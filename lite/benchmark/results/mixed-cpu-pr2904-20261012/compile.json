@@ -1,0 +1,16 @@
+[
+  "c++",
+  "-std=c++17",
+  "-O3",
+  "-DNDEBUG",
+  "-Wall",
+  "-Wextra",
+  "-Wpedantic",
+  "-I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include",
+  "/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/mixed_cpu_acceptance.cpp",
+  "-L/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "-Wl,-rpath,/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "-lvsag-lite",
+  "-o",
+  "/dev/shm/vsag-mixed2926-fa4fk0v8/probe"
+]

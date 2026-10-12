@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/usr/bin/time",
+    "-v",
+    "-o",
+    "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.resources.txt",
+    "taskset",
+    "-c",
+    "0",
+    "/dev/shm/vsag-mixed2926-fa4fk0v8/probe",
+    "/home/ubuntu/project/vsag-lite-datasets/gist/prepared-10k-100k/scale-10000",
+    "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1",
+    "fp32",
+    "3",
+    "100",
+    "/dev/shm/vsag-mixed2926-fa4fk0v8/gist10k-fp32-1"
+  ],
+  "environment": {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "LD_LIBRARY_PATH": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final"
+  }
+}

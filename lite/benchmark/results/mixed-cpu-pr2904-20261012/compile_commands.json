@@ -1,0 +1,632 @@
+[
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/bruteforce_backend.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/bruteforce_backend.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/bruteforce_backend.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx -mf16c -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx2 -mfma -mf16c -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx2.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx2.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx2.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx512f -mavx512dq -mavx512bw -mavx512vl -mavx2 -mf16c -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx512.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx512.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp16_distance_avx512.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -msse4.1 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_sse.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_sse.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_sse.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx2 -mfma -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx2.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx2.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx2.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx512f -mavx512dq -mavx512bw -mavx512vl -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx512.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx512.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/fp32_distance_avx512.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx2 -mfma -ffp-contract=off -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx2.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx2.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx2.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_HAS_X86_SIMD -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -O3 -DNDEBUG -fPIC -Wall -Wextra -Wpedantic -std=c++17 -mavx512f -mavx512dq -mavx512bw -mavx512vl -ffp-contract=off -o CMakeFiles/vsag_lite_objects.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx512.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx512.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_filter_ip_avx512.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -O3 -DNDEBUG -std=c++17 -o CMakeFiles/lite_rabitq_example.dir/example/rabitq_example.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/lite/example/rabitq_example.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/lite/example/rabitq_example.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -std=c++17 -o CMakeFiles/lite_tests.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index_test.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index_test.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/index_test.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -std=c++17 -o CMakeFiles/lite_graph_tests.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend_test.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend_test.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_backend_test.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -std=c++17 -o CMakeFiles/lite_graph_allocation_tests.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_allocation_test.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_allocation_test.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/graph_allocation_test.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -DVSAG_LITE_HAS_RABITQ_BACKEND -DVSAG_LITE_RABITQ_X86_SIMD -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src -I/home/ubuntu/project/vsag-pr2904-promotion-20261012/include -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -std=c++17 -o CMakeFiles/lite_rabitq_api_tests.dir/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend_test.cpp.o -c /home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend_test.cpp",
+  "file": "/home/ubuntu/project/vsag-pr2904-promotion-20261012/src/lite/rabitq_backend_test.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/catch_chronometer.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/catch_chronometer.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/catch_chronometer.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_analyse.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_analyse.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_analyse.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_benchmark_function.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_benchmark_function.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_benchmark_function.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_run_for_at_least.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_run_for_at_least.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_run_for_at_least.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/benchmark/detail/catch_stats.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_stats.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/benchmark/detail/catch_stats.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generator_exception.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generator_exception.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generator_exception.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generators.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generators.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generators.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/generators/catch_generators_random.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generators_random.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/generators/catch_generators_random.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_automake.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_automake.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_automake.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_common_base.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_common_base.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_common_base.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_compact.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_compact.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_compact.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_console.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_console.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_console.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_cumulative_base.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_cumulative_base.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_cumulative_base.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_event_listener.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_event_listener.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_event_listener.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_helpers.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_helpers.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_helpers.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_json.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_json.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_json.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_junit.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_junit.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_junit.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_multi.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_multi.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_multi.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_registrars.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_registrars.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_registrars.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_sonarqube.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_sonarqube.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_sonarqube.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_streaming_base.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_streaming_base.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_streaming_base.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_tap.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_tap.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_tap.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_teamcity.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_teamcity.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_teamcity.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/reporters/catch_reporter_xml.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_xml.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/reporters/catch_reporter_xml.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_capture.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_capture.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_capture.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_config.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_config.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_config.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_exception.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_exception.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_exception.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_generatortracker.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_generatortracker.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_generatortracker.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_registry_hub.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_registry_hub.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_registry_hub.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_reporter.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_reporter.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_reporter.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_reporter_factory.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_reporter_factory.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_reporter_factory.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/interfaces/catch_interfaces_testcase.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_testcase.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/interfaces/catch_interfaces_testcase.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_approx.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_approx.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_approx.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_assertion_result.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_assertion_result.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_assertion_result.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_config.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_config.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_config.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_get_random_seed.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_get_random_seed.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_get_random_seed.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_message.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_message.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_message.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_registry_hub.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_registry_hub.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_registry_hub.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_session.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_session.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_session.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_tag_alias_autoregistrar.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_tag_alias_autoregistrar.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_tag_alias_autoregistrar.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_test_case_info.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_test_case_info.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_test_case_info.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_test_spec.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_test_spec.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_test_spec.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_timer.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_timer.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_timer.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_tostring.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_tostring.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_tostring.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_totals.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_totals.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_totals.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_translate_exception.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_translate_exception.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_translate_exception.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/catch_version.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_version.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/catch_version.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_assertion_handler.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_assertion_handler.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_assertion_handler.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_case_insensitive_comparisons.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_case_insensitive_comparisons.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_case_insensitive_comparisons.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_clara.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_clara.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_clara.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_commandline.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_commandline.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_commandline.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_console_colour.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_console_colour.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_console_colour.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_context.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_context.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_context.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_debug_console.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_debug_console.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_debug_console.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_debugger.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_debugger.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_debugger.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_decomposer.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_decomposer.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_decomposer.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_enforce.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_enforce.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_enforce.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_enum_values_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_enum_values_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_enum_values_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_errno_guard.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_errno_guard.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_errno_guard.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_exception_translator_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_exception_translator_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_exception_translator_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_fatal_condition_handler.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_fatal_condition_handler.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_fatal_condition_handler.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_floating_point_helpers.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_floating_point_helpers.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_floating_point_helpers.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_getenv.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_getenv.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_getenv.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_istream.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_istream.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_istream.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_jsonwriter.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_jsonwriter.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_jsonwriter.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_lazy_expr.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_lazy_expr.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_lazy_expr.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_leak_detector.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_leak_detector.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_leak_detector.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_list.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_list.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_list.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_message_info.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_message_info.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_message_info.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_output_redirect.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_output_redirect.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_output_redirect.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_parse_numbers.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_parse_numbers.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_parse_numbers.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_polyfills.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_polyfills.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_polyfills.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_random_number_generator.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_random_number_generator.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_random_number_generator.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_random_seed_generation.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_random_seed_generation.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_random_seed_generation.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reporter_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reporter_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reporter_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reporter_spec_parser.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reporter_spec_parser.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reporter_spec_parser.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_reusable_string_stream.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reusable_string_stream.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_reusable_string_stream.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_run_context.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_run_context.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_run_context.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_section.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_section.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_section.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_singletons.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_singletons.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_singletons.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_source_line_info.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_source_line_info.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_source_line_info.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_startup_exception_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_startup_exception_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_startup_exception_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_stdstreams.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_stdstreams.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_stdstreams.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_string_manip.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_string_manip.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_string_manip.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_stringref.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_stringref.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_stringref.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_tag_alias_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_tag_alias_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_tag_alias_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_info_hasher.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_info_hasher.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_info_hasher.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_registry_impl.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_registry_impl.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_registry_impl.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_case_tracker.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_tracker.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_case_tracker.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_failure_exception.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_failure_exception.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_failure_exception.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_registry.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_registry.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_registry.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_test_spec_parser.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_spec_parser.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_test_spec_parser.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_textflow.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_textflow.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_textflow.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_uncaught_exceptions.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_uncaught_exceptions.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_uncaught_exceptions.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_wildcard_pattern.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_wildcard_pattern.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_wildcard_pattern.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/internal/catch_xmlwriter.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_xmlwriter.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_xmlwriter.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_container_properties.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_container_properties.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_container_properties.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_exception.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_exception.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_exception.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_floating_point.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_floating_point.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_floating_point.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_predicate.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_predicate.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_predicate.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_quantifiers.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_quantifiers.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_quantifiers.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_string.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_string.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_string.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/catch_matchers_templated.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_templated.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/catch_matchers_templated.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2.dir/catch2/matchers/internal/catch_matchers_impl.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/internal/catch_matchers_impl.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/matchers/internal/catch_matchers_impl.cpp"
+},
+{
+  "directory": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "command": "/usr/bin/c++ -I/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/.. -I/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/_deps/catch2-build/generated-includes -O3 -DNDEBUG -ffile-prefix-map=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/= -std=c++17 -o _deps/catch2-build/src/CMakeFiles/Catch2WithMain.dir/catch2/internal/catch_main.cpp.o -c /home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_main.cpp",
+  "file": "/home/ubuntu/vsag-deps/extracted-20260903/catch2-src/src/catch2/internal/catch_main.cpp"
+}
+]

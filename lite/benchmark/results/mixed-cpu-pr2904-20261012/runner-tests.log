@@ -1,0 +1,8 @@
+test_count_drift_and_duplicate_quality_query (test_mixed_cpu_acceptance.AcceptanceTests) ... ok
+test_nearest_rank_and_invalid_values (test_mixed_cpu_acceptance.AcceptanceTests) ... ok
+test_valid_raw_and_missing_call (test_mixed_cpu_acceptance.AcceptanceTests) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.003s
+
+OK

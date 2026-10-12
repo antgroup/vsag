@@ -1,0 +1,90 @@
+{
+  "feature_sha": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2",
+  "library_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
+  "build": "/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+  "benchmark_source_sha256": "a489aeee30cd097fcd02a1ff9084b76c96437ea9379cf707a3e56a631aa74bd7",
+  "benchmark_branch": "experiment/lite-baseline-v01",
+  "benchmark_parent": "410c134822d73d6b08cc24f68432c1fc9b8057bd",
+  "configuration": {
+    "rounds": 3,
+    "cycles": 100,
+    "trials": 3,
+    "degree": 16,
+    "construction_ef": 128,
+    "query_ef": 512,
+    "k": 10,
+    "cpu": 0,
+    "read_to_mutation": "1:1",
+    "externally_serialized": true
+  },
+  "feature_sources": {
+    "src/lite/backend.h": "10103cd3d9e1abc8111d9e3df1f3a1a646fd82e17f12afc428ec7c867c78fad4",
+    "src/lite/backend_utils.h": "c3042e488e176651e433e91bb5c46d3cc2c2561df1d7077809f0f8e87f948a08",
+    "src/lite/bruteforce_backend.cpp": "5ada90f39e6d332b11215444855ab1a00b5332828d5079facd92574dd4dc084c",
+    "src/lite/fp16_codec.h": "c5b9c78e4bf6140355b76a57ee19c743cc0b7d1e8ac060153f70e0f6f85b4164",
+    "src/lite/fp16_distance.cpp": "06cdf14b13cc47c317afada4e0cb100cb8eba6f13b30788fbb77d7c716d44bd2",
+    "src/lite/fp16_distance.h": "a435d5e1583ea9990a474442df09abdfc6eec63b0c8580cb2db406524cf0ae29",
+    "src/lite/fp16_distance_avx.cpp": "8d11ea4c0e3d5caa816fb419e395a9f77442f4576d120e52b3a744b1c10eba03",
+    "src/lite/fp16_distance_avx2.cpp": "6f997ce293c952ef8c789b8d68b36439a9cbc416018fe0445cf1594742f029c7",
+    "src/lite/fp16_distance_avx512.cpp": "2d710f301bd2f47a5231b2f3be80e93aed9f443647e2f540075689db80089329",
+    "src/lite/fp32_distance.cpp": "a67dcde37bdd6d76f6a1c3c224bafa91dc44b14ae4a5762efa0c7d4f3601f40b",
+    "src/lite/fp32_distance.h": "0210bd81d89d852010744b84b6c7b1b1d272112dc03cff3199effba6cb349fd2",
+    "src/lite/fp32_distance_avx2.cpp": "c274ad176cee0180be06eacf0e66a50673bfe308f4485c317f2016c457aa8c37",
+    "src/lite/fp32_distance_avx512.cpp": "f2f06a590bdc14c5aa97d8f4896aabad191877ead5e9245c96850f1a188ba7e2",
+    "src/lite/fp32_distance_sse.cpp": "635bdb10f311f394f29c35e23d46c9c28a0ff4c9a59ac33cddb16ca8f23a9095",
+    "src/lite/graph_allocation_test.cpp": "8b417674386f7996a23780eef799f760e147252277610aeeba75af27bb276b2e",
+    "src/lite/graph_backend.cpp": "275b4e58993d07fba8552487957848e6c6543c8227f401ccfee14605bc383e00",
+    "src/lite/graph_backend_test.cpp": "7bbcc2068d87553e440bfdf66b973fd344d8c0bc2a411987003fb494b68772f0",
+    "src/lite/index.cpp": "ef73a1d8aeaff7dd8b268e4753a0da4f61f450fb877cdf0228e8359bab78131a",
+    "src/lite/index_test.cpp": "5e1a6260656747d04b1013e0c2b3b9f16a089b6e1da9cf9efd8c1c08fe82ec77",
+    "src/lite/query_heap.h": "e12f5b8dbe78237137f5abfb81df15678b9fe41950420f628de5ecce6daa48ee",
+    "src/lite/query_visited.h": "c9a2e68d50b41c76a7bb9ac9c17c57b4a4de9b142943abdca5513460826062d4",
+    "src/lite/rabitq_backend.cpp": "6052e313a16ac9744d918e571c03f5e12ddfd72b9c76d7f1816cd2338be85949",
+    "src/lite/rabitq_backend_test.cpp": "fa17b0ab77afa1cb3fb9d761e900d8c0c5839c608d04a3b270edfe75ab6d90bf",
+    "src/lite/rabitq_codec.h": "69a9e8f1ee1d458e07dfc113c3daf3cd4c5f250a148f819b78a4fd0b28181795",
+    "src/lite/rabitq_constants.h": "436a6203d12857b36ecf27d2e6df61ddfc1624e3caf7ce38e5a55c932b38e3dd",
+    "src/lite/rabitq_filter_ip.cpp": "63e877e0963db0e8e6485120379d3ca471cb2793c7be6f0572facc3730953efb",
+    "src/lite/rabitq_filter_ip.h": "afdf7e994a83d521bcbde592b9cb1e0cf353e01b81a5d878cfafca8307249aea",
+    "src/lite/rabitq_filter_ip_avx2.cpp": "1466157828cef8bb2b3d962abfa181177e2a8f470c10143ff8fae7cd85a5a3ac",
+    "src/lite/rabitq_filter_ip_avx512.cpp": "ebc51410d4ac3f378db90f2e9f417c10b01eab100fabd3b18877d375f634b23a",
+    "src/lite/rabitq_graph_state.h": "c848126eb863a1dab4c291ff7232f9268e0ca9733dd6688f562245470995d7a4",
+    "src/lite/rabitq_snapshot.h": "035574726724ed6dfef6e77fc76d034b8de3f85698b4c75091e4afa48113f40d"
+  },
+  "platform": "Linux VM-0-10-ubuntu 5.15.0-190-generic #200-Ubuntu SMP Fri Aug 7 15:06:04 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux",
+  "cpu": "Architecture:                            x86_64\nCPU op-mode(s):                          32-bit, 64-bit\nAddress sizes:                           52 bits physical, 48 bits virtual\nByte Order:                              Little Endian\nCPU(s):                                  8\nOn-line CPU(s) list:                     0-7\nVendor ID:                               AuthenticAMD\nModel name:                              AMD EPYC 9K65 192-Core Processor\nCPU family:                              26\nModel:                                   0\nThread(s) per core:                      2\nCore(s) per socket:                      4\nSocket(s):                               1\nStepping:                                0\nBogoMIPS:                                4500.08\nFlags:                                   fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm rep_good nopl cpuid extd_apicid tsc_known_freq pni pclmulqdq ssse3 fma cx16 pcid sse4_1 sse4_2 x2apic movbe popcnt aes xsave avx f16c rdrand hypervisor lahf_lm cmp_legacy cr8_legacy abm sse4a misalignsse 3dnowprefetch osvw topoext perfctr_core invpcid_single ssbd ibrs ibpb stibp vmmcall fsgsbase bmi1 avx2 smep bmi2 erms invpcid avx512f avx512dq rdseed adx smap avx512ifma clflushopt clwb avx512cd sha_ni avx512bw avx512vl xsaveopt xsavec xgetbv1 xsaves avx512_bf16 clzero xsaveerptr wbnoinvd arat avx512vbmi umip avx512_vbmi2 gfni vaes vpclmulqdq avx512_vnni avx512_bitalg avx512_vpopcntdq rdpid movdiri movdir64b fsrm\nHypervisor vendor:                       KVM\nVirtualization type:                     full\nL1d cache:                               192 KiB (4 instances)\nL1i cache:                               128 KiB (4 instances)\nL2 cache:                                4 MiB (4 instances)\nL3 cache:                                32 MiB (1 instance)\nNUMA node(s):                            1\nNUMA node0 CPU(s):                       0-7\nVulnerability Gather data sampling:      Not affected\nVulnerability Indirect target selection: Not affected\nVulnerability Itlb multihit:             Not affected\nVulnerability L1tf:                      Not affected\nVulnerability Mds:                       Not affected\nVulnerability Meltdown:                  Not affected\nVulnerability Mmio stale data:           Not affected\nVulnerability Reg file data sampling:    Not affected\nVulnerability Retbleed:                  Not affected\nVulnerability Spec rstack overflow:      Not affected\nVulnerability Spec store bypass:         Mitigation; Speculative Store Bypass disabled via prctl and seccomp\nVulnerability Spectre v1:                Mitigation; usercopy/swapgs barriers and __user pointer sanitization\nVulnerability Spectre v2:                Mitigation; Retpolines; IBPB conditional; IBRS_FW; STIBP always-on; RSB filling; PBRSB-eIBRS Not affected; BHI Not affected\nVulnerability Srbds:                     Not affected\nVulnerability Tsa:                       Not affected\nVulnerability Tsx async abort:           Not affected\nVulnerability Vmscape:                   Not affected\n",
+  "compiler": "c++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0\nCopyright (C) 2021 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n",
+  "limits": [
+    "Short real-change interleaved regression, not hours-long endurance",
+    "Repeated use of the supplied query cohort, not new independent queries",
+    "FP64 oracle at initial/final state, mixed queries checked for live IDs/order/uniqueness",
+    "Per-call getrusage instrumentation adds overhead and has microsecond CPU resolution",
+    "Call-only throughput excludes validation, persistence and bookkeeping",
+    "Process peak includes input/oracle buffers, old+loaded index and truth computation",
+    "Save/load are same-process uncontrolled-cache, not fresh or cold I/O",
+    "Not a Full comparison or a complete package measurement"
+  ],
+  "inputs": {
+    "sift10k": {
+      "base.fvecs": {
+        "path": "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000/base.fvecs",
+        "sha256": "1e90414a3254361aba48a0d58e461f7661fb135dabb3da985290e94de8f60fe0"
+      },
+      "queries.fvecs": {
+        "path": "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000/queries.fvecs",
+        "sha256": "095af38bda2741be721447ba97e9286fa918ece946be92a9ae133276eddc1a10"
+      }
+    },
+    "gist10k": {
+      "base.fvecs": {
+        "path": "/home/ubuntu/project/vsag-lite-datasets/gist/prepared-10k-100k/scale-10000/base.fvecs",
+        "sha256": "359290ad0de501d683122967de2b353ecd6522b0ffc630c59ca945e228fd5444"
+      },
+      "queries.fvecs": {
+        "path": "/home/ubuntu/project/vsag-lite-datasets/gist/prepared-10k-100k/scale-10000/queries.fvecs",
+        "sha256": "ad146143b14cda7b8a243c4685d52038ead6b628396116c647a3f8494f6aa278"
+      }
+    }
+  },
+  "binary_sha256": "0181c5b3531434f1d107affb8bad80dc3aeef6e7354f84ae5538a646943bb4a7",
+  "ldd": "\tlinux-vdso.so.1 (0x00007ffdaccc4000)\n\tlibvsag-lite.so => /home/ubuntu/project/pr2904-promotion-audit-20261012/release-final/libvsag-lite.so (0x00007fa53ce12000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007fa53cbde000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fa53cbbe000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fa53c995000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fa53c8ae000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fa53ce7d000)\n"
+}

@@ -1,5 +1,10 @@
 # VSAG Lite baseline experiment
 
+Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
+The [current-feature mixed CPU matrix](results/mixed-cpu-pr2904-20261012/README.md)
+explicitly links the pinned PR2904 library; the older feature implementation on
+this experiment branch must not be mislabeled as the latest Lite implementation.
+
 This experimental tool records a deterministic standalone Lite BruteForce baseline. It does not claim a performance improvement.
 
 See [FINAL_REPORT.md](FINAL_REPORT.md) for the consolidated current-head and historical evidence.

@@ -1,0 +1,116 @@
+{
+  "build": {
+    "count": 1,
+    "p50_us": 541123.273,
+    "p99_us": 541123.273,
+    "wall_sum_ms": 541.123273,
+    "call_only_ops_per_second": 1.8480077459170747,
+    "user_sum_ms": 526.077,
+    "system_sum_ms": 15.052
+  },
+  "add": {
+    "count": 300,
+    "p50_us": 66.69,
+    "p99_us": 81.167,
+    "wall_sum_ms": 19.931986999999996,
+    "call_only_ops_per_second": 15051.183808217416,
+    "user_sum_ms": 20.024000000000186,
+    "system_sum_ms": 0.004999999999998
+  },
+  "remove": {
+    "count": 300,
+    "p50_us": 13.29,
+    "p99_us": 22.058,
+    "wall_sum_ms": 4.020848999999999,
+    "call_only_ops_per_second": 74611.10825101865,
+    "user_sum_ms": 4.09399999999936,
+    "system_sum_ms": 0.002
+  },
+  "update": {
+    "count": 300,
+    "p50_us": 74.518,
+    "p99_us": 107.837,
+    "wall_sum_ms": 22.756349000000004,
+    "call_only_ops_per_second": 13183.134078318099,
+    "user_sum_ms": 22.835999999999014,
+    "system_sum_ms": 0.005
+  },
+  "query": {
+    "count": 900,
+    "p50_us": 167.415,
+    "p99_us": 207.795,
+    "wall_sum_ms": 152.53816499999996,
+    "call_only_ops_per_second": 5900.162755989626,
+    "user_sum_ms": 152.757,
+    "system_sum_ms": 0.037
+  },
+  "save": {
+    "count": 3,
+    "p50_us": 3110.903,
+    "p99_us": 3304.838,
+    "wall_sum_ms": 9.526375,
+    "call_only_ops_per_second": 314.915169726155,
+    "user_sum_ms": 6.222,
+    "system_sum_ms": 3.305
+  },
+  "load": {
+    "count": 3,
+    "p50_us": 2624.837,
+    "p99_us": 3593.281,
+    "wall_sum_ms": 8.685229999999999,
+    "call_only_ops_per_second": 345.4139959448397,
+    "user_sum_ms": 8.036,
+    "system_sum_ms": 0.652
+  },
+  "recall": {
+    "0": 0.993,
+    "3": 0.993
+  },
+  "states": [
+    {
+      "round": "0",
+      "count": "10000",
+      "rss_kib": "21996",
+      "peak_kib": "26740",
+      "snapshot_bytes": "0"
+    },
+    {
+      "round": "1",
+      "count": "10000",
+      "rss_kib": "27860",
+      "peak_kib": "27860",
+      "snapshot_bytes": "4000064"
+    },
+    {
+      "round": "2",
+      "count": "10000",
+      "rss_kib": "28124",
+      "peak_kib": "28124",
+      "snapshot_bytes": "4000064"
+    },
+    {
+      "round": "3",
+      "count": "10000",
+      "rss_kib": "28124",
+      "peak_kib": "28124",
+      "snapshot_bytes": "4000064"
+    }
+  ],
+  "dataset": "sift10k",
+  "storage": "fp16",
+  "trial": 2,
+  "snapshots": {
+    "round-1": {
+      "bytes": 4000064,
+      "sha256": "627ae816e7ad13eb48dfdb82c067ebe594ee6fd1294b2cd34e9f598d19e35c7c"
+    },
+    "round-2": {
+      "bytes": 4000064,
+      "sha256": "9949bccac090e5cb8fa824bff284273fea3652d89fae27a7de3ce38ad0723683"
+    },
+    "round-3": {
+      "bytes": 4000064,
+      "sha256": "c1d14e24f7097c290288cc6b6c6c9f089e6326ce971a2f396c62824d4770af22"
+    }
+  }
+}
