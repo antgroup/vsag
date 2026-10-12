@@ -441,3 +441,21 @@ TEST_CASE("SINDIV2 FP16 rerank parameter validation", "[ut][SINDIV2Parameter]") 
         restored->FromJson(no_reorder),
         Catch::Matchers::ContainsSubstring("rerank_type=fp16 requires use_reorder=true"));
 }
+
+TEST_CASE("SINDIV2 posting cache capacity", "[ut][SINDIV2Parameter]") {
+    SINDIV2Parameter parameter;
+    parameter.FromJson(JsonType::Parse("{}"));
+    REQUIRE(parameter.posting_cache_capacity_bytes == 0);
+    for (const auto capacity : {0ULL, 1048576ULL, 4294967296ULL}) {
+        auto json = JsonType::Parse("{}");
+        json["posting_cache_capacity_bytes"].SetUint64(capacity);
+        REQUIRE_NOTHROW(SINDIV2::CheckAndMappingExternalParam(json, IndexCommonParam{}));
+        parameter.FromJson(json);
+        REQUIRE(parameter.posting_cache_capacity_bytes == capacity);
+        REQUIRE(parameter.ToJson()["posting_cache_capacity_bytes"].GetUint64() == capacity);
+    }
+    for (const auto* invalid : {"-1", "1.5", "true", "\"100\""}) {
+        REQUIRE_THROWS(parameter.FromJson(
+            JsonType::Parse(std::string("{\"posting_cache_capacity_bytes\":") + invalid + "}")));
+    }
+}

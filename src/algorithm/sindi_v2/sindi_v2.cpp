@@ -322,6 +322,7 @@ SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
         SPARSE_RERANK_TYPE,
         SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD,
         SPARSE_IMMUTABLE,
+        "posting_cache_capacity_bytes",
         "rerank_layout",
         "term_io",
         "rerank_io",
@@ -1777,6 +1778,7 @@ SINDIV2::Deserialize(StreamReader& reader) {
                                                                           window_size_,
                                                                           param_->term_io_parameter,
                                                                           common_param_);
+        disk_datacell->SetCacheCapacity(param_->posting_cache_capacity_bytes);
         disk_datacell->DeserializeTermLayout(reader, window_count, cur_element_count_);
         term_datacell_ = std::move(disk_datacell);
     }

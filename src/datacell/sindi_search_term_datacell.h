@@ -91,6 +91,7 @@ struct SindiTermBuffer {
         return external_values != nullptr ? external_values_size : values.size();
     }
 
+    std::shared_ptr<const SindiTermBuffer> owner;
     const uint16_t* external_ids{nullptr};
     const uint8_t* external_values{nullptr};
     uint64_t external_values_size{0};

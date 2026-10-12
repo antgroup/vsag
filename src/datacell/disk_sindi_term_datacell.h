@@ -15,10 +15,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <cmath>
+#include <list>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <unordered_map>
 #include <vector>
 
 #include "container_types.h"
@@ -54,6 +57,30 @@ public:
     virtual void
     DeserializeTermLayout(StreamReader& reader, uint32_t window_count, uint64_t total_count) = 0;
 
+    void
+    SetCacheCapacity(uint64_t capacity) {
+        std::lock_guard lock(cache_mutex_);
+        cache_capacity_ = capacity;
+        ++cache_generation_;
+        cache_.clear();
+        cache_lru_.clear();
+        cache_bytes_ = 0;
+    }
+
+protected:
+    struct CacheEntry {
+        std::shared_ptr<const TermBuffer> buffer;
+        uint64_t bytes;
+        std::list<uint32_t>::iterator position;
+    };
+    mutable std::mutex cache_mutex_;
+    std::atomic<uint64_t> cache_capacity_{0};
+    std::atomic<uint64_t> cache_generation_{0};
+    mutable uint64_t cache_bytes_{0};
+    mutable std::list<uint32_t> cache_lru_;
+    mutable std::unordered_map<uint32_t, CacheEntry> cache_;
+
+public:
     virtual void
     SetIO(const std::shared_ptr<Reader>& reader) = 0;
 };

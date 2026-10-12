@@ -213,6 +213,14 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
         rerank_type != SPARSE_RERANK_TYPE_DMQ8 || rerank_layout == 0,
         "SINDIV2 rerank_type=dmq8 requires rerank_layout=0");
 
+    posting_cache_capacity_bytes = 0;
+    if (json.Contains("posting_cache_capacity_bytes")) {
+        const auto value = json["posting_cache_capacity_bytes"];
+        CHECK_ARGUMENT(value.IsNumberInteger() && (value.IsNumberUnsigned() || value.GetInt() >= 0),
+                       "posting_cache_capacity_bytes must be a non-negative integer");
+        posting_cache_capacity_bytes = value.GetUint64();
+    }
+
     if (json.Contains(SINDI_V2_TERM_IO_KEY)) {
         term_io_parameter = IOParameter::GetIOParameterByJson(json[SINDI_V2_TERM_IO_KEY]);
         CHECK_ARGUMENT(term_io_parameter != nullptr, "invalid term_io parameter");
@@ -270,6 +278,7 @@ SINDIV2Parameter::ToJson() const {
     if (immutable) {
         json[SPARSE_IMMUTABLE].SetBool(true);
     }
+    json["posting_cache_capacity_bytes"].SetUint64(posting_cache_capacity_bytes);
     json[SINDI_V2_RERANK_LAYOUT_KEY].SetInt(rerank_layout);
     if (term_io_parameter != nullptr) {
         json[SINDI_V2_TERM_IO_KEY].SetJson(term_io_parameter->ToJson());
