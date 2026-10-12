@@ -1,5 +1,12 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest candidate gate: [strict-FP fresh native Full comparison, independent GIST
+source cohort and three full mutation passes](results/aligned-fp32-full-r2-20261012/README.md).
+Initial GIST candidate .9946 vsFull.9931, P50-34.11%; Release/SAN and raw/FP64
+audits PASS. However GIST changed-value recall .992→.973 at256; recovering with
+ef1024 costs~1046us. Candidate is NOT promoted to PR2904 and NOT overall PASS.
+Full Ofast versus Lite O3 math boundary is closed for this new matrix only.
+
 Latest diagnosis: [fixed-index routing/ranking loss decomposition](results/query-loss-trace-r1-20261012/README.md).
 FP32 misses94 all unvisited; FP16 misses95unvisited+2ranking; RaBitQ misses93unvisited+41ranking,
 zero coarse-shortlist losses on the prior900 validation queries. Full-code RaBitQ scan .995333.

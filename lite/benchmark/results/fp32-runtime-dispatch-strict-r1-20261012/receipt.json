@@ -1,0 +1,18 @@
+{
+  "audit": "PASS",
+  "results": [
+    {
+      "side": "lite",
+      "scalar_avx512": 1
+    },
+    {
+      "side": "native_full",
+      "scalar_avx512": 1,
+      "batch4_avx512": 1
+    }
+  ],
+  "lite_sha256": "4df979fb14a799460542f2f1cca8222186cdf6d576849cf6c6002fc3feb791e4",
+  "full_sha256": "32684a70bd4fe4cc8598036a9f068da44cc1b218752c7b5f1645996d09e5bc45",
+  "cpp_sha256": "71d8956cf73984492f5339a9576eabdbdc6d7dbe645db9df73d666673d0eab08",
+  "boundary": "Aligned candidate and strict native Full O3/g"
+}

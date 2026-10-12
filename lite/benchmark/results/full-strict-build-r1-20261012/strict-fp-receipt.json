@@ -1,0 +1,7 @@
+{
+  "baseline_head": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2",
+  "isolated_patch_sha256": "e6a38e793fba8187665c60185bb725e0a6653b6ce3c631b5d32835b2a7e86a1b",
+  "audited_core_commands": 305,
+  "flags": "O3, no Ofast or ffast-math",
+  "production_source_unchanged": true
+}

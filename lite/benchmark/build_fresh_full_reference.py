@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Fresh root-CMake native Full build; cached dependency sources, never cached objects."""
 import argparse
+import difflib
 from contextlib import contextmanager
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -42,6 +43,7 @@ def main():
     parser.add_argument('--antlr-archive', type=Path, required=True)
     parser.add_argument('--install', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--strict-fp', action='store_true', help='Build isolated native Full with -O3 instead of -Ofast')
     args = parser.parse_args()
     expected = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=args.source,text=True).strip()
@@ -62,7 +64,19 @@ def main():
         env['VSAG_THIRDPARTY_ANTLR4_4_13_2'] = archive_url
         build=Path(directory)/'build'
         assert not build.exists()
-        command=['cmake','-G','Ninja','-S',str(args.source),'-B',str(build),
+        build_source = args.source
+        if args.strict_fp:
+            build_source = Path(directory)/'source'
+            shutil.copytree(args.source, build_source)
+            compiler_config = build_source/'cmake/VSAGCompilerConfig.cmake'
+            original = compiler_config.read_text()
+            assert original.count('vsag_add_compile_flag (-Ofast)') == 1
+            modified = original.replace('vsag_add_compile_flag (-Ofast)', 'vsag_add_compile_flag (-O3)')
+            compiler_config.write_text(modified)
+            (args.output/'strict-fp.patch').write_text(''.join(difflib.unified_diff(original.splitlines(True), modified.splitlines(True), fromfile='a/cmake/VSAGCompilerConfig.cmake', tofile='b/cmake/VSAGCompilerConfig.cmake')))
+            assert args.source != build_source
+        print('BUILD SOURCE', build_source, 'strict_fp', args.strict_fp, flush=True)
+        command=['cmake','-G','Ninja','-S',str(build_source),'-B',str(build),
             '-DCMAKE_BUILD_TYPE=Release','-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
             '-DENABLE_CCACHE=OFF','-DENABLE_TESTS=OFF','-DENABLE_EXAMPLES=OFF',
             '-DENABLE_TOOLS=OFF','-DENABLE_PYBINDS=OFF','-DENABLE_NODE_BINDS=OFF',
@@ -90,6 +104,10 @@ def main():
         write_json(args.output/'core-objects.json',core_objects)
         shutil.copyfile(build/'CMakeCache.txt',args.output/'CMakeCache.txt')
         shutil.copyfile(build/'compile_commands.json',args.output/'compile_commands.json')
+        if args.strict_fp:
+            core_commands = [r for r in json.loads((build/'compile_commands.json').read_text()) if '/src/' in r['file'] and '/extern/' not in r['file']]
+            assert core_commands and all('-Ofast' not in r['command'] and '-ffast-math' not in r['command'] and '-O3' in r['command'] for r in core_commands)
+            write_json(args.output/'strict-fp-receipt.json', dict(baseline_head=head, isolated_patch_sha256=sha(args.output/'strict-fp.patch'), audited_core_commands=len(core_commands), flags='O3, no Ofast or ffast-math', production_source_unchanged=True))
         shutil.copyfile(build/'.ninja_log',args.output/'ninja-build.log')
         if (args.source/'src/version.h').exists():
             shutil.copyfile(args.source/'src/version.h',args.output/'generated-version.h')

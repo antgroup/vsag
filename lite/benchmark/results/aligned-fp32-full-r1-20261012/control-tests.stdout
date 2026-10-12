@@ -1,0 +1,198 @@
+Internal ctest changing into directory: /dev/shm/vsag-aligned-j0c_drpc/control/build
+Test project /dev/shm/vsag-aligned-j0c_drpc/control/build
+    Start 1: lite_unit
+1/5 Test #1: lite_unit ........................***Failed    0.00 sec
+Filters: [lite]
+Randomness seeded to: 4091343828
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+lite_tests is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Lite validates inputs and preserves IDs through physical deletion
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:23
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:35: FAILED:
+  REQUIRE_FALSE( index.Add(1, invalid, 2) )
+with expansion:
+  !{?}
+
+-------------------------------------------------------------------------------
+Lite snapshot roundtrip and malformed input
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:149
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:194: FAILED:
+  REQUIRE_FALSE( Index::Load(nonfinite) )
+with expansion:
+  !{?}
+
+-------------------------------------------------------------------------------
+Lite randomized CRUD matches an independent reference
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:213
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:259: FAILED:
+  REQUIRE( (*actual)[i].id == expected[i].id )
+with expansion:
+  1 == 45
+
+-------------------------------------------------------------------------------
+Lite identical graph updates preserve snapshots after validation
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:578
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/index_test.cpp:604: FAILED:
+  REQUIRE_FALSE( index.Update(1, invalid, 2) )
+with expansion:
+  !{?}
+
+===============================================================================
+test cases:   14 |   10 passed | 4 failed
+assertions: 5116 | 5112 passed | 4 failed
+
+
+    Start 2: lite_scale
+2/5 Test #2: lite_scale .......................   Passed    0.09 sec
+    Start 3: lite_graph
+3/5 Test #3: lite_graph .......................***Failed    0.41 sec
+Filters: [lite-graph]
+Randomness seeded to: 749920988
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+lite_graph_tests is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+Lite graph backend validates input and survives CRUD
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:132
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:148: FAILED:
+  REQUIRE_FALSE( (*graph)->Add(4, nonfinite.data(), 2) )
+with expansion:
+  !{?}
+
+-------------------------------------------------------------------------------
+Lite graph public transition and v2 snapshot roundtrip
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:629
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:695: FAILED:
+  REQUIRE_FALSE( Index::Load(nonfinite) )
+with expansion:
+  !{?}
+
+-------------------------------------------------------------------------------
+Lite borrowed topology matches owned graph and outlives its source
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:1100
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/graph_backend_test.cpp:1122: FAILED:
+  REQUIRE_FALSE( build_graph_topology(invalid, 4, 16) )
+with expansion:
+  !{?}
+
+===============================================================================
+test cases:      21 |      18 passed | 3 failed
+assertions: 1712810 | 1712807 passed | 3 failed
+
+
+    Start 4: lite_graph_allocation
+4/5 Test #4: lite_graph_allocation ............   Passed    0.43 sec
+    Start 5: lite_rabitq_api
+5/5 Test #5: lite_rabitq_api ..................***Failed    0.48 sec
+Filters: [lite-rabitq]
+Randomness seeded to: 4217484856
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+lite_rabitq_api_tests is a Catch2 v3.7.1 host application.
+Run with -? for options
+
+-------------------------------------------------------------------------------
+RaBitQ filters, budgets and expected errors preserve contents
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:103
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:113: FAILED:
+  REQUIRE_FALSE( index->Add(9, invalid.data(), 17) )
+with expansion:
+  !{?}
+
+-------------------------------------------------------------------------------
+RaBitQ prepared mutation preserves legacy bytes and rejects damaged preparation
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:444
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:474: FAILED:
+  REQUIRE_THROWS_AS( prepared_state.UpdatePrepared(42, std::move(damaged)), std::runtime_error )
+because no exception was thrown where one was expected:
+
+-------------------------------------------------------------------------------
+RaBitQ routing estimate omits only the unused lower bound
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:848
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:874: FAILED:
+  REQUIRE( route_batch[row].distance == full_batch[row].distance )
+with expansion:
+  206.940856934f == 206.940841675f
+
+-------------------------------------------------------------------------------
+RaBitQ bounded heap admission preserves the unpruned reference
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:881
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:955: FAILED:
+  REQUIRE( fast.visited == reference.visited )
+with expansion:
+  50 == 41
+
+-------------------------------------------------------------------------------
+RaBitQ row training supports reusable non-contiguous scratch
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:986
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:1018: FAILED:
+  REQUIRE_THROWS_AS( codec::train_rows( count, dim, 47, [&](uint64_t row) { return base.data() + row * dim; }), std::runtime_error )
+because no exception was thrown where one was expected:
+
+-------------------------------------------------------------------------------
+RaBitQ maintenance Batch4 preserves scalar candidate order and distance bits
+-------------------------------------------------------------------------------
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:1353
+...............................................................................
+
+/dev/shm/vsag-aligned-j0c_drpc/control/source/src/lite/rabitq_backend_test.cpp:1380: FAILED:
+  REQUIRE( std::memcmp(reinterpret_cast<const unsigned char*>(&batch[i].distance), reinterpret_cast<const unsigned char*>(&scalar[i].distance), sizeof(float)) == 0 )
+with expansion:
+  1 == 0
+
+===============================================================================
+test cases:     32 |     26 passed | 6 failed
+assertions: 369854 | 369848 passed | 6 failed
+
+
+
+40% tests passed, 3 tests failed out of 5
+
+Total Test time (real) =   1.41 sec
+
+The following tests FAILED:
+	  1 - lite_unit (Failed)
+	  3 - lite_graph (Failed)
+	  5 - lite_rabitq_api (Failed)

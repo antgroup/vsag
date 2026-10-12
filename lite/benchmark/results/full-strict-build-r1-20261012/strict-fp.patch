@@ -1,0 +1,11 @@
+--- a/cmake/VSAGCompilerConfig.cmake
++++ b/cmake/VSAGCompilerConfig.cmake
+@@ -105,7 +105,7 @@
+     if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+         vsag_add_compile_flag (-O3)
+     else ()
+-        vsag_add_compile_flag (-Ofast)
++        vsag_add_compile_flag (-O3)
+     endif ()
+ elseif (CMAKE_BUILD_TYPE STREQUAL "Sanitize")
+     vsag_add_compile_flag (-g)

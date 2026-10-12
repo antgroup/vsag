@@ -1,0 +1,181 @@
+{
+  "audit": "PASS",
+  "runs": 18,
+  "recorded_queries": 9900,
+  "replay_operations": 180000,
+  "candidate_sanitizer": "5/5 PASS",
+  "replay_quality_target_met": false,
+  "quality_target_not_contractual": true,
+  "summary": [
+    {
+      "dataset": "gist10k",
+      "side": "control",
+      "budget": 512,
+      "all_target_met": false,
+      "recall": 0.9676,
+      "p50_us": 428.238,
+      "p99_us": 590.203,
+      "snapshot_bytes": 39840064,
+      "phase_cpu_us": 429810.0,
+      "process_peak_rss_kib": 49104.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "candidate",
+      "budget": 256,
+      "all_target_met": true,
+      "recall": 0.9946,
+      "p50_us": 333.12,
+      "p99_us": 439.528,
+      "snapshot_bytes": 39840064,
+      "phase_cpu_us": 328828.0,
+      "process_peak_rss_kib": 48956.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "full",
+      "budget": 512,
+      "all_target_met": true,
+      "recall": 0.9931,
+      "p50_us": 505.537,
+      "p99_us": 612.042,
+      "snapshot_bytes": 39808753,
+      "phase_cpu_us": 498729.0,
+      "process_peak_rss_kib": 109372.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "control",
+      "budget": 384,
+      "all_target_met": true,
+      "recall": 0.991,
+      "p50_us": 124.506,
+      "p99_us": 148.226,
+      "snapshot_bytes": 6560064,
+      "phase_cpu_us": 12569.0,
+      "process_peak_rss_kib": 30768.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "candidate",
+      "budget": 128,
+      "all_target_met": true,
+      "recall": 1.0,
+      "p50_us": 55.138,
+      "p99_us": 69.288,
+      "snapshot_bytes": 6560064,
+      "phase_cpu_us": 5442.0,
+      "process_peak_rss_kib": 30768.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "full",
+      "budget": 128,
+      "all_target_met": false,
+      "recall": 0.958,
+      "p50_us": 81.008,
+      "p99_us": 92.357,
+      "snapshot_bytes": 5766017,
+      "phase_cpu_us": 8047.0,
+      "process_peak_rss_kib": 38880.0
+    }
+  ],
+  "replay": [
+    {
+      "dataset": "gist10k",
+      "operations": 90000,
+      "metrics": {
+        "base_count": "10000",
+        "query_count": "100",
+        "dim": "960",
+        "k": "10",
+        "rounds": "3",
+        "crud_ops": "10000",
+        "recall_at_k": "0.973000",
+        "build_ms": "2189.802882",
+        "search_p50_us": "328.101000",
+        "search_p99_us": "405.398000",
+        "save_ms": "16.963747",
+        "load_ms": "17.023586",
+        "snapshot_bytes": "39840064",
+        "storage": "fp32",
+        "max_degree": "16",
+        "ef_search": "128",
+        "crud_ms": "16149.430722",
+        "query_ef_search": "256",
+        "persistent_replacements": "30000",
+        "initial_recall_at_k": "0.992000",
+        "mutation_mode": "all"
+      },
+      "scope": "Three whole-index passes; real-value Update/Remove/Add; live count and Save/Load result identity verified by consumer. Not concurrent/endurance duration/periodic snapshots.",
+      "per_api": {
+        "update": {
+          "calls": 30000,
+          "p50_us": 295.832,
+          "p99_us": 440.577,
+          "calls_per_timed_second": 3346.4172197044886
+        },
+        "remove": {
+          "calls": 30000,
+          "p50_us": 19.379,
+          "p99_us": 42.998,
+          "calls_per_timed_second": 48425.53555841778
+        },
+        "add": {
+          "calls": 30000,
+          "p50_us": 220.374,
+          "p99_us": 268.941,
+          "calls_per_timed_second": 4576.951266940973
+        }
+      }
+    },
+    {
+      "dataset": "sift10k",
+      "operations": 90000,
+      "metrics": {
+        "base_count": "10000",
+        "query_count": "100",
+        "dim": "128",
+        "k": "10",
+        "rounds": "3",
+        "crud_ops": "10000",
+        "recall_at_k": "0.995000",
+        "build_ms": "693.015002",
+        "search_p50_us": "54.939000",
+        "search_p99_us": "68.509000",
+        "save_ms": "3.727954",
+        "load_ms": "4.136513",
+        "snapshot_bytes": "6560064",
+        "storage": "fp32",
+        "max_degree": "16",
+        "ef_search": "128",
+        "crud_ms": "5353.696578",
+        "query_ef_search": "128",
+        "persistent_replacements": "30000",
+        "initial_recall_at_k": "1.000000",
+        "mutation_mode": "all"
+      },
+      "scope": "Three whole-index passes; real-value Update/Remove/Add; live count and Save/Load result identity verified by consumer. Not concurrent/endurance duration/periodic snapshots.",
+      "per_api": {
+        "update": {
+          "calls": 30000,
+          "p50_us": 88.357,
+          "p99_us": 111.447,
+          "calls_per_timed_second": 11372.242458885386
+        },
+        "remove": {
+          "calls": 30000,
+          "p50_us": 12.559,
+          "p99_us": 16.83,
+          "calls_per_timed_second": 78240.87249088373
+        },
+        "add": {
+          "calls": 30000,
+          "p50_us": 78.628,
+          "p99_us": 94.188,
+          "calls_per_timed_second": 12893.428553148422
+        }
+      }
+    }
+  ]
+}

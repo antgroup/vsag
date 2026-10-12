@@ -1,0 +1,43 @@
+[
+  {
+    "tag": "control-configure",
+    "argv": [
+      "cmake",
+      "-S",
+      "/dev/shm/vsag-aligned-j0c_drpc/control/source/lite",
+      "-B",
+      "/dev/shm/vsag-aligned-j0c_drpc/control/build",
+      "-DCMAKE_BUILD_TYPE=Release",
+      "-DCMAKE_CXX_FLAGS_RELEASE=-Ofast -g -DNDEBUG",
+      "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
+      "-DENABLE_RABITQ_LITE_BACKEND=ON",
+      "-DENABLE_TESTS=ON",
+      "-DFETCHCONTENT_SOURCE_DIR_CATCH2=/home/ubuntu/vsag-deps/extracted-20260903/catch2-src"
+    ],
+    "exit": 0,
+    "library": null
+  },
+  {
+    "tag": "control-build",
+    "argv": [
+      "cmake",
+      "--build",
+      "/dev/shm/vsag-aligned-j0c_drpc/control/build",
+      "--parallel",
+      "2"
+    ],
+    "exit": 0,
+    "library": null
+  },
+  {
+    "tag": "control-tests",
+    "argv": [
+      "ctest",
+      "--test-dir",
+      "/dev/shm/vsag-aligned-j0c_drpc/control/build",
+      "--output-on-failure"
+    ],
+    "exit": 8,
+    "library": null
+  }
+]

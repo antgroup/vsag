@@ -1,0 +1,58 @@
+[
+  {
+    "dataset": "gist10k",
+    "operations": 90000,
+    "metrics": {
+      "base_count": "10000",
+      "query_count": "100",
+      "dim": "960",
+      "k": "10",
+      "rounds": "3",
+      "crud_ops": "10000",
+      "recall_at_k": "0.973000",
+      "build_ms": "2189.802882",
+      "search_p50_us": "328.101000",
+      "search_p99_us": "405.398000",
+      "save_ms": "16.963747",
+      "load_ms": "17.023586",
+      "snapshot_bytes": "39840064",
+      "storage": "fp32",
+      "max_degree": "16",
+      "ef_search": "128",
+      "crud_ms": "16149.430722",
+      "query_ef_search": "256",
+      "persistent_replacements": "30000",
+      "initial_recall_at_k": "0.992000",
+      "mutation_mode": "all"
+    },
+    "scope": "Three whole-index passes; real-value Update/Remove/Add; live count and Save/Load result identity verified by consumer. Not concurrent/endurance duration/periodic snapshots."
+  },
+  {
+    "dataset": "sift10k",
+    "operations": 90000,
+    "metrics": {
+      "base_count": "10000",
+      "query_count": "100",
+      "dim": "128",
+      "k": "10",
+      "rounds": "3",
+      "crud_ops": "10000",
+      "recall_at_k": "0.995000",
+      "build_ms": "693.015002",
+      "search_p50_us": "54.939000",
+      "search_p99_us": "68.509000",
+      "save_ms": "3.727954",
+      "load_ms": "4.136513",
+      "snapshot_bytes": "6560064",
+      "storage": "fp32",
+      "max_degree": "16",
+      "ef_search": "128",
+      "crud_ms": "5353.696578",
+      "query_ef_search": "128",
+      "persistent_replacements": "30000",
+      "initial_recall_at_k": "1.000000",
+      "mutation_mode": "all"
+    },
+    "scope": "Three whole-index passes; real-value Update/Remove/Add; live count and Save/Load result identity verified by consumer. Not concurrent/endurance duration/periodic snapshots."
+  }
+]

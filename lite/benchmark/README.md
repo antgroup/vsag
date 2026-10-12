@@ -1,5 +1,9 @@
 # VSAG Lite baseline experiment
 
+[Latest strict-FP native Full / candidate comparison and mutation gates](results/aligned-fp32-full-r2-20261012/README.md)
+records initial GIST quality-qualified speed/RSS gains, but post-mutation quality
+regression. Raw audit PASS is not candidate acceptance PASS; PR2904 unchanged.
+
 Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
 [Fixed-index GIST loss diagnosis](results/query-loss-trace-r1-20261012/README.md)
 attributes most missing truth IDs to unvisited nodes; it is not a new speedup.

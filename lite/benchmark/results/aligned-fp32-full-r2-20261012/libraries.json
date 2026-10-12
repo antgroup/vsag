@@ -1,0 +1,14 @@
+{
+  "control": {
+    "sha256": "bed1e07c5a587c4fff24510990e2a7970e5053387b76c32bbafcdc71a56fc30c",
+    "bytes": 6519328
+  },
+  "candidate": {
+    "sha256": "4df979fb14a799460542f2f1cca8222186cdf6d576849cf6c6002fc3feb791e4",
+    "bytes": 6510584
+  },
+  "full": {
+    "sha256": "32684a70bd4fe4cc8598036a9f068da44cc1b218752c7b5f1645996d09e5bc45",
+    "bytes": 40467408
+  }
+}
