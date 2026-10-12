@@ -225,6 +225,29 @@ public:
     [[nodiscard]] CliqueDataCellStats
     CollectStats(uint64_t total) const;
 
+    /// Batch-scoped read access for callers that must read many cliques, such as the chunked Add
+    /// planning pass. Such a caller takes the shared lock once with AcquireReadLock and then uses
+    /// the *Unlocked readers below, paying one lock acquisition per chunk instead of one per query.
+    ///
+    /// Contract: the returned lock must stay alive for the whole read burst, no session may
+    /// outlive the burst, and no mutating call may run (here or on another thread) until it is
+    /// released. The view is only frozen against mutation: later appends are invisible, and the
+    /// absence of a clique or membership in this view is not proof that it is absent live.
+    [[nodiscard]] std::shared_lock<std::shared_mutex>
+    AcquireReadLock() const;
+
+    void
+    CollectNodeCliqueIdsUnlocked(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const;
+
+    void
+    GetCliqueMembersUnlocked(InnerIdType clique_id, Vector<InnerIdType>& members) const;
+
+    [[nodiscard]] uint64_t
+    GetCliqueMemberCountUnlocked(InnerIdType clique_id) const;
+
+    [[nodiscard]] uint64_t
+    TotalLogicalCliqueCountUnlocked() const;
+
 private:
     void
     reset_delta_unlocked(uint64_t total);
