@@ -58,11 +58,12 @@ ASan/UBSan with leak detection and halt-on-UB: 5/5. Instrumented Debug: 5/5.
 Fresh gcov JSON union for production `src/lite` sources and inline headers:
 3072/3233 executable lines, 95.0201%. This is scoped Lite line coverage,
 not entire Full VSAG or branch coverage. No new CPU/performance matrix was run
+as part of this promotion; historical performance evidence remains versioned.
+
 clang-format 15, focused clang-tidy 15 on four core/test translation units and
 an installed-header/library RaBitQ CRUD/filter/Save/Load consumer passed.
 Dependency-header warnings were suppressed by clang-tidy's default scope;
 this does not claim a warning-free whole-repository lint.
-as part of this promotion; historical performance evidence remains versioned.
 
 ## Remaining acceptance boundaries
 
