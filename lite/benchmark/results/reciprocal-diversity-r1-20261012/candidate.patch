@@ -1,0 +1,74 @@
+--- a/src/lite/graph_backend.cpp
++++ b/src/lite/graph_backend.cpp
+@@ -945,6 +945,41 @@
+         if (not found) {
+             return tl::unexpected(found.error());
+         }
++        if (not fp16_) {
++            std::vector<uint64_t> selected;
++            selected.reserve(count);
++            for (const auto& neighbor : *found) {
++                const uint64_t slot = slots_.at(neighbor.id);
++                if (slot == excluded) {
++                    continue;
++                }
++                bool diverse = true;
++                for (const auto accepted : selected) {
++                    if (distance(accepted, slot) < neighbor.distance) {
++                        diverse = false;
++                        break;
++                    }
++                }
++                if (diverse) {
++                    selected.push_back(slot);
++                    if (selected.size() == count) {
++                        return selected;
++                    }
++                }
++            }
++            // Preserve Lite's degree-fill contract after heuristic selection.
++            for (const auto& neighbor : *found) {
++                const uint64_t slot = slots_.at(neighbor.id);
++                if (slot != excluded and
++                    std::find(selected.begin(), selected.end(), slot) == selected.end()) {
++                    selected.push_back(slot);
++                    if (selected.size() == count) {
++                        break;
++                    }
++                }
++            }
++            return selected;
++        }
+         std::vector<uint64_t> result;
+         result.reserve(count);
+         for (const auto& neighbor : *found) {
+@@ -980,7 +1015,28 @@
+                       ranked.begin() + static_cast<std::ptrdiff_t>(neighbors.size()),
+                       Closer{});
+             uint64_t dropped = max_degree_;
+-            for (uint64_t i = neighbors.size(); i > 0; --i) {
++            bool diverse_drop = false;
++            if (not fp16_) {
++                for (uint64_t i = neighbors.size(); i > 0; --i) {
++                    const uint64_t candidate = ranked[i - 1].slot;
++                    const bool safe = candidate == target ? not incoming_[candidate].empty()
++                                                          : incoming_[candidate].size() > 1;
++                    if (not safe) {
++                        continue;
++                    }
++                    for (uint64_t j = 0; j + 1 < i; ++j) {
++                        if (distance(ranked[j].slot, candidate) < ranked[i - 1].distance) {
++                            dropped = i - 1;
++                            diverse_drop = true;
++                            break;
++                        }
++                    }
++                    if (diverse_drop) {
++                        break;
++                    }
++                }
++            }
++            for (uint64_t i = neighbors.size(); i > 0 and not diverse_drop; --i) {
+                 const uint64_t candidate = ranked[i - 1].slot;
+                 const bool safe_to_drop = candidate == target ? not incoming_[candidate].empty()
+                                                               : incoming_[candidate].size() > 1;

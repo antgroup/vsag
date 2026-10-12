@@ -21,10 +21,13 @@ def verify(out,datasets):
     assert identity['source_head']=='dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     assert identity['control_sha256']=='3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
     rows=json.loads((out/'rows.json').read_text())
-    expected={(d,t,s) for d in ['sift10k','gist10k'] for t in range(3) for s in ['control','candidate']}
-    assert len(rows)==12 and {(r['dataset'],r['trial'],r['side']) for r in rows}==expected
+    sides=['control','nearest','candidate'] if (out/'nearest-control.json').exists() else ['control','candidate']
+    expected={(d,t,s) for d in ['sift10k','gist10k'] for t in range(3) for s in sides}
+    assert len(rows)==len(expected) and {(r['dataset'],r['trial'],r['side']) for r in rows}==expected
     commands=json.loads((out/'commands.json').read_text())
-    assert len(commands)==16 and all(c['exit']==0 for c in commands)
+    expected_commands = 25 if len(sides)==3 else (17 if any(c['tag']=='build-nearest' for c in commands) else 16)
+    assert len(commands)==expected_commands and all(c['exit']==0 for c in commands)
+    assert set(c['tag'] for c in commands)>={f'{d}-{t}-{s}' for d,t,s in expected}
     truths={}
     for label,directory in datasets.items():
         for name,info in json.loads((out/(label+'.inputs.json')).read_text()).items():
@@ -60,7 +63,7 @@ def verify(out,datasets):
     summary=[]
     for dataset in ['sift10k','gist10k']:
         item=dict(dataset=dataset)
-        for side in ['control','candidate']:
+        for side in sides:
             selected=[r['metrics'] for r in rows if r['dataset']==dataset and r['side']==side]
             item[side]={key:statistics.median(float(r[key]) for r in selected) for key in ['recall_at_k','build_ms','search_p50_us','search_p99_us','save_ms','snapshot_bytes']}
         assert len({tuple(raw_hits[(dataset,t,'control')]) for t in range(3)})==1
@@ -68,7 +71,7 @@ def verify(out,datasets):
         a=raw_hits[(dataset,0,'control')];b=raw_hits[(dataset,0,'candidate')]
         item['query_win_loss_tie']=[sum(y>x for x,y in zip(a,b)),sum(y<x for x,y in zip(a,b)),sum(y==x for x,y in zip(a,b))]
         summary.append(item)
-    return dict(audit='PASS',runs=12,recorded_queries=6600,summary=summary)
+    return dict(audit='PASS',runs=len(rows),recorded_queries=sum(len(truths[r['dataset']]) for r in rows),summary=summary)
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('output',type=Path)
     parser.add_argument('--gist',type=Path,required=True);parser.add_argument('--sift',type=Path,required=True)

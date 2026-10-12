@@ -49,10 +49,33 @@ INSERT = '''        if (not fp16_) {
             return selected;
         }
 '''
+RECIPROCAL = '''            bool diverse_drop = false;
+            if (not fp16_) {
+                for (uint64_t i = neighbors.size(); i > 0; --i) {
+                    const uint64_t candidate = ranked[i - 1].slot;
+                    const bool safe = candidate == target ? not incoming_[candidate].empty()
+                                                         : incoming_[candidate].size() > 1;
+                    if (not safe) {
+                        continue;
+                    }
+                    for (uint64_t j = 0; j + 1 < i; ++j) {
+                        if (distance(ranked[j].slot, candidate) < ranked[i - 1].distance) {
+                            dropped = i - 1;
+                            diverse_drop = true;
+                            break;
+                        }
+                    }
+                    if (diverse_drop) {
+                        break;
+                    }
+                }
+            }
+'''
 
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--reciprocal',action='store_true')
     args=parser.parse_args()
     root=Path(__file__).resolve().parent
     feature=Path('/home/ubuntu/project/vsag-pr2904-promotion-20261012')
@@ -87,9 +110,25 @@ def main():
         new=path.read_text()
         (out/'candidate.patch').write_text(''.join(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/src/lite/graph_backend.cpp',tofile='b/src/lite/graph_backend.cpp')))
         run('configure',['cmake','-S',source/'lite','-B',scratch/'build','-DCMAKE_BUILD_TYPE=Release','-DENABLE_RABITQ_LITE_BACKEND=ON','-DENABLE_TESTS=OFF'])
+        run('build-nearest',['cmake','--build',scratch/'build','--target','vsag_lite','--parallel','2'])
+        if args.reciprocal:
+            nearest_dir=scratch/'nearest';nearest_dir.mkdir()
+            shutil.copyfile(scratch/'build/libvsag-lite.so',nearest_dir/'libvsag-lite.so')
+            anchor_drop='''            uint64_t dropped = max_degree_;
+            for (uint64_t i = neighbors.size(); i > 0; --i) {'''
+            assert path.read_text().count(anchor_drop)==1
+            path.write_text(path.read_text().replace(anchor_drop,
+                '            uint64_t dropped = max_degree_;\n'+RECIPROCAL+
+                '            for (uint64_t i = neighbors.size(); i > 0 and not diverse_drop; --i) {'))
+            run('format-reciprocal',['clang-format-15','-i',path])
+            (out/'candidate.patch').write_text(''.join(difflib.unified_diff(old.splitlines(True),path.read_text().splitlines(True),fromfile='a/src/lite/graph_backend.cpp',tofile='b/src/lite/graph_backend.cpp')))
+            run('build-reciprocal',['cmake','--build',scratch/'build','--target','vsag_lite','--parallel','2'])
+            write_json(out/'nearest-control.json',dict(sha256=sha(nearest_dir/'libvsag-lite.so'),bytes=(nearest_dir/'libvsag-lite.so').stat().st_size))
+            env['VSAG_PILOT_RECIPROCAL']='1'
+
         run('build',['cmake','--build',scratch/'build','--target','vsag_lite','--parallel','2'])
         candidate=scratch/'build/libvsag-lite.so'
-        write_json(out/'identity.json',dict(source_head=head,control_sha256=sha(library),candidate_sha256=sha(candidate),candidate_bytes=candidate.stat().st_size,patch_sha256=sha(out/'candidate.patch'),scope='FP32 nearest only; reciprocal link and all FP16/RaBitQ code unchanged'))
+        write_json(out/'identity.json',dict(source_head=head,control_sha256=sha(library),candidate_sha256=sha(candidate),candidate_bytes=candidate.stat().st_size,patch_sha256=sha(out/'candidate.patch'),scope='FP32 nearest + reciprocal safe occlusion' if args.reciprocal else 'FP32 nearest only'))
         builder=root/'results/quality-target-r2-20261012/source-graph_crud_quality.cpp'
         (out/'source-builder.cpp').write_bytes(builder.read_bytes())
         run('compile-builder',['c++','-std=c++17','-O3','-DNDEBUG','-I'+str(feature/'include'),builder,'-L'+str(library.parent),'-Wl,-rpath,'+str(library.parent),'-lvsag-lite','-o',scratch/'builder'])
@@ -99,9 +138,12 @@ def main():
         for dataset,inputs in datasets.items():
             write_json(out/(dataset+'.inputs.json'),{name:dict(sha256=sha(inputs/name),bytes=(inputs/name).stat().st_size) for name in ['base.fvecs','queries.fvecs','groundtruth.ivecs']})
             for trial in range(3):
-                for side in (['control','candidate'] if trial%2==0 else ['candidate','control']):
+                order=['control','nearest','candidate'] if args.reciprocal else ['control','candidate']
+                if args.reciprocal: order=order[trial:]+order[:trial]
+                elif trial%2: order.reverse()
+                for side in order:
                     tag=f'{dataset}-{trial}-{side}';stem=out/tag
-                    env['LD_LIBRARY_PATH']=str(candidate.parent if side=='candidate' else library.parent)
+                    env['LD_LIBRARY_PATH']=str(nearest_dir if side=='nearest' else candidate.parent if side=='candidate' else library.parent)
                     run(tag,['taskset','-c','0',scratch/'builder',inputs,scratch/(tag+'.snapshot'),0,1,str(stem)+'.queries.csv'])
                     lines=(out/(tag+'.stdout')).read_text().splitlines()
                     import csv
