@@ -56,7 +56,7 @@ public:
             this->inner_id = 0;
             this->visible_total = 0;
             this->degree_target = 0;
-            this->planned_neighbor_count = 0;
+            this->live_neighbor_count = 0;
             this->memberships_empty = false;
             this->knn_empty = false;
             this->knn_ids.clear();
@@ -70,7 +70,10 @@ public:
         /// Degree target and both flags below are relative to the planning view, which is a lower
         /// bound of the live structure.
         uint64_t degree_target{0};
-        uint64_t planned_neighbor_count{0};
+        /// Neighbors the frozen view already gives this row, excluding the cliques the plan only
+        /// projects. The merge skips a row once this reaches degree_target, because then the live
+        /// structure is already covered and there is nothing left for the merge to write.
+        uint64_t live_neighbor_count{0};
         bool memberships_empty{false};
         bool knn_empty{false};
         Vector<InnerIdType> knn_ids;

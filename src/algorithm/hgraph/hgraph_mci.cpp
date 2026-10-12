@@ -1989,7 +1989,7 @@ MciIncrementalAddExecutor::plan_incremental_mci_clique(
             }
         }
     }
-    plan.planned_neighbor_count = neighbors.size();
+    plan.live_neighbor_count = neighbors.size();
     if (not plan.memberships_empty and neighbors.size() >= plan.degree_target) {
         plan.knn_empty = knn_ids.empty();
         return;
@@ -2058,9 +2058,12 @@ MciIncrementalAddExecutor::merge_incremental_mci_clique_plans(Vector<MciAddPlan>
     uint64_t repaired_rows = 0;
     for (auto index : order) {
         auto& plan = plans[index];
-        // The planning view is a lower bound of the live structure, so a row that already met the
-        // target there cannot have lost coverage here; every other row is merged.
-        if (not plan.memberships_empty and plan.planned_neighbor_count >= plan.degree_target) {
+        // live_neighbor_count is the degree the frozen view already gave this row, so a row that
+        // met the target there has nothing left to write and can be skipped. It deliberately
+        // excludes the neighbors the plan only projects through JOIN and local MCE: those cliques
+        // are not in the live structure yet, and this row is exactly the one that has to apply
+        // them, so counting them here would skip the writes that produce the planned coverage.
+        if (not plan.memberships_empty and plan.live_neighbor_count >= plan.degree_target) {
             continue;
         }
         if (plan.knn_empty) {
@@ -2187,7 +2190,7 @@ MciIncrementalAddExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& 
             std::atomic<uint64_t> next_row{begin};
             std::vector<std::future<void>> workers;
             workers.reserve(workers_here);
-            auto plan_one_row = [&, begin, end]() {
+            auto plan_one_row = [&, begin, end, data]() {
                 while (true) {
                     const auto index = next_row.fetch_add(1, std::memory_order_relaxed);
                     if (index >= end) {
