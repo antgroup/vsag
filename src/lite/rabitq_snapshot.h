@@ -4,8 +4,9 @@
 
 #include <cstring>
 #include <istream>
+#include <limits>
 #include <ostream>
-#include <unordered_set>
+#include <type_traits>
 
 #include "lite/rabitq_graph_state.h"
 
@@ -15,19 +16,22 @@ namespace vsag::lite::detail::rabitq {
 
 inline void
 write_u64(std::ostream& output, uint64_t value, uint64_t bytes = 8) {
+    char encoded[8];
     for (uint64_t i = 0; i < bytes; ++i) {
-        output.put(static_cast<char>((value >> (8U * i)) & 0xffU));
+        encoded[i] = static_cast<char>((value >> (8U * i)) & 0xffU);
     }
+    output.write(encoded, static_cast<std::streamsize>(bytes));
     codec_require(static_cast<bool>(output), "snapshot write failed");
 }
 
 inline uint64_t
 read_u64(std::istream& input, uint64_t bytes = 8) {
+    char encoded[8];
+    input.read(encoded, static_cast<std::streamsize>(bytes));
+    codec_require(static_cast<bool>(input), "truncated snapshot");
     uint64_t value = 0;
     for (uint64_t i = 0; i < bytes; ++i) {
-        const int byte = input.get();
-        codec_require(byte != std::char_traits<char>::eof(), "truncated snapshot");
-        value |= static_cast<uint64_t>(static_cast<uint8_t>(byte)) << (8U * i);
+        value |= static_cast<uint64_t>(static_cast<uint8_t>(encoded[i])) << (8U * i);
     }
     return value;
 }
@@ -89,6 +93,65 @@ read_bytes(std::istream& input, std::vector<uint8_t>& bytes) {
     read_bytes(input, bytes.data(), bytes.size());
 }
 
+inline bool
+snapshot_little_endian() {
+    const uint16_t value = 1;
+    return *reinterpret_cast<const uint8_t*>(&value) == 1;
+}
+
+// The same block-I/O principle as native StreamReader::ReadVector, with this
+// format's explicit little-endian conversion and capacity/failure contracts.
+template <typename T>
+inline void
+write_integer_array(std::ostream& output,
+                    const std::vector<T>& values,
+                    bool bulk = snapshot_little_endian()) {
+    static_assert(std::is_same_v<T, uint64_t> or std::is_same_v<T, int64_t>);
+    codec_require(
+        values.size() <=
+            static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max()) / sizeof(T),
+        "snapshot array exceeds stream capacity");
+    if (values.empty()) {
+        return;
+    }
+    if (bulk) {
+        output.write(reinterpret_cast<const char*>(values.data()),
+                     static_cast<std::streamsize>(values.size() * sizeof(T)));
+        codec_require(static_cast<bool>(output), "snapshot write failed");
+        return;
+    }
+    for (T value : values) {
+        uint64_t bits;
+        std::memcpy(&bits, &value, sizeof(bits));
+        write_u64(output, bits);
+    }
+}
+
+template <typename T>
+inline void
+read_integer_array(std::istream& input,
+                   std::vector<T>& values,
+                   bool bulk = snapshot_little_endian()) {
+    static_assert(std::is_same_v<T, uint64_t> or std::is_same_v<T, int64_t>);
+    codec_require(
+        values.size() <=
+            static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max()) / sizeof(T),
+        "snapshot array exceeds stream capacity");
+    if (values.empty()) {
+        return;
+    }
+    if (bulk) {
+        input.read(reinterpret_cast<char*>(values.data()),
+                   static_cast<std::streamsize>(values.size() * sizeof(T)));
+        codec_require(static_cast<bool>(input), "truncated snapshot");
+        return;
+    }
+    for (T& value : values) {
+        const uint64_t bits = read_u64(input);
+        std::memcpy(&value, &bits, sizeof(bits));
+    }
+}
+
 inline void
 write_snapshot_payload(std::ostream& output,
                        uint64_t version,
@@ -146,7 +209,7 @@ load_snapshot_payload(std::istream& input, uint64_t expected_version) {
     codec_require(position != std::streampos(-1) and end >= position,
                   "seekable encoded input required");
     input.seekg(position);
-    const uint64_t remaining = static_cast<uint64_t>(end - position);
+    const auto remaining = static_cast<uint64_t>(end - position);
     const uint64_t model_bytes = dim * sizeof(float) + flips_size;
     const uint64_t record_bytes = plane_bytes * K_TOTAL_BITS + 24 + 16;
     codec_require(
@@ -202,6 +265,50 @@ validate_graph_topology(const GraphTopology& graph, uint64_t count) {
     codec_require(graph.offsets.back() == graph.neighbors.size(), "graph edge count mismatch");
 }
 
+// Preserve CSR wire order without materializing a second whole graph.
+inline void
+write_graph_adjacency(std::ostream& output,
+                      const std::vector<std::vector<uint64_t>>& adjacency,
+                      bool bulk = snapshot_little_endian()) {
+    codec_require(adjacency.size() < std::numeric_limits<uint64_t>::max(),
+                  "snapshot offset count overflow");
+    uint64_t edges = 0;
+    for (const auto& row : adjacency) {
+        codec_require(row.size() <= std::numeric_limits<uint64_t>::max() - edges,
+                      "snapshot edge count overflow");
+        edges += row.size();
+    }
+    write_u64(output, adjacency.size() + 1);
+    write_u64(output, edges);
+    constexpr uint64_t k_buffer_entries = 8192;
+    std::vector<uint64_t> buffer;
+    buffer.reserve(
+        std::min(k_buffer_entries, std::max(static_cast<uint64_t>(adjacency.size()) + 1, edges)));
+    const auto flush = [&]() {
+        write_integer_array(output, buffer, bulk);
+        buffer.clear();
+    };
+    const auto append = [&](uint64_t value) {
+        buffer.push_back(value);
+        if (buffer.size() == k_buffer_entries) {
+            flush();
+        }
+    };
+    uint64_t offset = 0;
+    append(offset);
+    for (const auto& row : adjacency) {
+        offset += row.size();
+        append(offset);
+    }
+    flush();
+    for (const auto& row : adjacency) {
+        for (const uint64_t neighbor : row) {
+            append(neighbor);
+        }
+    }
+    flush();
+}
+
 inline void
 save_mutable_snapshot(std::ostream& output, const MutableGraphState& state) {
     state.Validate();
@@ -209,22 +316,12 @@ save_mutable_snapshot(std::ostream& output, const MutableGraphState& state) {
     write_u64(output, state.GetMaxDegree());
     write_u64(output, state.GetEfSearch());
     write_u64(output, state.GetIds().size());
-    for (int64_t id : state.GetIds()) {
-        write_i64(output, id);
-    }
-    const auto graph = state.GetGraph();
-    write_u64(output, graph.offsets.size());
-    write_u64(output, graph.neighbors.size());
-    for (uint64_t offset : graph.offsets) {
-        write_u64(output, offset);
-    }
-    for (uint64_t neighbor : graph.neighbors) {
-        write_u64(output, neighbor);
-    }
+    write_integer_array(output, state.GetIds());
+    write_graph_adjacency(output, state.GetAdjacency());
 }
 
 inline MutableGraphState
-load_mutable_snapshot(std::istream& input) {
+load_mutable_snapshot(std::istream& input, bool use_incoming_adjacency = false) {
     auto loaded = load_snapshot_payload(input, 1);
     const uint64_t max_degree = read_u64(input);
     const uint64_t ef_search = read_u64(input);
@@ -233,11 +330,8 @@ load_mutable_snapshot(std::istream& input) {
     const uint64_t id_count = read_u64(input);
     codec_require(id_count == loaded.codes.Size(), "invalid mutable snapshot ID count");
     std::vector<int64_t> ids(id_count);
-    std::unordered_set<int64_t> unique_ids;
-    for (int64_t& id : ids) {
-        id = read_i64(input);
-        codec_require(unique_ids.insert(id).second, "duplicate mutable snapshot ID");
-    }
+    read_integer_array(input, ids);
+    // MutableGraphState rejects duplicate IDs while building its required slot map.
     const uint64_t offset_count = read_u64(input);
     const uint64_t neighbor_count = read_u64(input);
     codec_require(
@@ -252,12 +346,8 @@ load_mutable_snapshot(std::istream& input) {
                           (offset_count + neighbor_count) * 8,
                   "encoded graph payload size mismatch");
     GraphTopology graph{std::vector<uint64_t>(offset_count), std::vector<uint64_t>(neighbor_count)};
-    for (uint64_t& offset : graph.offsets) {
-        offset = read_u64(input);
-    }
-    for (uint64_t& neighbor : graph.neighbors) {
-        neighbor = read_u64(input);
-    }
+    read_integer_array(input, graph.offsets);
+    read_integer_array(input, graph.neighbors);
     validate_graph_topology(graph, loaded.codes.Size());
     codec_require(input.peek() == std::char_traits<char>::eof(), "snapshot trailing bytes");
     return {std::move(loaded.model),
@@ -265,7 +355,9 @@ load_mutable_snapshot(std::istream& input) {
             graph,
             std::move(ids),
             max_degree,
-            ef_search};
+            ef_search,
+            false,
+            use_incoming_adjacency};
 }
 
 }  // namespace vsag::lite::detail::rabitq

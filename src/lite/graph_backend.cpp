@@ -16,6 +16,7 @@
 #include "lite/fp16_codec.h"
 #include "lite/fp16_distance.h"
 #include "lite/fp32_distance.h"
+#include "lite/query_heap.h"
 
 namespace vsag::lite::detail {
 namespace {
@@ -57,14 +58,178 @@ struct Farther {
 
 class GraphBackend final : public Backend {
 public:
-    GraphBackend(uint64_t dimension, uint64_t max_degree, uint64_t ef_search, bool fp16 = false)
+    GraphBackend(uint64_t dimension,
+                 uint64_t max_degree,
+                 uint64_t ef_search,
+                 bool fp16 = false,
+                 bool journal_mutations = true,
+                 const Backend* build_source = nullptr)
         : dim_(dimension),
           max_degree_(max_degree),
           ef_search_(ef_search),
           fp16_(fp16),
           distance_(select_fp32_distance()),
-          fp16_distance_(select_fp16_distance()) {
+          fp16_distance_(select_fp16_distance()),
+          journal_mutations_(journal_mutations),
+          build_source_(build_source) {
     }
+
+    void
+    ReserveBuild(uint64_t count) {
+        if (count > ids_.max_size() or count > extras_.max_size() or count > incoming_.max_size() or
+            (fp16_ ? count > fp16_vectors_.max_size() / Dim()
+                   : count > vectors_.max_size() / Dim())) {
+            throw std::length_error("graph build capacity exceeded");
+        }
+        if (fp16_) {
+            fp16_vectors_.reserve(count * Dim());
+        } else if (build_source_ == nullptr) {
+            vectors_.reserve(count * Dim());
+        }
+        ids_.reserve(count);
+        extras_.reserve(count);
+        incoming_.reserve(count);
+        slots_.reserve(count);
+    }
+
+    void
+    EnableMutationJournal() {
+        journal_mutations_ = true;
+    }
+
+    std::vector<std::vector<uint64_t>>
+    TakeBuildLinks() {
+        return std::move(extras_);
+    }
+
+    // Back up only rows touched by a mutation. Rollback reuses retained capacity
+    // and swaps saved rows, so allocation failure cannot leave a partial commit.
+    class MutationJournal {
+    public:
+        MutationJournal(GraphBackend& owner, uint64_t slot, int64_t added_id, bool adding)
+            : owner_(owner),
+              size_(owner.Size()),
+              slot_(slot),
+              added_id_(added_id),
+              adding_(adding) {
+            // Private construction is discarded on failure, then published once.
+            if (not owner_.journal_mutations_) {
+                committed_ = true;
+                return;
+            }
+            if (slot_ < size_) {
+                old_id_ = owner.ids_[slot_];
+                last_id_ = owner.ids_.back();
+                if (owner.fp16_) {
+                    fp16_slot_.assign(owner.fp16_vectors_.data() + slot_ * owner.Dim(),
+                                      owner.fp16_vectors_.data() + (slot_ + 1) * owner.Dim());
+                    fp16_last_.assign(owner.fp16_vectors_.data() + (size_ - 1) * owner.Dim(),
+                                      owner.fp16_vectors_.data() + size_ * owner.Dim());
+                } else {
+                    fp32_slot_.assign(owner.vectors_.data() + slot_ * owner.Dim(),
+                                      owner.vectors_.data() + (slot_ + 1) * owner.Dim());
+                    fp32_last_.assign(owner.vectors_.data() + (size_ - 1) * owner.Dim(),
+                                      owner.vectors_.data() + size_ * owner.Dim());
+                }
+                Remember(slot_);
+                Remember(size_ - 1);
+            }
+            owner_.active_journal_ = this;
+        }
+
+        ~MutationJournal() {
+            owner_.active_journal_ = nullptr;
+            if (committed_) {
+                return;
+            }
+            if (adding_) {
+                owner_.slots_.erase(added_id_);
+            }
+            owner_.ids_.resize(size_);
+            owner_.extras_.resize(size_);
+            owner_.incoming_.resize(size_);
+            if (owner_.fp16_) {
+                owner_.fp16_vectors_.resize(size_ * owner_.Dim());
+            } else {
+                owner_.vectors_.resize(size_ * owner_.Dim());
+            }
+            if (slot_ < size_) {
+                owner_.ids_[slot_] = old_id_;
+                owner_.ids_[size_ - 1] = last_id_;
+                owner_.slots_.at(last_id_) = size_ - 1;
+                if (owner_.fp16_) {
+                    std::copy(fp16_slot_.begin(),
+                              fp16_slot_.end(),
+                              owner_.fp16_vectors_.data() + slot_ * owner_.Dim());
+                    std::copy(fp16_last_.begin(),
+                              fp16_last_.end(),
+                              owner_.fp16_vectors_.data() + (size_ - 1) * owner_.Dim());
+                } else {
+                    std::copy(fp32_slot_.begin(),
+                              fp32_slot_.end(),
+                              owner_.vectors_.data() + slot_ * owner_.Dim());
+                    std::copy(fp32_last_.begin(),
+                              fp32_last_.end(),
+                              owner_.vectors_.data() + (size_ - 1) * owner_.Dim());
+                }
+            }
+            for (auto& entry : rows_) {
+                if (entry.second.outgoing_saved) {
+                    owner_.extras_[entry.first].swap(entry.second.outgoing);
+                }
+                if (entry.second.incoming_saved) {
+                    owner_.incoming_[entry.first].swap(entry.second.incoming);
+                }
+            }
+        }
+
+        void
+        Remember(uint64_t slot, bool outgoing = true, bool incoming = true) {
+            if (slot >= size_) {
+                return;
+            }
+            auto& saved = rows_.try_emplace(slot).first->second;
+            if (outgoing and not saved.outgoing_saved) {
+                saved.outgoing = owner_.extras_[slot];
+                saved.outgoing_saved = true;
+            }
+            if (incoming and not saved.incoming_saved) {
+                saved.incoming = owner_.incoming_[slot];
+                saved.incoming_saved = true;
+            }
+        }
+
+        void
+        Commit() {
+            committed_ = true;
+            owner_.active_journal_ = nullptr;
+        }
+
+        MutationJournal(const MutationJournal&) = delete;
+        MutationJournal&
+        operator=(const MutationJournal&) = delete;
+
+    private:
+        struct Row {
+            std::vector<uint64_t> outgoing;
+            std::vector<uint64_t> incoming;
+            bool outgoing_saved{};
+            bool incoming_saved{};
+        };
+        GraphBackend& owner_;
+        uint64_t size_;
+        uint64_t slot_;
+        int64_t added_id_;
+        bool adding_;
+        bool committed_{};
+        int64_t old_id_{};
+        int64_t last_id_{};
+        std::vector<float> fp32_slot_;
+        std::vector<float> fp32_last_;
+        std::vector<uint16_t> fp16_slot_;
+        std::vector<uint16_t> fp16_last_;
+        std::unordered_map<uint64_t, Row> rows_;
+    };
 
     tl::expected<void, Error>
     Add(int64_t id, const float* vector, uint64_t dim) override {
@@ -91,7 +256,7 @@ public:
             }
             if (fp16_) {
                 grow(fp16_vectors_, (Size() + 1) * dim);
-            } else {
+            } else if (build_source_ == nullptr) {
                 grow(vectors_, (Size() + 1) * dim);
             }
             grow(ids_, Size() + 1);
@@ -100,10 +265,11 @@ public:
             for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
+            MutationJournal journal(*this, Size(), id, true);
             slots_.emplace(id, Size());
             if (fp16_) {
                 fp16_vectors_.insert(fp16_vectors_.end(), encoded.begin(), encoded.end());
-            } else {
+            } else if (build_source_ == nullptr) {
                 vectors_.insert(vectors_.end(), vector, vector + dim);
             }
             ids_.push_back(id);
@@ -114,6 +280,7 @@ public:
                 link(neighbor, Size() - 1);
             }
             ensure_incoming(Size() - 1);
+            journal.Commit();
             return {};
         } catch (const std::invalid_argument&) {
             return failure(ErrorType::INVALID_ARGUMENT, "vector exceeds FP16 range");
@@ -156,9 +323,11 @@ public:
             for (uint64_t neighbor : *neighbors) {
                 extras_[neighbor].reserve(max_degree_ + 1);
             }
+            MutationJournal journal(*this, slot, 0, false);
             const auto old_neighbors = extras_[slot];
             const auto affected_nodes = incoming_[slot];
             for (const uint64_t source : affected_nodes) {
+                remember_row(source, true, false);
                 erase_value(extras_[source], slot);
             }
             incoming_[slot].clear();
@@ -178,6 +347,7 @@ public:
             for (const uint64_t target : old_neighbors) {
                 ensure_incoming(target);
             }
+            journal.Commit();
             return {};
         } catch (const std::invalid_argument&) {
             return failure(ErrorType::INVALID_ARGUMENT, "vector exceeds FP16 range");
@@ -194,64 +364,77 @@ public:
         if (found == slots_.end()) {
             return false;
         }
-        const uint64_t slot = found->second;
-        const uint64_t last = Size() - 1;
-        const auto removed_neighbors = extras_[slot];
-        const auto removed_incoming = incoming_[slot];
-        std::vector<uint64_t> affected_nodes = removed_neighbors;
-        affected_nodes.insert(
-            affected_nodes.end(), removed_incoming.begin(), removed_incoming.end());
-        for (const uint64_t target : removed_neighbors) {
-            erase_value(incoming_[target], slot);
-        }
-        for (const uint64_t source : removed_incoming) {
-            erase_value(extras_[source], slot);
-        }
-        incoming_[slot].clear();
-        if (slot != last) {
-            for (const uint64_t target : extras_[last]) {
-                replace_value(incoming_[target], last, slot);
+        try {
+            const uint64_t slot = found->second;
+            const uint64_t last = Size() - 1;
+            MutationJournal journal(*this, slot, 0, false);
+            const auto removed_neighbors = extras_[slot];
+            const auto removed_incoming = incoming_[slot];
+            std::vector<uint64_t> affected_nodes = removed_neighbors;
+            affected_nodes.insert(
+                affected_nodes.end(), removed_incoming.begin(), removed_incoming.end());
+            for (const uint64_t target : removed_neighbors) {
+                remember_row(target, false, true);
+                erase_value(incoming_[target], slot);
             }
-            for (const uint64_t source : incoming_[last]) {
-                replace_value(extras_[source], last, slot);
+            for (const uint64_t source : removed_incoming) {
+                remember_row(source, true, false);
+                erase_value(extras_[source], slot);
             }
-        }
-        if (slot != last) {
+            incoming_[slot].clear();
+            if (slot != last) {
+                for (const uint64_t target : extras_[last]) {
+                    remember_row(target, false, true);
+                    replace_value(incoming_[target], last, slot);
+                }
+                for (const uint64_t source : incoming_[last]) {
+                    remember_row(source, true, false);
+                    replace_value(extras_[source], last, slot);
+                }
+            }
+            if (slot != last) {
+                if (fp16_) {
+                    std::copy_n(fp16_vectors_.data() + last * Dim(),
+                                Dim(),
+                                fp16_vectors_.data() + slot * Dim());
+                } else {
+                    std::copy_n(
+                        vectors_.data() + last * Dim(), Dim(), vectors_.data() + slot * Dim());
+                }
+                ids_[slot] = ids_[last];
+                extras_[slot] = std::move(extras_[last]);
+                incoming_[slot] = std::move(incoming_[last]);
+                extras_[slot].erase(std::remove(extras_[slot].begin(), extras_[slot].end(), slot),
+                                    extras_[slot].end());
+                slots_.at(ids_[slot]) = slot;
+            }
+            ids_.pop_back();
             if (fp16_) {
-                std::copy_n(fp16_vectors_.data() + last * Dim(),
-                            Dim(),
-                            fp16_vectors_.data() + slot * Dim());
+                fp16_vectors_.resize(last * Dim());
             } else {
-                std::copy_n(vectors_.data() + last * Dim(), Dim(), vectors_.data() + slot * Dim());
+                vectors_.resize(last * Dim());
             }
-            ids_[slot] = ids_[last];
-            extras_[slot] = std::move(extras_[last]);
-            incoming_[slot] = std::move(incoming_[last]);
-            extras_[slot].erase(std::remove(extras_[slot].begin(), extras_[slot].end(), slot),
-                                extras_[slot].end());
-            slots_.at(ids_[slot]) = slot;
+            extras_.pop_back();
+            incoming_.pop_back();
+            auto remap = [slot, last](uint64_t node) { return node == last ? slot : node; };
+            for (auto& node : affected_nodes) {
+                node = remap(node);
+            }
+            std::vector<uint64_t> repair_candidates;
+            repair_candidates.reserve(removed_neighbors.size());
+            for (const uint64_t old_candidate : removed_neighbors) {
+                repair_candidates.push_back(remap(old_candidate));
+            }
+            repair(std::move(affected_nodes), repair_candidates);
+            slots_.erase(found);
+            journal.Commit();
+            maybe_compact_incoming();
+            return true;
+        } catch (const std::bad_alloc&) {
+            return false;
+        } catch (const std::length_error&) {
+            return false;
         }
-        slots_.erase(found);
-        ids_.pop_back();
-        if (fp16_) {
-            fp16_vectors_.resize(last * Dim());
-        } else {
-            vectors_.resize(last * Dim());
-        }
-        extras_.pop_back();
-        incoming_.pop_back();
-        auto remap = [slot, last](uint64_t node) { return node == last ? slot : node; };
-        for (auto& node : affected_nodes) {
-            node = remap(node);
-        }
-        std::vector<uint64_t> repair_candidates;
-        repair_candidates.reserve(removed_neighbors.size());
-        for (const uint64_t old_candidate : removed_neighbors) {
-            repair_candidates.push_back(remap(old_candidate));
-        }
-        repair(std::move(affected_nodes), repair_candidates);
-        maybe_compact_incoming();
-        return true;
     }
 
     tl::expected<std::vector<Neighbor>, Error>
@@ -291,7 +474,7 @@ public:
             }
             const uint64_t ef = std::min(Size(), std::max(k, budget));
             // With closer as Compare, top() is the farthest candidate and pop() evicts it.
-            std::priority_queue<Candidate, std::vector<Candidate>, Closer> best;
+            QueryHeap<Candidate, Closer> best;
             std::priority_queue<Candidate, std::vector<Candidate>, Closer> accepted;
             std::priority_queue<Candidate, std::vector<Candidate>, Farther> candidates;
             std::vector<uint8_t> visited(Size(), 0);
@@ -306,16 +489,23 @@ public:
                 }
                 visited[slot] = 1;
                 Candidate next{slot, distance(query, encoded_query, slot)};
-                candidates.push(next);
-                best.push(next);
-                if (best.size() > ef) {
-                    best.pop();
-                }
+                // Filtered results include every allowed visited node, even if
+                // its routing score does not improve the full best heap.
                 if (filter != nullptr and (*filter)(IdAt(slot))) {
                     accepted.push(next);
                     if (accepted.size() > k) {
                         accepted.pop();
                     }
+                }
+                // Native BasicSearcher also bounds admission before heap writes.
+                // The boundary only improves; rejected nodes cannot expand later.
+                if (best.size() == ef and not closer(next, best.top())) {
+                    return;
+                }
+                candidates.push(next);
+                best.push(next);
+                if (best.size() > ef) {
+                    best.pop();
                 }
             };
             visit(0);
@@ -348,25 +538,20 @@ public:
 
             std::vector<Neighbor> result;
             if (filter == nullptr) {
-                result.resize(best.size());
-                for (uint64_t i = result.size(); i > 0; --i) {
-                    const auto candidate = best.top();
-                    best.pop();
-                    result[i - 1] = {IdAt(candidate.slot), candidate.distance};
+                auto values = best.TakeData();
+                const auto rank = [this](const Candidate& left, const Candidate& right) {
+                    return left.distance < right.distance or
+                           (left.distance == right.distance and IdAt(left.slot) < IdAt(right.slot));
+                };
+                const uint64_t count = std::min(k, static_cast<uint64_t>(values.size()));
+                const auto end = values.begin() + static_cast<std::ptrdiff_t>(count);
+                if (count < values.size()) {
+                    std::nth_element(values.begin(), end, values.end(), rank);
                 }
-                // The heap already orders distances. Sort only equal-distance groups to preserve
-                // the public ID tie-break without re-sorting the complete result.
-                for (uint64_t begin = 0; begin < result.size();) {
-                    uint64_t end = begin + 1;
-                    while (end < result.size() and result[end].distance == result[begin].distance) {
-                        ++end;
-                    }
-                    std::sort(result.begin() + static_cast<std::ptrdiff_t>(begin),
-                              result.begin() + static_cast<std::ptrdiff_t>(end),
-                              [](const Neighbor& left, const Neighbor& right) {
-                                  return left.id < right.id;
-                              });
-                    begin = end;
+                std::sort(values.begin(), end, rank);
+                result.reserve(count);
+                for (uint64_t i = 0; i < count; ++i) {
+                    result.push_back({IdAt(values[i].slot), values[i].distance});
                 }
             } else {
                 result.reserve(accepted.size());
@@ -504,6 +689,9 @@ public:
 
     [[nodiscard]] const float*
     VectorAt(uint64_t slot, std::vector<float>& scratch) const override {
+        if (build_source_ != nullptr) {
+            return build_source_->VectorAt(slot, scratch);
+        }
         if (not fp16_) {
             return vectors_.data() + slot * Dim();
         }
@@ -512,6 +700,11 @@ public:
             scratch[d] = decode_fp16(fp16_vectors_[slot * Dim() + d]);
         }
         return scratch.data();
+    }
+
+    [[nodiscard]] const uint16_t*
+    FP16VectorAt(uint64_t slot) const override {
+        return fp16_ ? fp16_vectors_.data() + slot * Dim() : nullptr;
     }
 
 private:
@@ -550,16 +743,25 @@ private:
     }
 
     void
+    remember_row(uint64_t slot, bool outgoing, bool incoming) {
+        if (active_journal_ != nullptr) {
+            active_journal_->Remember(slot, outgoing, incoming);
+        }
+    }
+
+    void
     sync_incoming(uint64_t source, const std::vector<uint64_t>& old_neighbors) {
         const auto& neighbors = extras_[source];
         for (const uint64_t target : old_neighbors) {
             if (std::find(neighbors.begin(), neighbors.end(), target) == neighbors.end()) {
+                remember_row(target, false, true);
                 erase_value(incoming_[target], source);
             }
         }
         for (const uint64_t target : neighbors) {
             if (std::find(old_neighbors.begin(), old_neighbors.end(), target) ==
                 old_neighbors.end()) {
+                remember_row(target, false, true);
                 incoming_[target].push_back(source);
             }
         }
@@ -567,6 +769,7 @@ private:
 
     void
     replace_neighbors(uint64_t source, const std::vector<uint64_t>& neighbors) {
+        remember_row(source, true, false);
         const auto old_neighbors = extras_[source];
         extras_[source] = neighbors;
         sync_incoming(source, old_neighbors);
@@ -631,6 +834,7 @@ private:
         if (selected_source == Size()) {
             return;
         }
+        remember_row(selected_source, true, false);
         const auto old_neighbors = extras_[selected_source];
         extras_[selected_source][selected_edge] = target;
         sync_incoming(selected_source, old_neighbors);
@@ -652,6 +856,7 @@ private:
             if (repaired.size() >= max_degree_) {
                 continue;
             }
+            remember_row(source, true, false);
             const auto old_neighbors = repaired;
             std::vector<Candidate> ranked;
             ranked.reserve(additional_candidates.size());
@@ -703,7 +908,11 @@ private:
         if (fp16_) {
             return fp16_distance_(encoded_query.data(), fp16_vectors_.data() + slot * Dim(), Dim());
         }
-        return distance_(query, vectors_.data() + slot * Dim(), Dim());
+        if (build_source_ == nullptr) {
+            return distance_(query, vectors_.data() + slot * Dim(), Dim());
+        }
+        std::vector<float> scratch;
+        return distance_(query, build_source_->VectorAt(slot, scratch), Dim());
     }
 
     [[nodiscard]] float
@@ -712,7 +921,15 @@ private:
             return fp16_distance_(
                 fp16_vectors_.data() + left * Dim(), fp16_vectors_.data() + right * Dim(), Dim());
         }
-        return distance_(vectors_.data() + left * Dim(), vectors_.data() + right * Dim(), Dim());
+        if (build_source_ == nullptr) {
+            return distance_(
+                vectors_.data() + left * Dim(), vectors_.data() + right * Dim(), Dim());
+        }
+        std::vector<float> left_scratch;
+        std::vector<float> right_scratch;
+        const auto* left_vector = VectorAt(left, left_scratch);
+        const auto* right_vector = VectorAt(right, right_scratch);
+        return distance_(left_vector, right_vector, Dim());
     }
 
     tl::expected<std::vector<uint64_t>, Error>
@@ -749,6 +966,7 @@ private:
             std::find(neighbors.begin(), neighbors.end(), target) != neighbors.end()) {
             return;
         }
+        remember_row(source, true, false);
         const auto old_neighbors = neighbors;
         neighbors.push_back(target);
         if (neighbors.size() > max_degree_) {
@@ -795,6 +1013,10 @@ private:
     std::vector<std::vector<uint64_t>> incoming_;
     uint64_t removes_since_incoming_check_{};
     uint64_t incoming_compactions_{};
+    MutationJournal* active_journal_{};
+    bool journal_mutations_;
+    // Non-owning, synchronous build-only source. This graph never escapes its factory.
+    const Backend* build_source_;
 };
 
 }  // namespace
@@ -806,7 +1028,9 @@ make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_searc
         return failure(ErrorType::INVALID_ARGUMENT, "invalid graph options");
     }
     try {
-        auto graph = std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search);
+        auto graph =
+            std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search, false, false);
+        graph->ReserveBuild(source.Size());
         std::vector<float> scratch;
         for (uint64_t slot = 0; slot < source.Size(); ++slot) {
             auto added =
@@ -815,11 +1039,37 @@ make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_searc
                 return tl::unexpected(added.error());
             }
         }
+        graph->EnableMutationJournal();
         return std::unique_ptr<Backend>(std::move(graph));
     } catch (const std::bad_alloc&) {
         return failure(ErrorType::NO_ENOUGH_MEMORY, "graph allocation failed");
     } catch (const std::length_error&) {
         return failure(ErrorType::NO_ENOUGH_MEMORY, "graph capacity exceeded");
+    }
+}
+
+tl::expected<std::vector<std::vector<uint64_t>>, Error>
+build_graph_topology(const Backend& source, uint64_t max_degree, uint64_t ef_search) {
+    if (source.Kind() != BackendKind::BRUTE_FORCE or source.Dim() == 0 or max_degree < 2 or
+        max_degree > K_MAX_DEGREE or ef_search < max_degree) {
+        return failure(ErrorType::INVALID_ARGUMENT, "invalid topology options");
+    }
+    try {
+        GraphBackend graph(source.Dim(), max_degree, ef_search, false, false, &source);
+        graph.ReserveBuild(source.Size());
+        std::vector<float> scratch;
+        for (uint64_t slot = 0; slot < source.Size(); ++slot) {
+            auto added = graph.Add(source.IdAt(slot), source.VectorAt(slot, scratch), source.Dim());
+            if (not added) {
+                return tl::unexpected(added.error());
+            }
+        }
+        // Only owned adjacency leaves this scope, never the borrowed source or row pointers.
+        return graph.TakeBuildLinks();
+    } catch (const std::bad_alloc&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "topology allocation failed");
+    } catch (const std::length_error&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "topology capacity exceeded");
     }
 }
 
@@ -830,7 +1080,9 @@ make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_
         return failure(ErrorType::INVALID_ARGUMENT, "invalid FP16 graph options");
     }
     try {
-        auto graph = std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search, true);
+        auto graph =
+            std::make_unique<GraphBackend>(source.Dim(), max_degree, ef_search, true, false);
+        graph->ReserveBuild(source.Size());
         std::vector<float> scratch;
         for (uint64_t slot = 0; slot < source.Size(); ++slot) {
             auto added =
@@ -839,6 +1091,7 @@ make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_
                 return tl::unexpected(added.error());
             }
         }
+        graph->EnableMutationJournal();
         return std::unique_ptr<Backend>(std::move(graph));
     } catch (const std::bad_alloc&) {
         return failure(ErrorType::NO_ENOUGH_MEMORY, "FP16 graph allocation failed");

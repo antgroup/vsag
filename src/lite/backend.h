@@ -44,6 +44,12 @@ public:
     [[nodiscard]] virtual const float*
     VectorAt(uint64_t slot, std::vector<float>& scratch) const = 0;
 
+    // Borrowed storage row, valid until the next mutation; absent for other backends.
+    [[nodiscard]] virtual const uint16_t*
+    FP16VectorAt([[maybe_unused]] uint64_t slot) const {
+        return nullptr;
+    }
+
     [[nodiscard]] virtual BackendKind
     Kind() const = 0;
     [[nodiscard]] virtual VectorStorage
@@ -102,6 +108,10 @@ restore_brute_force_backend(uint64_t dim, std::vector<int64_t> ids, std::vector<
 
 tl::expected<std::unique_ptr<Backend>, Error>
 make_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search);
+
+// Builds with synchronous read-only source rows; returns only owned adjacency.
+tl::expected<std::vector<std::vector<uint64_t>>, Error>
+build_graph_topology(const Backend& source, uint64_t max_degree, uint64_t ef_search);
 
 tl::expected<std::unique_ptr<Backend>, Error>
 make_fp16_graph_backend(const Backend& source, uint64_t max_degree, uint64_t ef_search);

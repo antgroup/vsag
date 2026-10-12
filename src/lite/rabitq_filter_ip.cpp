@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "rabitq_filter_ip.h"
 
+#include "rabitq_constants.h"
+#include "simd/kernels/rabitq_compute.h"
+
 namespace vsag::lite::detail::rabitq {
 
 float
@@ -22,6 +25,43 @@ rabitq_filter_ip_generic(const float* query, const uint8_t* filter, uint64_t dim
     return result;
 }
 
+void
+rabitq_filter_ip_batch4_generic(const float* query,
+                                const uint8_t* filter0,
+                                const uint8_t* filter1,
+                                const uint8_t* filter2,
+                                const uint8_t* filter3,
+                                uint64_t dim,
+                                float* results) {
+    const uint8_t* filters[4] = {filter0, filter1, filter2, filter3};
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+        results[lane] = rabitq_filter_ip_generic(query, filters[lane], dim);
+    }
+}
+
+float
+rabitq_supplement_ip_generic(const float* query, const uint8_t* supplement, uint64_t dim) {
+    return simd::RaBitQFloatSupplementCodeIPScalarImpl(query, supplement, dim, K_SUPPLEMENT_BITS);
+}
+
+RaBitQFilterIP
+select_rabitq_supplement_ip() {
+    static const RaBitQFilterIP selected = []() -> RaBitQFilterIP {
+#ifdef VSAG_LITE_RABITQ_X86_SIMD
+        __builtin_cpu_init();
+        if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
+            __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl")) {
+            return rabitq_supplement_ip_avx512;
+        }
+        if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
+            return rabitq_supplement_ip_avx2;
+        }
+#endif
+        return rabitq_supplement_ip_generic;
+    }();
+    return selected;
+}
+
 RaBitQFilterIP
 select_rabitq_filter_ip() {
     static const RaBitQFilterIP selected = []() -> RaBitQFilterIP {
@@ -36,6 +76,24 @@ select_rabitq_filter_ip() {
         }
 #endif
         return rabitq_filter_ip_generic;
+    }();
+    return selected;
+}
+
+RaBitQFilterIPBatch4
+select_rabitq_filter_ip_batch4() {
+    static const RaBitQFilterIPBatch4 selected = []() -> RaBitQFilterIPBatch4 {
+#ifdef VSAG_LITE_RABITQ_X86_SIMD
+        __builtin_cpu_init();
+        if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
+            __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl")) {
+            return rabitq_filter_ip_batch4_avx512;
+        }
+        if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
+            return rabitq_filter_ip_batch4_avx2;
+        }
+#endif
+        return rabitq_filter_ip_batch4_generic;
     }();
     return selected;
 }

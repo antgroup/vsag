@@ -17,14 +17,9 @@
 // follow quantization/rabitq_quantization/rabitq_quantizer.cpp and the official
 // FHT/Kac transformer; no Full allocator, IO or graph dependencies are imported.
 // This module does not expose a public RaBitQ backend or a snapshot format.
-namespace vsag::lite::detail::rabitq {
+#include "lite/rabitq_constants.h"
 
-constexpr uint32_t K_TOTAL_BITS = 8;
-constexpr uint32_t K_FILTER_BITS = 3;
-constexpr uint32_t K_SUPPLEMENT_BITS = 5;
-constexpr uint32_t K_ROUNDS = 4;
-constexpr uint32_t K_ENCODE_ROUNDS = 6;
-constexpr float K_ERROR_RATE = 1.9F;
+namespace vsag::lite::detail::rabitq {
 
 inline void
 codec_require(bool value, const char* message) {
@@ -149,17 +144,20 @@ struct Model {
     }
 };
 
+template <typename RowAt>
 inline Model
-train(const std::vector<float>& base, uint64_t count, uint64_t dim, uint32_t seed) {
-    codec_require(count > 0 and dim > 0 and base.size() == count * dim, "invalid training matrix");
+train_rows(uint64_t count, uint64_t dim, uint32_t seed, RowAt row_at) {
+    codec_require(count > 0 and dim > 0, "invalid training dimensions");
     Model model{
         dim, std::vector<float>(dim, 0.0F), std::vector<uint8_t>(K_ROUNDS * ((dim + 7) / 8))};
-    for (float value : base) {
-        codec_require(std::isfinite(value), "non-finite training value");
-    }
     for (uint64_t i = 0; i < count; ++i) {
+        const float* row = row_at(i);
         for (uint64_t d = 0; d < dim; ++d) {
-            model.centroid[d] += base[i * dim + d];
+            codec_require(std::isfinite(row[d]), "non-finite training value");
+        }
+        // Accumulate while this validated row is still resident, preserving row order.
+        for (uint64_t d = 0; d < dim; ++d) {
+            model.centroid[d] += row[d];
         }
     }
     for (float& value : model.centroid) {
@@ -178,6 +176,14 @@ train(const std::vector<float>& base, uint64_t count, uint64_t dim, uint32_t see
         codec_require(std::isfinite(value), "training transform overflow");
     }
     return model;
+}
+
+inline Model
+train(const std::vector<float>& base, uint64_t count, uint64_t dim, uint32_t seed) {
+    codec_require(
+        count > 0 and dim > 0 and count <= base.max_size() / dim and base.size() == count * dim,
+        "invalid training matrix");
+    return train_rows(count, dim, seed, [&](uint64_t row) { return base.data() + row * dim; });
 }
 
 inline std::vector<uint8_t>

@@ -9,8 +9,8 @@
 > are not compatible with Full VSAG.
 > The filtered Search overload also applies after BuildGraph: rejected external IDs
 > can be traversed to keep the graph connected, but are never returned.
-> No concurrent calls, checksum, SQ8 or mmap are provided. An optional RaBitQ8
-> backend is documented below. The remainder of this page documents the original v0.1 default behavior.
+> No concurrent calls, checksum, SQ8 or mmap are provided. The
+> remainder of this page documents the original v0.1 default behavior.
 
 
 This experimental entry point starts with exact FP32 squared-L2 BruteForce and
@@ -59,7 +59,12 @@ Inputs must contain the specified number of finite float32 values. Calls must
 be externally serialized. Results own their memory; internal slots are not exposed.
 
 - Single-record Add rejects duplicate IDs; Update rejects absent IDs.
-- Remove returns false for absent IDs. A removed external ID can be inserted again.
+- Graph Update returns without changing adjacency or snapshots when validated FP32 bytes
+  or encoded FP16 bits match the stored representation. FP16 range checks still run first;
+  FP32 positive and negative zero have distinct byte representations. Same-value Update is
+  not a graph repair request. BuildGraph only converts BruteForce to Graph; it does not
+  rebuild an index that is already a graph.
+- Remove returns false for absent IDs or failed graph repair allocation without changing contents. A removed external ID can be inserted again.
 - Add failure leaves logical records unchanged, though reserved capacity may grow.
 - Search returns up to `min(k, Size())` entries sorted by squared-L2 then ascending ID.
   BruteForce checks the external ID before computing distance. Graph search may score and
@@ -244,37 +249,202 @@ Call `BuildGraph(VectorStorage::FP16, max_degree, ef_search)` to store graph vec
 
 ## Per-query graph budget
 
-`SearchWithOptions(query, dim, k, SearchOptions{ef_search}, filter)` sets the graph budget for one call. Zero uses the configured default; the effective budget is clamped to the live count and at least the requested result count. BruteForce ignores the budget and remains exact. Filtering uses external IDs. Existing Search calls, construction/CRUD budgets and saved defaults remain unchanged. Larger budgets require more work and do not guarantee a recall target. Calls still require external serialization.
+`SearchWithOptions(query, dim, k, SearchOptions{ef_search}, filter)` supplies a
+budget for one graph query. Zero uses the configured default; positive values
+are clamped to the live count and raised to the requested result count when
+necessary. BruteForce ignores this option and remains exact. The optional
+filter has the same external-ID semantics as Search. Existing Search calls,
+including empty filters, are unchanged.
 
-The installed consumer example builds with budget 8 and queries with budget 64.
-
-Graph Update validates its input before detecting identical storage: FP32 bytes or encoded FP16 values. An identical update preserves graph topology and snapshot bytes. Missing IDs, invalid dimensions, nonfinite values and FP16 overflow remain errors.
-
-## Optional RaBitQ8 graph storage
-
-Configure Lite with `-DENABLE_RABITQ_LITE_BACKEND=ON` and call
-`BuildGraph(VectorStorage::RABITQ8, max_degree, ef_search)` to build the
-8-bit RaBitQ graph backend. The option is off by default, so existing Lite
-builds keep the original source and dependency closure. RaBitQ8 keeps FP32
-inputs at the API boundary, trains its immutable quantization model while
-building from the current BruteForce contents, and reports estimated L2
-values. `ActiveVectorStorage()` returns `RABITQ8` after a successful build.
-
-RaBitQ8 supports Add, Update, Remove, filtered and per-query-budget Search,
-and a dedicated versioned snapshot (`VSAGLQ01`). Mutations prepare all
-fallible work before publishing state and preserve graph reachability and
-encoded storage consistency on failure. The RaBitQ snapshot is owned-memory,
-little-endian and separate from the v1/v2/v3 FP32/FP16 format and from Full
-VSAG serialization. Loading a RaBitQ snapshot requires a build with the same
-option enabled.
-
-The enabled build also provides `lite_rabitq_example` and registers
-`lite_rabitq_api` when tests are enabled:
-
-```sh
-cmake -S lite -B build-lite-rabitq -DCMAKE_BUILD_TYPE=Release \
-  -DENABLE_TESTS=ON -DENABLE_RABITQ_LITE_BACKEND=ON
-cmake --build build-lite-rabitq -j2
-ctest --test-dir build-lite-rabitq --output-on-failure
-./build-lite-rabitq/lite_rabitq_example
+```cpp
+vsag::lite::SearchOptions options{512};
+auto result = index->SearchWithOptions(query, dim, 10, options);
 ```
+
+The override does not change BuildGraph/Add/Update/Remove budgets or Save output.
+Snapshots retain their configured default. The consumer example builds with
+budget8 then queries with budget64. Calls still require external serialization;
+this feature does not add a concurrent-call guarantee. Bigger query budgets
+spend more work and may improve recall, but do not guarantee a quality target.
+
+## Opt-in 8-bit RaBitQ candidate
+
+Build the standalone target with `-DENABLE_RABITQ_LITE_BACKEND=ON` to enable
+`BuildGraph(VectorStorage::RABITQ8, degree, ef_search)`. The option is OFF by
+default. Disabled builds return `UNSUPPORTED_INDEX_OPERATION` for this selection;
+the original flat index remains intact. This candidate requires a nonempty flat
+training set, dimension at most 1,048,576, at most 1,000,000 live records, degree
+2–64 and ef at least degree. The deterministic training seed is currently 47.
+
+Inputs remain finite FP32 L2 vectors. The backend owns a fixed trained centroid,
+four FHT/Kac sign-mask rounds and 3+5 split code planes. Add/Update use the fixed
+model without retraining. Search traverses 3-bit filter estimates and ranks
+candidates with 8-bit estimates. These are approximate distances, not exact
+original-vector squared L2. Filtering accepts external IDs when the callback
+returns true; rejected nodes remain traversable. Per-call budgets do not change
+stored defaults. Filtered and unfiltered approximate paths need not return
+identical rows even with an allow-all callback.
+
+Save writes independent little-endian `VSAGLQ01` version 1 model/code/ID/graph
+payloads, never decoded-and-reencoded vectors. Load preserves query results and
+remains mutable, including after removing all records. Only enabled builds load
+this candidate format. Existing `VSAGLT01` v1/v2/v3 retain their original paths;
+experimental `VSLRBQ01` snapshots are not accepted as this candidate format.
+Streams must be seekable. Header sizes are checked against remaining bytes before
+large allocations. No checksum, atomic file replacement or concurrent calls are
+provided. Extreme finite values that overflow model/transform arithmetic fail
+without replacing the existing index.
+
+Duplicate Add and absent Update/Remove IDs are checked before transaction copying.
+Update encodes the requested vector and compares both planes plus all six metadata
+fields against the stored record. Identical complete encodings return without
+changing topology or snapshot bytes; plane identity alone is not sufficient.
+This still performs encoding and can fail on allocation or internal arithmetic.
+For a real change, the prepared normalized query and full code are moved into
+the transaction; the mutation path does not normalize or encode that input again.
+
+**Default public CRUD uses local rollback transactions.** Remove backs up the
+hole/last code and ID, retains the removed map node, and journals affected rows.
+On failure it restores lengths within retained capacity and reinserts the node
+without exceeding the map's old load; no rollback allocation is required.
+Public Add prepares codes
+and neighbors, reserves geometric container growth, then journals touched rows.
+Failure erases the inserted ID, truncates appended lengths and restores old rows;
+capacity/bucket growth can remain, but logical contents are preserved. Normal
+buffer expansion can still copy existing data. Public Update instead
+journals the replaced code and each adjacency row before its first write. Failure
+restores codes and swaps saved rows without allocating; IDs/model/container sizes
+are unchanged by Update. It still scans directed adjacency for inbound references
+and can journal many rows in a high-indegree case. The experimental inbound-index
+state uses the full-copy Add/Update/Remove fallback. This reduces mutation copying but does not make
+all CRUD constant-time or remove temporary mutation memory. This is a correctness candidate, not a validated
+performance improvement. Remove's bool result cannot distinguish a missing ID
+from allocation failure; either failure retains the state. Error construction
+itself can allocate, as with the existing Lite error contract. Build retains
+temporary FP32 vectors and a temporary FP32 graph; peak build RSS is not steady
+quantized RSS. Three-distribution quality/performance and long-CRUD acceptance
+remain pending. Do not infer those results from older standalone probe numbers.
+
+Use the opt-in `lite_rabitq_example` build target for the public API lifecycle.
+
+The integrated 10k SIFT/GIST/Cohere pilot is recorded in `lite/benchmark/results/integrated-storage-pilot-20261009`. It establishes a snapshot-size reduction at the measured settings, but queries and whole-process peak memory are worse than FP32. Historical queries and short churn do not replace100k, fresh-process isolated RSS or long changed-vector acceptance. Read the experiment report for raw evidence and measured-version boundaries.
+
+A fresh-process10k loaded-only study is recorded at `lite/benchmark/results/integrated-load-final-20261009`: RaBitQ loaded RSS is about41–66% below FP32 on these three distributions, with no original base matrix resident. Load/first-query regressions remain; these are warm-uncontrolled RAM measurements, not cold I/O or100k/long-CRUD acceptance. The report separates current-image VmHWM from the launcher-affected getrusage high-water metric.
+
+The integrated100k pilot records lower loaded RaBitQ RSS but quality failures at stored degree16/ef128. A separate observed-query grid meets the study floors at SIFT ef512 and GIST/Cohere ef2048 for RaBitQ, with slower queries than floating modes. See `lite/benchmark/results/integrated-100k-pilot-20261009` and `integrated-100k-budget-grid-20261009`. This selection is not blind final acceptance, exact equal-recall timing or a new default; long changed-vector CRUD and Full comparisons remain pending.
+
+
+[RaBitQ architecture, snapshot layout and remaining acceptance](lite_rabitq_design.md).
+
+## Mutation failure and RaBitQ distance computation
+
+Published FP32 and FP16 graphs use a local mutation journal. Allocation failure
+in Add or Update preserves logical records and adjacency; Remove returns false
+and preserves contents if its graph repair cannot allocate. Reserved capacity
+may grow. Only affected rows and the overwritten records are backed up, rather
+than copying the entire graph. Private BuildGraph construction is discarded on
+failure and enables journaling before publishing the completed graph.
+
+RaBitQ computes the query sum once per search or maintenance query. Its 5-bit
+supplement calls Full's shared scalar and SIMD kernels with runtime
+AVX2/AVX512 selection and a scalar fallback. SIMD uses the native fused multiply-add
+and vector reduction, so distance rounding can differ from the former scalar
+dimension-order accumulation. Tests cover independent scalar estimates, unaligned
+inputs, plane tails, query quality and mutation rollback. Encoding, persistence
+and search budgets are unchanged. A speed improvement over the previous Lite implementation does not
+establish parity with Full VSAG or with FP32/FP16.
+
+## Expanded native-reference acceptance and ELF scope
+
+The current Lite/native HGraph 600-query-per-dataset study is recorded in `lite/benchmark/results/acceptance-full-expanded-r1-20261009`. It uses a pinned installed Full reference, not old Lite, with explicit source/header/binary provenance. Query budgets differ (Lite512/Full128); this is not an exact matched-recall or same-budget comparison. The study records warm-load/total-RSS advantages but slower queries, larger snapshots and higher construction peaks. These observed queries are regression data, not blind holdout or long changed-vector CRUD acceptance.
+
+`python3 lite/benchmark/measure_elf_closure.py --lite LITE_SO --full FULL_SO --output NEW_OUTPUT --scratch /dev/shm` measures trusted shared-library ELF DT_NEEDED closures. It resolves recursive dependencies, counts each realpath once (including common system runtime), and applies identical `strip --strip-unneeded` only to scratch copies; originals are not changed. This scope excludes executables, headers, Python bindings, containers and dynamically loaded plugins. The recorded reduction is not a complete wheel/container/SDK size claim. Run `python3 lite/benchmark/test_measure_elf_closure.py` for dependency/deduplication/copy-only fixtures.
+
+Query-local graph heaps preserve the existing admission and traversal order.
+After unfiltered FP32/FP16 traversal ends, Lite takes the owned retained buffer,
+selects the best k candidates, and sorts only that prefix by distance then
+external ID. RaBitQ scores the same retained candidates directly instead of
+popping the entire coarse heap; its scoring formula and final ID tie-break are
+unchanged. Filtered search keeps its existing path. This follows the native
+DistanceHeap retained-buffer access pattern, without changing ef, topology,
+the public API, or snapshots. The paired regression evidence is in
+`lite/benchmark/results/query-selection-expanded-20261009`; its control is
+old Lite, not Full VSAG.
+
+For persistent whole-row CRUD replay, set `VSAG_GRAPH_REPLACEMENTS` to fvecs in operation order and supply QUERY_RESULTS. Every replacement must be finite and differ from the current row; the row count must equal ROUNDS times CRUD_OPS. Final truth comes from `changed-groundtruth.ivecs`, while initial truth stays in `groundtruth.ivecs`. Remove/re-add retain the new row instead of restoring original values. The tool writes `.initial` query evidence and `.operations.csv` (operation 0/1/2 means Update/Remove/Add); legacy CLI and CSV columns are unchanged without this opt-in. `lite/benchmark/prepare_persistent_crud.py` freezes three full-ID passes and computes direct-difference FP64 truth. `persistent-whole-crud-20261009` records lower maintained quality than fresh construction on the same final data, especially RaBitQ. Shorter queries are not a speed win when quality drops. Fresh RaBitQ also retrains the model, so that comparison does not isolate graph maintenance. These are serialized initial/final queries, warm cache, and one run per case, not per-operation interleaved reads or100k/final acceptance.
+
+RaBitQ removal still scans all adjacency rows without reverse edges. The scan now
+checks for either the removed slot or the relocated last slot once, skipping
+unchanged rows before erase/remap. Affected-row ordering, transactional backups,
+repair candidates and persisted results are unchanged; this is not an
+asymptotic-complexity improvement or a maintenance-quality repair. Fixed replay
+evidence and the legacy-scan golden path are recorded in
+`lite/benchmark/results/rabitq-remove-skip-20261009`. Its control is old Lite,
+not native Full; post-CRUD recall failures remain explicit.
+
+For persistent replay only, VSAG_GRAPH_CRUD_MODE=update runs Update without deletion, replace runs Remove/Add without the redundant preceding Update, and all keeps the combined protocol. Explicit selection appends mutation_mode to the opt-in CSV; default schema is unchanged. The same final data/truth isolation is recorded in lite/benchmark/results/persistent-crud-isolation-20261010. Both isolated RaBitQ paths still fail the study recall floors; this separates workloads but does not establish or repair a sole cause.
+
+VSAG_GRAPH_DIAGNOSTIC_EF can request the full node count during persistent
+benchmark replay, emitting separate initial/final diagnostic evidence without
+changing formal ef. The frozen-model ceiling study in
+lite/benchmark/results/rabitq-model-ceiling-20261010 reaches about99.55--99.65%
+after this workload, while formal maintenance quality remains lower. An isolated
+Update incoming-protection candidate improves recall but adds about33% mutation
+cost and fails the GIST study floor; it is not enabled in production. See the
+adjacent candidate results. Diagnostic full-budget recall is not formal acceptance.
+
+## Experimental runtime incoming-count maintenance
+
+RaBitQ now contains an internal NONE/RECOUNT/CACHED incoming-protection policy; the public adapter remains NONE. CACHED lazily maintains one uint64_t incoming count per slot through adjacency changes instead of recounting the whole graph on every Update. Successful Add appends a zero count and applies edge deltas; Remove subtracts deleted outgoing edges and transfers the last slot count during compaction. Failed journal mutations invalidate it; the next Update rebuilds. Reverse-adjacency copy rollback preserves the original cache. Runtime counts consume 8N logical bytes, are included in internal memory accounting, and do not change snapshots/API/model/budgets. Disabling retains capacity. Continuous Update replay at10k reduced the protected prototype's mutation block by15.79% on GIST and18.50% on Cohere, with byte-identical paired snapshots and ordered results. GIST Recall .897667 still fails the study target, so the policy is not default-enabled; mixed replay still fails maintenance-quality targets;100k and native Full benefits are unproven. See lite/benchmark/results/rabitq-incoming-count-cache-20261010 for raw data, golden tests, scoped coverage and limitations.
+
+The structural mixed replay in lite/benchmark/results/rabitq-mixed-count-cache-20261010 preserves the same protected-policy snapshots and ordered results after three changed Update/Remove/Add passes. Relative to the previous cache that invalidated on each successful Add/Remove, mutation blocks decrease10.05%/11.61% on GIST/Cohere10k. Final recalls .811667/.908000 still fail study targets: this is bookkeeping cost reduction, not a maintenance-quality fix, a public-default speedup or native Full comparison. Operation timings are not uniformly improved and the evidence is single-pair serialized replay.
+
+Internal ConfigureIncomingProtection also accepts optional Add/Remove stage flags, both false by default. Add can protect a new slot after link; Remove can protect sorted affected orphan targets after compaction/repair, with the same degree-safe local guard and mutation journal. Public adapter remains NONE. The fixed factorial study in lite/benchmark/results/rabitq-structural-guard-20261010 raises mixed GIST/Cohere Recall .811667/.908000 to .847500/.922000 when both flags are on, at mutation-block costs +6.39%/+3.30% and higher query latency. Add-only accounts for most observed gains. These recalls still fail study targets; the internal flags are not public configuration/default acceptance, and this borrows the existing Lite floating GraphBackend, not native Full HGraph.
+
+The further internal Add displaced-target guard records old targets evicted by reverse-link pruning and repairs their incoming edges inside the existing transaction. Fixed-budget10k mixed changed-vector CRUD improves GIST Recall .847500 to .855167 and Cohere .922000 to .924500,with CRUD block cost +2.86%/+1.52%; one-pair query point estimates improve but are not a repeatable latency claim. Both still miss study floors,so the public policy remains NONE. The regression demonstrates the old-target omission,not a global connectivity guarantee. Evidence: `lite/benchmark/results/rabitq-add-displaced-20261010`.
+
+The bounded RaBitQ link-ranking stack-scratch trial was rejected: three fixed-budget real changed-vector CRUD pairs per dataset showed no stable benefit (median mutation block +1.77% GIST/+1.07% Cohere). Complete snapshots and ordered results were identical. Production was restored; only the degree64 saturation/tied-code regression and negative evidence remain. See `lite/benchmark/results/rabitq-link-scratch-20261010`; scoped restored Lite coverage is95.16%,not a new performance gain.
+
+## RaBitQ load-only ID validation optimization (2026-10-11)
+
+The [matched loader study](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-load-id-map-20261011/README.md) removes a temporary duplicate-ID set;the required constructor slot map still rejects duplicates. Default reverse=false/NONE and snapshot bytes are unchanged. Fifteen alternating10k pairs per dataset show GIST/Cohere warm-load medians6.483486->6.243492ms (-3.70%) and 5.721933->5.503448ms (-3.82%),with baseline-subtracted RSS472/416KiB lower and60 exact native round trips. This is allocator-retention/warm-load evidence,not index capacity,query,CRUD,cold I/O,Full or100k improvement. Malformed duplicates are rejected later after graph parsing;INVALID_BINARY remains but validation order/error text is not preserved. Quality and final acceptance remain pending.
+
+## Experimental RaBitQ incoming-safe link pruning (2026-10-11)
+
+The [fixed-budget paired study](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-safe-link-20261011/README.md) adapts floating Lite's incoming-safe edge removal to RaBitQ cached counts. An existing target's last incoming edge is preserved when another ranked edge can be safely dropped; if none exists, the original farthest fallback remains. This is not general diversity pruning or complete connectivity protection. The internal final `protect_link` argument requires CACHED and defaults false; the public adapter remains NONE/reverse=false, with unchanged API, model, degree/ef and snapshot format.
+
+Both measured adapters use CACHED, with only the candidate enabling this gate. Three alternating10k pairs each use GIST/Cohere600 observed queries and three full-ID true whole-vector Update/Remove/Add passes (1.08M calls total). Final recall improves .811667 to .899167 / .908 to .947 (+8.75/+3.90 percentage points), while CRUD median rises1.20/2.29%. Post-CRUD query P50 also rises407.651 to439.810 /403.991 to428.569us; this is a quality/cost tradeoff, not an equal-recall speed win. Both pre-existing study floors .90/.95 are still missed. These deterministic observed cohorts are not blind or independent quality replications.
+
+Keep this internal strategy opt-in pending further maintenance-quality work and100k/interleaved acceptance. Release6,ASan/UBSan5,fresh coverage5,RaBitQ-OFF4,format/tidy15 and30000 allocation-fault positions pass; scoped Lite coverage is95.44%,not whole Full. Source/dependency/adapter receipts and raw query/operation evidence are retained. No public-default, Full, cold I/O or package improvement is claimed.
+
+## RaBitQ owned build adjacency handoff (2026-10-11)
+
+The [paired build diagnostic](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-owned-topology-20261011/README.md) removes row adjacency → CSR → row adjacency copies. Build shrinks spare row capacity individually then transfers ownership; loading keeps the CSR constructor. API, edges, quantization, query budgets, incoming defaults and format remain unchanged. Reverse adjacency checks targets before count-array indexing.
+
+Synthetic dim17, three alternating pairs each10k/100k: median100k build HWM87628→65460KiB (-25.30%);10k both18856KiB. Build-time medians increase0.47%/1.60%, not a stable speed win. Cumulative ordinary-new requested bytes decrease4760184/38653816, not retained memory. Six paired snapshots and ordered eight-query IDs/distances match. Not real high-dimensional data, long CRUD, cold loading, recall acceptance or Full comparison.10k HWM can be obscured by launcher floor; real-data and fresh Full validation remain pending.
+
+## Real100k RaBitQ ownership acceptance slice (2026-10-11)
+
+The [real-data study](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-owned-real100k-20261011/README.md) compares production4f73870 against0444bf9, BOTH Lite public NONE/reverse=false, not native Full. GIST960 and normalized Cohere768 each100k/100 observed queries/k10; degree16/build128/query512; three alternating pairs,12 builders/36 fresh loaders.
+
+Whole-process peak medians fall928420→903892KiB (-2.64%) and759556→734956 (-3.24%); this includes inputs/construction/query/native reload, not a separate build-stage peak. Build medians are essentially unchanged. Six paired native snapshots/ordered-query outputs match exactly;Recall.859/.937 stays unchanged and insufficient. Snapshot sizes112804416/93603552bytes unchanged. Query P50 medians increase1088.753→1115.092us (+2.42%) and1068.973→1134.902 (+6.17%);Save47.454→65.928ms (+38.93%) and38.101→60.065 (+57.65%) regresses. Fresh warm load62.696→60.714/53.161→53.228ms is not a cold or universal speed result.
+
+This validates a modest real memory tradeoff, NOT overall speed acceptance, Full advantage or durable changed-value CRUD.100 observed queries make exploratory tails only. Row allocation/cache locality and Save's GetGraph CSR materialization are follow-up hypotheses, not measured causes. Release6 and the initial driver fixture passed; prior4f73870 sanitizer/OFF/coverage evidence is inherited, not rerun. Final collection after RAM control expiry restored the first successful fixture log from the archive and retains the failed replay log. Fresh Full/config-SIMD-quality alignment, real long CRUD and broader query cohorts remain open.
+
+## RaBitQ bounded streamed Save (2026-10-11)
+
+The [streamed Save study](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-stream-save-20261011/README.md) replaces whole-graph GetGraph CSR materialization with read-only row traversal in original offsets/edges order using at most8192 uint64 entries (64KiB). Validate,scalar little-endian fallback,short-write errors and wire format remain;no public API/topology/model/budget/default changes.64KiB is adjacency staging only,not all Save scratch in reverse/cached modes.
+
+Real GIST960/Cohere768 each100k,parentb09631c versus candidate,seven alternating fresh-process pairs/dataset,28 saves. Load precedes timing of ofstream open/Save/close;CPU0/threads1/RAM warm uncontrolled cache,not fdatasync durability or cold I/O. Save medians52.819 to45.774ms (-13.34%) and44.151 to37.441 (-15.20%). After-Save VmHWM151216 to134964/132460 to116216KiB,16252/16244KiB less;load/launcher HWM can obscure Save-only peaks. All28 output hashes equal input;input hashes match previous real100k study.
+
+Release6/SAN5/freshCov5/OFF4/format-tidy15 pass;scoped production Lite2983/3125=95.456%,not wholeFull. Tests span0/1/8191/8192/8193/9000rows,block boundaries,bulk/scalar endian and short writes. Initial naming lint failed,corrected before timing;log retained. This is loaded-state Save optimization,NOT same-protocol remeasurement of prior build-then-Save regression,query regression,long CRUD quality or Full acceptance;those remain open.
+
+## Build-row capacity candidate not adopted (2026-10-11)
+
+The [isolated study](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-row-capacity-20261011/README.md) removes only the per-row shrink_to_fit loop in a candidate adapter. Both variants share bf50173 headers/objects/streamed Save; no production source or public option changes. GIST960/Cohere768 each100k/100 observed queries,degree16/build128/query512/CPU0/threads1,three alternating pairs,12 builders/36 warm fresh loaders. Six paired snapshots and ordered query outputs match;Recall .859/.937 unchanged.
+
+Median query P50 GIST1081.373 to1084.913us (+0.33%),Cohere1100.393 to1146.963 (+4.23%);P99+3.46%/+0.94%. Build+0.60%/+0.02%,whole-process peak+0.005%/0%,no clear win. Small Save/load changes are not stable algorithm gains. Keeping capacity does not establish query improvement or causality of the prior regression. Do not adopt;retain shrinking default and streamed Save. Raw parameters/source/inputs/latencies/GT/commands archived and independently verified. Fresh Release6 passed;SAN/OFF/coverage inherited from bf50173,NOT candidate sanitizer/fault acceptance. Not Full,long CRUD or blind tail validation. Next priority is route workspace/heap allocation diagnosis.
+
+## Promoted implementation and historical evidence
+
+The implementation promoted on 2026-10-12 is derived from personal source `a62e62e08db3f0d7da2e4439785feed6fcf90257`. Experimental diversity switches and diagnostic benchmark targets are excluded. Benchmark commands and `lite/benchmark/` paths below refer to that pinned experimental repository, not targets shipped in this standalone PR. The reports retain each measured source version: numbers from different stages are not a single latest-version acceptance matrix. See [the pinned reproducibility sources](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark) and [promotion evidence](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results). Current CPU-time/utilization, quality-matched native Full comparisons, cold I/O and hours-long interleaved changed-vector CRUD remain incomplete. Externally concurrent calls require caller serialization.
