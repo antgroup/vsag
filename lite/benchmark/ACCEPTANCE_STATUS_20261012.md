@@ -1,5 +1,13 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest addition: [20-round resident-index mixed CRUD/CPU matrix](results/resident-mixed-cpu-pr2904-20261012/README.md).
+The original index is retained across all rounds;18fresh processes each15k mutation
+calls and15k queries,270k each cumulatively. Per-round persistence, current-state truth,
+sampled thread counts, raw archive/hash verification and late-window RSS are recorded.
+This closes the earlier reload-resetting-object weakness for this fixed-round workload,
+but neither hours-long endurance nor zero fragmentation is established. GIST RaBitQ
+recall .970→.963 and a264KiB late RSS step are retained as limitations.
+
 Code, supported contracts, tests and architecture live in [PR2904](https://github.com/antgroup/vsag/pull/2904).
 Benchmark scripts, protocols, raw results and acceptance analysis belong to
 [PR2926](https://github.com/antgroup/vsag/pull/2926), branch `experiment/lite-baseline-v01`.

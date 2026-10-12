@@ -32,6 +32,11 @@ def verify(output):
             query_rows = list(csv.DictReader(stream))
         queries = len(query_rows) // 2
         raw = verify_run(folder, config['rounds'], config['cycles'], queries)
+        command = json.loads((output / (folder.name + '.command.json')).read_text())['argv']
+        if config.get('resident', False):
+            assert command[-1] == 'resident', ('wrong resident invocation', key)
+            assert all(int(state['threads']) == 1 for state in raw['states']), key
+            assert all(int(state['rss_before_persistence_kib']) > 0 for state in raw['states']), key
         expected = {k: v for k, v in row.items()
                     if k not in ['dataset', 'storage', 'trial', 'snapshots']}
         assert raw == expected, key

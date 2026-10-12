@@ -1,11 +1,15 @@
 # Copyright 2024-present the vsag project
 # SPDX-License-Identifier: Apache-2.0
 import csv
+import math
+import os
 from pathlib import Path
+import struct
+import subprocess
 import tempfile
 import unittest
 
-from run_mixed_cpu_acceptance import percentile, verify_run
+from run_mixed_cpu_acceptance import percentile, sha, verify_run
 
 
 class AcceptanceTests(unittest.TestCase):
@@ -53,6 +57,42 @@ class AcceptanceTests(unittest.TestCase):
             (folder / 'quality.csv').write_text('round,query,hits,k\n0,0,10,10\n1,1,9,10\n')
             with self.assertRaises(AssertionError):
                 verify_run(folder, 1, 1, 1)
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_resident_and_reloaded_lifecycle_parity(self):
+        binary = os.environ['VSAG_MIXED_PROBE']
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            dataset = root / 'input'
+            dataset.mkdir()
+            for name, count in [('base.fvecs', 96), ('queries.fvecs', 5)]:
+                with (dataset / name).open('wb') as stream:
+                    for row in range(count):
+                        stream.write(struct.pack('<i17f', 17,
+                            *[math.sin((row + 1) * (d + 3) * .17) for d in range(17)]))
+            for storage in ['fp32', 'fp16', 'rabitq8']:
+                receipts = []
+                for resident in [False, True]:
+                    tag = storage + ('-resident' if resident else '-reload')
+                    output = root / tag
+                    snapshots = root / (tag + '-snapshots')
+                    snapshots.mkdir()
+                    command = [binary, str(dataset), str(output), storage, '3', '7', str(snapshots)]
+                    if resident:
+                        command.append('resident')
+                    result = subprocess.run(command, capture_output=True, text=True, check=True)
+                    self.assertIn('resident=' + str(int(resident)), result.stdout)
+                    raw = verify_run(output, 3, 7, 5)
+                    self.assertTrue(all(int(s['threads']) == 1 for s in raw['states']))
+                    receipts.append([(p.name, sha(p)) for p in sorted(snapshots.iterdir())])
+                self.assertEqual(receipts[0], receipts[1])
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_bad_lifecycle_rejected(self):
+        result = subprocess.run([os.environ['VSAG_MIXED_PROBE'], 'missing', 'missing-output',
+            'fp32', '1', '1', 'missing-snapshot', 'invalid'], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('invalid lifecycle mode', result.stderr)
 
 
 if __name__ == '__main__':

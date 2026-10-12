@@ -83,6 +83,8 @@ def main():
     parser.add_argument('--rounds', type=int, default=3)
     parser.add_argument('--cycles', type=int, default=100)
     parser.add_argument('--cpu', type=int, default=0)
+    parser.add_argument('--resident', action='store_true',
+                        help='Keep the original index between rounds; reload only checks persistence')
     args = parser.parse_args()
     assert min(args.trials, args.rounds, args.cycles) > 0
     assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=args.feature_repo,
@@ -102,13 +104,14 @@ def main():
             cwd=source.parent, text=True).strip(),
         configuration=dict(rounds=args.rounds, cycles=args.cycles, trials=args.trials,
             degree=16, construction_ef=128, query_ef=512, k=10, cpu=args.cpu,
-            read_to_mutation='1:1', externally_serialized=True),
+            read_to_mutation='1:1', externally_serialized=True,
+            resident=args.resident, measurement_buffer='pre-sized/touched then cleared'),
         feature_sources={str(p.relative_to(args.feature_repo)): sha(p)
             for p in sorted((args.feature_repo / 'src/lite').glob('*')) if p.is_file()},
         platform=subprocess.check_output(['uname', '-a'], text=True).strip(),
         cpu=subprocess.check_output(['lscpu'], text=True),
         compiler=subprocess.check_output(['c++', '--version'], text=True),
-        limits=['Short real-change interleaved regression, not hours-long endurance',
+        limits=['Fixed-round real-change interleaved regression, not hours-long endurance',
             'Repeated use of the supplied query cohort, not new independent queries',
             'FP64 oracle at initial/final state, mixed queries checked for live IDs/order/uniqueness',
             'Per-call getrusage instrumentation adds overhead and has microsecond CPU resolution',
@@ -153,6 +156,8 @@ def main():
                     command = ['/usr/bin/time', '-v', '-o', str(args.output / (tag + '.resources.txt')),
                         'taskset', '-c', str(args.cpu), str(binary), str(dataset), str(selected),
                         mode, str(args.rounds), str(args.cycles), str(snapshots)]
+                    if args.resident:
+                        command.append('resident')
                     write_json(args.output / (tag + '.command.json'), dict(argv=command,
                         environment={key: env[key] for key in ['OMP_NUM_THREADS',
                             'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'LD_LIBRARY_PATH']}))

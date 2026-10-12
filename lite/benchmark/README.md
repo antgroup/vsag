@@ -1,6 +1,8 @@
 # VSAG Lite baseline experiment
 
 Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
+See also the [resident-index 20-round matrix](results/resident-mixed-cpu-pr2904-20261012/README.md),
+which retains the original index rather than replacing it with a loaded copy.
 The [current-feature mixed CPU matrix](results/mixed-cpu-pr2904-20261012/README.md)
 explicitly links the pinned PR2904 library; the older feature implementation on
 this experiment branch must not be mislabeled as the latest Lite implementation.
