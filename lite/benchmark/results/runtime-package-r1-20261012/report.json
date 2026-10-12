@@ -1,0 +1,1029 @@
+{
+  "profile": "Native C++ index application + recursive dynamic ELF runtime + loader + launcher + license texts",
+  "excludes": [
+    "SDK headers/static archives",
+    "Python bindings",
+    "container/OS/kernel/shell",
+    "datasets/snapshots",
+    "dlopen plugins"
+  ],
+  "source_archive_sha256": "0c6697115a21dc210ab63cc0dfd659c53614d39ffc89115292765a1565ca9b54",
+  "redistribution": "measurement prototype only; license notices copied, no legal certification",
+  "strip": "GNU strip (GNU Binutils for Ubuntu) 2.38",
+  "packages": {
+    "lite": {
+      "compile": [
+        "c++",
+        "-std=c++17",
+        "-O3",
+        "-DNDEBUG",
+        "-I/home/ubuntu/project/pr2904-promotion-audit-20261012/installed/include",
+        "/dev/shm/vsag-runtime-package-5q1gardz/sources/source-graph_crud_quality.cpp",
+        "-L/home/ubuntu/project/pr2904-promotion-audit-20261012/installed/lib",
+        "-Wl,-rpath,/home/ubuntu/project/pr2904-promotion-audit-20261012/installed/lib",
+        "-lvsag-lite",
+        "-o",
+        "/dev/shm/vsag-runtime-package-5q1gardz/lite-probe"
+      ],
+      "consumer_source_sha256": "145e3ff4058705ce8a072acc05502e7d82097264d5dd9017f31511d95faa27b2",
+      "files": {
+        "/dev/shm/vsag-runtime-package-5q1gardz/lite-probe": {
+          "source_sha256": "82311792de8b5d817fe644d87f3f0d5709ed66e6b1943bac43ca9243ff7a7f3f",
+          "source_bytes": 77272,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffd16321000)\n\tlibvsag-lite.so => /home/ubuntu/project/pr2904-promotion-audit-20261012/installed/lib/libvsag-lite.so (0x00007f6f917c9000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f6f91595000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f6f91575000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f6f9134c000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f6f91265000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f6f91835000)\n",
+          "packaged_path": "bin/probe",
+          "stripped_bytes": 63800,
+          "stripped_sha256": "977c058647560b74c7071ded27f6bfcb16dc4fcf21455635dde7589c47930392"
+        },
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": {
+          "source_sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc",
+          "source_bytes": 240936,
+          "ldd": "\tstatically linked\n",
+          "packaged_path": "lib/ld-linux-x86-64.so.2",
+          "stripped_bytes": 240936,
+          "stripped_sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc"
+        },
+        "/usr/lib/x86_64-linux-gnu/libm.so.6": {
+          "source_sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176",
+          "source_bytes": 940560,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffe66d7a000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f244f933000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f244fc4d000)\n",
+          "packaged_path": "lib/libm.so.6",
+          "stripped_bytes": 940560,
+          "stripped_sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176"
+        },
+        "/usr/lib/x86_64-linux-gnu/libc.so.6": {
+          "source_sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50",
+          "source_bytes": 2220400,
+          "ldd": "\t/lib64/ld-linux-x86-64.so.2 (0x00007fdd62169000)\n\tlinux-vdso.so.1 (0x00007ffcd1bc9000)\n",
+          "packaged_path": "lib/libc.so.6",
+          "stripped_bytes": 2220400,
+          "stripped_sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50"
+        },
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": {
+          "source_sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a",
+          "source_bytes": 125488,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffdbd9fe000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007efff2d3d000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007efff2f90000)\n",
+          "packaged_path": "lib/libgcc_s.so.1",
+          "stripped_bytes": 125488,
+          "stripped_sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a"
+        },
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30": {
+          "source_sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128",
+          "source_bytes": 2260296,
+          "ldd": "\tlinux-vdso.so.1 (0x00007fff4a185000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fab5dd0f000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fab5dae6000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fab5e02c000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fab5dac6000)\n",
+          "packaged_path": "lib/libstdc++.so.6.0.30",
+          "stripped_bytes": 2260296,
+          "stripped_sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128"
+        },
+        "/home/ubuntu/project/pr2904-promotion-audit-20261012/installed/lib/libvsag-lite.so": {
+          "source_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
+          "source_bytes": 412512,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffd1e756000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f472ef11000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f472ee2a000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f472ee0a000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f472ebe1000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f472f1a0000)\n",
+          "packaged_path": "lib/libvsag-lite.so",
+          "stripped_bytes": 360096,
+          "stripped_sha256": "1a712e83e01c74fe95026d8bf5364863917dfe8249ac69d49d247b0d865f49a3"
+        }
+      },
+      "licenses": {
+        "libc6-amd64-copyright": {
+          "package": "libc6:amd64",
+          "source": "/usr/share/doc/libc6/copyright",
+          "sha256": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+        },
+        "libgcc-s1-amd64-copyright": {
+          "package": "libgcc-s1:amd64",
+          "source": "/usr/share/doc/libgcc-s1/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "libstdc++6-amd64-copyright": {
+          "package": "libstdc++6:amd64",
+          "source": "/usr/share/doc/libstdc++6/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        }
+      },
+      "inventory": {
+        "bin/probe": {
+          "kind": "file",
+          "bytes": 63800,
+          "sha256": "977c058647560b74c7071ded27f6bfcb16dc4fcf21455635dde7589c47930392"
+        },
+        "lib/ld-linux-x86-64.so.2": {
+          "kind": "file",
+          "bytes": 240936,
+          "sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc"
+        },
+        "lib/libc.so.6": {
+          "kind": "file",
+          "bytes": 2220400,
+          "sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50"
+        },
+        "lib/libgcc_s.so.1": {
+          "kind": "file",
+          "bytes": 125488,
+          "sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a"
+        },
+        "lib/libm.so.6": {
+          "kind": "file",
+          "bytes": 940560,
+          "sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176"
+        },
+        "lib/libstdc++.so.6": {
+          "kind": "symlink",
+          "target": "libstdc++.so.6.0.30"
+        },
+        "lib/libstdc++.so.6.0.30": {
+          "kind": "file",
+          "bytes": 2260296,
+          "sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128"
+        },
+        "lib/libvsag-lite.so": {
+          "kind": "file",
+          "bytes": 360096,
+          "sha256": "1a712e83e01c74fe95026d8bf5364863917dfe8249ac69d49d247b0d865f49a3"
+        },
+        "licenses/VSAG-Apache-2.0": {
+          "kind": "file",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        "licenses/common-Apache-2.0": {
+          "kind": "file",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        "licenses/common-Artistic": {
+          "kind": "file",
+          "bytes": 6111,
+          "sha256": "b7fd9b73ea99602016a326e0b62e6646060d18febdd065ceca8bb482208c3d88"
+        },
+        "licenses/common-BSD": {
+          "kind": "file",
+          "bytes": 1499,
+          "sha256": "5d588eb3b157d52112afea935c88a7ff9efddc1e2d95a42c25d3b96ad9055008"
+        },
+        "licenses/common-CC0-1.0": {
+          "kind": "file",
+          "bytes": 7048,
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        },
+        "licenses/common-GFDL": {
+          "kind": "file",
+          "bytes": 22962,
+          "sha256": "4748f03ed2dbcc14cde6ebc30799899c403e356a7465dc30fcf2b80c45fc0059"
+        },
+        "licenses/common-GFDL-1.2": {
+          "kind": "file",
+          "bytes": 20431,
+          "sha256": "56976e64523fa1e68db4e6f464f5b2cb89d7d08f54b1d012e317b8db286b3faf"
+        },
+        "licenses/common-GFDL-1.3": {
+          "kind": "file",
+          "bytes": 22962,
+          "sha256": "4748f03ed2dbcc14cde6ebc30799899c403e356a7465dc30fcf2b80c45fc0059"
+        },
+        "licenses/common-GPL": {
+          "kind": "file",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        "licenses/common-GPL-1": {
+          "kind": "file",
+          "bytes": 12632,
+          "sha256": "d77d235e41d54594865151f4751e835c5a82322b0e87ace266567c3391a4b912"
+        },
+        "licenses/common-GPL-2": {
+          "kind": "file",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        },
+        "licenses/common-GPL-3": {
+          "kind": "file",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        "licenses/common-LGPL": {
+          "kind": "file",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        "licenses/common-LGPL-2": {
+          "kind": "file",
+          "bytes": 25383,
+          "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+        },
+        "licenses/common-LGPL-2.1": {
+          "kind": "file",
+          "bytes": 26530,
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+        },
+        "licenses/common-LGPL-3": {
+          "kind": "file",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        "licenses/common-MPL-1.1": {
+          "kind": "file",
+          "bytes": 25755,
+          "sha256": "f849fc26a7a99981611a3a370e83078deb617d12a45776d6c4cada4d338be469"
+        },
+        "licenses/common-MPL-2.0": {
+          "kind": "file",
+          "bytes": 16726,
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+        },
+        "licenses/libc6-amd64-copyright": {
+          "kind": "file",
+          "bytes": 26462,
+          "sha256": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+        },
+        "licenses/libgcc-s1-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/libstdc++6-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "run": {
+          "kind": "file",
+          "bytes": 480,
+          "sha256": "d181c2e2e04fe1461e98e9754c1953812865074b55bfe408a93ffbf4cca28ce2"
+        }
+      },
+      "payload_bytes": 6689348,
+      "tar_gzip_bytes": 2664623,
+      "tar_gzip_sha256": "ab4681da14f2724a4f4029119004d92ccf56f37e89a7d78aa98cba3569a9a7ea",
+      "relocation_checks": [
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/lite-fp32.snapshot",
+            "fp32"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libvsag-lite.so"
+          ],
+          "metrics": {
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "rounds": "0",
+            "crud_ops": "1",
+            "recall_at_k": "0.993000",
+            "build_ms": "540.494006",
+            "search_p50_us": "164.436000",
+            "search_p99_us": "200.445000",
+            "save_ms": "3.724848",
+            "load_ms": "4.151805",
+            "snapshot_bytes": "6560064",
+            "storage": "fp32",
+            "max_degree": "16",
+            "ef_search": "128",
+            "crud_ms": "0.000320",
+            "query_ef_search": "512"
+          },
+          "snapshot_bytes": 6560064,
+          "snapshot_sha256": "38e00e3b24bde8eddf60b5868bbc7e2bfcd36d6946c225ec8e16fa895004f256"
+        },
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/lite-fp16.snapshot",
+            "fp16"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libvsag-lite.so"
+          ],
+          "metrics": {
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "rounds": "0",
+            "crud_ops": "1",
+            "recall_at_k": "0.993000",
+            "build_ms": "530.357339",
+            "search_p50_us": "162.796000",
+            "search_p99_us": "189.935000",
+            "save_ms": "3.206181",
+            "load_ms": "3.238039",
+            "snapshot_bytes": "4000064",
+            "storage": "fp16",
+            "max_degree": "16",
+            "ef_search": "128",
+            "crud_ms": "0.000299",
+            "query_ef_search": "512"
+          },
+          "snapshot_bytes": 4000064,
+          "snapshot_sha256": "b15222f9948c288b15697c38765b0b43b152c3666dcc938e42f3d774f64fbde6"
+        },
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/lite-rabitq8.snapshot",
+            "rabitq8"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-lite/lib/libvsag-lite.so"
+          ],
+          "metrics": {
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "rounds": "0",
+            "crud_ops": "1",
+            "recall_at_k": "0.987000",
+            "build_ms": "603.108256",
+            "search_p50_us": "198.135000",
+            "search_p99_us": "359.859000",
+            "save_ms": "2.589897",
+            "load_ms": "4.041558",
+            "snapshot_bytes": "2960672",
+            "storage": "rabitq8",
+            "max_degree": "16",
+            "ef_search": "128",
+            "crud_ms": "0.000160",
+            "query_ef_search": "512"
+          },
+          "snapshot_bytes": 2960672,
+          "snapshot_sha256": "77e5628bba939aed65d8281740483fb196e9ac85c2ed72419c3dc5eca927dd02"
+        }
+      ],
+      "source_libraries_unchanged": true
+    },
+    "full": {
+      "compile": [
+        "c++",
+        "-std=c++17",
+        "-O3",
+        "-DNDEBUG",
+        "-I/home/ubuntu/project/vsag-full-known-install-20261006/include",
+        "/dev/shm/vsag-runtime-package-5q1gardz/sources/source-full_rabitq_dataset_main.cpp",
+        "-L/home/ubuntu/project/vsag-full-known-install-20261006/lib",
+        "-Wl,-rpath,/home/ubuntu/project/vsag-full-known-install-20261006/lib",
+        "-lvsag",
+        "-o",
+        "/dev/shm/vsag-runtime-package-5q1gardz/full-probe"
+      ],
+      "consumer_source_sha256": "508b17814b3ad94d5e766456fb61adc74e0020d6c3fcbeb090457b5a5ea3cc48",
+      "files": {
+        "/dev/shm/vsag-runtime-package-5q1gardz/full-probe": {
+          "source_sha256": "cd6fc3ed4efce8c8786e9867f61b66dcf011f1555762aeec7d1199ab46cd126a",
+          "source_bytes": 100072,
+          "ldd": "\tlinux-vdso.so.1 (0x00007fff6799d000)\n\tlibvsag.so.0.0 => /home/ubuntu/project/vsag-full-known-install-20261006/lib/libvsag.so.0.0 (0x00007f10e954f000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f10e9527000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f10e92fe000)\n\tlibgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x00007f10e92b4000)\n\tlibopenblas.so.0 => /lib/x86_64-linux-gnu/libopenblas.so.0 (0x00007f10e6e60000)\n\tliblapacke.so.3 => /lib/x86_64-linux-gnu/liblapacke.so.3 (0x00007f10e6bf9000)\n\tlibaio.so.1 => /lib/x86_64-linux-gnu/libaio.so.1 (0x00007f10e6bf4000)\n\tlibfmt.so.8 => /lib/x86_64-linux-gnu/libfmt.so.8 (0x00007f10e6bd3000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f10e6aec000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f10ebc04000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007f10e6811000)\n\tlibblas.so.3 => /lib/x86_64-linux-gnu/libblas.so.3 (0x00007f10e67af000)\n\tliblapack.so.3 => /lib/x86_64-linux-gnu/liblapack.so.3 (0x00007f10e60ea000)\n\tlibtmglib.so.3 => /lib/x86_64-linux-gnu/libtmglib.so.3 (0x00007f10e607f000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f10e5e53000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007f10e5e0b000)\n",
+          "packaged_path": "bin/probe",
+          "stripped_bytes": 84280,
+          "stripped_sha256": "6366b1cd14e34be425636fcb46e3b0da92247b9357249ee2709e8fd029084c3b"
+        },
+        "/usr/lib/x86_64-linux-gnu/libquadmath.so.0.0.0": {
+          "source_sha256": "a962d0383ce4c2a39a81017ffd9e5b51f32fd314e411c09ddd6da21593079a8c",
+          "source_bytes": 289592,
+          "ldd": "\tlinux-vdso.so.1 (0x00007fffb97e9000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f66f69a1000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f66f6778000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f66f6ada000)\n",
+          "packaged_path": "lib/libquadmath.so.0.0.0",
+          "stripped_bytes": 289592,
+          "stripped_sha256": "a962d0383ce4c2a39a81017ffd9e5b51f32fd314e411c09ddd6da21593079a8c"
+        },
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2": {
+          "source_sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc",
+          "source_bytes": 240936,
+          "ldd": "\tstatically linked\n",
+          "packaged_path": "lib/ld-linux-x86-64.so.2",
+          "stripped_bytes": 240936,
+          "stripped_sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc"
+        },
+        "/usr/lib/x86_64-linux-gnu/libc.so.6": {
+          "source_sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50",
+          "source_bytes": 2220400,
+          "ldd": "\t/lib64/ld-linux-x86-64.so.2 (0x00007fca32fc6000)\n\tlinux-vdso.so.1 (0x00007ffd63f8e000)\n",
+          "packaged_path": "lib/libc.so.6",
+          "stripped_bytes": 2220400,
+          "stripped_sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50"
+        },
+        "/usr/lib/x86_64-linux-gnu/libm.so.6": {
+          "source_sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176",
+          "source_bytes": 940560,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffc4113b000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fd3cbdd6000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fd3cc0f0000)\n",
+          "packaged_path": "lib/libm.so.6",
+          "stripped_bytes": 940560,
+          "stripped_sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176"
+        },
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.30": {
+          "source_sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128",
+          "source_bytes": 2260296,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffc4bdb4000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f7da8001000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f7da7dd8000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f7da831e000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f7da7db8000)\n",
+          "packaged_path": "lib/libstdc++.so.6.0.30",
+          "stripped_bytes": 2260296,
+          "stripped_sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128"
+        },
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1": {
+          "source_sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a",
+          "source_bytes": 125488,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffd211fa000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4445ef6000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f4446149000)\n",
+          "packaged_path": "lib/libgcc_s.so.1",
+          "stripped_bytes": 125488,
+          "stripped_sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a"
+        },
+        "/usr/lib/x86_64-linux-gnu/libtmglib.so.3.10.0": {
+          "source_sha256": "975b62511441706eba5ee082cace0e75249fadda16f84d5a79b97a7385e3e743",
+          "source_bytes": 431968,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffdbebaf000)\n\tlibblas.so.3 => /lib/x86_64-linux-gnu/libblas.so.3 (0x00007fdd8d5e4000)\n\tliblapack.so.3 => /lib/x86_64-linux-gnu/liblapack.so.3 (0x00007fdd8cf1f000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fdd8ce38000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fdd8ce18000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fdd8cbef000)\n\tlibopenblas.so.0 => /lib/x86_64-linux-gnu/libopenblas.so.0 (0x00007fdd8a798000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007fdd8a4bd000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fdd8d6bb000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007fdd8a475000)\n",
+          "packaged_path": "lib/libtmglib.so.3.10.0",
+          "stripped_bytes": 431968,
+          "stripped_sha256": "975b62511441706eba5ee082cace0e75249fadda16f84d5a79b97a7385e3e743"
+        },
+        "/usr/lib/x86_64-linux-gnu/libgfortran.so.5.0.0": {
+          "source_sha256": "f7379c9331de9d66c03b439a070e8056b7419fc4213320d647952b998d026b30",
+          "source_bytes": 2989432,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffccf3c6000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007fb4cc758000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007fb4cc671000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007fb4cc651000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fb4cc428000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fb4cca85000)\n",
+          "packaged_path": "lib/libgfortran.so.5.0.0",
+          "stripped_bytes": 2989432,
+          "stripped_sha256": "f7379c9331de9d66c03b439a070e8056b7419fc4213320d647952b998d026b30"
+        },
+        "/usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblasp-r0.3.20.so": {
+          "source_sha256": "1dedc9fee9ca46eb73e1abc9d989093acbb5bf1bb474fe673af7f0591fa4b2d9",
+          "source_bytes": 38017672,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffd20699000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007feb53bc1000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007feb538e6000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007feb536bd000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007feb56101000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007feb53675000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007feb53655000)\n",
+          "packaged_path": "lib/libopenblasp-r0.3.20.so",
+          "stripped_bytes": 38017672,
+          "stripped_sha256": "1dedc9fee9ca46eb73e1abc9d989093acbb5bf1bb474fe673af7f0591fa4b2d9"
+        },
+        "/usr/lib/x86_64-linux-gnu/openblas-pthread/liblapack.so.3": {
+          "source_sha256": "426b4bf536065cc63ef879444dad76dbc9f85e36e5cde906269acd6f177c5151",
+          "source_bytes": 7092680,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffe5a987000)\n\tlibopenblas.so.0 => /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblas.so.0 (0x00007f26f3838000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f26f3749000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007f26f346e000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f26f3245000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f26f6351000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007f26f31fd000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f26f31dd000)\n",
+          "packaged_path": "lib/liblapack.so.3",
+          "stripped_bytes": 7092680,
+          "stripped_sha256": "426b4bf536065cc63ef879444dad76dbc9f85e36e5cde906269acd6f177c5151"
+        },
+        "/usr/lib/x86_64-linux-gnu/openblas-pthread/libblas.so.3": {
+          "source_sha256": "babdd0d2612d7bd2f0099ac8c82714702fb5bb47b1e2e6fdba819c97c79fc0fd",
+          "source_bytes": 395776,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffc64935000)\n\tlibopenblas.so.0 => /usr/lib/x86_64-linux-gnu/openblas-pthread/libopenblas.so.0 (0x00007f77109a8000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f77108b9000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f7710690000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007f77103b5000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f7712e5d000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007f771036d000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f771034d000)\n",
+          "packaged_path": "lib/libblas.so.3",
+          "stripped_bytes": 395776,
+          "stripped_sha256": "babdd0d2612d7bd2f0099ac8c82714702fb5bb47b1e2e6fdba819c97c79fc0fd"
+        },
+        "/usr/lib/x86_64-linux-gnu/libfmt.so.8.1.1": {
+          "source_sha256": "d463bedd51d449b2346d329fad8080e0900120ad0aeab8bf93e325b6cff4a587",
+          "source_bytes": 133816,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffe66b99000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f4c12c74000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f4c12c54000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f4c12a2b000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4c12944000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f4c12ecb000)\n",
+          "packaged_path": "lib/libfmt.so.8.1.1",
+          "stripped_bytes": 133816,
+          "stripped_sha256": "d463bedd51d449b2346d329fad8080e0900120ad0aeab8bf93e325b6cff4a587"
+        },
+        "/usr/lib/x86_64-linux-gnu/libaio.so.1.0.1": {
+          "source_sha256": "9230aa3b63b95b47171d8771b1cdd93f4abab2a86bbb7904c24d5784cdba2c05",
+          "source_bytes": 14456,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffeb83bb000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007fc7070c2000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007fc7072fa000)\n",
+          "packaged_path": "lib/libaio.so.1.0.1",
+          "stripped_bytes": 14456,
+          "stripped_sha256": "9230aa3b63b95b47171d8771b1cdd93f4abab2a86bbb7904c24d5784cdba2c05"
+        },
+        "/usr/lib/x86_64-linux-gnu/liblapacke.so.3.10.0": {
+          "source_sha256": "754f1214437545778d9219a398ffc7376991bc3ec7922e738c51ae98d9b1c01b",
+          "source_bytes": 2512896,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffe705b4000)\n\tlibblas.so.3 => /lib/x86_64-linux-gnu/libblas.so.3 (0x00007f480c6ff000)\n\tliblapack.so.3 => /lib/x86_64-linux-gnu/liblapack.so.3 (0x00007f480c03a000)\n\tlibtmglib.so.3 => /lib/x86_64-linux-gnu/libtmglib.so.3 (0x00007f480bfcf000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f480bda6000)\n\tlibopenblas.so.0 => /lib/x86_64-linux-gnu/libopenblas.so.0 (0x00007f4809950000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f4809869000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007f480958e000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f480956e000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f480c9d2000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007f4809526000)\n",
+          "packaged_path": "lib/liblapacke.so.3.10.0",
+          "stripped_bytes": 2512896,
+          "stripped_sha256": "754f1214437545778d9219a398ffc7376991bc3ec7922e738c51ae98d9b1c01b"
+        },
+        "/usr/lib/x86_64-linux-gnu/libgomp.so.1.0.0": {
+          "source_sha256": "d46f9225c1883039e8a6853e6d96ca1af11d034ce186a090952e4a7c8a7c2fdc",
+          "source_bytes": 298776,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffcf69d0000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f5aaae6f000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f5aab0ec000)\n",
+          "packaged_path": "lib/libgomp.so.1.0.0",
+          "stripped_bytes": 298776,
+          "stripped_sha256": "d46f9225c1883039e8a6853e6d96ca1af11d034ce186a090952e4a7c8a7c2fdc"
+        },
+        "/home/ubuntu/project/vsag-full-known-install-20261006/lib/libvsag.so.0.0.0": {
+          "source_sha256": "9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72",
+          "source_bytes": 576730568,
+          "ldd": "\tlinux-vdso.so.1 (0x00007ffc34e8c000)\n\tlibgomp.so.1 => /lib/x86_64-linux-gnu/libgomp.so.1 (0x00007f6990b39000)\n\tlibopenblas.so.0 => /lib/x86_64-linux-gnu/libopenblas.so.0 (0x00007f698e6e8000)\n\tliblapacke.so.3 => /lib/x86_64-linux-gnu/liblapacke.so.3 (0x00007f698e481000)\n\tlibaio.so.1 => /lib/x86_64-linux-gnu/libaio.so.1 (0x00007f698e47c000)\n\tlibfmt.so.8 => /lib/x86_64-linux-gnu/libfmt.so.8 (0x00007f698e45b000)\n\tlibm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f698e374000)\n\tlibgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f698e354000)\n\tlibc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f698e12b000)\n\t/lib64/ld-linux-x86-64.so.2 (0x00007f699322a000)\n\tlibgfortran.so.5 => /lib/x86_64-linux-gnu/libgfortran.so.5 (0x00007f698de50000)\n\tlibblas.so.3 => /lib/x86_64-linux-gnu/libblas.so.3 (0x00007f698ddee000)\n\tliblapack.so.3 => /lib/x86_64-linux-gnu/liblapack.so.3 (0x00007f698d729000)\n\tlibtmglib.so.3 => /lib/x86_64-linux-gnu/libtmglib.so.3 (0x00007f698d6bc000)\n\tlibstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f698d490000)\n\tlibquadmath.so.0 => /lib/x86_64-linux-gnu/libquadmath.so.0 (0x00007f698d448000)\n",
+          "packaged_path": "lib/libvsag.so.0.0.0",
+          "stripped_bytes": 40463344,
+          "stripped_sha256": "362f9dd0ffafec75c444a0efa84621463735601f71063490a2d7a1f104715a14"
+        }
+      },
+      "licenses": {
+        "libquadmath0-amd64-copyright": {
+          "package": "libquadmath0:amd64",
+          "source": "/usr/share/doc/libquadmath0/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "libc6-amd64-copyright": {
+          "package": "libc6:amd64",
+          "source": "/usr/share/doc/libc6/copyright",
+          "sha256": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+        },
+        "libstdc++6-amd64-copyright": {
+          "package": "libstdc++6:amd64",
+          "source": "/usr/share/doc/libstdc++6/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "libgcc-s1-amd64-copyright": {
+          "package": "libgcc-s1:amd64",
+          "source": "/usr/share/doc/libgcc-s1/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "libtmglib3-amd64-copyright": {
+          "package": "libtmglib3:amd64",
+          "source": "/usr/share/doc/libtmglib3/copyright",
+          "sha256": "cea124797a83f772af14449ea95a28bb192d2bc4861b8af347101a3592476089"
+        },
+        "libgfortran5-amd64-copyright": {
+          "package": "libgfortran5:amd64",
+          "source": "/usr/share/doc/libgfortran5/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "libopenblas0-pthread-amd64-copyright": {
+          "package": "libopenblas0-pthread:amd64",
+          "source": "/usr/share/doc/libopenblas0-pthread/copyright",
+          "sha256": "88744f400a3831fccec1f9a4259a706a17d8df09f4886a8fc45afb1be4e28a08"
+        },
+        "libfmt8-amd64-copyright": {
+          "package": "libfmt8:amd64",
+          "source": "/usr/share/doc/libfmt8/copyright",
+          "sha256": "dfaa7ad8c59bedf69b82afb0114431727f211c8438cc3356226dc95d80f9a27a"
+        },
+        "libaio1-amd64-copyright": {
+          "package": "libaio1:amd64",
+          "source": "/usr/share/doc/libaio1/copyright",
+          "sha256": "fe205df403d2774730410e4a5d67a57ec1cc4f0b29eb5e7c47d341d4d18ebe38"
+        },
+        "liblapacke-amd64-copyright": {
+          "package": "liblapacke:amd64",
+          "source": "/usr/share/doc/liblapacke/copyright",
+          "sha256": "cea124797a83f772af14449ea95a28bb192d2bc4861b8af347101a3592476089"
+        },
+        "libgomp1-amd64-copyright": {
+          "package": "libgomp1:amd64",
+          "source": "/usr/share/doc/libgomp1/copyright",
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        }
+      },
+      "inventory": {
+        "bin/probe": {
+          "kind": "file",
+          "bytes": 84280,
+          "sha256": "6366b1cd14e34be425636fcb46e3b0da92247b9357249ee2709e8fd029084c3b"
+        },
+        "lib/ld-linux-x86-64.so.2": {
+          "kind": "file",
+          "bytes": 240936,
+          "sha256": "8d06f393f4a93bcf9b81145a259524d66a95522a646bf8d7e05b6ffdf2e63dcc"
+        },
+        "lib/libaio.so.1": {
+          "kind": "symlink",
+          "target": "libaio.so.1.0.1"
+        },
+        "lib/libaio.so.1.0.1": {
+          "kind": "file",
+          "bytes": 14456,
+          "sha256": "9230aa3b63b95b47171d8771b1cdd93f4abab2a86bbb7904c24d5784cdba2c05"
+        },
+        "lib/libblas.so.3": {
+          "kind": "file",
+          "bytes": 395776,
+          "sha256": "babdd0d2612d7bd2f0099ac8c82714702fb5bb47b1e2e6fdba819c97c79fc0fd"
+        },
+        "lib/libc.so.6": {
+          "kind": "file",
+          "bytes": 2220400,
+          "sha256": "e01b1ce7be2987f3b8560e26d0df2623f9dd5cec17be923ae28a785bc0d32d50"
+        },
+        "lib/libfmt.so.8": {
+          "kind": "symlink",
+          "target": "libfmt.so.8.1.1"
+        },
+        "lib/libfmt.so.8.1.1": {
+          "kind": "file",
+          "bytes": 133816,
+          "sha256": "d463bedd51d449b2346d329fad8080e0900120ad0aeab8bf93e325b6cff4a587"
+        },
+        "lib/libgcc_s.so.1": {
+          "kind": "file",
+          "bytes": 125488,
+          "sha256": "fc9d43b2f6c20e53b009238f767c5b949d202389e20de9e202ea684b4ba3729a"
+        },
+        "lib/libgfortran.so.5": {
+          "kind": "symlink",
+          "target": "libgfortran.so.5.0.0"
+        },
+        "lib/libgfortran.so.5.0.0": {
+          "kind": "file",
+          "bytes": 2989432,
+          "sha256": "f7379c9331de9d66c03b439a070e8056b7419fc4213320d647952b998d026b30"
+        },
+        "lib/libgomp.so.1": {
+          "kind": "symlink",
+          "target": "libgomp.so.1.0.0"
+        },
+        "lib/libgomp.so.1.0.0": {
+          "kind": "file",
+          "bytes": 298776,
+          "sha256": "d46f9225c1883039e8a6853e6d96ca1af11d034ce186a090952e4a7c8a7c2fdc"
+        },
+        "lib/liblapack.so.3": {
+          "kind": "file",
+          "bytes": 7092680,
+          "sha256": "426b4bf536065cc63ef879444dad76dbc9f85e36e5cde906269acd6f177c5151"
+        },
+        "lib/liblapacke.so.3": {
+          "kind": "symlink",
+          "target": "liblapacke.so.3.10.0"
+        },
+        "lib/liblapacke.so.3.10.0": {
+          "kind": "file",
+          "bytes": 2512896,
+          "sha256": "754f1214437545778d9219a398ffc7376991bc3ec7922e738c51ae98d9b1c01b"
+        },
+        "lib/libm.so.6": {
+          "kind": "file",
+          "bytes": 940560,
+          "sha256": "df621c68dbfed7e843434ef2faedb9f4d4b0543ad161e9a55eaf4d4ce2443176"
+        },
+        "lib/libopenblas.so.0": {
+          "kind": "symlink",
+          "target": "libopenblasp-r0.3.20.so"
+        },
+        "lib/libopenblasp-r0.3.20.so": {
+          "kind": "file",
+          "bytes": 38017672,
+          "sha256": "1dedc9fee9ca46eb73e1abc9d989093acbb5bf1bb474fe673af7f0591fa4b2d9"
+        },
+        "lib/libquadmath.so.0": {
+          "kind": "symlink",
+          "target": "libquadmath.so.0.0.0"
+        },
+        "lib/libquadmath.so.0.0.0": {
+          "kind": "file",
+          "bytes": 289592,
+          "sha256": "a962d0383ce4c2a39a81017ffd9e5b51f32fd314e411c09ddd6da21593079a8c"
+        },
+        "lib/libstdc++.so.6": {
+          "kind": "symlink",
+          "target": "libstdc++.so.6.0.30"
+        },
+        "lib/libstdc++.so.6.0.30": {
+          "kind": "file",
+          "bytes": 2260296,
+          "sha256": "ff0825e113603c3866680d5d52216bc6d8eedf3a59f52a0aef67ff01994db128"
+        },
+        "lib/libtmglib.so.3": {
+          "kind": "symlink",
+          "target": "libtmglib.so.3.10.0"
+        },
+        "lib/libtmglib.so.3.10.0": {
+          "kind": "file",
+          "bytes": 431968,
+          "sha256": "975b62511441706eba5ee082cace0e75249fadda16f84d5a79b97a7385e3e743"
+        },
+        "lib/libvsag.so.0.0": {
+          "kind": "symlink",
+          "target": "libvsag.so.0.0.0"
+        },
+        "lib/libvsag.so.0.0.0": {
+          "kind": "file",
+          "bytes": 40463344,
+          "sha256": "362f9dd0ffafec75c444a0efa84621463735601f71063490a2d7a1f104715a14"
+        },
+        "licenses/VSAG-Apache-2.0": {
+          "kind": "file",
+          "bytes": 11357,
+          "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+        },
+        "licenses/common-Apache-2.0": {
+          "kind": "file",
+          "bytes": 11358,
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+        },
+        "licenses/common-Artistic": {
+          "kind": "file",
+          "bytes": 6111,
+          "sha256": "b7fd9b73ea99602016a326e0b62e6646060d18febdd065ceca8bb482208c3d88"
+        },
+        "licenses/common-BSD": {
+          "kind": "file",
+          "bytes": 1499,
+          "sha256": "5d588eb3b157d52112afea935c88a7ff9efddc1e2d95a42c25d3b96ad9055008"
+        },
+        "licenses/common-CC0-1.0": {
+          "kind": "file",
+          "bytes": 7048,
+          "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499"
+        },
+        "licenses/common-GFDL": {
+          "kind": "file",
+          "bytes": 22962,
+          "sha256": "4748f03ed2dbcc14cde6ebc30799899c403e356a7465dc30fcf2b80c45fc0059"
+        },
+        "licenses/common-GFDL-1.2": {
+          "kind": "file",
+          "bytes": 20431,
+          "sha256": "56976e64523fa1e68db4e6f464f5b2cb89d7d08f54b1d012e317b8db286b3faf"
+        },
+        "licenses/common-GFDL-1.3": {
+          "kind": "file",
+          "bytes": 22962,
+          "sha256": "4748f03ed2dbcc14cde6ebc30799899c403e356a7465dc30fcf2b80c45fc0059"
+        },
+        "licenses/common-GPL": {
+          "kind": "file",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        "licenses/common-GPL-1": {
+          "kind": "file",
+          "bytes": 12632,
+          "sha256": "d77d235e41d54594865151f4751e835c5a82322b0e87ace266567c3391a4b912"
+        },
+        "licenses/common-GPL-2": {
+          "kind": "file",
+          "bytes": 18092,
+          "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+        },
+        "licenses/common-GPL-3": {
+          "kind": "file",
+          "bytes": 35147,
+          "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+        },
+        "licenses/common-LGPL": {
+          "kind": "file",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        "licenses/common-LGPL-2": {
+          "kind": "file",
+          "bytes": 25383,
+          "sha256": "b7993225104d90ddd8024fd838faf300bea5e83d91203eab98e29512acebd69c"
+        },
+        "licenses/common-LGPL-2.1": {
+          "kind": "file",
+          "bytes": 26530,
+          "sha256": "dc626520dcd53a22f727af3ee42c770e56c97a64fe3adb063799d8ab032fe551"
+        },
+        "licenses/common-LGPL-3": {
+          "kind": "file",
+          "bytes": 7651,
+          "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+        },
+        "licenses/common-MPL-1.1": {
+          "kind": "file",
+          "bytes": 25755,
+          "sha256": "f849fc26a7a99981611a3a370e83078deb617d12a45776d6c4cada4d338be469"
+        },
+        "licenses/common-MPL-2.0": {
+          "kind": "file",
+          "bytes": 16726,
+          "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+        },
+        "licenses/libaio1-amd64-copyright": {
+          "kind": "file",
+          "bytes": 1154,
+          "sha256": "fe205df403d2774730410e4a5d67a57ec1cc4f0b29eb5e7c47d341d4d18ebe38"
+        },
+        "licenses/libc6-amd64-copyright": {
+          "kind": "file",
+          "bytes": 26462,
+          "sha256": "d3c95b56fa33e28b57860580f0baf4e4f4de2a268a2b80f1d031a5191bade265"
+        },
+        "licenses/libfmt8-amd64-copyright": {
+          "kind": "file",
+          "bytes": 20324,
+          "sha256": "dfaa7ad8c59bedf69b82afb0114431727f211c8438cc3356226dc95d80f9a27a"
+        },
+        "licenses/libgcc-s1-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/libgfortran5-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/libgomp1-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/liblapacke-amd64-copyright": {
+          "kind": "file",
+          "bytes": 4906,
+          "sha256": "cea124797a83f772af14449ea95a28bb192d2bc4861b8af347101a3592476089"
+        },
+        "licenses/libopenblas0-pthread-amd64-copyright": {
+          "kind": "file",
+          "bytes": 20613,
+          "sha256": "88744f400a3831fccec1f9a4259a706a17d8df09f4886a8fc45afb1be4e28a08"
+        },
+        "licenses/libquadmath0-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/libstdc++6-amd64-copyright": {
+          "kind": "file",
+          "bytes": 68194,
+          "sha256": "da8191658b3452ce9caf31638ba61dab31a38c619fa39df119812e050f592fd3"
+        },
+        "licenses/libtmglib3-amd64-copyright": {
+          "kind": "file",
+          "bytes": 4906,
+          "sha256": "cea124797a83f772af14449ea95a28bb192d2bc4861b8af347101a3592476089"
+        },
+        "run": {
+          "kind": "file",
+          "bytes": 617,
+          "sha256": "29ac125318c5273d0b6f1337092f6fe46092c537d851335dbc023f9ff8c59712"
+        }
+      },
+      "payload_bytes": 99246762,
+      "tar_gzip_bytes": 26932509,
+      "tar_gzip_sha256": "40a4093a2defc47630a7e923db8fa0e8a19ca9bbf56bbfc691b8ecb8036a2564",
+      "relocation_checks": [
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/full-fp32.snapshot",
+            "fp32"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libaio.so.1.0.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libblas.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libfmt.so.8.1.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgfortran.so.5.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgomp.so.1.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapack.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapacke.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libopenblasp-r0.3.20.so",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libquadmath.so.0.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libtmglib.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libvsag.so.0.0.0"
+          ],
+          "metrics": {
+            "mode": "fp32",
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "recall_at_k": "0.987000",
+            "build_ms": "788.437978",
+            "search_p50_us": "271.233000",
+            "search_p99_us": "436.718000",
+            "save_ms": "2.991466",
+            "load_ms": "4.625441",
+            "snapshot_bytes": "5766017",
+            "build_steady_rss_kib": "33548",
+            "final_steady_rss_kib": "34456",
+            "process_peak_rss_kib": "42144",
+            "query_ef_search": "512",
+            "warmup_rounds": "0",
+            "query_loop_cpu_ms": "27.223000"
+          },
+          "snapshot_bytes": 5766017,
+          "snapshot_sha256": "8b73b592f40525284f81e587b340d6315426e907a1225ca63931134e4c79f035"
+        },
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/full-fp16.snapshot",
+            "fp16"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libaio.so.1.0.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libblas.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libfmt.so.8.1.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgfortran.so.5.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgomp.so.1.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapack.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapacke.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libopenblasp-r0.3.20.so",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libquadmath.so.0.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libtmglib.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libvsag.so.0.0.0"
+          ],
+          "metrics": {
+            "mode": "fp16",
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "recall_at_k": "0.987000",
+            "build_ms": "799.564697",
+            "search_p50_us": "269.012000",
+            "search_p99_us": "424.439000",
+            "save_ms": "2.346695",
+            "load_ms": "3.141313",
+            "snapshot_bytes": "3144565",
+            "build_steady_rss_kib": "31208",
+            "final_steady_rss_kib": "31924",
+            "process_peak_rss_kib": "37040",
+            "query_ef_search": "512",
+            "warmup_rounds": "0",
+            "query_loop_cpu_ms": "27.116000"
+          },
+          "snapshot_bytes": 3144565,
+          "snapshot_sha256": "7bd44b0ba8cf17c4dbeaa0948d66f6be2cd45bf4f902b5efa2ecf8bc0cb718ad"
+        },
+        {
+          "argv": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/run",
+            "/home/ubuntu/project/vsag-lite-datasets/sift/prepared-10k-100k/scale-10000",
+            "/dev/shm/vsag-runtime-package-5q1gardz/full-rabitq8.snapshot",
+            "rabitq8"
+          ],
+          "exit": 0,
+          "mapped_elf_paths": [
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/bin/probe",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/ld-linux-x86-64.so.2",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libaio.so.1.0.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libblas.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libc.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libfmt.so.8.1.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgcc_s.so.1",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgfortran.so.5.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libgomp.so.1.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapack.so.3",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/liblapacke.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libm.so.6",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libopenblasp-r0.3.20.so",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libquadmath.so.0.0.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libstdc++.so.6.0.30",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libtmglib.so.3.10.0",
+            "/dev/shm/vsag-runtime-package-5q1gardz/relocated-full/lib/libvsag.so.0.0.0"
+          ],
+          "metrics": {
+            "mode": "rabitq3x5",
+            "base_count": "10000",
+            "query_count": "100",
+            "dim": "128",
+            "k": "10",
+            "recall_at_k": "0.982000",
+            "build_ms": "915.182326",
+            "search_p50_us": "330.520000",
+            "search_p99_us": "542.506000",
+            "save_ms": "1.878969",
+            "load_ms": "2.459122",
+            "snapshot_bytes": "2203446",
+            "build_steady_rss_kib": "30720",
+            "final_steady_rss_kib": "31528",
+            "process_peak_rss_kib": "38020",
+            "query_ef_search": "512",
+            "warmup_rounds": "0",
+            "query_loop_cpu_ms": "32.938000"
+          },
+          "snapshot_bytes": 2203446,
+          "snapshot_sha256": "cbdea1d43af15932d78a94546dae32085b710ac304e71679bc866d73a90cbdcc"
+        }
+      ],
+      "source_libraries_unchanged": true
+    }
+  },
+  "payload_reduction_percent": 93.25988287658191,
+  "compressed_reduction_percent": 90.10629496123069
+}

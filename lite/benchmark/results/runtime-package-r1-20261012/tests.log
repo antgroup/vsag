@@ -1,0 +1,8 @@
+test_dependency_aliases_and_missing (test_runtime_package.RuntimePackageTests) ... ok
+test_deterministic_pack_and_safe_relocation (test_runtime_package.RuntimePackageTests) ... ok
+test_unsafe_members_rejected (test_runtime_package.RuntimePackageTests) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.004s
+
+OK

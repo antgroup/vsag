@@ -1,0 +1,20 @@
+[2026-10-12 19:48:05.334] [info] 
+====vsag start init====
+running on AMD EPYC 9K65 192-Core
+instance spec: 4C15G
+cpu sse >> dist_support:Y + platform:Y = using:Y
+cpu avx >> dist_support:Y + platform:Y = using:Y
+cpu avx2 >> dist_support:Y + platform:Y = using:Y
+cpu avx512f >> dist_support:Y + platform:Y = using:Y
+cpu avx512dq >> dist_support:Y + platform:Y = using:Y
+cpu avx512bw >> dist_support:Y + platform:Y = using:Y
+cpu avx512vl >> dist_support:Y + platform:Y = using:Y
+cpu avx512vpopcntdq >> dist_support:Y + platform:Y = using:Y
+cpu neon >> dist_support:N + platform:N = using:N
+cpu sve >> dist_support:N + platform:N = using:N
+====vsag init done====
+[2026-10-12 19:48:06.158] [info] hgraph Serialize cost 2.943ms
+[2026-10-12 19:48:06.163] [info] IOStreamReader io count (6) in deserialize process
+[2026-10-12 19:48:06.163] [info] hgraph Deserialize cost 4.609ms
+mode,base_count,query_count,dim,k,recall_at_k,build_ms,search_p50_us,search_p99_us,save_ms,load_ms,snapshot_bytes,build_steady_rss_kib,final_steady_rss_kib,process_peak_rss_kib,query_ef_search,warmup_rounds,query_loop_cpu_ms
+fp32,10000,100,128,10,0.987000,788.437978,271.233000,436.718000,2.991466,4.625441,5766017,33548,34456,42144,512,0,27.223000

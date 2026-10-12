@@ -1,5 +1,12 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest package evidence: [runnable native C++ runtime bundle](results/runtime-package-r1-20261012/README.md).
+Includes consumer/recursive ELF runtime/loader/launcher/notices, with actual tar creation,
+relocation and six storage smokes plus mapped-library validation. Lite payload6.689MB
+vsFull99.247MB (−93.260%); gzip2.665MB vs26.933MB (−90.106%). This is the defined
+application profile, not completeSDK/wheel/container or certifiedredistribution.
+The Full historical-install/fresh-build boundary remains unchanged.
+
 Latest Full addition: [equal-ef current Lite / pinned native Full comparison](results/equal-ef-native-full-20261012/README.md),
 36builders108loaders, bothquery512. Total loadedRSS6/6lower andwarmload5/6faster,
 but incrementalloadedRSS6/6higher, allSave/snapshotsworse andGISTqualitylower.
