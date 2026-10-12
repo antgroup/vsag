@@ -76,7 +76,7 @@ one_bit_code_distance(const EncodedView& left, const EncodedView& right, uint64_
     for (uint64_t byte = 0; byte < full_bytes; ++byte) {
         mismatches += popcount_byte(left.filter[byte] ^ right.filter[byte]);
     }
-    const uint32_t tail_bits = static_cast<uint32_t>(dim & 7U);
+    const auto tail_bits = static_cast<uint32_t>(dim & 7U);
     if (tail_bits != 0) {
         const auto mask = static_cast<uint8_t>((1U << tail_bits) - 1U);
         mismatches += popcount_byte((left.filter[full_bytes] ^ right.filter[full_bytes]) & mask);
