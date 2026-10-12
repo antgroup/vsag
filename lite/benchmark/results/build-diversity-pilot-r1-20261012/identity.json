@@ -1,0 +1,8 @@
+{
+  "source_head": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2",
+  "control_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
+  "candidate_sha256": "20dd9b45decafca612d346e05ff152d146f7eff422a3dca2cdc498dbb24e81e4",
+  "candidate_bytes": 412400,
+  "patch_sha256": "81524873afa0bad3d3dc6ea10b9ba78cecb2fc1780c3b3778a12ee214e4cedfd",
+  "scope": "FP32 nearest only; reciprocal link and all FP16/RaBitQ code unchanged"
+}

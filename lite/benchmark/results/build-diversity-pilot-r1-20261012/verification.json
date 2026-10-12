@@ -1,0 +1,55 @@
+{
+  "audit": "PASS",
+  "runs": 12,
+  "recorded_queries": 6600,
+  "summary": [
+    {
+      "dataset": "sift10k",
+      "control": {
+        "recall_at_k": 0.993,
+        "build_ms": 534.900075,
+        "search_p50_us": 162.916,
+        "search_p99_us": 187.454,
+        "save_ms": 3.712924,
+        "snapshot_bytes": 6560064.0
+      },
+      "candidate": {
+        "recall_at_k": 0.996,
+        "build_ms": 610.594971,
+        "search_p50_us": 165.324,
+        "search_p99_us": 192.795,
+        "save_ms": 3.637488,
+        "snapshot_bytes": 6560064.0
+      },
+      "query_win_loss_tie": [
+        2,
+        0,
+        98
+      ]
+    },
+    {
+      "dataset": "gist10k",
+      "control": {
+        "recall_at_k": 0.9646,
+        "build_ms": 1281.724413,
+        "search_p50_us": 444.298,
+        "search_p99_us": 591.683,
+        "save_ms": 15.765855,
+        "snapshot_bytes": 39840064.0
+      },
+      "candidate": {
+        "recall_at_k": 0.9743,
+        "build_ms": 1496.883195,
+        "search_p50_us": 450.247,
+        "search_p99_us": 602.173,
+        "save_ms": 15.96283,
+        "snapshot_bytes": 39840064.0
+      },
+      "query_win_loss_tie": [
+        134,
+        64,
+        802
+      ]
+    }
+  ]
+}
