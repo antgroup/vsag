@@ -28,6 +28,8 @@ guarded(Function function, ErrorType fallback = ErrorType::INTERNAL_ERROR) -> de
 class RaBitQBackend final : public Backend {
 public:
     explicit RaBitQBackend(rabitq::MutableGraphState state) : state_(std::move(state)) {
+        state_.ConfigureIncomingProtection(
+            rabitq::IncomingProtection::CACHED, false, false, false, true);
     }
 
     tl::expected<void, Error>
@@ -182,43 +184,40 @@ make_rabitq_graph_backend(const Backend& source, uint64_t max_degree, uint64_t e
     }
     return guarded(
         [&]() -> tl::expected<std::unique_ptr<Backend>, Error> {
-            std::vector<float> base;
             std::vector<int64_t> ids;
-            if (source.Dim() == 0 or source.Size() > base.max_size() / source.Dim()) {
+            if (source.Dim() == 0 or
+                source.Size() > std::vector<float>().max_size() / source.Dim()) {
                 return failure(ErrorType::INVALID_ARGUMENT, "RaBitQ training size overflow");
             }
-            base.reserve(source.Size() * source.Dim());
             ids.reserve(source.Size());
             std::vector<float> scratch;
-            for (uint64_t slot = 0; slot < source.Size(); ++slot) {
-                const auto* vector = source.VectorAt(slot, scratch);
-                base.insert(base.end(), vector, vector + source.Dim());
-                ids.push_back(source.IdAt(slot));
-            }
-            auto model = rabitq::train(base, source.Size(), source.Dim(), 47);
+            // Row pointers are consumed before requesting the next scratch-backed row.
+            auto model = rabitq::train_rows(source.Size(), source.Dim(), 47, [&](uint64_t slot) {
+                return source.VectorAt(slot, scratch);
+            });
             rabitq::EncodedRecords codes(source.Dim());
             codes.Reserve(source.Size());
             for (uint64_t slot = 0; slot < source.Size(); ++slot) {
-                codes.Append(rabitq::encode(model, base.data() + slot * source.Dim()));
+                codes.Append(rabitq::encode(model, source.VectorAt(slot, scratch)));
+                ids.push_back(source.IdAt(slot));
             }
-            auto graph = make_graph_backend(source, max_degree, ef_search);
-            if (not graph) {
-                return tl::unexpected(graph.error());
+            auto links = build_graph_topology(source, max_degree, ef_search);
+            if (not links) {
+                return tl::unexpected(links.error());
             }
-            rabitq::GraphTopology topology;
-            topology.offsets.push_back(0);
-            for (uint64_t slot = 0; slot < source.Size(); ++slot) {
-                for (uint64_t edge = 0; edge < (*graph)->LinkCountAt(slot); ++edge) {
-                    topology.neighbors.push_back((*graph)->LinkAt(slot, edge));
-                }
-                topology.offsets.push_back(topology.neighbors.size());
+            // Construction reserves a spare edge per row; do not retain that build-only slack.
+            // Shrink one row at a time instead of allocating a second whole topology.
+            for (auto& row : *links) {
+                row.shrink_to_fit();
             }
-            rabitq::MutableGraphState state(std::move(model),
+            rabitq::MutableGraphState state(rabitq::OwnedGraphAdjacency{std::move(*links)},
+                                            std::move(model),
                                             std::move(codes),
-                                            topology,
                                             std::move(ids),
                                             max_degree,
-                                            ef_search);
+                                            ef_search,
+                                            false,
+                                            true);
             return std::unique_ptr<Backend>(new RaBitQBackend(std::move(state)));
         },
         ErrorType::INVALID_ARGUMENT);
@@ -229,7 +228,7 @@ load_rabitq_graph_backend(std::istream& input) {
     return guarded(
         [&]() -> tl::expected<std::unique_ptr<Backend>, Error> {
             return std::unique_ptr<Backend>(
-                new RaBitQBackend(rabitq::load_mutable_snapshot(input)));
+                new RaBitQBackend(rabitq::load_mutable_snapshot(input, true)));
         },
         ErrorType::INVALID_BINARY);
 }

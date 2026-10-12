@@ -69,7 +69,9 @@ public:
      */
     tl::expected<void, Error>
     Update(int64_t id, const float* vector, uint64_t dim);
-    /** Physically remove a record. Returns false for a missing ID; capacity is retained. */
+    /** Physically remove a record; capacity is retained.
+     * Returns false for a missing ID or failed graph allocation; contents remain unchanged.
+     */
     bool
     Remove(int64_t id);
     /** k=0 or an empty index returns an empty result; k is capped at the record count. */
