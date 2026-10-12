@@ -36,8 +36,8 @@ struct QueryContext {
 
 class SearchStatistics {
 public:
-    [[nodiscard]] std::string
-    Dump() const {
+    [[nodiscard]] JsonType
+    ToJson() const {
         JsonType j;
         j["is_timeout"].SetBool(is_timeout.load(std::memory_order_relaxed));
         j["dist_cmp"].SetInt(dist_cmp.load(std::memory_order_relaxed));
@@ -55,7 +55,12 @@ public:
             rabitq_reorder_hint_full_count.load(std::memory_order_relaxed));
         j["rabitq_reorder_fallback_full_count"].SetInt(
             rabitq_reorder_fallback_full_count.load(std::memory_order_relaxed));
-        return j.Dump();
+        return j;
+    }
+
+    [[nodiscard]] std::string
+    Dump() const {
+        return ToJson().Dump();
     }
 
 public:

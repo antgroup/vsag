@@ -99,6 +99,9 @@ HGraph::Build(const DatasetPtr& data) {
         if (use_elp_optimizer_) {
             elp_optimize();
         }
+        if (this->mci_parameters_.enabled) {
+            this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
+        }
         return ret;
     }
     this->Train(data);
@@ -111,6 +114,9 @@ HGraph::Build(const DatasetPtr& data) {
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    if (this->mci_parameters_.enabled and graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+        this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
+    }
     return ret;
 }
 
@@ -120,7 +126,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
+    const auto* vectors = get_data(data);
     const auto* extra_infos = data->GetExtraInfos();
     const auto* source_id = data->GetSourceID();
     Vector<int64_t> valid_indices(allocator_);
@@ -174,12 +180,12 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
             this->label_table_->InsertSourceId(inner_id, source_id[i]);
         }
         if (not defer_persistent_codes) {
-            this->insert_persistent_codes(vectors + dim_ * i, inner_id);
+            this->insert_persistent_codes(get_data(data, i), inner_id);
         } else {
             deferred_code_ids.emplace_back(inner_id, i);
         }
         if (temporary_sq8_build_data != nullptr) {
-            temporary_sq8_build_data->InsertVector(vectors + dim_ * i, inner_id);
+            temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -220,7 +226,7 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
         temporary_sq8_build_data.reset();
         this->Train(data);
         for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-            this->insert_persistent_codes(vectors + dim_ * local_idx, inner_id);
+            this->insert_persistent_codes(get_data(data, local_idx), inner_id);
         }
     }
     return failed_ids;
@@ -228,6 +234,14 @@ HGraph::build_by_odescent(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::Add(const DatasetPtr& data) {
+    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    if (this->mci_parameters_.enabled) {
+        mci_add_lock.lock();
+    }
+    const auto mci_start_total = this->total_count_.load();
+    const bool had_mci_clique_index = this->mci_parameters_.enabled and
+                                      this->mci_cliques_ != nullptr and
+                                      this->mci_cliques_->HasCliqueIndex(mci_start_total);
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
@@ -298,6 +312,9 @@ HGraph::Add(const DatasetPtr& data) {
     const auto* extra_infos = data->GetExtraInfos();
     const auto* attr_sets = data->GetAttributeSets();
     bool use_parallel_add = this->thread_pool_ != nullptr;
+    if (had_mci_clique_index) {
+        this->mci_cliques_->MarkUnavailable();
+    }
     Vector<std::pair<InnerIdType, LabelType>> inner_ids(allocator_);
     for (int64_t j = 0; j < total; ++j) {
         // Check if label already exists (skip removed IDs)
@@ -389,6 +406,24 @@ HGraph::Add(const DatasetPtr& data) {
             }
         }
     }
+    if (this->mci_parameters_.enabled) {
+        if (had_mci_clique_index) {
+            logger::info("hgraph mci incremental add started, added={}", inner_ids.size());
+            for (const auto& [inner_id, local_idx] : inner_ids) {
+                this->incremental_update_mci_clique(inner_id, get_data(data, local_idx));
+            }
+            this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            logger::info("hgraph mci incremental add finished, total={}",
+                         this->total_count_.load());
+        } else {
+            const void* vectors = nullptr;
+            if (mci_start_total == 0 and failed_ids.empty()) {
+                vectors = this->get_data(data);
+            }
+            this->build_mci_clique_index(vectors);
+        }
+        this->cal_memory_usage();
+    }
     return failed_ids;
 }
 
@@ -403,6 +438,7 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
     if (not this->support_force_remove()) {
         add_lock = std::shared_lock<std::shared_mutex>(this->add_mutex_);
     }
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     this->basic_flatten_codes_->InsertVector(data, inner_id);
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
@@ -564,6 +600,7 @@ HGraph::resize(uint64_t new_size) {
         return;
     }
     std::scoped_lock lock(this->global_mutex_);
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     cur_size = this->max_capacity_.load();
     if (cur_size < new_size_power_2) {
         this->neighbors_mutex_->Resize(new_size_power_2);

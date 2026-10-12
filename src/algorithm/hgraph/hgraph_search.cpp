@@ -14,10 +14,11 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
+
 #include "attr/argparse.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
-#include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
@@ -523,33 +524,38 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     DistHeapPtr search_result;
     bool brute_force_used = false;
-    if (params.brute_force_threshold > 0.0F) {
-        float valid_ratio = ft != nullptr ? ft->ValidRatio() : 1.0F;
-        if (valid_ratio <= params.brute_force_threshold) {
-            if (is_range) {
-                search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
-                    raw_query, ft, request.limited_size_, request.radius_, &ctx);
-            } else {
-                search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
-                    raw_query, ft, k, 0.0F, &ctx);
-            }
-            brute_force_used = true;
+    MCIHybridSearchResult mci_result(params, ft);
+    if (params.brute_force_threshold > 0.0F and
+        mci_result.valid_ratio <= params.brute_force_threshold) {
+        if (is_range) {
+            search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
+                raw_query, ft, request.limited_size_, request.radius_, &ctx);
+        } else {
+            search_result =
+                this->brute_force_search<InnerSearchMode::KNN_SEARCH>(raw_query, ft, k, 0.0F, &ctx);
         }
-    }
-    if (not brute_force_used) {
-        search_result = this->search_one_graph(raw_query,
-                                               this->bottom_graph_,
-                                               this->basic_flatten_codes_,
-                                               search_param,
-                                               vt,
-                                               &ctx,
-                                               rabitq_lower_bound_candidates_ptr);
+        brute_force_used = true;
+        mci_result.route = "brute_force";
+    } else {
+        mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+        if (mci_result.route == "mci") {
+            search_result = std::move(mci_result.result);
+        } else {
+            search_result = this->search_one_graph(raw_query,
+                                                   this->bottom_graph_,
+                                                   this->basic_flatten_codes_,
+                                                   search_param,
+                                                   vt,
+                                                   &ctx,
+                                                   rabitq_lower_bound_candidates_ptr);
+        }
     }
 
     this->pool_->ReturnOne(vt);
 
     // Reorder
-    if (not brute_force_used and use_reorder_ and search_param.enable_reorder) {
+    if (mci_result.route != "mci" and not brute_force_used and use_reorder_ and
+        search_param.enable_reorder) {
         auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query,
                       this->get_reorder_codes(),
@@ -558,8 +564,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                       nullptr,
                       ctx,
                       rabitq_lower_bound_candidates_ptr);
-    } else if (not brute_force_used and search_param.enable_reorder and
-               params.rabitq_one_bit_search) {
+    } else if (mci_result.route != "mci" and not brute_force_used and
+               search_param.enable_reorder and params.rabitq_one_bit_search) {
         auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query, this->basic_flatten_codes_, search_result, limit, nullptr, ctx);
     }
@@ -576,7 +582,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
         auto result = this->pack_knn_result_with_extra_info(search_result, ctx.alloc);
-        result->Statistics(stats.Dump());
+        result->Statistics(mci_result.MakeStatistics(stats).Dump());
         return result;
     }
 
@@ -588,7 +594,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // return an empty dataset directly if searcher returns nothing
     if (search_result->Empty()) {
         auto dataset_result = DatasetImpl::MakeEmptyDataset();
-        dataset_result->Statistics(stats.Dump());
+        dataset_result->Statistics(mci_result.MakeStatistics(stats).Dump());
         if (reasoning_ctx) {
             reasoning_ctx->DiagnoseExpectedTargets();
             dataset_result->Reasoning(reasoning_ctx->GenerateReport());
@@ -617,7 +623,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_result->Pop();
     }
-    dataset_results->Statistics(stats.Dump());
+    dataset_results->Statistics(mci_result.MakeStatistics(stats).Dump());
 
     // Generate reasoning report if reasoning context was created
     if (reasoning_ctx) {

@@ -24,6 +24,7 @@
 #include "../inner_index_interface.h"
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
+#include "datacell/clique_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
@@ -33,6 +34,7 @@
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
@@ -469,6 +471,17 @@ private:
         return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
     }
 
+    /// Return the best available flatten for precise distance in MCI and other internal
+    /// search paths.
+    /// Here, "precise" means the best available precision and does not guarantee raw FP32 data.
+    [[nodiscard]] FlattenInterfacePtr
+    get_precise_codes() const {
+        if (create_new_raw_vector_ and raw_vector_ != nullptr) {
+            return raw_vector_;
+        }
+        return has_precise_reorder() ? high_precise_codes_ : basic_flatten_codes_;
+    }
+
     /// Populate the neighbor cache from the index state.
     void
     fullfill_cache() const;
@@ -568,6 +581,47 @@ private:
                            const FlattenInterfacePtr& flatten_codes,
                            const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
+    struct MCIHybridSearchResult {
+        MCIHybridSearchResult(const HGraphSearchParameters& params, const FilterPtr& filter);
+
+        [[nodiscard]] JsonType
+        MakeStatistics(const SearchStatistics& stats) const;
+
+        DistHeapPtr result{nullptr};
+        float valid_ratio{1.0F};
+        float threshold{0.0F};
+        float seed_ratio{0.0F};
+        std::string route{"disabled"};
+        uint64_t seed_count{0};
+        bool used_precise_float_csr{false};
+    };
+
+    [[nodiscard]] MCIHybridSearchResult
+    try_mci_search(const SearchRequest& request,
+                   const HGraphSearchParameters& params,
+                   const FilterPtr& inner_filter,
+                   const void* query,
+                   const InnerSearchParam& search_param,
+                   QueryContext* ctx) const;
+
+    void
+    build_mci_clique_index(const void* vectors = nullptr);
+
+    void
+    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+
+    [[nodiscard]] Vector<InnerIdType>
+    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+
+    [[nodiscard]] Vector<InnerIdType>
+    search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
+
+    bool
+    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
     FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
@@ -582,6 +636,7 @@ private:
     bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
 
     BasicSearcherPtr searcher_;              // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;            // companion MCI clique searcher
     ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
 
     std::default_random_engine level_generator_{
@@ -593,15 +648,21 @@ private:
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
+    CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
+    HGraphMCIParameters mci_parameters_{};
+
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;        // guards total_count_, entry_point_id_
-    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
+    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
+    mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
+    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
+    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
 
     std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
 

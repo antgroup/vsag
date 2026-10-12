@@ -49,6 +49,13 @@ const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
 const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
 const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
 const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const HGRAPH_MCI_KEY = "mci";
+const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
+const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
+const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
+    "mci_incremental_join_ratio_threshold";
+const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
+const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";

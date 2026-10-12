@@ -263,6 +263,8 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+    Its optional [MCI companion](docs/docs/en/src/advanced/hgraph_mci_companion.md)
+    supports selective filtered KNN search.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector

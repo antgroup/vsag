@@ -131,7 +131,8 @@ InnerIndexInterface::KnnSearch(const DatasetPtr& query,
                                const BitsetPtr& invalid) const {
     FilterPtr filter_ptr = nullptr;
     if (invalid != nullptr) {
-        filter_ptr = std::make_shared<BlackListFilter>(invalid);
+        filter_ptr = std::make_shared<BlackListFilter>(
+            invalid, this->label_table_ == nullptr ? 0 : this->label_table_->GetTotalCount());
     }
     return this->KnnSearch(query, k, parameters, filter_ptr);
 }
