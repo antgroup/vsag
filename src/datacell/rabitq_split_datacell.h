@@ -1639,32 +1639,36 @@ public:
         }
     }
 
-    // Per-cluster constants used by the code-domain pair distance. All of them are derived from
-    // the centroids that the codec already stores, so nothing is added to the index.
-    //
-    // Memory shape: fused_centroid_sums_ is cluster_count floats, fused_centroid_pair_ip_ is
-    // cluster_count^2 floats, and the cluster-pair difference vector is computed per pair into a
-    // thread-local buffer instead of being tabulated, which would have cost cluster_count^2 * dim
-    // floats. The fused codec uses K_FUSED_CLUSTER_COUNT = 16 today (256 floats for the pair
-    // table); the quadratic term only becomes material if that constant grows a lot.
+    // Pair-distance residual codes live in the rotated space. Keep a derived cache in that
+    // same space; fused_centroids_ remains in the original space for assignment/serialization.
     void
     refresh_fused_cluster_stats() {
         const uint64_t cluster_count = fused_quantizers_.size();
         const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        fused_rotated_centroids_.clear();
         fused_centroid_sums_.assign(cluster_count, 0.0F);
         fused_centroid_pair_ip_.assign(cluster_count * cluster_count, 0.0F);
         if (cluster_count == 0 or fused_centroids_.size() != cluster_count * dim) {
             return;
         }
+        fused_rotated_centroids_.resize(cluster_count * dim);
+        Vector<float> transformed_centroid(dim, 0.0F, this->allocator_);
         for (uint64_t i = 0; i < cluster_count; ++i) {
-            const float* centroid_i = fused_centroids_.data() + i * dim;
+            float raw_norm = 0.0F;
+            typename BottomQuantizer::norm_type mrq_norm_sqr = 0.0F;
+            this->bottom_quantizer().TransformFusedQuery(
+                fused_centroids_.data() + i * dim, transformed_centroid, raw_norm, mrq_norm_sqr);
+            std::copy(transformed_centroid.begin(),
+                      transformed_centroid.end(),
+                      fused_rotated_centroids_.data() + i * dim);
+            const float* centroid_i = fused_rotated_centroids_.data() + i * dim;
             float sum = 0.0F;
             for (uint64_t d = 0; d < dim; ++d) {
                 sum += centroid_i[d];
             }
             fused_centroid_sums_[i] = sum;
             for (uint64_t j = 0; j <= i; ++j) {
-                const float* centroid_j = fused_centroids_.data() + j * dim;
+                const float* centroid_j = fused_rotated_centroids_.data() + j * dim;
                 const float ip = FP32ComputeIP(centroid_i, centroid_j, dim);
                 fused_centroid_pair_ip_[i * cluster_count + j] = ip;
                 fused_centroid_pair_ip_[j * cluster_count + i] = ip;
@@ -1684,8 +1688,10 @@ public:
         // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
         // codec layouts) keep using the float reconstruction path.
         if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
-            fused_centroid_sums_.size() != fused_quantizers_.size() or (dim & 63U) != 0U or
-            bottom_quantizer().FilterBits() != 1 or bottom_quantizer().ReorderBits() != 7) {
+            fused_centroid_sums_.size() != fused_quantizers_.size() or
+            fused_rotated_centroids_.size() != fused_quantizers_.size() * dim or
+            (dim & 63U) != 0U or bottom_quantizer().FilterBits() != 1 or
+            bottom_quantizer().ReorderBits() != 7) {
             return false;
         }
         RaBitQFusedCodeView view1;
@@ -1703,11 +1709,11 @@ public:
             return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
                 view1.one_bit_code,
                 view1.supplement_code,
-                fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
                 fused_centroid_sums_[view1.cluster_id],
                 view2.one_bit_code,
                 view2.supplement_code,
-                fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
                 fused_centroid_sums_[view2.cluster_id],
                 fused_centroid_pair_ip_[index1],
                 distance);
@@ -1725,9 +1731,9 @@ public:
                     diff_scratch.resize(dim);
                 }
                 const float* centroid1 =
-                    fused_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim;
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim;
                 const float* centroid2 =
-                    fused_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim;
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim;
                 float sq = 0.0F;
                 for (uint64_t d = 0; d < dim; ++d) {
                     const float delta = centroid1[d] - centroid2[d];
@@ -2675,6 +2681,9 @@ public:
         memory += sizeof(QuantizerT);
         memory += fused_quantizers_.size() * sizeof(RaBitQuantizer<metric>);
         memory += fused_centroids_.capacity() * sizeof(float);
+        memory += fused_rotated_centroids_.capacity() * sizeof(float);
+        memory += fused_centroid_sums_.capacity() * sizeof(float);
+        memory += fused_centroid_pair_ip_.capacity() * sizeof(float);
         return memory;
     }
 
@@ -2684,6 +2693,7 @@ public:
     std::shared_ptr<QuantizerT> quantizer_{nullptr};
     std::vector<std::shared_ptr<RaBitQuantizer<metric>>> fused_quantizers_;
     std::vector<float> fused_centroids_;
+    std::vector<float> fused_rotated_centroids_;
     std::vector<float> fused_centroid_sums_;
     std::vector<float> fused_centroid_pair_ip_;
     std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
