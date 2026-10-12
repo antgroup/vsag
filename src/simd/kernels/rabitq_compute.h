@@ -544,6 +544,32 @@ RaBitQFloatSplitCodeIPImpl(const float* vector,
     return result;
 }
 
+// Shared scalar implementation for Full and standalone Lite.
+inline float
+RaBitQFloatSupplementCodeIPScalarImpl(const float* vector,
+                                      const uint8_t* supplement_code,
+                                      uint64_t dim,
+                                      uint32_t supplement_bits) {
+    if (dim == 0 or supplement_bits == 0) {
+        return 0.0F;
+    }
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = 0;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0U) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+    return result;
+}
+
 template <typename T>
 inline float
 RaBitQFloatSupplementCodeIPImpl(const float* vector,
@@ -573,7 +599,7 @@ RaBitQFloatSupplementCodeIPImpl(const float* vector,
     float result = T::reduce_add(sum);
     for (; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         uint32_t code = 0;
         for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
             const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
