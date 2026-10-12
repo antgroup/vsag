@@ -1,5 +1,14 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest same-source evidence: [fresh native Full / Lite matrix](results/full-fresh-equal-r1-20261012/README.md).
+Full core was rebuilt from an empty directory at dbb2fe0, ccache OFF, 243 core
+objects, matching headers, cached dependency sources/system libraries. Verified
+36 builders / 108 loaders / 3600 queries. Loaded process RSS and P50 are lower
+in all six cells; warm load and P99 improve in five. GIST recall, RaBitQ tails,
+incremental RSS, Save/snapshot and GIST builder peaks remain limitations.
+This closes the fresh-core/same-source gap for this matrix only; it does not
+retroactively freshen older results or establish equal-quality/ISA acceptance.
+
 Latest package evidence: [runnable native C++ runtime bundle](results/runtime-package-r1-20261012/README.md).
 Includes consumer/recursive ELF runtime/loader/launcher/notices, with actual tar creation,
 relocation and six storage smokes plus mapped-library validation. Lite payload6.689MB

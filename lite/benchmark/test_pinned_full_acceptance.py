@@ -6,9 +6,30 @@ import tempfile
 import unittest
 
 from verify_pinned_full_acceptance import verify
+from run_pinned_full_acceptance import validate_fresh_receipt
 
 
 class FullAuditTests(unittest.TestCase):
+    def test_fresh_receipt_guards(self):
+        receipt = dict(full_source_head='feature', fresh_core=True, ccache=False,
+            prior_object_count=0, core_object_count=100, install='/tmp/full-reference',
+            library_sha256='a' * 64, full_headers_sha256={'vsag.h': 'b' * 64})
+        validate_fresh_receipt(receipt, 'feature', Path('/tmp/full-reference'))
+        for field, invalid in [('full_source_head', 'historical'), ('fresh_core', False),
+                ('ccache', True), ('prior_object_count', 1), ('core_object_count', 1),
+                ('install', '/tmp/another-reference'), ('library_sha256', 'short'),
+                ('full_headers_sha256', {})]:
+            with self.subTest(field=field):
+                altered = dict(receipt, **{field: invalid})
+                with self.assertRaises(AssertionError):
+                    validate_fresh_receipt(altered, 'feature', Path('/tmp/full-reference'))
+
+    def test_nonhex_receipt_digest_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_fresh_receipt(dict(full_source_head='feature', fresh_core=True,
+                ccache=False, prior_object_count=0, core_object_count=100,
+                install='/tmp/full-reference', library_sha256='z' * 64), 'feature', Path('/tmp/full-reference'))
+
     def fixture(self, directory, ef=512, digest='full'):
         root = Path(directory)
         (root / 'measurements').mkdir()

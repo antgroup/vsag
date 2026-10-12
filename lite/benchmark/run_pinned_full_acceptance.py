@@ -12,6 +12,16 @@ import tempfile
 
 from run_mixed_cpu_acceptance import sha, write_json
 
+def validate_fresh_receipt(receipt, feature, install):
+    assert receipt['full_source_head'] == feature
+    assert receipt['fresh_core'] is True and receipt['ccache'] is False
+    assert receipt['prior_object_count'] == 0 and receipt['core_object_count'] > 50
+    assert Path(receipt['install']).resolve() == install.resolve()
+    assert len(receipt['library_sha256']) == 64
+    int(receipt['library_sha256'], 16)
+    assert receipt['full_headers_sha256'], 'Missing public header identities'
+
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -21,6 +31,7 @@ def main():
     parser.add_argument('--source-ref', default='a62e62e08db3f0d7da2e4439785feed6fcf90257')
     parser.add_argument('--full-install', type=Path, required=True)
     parser.add_argument('--dataset', action='append', required=True)
+    parser.add_argument('--fresh-full-receipt', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output = args.output.resolve()
@@ -31,9 +42,19 @@ def main():
     assert feature_sha == expected_feature
     assert not subprocess.check_output(['git', 'status', '--porcelain', '-uno'], cwd=args.feature)
     full_library = args.full_install / 'lib/libvsag.so'
+    if args.fresh_full_receipt:
+        receipt = json.loads(args.fresh_full_receipt.read_text())
+        validate_fresh_receipt(receipt, expected_feature, args.full_install)
+        expected_full = receipt['library_sha256']
+        old_provenance = receipt
+        (args.output / 'fresh-full-receipt.json').write_bytes(args.fresh_full_receipt.read_bytes())
+    else:
+        old_provenance = json.loads(subprocess.check_output(['git', 'show', args.source_ref +
+            ':lite/benchmark/results/current-full-10k600-20261011/provenance.json'], cwd=args.source_repo))
     assert sha(full_library) == expected_full
-    old_provenance = json.loads(subprocess.check_output(['git', 'show', args.source_ref +
-        ':lite/benchmark/results/current-full-10k600-20261011/provenance.json'], cwd=args.source_repo))
+    actual_headers = {str(p.relative_to(args.full_install / 'include')): sha(p)
+                      for p in (args.full_install / 'include').rglob('*') if p.is_file()}
+    assert actual_headers == old_provenance['full_headers_sha256']
     for name, digest in old_provenance['full_headers_sha256'].items():
         assert sha(args.full_install / 'include' / name) == digest, name
     meta = dict(feature_sha=feature_sha, lite_library_sha256=sha(args.feature_build / 'libvsag-lite.so'),
@@ -42,6 +63,11 @@ def main():
         full_suite='not rerun', query_ef_both=512, trials=3, loads_per_builder=3,
         compiler=subprocess.check_output(['c++', '--version'], text=True),
         helpers_source_ref=args.source_ref, helper_source_hashes={}, compile_commands=[])
+    meta['fresh_full_core'] = bool(args.fresh_full_receipt)
+    meta['compiler_semantics'] = 'Native Full root Release uses -Ofast/-g; Lite Release uses -O3. Equal search parameters, not identical compiler flags or equal recall.'
+    if args.fresh_full_receipt:
+        meta['fresh_full_receipt_sha256'] = sha(args.fresh_full_receipt)
+        meta['full_suite'] = old_provenance['full_suite']
     env = {k: v for k, v in os.environ.items() if not k.startswith('VSAG_')}
     env.update(OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
     with tempfile.TemporaryDirectory(prefix='vsag-equal-full-', dir='/dev/shm') as directory:
@@ -94,7 +120,7 @@ def main():
             stream.add(args.output / name, arcname=name, recursive=False)
     write_json(args.output / 'archive.json', dict(sha256=sha(args.output / 'raw.tar.gz'),
         bytes=(args.output / 'raw.tar.gz').stat().st_size, members=len(manifest) + 1, originals_preserved=True))
-    print('Complete same-config initial-index comparison; not same-quality or fresh Full library')
+    print('Complete equal-query-ef initial-index comparison; not same-quality. Fresh Full core:', bool(args.fresh_full_receipt))
 
 
 if __name__ == '__main__':

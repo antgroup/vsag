@@ -19,6 +19,18 @@ def verify(output, overrides=None):
         assert sha(output / name) == digest, name
     identity = json.loads((output / 'measurements/identity.json').read_text())
     assert identity['arguments']['ef'] == identity['arguments']['full_ef'] == 512
+    if provenance.get('fresh_full_core'):
+        receipt_path = output / 'fresh-full-receipt.json'
+        assert sha(receipt_path) == provenance['fresh_full_receipt_sha256']
+        receipt = json.loads(receipt_path.read_text())
+        assert receipt['fresh_core'] is True and receipt['ccache'] is False
+        assert receipt['prior_object_count'] == 0 and receipt['core_object_count'] > 50
+        assert receipt['full_source_head'] == provenance['full_source_sha'] == provenance['feature_sha']
+        assert receipt['library_sha256'] == provenance['full_library_sha256']
+        assert receipt['full_headers_sha256'] == provenance['full_headers']
+        assert receipt['full_build_boundary'] == provenance['full_boundary']
+        assert 'fresh-full-receipt.json' in manifest
+        assert provenance['full_suite'] == receipt['full_suite']
     assert identity['reference_library_sha256'] == provenance['full_library_sha256']
     assert identity['lite_library_sha256'] == provenance['lite_library_sha256']
     rows = json.loads((output / 'measurements/rows.json').read_text())

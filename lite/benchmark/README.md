@@ -1,6 +1,10 @@
 # VSAG Lite baseline experiment
 
 Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
+[Fresh same-source native Full / Lite matrix](results/full-fresh-equal-r1-20261012/README.md)
+uses an empty build directory and 243 freshly compiled Full core objects;
+36 builders / 108 loaders are independently verified. It supersedes the historical
+Full build boundary only for this new matrix, not for older package/CRUD reports.
 [Native C++ runtime package measurement](results/runtime-package-r1-20261012/README.md)
 adds the executable, launcher and notices, verifies relocation, and states the package scope explicitly.
 The [native Full equal-ef matrix](results/equal-ef-native-full-20261012/README.md)

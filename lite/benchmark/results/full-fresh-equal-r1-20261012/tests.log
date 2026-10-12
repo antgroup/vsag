@@ -1,0 +1,10 @@
+test_fresh_receipt_guards (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_manifest_corruption_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_nonhex_receipt_digest_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_unequal_query_budget_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_wrong_reference_library_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 0.003s
+
+OK
