@@ -1,6 +1,9 @@
 # VSAG Lite baseline experiment
 
 Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
+[Fixed-index GIST loss diagnosis](results/query-loss-trace-r1-20261012/README.md)
+attributes most missing truth IDs to unvisited nodes; it is not a new speedup.
+Exact prior snapshot and ordered-neighbor parity are retained.
 [GIST frozen common-target / 900-query validation](results/quality-target-r2-20261012/README.md)
 records a negative result: all Lite modes miss the .990 held-out target, despite
 passing calibration; higher query budgets make FP32/FP16 slower than native Full.

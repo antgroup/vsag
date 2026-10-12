@@ -1,5 +1,10 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest diagnosis: [fixed-index routing/ranking loss decomposition](results/query-loss-trace-r1-20261012/README.md).
+FP32 misses94 all unvisited; FP16 misses95unvisited+2ranking; RaBitQ misses93unvisited+41ranking,
+zero coarse-shortlist losses on the prior900 validation queries. Full-code RaBitQ scan .995333.
+This motivates graph-neighbor selection work, not a new performance/quality acceptance PASS.
+
 Latest quality-control evidence: [GIST fixed-snapshot target calibration / validation](results/quality-target-r2-20261012/README.md).
 100 calibration + 900 independent query rows, frozen budgets, three trials,
 108 calibration /18 validation processes, 27000 recorded queries, FP64 oracle

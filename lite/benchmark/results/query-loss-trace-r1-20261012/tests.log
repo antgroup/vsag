@@ -1,0 +1,22 @@
+test_empty_accounting (test_query_loss_trace.LossTraceTests) ... ok
+test_exclusive_accounting (test_query_loss_trace.LossTraceTests) ... ok
+test_formal_hit_does_not_double_count (test_query_loss_trace.LossTraceTests) ... ok
+test_formal_unvisited_rejected (test_query_loss_trace.LossTraceTests) ... ok
+test_nonboolean_rejected (test_query_loss_trace.LossTraceTests) ... ok
+test_rerank_unvisited_rejected (test_query_loss_trace.LossTraceTests) ... ok
+test_duplicate_result_query_rejected (test_quality_target.QualityTargetTests) ... ok
+test_manifest_tampering_rejected (test_quality_target.QualityTargetTests) ... ok
+test_quantile_nearest_rank (test_quality_target.QualityTargetTests) ... ok
+test_query_interval_rejected (test_quality_target.QualityTargetTests) ... ok
+test_raw_corruptions_rejected (test_quality_target.QualityTargetTests) ... ok
+test_valid_raw_hits (test_quality_target.QualityTargetTests) ... ok
+test_fresh_receipt_guards (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_manifest_corruption_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_nonhex_receipt_digest_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_unequal_query_budget_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_wrong_reference_library_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.005s
+
+OK

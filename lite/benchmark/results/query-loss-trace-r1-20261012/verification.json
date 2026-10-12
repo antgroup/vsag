@@ -1,0 +1,49 @@
+{
+  "audit": "PASS",
+  "diagnostic_queries": 3000,
+  "truth_records": 30000,
+  "ordered_native_neighbors": 30000,
+  "shared_unvisited_truth_pairs": {
+    "fp32-fp16": 94,
+    "fp32-rabitq8": 92,
+    "fp16-rabitq8": 92
+  },
+  "summary": [
+    {
+      "storage": "fp32",
+      "truth_records": 9000,
+      "hits": 8906,
+      "unvisited": 94,
+      "shortlist_loss": 0,
+      "visited_rank_loss": 0,
+      "global_code_hits": null,
+      "mean_visited": 5842.457777777778,
+      "min_visited": 4932,
+      "max_visited": 6513
+    },
+    {
+      "storage": "fp16",
+      "truth_records": 9000,
+      "hits": 8903,
+      "unvisited": 95,
+      "shortlist_loss": 0,
+      "visited_rank_loss": 2,
+      "global_code_hits": null,
+      "mean_visited": 5841.834444444445,
+      "min_visited": 4934,
+      "max_visited": 6513
+    },
+    {
+      "storage": "rabitq8",
+      "truth_records": 9000,
+      "hits": 8866,
+      "unvisited": 93,
+      "shortlist_loss": 0,
+      "visited_rank_loss": 41,
+      "global_code_hits": 8958,
+      "mean_visited": 5843.827777777778,
+      "min_visited": 4926,
+      "max_visited": 6501
+    }
+  ]
+}
