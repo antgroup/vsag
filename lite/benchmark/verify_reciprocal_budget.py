@@ -30,9 +30,11 @@ def verify(out,datasets):
     assert identity['patch_sha256']==sha(out/'candidate.patch')=='e377e6918491d8966c76602ef9fcee6fafd502e5400d0918e7fc82c4f11c33b9'
     rows=json.loads((out/'rows.json').read_text())
     expected={(d,t,s,b) for d in datasets for t in range(3) for s,b in [('control',512)]+[('candidate',b) for b in [128,192,256,384]]}
-    assert len(rows)==30 and {(r['dataset'],r['trial'],r['side'],r['budget']) for r in rows}==expected
+    paired=(out/'protocol.json').exists() and json.loads((out/'protocol.json').read_text())['paired_low']
+    if paired:expected={(d,t,s,b) for d in datasets for t in range(3) for s in ['control','candidate'] for b in [128,192,256,384]}
+    assert len(rows)==len(expected) and {(r['dataset'],r['trial'],r['side'],r['budget']) for r in rows}==expected
     commands=json.loads((out/'commands.json').read_text())
-    assert len(commands)==34 and all(c['exit']==0 for c in commands)
+    assert len(commands)==len(expected)+4 and all(c['exit']==0 for c in commands)
     truths={};hits_by_cell={};queries=0
     for dataset,directory in datasets.items():
         for name,info in json.loads((out/(dataset+'.inputs.json')).read_text()).items():
@@ -69,7 +71,8 @@ def verify(out,datasets):
         hits_by_cell[(dataset,trial,side,budget)]=hits;queries+=len(truth)
     summary=[]
     for dataset in datasets:
-        for side,budget in [('control',512)]+[('candidate',b) for b in [128,192,256,384]]:
+        cells=[(s,b) for b in [128,192,256,384] for s in ['control','candidate']] if paired else [('control',512)]+[('candidate',b) for b in [128,192,256,384]]
+        for side,budget in cells:
             selected=[r['metrics'] for r in rows if (r['dataset'],r['side'],r['budget'])==(dataset,side,budget)]
             assert len({tuple(hits_by_cell[(dataset,t,side,budget)]) for t in range(3)})==1
             summary.append(dict(dataset=dataset,side=side,budget=budget,**{key:statistics.median(float(r[key]) for r in selected) for key in ['recall_at_k','search_p50_us','search_p99_us','build_ms','snapshot_bytes']}))

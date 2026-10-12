@@ -1,0 +1,13 @@
+{
+  "paired_low": true,
+  "budgets": [
+    128,
+    192,
+    256,
+    384
+  ],
+  "trials": 3,
+  "cpu": 0,
+  "threads": 1,
+  "development_data": true
+}

@@ -15,6 +15,7 @@ from run_mixed_cpu_acceptance import sha, write_json
 def main():
     parser=argparse.ArgumentParser()
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--paired-low',action='store_true',help='Compare both sides at identical low budgets')
     args=parser.parse_args()
     root=Path(__file__).resolve().parent
     feature=Path('/home/ubuntu/project/vsag-pr2904-promotion-20261012')
@@ -43,6 +44,7 @@ def main():
         candidate=scratch/'build/libvsag-lite.so'
         shutil.copyfile(patch,out/'candidate.patch')
         write_json(out/'identity.json',dict(source_head='dbb2fe0bec685ae7a343b1d2060d0553a98e20d2',control_sha256=sha(library),candidate_sha256=sha(candidate),patch_sha256=sha(patch),candidate_bytes=candidate.stat().st_size,scope='FP32 reciprocal candidate query-budget calibration; development data only'))
+        write_json(out/'protocol.json',dict(paired_low=args.paired_low,budgets=[128,192,256,384],trials=3,cpu=0,threads=1,development_data=True))
         builder=root/'results/quality-target-r2-20261012/source-graph_crud_quality.cpp'
         shutil.copyfile(builder,out/'source-builder.cpp')
         run('compile',['c++','-std=c++17','-O3','-DNDEBUG','-I'+str(feature/'include'),builder,'-L'+str(library.parent),'-Wl,-rpath,'+str(library.parent),'-lvsag-lite','-o',scratch/'builder'])
@@ -52,6 +54,13 @@ def main():
             for trial in range(3):
                 order=[('control',512)]+[('candidate',budget) for budget in [128,192,256,384]]
                 order=order[trial:]+order[:trial]
+                if args.paired_low:
+                    order=[]
+                    budgets=[128,192,256,384]
+                    budgets=budgets[trial:]+budgets[:trial]
+                    for budget in budgets:
+                        sides=['control','candidate'] if trial%2==0 else ['candidate','control']
+                        order.extend((side,budget) for side in sides)
                 for side,budget in order:
                     tag=f'{dataset}-{trial}-{side}-{budget}'
                     env['VSAG_GRAPH_QUERY_EF']=str(budget)

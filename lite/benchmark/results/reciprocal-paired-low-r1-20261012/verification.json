@@ -1,0 +1,167 @@
+{
+  "audit": "PASS",
+  "runs": 48,
+  "recorded_queries": 26400,
+  "summary": [
+    {
+      "dataset": "gist10k",
+      "side": "control",
+      "budget": 128,
+      "recall_at_k": 0.8979,
+      "search_p50_us": 143.926,
+      "search_p99_us": 198.925,
+      "build_ms": 1296.394589,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "candidate",
+      "budget": 128,
+      "recall_at_k": 0.9833,
+      "search_p50_us": 197.684,
+      "search_p99_us": 256.084,
+      "build_ms": 2147.625407,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "control",
+      "budget": 192,
+      "recall_at_k": 0.9243,
+      "search_p50_us": 195.104,
+      "search_p99_us": 264.993,
+      "build_ms": 1293.916926,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "candidate",
+      "budget": 192,
+      "recall_at_k": 0.9905,
+      "search_p50_us": 273.773,
+      "search_p99_us": 349.45,
+      "build_ms": 2126.433762,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "control",
+      "budget": 256,
+      "recall_at_k": 0.9397,
+      "search_p50_us": 251.062,
+      "search_p99_us": 341.49,
+      "build_ms": 1297.500766,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "candidate",
+      "budget": 256,
+      "recall_at_k": 0.9938,
+      "search_p50_us": 345.768,
+      "search_p99_us": 434.187,
+      "build_ms": 2133.682841,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "control",
+      "budget": 384,
+      "recall_at_k": 0.9563,
+      "search_p50_us": 349.05,
+      "search_p99_us": 472.027,
+      "build_ms": 1300.901768,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "gist10k",
+      "side": "candidate",
+      "budget": 384,
+      "recall_at_k": 0.9966,
+      "search_p50_us": 484.277,
+      "search_p99_us": 603.803,
+      "build_ms": 2135.019183,
+      "snapshot_bytes": 39840064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "control",
+      "budget": 128,
+      "recall_at_k": 0.985,
+      "search_p50_us": 50.799,
+      "search_p99_us": 63.788,
+      "build_ms": 543.803191,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "candidate",
+      "budget": 128,
+      "recall_at_k": 1.0,
+      "search_p50_us": 55.778,
+      "search_p99_us": 70.168,
+      "build_ms": 689.854668,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "control",
+      "budget": 192,
+      "recall_at_k": 0.989,
+      "search_p50_us": 71.098,
+      "search_p99_us": 87.389,
+      "build_ms": 540.990701,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "candidate",
+      "budget": 192,
+      "recall_at_k": 1.0,
+      "search_p50_us": 78.817,
+      "search_p99_us": 99.488,
+      "build_ms": 690.453871,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "control",
+      "budget": 256,
+      "recall_at_k": 0.989,
+      "search_p50_us": 90.767,
+      "search_p99_us": 109.277,
+      "build_ms": 540.817676,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "candidate",
+      "budget": 256,
+      "recall_at_k": 1.0,
+      "search_p50_us": 99.717,
+      "search_p99_us": 120.726,
+      "build_ms": 689.490549,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "control",
+      "budget": 384,
+      "recall_at_k": 0.991,
+      "search_p50_us": 128.647,
+      "search_p99_us": 154.566,
+      "build_ms": 542.748691,
+      "snapshot_bytes": 6560064.0
+    },
+    {
+      "dataset": "sift10k",
+      "side": "candidate",
+      "budget": 384,
+      "recall_at_k": 1.0,
+      "search_p50_us": 140.045,
+      "search_p99_us": 162.475,
+      "build_ms": 689.011442,
+      "snapshot_bytes": 6560064.0
+    }
+  ]
+}
