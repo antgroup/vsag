@@ -1,6 +1,8 @@
 # VSAG Lite baseline experiment
 
 Latest acceptance entry: [ACCEPTANCE_STATUS_20261012.md](ACCEPTANCE_STATUS_20261012.md).
+The [native Full equal-ef matrix](results/equal-ef-native-full-20261012/README.md)
+uses a real Full reference, reports quality/resource costs, and does not claim fresh-library or complete-package acceptance.
 See also the [resident-index 20-round matrix](results/resident-mixed-cpu-pr2904-20261012/README.md),
 which retains the original index rather than replacing it with a loaded copy.
 The [current-feature mixed CPU matrix](results/mixed-cpu-pr2904-20261012/README.md)

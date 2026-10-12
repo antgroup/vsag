@@ -1,5 +1,11 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest Full addition: [equal-ef current Lite / pinned native Full comparison](results/equal-ef-native-full-20261012/README.md),
+36builders108loaders, bothquery512. Total loadedRSS6/6lower andwarmload5/6faster,
+but incrementalloadedRSS6/6higher, allSave/snapshotsworse andGISTqualitylower.
+DT_NEEDEDclosure93.754%smaller is not a complete package. Full is the pinned installed
+d18c82a incremental rebuild, not latestfresh; same-quality/selectedISA andfreshFull gates remain.
+
 Latest addition: [20-round resident-index mixed CRUD/CPU matrix](results/resident-mixed-cpu-pr2904-20261012/README.md).
 The original index is retained across all rounds;18fresh processes each15k mutation
 calls and15k queries,270k each cumulatively. Per-round persistence, current-state truth,

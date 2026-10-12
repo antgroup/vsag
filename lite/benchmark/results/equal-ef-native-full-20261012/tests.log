@@ -1,0 +1,8 @@
+test_manifest_corruption_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_unequal_query_budget_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+test_wrong_reference_library_rejected (test_pinned_full_acceptance.FullAuditTests) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.002s
+
+OK

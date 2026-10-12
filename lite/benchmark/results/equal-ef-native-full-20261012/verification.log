@@ -1,0 +1,8 @@
+{
+  "audit": "PASS",
+  "builders": 36,
+  "fresh_loaders": 108,
+  "query_results": 3600,
+  "native_full_reference": "d18c82a1f1f23ff84362516e86af5f3cb2e34475",
+  "equal_query_ef": 512
+}
