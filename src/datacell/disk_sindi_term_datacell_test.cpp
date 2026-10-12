@@ -43,6 +43,7 @@ public:
 
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
+        ++read_count;
         REQUIRE(offset <= bytes_.size());
         REQUIRE(len <= bytes_.size() - offset);
         std::memcpy(dest, bytes_.data() + offset, len);
@@ -58,6 +59,9 @@ public:
     Size() const override {
         return bytes_.size();
     }
+
+public:
+    uint64_t read_count{0};
 
 private:
     std::string bytes_;
@@ -556,4 +560,77 @@ TEST_CASE("DiskSindiTermDataCell rejects memory io", "[ut][DiskSindiTermDataCell
                                                      io_param,
                                                      common_param),
         Catch::Matchers::ContainsSubstring("unsupported SINDIV2 term io type"));
+}
+
+TEST_CASE("DiskSindiTermDataCell LRU eviction and query lifetime", "[ut][DiskSindiTermDataCell]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto* allocator = common.allocator_.get();
+    MutableSindiTermDataCell source(10,
+                                    10000,
+                                    allocator,
+                                    SparseValueQuantizationType::FP32,
+                                    std::make_shared<QuantizationParams>());
+    uint32_t ids[] = {1, 2, 3};
+    float values[] = {1, 2, 3};
+    SparseVector vector;
+    vector.len_ = 3;
+    vector.ids_ = ids;
+    vector.vals_ = values;
+    source.InsertVector(vector, 7);
+    source.Finalize();
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    source.SerializeTermLayout(writer, source.GetTermDictCount());
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"reader_io"})"));
+    auto disk = DiskSindiTermDataCellInterface::MakeInstance(
+        10, allocator, SparseValueQuantizationType::FP32, nullptr, 10000, io, common);
+    IOStreamReader layout(stream);
+    disk->DeserializeTermLayout(layout, 1, 8);
+    auto reader = std::make_shared<StringReader>(stream.str());
+    disk->SetIO(reader);
+    auto load = [&](uint32_t term) {
+        Vector<uint32_t> terms(allocator);
+        terms.push_back(term);
+        return disk->LoadQueryTermBuffers(terms);
+    };
+    disk->SetCacheCapacity(4096);
+    auto memory = disk->GetMemoryUsage();
+    load(1);
+    auto entry_bytes = disk->GetMemoryUsage() - memory;
+    REQUIRE(entry_bytes > 0);
+    disk->SetCacheCapacity(entry_bytes * 2);
+    reader->read_count = 0;
+    load(1);
+    load(2);
+    auto retained = load(1);
+    REQUIRE(reader->read_count == 2);
+    REQUIRE(retained.at(1).owner != nullptr);
+    load(3);  // term 2 is least recently used.
+    load(1);
+    REQUIRE(reader->read_count == 3);
+    load(2);
+    REQUIRE(reader->read_count == 4);
+    REQUIRE(disk->GetMemoryUsage() <= memory + entry_bytes * 2);
+    disk->SetCacheCapacity(0);
+    REQUIRE(retained.at(1).IdsData()[0] == 7);
+    float value;
+    std::memcpy(&value, retained.at(1).ValuesData(), sizeof(value));
+    REQUIRE(value == 1);
+    load(1);
+    load(1);
+    REQUIRE(reader->read_count == 6);
+    disk->SetCacheCapacity(entry_bytes - 1);
+    load(1);
+    load(1);
+    REQUIRE(reader->read_count == 8);
+    REQUIRE(disk->GetMemoryUsage() == memory);
+    disk->SetCacheCapacity(4096);
+    load(1);
+    auto before_rebind = reader->read_count;
+    disk->SetIO(reader);
+    auto after_rebind = reader->read_count;
+    REQUIRE(after_rebind > before_rebind);
+    load(1);
+    REQUIRE(reader->read_count == after_rebind + 1);
 }
