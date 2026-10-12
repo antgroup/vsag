@@ -79,6 +79,8 @@ Build parameters live under `index_param`.
 | `term_id_limit` | int | `1000000` | Upper bound on term IDs; maximum 50 000 000. |
 | `window_size` | int | `50000` | Documents per window, from 10 000 to 60 000. |
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight document terms removed during build (`[0.0, 1.0)`). |
+| `term_prune_ratio` | float | `0.0` | Fraction of lowest-weight postings permanently removed per term per window during `Build`; `[0, 1)`, disabled by default. |
+| `term_retain_threshold` | integer | `0` | Build-time posting cap per term, divided across windows; `0` disables the cap. |
 | `use_quantization` | bool or string | `false` | `false` stores FP32, `true` stores SQ8, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Store high-precision vectors and rerank coarse candidates. |
 | `rerank_type` | string | `"fp32"` | Rerank storage type: `fp32`, `fp16`, or `dmq8`. FP16 stores document values in half precision and scores in FP32. |
@@ -147,3 +149,9 @@ Use SINDI when the full sparse index remains in memory and window-first
 serialization is appropriate. Use SINDI_V2 when persisted postings should be
 organized by term or when searches should fetch only the query's term lists
 from external storage.
+
+### Build-time term pruning
+
+The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`, default `0`) and `term_retain_threshold` (non-negative integer, default `0`). Both default to disabled. During `Build`, each term's postings in each window are sorted by stored weight and permanently trimmed to the smaller of `floor(posting_count * (1 - term_prune_ratio))` and `floor(term_retain_threshold / window_count)`; a zero threshold imposes no cap, and non-empty lists retain at least one posting. Mutable and immutable builds support FP32, FP16 and SQ8. Rerank vectors and document labels are preserved. Search-time pruning operates on the retained postings; it cannot restore removed postings. Subsequent `Add` calls do not apply build-time pruning.
+
+For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.
