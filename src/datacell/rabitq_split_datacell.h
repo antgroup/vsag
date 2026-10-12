@@ -1726,6 +1726,8 @@ public:
             const float* centroid_diff = nullptr;
             float centroid_diff_sq = 0.0F;
             if (not same_cluster) {
+                // Per-thread scratch does not mutate this datacell. Retain the largest dimension
+                // seen by this thread to avoid per-pair allocation; release it at thread exit.
                 thread_local std::vector<float> diff_scratch;
                 if (diff_scratch.size() < dim) {
                     diff_scratch.resize(dim);

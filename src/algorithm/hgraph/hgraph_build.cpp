@@ -570,9 +570,9 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
     const auto dim = static_cast<uint64_t>(this->dim_);
     encoded->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
     encoded->stride = encoded->one_bit_size + rabitq_split_codes_->SupplementCodeSize();
-    CHECK_ARGUMENT(
-        encoded->stride > 0 and count <= std::numeric_limits<uint64_t>::max() / encoded->stride,
-        "fused Add code buffer size overflow");
+    if (encoded->stride == 0 or count > std::numeric_limits<uint64_t>::max() / encoded->stride) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused Add code buffer size overflow");
+    }
     encoded->codes.resize(count * encoded->stride);
     encoded->clusters.resize(count);
     const auto* vectors = static_cast<const float*>(get_data(data));

@@ -56,6 +56,8 @@ public:
         }
         // Reserve directory space first so publishing pointers below cannot allocate.
         blocks_.reserve(required);
+        // MemoryBlockIO only appends blocks: same-size Resize is a no-op and growth never
+        // relocates old blocks, including blocks retained after a partial allocation failure.
         io_.Resize(required * block_size_);
         while (blocks_.size() < required) {
             auto lease = io_.Acquire(blocks_.size() * block_size_, block_size_);

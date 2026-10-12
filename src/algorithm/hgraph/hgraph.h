@@ -177,6 +177,8 @@ public:
             hash ^= value;
             hash *= 1099511628211ULL;
         };
+        // Walk the physical bottom graph, not the HGraph publication watermark. As required
+        // above, callers must finish construction/publication before taking this checksum.
         const auto nodes = this->bottom_graph_->TotalCount();
         for (InnerIdType node = 0; node < nodes; ++node) {
             Vector<InnerIdType> neighbors(allocator_);
