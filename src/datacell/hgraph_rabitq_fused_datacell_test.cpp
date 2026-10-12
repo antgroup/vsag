@@ -219,3 +219,63 @@ TEST_CASE("HGraph RaBitQ fused deserialize validates its wire layout",
 }
 
 }  // namespace vsag
+
+namespace vsag {
+TEST_CASE("HGraph fused blocks preserve node views and packed serialization during growth",
+          "[ut][HGraphRaBitQFusedDataCell][AlignedBlockLayout]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 1536;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    param->max_degree_ = 48;
+    param->init_max_capacity_ = 0;
+    constexpr uint64_t one_size = 204;
+    constexpr uint64_t supplement_size = 1360;
+    HGraphRaBitQFusedDataCell graph(param, one_size, supplement_size, common);
+    REQUIRE(graph.RecordSize() == 1792);
+    Vector<uint8_t> one(one_size, 0x5A, allocator.get());
+    Vector<uint8_t> supplement(supplement_size, 0xA5, allocator.get());
+    Vector<InnerIdType> neighbors(1, 0, allocator.get());
+    const uint8_t* first = nullptr;
+    constexpr InnerIdType count = 2500;
+    for (InnerIdType id = 0; id < count; ++id) {
+        graph.Resize(id + 1);
+        graph.SetNodeCodes(id, id + 100, id % 16, one.data(), supplement.data());
+        graph.InsertNeighborsById(id, neighbors);
+        if (id == 0) {
+            first = graph.GetNodeRecord(0);
+        }
+        REQUIRE(graph.GetNodeRecord(0) == first);
+    }
+    REQUIRE(graph.GetMemoryUsage() < 8 * 1024 * 1024);
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    graph.Serialize(writer);
+    const auto wire = stream.str();
+    const auto payload_offset = wire.size() - count * graph.RecordSize();
+    HGraphRaBitQFusedDataCell restored(param, one_size, supplement_size, common);
+    IOStreamReader reader(stream);
+    restored.Deserialize(reader);
+    REQUIRE(restored.Capacity() == count);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto* record = graph.GetNodeRecord(id);
+        REQUIRE(reinterpret_cast<uintptr_t>(record) % 64 == 0);
+        REQUIRE(graph.GetLabel(record) == id + 100);
+        REQUIRE(graph.GetNodeView(id).neighbor_count == 1);
+        REQUIRE(graph.GetCodeView(id).cluster_id == id % 16);
+        REQUIRE(std::memcmp(graph.GetOneBitCode(record), one.data(), one_size) == 0);
+        REQUIRE(std::memcmp(graph.GetSupplementCode(record), supplement.data(), supplement_size) ==
+                0);
+        REQUIRE(std::memcmp(record,
+                            wire.data() + payload_offset + id * graph.RecordSize(),
+                            graph.RecordSize()) == 0);
+        REQUIRE(std::memcmp(record, restored.GetNodeRecord(id), graph.RecordSize()) == 0);
+    }
+    const auto* old = restored.GetNodeRecord(count - 1);
+    restored.Resize(2 * count);
+    REQUIRE(restored.GetNodeRecord(count - 1) == old);
+    REQUIRE(restored.GetLabel(old) == count + 99);
+}
+}  // namespace vsag

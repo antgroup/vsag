@@ -72,8 +72,7 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
                                                      uint64_t one_bit_code_size,
                                                      uint64_t supplement_code_size,
                                                      const IndexCommonParam& common_param)
-    : storage_(common_param.allocator_.get()),
-      one_bit_code_size_(one_bit_code_size),
+    : one_bit_code_size_(one_bit_code_size),
       supplement_code_size_(supplement_code_size),
       dim_(common_param.dim_) {
     CHECK_ARGUMENT(graph_param != nullptr, "fused graph parameter must not be null");
@@ -103,24 +102,13 @@ HGraphRaBitQFusedDataCell::HGraphRaBitQFusedDataCell(const GraphDataCellParamPtr
     if (graph_param->support_duplicate_) {
         InitDuplicateTracker();
     }
+    storage_ = std::make_unique<AlignedBlockLayout>(record_size_, allocator_);
     Reallocate(max_capacity_);
 }
 
 void
 HGraphRaBitQFusedDataCell::Reallocate(InnerIdType new_capacity) {
-    Vector<uint8_t> replacement(
-        static_cast<uint64_t>(new_capacity) * record_size_ + K_CACHE_LINE_SIZE - 1, 0, allocator_);
-    const auto replacement_address = reinterpret_cast<uintptr_t>(replacement.data());
-    const uint64_t replacement_offset =
-        (K_CACHE_LINE_SIZE - replacement_address % K_CACHE_LINE_SIZE) % K_CACHE_LINE_SIZE;
-    if (not storage_.empty()) {
-        const auto copy_count = std::min(max_capacity_, new_capacity);
-        std::memcpy(replacement.data() + replacement_offset,
-                    storage_.data() + aligned_offset_,
-                    static_cast<uint64_t>(copy_count) * record_size_);
-    }
-    storage_ = std::move(replacement);
-    aligned_offset_ = replacement_offset;
+    storage_->Reserve(new_capacity);
     max_capacity_ = new_capacity;
     if (duplicate_tracker_ != nullptr) {
         duplicate_tracker_->Resize(new_capacity);
@@ -129,7 +117,7 @@ HGraphRaBitQFusedDataCell::Reallocate(InnerIdType new_capacity) {
 
 uint8_t*
 HGraphRaBitQFusedDataCell::MutableNodeRecord(InnerIdType id) {
-    return storage_.data() + aligned_offset_ + static_cast<uint64_t>(id) * record_size_;
+    return storage_->GetMutableRecord(id);
 }
 
 const InnerIdType*
@@ -209,7 +197,7 @@ bool
 HGraphRaBitQFusedDataCell::GetFusedCodeView(InnerIdType id, RaBitQFusedCodeView& view) const {
     // Logical duplicate aliases own encoded records but no graph edges, so their IDs may be
     // greater than the graph-node high-water mark. Callers validate logical IDs through the
-    // label table; this layer only enforces the allocated slab boundary.
+    // label table; this layer only enforces the allocated record capacity.
     if (id >= max_capacity_) {
         view = {};
         return false;
@@ -323,7 +311,7 @@ HGraphRaBitQFusedDataCell::Serialize(StreamWriter& writer) {
     StreamWriter::WriteString(writer, codec_model_);
     const uint64_t bytes = static_cast<uint64_t>(max_capacity_) * record_size_;
     StreamWriter::WriteObj(writer, bytes);
-    writer.Write(reinterpret_cast<const char*>(storage_.data() + aligned_offset_), bytes);
+    storage_->WriteRecords(writer, max_capacity_);
 }
 
 void
@@ -424,28 +412,20 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     CHECK_ARGUMENT(bytes == expected_bytes, "invalid fused graph payload size");
     CHECK_ARGUMENT(bytes <= remaining_bytes(reader), "truncated fused graph node payload");
 
-    Vector<uint8_t> replacement(bytes + K_CACHE_LINE_SIZE - 1, 0, allocator_);
-    const auto replacement_address = reinterpret_cast<uintptr_t>(replacement.data());
-    const uint64_t replacement_offset =
-        (K_CACHE_LINE_SIZE - replacement_address % K_CACHE_LINE_SIZE) % K_CACHE_LINE_SIZE;
-    if (bytes > 0) {
-        reader.Read(reinterpret_cast<char*>(replacement.data() + replacement_offset), bytes);
-    }
+    auto replacement = std::make_unique<AlignedBlockLayout>(record_size_, allocator_);
+    replacement->Reserve(max_capacity_);
+    replacement->ReadRecords(reader, max_capacity_);
 
     codec_model_ = std::move(codec_model);
     storage_ = std::move(replacement);
-    aligned_offset_ = replacement_offset;
     if (duplicate_tracker_ != nullptr) {
         duplicate_tracker_->Resize(max_capacity_);
     }
-    CHECK_ARGUMENT(
-        reinterpret_cast<uintptr_t>(storage_.data() + aligned_offset_) % K_CACHE_LINE_SIZE == 0,
-        "fused graph node slab is not cache-line aligned");
 }
 
 uint64_t
 HGraphRaBitQFusedDataCell::GetMemoryUsage() const {
-    return sizeof(*this) + storage_.capacity() + codec_model_.capacity();
+    return sizeof(*this) + storage_->GetMemoryUsage() + codec_model_.capacity();
 }
 
 DuplicateTrackerPtr
