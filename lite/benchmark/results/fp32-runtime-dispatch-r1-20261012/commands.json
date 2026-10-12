@@ -1,0 +1,18 @@
+[
+  {
+    "tag": "lite-compile",
+    "argv": [
+      "c++",
+      "-std=c++17",
+      "-O3",
+      "-I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src",
+      "/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/fp32_dispatch_probe.cpp",
+      "-L/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+      "-Wl,-rpath,/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+      "-lvsag-lite",
+      "-o",
+      "/dev/shm/vsag-dispatch-qce806n7/lite"
+    ],
+    "exit": 1
+  }
+]

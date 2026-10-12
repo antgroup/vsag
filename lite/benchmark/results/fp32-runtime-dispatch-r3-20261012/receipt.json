@@ -1,0 +1,18 @@
+{
+  "audit": "PASS",
+  "results": [
+    {
+      "side": "lite",
+      "scalar_avx512": 1
+    },
+    {
+      "side": "native_full",
+      "scalar_avx512": 1,
+      "batch4_avx512": 1
+    }
+  ],
+  "lite_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
+  "full_sha256": "8740d2199518703883021d0d49b427e0e6a01be32a6866f561cfd86012f9c888",
+  "cpp_sha256": "71d8956cf73984492f5339a9576eabdbdc6d7dbe645db9df73d666673d0eab08",
+  "boundary": "Runtime FP32 dispatch only; compiler semantics remain Full -Ofast/-g vs Lite -O3. No index/query timing measured."
+}

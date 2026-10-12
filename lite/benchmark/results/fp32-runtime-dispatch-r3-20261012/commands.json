@@ -1,0 +1,63 @@
+[
+  {
+    "tag": "lite-compile",
+    "argv": [
+      "c++",
+      "-std=c++17",
+      "-O3",
+      "-I/home/ubuntu/project/vsag-pr2904-promotion-20261012/src",
+      "-DVSAG_LITE_HAS_X86_SIMD",
+      "/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/fp32_dispatch_probe.cpp",
+      "-L/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+      "-Wl,-rpath,/home/ubuntu/project/pr2904-promotion-audit-20261012/release-final",
+      "-lvsag-lite",
+      "-o",
+      "/dev/shm/vsag-dispatch-929zamp_/lite"
+    ],
+    "exit": 0
+  },
+  {
+    "tag": "lite-runtime",
+    "argv": [
+      "taskset",
+      "-c",
+      "0",
+      "/dev/shm/vsag-dispatch-929zamp_/lite"
+    ],
+    "exit": 0
+  },
+  {
+    "tag": "full-compile",
+    "argv": [
+      "c++",
+      "-std=c++17",
+      "-O3",
+      "-I/home/ubuntu/project/vsag-full-fresh-source-20261012/src",
+      "-DVSAG_BENCH_FULL",
+      "/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/fp32_dispatch_probe.cpp",
+      "-L/home/ubuntu/project/vsag-full-fresh-install-20261012/lib",
+      "-Wl,-rpath,/home/ubuntu/project/vsag-full-fresh-install-20261012/lib",
+      "-lvsag",
+      "-o",
+      "/dev/shm/vsag-dispatch-929zamp_/full"
+    ],
+    "exit": 0
+  },
+  {
+    "tag": "full-runtime",
+    "argv": [
+      "taskset",
+      "-c",
+      "0",
+      "/dev/shm/vsag-dispatch-929zamp_/full"
+    ],
+    "exit": 0
+  },
+  {
+    "tag": "cpu",
+    "argv": [
+      "lscpu"
+    ],
+    "exit": 0
+  }
+]

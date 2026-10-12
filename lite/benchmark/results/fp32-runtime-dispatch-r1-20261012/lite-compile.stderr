@@ -1,0 +1,5 @@
+/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/fp32_dispatch_probe.cpp: In function ‘int main()’:
+/home/ubuntu/project/vsag-pr2926-acceptance-20261012/lite/benchmark/fp32_dispatch_probe.cpp:20:45: error: ‘avx512_fp32_distance’ is not a member of ‘vsag::lite::detail’; did you mean ‘select_fp32_distance’?
+   20 |                         vsag::lite::detail::avx512_fp32_distance;
+      |                                             ^~~~~~~~~~~~~~~~~~~~
+      |                                             select_fp32_distance
