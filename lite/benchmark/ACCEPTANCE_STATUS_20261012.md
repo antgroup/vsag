@@ -1,5 +1,11 @@
 # OSPP Lite acceptance evidence status, 2026-10-12
 
+Latest quality-control evidence: [GIST fixed-snapshot target calibration / validation](results/quality-target-r2-20261012/README.md).
+100 calibration + 900 independent query rows, frozen budgets, three trials,
+108 calibration /18 validation processes, 27000 recorded queries, FP64 oracle
+and raw audit PASS. All Lite modes miss the .990 diagnostic validation target;
+Full meets it. Equal-budget latency wins must not be called same-quality wins.
+
 Latest same-source evidence: [fresh native Full / Lite matrix](results/full-fresh-equal-r1-20261012/README.md).
 Full core was rebuilt from an empty directory at dbb2fe0, ccache OFF, 243 core
 objects, matching headers, cached dependency sources/system libraries. Verified

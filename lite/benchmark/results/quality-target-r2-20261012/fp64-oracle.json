@@ -1,0 +1,12 @@
+{
+  "oracle": "Direct C++ FP64 coordinate-difference squared-L2, ties by ascending ID; no Lite distance kernel or fast-math",
+  "source_sha256": "4185e4bbf4ea9e6fd18056c0b1ef9e6d265534035c20a96282dfdc539708cee3",
+  "queries": 1000,
+  "base_count": 10000,
+  "mismatches": [],
+  "inputs": {
+    "base.fvecs": "359290ad0de501d683122967de2b353ecd6522b0ffc630c59ca945e228fd5444",
+    "queries.fvecs": "0d1d620049de12da455ed7201e97cbab372c4d54d0e6dedbc8c503f62c911299",
+    "groundtruth.ivecs": "960cd0112389dc79c06e8a4f9dc02e88ed3881fbcf4848c0c33109ea801a1fea"
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "fp32-lite": {
+    "ef": 2048,
+    "calibration_target_met": true
+  },
+  "fp32-full": {
+    "ef": 512,
+    "calibration_target_met": true
+  },
+  "fp16-lite": {
+    "ef": 2048,
+    "calibration_target_met": true
+  },
+  "fp16-full": {
+    "ef": 512,
+    "calibration_target_met": true
+  },
+  "rabitq8-lite": {
+    "ef": 2048,
+    "calibration_target_met": true
+  },
+  "rabitq8-full": {
+    "ef": 2048,
+    "calibration_target_met": true
+  }
+}
