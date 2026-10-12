@@ -217,8 +217,9 @@ preserves vector inner IDs, and may renumber cliques. FORCE_REMOVE also moves ve
 
 Shared ADD/repair pipeline:
 
-1. Insert an ADD batch into HGraph, then maintain successful points. `search_mci_knn` calls
-   HGraph `KnnSearch` with `use_mci=false`, not MCI search.
+1. Insert an ADD batch into HGraph, then maintain the successful points: each chunk is planned
+   in parallel and merged in inner-ID order by a single thread, and every row still follows the
+   rules in steps 2-3. `search_mci_knn` calls HGraph `KnnSearch` with `use_mci=false`, not MCI search.
 2. Target `min(mci_mcs, visible_total - 1)` neighbors. Internal ef is `max(query_k, 100)`,
    not benchmark ef=320. Remove self, deleted, and out-of-range points; enlarge the request if needed.
 3. Try existing cliques with `|KNN ∩ C| / |C| >= join_ratio` and room below the incremental cap,
@@ -371,8 +372,16 @@ See `examples/cpp/324_feature_hgraph_mci_companion.cpp` for Dataset and Filter c
 ## Add, Delete, Serialize, and Stats
 
 When MCI is enabled by the flat build parameters, `HGraph::Add()` first inserts the HGraph
-batch, then updates MCI for each successfully inserted row. It first tries to join suitable
-existing cliques, then creates incremental cliques if the unique neighbor degree is still too low.
+batch, then updates the MCI companion for the successfully inserted rows. It first tries to join
+suitable existing cliques, then creates incremental cliques if the unique neighbor degree is still
+too low.
+
+That update works in chunks. Inside a chunk the candidate KNN, the clique JOIN proposals and the
+local clique construction of every row are planned in parallel against one frozen read view, and a
+single thread then merges the plans in inner-ID order and applies them. Per-row coverage and the
+degree target do not depend on the planning order, but the candidate KNN comes from concurrent
+graph search, so as in the full parallel build the resulting clique structure may depend on the
+thread count and on scheduling.
 
 Prefer `Build()` for the initial index, followed by incremental additions. Add on an empty
 index can trigger construction, but many tiny Adds are not recommended as a replacement
