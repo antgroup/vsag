@@ -38,6 +38,7 @@ struct HGraphMCIParameters {
     uint64_t mcs{200};
     uint64_t clique_max{50};
     float alpha{1.2F};
+    std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};
     std::string knng_path{};
     float incremental_join_ratio_threshold{0.6F};
     uint64_t incremental_added_mct{3};

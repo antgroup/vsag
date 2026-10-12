@@ -11,8 +11,10 @@ companion by comparing `Filter::ValidRatio()` with a threshold.
 ## Build Configuration
 
 MCI build parameters are flat fields in `index_param`. The companion is enabled when
-`use_mci` is true or when any of `mci_mcs`, `mci_clique_max`, or `mci_alpha` is present.
-Omit all four fields to disable it:
+`use_mci` is true or when `mci_mcs`, `mci_clique_max`, `mci_alpha`, or
+`mci_knng_source` is present. The `mci_knng_source` parameter selects whether clique
+construction derives its KNN graph from the completed
+HGraph bottom graph or builds a dedicated ODescent graph:
 
 ```json
 {
@@ -25,17 +27,21 @@ Omit all four fields to disable it:
     "ef_construction": 400,
     "mci_mcs": 200,
     "mci_clique_max": 50,
-    "mci_alpha": 1.2
+    "mci_alpha": 1.2,
+    "mci_knng_source": "odescent"
   }
 }
 ```
 
-HGraph derives the KNN graph for clique construction from the built HGraph graph and vector data.
+The default source is `hgraph`, which preserves the existing behavior. Set the source to
+`odescent` to build the MCI KNN graph directly from the stored vectors. An internally configured
+external KNN graph path takes precedence over this selector.
 
 | Parameter | Purpose |
 | --- | --- |
 | `use_mci` | Enables MCI with default build parameters when set to `true`. |
 | `mci_mcs` | Candidate neighbor count used when constructing cliques. |
+| `mci_knng_source` | KNN graph source: `hgraph` (default) or `odescent`. |
 | `mci_clique_max` | Maximum clique size during full build. |
 | `mci_alpha` | Clique construction expansion factor. |
 | `mci_incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
@@ -66,9 +72,10 @@ The seed count is
 `mci_seed_ratio` defaults to `0.1` and must be finite and non-negative. The resulting
 seed count is capped at the number of points that satisfy the filter.
 
-The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
-function filters are accepted, but a custom `Filter` gives the search planner better
-selectivity information.
+The MCI route requires a bitset filter or a custom `Filter` that supplies a nonempty
+valid-ID list through `GetValidIds()`, plus a meaningful `ValidRatio()` hint. Function-only
+filters fall back to HGraph. Sampling resolves the selected labels without filling gaps
+from stale or duplicate IDs; if no seeds remain, search falls back to HGraph.
 
 ## Add, Serialize, and Stats
 

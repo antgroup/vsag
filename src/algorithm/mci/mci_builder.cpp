@@ -18,10 +18,11 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
-#include <future>
+#include <exception>
 #include <limits>
 #include <map>
 #include <mutex>
+#include <thread>
 #include <vector>
 
 #include "impl/logger/logger.h"
@@ -32,8 +33,6 @@ namespace vsag {
 namespace {
 
 constexpr uint64_t K_V3_SCHEDULE_CHUNK = 64;
-constexpr uint64_t K_MCI_MIN_CLIQUE_SIZE = 50;
-
 // NOLINTNEXTLINE(readability-identifier-naming)
 struct MCIV3Candidate {
     InnerIdType id{0};
@@ -60,6 +59,24 @@ struct MCIV3ThreadTiming {
     double edge_sort{0.0};
     double mce{0.0};
     double choose{0.0};
+};
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+class MCIThreadJoinGuard {
+public:
+    explicit MCIThreadJoinGuard(Vector<std::thread>& workers) : workers_(workers) {
+    }
+
+    ~MCIThreadJoinGuard() {
+        for (auto& worker : workers_) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+    }
+
+private:
+    Vector<std::thread>& workers_;
 };
 
 double
@@ -134,7 +151,7 @@ BuildMCICliques(const float* vectors,
     const auto candidate_limit =
         std::min<uint64_t>({params.candidate_limit, graph.row_stride, total - 1});
     const auto clique_threshold =
-        std::min<uint64_t>({K_MCI_MIN_CLIQUE_SIZE, candidate_limit + 1, total});
+        std::max<uint64_t>(2, std::min<uint64_t>({params.clique_max, candidate_limit + 1, total}));
     const auto node_clique_limit = std::max<int>(3, static_cast<int>(total / 100));
     const auto thread_count = std::max<uint64_t>(1, std::min<uint64_t>(params.thread_count, total));
     const auto max_saved_cliques =
@@ -155,11 +172,24 @@ BuildMCICliques(const float* vectors,
     double max_norm_error = 0.0;
     {
         std::atomic<uint64_t> next_id{0};
-        std::vector<std::future<void>> workers;
+        Vector<std::thread> workers(allocator);
         workers.reserve(thread_count);
         std::mutex norm_mutex;
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
+        MCIThreadJoinGuard join_guard(workers);
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
-            workers.emplace_back(std::async(std::launch::async, [&, tid]() {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
                 double local_max = 0.0;
                 while (true) {
                     const auto start = next_id.fetch_add(K_V3_SCHEDULE_CHUNK);
@@ -176,10 +206,15 @@ BuildMCICliques(const float* vectors,
                 }
                 std::lock_guard<std::mutex> lock(norm_mutex);
                 max_norm_error = std::max(max_norm_error, local_max);
-            }));
+            });
         }
         for (auto& worker : workers) {
-            worker.get();
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
         }
     }
     const bool unit_norm = max_norm_error < 1e-3;
@@ -188,8 +223,9 @@ BuildMCICliques(const float* vectors,
                  max_norm_error);
 
     auto distance_from_dot = [&](InnerIdType lhs, InnerIdType rhs, float dot) {
-        if (params.metric == MetricType::METRIC_TYPE_L2SQR) {
-            return FP32ComputeL2Sqr(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim);
+        if (params.metric == MetricType::METRIC_TYPE_COSINE and unit_norm) {
+            const float distance = 2.0F - 2.0F * dot;
+            return distance > 0.0F ? distance : 0.0F;
         }
         if (params.metric == MetricType::METRIC_TYPE_IP) {
             return 1.0F - dot;
@@ -246,11 +282,24 @@ BuildMCICliques(const float* vectors,
         std::atomic<uint64_t> sum_edge_size{0};
         std::atomic<uint64_t> sum_clique_count{0};
         Vector<MCIV3ThreadTiming> round_timings(thread_count, allocator);
-        std::vector<std::future<void>> workers;
+        Vector<std::thread> workers(allocator);
         workers.reserve(thread_count);
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
+        MCIThreadJoinGuard join_guard(workers);
 
         for (uint64_t tid = 0; tid < thread_count; ++tid) {
-            workers.emplace_back(std::async(std::launch::async, [&, tid]() {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
                 std::vector<MCIV3Edge> edges;
                 edges.reserve(candidate_limit * (candidate_limit + 1) / 2);
                 Vector<MCIV3Candidate> candidates(candidate_limit, allocator);
@@ -270,7 +319,6 @@ BuildMCICliques(const float* vectors,
                 };
 
                 auto solve_seed = [&](InnerIdType seed) {
-                    const auto* query = VectorAt(vectors, dim, seed);
                     edges.clear();
                     uint64_t candidate_size = 0;
 
@@ -341,7 +389,7 @@ BuildMCICliques(const float* vectors,
                         ExpandDistanceLimit(candidates[0].distance, now_alpha, params.metric);
                     stage_start = std::chrono::steady_clock::now();
                     for (uint64_t i = 0; i < candidate_size; ++i) {
-                        if (candidates[i].distance <= distance_limit) {
+                        if (candidates[i].distance < distance_limit) {
                             edges.push_back(
                                 MCIV3Edge{seed, candidates[i].id, candidates[i].distance});
                         }
@@ -501,10 +549,15 @@ BuildMCICliques(const float* vectors,
                         solve_seed(seed);
                     }
                 }
-            }));
+            });
         }
         for (auto& worker : workers) {
-            worker.get();
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
         }
 
         uncovered = 0;
