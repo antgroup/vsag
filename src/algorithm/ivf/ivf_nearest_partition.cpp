@@ -450,6 +450,23 @@ IVFNearestPartition::GetMemoryUsage() const {
     memory += this->norms_.size() * sizeof(float);
     return memory;
 }
+
+[[nodiscard]] uint64_t
+IVFNearestPartition::EstimateMemory(uint64_t num_elements) const {
+    (void)num_elements;
+    auto memory = static_cast<uint64_t>(sizeof(IVFNearestPartition));
+    // The trained layout always materializes bucket_count_ centroids of dim_ floats plus the
+    // per-centroid constant term, regardless of how many vectors are inserted afterwards.
+    const auto bucket_count = static_cast<uint64_t>(this->bucket_count_);
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    memory += bucket_count * dim * sizeof(float);
+    memory += bucket_count * sizeof(float);
+    if (this->use_route_graph_ and this->route_index_ptr_ != nullptr) {
+        memory += this->route_index_ptr_->EstimateMemory(bucket_count);
+    }
+    return memory;
+}
+
 Vector<BucketIdType>
 IVFNearestPartition::classify_datas_by_scan(const void* datas,
                                             int64_t count,
