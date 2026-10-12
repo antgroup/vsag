@@ -3687,6 +3687,46 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
     SECTION("serial reference reaches the same coverage") {
         REQUIRE(stats_of(build_and_add(1, 500))["mci_covered_nodes"].GetInt() == base + 500);
     }
+    SECTION("sparse candidates keep coverage complete when rows fall back to the repair") {
+        // Vectors placed on a coarse grid are far apart, so an incremental row finds fewer
+        // candidates than the degree target and the merge hands the row to the serial repair.
+        // Measured on this data: every one of the 600 added rows takes the fallback, which is the
+        // branch that must keep coverage complete when a plan under-reports. The planned cliques
+        // are walked before the live structure sees them, so the knn_empty/singleton branches are
+        // reached as well. Coverage is the invariant that must hold either way.
+        constexpr int64_t sparse_dim = 8;
+        constexpr int64_t sparse_base = 200;
+        constexpr int64_t sparse_added = 600;
+        constexpr int64_t sparse_total = sparse_base + sparse_added;
+        std::vector<int64_t> sparse_ids(sparse_total);
+        std::iota(sparse_ids.begin(), sparse_ids.end(), 0);
+        std::vector<float> sparse_vectors(sparse_total * sparse_dim);
+        for (int64_t row = 0; row < sparse_total; ++row) {
+            for (int64_t col = 0; col < sparse_dim; ++col) {
+                // A large stride keeps distinct rows far apart in L2, so each row's candidate set
+                // is small relative to the degree target.
+                sparse_vectors[row * sparse_dim + col] =
+                    static_cast<float>(((row * 7919 + col * 104729) % 100003)) * 1.0F;
+            }
+        }
+        auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(sparse_dim));
+        params["index_param"]["graph_type"].SetString("nsw");
+        params["index_param"]["base_io_type"].SetString("memory_io");
+        params["index_param"]["build_thread_count"].SetInt(4);
+        auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(index->Build(make_dataset(sparse_ids, sparse_vectors, 0, sparse_base, sparse_dim))
+                    .has_value());
+        auto added = index->Add(
+            make_dataset(sparse_ids, sparse_vectors, sparse_base, sparse_added, sparse_dim));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(stats["mci_total_nodes"].GetInt() == sparse_total);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == sparse_total);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    }
     SECTION("search stays usable after a planned batch") {
         const auto index = build_and_add(4, 2500);
         for (const auto& search_param :

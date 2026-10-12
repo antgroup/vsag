@@ -87,7 +87,9 @@ public:
     Run(const HGraph::AddBatch& batch, const DatasetPtr& data);
 
     /// Plan one row of an Add batch against a frozen read view. Caller owns view and plan and must
-    /// not hold any CliqueDataCell write lock. Plans are not applied here.
+    /// not hold any CliqueDataCell write lock. plan.inner_id must already hold the row this plan
+    /// describes: it is read here and reused by the merge, so the caller sets it once. Plans are
+    /// not applied here.
     void
     plan_incremental_mci_clique(const std::shared_lock<std::shared_mutex>& view,
                                 const Vector<InnerIdType>& knn_ids,
