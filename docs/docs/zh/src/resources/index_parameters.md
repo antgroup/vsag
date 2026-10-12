@@ -45,7 +45,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
 | `alpha` | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/) |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/) |
 | `use_reverse_edges` | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且压缩图存储不支持 |
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
 | `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
@@ -54,6 +54,8 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `mrle_dim` | `0` | MRLE 输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
 | `fast_encode_rabitq` | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 恢复精确编码器 |
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
+
+HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantization_type` 均可选择 `sq8_local` 或 `sq4_local`（后者需要 `use_reorder: true`）。内存、持久化及限制见[local SQ4/SQ8](../quantization/sq.md)。
 
 ### PiPNN 构建参数
 

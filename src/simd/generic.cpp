@@ -15,11 +15,14 @@
 
 #include <cstring>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
 #include "simd/int8_simd.h"
 #include "simd/kernels/kernels.h"
 #include "simd/kernels/rabitq_pack.h"
 #include "simd/traits/simd_traits_generic.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 #include "utils/float_utils.h"
 
 namespace vsag::generic {
@@ -1383,4 +1386,50 @@ FHTRotate(float* data, uint64_t dim_) {
     }
 }
 
+}  // namespace vsag::generic
+
+namespace vsag::generic {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, true, 8, false>(
+        query, nullptr, codes, dim);
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 8, false>(
+        nullptr, a, b, dim);
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, true, 8, true>(
+        query, nullptr, codes, dim);
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 8, true>(
+        nullptr, a, b, dim);
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, true, 4, false>(
+        query, nullptr, codes, dim);
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 4, false>(
+        nullptr, a, b, dim);
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, true, 4, true>(
+        query, nullptr, codes, dim);
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 4, true>(
+        nullptr, a, b, dim);
+}
 }  // namespace vsag::generic

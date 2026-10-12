@@ -1218,7 +1218,8 @@ HGraph::InitFeatures() {
     auto name = this->basic_flatten_codes_->GetQuantizerName();
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16) {
+        name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
+        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({

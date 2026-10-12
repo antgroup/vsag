@@ -23,7 +23,10 @@
 #include <cstring>
 #include <memory>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 constexpr auto
 generate_bit_lookup_table() {
     std::array<std::array<uint8_t, 8>, 256> table{};
@@ -1660,4 +1663,42 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::sve
+
+namespace vsag::sve {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+}
 }  // namespace vsag::sve
