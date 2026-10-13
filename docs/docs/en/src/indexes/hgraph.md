@@ -82,6 +82,10 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `mmap_io`) |
 | `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
 
+The optional [MCI companion](../advanced/hgraph_mci_companion.md) supports filtered
+search. Set `mci_knng_source` in `index_param` to `hgraph` (default) or `odescent`
+to select its candidate graph source and enable the companion.
+
 ## Supported input data types
 
 The `dtype` field in the top-level build config selects how `Dataset` interprets the raw vector

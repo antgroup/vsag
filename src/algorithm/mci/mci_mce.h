@@ -91,7 +91,10 @@ private:
     void
     clear_must_node(uint32_t u, std::vector<bool>& must_contain_nodes);
     bool
-    try_save_must_clique(uint32_t ER, uint32_t EC, std::vector<bool>& must_contain_nodes);
+    try_save_must_clique(uint32_t ER,
+                         uint32_t EC,
+                         uint32_t EP,
+                         std::vector<bool>& must_contain_nodes);
 
     void
     bk_tomita_rec_ccr_v4(

@@ -76,6 +76,10 @@ auto result = index->KnnSearch(
 | `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `buffer_io` 时必填） |
 | `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
 
+可选的 [MCI 挂件](../advanced/hgraph_mci_companion.md) 支持过滤搜索。
+在 `index_param` 中设置 `mci_knng_source` 为 `hgraph`（默认）或 `odescent`，
+即可选择候选图来源并启用挂件。
+
 ## 支持的输入数据类型
 
 顶层构建配置中的 `dtype` 字段决定 `Dataset` 如何解释原始向量字节。HGraph 支持四种输入类型，

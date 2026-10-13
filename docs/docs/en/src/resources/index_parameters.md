@@ -41,6 +41,10 @@ HGraph places its build parameters under the generic `index_param` key (see
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/README.md) for all supported values |
 
+The optional `mci_knng_source` build parameter enables the MCI companion and selects
+`hgraph` (default) or `odescent` for its candidate graph. See the
+[MCI companion guide](../advanced/hgraph_mci_companion.md) for construction and filter requirements.
+
 At search time:
 
 ```json
