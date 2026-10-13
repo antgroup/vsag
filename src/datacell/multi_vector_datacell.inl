@@ -79,10 +79,9 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector, InnerId
     {
         std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
-            idx = total_count_;
-            ++total_count_;
+            idx = total_count_.fetch_add(1, std::memory_order_acq_rel);
         } else {
-            total_count_ = std::max(total_count_, idx + 1);
+            total_count_.store(std::max(total_count_.load(std::memory_order_relaxed), idx + 1), std::memory_order_release);
         }
     }
 
@@ -121,9 +120,9 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
         {
             std::lock_guard lock(mutex_);
             for (InnerIdType i = 0; i < count; ++i) {
-                idx_vec[i] = total_count_ + i;
+                idx_vec[i] = total_count_.load(std::memory_order_relaxed) + i;
             }
-            total_count_ += count;
+            total_count_.fetch_add(count, std::memory_order_release);
         }
     }
     for (InnerIdType i = 0; i < count; ++i) {
@@ -135,7 +134,7 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 MultiVectorDataCell<QuantTmpl, IOTmpl>::Resize(InnerIdType new_capacity) {
     std::lock_guard lock(mutex_);
-    const InnerIdType effective_capacity = std::max(new_capacity, total_count_);
+    const InnerIdType effective_capacity = std::max(new_capacity, total_count_.load(std::memory_order_relaxed));
     if (effective_capacity <= this->max_capacity_) {
         return;
     }
@@ -162,7 +161,7 @@ template <typename QuantTmpl, typename IOTmpl>
 const uint8_t*
 MultiVectorDataCell<QuantTmpl, IOTmpl>::GetCodesById(InnerIdType id, bool& need_release) const {
     std::shared_lock lock(mutex_);
-    CHECK_ARGUMENT(id < total_count_, "MultiVectorDataCell id is out of range");
+    CHECK_ARGUMENT(id < total_count_.load(std::memory_order_acquire), "MultiVectorDataCell id is out of range");
     const uint64_t offset = layout_.ReadLocation(id);
     uint32_t length = 0;
     if (not layout_.Payload().Read(offset, sizeof(length), reinterpret_cast<uint8_t*>(&length))) {
@@ -227,25 +226,26 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Deserialize(LvalueOrRvalue<StreamReader>
     this->backend_ =
         QuantizerDistanceBackend<QuantTmpl>::Get(static_cast<const QuantTmpl&>(*this->quantizer_));
 
-    if (this->total_count_ > 0) {
-        std::vector<uint64_t> offsets(static_cast<uint64_t>(this->total_count_));
-        std::vector<InnerIdType> ids(static_cast<uint64_t>(this->total_count_));
-        for (InnerIdType i = 0; i < this->total_count_; ++i) {
+    auto total = this->total_count_.load(std::memory_order_relaxed);
+    if (total > 0) {
+        std::vector<uint64_t> offsets(static_cast<uint64_t>(total));
+        std::vector<InnerIdType> ids(static_cast<uint64_t>(total));
+        for (InnerIdType i = 0; i < total; ++i) {
             ids[i] = i;
         }
         if (not layout_.Locations().MultiRead(ids.data(),
-                                              static_cast<uint64_t>(this->total_count_),
+                                              static_cast<uint64_t>(total),
                                               reinterpret_cast<uint8_t*>(offsets.data()),
                                               allocator_)) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "MultiVectorDataCell: failed to read offsets in Deserialize");
         }
 
-        token_counts_.resize(static_cast<uint64_t>(this->total_count_));
-        std::vector<uint64_t> sizes(static_cast<uint64_t>(this->total_count_), sizeof(uint32_t));
+        token_counts_.resize(static_cast<uint64_t>(total));
+        std::vector<uint64_t> sizes(static_cast<uint64_t>(total), sizeof(uint32_t));
         if (not layout_.Payload().MultiRead(offsets.data(),
                                             sizes.data(),
-                                            static_cast<uint64_t>(this->total_count_),
+                                            static_cast<uint64_t>(total),
                                             reinterpret_cast<uint8_t*>(token_counts_.data()))) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "MultiVectorDataCell: failed to read token counts in Deserialize");
@@ -281,7 +281,7 @@ MultiVectorDataCell<QuantTmpl, IOTmpl>::Query(float* result_dists,
     CHECK_ARGUMENT(idx != nullptr, "MultiVectorDataCell query ids are null");
     std::shared_lock lock(mutex_);
     for (InnerIdType i = 0; i < id_count; ++i) {
-        CHECK_ARGUMENT(idx[i] < total_count_, "MultiVectorDataCell query id is out of range");
+        CHECK_ARGUMENT(idx[i] < total_count_.load(std::memory_order_relaxed), "MultiVectorDataCell query id is out of range");
     }
 
     SearchStatistics* stats = ctx != nullptr ? ctx->stats : nullptr;

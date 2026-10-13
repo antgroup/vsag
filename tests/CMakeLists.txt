@@ -20,6 +20,7 @@
 # executable for CI and full validation, and expose opt-in module executables for local iteration.
 set (VSAG_UNITTEST_FIXTURES
         test_main.cpp
+        test_search_session.cpp
         $<TARGET_OBJECTS:fixtures_allocator>
         $<TARGET_OBJECTS:fixtures_core>
         $<TARGET_OBJECTS:fixtures_data>

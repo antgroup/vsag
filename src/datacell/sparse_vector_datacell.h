@@ -88,11 +88,13 @@ public:
     void
     Resize(InnerIdType new_capacity) override {
         std::lock_guard lock(mutex_);
-        const InnerIdType effective_capacity = std::max(new_capacity, total_count_);
+        const InnerIdType effective_capacity =
+            std::max(new_capacity, total_count_.load(std::memory_order_relaxed));
         if (effective_capacity <= this->max_capacity_) {
             return;
         }
-        const uint64_t additional_count = static_cast<uint64_t>(effective_capacity - total_count_);
+        const uint64_t additional_count = static_cast<uint64_t>(
+            effective_capacity - total_count_.load(std::memory_order_relaxed));
         const uint64_t current_size = layout_.GetNextOffset();
         if (max_code_size_ != 0 &&
             additional_count >

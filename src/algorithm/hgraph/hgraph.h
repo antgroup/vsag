@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -66,6 +67,7 @@ class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
+class MciIncrementalAddExecutor;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
 struct RaBitQFusedCodeView;
@@ -83,8 +85,19 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphContinueSession;
+
+    std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const override;
+
     friend class HGraphAnalyzer;
     friend class HGraphOptimizedBuildSession;
+    friend class MciIncrementalAddExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -180,8 +193,9 @@ public:
         // Walk the physical bottom graph, not the HGraph publication watermark. As required
         // above, callers must finish construction/publication before taking this checksum.
         const auto nodes = this->bottom_graph_->TotalCount();
+        Vector<InnerIdType> neighbors(allocator_);
         for (InnerIdType node = 0; node < nodes; ++node) {
-            Vector<InnerIdType> neighbors(allocator_);
+            neighbors.clear();
             this->bottom_graph_->GetNeighbors(node, neighbors);
             mix(node);
             mix(neighbors.size());
@@ -205,7 +219,7 @@ public:
     }
 
     /// Mark every id below total_count_ visible. Used where a whole id range is created and
-    /// completed together (batch reservation, ODescent build, deserialization).
+    /// completed together (ODescent build, deserialization, merge).
     ///
     /// The two counters are read and written separately, so the caller must be the single writer
     /// of the id range at that moment: this runs on the thread that just grew, shrank (remove
@@ -219,9 +233,9 @@ public:
     /// Mark one node visible, once its codes and links are both written.
     ///
     /// prepare_add_batch hands out ids in increasing order and every worker publishes its own node
-    /// after construction, so the mark advances in (roughly) increasing id order; a node that is
-    /// already covered exits the loop immediately and retries are bounded by the number of
-    /// concurrent publishers. This is a visibility and counting mark, not a barrier: like the
+    /// after construction. This stores the maximum completed id plus one; it does not wait for
+    /// lower ids to complete. A node already covered exits immediately. This is a visibility
+    /// and counting mark, not a completion barrier: like the
     /// bulk Build path, which publishes the reserved range up front, it assumes no search runs
     /// concurrently with the build.
     void
@@ -803,6 +817,13 @@ private:
     uint64_t
     apply_footer_metadata(const MetadataPtr& metadata);
 
+    // Load clique-owned state only; restore labels after all parallel component tasks finish.
+    void
+    deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info);
+
+    void
+    restore_mci_label_state(const JsonType& basic_info);
+
     /// Restore a whole component whose Deserialize seeks inside its own payload
     /// (see requires_seekable_payload). The frame is buffered first, so the
     /// component gets a seekable reader and the frame stays exactly consumed
@@ -810,7 +831,8 @@ private:
     void
     deserialize_seekable_whole_component(DeserializeReader& reader,
                                          const ComponentManifestEntry& comp,
-                                         bool compressed);
+                                         bool compressed,
+                                         const JsonType& basic_info);
 
     /// dispatch a whole component of the chunked manifest to its sequential
     /// Deserialize by name.
@@ -822,18 +844,24 @@ private:
     /// a capacity field) requires either moving that state out of here or
     /// serializing the component on the calling thread.
     void
-    deserialize_whole_component(const std::string& name, StreamReader& reader);
+    deserialize_whole_component(const std::string& name,
+                                StreamReader& reader,
+                                const JsonType& basic_info);
 
     /// parallel body load driven by the manifest recorded in the footer
     void
     parallel_deserialize_manifest(DeserializeReader& reader,
                                   ThreadPool& pool,
-                                  const ChunkedManifest& chunked_manifest);
+                                  const ChunkedManifest& chunked_manifest,
+                                  const JsonType& basic_info);
 
     /// parallel load of an uncompressed body without a recorded manifest:
     /// probe the component extents sequentially, then fill io data in parallel
     void
-    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+    parallel_deserialize_probe(DeserializeReader& reader,
+                               ThreadPool& pool,
+                               uint64_t body_end,
+                               const JsonType& basic_info);
 
     /// Read label (external id) mappings from stream.
     void
@@ -868,6 +896,11 @@ private:
     /// Compact internal storage after deletions.
     void
     shrink_to_fit();
+
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
 
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -1104,19 +1137,102 @@ private:
     build_mci_clique_index(const void* vectors = nullptr);
 
     void
-    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+    mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
+                          InnerIdType node_id,
+                          Vector<InnerIdType>& clique_ids) const;
 
-    [[nodiscard]] Vector<InnerIdType>
-    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+    void
+    mci_read_clique_members(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType clique_id,
+                            Vector<InnerIdType>& members) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_clique_member_count(const std::shared_lock<std::shared_mutex>* view,
+                                 InnerIdType clique_id) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_logical_clique_count(const std::shared_lock<std::shared_mutex>* view) const;
+
+    /// Contiguous FP32 rows for lock-free L2 pair distances, or nullptr when the companion codes
+    /// or the metric require the codec pair API. Both paths return the identical L2 value.
+    [[nodiscard]] const float*
+    mci_contiguous_l2_vectors(uint64_t* row_stride) const;
+
+    /// Candidate cliques worth joining for one seed, ordered by overlapping members. Shared by the
+    /// serial update (which appends to them) and the planning pass (which only records them).
+    void
+    collect_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                             const Vector<InnerIdType>& knn_ids,
+                             Vector<std::pair<uint64_t, InnerIdType>>& targets) const;
+
+    /// Walk collected JOIN targets in gain order. With apply set they are appended to the live
+    /// structure; otherwise the walk only counts the neighbors a plan would gain.
+    void
+    apply_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                           InnerIdType new_inner_id,
+                           const Vector<std::pair<uint64_t, InnerIdType>>& targets,
+                           uint64_t degree_target,
+                           UnorderedSet<InnerIdType>& neighbors,
+                           bool apply);
+
+    /// Local MCE around a seed with the full-build expansion rules. `view` selects the companion
+    /// state and `emit` receives every produced clique in global inner IDs, so the caller decides
+    /// whether it is written to the cell or recorded in a plan.
+    void
+    build_local_mci_cliques(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t visible_total,
+                            const std::function<void(const Vector<InnerIdType>&)>& emit);
+
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
+
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    void
+    maybe_compact_mci(uint64_t changed_count);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
+    /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
+    void
+    repair_mci_clique(InnerIdType node_id);
+
+    /// Recheck live coverage after earlier repairs, reusing caller-owned scratch storage.
+    /// Caller holds mutation and persistent-codes locks and supplies a current inner ID.
+    bool
+    repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
-    bool
-    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
 
     void
-    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
@@ -1153,6 +1269,7 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
@@ -1162,11 +1279,18 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
-    mutable std::mutex pipnn_initial_build_mutex_;      // serializes PiPNN's first Add batch
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
+    // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
+    // persistent_codes shared for repair, and finally reacquires force_remove exclusively before
+    // pinning codes exclusively to shrink. The release is required because repair enters public
+    // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
+    // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};

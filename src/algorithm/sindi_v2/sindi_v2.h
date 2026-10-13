@@ -78,6 +78,9 @@ public:
               Allocator* allocator) const override;
 
     DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
+    DatasetPtr
     RangeSearch(const DatasetPtr& query,
                 float radius,
                 const std::string& parameters,
@@ -155,10 +158,48 @@ private:
                 const SparseVector* original_query = nullptr,
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
-                const SindiMetadataSearchRoute& metadata_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {},
+                ReasoningContext* reasoning_ctx = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDIV2SearchParameter& search_param) const;
+
+    void
+    AttachReasoningReport(const DatasetPtr& dataset_results, ReasoningContext* reasoning_ctx) const;
+
+    /**
+     * Validates the incoming request and derives the flags the search path relies on.
+     *
+     * Split out of SearchWithRequest so that the argument checks live in a small
+     * translation-unit-local function; keeping them inline made the enclosing
+     * function large enough that clang-tidy's path-sensitive
+     * bugprone-unchecked-optional-access analysis did not terminate in CI.
+     */
+    static void
+    ValidateSearchRequest(const SearchRequest& request, bool is_range);
+
+    /**
+     * Builds the reasoning context for a request carrying expected labels and
+     * resolves those labels to inner ids, recording the true distances when a
+     * rerank path is available.
+     */
+    std::shared_ptr<ReasoningContext>
+    PrepareReasoningContext(const SearchRequest& request,
+                            const SparseVector& sparse_query,
+                            Allocator* search_allocator,
+                            bool is_range,
+                            bool filter_enabled) const;
+
+    /**
+     * Classifies the query against the metadata filter and installs the filter
+     * on the inner search parameters. Returns false when the metadata route is
+     * empty, in which case no search should be executed.
+     */
+    bool
+    ResolveSearchRoute(const SearchRequest& request,
+                       bool filter_enabled,
+                       SindiMetadataSearchRoute& metadata_route,
+                       InnerSearchParam& inner_param) const;
 
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;

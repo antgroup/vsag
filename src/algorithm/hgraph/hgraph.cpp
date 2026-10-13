@@ -36,7 +36,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
@@ -737,6 +737,10 @@ HGraph::GetStats() const {
         stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
         stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
         stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_retired_clique_count"].SetInt(
+            static_cast<int64_t>(mci_stats.retired_clique_count));
+        stats["mci_inactive_node_count"].SetInt(
+            static_cast<int64_t>(mci_stats.inactive_node_count));
         stats["mci_base_membership_count"].SetInt(
             static_cast<int64_t>(mci_stats.base_membership_count));
         stats["mci_delta_extra_membership_count"].SetInt(

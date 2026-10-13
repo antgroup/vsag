@@ -283,7 +283,8 @@ link_back_edges(InnerIdType cur_c,
             Vector<InnerIdType> cur(allocator);
             graph->GetNeighbors(selected_neighbor, cur);
             snapshot_still_valid =
-                (cur.size() == snap_sz and std::equal(cur.begin(), cur.end(), snapshot.begin()));
+                (cur.size() == snap_sz and
+                 std::equal(cur.begin(), cur.end(), snapshot.begin(), snapshot.end()));
             if (snapshot_still_valid) {
                 graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
             }

@@ -35,6 +35,8 @@ set (SIMD_SRCS
         bf16_simd.cpp
         pqfs_simd.cpp
         sq8_simd.cpp
+        sq8_local_simd.cpp
+        sq4_local_simd.cpp
         sq4_simd.cpp
         sq4_uniform_simd.cpp
         sq8_uniform_simd.cpp

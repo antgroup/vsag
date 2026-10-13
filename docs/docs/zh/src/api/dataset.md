@@ -166,12 +166,14 @@ struct MultiVector {
 ## 命名 metadata
 
 `UInt32Metadata(name, values)` 为每个 dataset 元素附加一个无符号整数，
-`GetUInt32Metadata` 返回对应命名数组，不存在时返回 `nullptr`。`StringMetadata(name, values)`
-和 `GetStringMetadata(name)` 提供对应的通用命名字符串数组。SINDI 和 SINDI_V2 使用名为
-`host` 的字符串 metadata 实现 host 过滤。日期过滤复用现有命名字符串 path API，通过
-`Paths("date", values)` 和 `GetPaths("date")` 传递日期 bucket。单元素查询 Dataset 的日期范围
-使用独立的 `date_begin` 和 `date_end` 命名 path；两者各指向一个规范的 `YYYY`、`YYYY/MM` 或
-`YYYY/MM/DD` 字符串。这些数组遵循 Dataset 通用的 ownership、深拷贝和 Append 规则。
+`GetUInt32Metadata` 返回对应命名数组，不存在时返回 `nullptr`。`Int64Metadata(name, values)` 与
+`GetInt64Metadata(name)` 提供命名的有符号 64 位整数数组；`StringMetadata(name, values)` 与
+`GetStringMetadata(name)` 提供命名字符串数组。SINDI 和 SINDI_V2 使用名为 `host` 的字符串
+metadata 进行 host 过滤，使用名为 `publish_time_stamp` 的 int64 metadata 进行 UTC 日粒度时间
+过滤。单元素查询 Dataset 的时间范围使用 `publish_time_stamp_begin` 与
+`publish_time_stamp_end`。对于 SINDI 和 SINDI_V2 的 base dataset，`publish_time_stamp == 0`
+保留为缺失时间戳，且永远不会匹配时间 selector。这些数组均须为每个 dataset 元素提供一个值，
+并遵循 Dataset 通用的 ownership、深拷贝和 Append 规则。
 
 ## 参见
 

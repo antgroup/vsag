@@ -24,13 +24,36 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
 namespace {
+// Pin one deletion generation while filtering; release it before any label lookup.
+void
+filter_deleted_candidates(const DistHeapPtr& result,
+                          const LabelTablePtr& labels,
+                          Allocator* allocator) {
+    const auto deleted_view = labels->GetDeletedIdsReadView();
+    if (deleted_view == nullptr) {
+        return;
+    }
+    DistanceRecordVector live_records(allocator);
+    live_records.reserve(result->Size());
+    while (not result->Empty()) {
+        const auto record = result->Top();
+        result->Pop();
+        if (deleted_view->CheckValid(record.second)) {
+            live_records.push_back(record);
+        }
+    }
+    for (const auto& record : live_records) {
+        result->Push(record);
+    }
+}
+
 struct HGraphVisitedListGuard {
     std::shared_ptr<VisitedListPool> pool;
     VisitedListPtr visited_list;
@@ -653,6 +676,9 @@ HGraph::search_range_with_request(const SearchRequest& request,
                       ctx);
     }
 
+    if (mci_result.route != "mci") {
+        filter_deleted_candidates(search_result, this->label_table_, ctx.alloc);
+    }
     while (not search_result->Empty() and
            search_result->Top().first > request.radius_ + THRESHOLD_ERROR) {
         search_result->Pop();
@@ -804,7 +830,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
         Vector<int64_t> expected_labels_vec(
             request.expected_labels_.begin(), request.expected_labels_.end(), this->allocator_);
-        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec, label_to_inner_id);
+        reasoning_ctx->InitializeExpectedTargets(expected_labels_vec,
+                                                 label_to_inner_id);  // [reasoning]
 
         FlattenInterfacePtr precise_flatten = nullptr;
         ComputerLease computer_lease;
@@ -826,7 +853,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             } else {
                 precise_flatten->Query(&dist, computer, &inner_id, 1, &ctx);
             }
-            reasoning_ctx->SetTrueDistance(inner_id, dist);
+            reasoning_ctx->SetTrueDistance(inner_id, dist);  // [reasoning]
         }
 
         ctx.reasoning_ctx = reasoning_ctx.get();
@@ -1239,6 +1266,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
         }
 
+        // A fallback may accept a slot before MARK_REMOVE and another incarnation after Add.
+        // MCI pins its deletion state during traversal; fallback results need this recheck.
+        if (mci_result.route != "mci") {
+            filter_deleted_candidates(search_result, this->label_table_, ctx.alloc);
+        }
         DistanceRecordVector finite_records(ctx.alloc);
         finite_records.reserve(search_result->Size());
         while (not search_result->Empty()) {

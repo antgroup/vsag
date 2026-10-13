@@ -16,6 +16,7 @@
 #include "ivf_parameter.h"
 
 #include <cmath>
+#include <limits>
 #include <numeric>
 
 #include "ivf.h"
@@ -609,5 +610,272 @@ TEST_CASE("IVF rejects invalid RaBitQ split storage parameters",
         auto param = make_valid_param();
         param["graph_build_threshold"].SetInt(10);
         REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(param, common_param));
+    }
+}
+
+TEST_CASE("IVF maps GPU build external parameters", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({
+        "buckets_count": 64,
+        "enable_gpu_build": true,
+        "gpu_device_id": 2,
+        "gpu_memory_budget": 536870912,
+        "gpu_min_work_threshold": 4294967296
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+    REQUIRE(ivf_param != nullptr);
+
+    const auto& strategy = ivf_param->ivf_partition_strategy_parameter;
+    REQUIRE(strategy != nullptr);
+    REQUIRE(strategy->enable_gpu_build);
+    REQUIRE(strategy->gpu_device_id == 2);
+    REQUIRE(strategy->gpu_memory_budget == 536870912ULL);
+    REQUIRE(strategy->gpu_min_work_threshold == 4294967296ULL);
+}
+
+TEST_CASE("IVF leaves the GPU build off when it is not asked for", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({"buckets_count": 64})");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+    auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+    REQUIRE(ivf_param != nullptr);
+    REQUIRE_FALSE(ivf_param->ivf_partition_strategy_parameter->enable_gpu_build);
+}
+
+TEST_CASE("IVF refuses GPU parameters outside the range they land in", "[ut][IVFParameter]") {
+    // The two unsigned knobs stop at INT64_MAX rather than at UINT64_MAX, which
+    // WorthOffloading's own overflow argument rests on, and a value past it has to
+    // be refused rather than wrapped. GetInt turns one into a negative, so this
+    // pins which bound each value breaks as well as that it is refused.
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = [&](const std::string& body) {
+        return vsag::IVF::CheckAndMappingExternalParam(vsag::JsonType::Parse(body), common_param);
+    };
+
+    SECTION("a budget past INT64_MAX") {
+        REQUIRE_THROWS(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 18446744073709551615})"));
+    }
+    SECTION("a threshold past INT64_MAX") {
+        REQUIRE_THROWS(
+            mapped(R"({"buckets_count": 64, "gpu_min_work_threshold": 18446744073709551615})"));
+    }
+    SECTION("a negative budget") {
+        REQUIRE_THROWS(mapped(R"({"buckets_count": 64, "gpu_memory_budget": -1})"));
+    }
+    SECTION("a device beyond int32") {
+        REQUIRE_THROWS(mapped(R"({"buckets_count": 64, "gpu_device_id": 2147483648})"));
+    }
+    SECTION("INT64_MAX itself is taken") {
+        auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 9223372036854775807})"));
+        REQUIRE(param != nullptr);
+        REQUIRE(param->ivf_partition_strategy_parameter->gpu_memory_budget ==
+                static_cast<uint64_t>(std::numeric_limits<int64_t>::max()));
+    }
+    SECTION("a budget written as a float is still taken") {
+        auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+            mapped(R"({"buckets_count": 64, "gpu_memory_budget": 1e9})"));
+        REQUIRE(param != nullptr);
+        REQUIRE(param->ivf_partition_strategy_parameter->gpu_memory_budget == 1000000000ULL);
+    }
+}
+
+TEST_CASE("IVF maps kmeans_iter_count external parameter", "[ut][IVFParameter]") {
+    REQUIRE(std::string(vsag::IVF_KMEANS_ITER_COUNT_KEY) == "kmeans_iter_count");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("defaults per strategy when unset") {
+        auto external_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "ivf"
+        })");
+        auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+        auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+        REQUIRE(ivf_param != nullptr);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->kmeans_iter_count == -1);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->GetKMeansIterCount() == 25);
+    }
+
+    SECTION("GNO-IMI keeps its historical default of 30") {
+        auto external_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "gno_imi",
+            "first_order_buckets_count": 4,
+            "second_order_buckets_count": 4
+        })");
+        auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+        auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+        REQUIRE(ivf_param != nullptr);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->GetKMeansIterCount() == 30);
+    }
+
+    SECTION("explicit value overrides the default for both strategies") {
+        auto external_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "ivf",
+            "kmeans_iter_count": 7
+        })");
+        auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+        auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+        REQUIRE(ivf_param != nullptr);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->kmeans_iter_count == 7);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->GetKMeansIterCount() == 7);
+
+        auto gnoimi_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "gno_imi",
+            "kmeans_iter_count": 7,
+            "first_order_buckets_count": 4,
+            "second_order_buckets_count": 4
+        })");
+        auto gnoimi_mapped = vsag::IVF::CheckAndMappingExternalParam(gnoimi_param, common_param);
+        auto gnoimi_ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(gnoimi_mapped);
+        REQUIRE(gnoimi_ivf_param != nullptr);
+        REQUIRE(gnoimi_ivf_param->ivf_partition_strategy_parameter->GetKMeansIterCount() == 7);
+    }
+
+    SECTION("rejects non-positive values") {
+        auto zero_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "ivf",
+            "kmeans_iter_count": 0
+        })");
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(zero_param, common_param));
+
+        auto negative_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "ivf",
+            "kmeans_iter_count": -3
+        })");
+        REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(negative_param, common_param));
+    }
+}
+
+TEST_CASE("IVF kmeans_iter_count survives JSON round-trip", "[ut][IVFParameter]") {
+    // FromJson() reads ivf_train_type and partition_strategy_type unconditionally, so the
+    // payloads below carry both keys exactly as build_default_ivf_param() produces them.
+    SECTION("explicit value is preserved") {
+        auto json = vsag::JsonType::Parse(R"({
+            "ivf_train_type": "kmeans",
+            "partition_strategy_type": "ivf",
+            "kmeans_iter_count": 12
+        })");
+        auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        param->FromJson(json);
+        REQUIRE(param->GetKMeansIterCount() == 12);
+
+        auto dumped = param->ToJson();
+        REQUIRE(dumped[vsag::IVF_KMEANS_ITER_COUNT_KEY].GetInt() == 12);
+
+        auto reloaded = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        reloaded->FromJson(dumped);
+        REQUIRE(reloaded->GetKMeansIterCount() == 12);
+    }
+
+    SECTION("unset value is dumped as the resolved per-strategy default") {
+        // An unset value must serialize as a concrete number so that a reload does not
+        // silently re-derive a different default.
+        auto unset_json = vsag::JsonType::Parse(R"({
+            "ivf_train_type": "kmeans",
+            "partition_strategy_type": "ivf"
+        })");
+        auto unset_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        unset_param->FromJson(unset_json);
+        REQUIRE(unset_param->kmeans_iter_count == -1);
+        REQUIRE(unset_param->ToJson()[vsag::IVF_KMEANS_ITER_COUNT_KEY].GetInt() == 25);
+
+        auto gnoimi_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        // Direct FromJson() input nests the GNO-IMI parameters under "gno_imi"; the
+        // top-level first_order_buckets_count form is only used by the external mapper.
+        gnoimi_param->FromJson(vsag::JsonType::Parse(R"({
+            "ivf_train_type": "kmeans",
+            "partition_strategy_type": "gno_imi",
+            "gno_imi": {
+                "first_order_buckets_count": 4,
+                "second_order_buckets_count": 4
+            }
+        })"));
+        REQUIRE(gnoimi_param->ToJson()[vsag::IVF_KMEANS_ITER_COUNT_KEY].GetInt() == 30);
+    }
+
+    SECTION("configured value survives a full IVFParameter round-trip") {
+        auto external_param = vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "ivf",
+            "kmeans_iter_count": 9
+        })");
+        vsag::IndexCommonParam common_param;
+        common_param.dim_ = 64;
+        common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+        auto param = vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+        auto ivf_param = std::dynamic_pointer_cast<vsag::IVFParameter>(param);
+        REQUIRE(ivf_param != nullptr);
+        REQUIRE(ivf_param->ivf_partition_strategy_parameter->GetKMeansIterCount() == 9);
+        REQUIRE(
+            ivf_param->ivf_partition_strategy_parameter->ToJson()[vsag::IVF_KMEANS_ITER_COUNT_KEY]
+                .GetInt() == 9);
+    }
+}
+
+TEST_CASE("IVF kmeans_iter_count participates in compatibility checks", "[ut][IVFParameter]") {
+    const auto make_param = [](const std::string& extra) {
+        auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        param->FromJson(vsag::JsonType::Parse(fmt::format(
+            R"({{"ivf_train_type": "kmeans", "partition_strategy_type": "ivf"{}}})", extra)));
+        return param;
+    };
+
+    SECTION("a different explicit value is rejected") {
+        auto left = make_param(R"(, "kmeans_iter_count": 10)");
+        auto right = make_param(R"(, "kmeans_iter_count": 40)");
+        REQUIRE(left->GetKMeansIterCount() == 10);
+        REQUIRE(right->GetKMeansIterCount() == 40);
+        REQUIRE_FALSE(left->CheckCompatibility(right));
+        REQUIRE_FALSE(right->CheckCompatibility(left));
+    }
+
+    SECTION("the same explicit value is accepted") {
+        auto left = make_param(R"(, "kmeans_iter_count": 10)");
+        auto right = make_param(R"(, "kmeans_iter_count": 10)");
+        REQUIRE(left->CheckCompatibility(right));
+    }
+
+    SECTION("an unset reader matches an index stored with the strategy default") {
+        // ToJson() persists the resolved value, so a reader that never set the key must still
+        // be compatible with an index trained under the 25-iteration default.
+        auto reader = make_param("");
+        auto stored = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        stored->FromJson(reader->ToJson());
+        REQUIRE(reader->kmeans_iter_count == -1);
+        REQUIRE(stored->kmeans_iter_count == 25);
+        REQUIRE(reader->CheckCompatibility(stored));
+        REQUIRE(stored->CheckCompatibility(reader));
+    }
+
+    SECTION("an unset reader matches a GNO-IMI index stored with its own default") {
+        auto gnoimi_json = vsag::JsonType::Parse(R"({
+            "ivf_train_type": "kmeans",
+            "partition_strategy_type": "gno_imi",
+            "gno_imi": {
+                "first_order_buckets_count": 4,
+                "second_order_buckets_count": 4
+            }
+        })");
+        auto reader = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        reader->FromJson(gnoimi_json);
+        REQUIRE(reader->kmeans_iter_count == -1);
+
+        auto stored = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+        stored->FromJson(reader->ToJson());
+        REQUIRE(stored->kmeans_iter_count == 30);
+        REQUIRE(reader->CheckCompatibility(stored));
+        REQUIRE(stored->CheckCompatibility(reader));
     }
 }

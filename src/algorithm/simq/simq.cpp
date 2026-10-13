@@ -1232,16 +1232,12 @@ SIMQ::coarse_search(const float* query_tokens,
                     int64_t coarse_k,
                     uint64_t* coarse_dist_cmp,
                     uint64_t* coarse_probe_count) const {
-    // Flat-array fast-path replacing the previous unordered_map + unordered_set
-    // pair, which dominated coarse-search latency. Buffers are reused across
-    // queries via mutable member state and lazily grown to fit total_count_ on
-    // first call after Build/Add/Deserialize.
     const auto n_docs = static_cast<size_t>(total_count_);
-    if (coarse_score_buf_.size() < n_docs) {
-        coarse_score_buf_.assign(n_docs, 0.0F);
-        coarse_seen_buf_.assign(n_docs, false);
-    }
-    coarse_dirty_.clear();
+    std::vector<float> score_buf(n_docs, 0.0F);
+    std::vector<bool> seen_buf(n_docs, false);
+    std::vector<InnerIdType> dirty_list;
+    std::vector<InnerIdType> seen_dirty_list;
+    dirty_list.reserve(n_docs);
 
     // Each query token's search is independent. We do all KnnSearch calls in
     // parallel, then sequentially propagate scores (which is fast O(k) per token).
@@ -1338,35 +1334,33 @@ SIMQ::coarse_search(const float* query_tokens,
             *coarse_dist_cmp += result.dist_cmp;
         }
 
-        coarse_seen_dirty_.clear();
+        seen_dirty_list.clear();
         for (const auto& [cscore, cidx] : result.cscores) {
             if (cidx >= static_cast<InnerIdType>(num_clusters_)) {
                 continue;
             }
             for (InnerIdType doc_id : cluster_lists_[cidx]) {
-                if (coarse_seen_buf_[doc_id]) {
+                if (seen_buf[doc_id]) {
                     continue;
                 }
-                coarse_seen_buf_[doc_id] = true;
-                coarse_seen_dirty_.push_back(doc_id);
-                if (coarse_score_buf_[doc_id] == 0.0F) {
-                    coarse_dirty_.push_back(doc_id);
+                seen_buf[doc_id] = true;
+                seen_dirty_list.push_back(doc_id);
+                if (score_buf[doc_id] == 0.0F) {
+                    dirty_list.push_back(doc_id);
                 }
-                coarse_score_buf_[doc_id] += cscore;
+                score_buf[doc_id] += cscore;
             }
         }
-        for (InnerIdType doc_id : coarse_seen_dirty_) {
-            coarse_seen_buf_[doc_id] = false;
+        for (InnerIdType doc_id : seen_dirty_list) {
+            seen_buf[doc_id] = false;
         }
     }
 
     std::vector<std::pair<InnerIdType, float>> ranked;
-    ranked.reserve(coarse_dirty_.size());
-    for (InnerIdType doc_id : coarse_dirty_) {
-        ranked.emplace_back(doc_id, coarse_score_buf_[doc_id]);
-        coarse_score_buf_[doc_id] = 0.0F;  // reset for next query
+    ranked.reserve(dirty_list.size());
+    for (InnerIdType doc_id : dirty_list) {
+        ranked.emplace_back(doc_id, score_buf[doc_id]);
     }
-    coarse_dirty_.clear();
 
     std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
         return a.second > b.second;
@@ -1374,12 +1368,38 @@ SIMQ::coarse_search(const float* query_tokens,
     return ranked;
 }
 
+void
+SIMQ::SetImmutable() {
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::scoped_lock<std::shared_mutex> lock(global_mutex_);
+    if (this->immutable_.load(std::memory_order_relaxed)) {
+        return;
+    }
+    if (this->rep_hgraph_ != nullptr) {
+        this->rep_hgraph_->SetImmutable();
+    }
+    this->immutable_.store(true, std::memory_order_release);
+}
+
 DatasetPtr
 SIMQ::KnnSearch(const DatasetPtr& query,
                 int64_t k,
                 const std::string& parameters,
                 const FilterPtr& filter) const {
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return KnnSearchImpl(query, k, parameters, filter);
+    }
     std::unique_lock lock(global_mutex_);
+    return KnnSearchImpl(query, k, parameters, filter);
+}
+
+DatasetPtr
+SIMQ::KnnSearchImpl(const DatasetPtr& query,
+                    int64_t k,
+                    const std::string& parameters,
+                    const FilterPtr& filter) const {
     SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
@@ -1541,7 +1561,19 @@ SIMQ::RangeSearch(const DatasetPtr& query,
                   const std::string& parameters,
                   const FilterPtr& filter,
                   int64_t limited_size) const {
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return RangeSearchImpl(query, radius, parameters, filter, limited_size);
+    }
     std::unique_lock lock(global_mutex_);
+    return RangeSearchImpl(query, radius, parameters, filter, limited_size);
+}
+
+DatasetPtr
+SIMQ::RangeSearchImpl(const DatasetPtr& query,
+                      float radius,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      int64_t limited_size) const {
     SearchStatistics stats;
 
     if (total_count_ == 0 || rep_hgraph_ == nullptr) {
@@ -1693,16 +1725,21 @@ SIMQ::CalcDistanceById(const DatasetPtr& query, int64_t id, bool calculate_preci
     CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
     const bool valid_vector = vectors[0].len_ > 0 && vectors[0].vectors_ != nullptr;
     CHECK_ARGUMENT(valid_vector, "query multi-vector must contain token vectors");
-    std::shared_lock lock(global_mutex_);
-    const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
-    if (not valid) {
-        return -1.0F;
+    auto compute = [&]() {
+        const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
+        if (not valid) {
+            return -1.0F;
+        }
+        auto computer = mv_codes_->FactoryComputer(vectors);
+        float distance = 0.0F;
+        mv_codes_->Query(&distance, computer, &inner_id, 1);
+        return distance;
+    };
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return compute();
     }
-    // SIMQ has one stored representation; both precision modes use the rerank backend.
-    auto computer = mv_codes_->FactoryComputer(vectors);
-    float distance = 0.0F;
-    mv_codes_->Query(&distance, computer, &inner_id, 1);
-    return distance;
+    std::shared_lock lock(global_mutex_);
+    return compute();
 }
 
 void
@@ -1811,6 +1848,77 @@ SIMQ::InitFeatures() {
         IndexFeature::SUPPORT_GET_MEMORY_USAGE,
         IndexFeature::SUPPORT_CHECK_ID_EXIST,
     });
+}
+
+// Helper functions for SIMQ::GetStats()
+
+static float
+stats_calculate_percentile(const std::vector<float>& sorted_values, float percentile) {
+    if (sorted_values.empty()) {
+        return 0.0F;
+    }
+    float index = percentile * static_cast<float>(sorted_values.size() - 1);
+    auto lower = static_cast<uint64_t>(std::floor(index));
+    auto upper = static_cast<uint64_t>(std::ceil(index));
+    if (lower == upper) {
+        return sorted_values[lower];
+    }
+    float weight = index - static_cast<float>(lower);
+    return sorted_values[lower] * (1.0F - weight) + sorted_values[upper] * weight;
+}
+
+static JsonType
+stats_make_doc_vector_count_json(std::vector<float> values) {
+    JsonType json;
+    if (values.empty()) {
+        json["mean"].SetFloat(0.0F);
+        json["p90"].SetFloat(0.0F);
+        json["p99"].SetFloat(0.0F);
+        json["min"].SetInt(0);
+        json["max"].SetInt(0);
+        return json;
+    }
+
+    std::sort(values.begin(), values.end());
+    float sum = std::accumulate(values.begin(), values.end(), 0.0F);
+    json["mean"].SetFloat(sum / static_cast<float>(values.size()));
+    json["p90"].SetFloat(stats_calculate_percentile(values, 0.90F));
+    json["p99"].SetFloat(stats_calculate_percentile(values, 0.99F));
+    json["min"].SetInt(static_cast<int64_t>(values.front()));
+    json["max"].SetInt(static_cast<int64_t>(values.back()));
+    return json;
+}
+
+std::string
+SIMQ::GetStats() const {
+    std::shared_lock lock(global_mutex_);
+    JsonType stats;
+
+    uint64_t count = total_count_.load();
+    stats["total_count"].SetUint64(count);
+    stats["total_token_count"].SetUint64(token_to_doc_.size());
+
+    JsonType dist_json;
+    if (count == 0 || token_to_doc_.empty()) {
+        dist_json = stats_make_doc_vector_count_json({});
+    } else {
+        std::unordered_map<InnerIdType, uint32_t> doc_token_counts;
+        for (InnerIdType doc_id : token_to_doc_) {
+            ++doc_token_counts[doc_id];
+        }
+        std::vector<float> values;
+        values.reserve(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            auto it = doc_token_counts.find(static_cast<InnerIdType>(i));
+            values.push_back(static_cast<float>(it != doc_token_counts.end() ? it->second : 0));
+        }
+        dist_json = stats_make_doc_vector_count_json(std::move(values));
+    }
+    stats["doc_vector_count_distribution"].SetJson(dist_json);
+    if (rep_hgraph_ != nullptr) {
+        stats["rep_hgraph"].SetJson(JsonType::Parse(rep_hgraph_->GetStats()));
+    }
+    return stats.Dump();
 }
 
 JsonType

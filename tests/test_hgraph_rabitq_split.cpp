@@ -1555,14 +1555,22 @@ TEST_CASE("HGraph fused Add drains preencoding tasks before rejecting an enqueue
     for (uint64_t i = 0; i < count; ++i) {
         labels[i] = 1000000 + i;
     }
+    const bool fail_worker = GENERATE(false, true);
+    std::vector<float> vectors(dataset->base_->GetFloat32Vectors(),
+                               dataset->base_->GetFloat32Vectors() + count * dim);
+    if (fail_worker) {
+        // The first accepted range fails encoding while the second enqueue also fails.
+        std::fill_n(vectors.data(), dim, std::numeric_limits<float>::max());
+    }
     auto batch = vsag::Dataset::Make()
                      ->NumElements(count)
                      ->Dim(dim)
                      ->Ids(labels.data())
-                     ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                     ->Float32Vectors(vectors.data())
                      ->Owner(false);
     auto added = index->Add(batch);
     REQUIRE_FALSE(added.has_value());
+    REQUIRE(added.error().message.find("injected enqueue failure") != std::string::npos);
     REQUIRE(rejecting_pool->TaskFinished());
     REQUIRE(index->GetNumElements() == count);
     for (uint64_t i = 0; i < count; ++i) {

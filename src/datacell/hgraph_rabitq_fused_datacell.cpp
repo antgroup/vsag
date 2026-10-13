@@ -160,10 +160,9 @@ HGraphRaBitQFusedDataCell::InsertNeighborsById(InnerIdType id,
 
     auto* record = MutableNodeRecord(id);
     const auto count = static_cast<uint32_t>(neighbor_ids.size());
-    // Publish the payload before the count, with a release fence in between. Readers currently
-    // take the shared neighbour lock, so this is not the only guarantee they rely on, but the
-    // count is a plain write into the node record: keeping the payload first means a future
-    // lock-free reader cannot observe a count that outruns its neighbours.
+    // The caller must hold the exclusive neighbour lock, or own an unreachable new node.
+    // Publish the payload before the count. Both are non-atomic: the release fence does not
+    // replace the shared/exclusive neighbour locks required by concurrent readers/writers.
     auto* output = reinterpret_cast<InnerIdType*>(record + neighbors_offset_);
     for (uint64_t i = 0; i < neighbor_ids.size(); ++i) {
         output[i] = neighbor_ids[i];
@@ -268,7 +267,7 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
     neighbor_ids.clear();
     neighbor_ids.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
-        if (input[i] < total_count_) {
+        if (input[i] < total_count_.load(std::memory_order_relaxed)) {
             neighbor_ids.push_back(input[i]);
         }
     }
@@ -276,7 +275,7 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
 
 bool
 HGraphRaBitQFusedDataCell::CheckIdExists(InnerIdType id) const {
-    return id < total_count_ and id < max_capacity_;
+    return id < total_count_.load(std::memory_order_relaxed) and id < max_capacity_;
 }
 
 void
@@ -341,7 +340,8 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, layout.supplement_offset);
     StreamReader::ReadObj(reader, layout.one_bit_code_size);
     StreamReader::ReadObj(reader, layout.supplement_code_size);
-    CHECK_ARGUMENT(total_count_ <= max_capacity_, "invalid fused graph count and capacity");
+    CHECK_ARGUMENT(total_count_.load(std::memory_order_relaxed) <= max_capacity_,
+                   "invalid fused graph count and capacity");
     CHECK_ARGUMENT(maximum_degree_ == expected_maximum_degree,
                    "fused graph maximum degree does not match construction parameters");
 

@@ -24,7 +24,10 @@
 #include <cmath>
 #include <cstdint>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::neon {
 
@@ -835,10 +838,12 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     uint64_t d = 0;
     float32x4_t sum = vdupq_n_f32(0.0f);
-    const float32x4_t inv_sqrt_d_vec =
-        inv_sqrt_d < 1e-3 ? vdupq_n_f32(1.0f) : vdupq_n_f32(inv_sqrt_d);
-    const float32x4_t neg_inv_sqrt_d_vec =
-        inv_sqrt_d < 1e-3 ? vdupq_n_f32(0.0f) : vdupq_n_f32(-inv_sqrt_d);
+    // A small scale selects the raw 0/1 dot product. Use the same weights
+    // for vectorized blocks and tail lanes (not +/-0 when the scale is zero).
+    const float positive = inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F;
+    const float negative = inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F;
+    const float32x4_t inv_sqrt_d_vec = vdupq_n_f32(positive);
+    const float32x4_t neg_inv_sqrt_d_vec = vdupq_n_f32(negative);
 
     for (; d + 11 < dim; d += 12) {
         __builtin_prefetch(vector + d + 24, 0, 1);
@@ -896,7 +901,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 2);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 2);
         d++;
         remaining--;
     }
@@ -906,7 +911,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 1);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 1);
         d++;
         remaining--;
     }
@@ -916,7 +921,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 0);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 0);
     }
 
     if (dim > d) {
@@ -1255,4 +1260,82 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::neon
+
+namespace vsag::neon {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 8, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 8, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 8, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 8, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 4, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 4, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 4, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 4, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::neon

@@ -28,8 +28,9 @@
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"
 #include "hgraph_fast_build.h"
+#include "hgraph_mci_add.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -481,9 +482,11 @@ HGraph::Add(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::add_impl(const DatasetPtr& data) {
-    std::unique_lock<std::mutex> mci_add_lock(this->mci_add_mutex_, std::defer_lock);
+    // Match FORCE_REMOVE: acquire mutation serialization before pinning vector IDs.
+    // Reversing these locks could block a remover that needs to reacquire its write lock.
+    std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
     if (this->mci_parameters_.enabled) {
-        mci_add_lock.lock();
+        mci_mutation_lock.lock();
     }
     const auto mci_start_total = this->total_count_.load();
     const bool had_mci_clique_index = this->mci_parameters_.enabled and
@@ -505,20 +508,25 @@ HGraph::add_impl(const DatasetPtr& data) {
     }
     this->insert_add_batch(data, context, batch);
     if (this->mci_parameters_.enabled) {
+        // MCI candidate generation enters public search, which pins the force-remove lock.
+        // The mutation lock still excludes MCI physical deletion; avoid recursive read locking.
+        if (force_remove_rlock.owns_lock()) {
+            force_remove_rlock.unlock();
+        }
         if (had_mci_clique_index) {
-            logger::info("hgraph mci incremental add started, added={}", batch.rows.size());
-            for (const auto& row : batch.rows) {
-                this->incremental_update_mci_clique(row.inner_id, get_data(data, row.input_idx));
-            }
+            MciIncrementalAddExecutor(*this).Run(batch, data);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            logger::info("hgraph mci incremental add finished, total={}",
-                         this->total_count_.load());
         } else {
             const void* vectors = nullptr;
             if (mci_start_total == 0 and batch.failed_ids.empty()) {
                 vectors = this->get_data(data);
             }
             this->build_mci_clique_index(vectors);
+            if (this->support_force_remove()) {
+                const auto removed = this->label_table_->GetAllDeletedIds(this->allocator_);
+                this->remove_from_mci(removed);
+                this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            }
         }
         this->cal_memory_usage();
     }
@@ -603,7 +611,19 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
             // A packaged-task future can become ready before its pool wrapper returns.
             try {
                 this->thread_pool_->WaitUntilEmpty();
+            } catch (const std::exception& e) {
+                logger::error("fused preencoding pool failed while draining: {}", e.what());
             } catch (...) {
+                logger::error("fused preencoding pool failed with an unknown exception");
+            }
+            // Drain every accepted task before releasing the batch buffers. Keep the enqueue
+            // error primary, but report any secondary worker/pool failure instead of hiding it.
+            try {
+                wait_all_futures(futures);
+            } catch (const std::exception& e) {
+                logger::error("fused preencoding worker failed while draining: {}", e.what());
+            } catch (...) {
+                logger::error("fused preencoding worker failed with an unknown exception");
             }
             std::rethrow_exception(enqueue_exception);
         }
@@ -1297,6 +1317,8 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_KNN_SEARCH,
         IndexFeature::SUPPORT_KNN_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_KNN_ITERATOR_FILTER_SEARCH,
+        IndexFeature::SUPPORT_BATCH_SEARCH,
+        IndexFeature::SUPPORT_CONTINUE_SEARCH_SESSION,
     });
     // update
     if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
@@ -1329,7 +1351,8 @@ HGraph::InitFeatures() {
     auto name = this->basic_flatten_codes_->GetQuantizerName();
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16) {
+        name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
+        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({

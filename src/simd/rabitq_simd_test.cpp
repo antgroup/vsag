@@ -336,6 +336,35 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ FP32-BQ SIMD preserves raw and signed tail products", "[ut][simd]") {
+    // Cover every remainder of the NEON 12/8/4-element loops, including dim=70
+    // used by the residual original-query full-factor regression.
+    for (uint64_t dim = 0; dim <= 80; ++dim) {
+        for (const uint8_t pattern : {0x00, 0xFF, 0x55, 0xAA}) {
+            std::vector<uint8_t> bits((dim + 7) / 8, pattern);
+            std::vector<float> values(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                values[d] = static_cast<float>(static_cast<int>(d % 7) - 3) * 0.25F;
+            }
+            for (const float inv_sqrt_d : {0.0F, 0.0005F, 0.125F}) {
+                CAPTURE(dim, pattern, inv_sqrt_d);
+                // Small scales select the raw 0/1 dot product; otherwise bits
+                // represent signed +/-inv_sqrt_d coordinates.
+                const float positive = inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F;
+                const float negative = inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F;
+                float gt = 0.0F;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const bool bit = ((bits[d / 8] >> (d % 8)) & 1U) != 0U;
+                    gt += values[d] * (bit ? positive : negative);
+                }
+                const auto* query = values.data();
+                const auto* base = bits.data();
+                TEST_ACCURACY_FP32(RaBitQFloatBinaryIP);
+            }
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
 

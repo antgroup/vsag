@@ -246,6 +246,7 @@ public:
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     friend class PyramidAnalyzer;
+    friend class PyramidDuplicateTestPeer;
 
 private:
     MetadataPtr
@@ -449,7 +450,7 @@ private:
                                const FlattenInterfacePtr& codes,
                                float alpha);
 
-    void
+    InnerIdType
     add_routed_point(const Hierarchy& hierarchy,
                      IndexNode& node,
                      InnerIdType inner_id,
@@ -457,6 +458,11 @@ private:
                      uint64_t ef_construction,
                      bool use_self_as_entry,
                      int sampled_level);
+
+    // Build-only barrier: restore directed reachability without changing alias ownership.
+    void
+    repair_duplicate_connectivity(IndexNode& node,
+                                  const Vector<InnerIdType>* cached_representatives = nullptr);
 
     void
     add_graph_point(const Hierarchy& hierarchy,
@@ -467,7 +473,7 @@ private:
                     bool use_self_as_entry,
                     int sampled_route_level);
 
-    void
+    InnerIdType
     add_bottom_graph_point(const Hierarchy& hierarchy,
                            IndexNode& node,
                            InnerIdType inner_id,
