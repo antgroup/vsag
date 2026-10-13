@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <atomic>
+#include <catch2/catch_approx.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -1168,4 +1169,341 @@ TEST_CASE("HGraph generic MCI keeps whole cliques and honors the minimum", "[ut]
         vsag::HGraphMCITestAccess::GetCliques(restored.value())->CollectStats(total);
     REQUIRE(restored_stats.max_clique_size == expected);
     REQUIRE(restored_stats.total_membership_count == stats.total_membership_count);
+}
+
+TEST_CASE("HGraph dynamic neighbor traversal mixes sparse and clique neighbors",
+          "[ut][hgraph][mci][hybrid]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+
+    // Restrict the predicate to the second half of the ids so the filter is selective.
+    std::vector<int64_t> valid_ids(total / 2);
+    std::iota(valid_ids.begin(), valid_ids.end(), total / 2);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+
+    // Routing baseline: MCI is considered but rejected by the selectivity threshold,
+    // so the plain sparse-graph traversal runs and reports the "hgraph" route.
+    const std::string baseline_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":true,"hgraph_valid_ratio_threshold":0.0}})";
+    auto baseline = index.value()->KnnSearch(query, 5, baseline_params, filter);
+    REQUIRE(baseline.has_value());
+    REQUIRE(baseline.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
+
+    // Same traversal budget, but the clique companion is expanded inside the same loop.
+    const std::string hybrid_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+        // coverage=0 keeps the seed list partial so the expansion path is exercised at all.
+        R"("hybrid_vob":0.0,"hybrid_filter_cost_ratio":1.0,)"
+        R"("mci_seed_coverage":0.0}})";
+    auto hybrid = index.value()->KnnSearch(query, 5, hybrid_params, filter);
+    REQUIRE(hybrid.has_value());
+    REQUIRE(hybrid.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hybrid")");
+
+    const auto stats = vsag::JsonType::Parse(hybrid.value()->GetStatistics());
+    REQUIRE(stats["hybrid_expanded_nodes"].GetUint64() > 0);
+    REQUIRE(stats["hybrid_dist_computations"].GetUint64() > 0);
+    REQUIRE(stats["hybrid_mci_members_considered"].GetUint64() > 0);
+    // The filter enumerates its valid ids, so the traversal is seeded from them.
+    REQUIRE(stats["hybrid_seeded_entries"].GetUint64() > 0);
+    // A disabled boundary must not cut the clique traversal short.
+    REQUIRE_FALSE(stats["hybrid_mci_stopped_early"].GetBool());
+
+    // Every returned id has to satisfy the predicate.
+    REQUIRE(hybrid.value()->GetDim() > 0);
+    for (int64_t i = 0; i < hybrid.value()->GetDim(); ++i) {
+        const auto id = hybrid.value()->GetIds()[i];
+        REQUIRE(std::find(valid_ids.begin(), valid_ids.end(), id) != valid_ids.end());
+    }
+
+    // Zeroing both budget terms leaves the floor of the sqrt term: max(1, 0) == 1. The
+    // aligned budget can never drop to zero seeds, so exactly one seed is used here.
+    const std::string unseeded_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+        R"("hybrid_vob":0.0,"mci_seed_ratio":0.0,"mci_seed_coverage":0.0}})";
+    auto unseeded = index.value()->KnnSearch(query, 5, unseeded_params, filter);
+    REQUIRE(unseeded.has_value());
+    REQUIRE(unseeded.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hybrid")");
+    {
+        const auto stats = vsag::JsonType::Parse(unseeded.value()->GetStatistics());
+        REQUIRE(stats["hybrid_seed_budget"].GetUint64() == 1);
+        REQUIRE(stats["hybrid_seeded_entries"].GetUint64() == 1);
+    }
+
+    // The default coverage budget seeds the entire valid set for this small index.
+    const std::string covered_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+        R"("hybrid_vob":0.0,"mci_seed_ratio":0.0}})";
+    auto covered = index.value()->KnnSearch(query, 5, covered_params, filter);
+    REQUIRE(covered.has_value());
+    const auto covered_stats = vsag::JsonType::Parse(covered.value()->GetStatistics());
+    REQUIRE(covered_stats["hybrid_seed_budget"].GetUint64() >=
+            static_cast<uint64_t>(valid_ids.size()));
+    REQUIRE(covered_stats["hybrid_seeded_entries"].GetUint64() > 0);
+    // The budget covers the whole valid set, so the traversal is answered from the seeds and
+    // the clique expansion is skipped entirely.
+    REQUIRE(covered_stats["hybrid_expansion_skipped"].GetBool());
+    REQUIRE(covered_stats["hybrid_expanded_nodes"].GetUint64() == 0);
+    REQUIRE(covered_stats["hybrid_mci_cliques_expanded"].GetUint64() == 0);
+}
+
+TEST_CASE("HGraph dynamic neighbor traversal stops early on a tight overhead boundary",
+          "[ut][hgraph][mci][hybrid]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+
+    std::vector<int64_t> valid_ids(total / 2);
+    std::iota(valid_ids.begin(), valid_ids.end(), total / 2);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+
+    // A boundary of 2.0 with ratio = 1.0 admits a single clique member,
+    // so the remaining members of the first clique must be skipped.
+    const std::string tight_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+        R"("hybrid_vob":2.0,"hybrid_filter_cost_ratio":1.0,)"
+        R"("mci_seed_coverage":0.0}})";
+    auto tight = index.value()->KnnSearch(query, 5, tight_params, filter);
+    REQUIRE(tight.has_value());
+    REQUIRE(tight.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hybrid")");
+    const auto tight_stats = vsag::JsonType::Parse(tight.value()->GetStatistics());
+    REQUIRE(tight_stats["hybrid_mci_stopped_early"].GetBool());
+    REQUIRE(tight_stats["hybrid_mci_members_considered"].GetUint64() <
+            tight_stats["hybrid_mci_cliques_expanded"].GetUint64() * (total / 2));
+
+    // The relaxed boundary has to consider at least as much work.
+    const std::string relaxed_params =
+        R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+        R"("hybrid_vob":0.0,"hybrid_filter_cost_ratio":1.0,)"
+        R"("mci_seed_coverage":0.0}})";
+    auto relaxed = index.value()->KnnSearch(query, 5, relaxed_params, filter);
+    REQUIRE(relaxed.has_value());
+    const auto relaxed_stats = vsag::JsonType::Parse(relaxed.value()->GetStatistics());
+    REQUIRE_FALSE(relaxed_stats["hybrid_mci_stopped_early"].GetBool());
+    REQUIRE(relaxed_stats["hybrid_mci_members_considered"].GetUint64() >=
+            tight_stats["hybrid_mci_members_considered"].GetUint64());
+}
+
+TEST_CASE("HGraph hybrid seed budget follows the coverage rule", "[ut][hgraph][mci][hybrid]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+
+    // The filter admits exactly half of the 64 points, so valid == 32.
+    constexpr uint64_t valid_count = total / 2;
+    std::vector<int64_t> valid_ids(valid_count);
+    std::iota(valid_ids.begin(), valid_ids.end(), valid_count);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid_ids);
+
+    // N == 64 and mci_seed_ratio == 1.0 put the sqrt term at ceil(sqrt(64) * 1.0) == 8.
+    auto budget_of =
+        [&](const std::string& ratio, const std::string& coverage, const std::string& cap) {
+            const std::string params =
+                R"({"hgraph":{"ef_search":64,"use_mci":false,"use_hybrid_traversal":true,)"
+                R"("mci_seed_ratio":)" +
+                ratio + R"(,"mci_seed_coverage":)" + coverage + R"(,"mci_seed_max_count":)" + cap +
+                "}}";
+            auto result = index.value()->KnnSearch(query, 5, params, filter);
+            REQUIRE(result.has_value());
+            return vsag::JsonType::Parse(result.value()->GetStatistics())["hybrid_seed_budget"]
+                .GetUint64();
+        };
+
+    // The coverage term raises the budget to the whole valid set, which is what makes the
+    // traversal exact (and lets it skip the expansion).
+    REQUIRE(budget_of("1.0", "1.0", "32768") == valid_count);
+    // cap == 0 means unlimited, so it does not restrict the coverage term either.
+    REQUIRE(budget_of("1.0", "1.0", "0") == valid_count);
+    // A coverage target that misses the cap is dropped entirely rather than truncated, so
+    // the budget falls back to the sqrt term instead of being clamped to the cap.
+    REQUIRE(budget_of("1.0", "1.0", "16") == 8);
+    // A coverage term below the sqrt term changes nothing.
+    REQUIRE(budget_of("1.0", "0.1", "32768") == 8);
+    // Both terms zero leave the max(1, ...) floor of the sqrt term.
+    REQUIRE(budget_of("0.0", "0.0", "32768") == 1);
+}
+
+TEST_CASE("HGraph hybrid traversal preserves 1.0 fallback and reranking",
+          "[ut][hgraph][mci][hybrid]") {
+    constexpr int64_t total = 32;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 100);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>(i + j);
+        }
+    }
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    config["index_param"]["build_thread_count"].SetInt(1);
+    const auto quantized = GENERATE(false, true);
+    if (quantized) {
+        config["index_param"]["base_quantization_type"].SetString("sq8");
+        config["index_param"]["use_reorder"].SetBool(true);
+        config["index_param"]["precise_quantization_type"].SetString("fp32");
+    }
+    auto index = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(
+        std::vector<int64_t>(ids.begin() + total / 2, ids.end()));
+    const std::string params =
+        R"({"hgraph":{"ef_search":32,"use_mci":false,"use_hybrid_traversal":true}})";
+    SECTION("exhaustive label seeds retain exact reranked distances") {
+        auto result = index.value()->KnnSearch(query, 3, params, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        for (int64_t i = 0; i < 3; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == 100 + total / 2 + i);
+            REQUIRE(result.value()->GetDistances()[i] ==
+                    Catch::Approx(static_cast<float>(dim * (total / 2 + i) * (total / 2 + i))));
+        }
+        const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+        REQUIRE(stats["mci_hybrid_route"].GetString() == "hybrid");
+        REQUIRE(stats["hybrid_expansion_skipped"].GetBool());
+    }
+    SECTION("range search stays on the existing path") {
+        auto fallback_filter = std::make_shared<HalfRatioAllValidFilter>(
+            std::vector<int64_t>(ids.begin(), ids.begin() + total / 2));
+        auto result = index.value()->RangeSearch(query, 10000.0F, params, fallback_filter, 3);
+        REQUIRE(result.has_value());
+        auto baseline_params = vsag::JsonType::Parse(params);
+        baseline_params["hgraph"]["use_hybrid_traversal"].SetBool(false);
+        auto baseline =
+            index.value()->RangeSearch(query, 10000.0F, baseline_params.Dump(), fallback_filter, 3);
+        REQUIRE(baseline.has_value());
+        // Keep the valid region connected to the query's entry so this checks fallback
+        // semantics without exercising the separate legacy empty-result reorder path.
+        REQUIRE(result.value()->GetDim() == 3);
+        REQUIRE(result.value()->GetDim() == baseline.value()->GetDim());
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(result.value()->GetIds()[i] == baseline.value()->GetIds()[i]);
+            REQUIRE(result.value()->GetDistances()[i] == baseline.value()->GetDistances()[i]);
+        }
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"}) ==
+                baseline.value()->GetStatistics({"mci_hybrid_route"}));
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] != R"("hybrid")");
+        auto all_valid = index.value()->RangeSearch(
+            query, 10000.0F, params, std::make_shared<CallbackOnlyFilter>(), 3);
+        REQUIRE(all_valid.has_value());
+        REQUIRE(all_valid.value()->GetDim() == 3);
+    }
+    SECTION("missing companion falls back") {
+        auto fallback_filter = std::make_shared<HalfRatioAllValidFilter>(
+            std::vector<int64_t>(ids.begin(), ids.begin() + total / 2));
+        vsag::HGraphMCITestAccess::GetCliques(index.value())->Clear(total);
+        auto result = index.value()->KnnSearch(query, 3, params, fallback_filter);
+        REQUIRE(result.has_value());
+        auto baseline_params = vsag::JsonType::Parse(params);
+        baseline_params["hgraph"]["use_hybrid_traversal"].SetBool(false);
+        auto baseline = index.value()->KnnSearch(query, 3, baseline_params.Dump(), fallback_filter);
+        REQUIRE(baseline.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        REQUIRE(result.value()->GetDim() == baseline.value()->GetDim());
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(result.value()->GetIds()[i] == baseline.value()->GetIds()[i]);
+            REQUIRE(result.value()->GetDistances()[i] == baseline.value()->GetDistances()[i]);
+        }
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"}) ==
+                baseline.value()->GetStatistics({"mci_hybrid_route"}));
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] != R"("hybrid")");
+        auto all_valid =
+            index.value()->KnnSearch(query, 3, params, std::make_shared<CallbackOnlyFilter>());
+        REQUIRE(all_valid.has_value());
+        REQUIRE(all_valid.value()->GetDim() == 3);
+        REQUIRE(all_valid.value()->GetIds()[0] == 100);
+    }
+    SECTION("brute force retains precedence") {
+        auto search = vsag::JsonType::Parse(params);
+        search["hgraph"]["brute_force_threshold"].SetFloat(1.0F);
+        auto result = index.value()->KnnSearch(query, 3, search.Dump(), filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+    }
+    SECTION("bitset seeds never claim exhaustive coverage") {
+        auto invalid = vsag::Bitset::Make();
+        for (int64_t i = 0; i < total / 2; ++i) {
+            invalid->Set(ids[i]);
+        }
+        auto result = index.value()->KnnSearch(query, 3, params, invalid);
+        REQUIRE(result.has_value());
+        const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+        REQUIRE(stats["mci_hybrid_route"].GetString() == "hybrid");
+        REQUIRE_FALSE(stats["hybrid_expansion_skipped"].GetBool());
+        REQUIRE(result.value()->GetDim() == 3);
+        for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+            REQUIRE(result.value()->GetIds()[i] >= 100 + total / 2);
+        }
+    }
+    SECTION("callback only filter uses the entry point") {
+        auto result =
+            index.value()->KnnSearch(query, 3, params, std::make_shared<CallbackOnlyFilter>());
+        REQUIRE(result.has_value());
+        const auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+        REQUIRE(stats["mci_hybrid_route"].GetString() == "hybrid");
+        REQUIRE(stats["hybrid_seeded_entries"].GetUint64() == 0);
+        REQUIRE_FALSE(stats["hybrid_expansion_skipped"].GetBool());
+        REQUIRE(result.value()->GetIds()[0] == 100);
+    }
 }

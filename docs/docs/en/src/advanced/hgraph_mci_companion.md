@@ -63,8 +63,9 @@ Search parameters live under the `hgraph` search object:
 }
 ```
 
-`use_mci` defaults to true for search and can be set to false to disable MCI for a single
-query. `hgraph_valid_ratio_threshold` is the search routing threshold: use MCI when
+`use_mci` defaults to true for search and can be set to false to disable the original MCI
+route for a single query. The hybrid traversal below has its own enable flag.
+`hgraph_valid_ratio_threshold` is the search routing threshold: use MCI when
 `ValidRatio()` is below this value; otherwise use HGraph. The default is `0.05`.
 
 The seed count is
@@ -76,6 +77,59 @@ The MCI route requires a bitset filter or a custom `Filter` that supplies a none
 valid-ID list through `GetValidIds()`, plus a meaningful `ValidRatio()` hint. Function-only
 filters fall back to HGraph. Sampling resolves the selected labels without filling gaps
 from stale or duplicate IDs; if no seeds remain, search falls back to HGraph.
+
+## Dynamic Neighbor Traversal
+
+`use_hybrid_traversal` (default `false`) replaces the either/or routing above with a single
+traversal that handles both neighbor sources of every expanded vector in one pass:
+
+- the sparse HGraph neighbors are scored first and pushed into the candidate heap, so the
+  search subgraph stays connected regardless of selectivity;
+- the clique members of the same vector are scored predicate-first, and that part is cut short
+  by a virtual-overhead budget.
+
+The budget stops the clique part once
+`considered * (hybrid_filter_cost_ratio + local_selectivity)` reaches `hybrid_vob`, where
+`hybrid_filter_cost_ratio` is `O_filter / O_dist` (the cost of one predicate filtering relative
+to one distance computation) and `local_selectivity` is the running predicate hit rate of the
+current neighbor traversal. A zero `hybrid_vob` disables the early stop. Both cost parameters must be
+finite and non-negative. The two
+parameters default to `0.0` and `1.0`, and `hybrid_vob` is expressed in units of `O_dist`.
+
+```json
+{
+    "hgraph": {
+      "ef_search": 600,
+      "use_hybrid_traversal": true,
+      "hybrid_vob": 32.0,
+      "mci_seed_ratio": 1.0,
+      "mci_seed_coverage": 1.0
+    }
+}
+```
+
+The traversal samples the predicate's valid set using the MCI samplers. Its seed budget is
+`max(1, ceil(sqrt(N) * mci_seed_ratio))`, raised to `ceil(mci_seed_coverage * valid_count)`
+only when that coverage target does not exceed N and fits `mci_seed_max_count`. A target
+that misses the cap is dropped entirely, not truncated. Coverage defaults to `1.0` and
+the cap to `32768` (`0` means unlimited); both must be non-negative and coverage finite.
+Setting both ratio and coverage to zero leaves one seed. These two new parameters affect
+only hybrid traversal; the existing MCI route retains its original seed budget.
+When that budget ends up covering every valid point, all valid distances are already known and
+the traversal answers from the seeds directly; the expansion is skipped because it is provably
+redundant, not as an approximation. `GetStatistics()` reports the behavior through
+`mci_hybrid_route` (`"hybrid"` when the traversal ran), `hybrid_seed_budget`,
+`hybrid_seeded_entries`, `hybrid_expansion_skipped`, `hybrid_expanded_nodes`,
+`hybrid_mci_members_considered`, `hybrid_dist_computations` and `hybrid_mci_stopped_early`.
+
+The bitset sampler cannot prove exhaustiveness, so it never enables the expansion skip.
+Filters without a usable seed list start at the coarse-search entry point. Hybrid traversal
+is independent of the search-time `use_mci` routing flag. It falls back to existing routes
+when no companion is published for the current count, for range search, or when an
+attribute-filter executor is present. An enabled brute-force threshold takes precedence.
+This `1.0` backport retains single-query search; it does not add main's batch-search API.
+The exhaustive skip is exact for the distances used during traversal; quantized codes
+still have their usual approximation and reranking behavior.
 
 ## Add, Serialize, and Stats
 
