@@ -16,10 +16,14 @@
 
 #include <array>
 #include <catch2/catch_approx.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <limits>
 
 #include "impl/allocator/safe_allocator.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp32_simd.h"
 #include "unittest.h"
+#include "utils/float_utils.h"
 
 namespace vsag {
 
@@ -115,6 +119,29 @@ TEST_CASE("PiPNN adaptive revisits rejects and original tail", "[ut][pipnn_adapt
         CHECK(result[1] == 2);
         CHECK(stats.initial_rejected == 0);
     }
+    SECTION("fallback discards rejects and does not repeat first-pass rejects") {
+        // u=(0,0), a=(1,0), b=(1.1,0), c=(0.5,1). The first pass accepts a,c;
+        // tightening rejects b,c, and fallback must reject b before restoring c.
+        const std::array<std::array<float, 2>, 3> points{
+            {{1.0F, 0.0F}, {1.1F, 0.0F}, {0.5F, 1.0F}}};
+        candidates = {{1.0F, 0}, {1.21F, 1}, {1.25F, 2}};
+        const auto result = select_pipnn_edges_adaptive(
+            candidates,
+            2,
+            1.06F,
+            0.06F,
+            [&](uint32_t lhs, uint32_t rhs) {
+                return FP32ComputeL2Sqr(points[lhs].data(), points[rhs].data(), 2);
+            },
+            allocator.get(),
+            &stats);
+        REQUIRE(result.size() == 2);
+        CHECK(result[0] == 0);
+        CHECK(result[1] == 2);
+        CHECK(stats.branch == PiPNNAdaptivePruningBranch::TIGHTEN);
+        CHECK(stats.initial_rejected == 1);
+        CHECK(stats.distance_calls == 6);
+    }
     SECTION("fallback uses tightened rejects even when first pass rejected nothing") {
         candidates = {{1.0F, 1}, {2.0F, 2}};
         const auto result = select_pipnn_edges_adaptive(
@@ -201,6 +228,29 @@ TEST_CASE("PiPNN adaptive strict comparison and empty input", "[ut][pipnn_adapti
     CHECK(stats.distance_calls == 0);
     candidates.clear();
     CHECK(select_pipnn_edges_adaptive(candidates, 2, 1, 0.06F, distance, allocator.get()).empty());
+}
+
+TEST_CASE("PiPNN adaptive rejects pairwise overflow with finite source distances",
+          "[ut][pipnn_adaptive]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    const float source = 0.0F;
+    const std::array<float, 2> points{1.0e19F, -1.0e19F};
+    Vector<std::pair<float, uint32_t>> candidates(allocator.get());
+    for (uint32_t id = 0; id < points.size(); ++id) {
+        REQUIRE(IsFiniteFloatBits(points[id]));
+        const float source_distance = FP32ComputeL2Sqr(&source, &points[id], 1);
+        // Source distances remain finite even after PiPNN's BF16 cache round trip.
+        const float cached_distance = generic::BF16ToFloat(generic::FloatToBF16(source_distance));
+        REQUIRE(IsFiniteFloatBits(cached_distance));
+        candidates.emplace_back(cached_distance, id);
+    }
+    const auto distance = [&](uint32_t lhs, uint32_t rhs) {
+        return FP32ComputeL2Sqr(&points[lhs], &points[rhs], 1);
+    };
+    REQUIRE_FALSE(IsFiniteFloatBits(distance(0, 1)));
+    CHECK_THROWS_WITH(
+        select_pipnn_edges_adaptive(candidates, 2, 1.2F, 0.06F, distance, allocator.get()),
+        "PiPNN adaptive pruning requires finite non-negative pairwise L2 distances");
 }
 
 TEST_CASE("PiPNN adaptive rejects invalid thresholds and distances", "[ut][pipnn_adaptive]") {

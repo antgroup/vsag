@@ -59,7 +59,7 @@ select_pipnn_edges_adaptive(const Vector<std::pair<float, uint32_t>>& ordered,
     Vector<uint64_t> positions(ordered.size(), allocator);
     std::iota(positions.begin(), positions.end(), uint64_t{0});
     Vector<uint64_t> rejected(allocator);
-    auto scan = [&](const Vector<uint64_t>& input, float threshold, Vector<uint64_t>& failures) {
+    auto scan = [&](const Vector<uint64_t>& input, float threshold, Vector<uint64_t>* failures) {
         for (const auto position : input) {
             if (accepted.size() == target_degree) {
                 break;
@@ -69,6 +69,7 @@ select_pipnn_edges_adaptive(const Vector<std::pair<float, uint32_t>>& ordered,
             for (const auto selected : accepted) {
                 const float pair_distance = distance(ordered[selected].second, candidate.second);
                 ++result.distance_calls;
+                // Finite source distances do not rule out pairwise FP32 overflow.
                 const bool valid_pair = IsFiniteFloatBits(pair_distance) and pair_distance >= 0;
                 CHECK_ARGUMENT(
                     valid_pair,
@@ -80,13 +81,13 @@ select_pipnn_edges_adaptive(const Vector<std::pair<float, uint32_t>>& ordered,
             }
             if (keep) {
                 accepted.emplace_back(position);
-            } else {
-                failures.emplace_back(position);
+            } else if (failures != nullptr) {
+                failures->emplace_back(position);
             }
         }
     };
 
-    scan(positions, alpha, rejected);
+    scan(positions, alpha, &rejected);
     result.initial_accepted = accepted.size();
     result.initial_rejected = rejected.size();
     if (adjust_step == 0) {
@@ -98,8 +99,7 @@ select_pipnn_edges_adaptive(const Vector<std::pair<float, uint32_t>>& ordered,
             static_cast<double>(target_degree) / static_cast<double>(accepted.size());
         const int steps = ratio > 3 ? 3 : (ratio > 1.5 ? 2 : 1);
         result.second_alpha = alpha + static_cast<float>(steps) * adjust_step;
-        Vector<uint64_t> remaining(allocator);
-        scan(rejected, result.second_alpha, remaining);
+        scan(rejected, result.second_alpha, nullptr);
     } else if (accepted.size() == target_degree) {
         result.branch = PiPNNAdaptivePruningBranch::TIGHTEN;
         const double ratio =
@@ -107,13 +107,12 @@ select_pipnn_edges_adaptive(const Vector<std::pair<float, uint32_t>>& ordered,
         const int steps = ratio >= 5 ? 0 : (ratio >= 2.5 ? 1 : 2);
         result.second_alpha = alpha - static_cast<float>(steps) * adjust_step;
         accepted.clear();
-        auto tightened_rejects = std::move(rejected);
-        tightened_rejects.clear();
+        // Reuse the allocation, discarding first-pass rejects before the full rescan.
+        rejected.clear();
         // Revisit the complete original reservoir, including the unscanned first-pass tail.
-        scan(positions, result.second_alpha, tightened_rejects);
+        scan(positions, result.second_alpha, &rejected);
         if (accepted.size() < target_degree) {
-            Vector<uint64_t> remaining(allocator);
-            scan(tightened_rejects, alpha, remaining);
+            scan(rejected, alpha, nullptr);
         }
     }
     std::sort(accepted.begin(), accepted.end());
