@@ -19,6 +19,7 @@
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
+- [UHG](indexes/uhg.md)
 - [SINDI_V2](indexes/sindi_v2.md)
 - [SIMQ](indexes/simq.md)
 - [Pyramid](indexes/pyramid.md)

@@ -273,6 +273,7 @@ Thrive together in VSAG community with users and developers from all around the 
   - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
   - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
   - **SINDI_V2**: Optimized sparse vector index supporting both in-memory and disk-based I/O.
+  - **[UHG (Unified Hybrid Graph)](docs/docs/en/src/indexes/uhg.md)**: Paired dense/sparse retrieval with query-specific weights, using HGraph and SINDI guides.
 
 - **Advanced Quantization Methods**
   - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.

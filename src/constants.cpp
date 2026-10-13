@@ -19,6 +19,7 @@
 namespace vsag {
 
 const char* const INDEX_HGRAPH = "hgraph";
+const char* const INDEX_UHG = "uhg";
 const char* const INDEX_LAZY_HGRAPH = "lazy_hgraph";
 const char* const INDEX_PYRAMID = "pyramid";
 const char* const INDEX_SINDI = "sindi";

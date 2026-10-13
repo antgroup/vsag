@@ -68,7 +68,8 @@ enum class IndexType {
     WARP = 8,
     LAZY_HGRAPH = 9,
     SIMQ = 10,  ///< Single Index for Multi-vector Query.
-    SINDI_V2 = 11
+    SINDI_V2 = 11,
+    UHG = 12  ///< Unified dense-sparse hybrid graph.
 };
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
 #define DATA_FLAG_INT8_VECTOR 0x02
