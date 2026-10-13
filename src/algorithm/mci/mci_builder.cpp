@@ -156,6 +156,12 @@ BuildMCICliques(const float* vectors,
     const auto thread_count = std::max<uint64_t>(1, std::min<uint64_t>(params.thread_count, total));
     const auto max_saved_cliques =
         std::min<uint64_t>(candidate_limit, static_cast<uint64_t>(params.max_degree + 2));
+    // clique_max is the MINIMUM size the enumerator must keep: every maximal clique found inside
+    // the candidate pool is stored in full, so its size is bounded by the pool itself. Clipping the
+    // stored clique to `clique_max` collapsed every clique to exactly that size and cut the
+    // clique-union degree of the built index far below what the reference MCI implementation
+    // produces for the same parameters.
+    const auto clique_cap = candidate_limit + 1;
 
     logger::info(
         "mci v3 clique build started, total={}, dim={}, candidate_limit={}, clique_threshold={}, "
@@ -313,8 +319,8 @@ BuildMCICliques(const float* vectors,
                 auto append_selected_clique = [&](const auto& clique) {
                     selected_by_thread[tid].emplace_back(allocator);
                     selected_by_thread[tid].back().assign(clique.begin(), clique.end());
-                    if (selected_by_thread[tid].back().size() > params.clique_max) {
-                        selected_by_thread[tid].back().resize(params.clique_max);
+                    if (selected_by_thread[tid].back().size() > clique_cap) {
+                        selected_by_thread[tid].back().resize(clique_cap);
                     }
                 };
 
@@ -487,10 +493,10 @@ BuildMCICliques(const float* vectors,
                     uint64_t chosen_count = 0;
                     for (uint64_t i = 0; i < local_clique_count; ++i) {
                         auto& clique = local_max_cliques[i];
-                        if (clique.size() > params.clique_max) {
+                        if (clique.size() > clique_cap) {
                             const bool contains_seed =
                                 std::find(clique.begin(), clique.end(), seed) != clique.end();
-                            clique.resize(params.clique_max);
+                            clique.resize(clique_cap);
                             if (contains_seed and
                                 std::find(clique.begin(), clique.end(), seed) == clique.end()) {
                                 clique.back() = seed;

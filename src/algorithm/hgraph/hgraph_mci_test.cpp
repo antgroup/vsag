@@ -25,15 +25,27 @@
 #include <tuple>
 #include <vector>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/mci/mci_builder.h"
 #include "algorithm/mci/mci_runner.h"
 #include "datacell/clique_datacell.h"
 #include "impl/allocator/default_allocator.h"
+#include "index/index_impl.h"
 #include "unittest.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
 #include "vsag/factory.h"
 #include "vsag/filter.h"
+
+namespace vsag {
+struct HGraphMCITestAccess {
+    static CliqueDataCellPtr
+    GetCliques(const IndexPtr& index) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
+        return std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex())->mci_cliques_;
+    }
+};
+}  // namespace vsag
 
 namespace {
 
@@ -94,6 +106,71 @@ public:
     ValidRatio() const override {
         return 0.5F;
     }
+};
+
+// Keeps the `valid_count` labels that start at `first_label` and, when requested, also exposes a
+// dense bitmap whose valid inner ids are given by `bitmap_valid_ids`. The two sets are only the same
+// object when labels and inner ids coincide.
+class RangeBitmapFilter : public vsag::Filter {
+public:
+    RangeBitmapFilter(int64_t first_label,
+                      int64_t total,
+                      int64_t valid_count,
+                      const std::vector<int64_t>& bitmap_valid_ids,
+                      bool expose_bitmap,
+                      uint8_t valid_byte = 1,
+                      uint64_t reported_size = std::numeric_limits<uint64_t>::max())
+        : first_label_(first_label),
+          valid_count_(valid_count),
+          bitmap_(static_cast<uint64_t>(total), 0),
+          expose_bitmap_(expose_bitmap),
+          reported_size_(reported_size) {
+        valid_ids_.resize(static_cast<uint64_t>(valid_count));
+        std::iota(valid_ids_.begin(), valid_ids_.end(), first_label_);
+        for (auto id : bitmap_valid_ids) {
+            if (id >= 0 and id < total) {
+                bitmap_[static_cast<uint64_t>(id)] = valid_byte;
+            }
+        }
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id >= first_label_ and id < first_label_ + valid_count_;
+    }
+
+    float
+    ValidRatio() const override {
+        return static_cast<float>(valid_count_) / static_cast<float>(bitmap_.size());
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        *valid_ids = valid_ids_.data();
+        count = static_cast<int64_t>(valid_ids_.size());
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        if (not expose_bitmap_) {
+            if (size != nullptr) {
+                *size = 0;
+            }
+            return nullptr;
+        }
+        if (size != nullptr) {
+            *size = std::min<uint64_t>(bitmap_.size(), reported_size_);
+        }
+        return bitmap_.data();
+    }
+
+private:
+    int64_t first_label_{0};
+    int64_t valid_count_{0};
+    std::vector<int64_t> valid_ids_;
+    std::vector<uint8_t> bitmap_;
+    bool expose_bitmap_{false};
+    uint64_t reported_size_;
 };
 
 struct TestEdge {
@@ -636,7 +713,7 @@ TEST_CASE("MCI builder includes duplicate-vector seed edges", "[ut][hgraph][mci]
         cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == total; }));
 }
 
-TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][mci]") {
+TEST_CASE("MCI builder keeps maximal cliques larger than clique_max", "[ut][hgraph][mci]") {
     constexpr uint64_t total = 6;
     constexpr uint64_t dim = 2;
     const std::vector<float> vectors{
@@ -664,10 +741,63 @@ TEST_CASE("MCI builder treats clique_max only as a storage cap", "[ut][hgraph][m
     vsag::DefaultAllocator allocator;
     const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
     REQUIRE_FALSE(cliques.empty());
-    REQUIRE(std::all_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() <= 2; }));
+    // clique_max is a lower bound on the size of a maximal clique, never a cap: an enumerated clique
+    // is stored in full, so it may grow up to the candidate pool (mcs neighbours plus the seed).
+    REQUIRE(std::all_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() >= params.clique_max and clique.size() <= params.candidate_limit + 1;
+    }));
+    // Both clusters of this data are triangles, so a size-3 maximal clique must survive intact.
     REQUIRE(std::any_of(
-        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 2; }));
+        cliques.begin(), cliques.end(), [](const auto& clique) { return clique.size() == 3; }));
+}
+
+TEST_CASE("MCI builder stores a full candidate-pool clique", "[ut][hgraph][mci]") {
+    // Every pair of vectors is equally far apart, so each seed sees a complete graph over its
+    // candidate pool and the only maximal clique has size candidate_limit + 1.
+    constexpr uint64_t total = 7;
+    constexpr uint64_t dim = 7;
+    constexpr uint64_t candidate_limit = 6;
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (uint64_t id = 0; id < total; ++id) {
+        vectors[id * dim + id] = 1.0F;
+    }
+    std::vector<vsag::InnerIdType> neighbors(total * candidate_limit);
+    for (uint64_t id = 0; id < total; ++id) {
+        uint64_t rank = 0;
+        for (uint64_t other = 0; other < total; ++other) {
+            if (other == id) {
+                continue;
+            }
+            neighbors[id * candidate_limit + rank] = static_cast<vsag::InnerIdType>(other);
+            ++rank;
+        }
+    }
+    const std::vector<uint32_t> counts(total, candidate_limit);
+
+    vsag::MCIGraphView graph;
+    graph.neighbors = neighbors.data();
+    graph.counts = counts.data();
+    graph.total = total;
+    graph.row_stride = candidate_limit;
+    vsag::MCIV3BuildParams params;
+    params.total = total;
+    params.dim = dim;
+    params.candidate_limit = candidate_limit;
+    params.clique_max = 3;
+    params.max_degree = 32;
+    params.alpha = 1.2F;
+    params.thread_count = 2;
+    params.metric = vsag::MetricType::METRIC_TYPE_L2SQR;
+
+    vsag::DefaultAllocator allocator;
+    const auto cliques = vsag::BuildMCICliques(vectors.data(), graph, params, &allocator);
+    REQUIRE_FALSE(cliques.empty());
+    REQUIRE(std::all_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() >= params.clique_max;
+    }));
+    REQUIRE(std::any_of(cliques.begin(), cliques.end(), [&](const auto& clique) {
+        return clique.size() == candidate_limit + 1;
+    }));
 }
 
 TEST_CASE("MCI builder transports worker exceptions", "[ut][hgraph][mci]") {
@@ -845,4 +975,197 @@ TEST_CASE("HGraph Merge rebuilds the MCI companion", "[ut][hgraph][mci]") {
         filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+}
+
+TEST_CASE("HGraph MCI inlines an identity-mapped filter bitmap", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    constexpr int64_t valid_count = total / 2;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    std::vector<int64_t> bitmap_valid_ids(valid_count);
+    std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), 0);
+
+    const auto quantizer = GENERATE(std::string("fp32"), std::string("sq8"));
+    const auto restore = GENERATE(false, true);
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["base_quantization_type"].SetString(quantizer);
+    params["index_param"]["base_io_type"].SetString("memory_io");
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    if (restore) {
+        std::stringstream stream;
+        REQUIRE(index.value()->Serialize(stream).has_value());
+        index = vsag::Factory::CreateIndex("hgraph", params.Dump());
+        REQUIRE(index.has_value());
+        REQUIRE(index.value()->Deserialize(stream).has_value());
+    }
+
+    // Query with the vector of a filtered-out element, so that a wrong validity answer is visible.
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + (total - 1) * dim)
+                     ->Owner(false);
+    const std::string search_params =
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})";
+
+    for (const auto valid_byte : {uint8_t{1}, uint8_t{2}, uint8_t{255}}) {
+        for (const auto short_bitmap : {false, true}) {
+            std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), 0);
+            auto bitmap_filter =
+                std::make_shared<RangeBitmapFilter>(0,
+                                                    total,
+                                                    valid_count,
+                                                    bitmap_valid_ids,
+                                                    true,
+                                                    valid_byte,
+                                                    short_bitmap ? total - 1 : total);
+            auto bitmap_result = index.value()->KnnSearch(query, 5, search_params, bitmap_filter);
+            REQUIRE(bitmap_result.has_value());
+            REQUIRE(bitmap_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+            REQUIRE(vsag::JsonType::Parse(
+                        bitmap_result.value()->GetStatistics())["mci_bitmap_fast_path"]
+                        .GetBool() == not short_bitmap);
+            REQUIRE(
+                vsag::JsonType::Parse(bitmap_result.value()->GetStatistics())["mci_raw_float_csr"]
+                    .GetBool() == (quantizer == "fp32"));
+            REQUIRE(bitmap_result.value()->GetDim() > 0);
+            for (int64_t i = 0; i < bitmap_result.value()->GetDim(); ++i) {
+                REQUIRE(bitmap_result.value()->GetIds()[i] < valid_count);
+            }
+
+            // The same filter without a bitmap searches through the callback path and must agree exactly.
+            auto callback_filter =
+                std::make_shared<RangeBitmapFilter>(0, total, valid_count, bitmap_valid_ids, false);
+            auto callback_result =
+                index.value()->KnnSearch(query, 5, search_params, callback_filter);
+            REQUIRE(callback_result.has_value());
+            REQUIRE_FALSE(vsag::JsonType::Parse(
+                              callback_result.value()->GetStatistics())["mci_bitmap_fast_path"]
+                              .GetBool());
+            REQUIRE(callback_result.value()->GetDim() == bitmap_result.value()->GetDim());
+            for (int64_t i = 0; i < callback_result.value()->GetDim(); ++i) {
+                REQUIRE(callback_result.value()->GetIds()[i] == bitmap_result.value()->GetIds()[i]);
+                REQUIRE(callback_result.value()->GetDistances()[i] ==
+                        bitmap_result.value()->GetDistances()[i]);
+            }
+            // Per-search marks must be rebuilt for each filter, including after a serialized round trip.
+            std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), valid_count);
+            auto second_filter = std::make_shared<RangeBitmapFilter>(
+                valid_count, total, valid_count, bitmap_valid_ids, true, valid_byte);
+            auto second = index.value()->KnnSearch(query, 5, search_params, second_filter);
+            REQUIRE(second.has_value());
+            REQUIRE(second.value()->GetDim() == 5);
+            for (int64_t i = 0; i < second.value()->GetDim(); ++i) {
+                REQUIRE(second.value()->GetIds()[i] >= valid_count);
+            }
+        }
+    }
+}
+
+TEST_CASE("HGraph MCI ignores a bitmap whose ids are not inner ids", "[ut][hgraph][mci]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t total = 64;
+    constexpr int64_t valid_count = total / 2;
+    constexpr int64_t first_label = 8000;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), first_label);
+    std::vector<float> vectors(total * dim);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    // The exposed bitmap marks exactly the ids this filter rejects. Reusing it as an inner-id
+    // bitmap would return them, so the label table not being the identity must disable the bitmap.
+    std::vector<int64_t> bitmap_valid_ids(valid_count);
+    std::iota(bitmap_valid_ids.begin(), bitmap_valid_ids.end(), valid_count);
+
+    auto index = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + (total - 1) * dim)
+                     ->Owner(false);
+    const std::string search_params =
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":5.0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})";
+
+    auto filter = std::make_shared<RangeBitmapFilter>(
+        first_label, total, valid_count, bitmap_valid_ids, true);
+    auto result = index.value()->KnnSearch(query, 5, search_params, filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE_FALSE(
+        vsag::JsonType::Parse(result.value()->GetStatistics())["mci_bitmap_fast_path"].GetBool());
+    REQUIRE(result.value()->GetDim() > 0);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        const auto id = result.value()->GetIds()[i];
+        REQUIRE(id >= first_label);
+        REQUIRE(id < first_label + valid_count);
+    }
+}
+
+TEST_CASE("HGraph generic MCI keeps whole cliques and honors the minimum", "[ut][hgraph][mci]") {
+    constexpr int64_t total = 6;
+    constexpr int64_t dim = total;
+    const auto minimum = GENERATE(2, 4, 6);
+    const auto separated = GENERATE(false, true);
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<int8_t> vectors(total * dim, 0);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim + i] = 1;
+        if (separated and i >= total / 2) {
+            for (int64_t j = 0; j < dim; ++j) {
+                vectors[i * dim + j] += 2;
+            }
+        }
+    }
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["dtype"].SetString("int8");
+    params["index_param"]["base_quantization_type"].SetString("int8");
+    params["index_param"]["mci_clique_max"].SetInt(minimum);
+    params["index_param"]["mci_mcs"].SetInt(total - 1);
+    params["index_param"]["build_thread_count"].SetInt(1);
+    auto index = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(index.has_value());
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(total)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Int8Vectors(vectors.data())
+                    ->Owner(false);
+    REQUIRE(index.value()->Build(data).has_value());
+    const auto stats = vsag::HGraphMCITestAccess::GetCliques(index.value())->CollectStats(total);
+    REQUIRE(stats.has_index);
+    // A regular simplex is a complete clique. Two separated triangles require alpha to grow
+    // before a minimum above three can be met; ignoring the minimum leaves only triangles.
+    const auto expected = separated and minimum <= 3 ? total / 2 : total;
+    REQUIRE(stats.max_clique_size == expected);
+    REQUIRE(stats.avg_clique_size >= minimum);
+    std::stringstream stream;
+    REQUIRE(index.value()->Serialize(stream).has_value());
+    auto restored = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(restored.has_value());
+    REQUIRE(restored.value()->Deserialize(stream).has_value());
+    const auto restored_stats =
+        vsag::HGraphMCITestAccess::GetCliques(restored.value())->CollectStats(total);
+    REQUIRE(restored_stats.max_clique_size == expected);
+    REQUIRE(restored_stats.total_membership_count == stats.total_membership_count);
 }
