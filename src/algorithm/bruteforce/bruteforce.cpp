@@ -77,9 +77,10 @@ BruteForce::BruteForce(const BruteForceParameterPtr& param, const IndexCommonPar
     : InnerIndexInterface(param, common_param) {
     inner_codes_ = FlattenInterface::MakeInstance(param->base_codes_param, common_param);
     is_multi_vector_ = (param->base_codes_param->name == MULTI_VECTOR_DATA_CELL);
+    is_sparse_vector_ = (param->base_codes_param->name == SPARSE_VECTOR_DATA_CELL);
     this->resize_increase_count_bit_ = param->resize_increase_count_bit;
     this->use_attribute_filter_ = param->use_attribute_filter;
-    this->has_raw_vector_ = !is_multi_vector_;
+    this->has_raw_vector_ = !is_multi_vector_ && !is_sparse_vector_;
 }
 
 uint64_t
@@ -88,6 +89,11 @@ BruteForce::EstimateMemory(uint64_t num_elements) const {
         uint64_t avg_vectors_per_doc = 10;
         return num_elements * (avg_vectors_per_doc * this->dim_ * sizeof(float) +
                                sizeof(LabelType) * 2 + sizeof(InnerIdType) + sizeof(uint32_t) * 2);
+    }
+    if (is_sparse_vector_) {
+        return num_elements *
+               (sizeof(uint32_t) + this->dim_ * (sizeof(uint32_t) + sizeof(float)) +
+                sizeof(uint64_t) + sizeof(uint32_t) + sizeof(LabelType) * 2 + sizeof(InnerIdType));
     }
     return num_elements *
            (this->dim_ * sizeof(float) + sizeof(LabelType) * 2 + sizeof(InnerIdType));
@@ -127,7 +133,9 @@ BruteForce::Train(const DatasetPtr& data) {
     if (is_multi_vector_) {
         this->train_multi_vector(data);
     } else {
-        this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        const auto* vectors = this->get_data(data);
+        CHECK_ARGUMENT(vectors != nullptr, "training vectors are null");
+        this->inner_codes_->Train(vectors, data->GetNumElements());
     }
 }
 
@@ -222,10 +230,21 @@ BruteForce::Add(const DatasetPtr& data) {
     }
 
     std::vector<int64_t> failed_ids;
-    auto base_dim = data->GetDim();
-    CHECK_ARGUMENT(base_dim == dim_,
-                   fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(data != nullptr, "base dataset is nullptr");
+    if (!is_sparse_vector_) {
+        auto base_dim = data->GetDim();
+        CHECK_ARGUMENT(base_dim == dim_,
+                       fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
+    }
+    CHECK_ARGUMENT(
+        this->get_data(data) != nullptr,
+        is_sparse_vector_ ? "base.sparse_vectors is nullptr" : "base.float_vector is nullptr");
+    if (is_sparse_vector_) {
+        const auto* vectors = data->GetSparseVectors();
+        for (int64_t i = 0; i < data->GetNumElements(); ++i) {
+            this->validate_sparse_vector(vectors[i], "base vector");
+        }
+    }
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -234,7 +253,7 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func = [&](const float* data,
+    auto add_func = [&](const void* vector,
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
@@ -246,14 +265,13 @@ BruteForce::Add(const DatasetPtr& data) {
             std::lock_guard lock(this->add_mutex_);
             this->extra_infos_->InsertExtraInfo(extra_info, slot.value());
         }
-        this->add_one(data, slot.value());
+        this->add_one(vector, slot.value());
         return std::nullopt;
     };
 
     std::vector<std::future<std::optional<int64_t>>> futures;
     const auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
     const auto* extra_info = data->GetExtraInfos();
     const auto extra_info_size = data->GetExtraInfoSize();
@@ -264,6 +282,7 @@ BruteForce::Add(const DatasetPtr& data) {
     }
     for (int64_t j = 0; j < total; ++j) {
         const auto label = labels[j];
+        const auto* vector = this->get_data(data, j);
         {
             std::lock_guard label_lock(this->label_lookup_mutex_);
             if (this->label_table_->CheckLabel(label)) {
@@ -273,15 +292,12 @@ BruteForce::Add(const DatasetPtr& data) {
         }
         const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
         if (this->thread_pool_ != nullptr) {
-            auto future = this->thread_pool_->GeneralEnqueue(add_func,
-                                                             vectors + j * dim_,
-                                                             label,
-                                                             attrs == nullptr ? nullptr : attrs + j,
-                                                             ei_ptr);
+            auto future = this->thread_pool_->GeneralEnqueue(
+                add_func, vector, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
             futures.emplace_back(std::move(future));
         } else {
-            if (auto add_res = add_func(
-                    vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
+            if (auto add_res =
+                    add_func(vector, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
@@ -299,11 +315,11 @@ BruteForce::Add(const DatasetPtr& data) {
 
 uint32_t
 BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
-    if (is_multi_vector_ && mode != RemoveMode::MARK_REMOVE) {
+    if ((is_multi_vector_ || is_sparse_vector_) && mode != RemoveMode::MARK_REMOVE) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "multi-vector mode only supports MARK_REMOVE");
+                            "multi-vector and sparse modes only support MARK_REMOVE");
     }
-    if (not is_multi_vector_) {
+    if (not is_multi_vector_ && not is_sparse_vector_) {
         CHECK_ARGUMENT(not use_attribute_filter_,
                        "remove is not supported when use_attribute_filter is true");
     }
@@ -505,15 +521,23 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
 
     auto search_func = [&](InnerIdType start, InnerIdType end, const DistHeapPtr& cur_heap) {
         uint32_t dist_cmp_local = 0;
+        constexpr uint64_t sparse_batch_size = 64;
+        const uint64_t native_batch_size = is_sparse_vector_ ? sparse_batch_size : 1;
         std::vector<InnerIdType> custom_inner_ids;
         std::vector<int64_t> custom_labels;
         std::vector<float> custom_dists;
+        std::vector<InnerIdType> native_inner_ids;
+        std::vector<float> native_dists;
         if (use_custom_distance) {
             const uint64_t batch_capacity =
                 std::min<uint64_t>(request.distance_batch_size_, end - start);
             custom_inner_ids.reserve(batch_capacity);
             custom_labels.reserve(batch_capacity);
             custom_dists.resize(batch_capacity);
+        } else {
+            const uint64_t batch_capacity = std::min<uint64_t>(native_batch_size, end - start);
+            native_inner_ids.reserve(batch_capacity);
+            native_dists.resize(batch_capacity);
         }
 
         auto flush_custom_batch = [&]() {
@@ -542,6 +566,33 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
         // Worker distances are counted locally and merged once below. Keep the statistics sink for
         // legacy IO counters, but suppress only the datacell's per-call distance aggregation.
         local_query_context.track_distance_evaluations = false;
+        auto flush_native_batch = [&]() {
+            if (native_inner_ids.empty()) {
+                return;
+            }
+            inner_codes_->Query(native_dists.data(),
+                                computer,
+                                native_inner_ids.data(),
+                                static_cast<InnerIdType>(native_inner_ids.size()),
+                                &local_query_context);
+            for (uint64_t j = 0; j < native_inner_ids.size(); ++j) {
+                const float dist = native_dists[j];
+                const auto inner_id = native_inner_ids[j];
+                if (statistics != nullptr) {
+                    ++dist_cmp_local;
+                }
+                if (reasoning != nullptr) {
+                    reasoning->RecordVisit(inner_id, dist, 0);
+                }
+                if (is_range and dist > radius) {
+                    continue;
+                }
+                if (is_range || not request.threshold_.has_value() || std::isfinite(dist)) {
+                    cur_heap->Push(dist, inner_id);
+                }
+            }
+            native_inner_ids.clear();
+        };
         for (InnerIdType i = start; i < end; ++i) {
             if (attr_filter != nullptr and not attr_filter->CheckValid(i)) {
                 if (reasoning != nullptr) {
@@ -557,19 +608,9 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
                         flush_custom_batch();
                     }
                 } else {
-                    float dist = 0.0F;
-                    inner_codes_->Query(&dist, computer, &i, 1, &local_query_context);
-                    if (statistics != nullptr) {
-                        ++dist_cmp_local;
-                    }
-                    if (reasoning != nullptr) {
-                        reasoning->RecordVisit(i, dist, 0);
-                    }
-                    if (is_range and dist > radius) {
-                        continue;
-                    }
-                    if (is_range or not request.threshold_.has_value() or std::isfinite(dist)) {
-                        cur_heap->Push(dist, i);
+                    native_inner_ids.push_back(i);
+                    if (native_inner_ids.size() == native_batch_size) {
+                        flush_native_batch();
                     }
                 }
             } else {
@@ -579,6 +620,7 @@ BruteForce::SearchWithRequest(const SearchRequest& request, SearchMetrics* metri
             }
         }
         flush_custom_batch();
+        flush_native_batch();
         if (statistics != nullptr) {
             dist_cmp.fetch_add(dist_cmp_local, std::memory_order_relaxed);
             statistics->AddDistance(
@@ -687,23 +729,49 @@ BruteForce::RangeSearch(const vsag::DatasetPtr& query,
 
 ComputerInterfacePtr
 BruteForce::make_search_computer(const DatasetPtr& query) const {
+    CHECK_ARGUMENT(query != nullptr, "query dataset is nullptr");
     if (is_multi_vector_) {
         const MultiVector* query_multi_vectors = query->GetMultiVectors();
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
-    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    if (is_sparse_vector_) {
+        const auto* vectors = query->GetSparseVectors();
+        CHECK_ARGUMENT(vectors != nullptr, "query.sparse_vectors is nullptr");
+        this->validate_sparse_vector(vectors[0], "query vector");
+        return this->inner_codes_->FactoryComputer(vectors);
+    }
+    const auto* vector = this->get_data(query);
+    CHECK_ARGUMENT(vector != nullptr, "query.float_vector is nullptr");
+    return this->inner_codes_->FactoryComputer(vector);
 }
 
 float
 BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
-    if (not is_multi_vector_) {
+    if (not is_multi_vector_ && not is_sparse_vector_) {
         return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
     }
     CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
     CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    if (is_sparse_vector_) {
+        const auto* vectors = query->GetSparseVectors();
+        CHECK_ARGUMENT(vectors != nullptr, "distance query must contain sparse vectors");
+        this->validate_sparse_vector(vectors[0], "distance query");
+        std::shared_lock global_lock(global_mutex_, std::defer_lock);
+        std::shared_lock label_lock(label_lookup_mutex_, std::defer_lock);
+        std::lock(global_lock, label_lock);
+        const auto [valid, inner_id] = label_table_->TryGetIdByLabel(id);
+        label_lock.unlock();
+        if (not valid) {
+            return -1.0F;
+        }
+        auto computer = inner_codes_->FactoryComputer(vectors);
+        float distance = 0.0F;
+        inner_codes_->Query(&distance, computer, &inner_id, 1);
+        return distance;
+    }
     CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
     const auto* vectors = query->GetMultiVectors();
     CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
@@ -727,6 +795,7 @@ BruteForce::CalcDistanceById(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
     CHECK_ARGUMENT(not is_multi_vector_, "multi-vector distance requires a Dataset query");
+    CHECK_ARGUMENT(not is_sparse_vector_, "sparse distance requires a Dataset query");
     CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
     // ForceRemove can move the last vector into this slot. Keep label mapping and code
     // storage stable through Query, using deadlock-safe acquisition as in the native path.
@@ -1106,7 +1175,7 @@ BruteForce::Deserialize(StreamReader& reader) {
 
         if (basic_info.Contains("is_multi_vector")) {
             is_multi_vector_ = basic_info["is_multi_vector"].GetBool();
-            this->has_raw_vector_ = !is_multi_vector_;
+            this->has_raw_vector_ = !is_multi_vector_ && !is_sparse_vector_;
         }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
@@ -1134,7 +1203,13 @@ BruteForce::InitFeatures() {
     this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
                                             IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID});
     auto name = this->inner_codes_->GetQuantizerName();
-    if (is_multi_vector_) {
+    if (is_sparse_vector_) {
+        this->index_feature_list_->SetFeatures({IndexFeature::SUPPORT_ADD_FROM_EMPTY,
+                                                IndexFeature::SUPPORT_RANGE_SEARCH,
+                                                IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+                                                IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
+                                                IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
+    } else if (is_multi_vector_) {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16) {
             this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
         } else {
@@ -1200,11 +1275,13 @@ BruteForce::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT);
     }
-    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT);
+    if (!is_sparse_vector_) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_UPDATE_VECTOR_CONCURRENT);
+    }
 }
 
 JsonType
-build_default_brute_force_param(const JsonType& external_param, bool warp) {
+build_default_brute_force_param(const JsonType& external_param, bool warp, bool sparse) {
     const auto base_io_type = external_param.Contains(BRUTE_FORCE_BASE_IO_TYPE)
                                   ? external_param[BRUTE_FORCE_BASE_IO_TYPE].GetString()
                                   : IO_TYPE_VALUE_BLOCK_MEMORY_IO;
@@ -1215,6 +1292,14 @@ build_default_brute_force_param(const JsonType& external_param, bool warp) {
     if (warp) {
         json[BASE_CODES_KEY].SetJson(
             MultiVectorDataCellParameter::CreateDefault(base_io_type)->ToJson());
+    } else if (sparse) {
+        auto sparse_codes =
+            FlattenDataCellParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_SPARSE, base_io_type)
+                ->ToJson();
+        sparse_codes[CODES_TYPE_KEY].SetString(SPARSE_CODES);
+        json[BASE_CODES_KEY].SetJson(sparse_codes);
+        json[EXTRA_INFO_KEY][IO_PARAMS_KEY].SetJson(
+            IOParameter::CreateDefault(IO_TYPE_VALUE_BLOCK_MEMORY_IO)->ToJson());
     } else {
         const auto base_quantization_type =
             external_param.Contains(BRUTE_FORCE_BASE_QUANTIZATION_TYPE)
@@ -1258,7 +1343,7 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                 fmt::format("WARP not support {} datatype", DATATYPE_INT8));
         }
 
-        auto inner_json = build_default_brute_force_param(warp_external_param, true);
+        auto inner_json = build_default_brute_force_param(warp_external_param, true, false);
         for (const auto& [key, value] : warp_external_param.GetInnerJson()->items()) {
             (void)value;
             auto field = warp_external_param[key];
@@ -1286,30 +1371,47 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                             fmt::format("BruteForce not support {} datatype", DATATYPE_INT8));
     }
 
-    auto inner_json = build_default_brute_force_param(external_param, false);
+    const bool is_sparse = common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE;
+    if (is_sparse) {
+        CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_IP,
+                       "sparse BruteForce only supports inner product metric");
+    }
+
+    auto inner_json = build_default_brute_force_param(external_param, false, is_sparse);
     for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
         (void)value;
         auto field = external_param[key];
         if (key == RESIZE_INCREASE_COUNT_BIT) {
             inner_json[RESIZE_INCREASE_COUNT_BIT].SetJson(field);
         } else if (key == BRUTE_FORCE_BASE_QUANTIZATION_TYPE) {
+            if (is_sparse) {
+                CHECK_ARGUMENT(
+                    field.IsString() && field.GetString() == QUANTIZATION_TYPE_VALUE_SPARSE,
+                    "sparse BruteForce only supports sparse quantization");
+            }
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_BASE_IO_TYPE) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_BASE_PQ_DIM) {
+            CHECK_ARGUMENT(!is_sparse, "base_pq_dim is not supported by sparse BruteForce");
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][PRODUCT_QUANTIZATION_DIM_KEY]
                 .SetJson(field);
         } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE) {
+            CHECK_ARGUMENT(!is_sparse,
+                           "precise_quantization_type is not supported by sparse BruteForce");
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_PRECISE_IO_TYPE) {
+            CHECK_ARGUMENT(!is_sparse, "precise_io_type is not supported by sparse BruteForce");
             inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_PRECISE_FILE_PATH) {
+            CHECK_ARGUMENT(!is_sparse, "precise_file_path is not supported by sparse BruteForce");
             inner_json[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(field);
         } else if (key == STORE_RAW_VECTOR) {
+            CHECK_ARGUMENT(!is_sparse, "store_raw_vector is not supported by sparse BruteForce");
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(ApplyHoldMoldsToQuantizer(
                 inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY], field.GetBool()));
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(
@@ -1318,6 +1420,7 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == USE_ATTRIBUTE_FILTER) {
             inner_json[USE_ATTRIBUTE_FILTER_KEY].SetJson(field);
         } else if (key == BRUTE_FORCE_USE_RESIDUAL) {
+            CHECK_ARGUMENT(!is_sparse, "use_residual is not supported by sparse BruteForce");
             inner_json[USE_REORDER_KEY].SetJson(field);
         } else {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -1373,12 +1476,37 @@ BruteForce::shrink_to_fit() {
 }
 
 void
-BruteForce::add_one(const float* data, InnerIdType inner_id) {
+BruteForce::add_one(const void* data, InnerIdType inner_id) {
     this->inner_codes_->InsertVector(data, inner_id);
+}
+
+const void*
+BruteForce::get_data(const DatasetPtr& dataset, int64_t index) const {
+    CHECK_ARGUMENT(dataset != nullptr, "dataset is nullptr");
+    CHECK_ARGUMENT(index >= 0, "dataset index must be non-negative");
+    if (is_sparse_vector_) {
+        const auto* vectors = dataset->GetSparseVectors();
+        return vectors == nullptr ? nullptr : vectors + index;
+    }
+    const bool is_offset_valid = dim_ == 0 || index <= std::numeric_limits<int64_t>::max() / dim_;
+    CHECK_ARGUMENT(is_offset_valid, "dense vector offset exceeds int64_t range");
+    const auto* vectors = dataset->GetFloat32Vectors();
+    return vectors == nullptr ? nullptr : vectors + index * dim_;
+}
+
+void
+BruteForce::validate_sparse_vector(const SparseVector& vector, const std::string& name) const {
+    CHECK_ARGUMENT(
+        vector.len_ <= static_cast<uint64_t>(dim_),
+        fmt::format("{}.len_({}) must not exceed index.dim({})", name, vector.len_, dim_));
+    const bool has_valid_data =
+        vector.len_ == 0 || (vector.ids_ != nullptr && vector.vals_ != nullptr);
+    CHECK_ARGUMENT(has_valid_data, fmt::format("{} requires term IDs and values", name));
 }
 
 void
 BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    CHECK_ARGUMENT(!is_sparse_vector_, "sparse BruteForce does not expose dense vectors");
     if (is_multi_vector_) {
         auto codes = inner_codes_->AcquireCodesById(inner_id);
         if (not codes) {
@@ -1402,6 +1530,7 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
 bool
 BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
     (void)force_update;
+    CHECK_ARGUMENT(!is_sparse_vector_, "sparse BruteForce does not support UpdateVector");
     CHECK_ARGUMENT(new_base != nullptr, "new_base is nullptr");
     auto base_dim = new_base->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,

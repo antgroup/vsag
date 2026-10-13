@@ -15,7 +15,10 @@
 > 仍保留该弃用别名；新代码应使用 `CalcDistancesById`。两者语义完全相同。详情参见
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068)。
 
-HGraph 还支持配置为稀疏或非 FP32 数据类型。这些配置应使用包含原生 query 字段的 Dataset（`SparseVectors`、`Int8Vectors`，以及 FP16/BF16 对应的 `Float16Vectors`）；只有 float32 索引才能使用普通 `float*` 距离查询。Dataset 表示必须匹配索引配置，不能只检查向量维度。
+BruteForce 和 HGraph 还支持配置为稀疏数据；HGraph 也支持非 FP32 稠密数据类型。这些配置
+应使用包含原生 query 字段的 Dataset（`SparseVectors`、`Int8Vectors`，以及 FP16/BF16
+对应的 `Float16Vectors`）；只有 float32 索引才能使用普通 `float*` 距离查询。Dataset
+表示必须匹配索引配置，不能只检查向量维度。
 
 ### C++ 实现迁移
 
@@ -73,11 +76,14 @@ CalcDistancesById(const DatasetPtr& query,
 
 | 索引 | 单 ID query | 多 query 批量输入 |
 |---|---|---|
-| BruteForce、HGraph、IVF、Pyramid、LazyHGraph | `float*`，或含 `Float32Vectors` 的单行 `DatasetPtr` | 含 `Float32Vectors` 的 `DatasetPtr` |
+| BruteForce、HGraph | float32 使用 `float*`，也可使用含配置对应原生表示（包括 `SparseVectors`）的单行 `DatasetPtr` | 含配置对应原生表示的 `DatasetPtr` |
+| IVF、Pyramid、LazyHGraph | `float*`，或含 `Float32Vectors` 的单行 `DatasetPtr` | 含 `Float32Vectors` 的 `DatasetPtr` |
 | SINDI、SINDI_V2 | 含 `SparseVectors` 的单行 `DatasetPtr` | 含 `SparseVectors` 的 `DatasetPtr` |
 | WARP、SIMQ | 含 `MultiVectors`、`MultiVectorDim` 的单行 `DatasetPtr` | 含 `MultiVectors`、`MultiVectorDim` 的 `DatasetPtr` |
 
-SINDI immutable 存储也支持单 ID 和批量距离，包括反序列化后的索引。WARP/SIMQ 使用与搜索距离后端一致的多向量聚合，不经过粗排候选选择。普通 float 指针不能表示稀疏或多向量 query。
+稀疏 BruteForce 和 SINDI immutable 存储都支持单 ID 和批量距离，包括反序列化后的索引。
+WARP/SIMQ 使用与搜索距离后端一致的多向量聚合，不经过粗排候选选择。普通 float 指针
+不能表示稀疏或多向量 query。
 
 N 行 query、每行 `count` 个候选 ID 时，必须按行优先提供 N × count 个 ID（`ids[q * count + j]`），不会隐式广播一份候选列表。新代码推荐使用 `CalcDistancesById`；`CalDistanceById` 保留为兼容别名。
 
