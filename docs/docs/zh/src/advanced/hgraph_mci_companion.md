@@ -41,7 +41,7 @@ MCI 会直接基于已存储向量构建专用 KNN 图。若内部配置了外�
 | --- | --- |
 | `use_mci` | 设为 `true` 时使用默认构建参数启用 MCI。 |
 | `mci_mcs` | 构建团时使用的候选邻居数量。 |
-| `mci_clique_max` | 全量构建时的最大团大小。 |
+| `mci_clique_max` | 全量构建时保留的极大团的最小大小。团始终完整保存，因此这是下限而非上限。 |
 | `mci_knng_source` | KNN 图来源：`hgraph`（默认）或 `odescent`。 |
 | `mci_alpha` | 团构建扩展系数。 |
 | `mci_incremental_join_ratio_threshold` | Add 时加入已有团的阈值。 |
@@ -106,3 +106,11 @@ MCI 挂件。它会先尝试加入合适的已有团；如果没有好的候选�
 
 最小构建和过滤搜索流程见
 [`examples/cpp/324_feature_hgraph_mci_companion.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/324_feature_hgraph_mci_companion.cpp)。
+
+## 可选过滤位图
+
+自定义过滤器可通过 `GetValidBitmap(uint64_t* size)` 提供按标签索引的逐字节位图，
+零表示过滤掉该标签，任意非零值表示保留。位图须在整个搜索期间保持有效且不变，
+并与 `CheckValid()` 的结果一致。仅当所有有效标签均等于对应内部 ID，且位图覆盖
+整个索引时，MCI 才使用此优化；否则继续调用 `CheckValid()`。现有过滤器无需修改。
+搜索统计项 `mci_bitmap_fast_path` 表示是否使用了位图。浮点和量化 MCI 搜索均支持此优化。

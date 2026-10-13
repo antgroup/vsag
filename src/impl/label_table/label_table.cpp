@@ -151,6 +151,7 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
+    MarkLabelsMutated();
     if (use_reverse_map_) {
         this->label_remap_.Clear();
         this->label_remap_.Reserve(label_table_.size());
@@ -188,6 +189,7 @@ LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) 
             this->label_table_[i + current_total_count_u] = new_label;
         }
     }
+    MarkLabelsMutated();
     total_count_ += static_cast<int64_t>(other_size_u);
 }
 }  // namespace vsag

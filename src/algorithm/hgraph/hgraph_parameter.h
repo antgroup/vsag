@@ -36,6 +36,8 @@ DEFINE_POINTER(HGraphParameter);
 struct HGraphMCIParameters {
     bool enabled{false};
     uint64_t mcs{200};
+    // Minimum size of a maximal clique the full build must keep; the clique itself is stored in
+    // full, so this is a lower bound and not a cap.
     uint64_t clique_max{50};
     float alpha{1.2F};
     std::string knng_source{HGRAPH_MCI_KNNG_SOURCE_HGRAPH};

@@ -42,7 +42,7 @@ external KNN graph path takes precedence over this selector.
 | `use_mci` | Enables MCI with default build parameters when set to `true`. |
 | `mci_mcs` | Candidate neighbor count used when constructing cliques. |
 | `mci_knng_source` | KNN graph source: `hgraph` (default) or `odescent`. |
-| `mci_clique_max` | Maximum clique size during full build. |
+| `mci_clique_max` | Minimum size of a maximal clique the full build must keep. Cliques are stored in full, so this is a lower bound, not a cap. |
 | `mci_alpha` | Clique construction expansion factor. |
 | `mci_incremental_join_ratio_threshold` | Add-time threshold for joining existing cliques. |
 | `mci_incremental_added_mct` | Maximum existing cliques a newly added node may join. |
@@ -114,3 +114,13 @@ unsupported by this foundation.
 See
 [`examples/cpp/324_feature_hgraph_mci_companion.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/324_feature_hgraph_mci_companion.cpp)
 for a minimal build and filtered-search flow.
+
+## Optional filter bitmap
+
+A custom filter can expose `GetValidBitmap(uint64_t* size)` with one byte per label,
+where zero rejects a label and any nonzero value accepts it. Keep the bitmap alive
+and unchanged throughout the search, and make it agree with `CheckValid()`.
+MCI uses this optimization only when all live labels equal their inner IDs and
+the bitmap covers the index. Otherwise it uses `CheckValid()`. Existing filters
+need no changes. The search statistic `mci_bitmap_fast_path` reports whether the
+bitmap was used. This applies to both float and quantized MCI searches.
