@@ -82,6 +82,9 @@ MCI 路径要求使用 bitset 过滤器，或通过 `GetValidIds()` 提供非空
 两类邻居：先计算稀疏 HGraph 邻居的距离并加入候选堆，保持图的连通性；团成员则
 先判断过滤条件，再计算距离，并受每次节点展开的虚拟开销预算约束。
 
+NaN 距离不会进入结果集；对应节点使用确定的遍历优先级，
+以便继续访问通过这些节点可达的有限距离邻居。
+
 当 `considered * (hybrid_filter_cost_ratio + local_selectivity) >= hybrid_vob` 时，
 停止当前节点的团遍历。`local_selectivity` 是本次展开中已考虑团成员的过滤命中率，
 `hybrid_filter_cost_ratio` 是单次过滤相对于单次距离计算的开销比。`hybrid_vob`

@@ -88,6 +88,9 @@ traversal that handles both neighbor sources of every expanded vector in one pas
 - the clique members of the same vector are scored predicate-first, and that part is cut short
   by a virtual-overhead budget.
 
+NaN distances are excluded from results. Their nodes retain a deterministic traversal priority
+so finite neighbors reachable through them can still be explored.
+
 The budget stops the clique part once
 `considered * (hybrid_filter_cost_ratio + local_selectivity)` reaches `hybrid_vob`, where
 `hybrid_filter_cost_ratio` is `O_filter / O_dist` (the cost of one predicate filtering relative

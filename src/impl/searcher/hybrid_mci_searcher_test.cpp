@@ -72,7 +72,7 @@ struct HybridFixture {
  *   cliques: c0 = {0, 3, 4}, c1 = {1, 5}
  */
 HybridFixture
-MakeFixture() {
+MakeFixture(InnerIdType nan_id = 6) {
     HybridFixture fixture;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     fixture.common.allocator_ = allocator;
@@ -81,6 +81,10 @@ MakeFixture() {
 
     std::vector<float> vectors = {
         0.1F, 0.0F, 1.0F, 0.0F, 2.0F, 0.0F, 3.0F, 0.0F, 4.0F, 0.0F, 5.0F, 0.0F};
+
+    if (nan_id < fixture.ids.size()) {
+        vectors[nan_id * kDim] = std::numeric_limits<float>::quiet_NaN();
+    }
 
     constexpr const char* param_template = R"({{"type": "{}"}})";
     auto quantizer_param = QuantizerParameter::GetQuantizerParameterByJson(
@@ -417,4 +421,50 @@ TEST_CASE("HybridMCISearcher seeds the heaps from an injected valid set",
         REQUIRE(stats.expanded_nodes > 0);
         REQUIRE(ResultIds(result) == std::vector<InnerIdType>{1, 3, 4});
     }
+}
+
+TEST_CASE("HybridMCISearcher orders NaN bridges without returning NaN distances",
+          "[ut][HybridMCISearcher][nonfinite]") {
+    // Exercise entry/seed, sparse-neighbor and clique-member insertion separately.
+    const auto nan_id = GENERATE(InnerIdType{0}, InnerIdType{1}, InnerIdType{3});
+    auto fixture = MakeFixture(nan_id);
+    const std::vector<float> query{0.0F, 0.0F};
+    auto param = MakeParam(/*topk=*/6, /*ef=*/10, /*vob=*/0.0);
+    HybridSearchStats stats;
+    auto result = HybridMCISearcher(fixture.common)
+                      .Search(fixture.graph,
+                              fixture.cliques,
+                              fixture.flatten,
+                              query.data(),
+                              nullptr,
+                              param,
+                              nullptr,
+                              &stats);
+    std::vector<InnerIdType> expected{0, 1, 2, 3, 4, 5};
+    expected.erase(std::remove(expected.begin(), expected.end(), nan_id), expected.end());
+    REQUIRE(ResultIds(result) == expected);
+    REQUIRE(stats.expanded_nodes == 6);
+    REQUIRE(stats.dist_computations == 6);
+    while (not result->Empty()) {
+        REQUIRE_FALSE(std::isnan(result->Top().first));
+        result->Pop();
+    }
+}
+
+TEST_CASE("HybridMCISearcher NaN frontier cannot block a closer finite branch",
+          "[ut][HybridMCISearcher][nonfinite]") {
+    auto fixture = MakeFixture(/*nan_id=*/1);
+    fixture.graph = std::make_shared<MockGraphDataCell>(
+        std::vector<std::vector<InnerIdType>>{{1, 2}, {}, {5}, {}, {}, {}});
+    const std::vector<float> query{2.0F, 0.0F};
+    // The frontier fills with entry 0 and NaN neighbor 1 before finite neighbor 2 is
+    // considered. Comparing against a NaN tail would reject 2 and lose its neighbor 5.
+    auto result = HybridMCISearcher(fixture.common)
+                      .Search(fixture.graph,
+                              nullptr,
+                              fixture.flatten,
+                              query.data(),
+                              nullptr,
+                              MakeParam(/*topk=*/6, /*ef=*/2, /*vob=*/0.0));
+    REQUIRE(ResultIds(result) == std::vector<InnerIdType>{0, 2, 5});
 }

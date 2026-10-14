@@ -15,8 +15,10 @@
 #include "hybrid_mci_searcher.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #include "container_types.h"
@@ -270,8 +272,10 @@ HybridMCISearcher::Search(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < batch_ids.size(); ++i) {
             const auto id = batch_ids[i];
             const auto distance = batch_dists[i];
-            heap_c.Insert(distance, id);
-            if (is_satisfactory(id)) {
+            // Keep NaN nodes traversable as bridges, but never compare NaNs in either heap.
+            const bool nan_distance = is_nan_distance(distance);
+            heap_c.Insert(nan_distance ? std::numeric_limits<float>::lowest() : distance, id);
+            if (not nan_distance and is_satisfactory(id)) {
                 heap_r->Push(distance, id);
             }
             // seeded_entries counts injected seeds, not the fallback entry point.
@@ -329,7 +333,9 @@ HybridMCISearcher::Search(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < batch_ids.size(); ++i) {
             const auto v_1 = batch_ids[i];
             const auto distance = batch_dists[i];
-            heap_c.Insert(distance, v_1);  // line 16
+            heap_c.Insert(
+                is_nan_distance(distance) ? std::numeric_limits<float>::lowest() : distance,
+                v_1);  // line 16
             if ((heap_r->Size() < static_cast<uint64_t>(result_capacity) or
                  distance < heap_r->Top().first) and
                 not is_nan_distance(distance)) {  // line 17
@@ -395,7 +401,9 @@ HybridMCISearcher::Search(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < batch_ids.size(); ++i) {
             const auto v_1 = batch_ids[i];
             const auto distance = batch_dists[i];
-            heap_c.Insert(distance, v_1);  // line 28
+            heap_c.Insert(
+                is_nan_distance(distance) ? std::numeric_limits<float>::lowest() : distance,
+                v_1);  // line 28
             // Same capacity guard as the sparse path: every member here is already known to
             // be satisfactory, so the only way a Push can be wasted is a full heap whose
             // farthest entry is at least as close. Skipping it avoids the virtual dispatch.

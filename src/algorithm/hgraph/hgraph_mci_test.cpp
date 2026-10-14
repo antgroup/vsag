@@ -40,6 +40,23 @@
 
 namespace vsag {
 struct HGraphMCITestAccess {
+    static void
+    ConnectLine(const IndexPtr& index, InnerIdType total) {
+        const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
+        const auto hgraph = std::dynamic_pointer_cast<HGraph>(wrapper->GetInnerIndex());
+        Vector<InnerIdType> neighbors(hgraph->allocator_);
+        for (InnerIdType id = 0; id < total; ++id) {
+            neighbors.clear();
+            if (id > 0) {
+                neighbors.push_back(id - 1);
+            }
+            if (id + 1 < total) {
+                neighbors.push_back(id + 1);
+            }
+            hgraph->bottom_graph_->InsertNeighborsById(id, neighbors);
+        }
+    }
+
     static CliqueDataCellPtr
     GetCliques(const IndexPtr& index) {
         const auto wrapper = std::dynamic_pointer_cast<IndexImpl<HGraph>>(index);
@@ -1400,6 +1417,9 @@ TEST_CASE("HGraph hybrid traversal preserves 1.0 fallback and reranking",
     auto index = vsag::Factory::CreateIndex("hgraph", config.Dump());
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    // This tests routing/reranking, not approximate graph construction. A connected line
+    // makes the exact nearest-label assertions independent of ODescent's random topology.
+    vsag::HGraphMCITestAccess::ConnectLine(index.value(), total);
     auto query = vsag::Dataset::Make()
                      ->NumElements(1)
                      ->Dim(dim)
