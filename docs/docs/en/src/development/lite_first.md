@@ -99,7 +99,7 @@ coverage jobs, all-source formatting, configured-TU/header tidy, installation
 and consumer checks. Coverage collector gates the production Lite line union at
 90%, not Full or branch coverage. Local passes do not imply online CI has passed.
 
-Old experiments and negative candidates remain in the [pinned experimental repository](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark).
+Old experiments and negative candidates are retained in benchmark PR #2926.
 Reported best values from different measured versions must not be combined into
 a fictitious latest-version matrix. Functional support is not complete quality,
 performance or long-term stability acceptance. The project is not declared finished.

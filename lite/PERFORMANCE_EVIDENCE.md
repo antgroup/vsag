@@ -24,19 +24,18 @@ off. Historical NONE/reverse-disabled cohorts are not the current configuration.
 
 ## Historical measurements, not a composite current-version matrix
 
-All source versions, commands, configs, verifiers and raw-result archives remain
-in the [pinned benchmark repository](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark).
-Report links below identify the actual workload and measured source provenance.
+Detailed benchmark reports and raw evidence belong to PR #2926.
+The table below summarizes the historical workloads and their limits.
 Do not combine different-stage best numbers into one latest-version result.
 
 | Change / workload | Observed benefit | Qualification / remaining cost |
 | --- | --- | --- |
-| [Native SIMD reuse, SIFT/GIST/Cohere 10k](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/shared-rabitq-kernels-20261009) | RaBitQ query P50 about -18%/-51%/-44%, unchanged recall and ordered IDs | Compared with previous Lite RaBitQ, not Full; still slower than floating modes in this cohort |
-| [Production RaBitQ local CRUD, GIST/Cohere 100k](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-production-100k-crud-20261011) | 90k mutation API calls: 329487 to 35222 ms / 337975 to 30193 ms, about -89%/-91% | One paired run per dataset; final GIST recall .853, Cohere .953; quality gap not solved |
-| [SIFT 100k persistent changed CRUD](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/sift-production-100k-crud-20261011) | FP32/FP16/RaBitQ: 8332/9636/7176 mutation API calls/s; final recall .989/.989/.983 | One fresh run/mode, serialized initial/final queries, not concurrent reads or hours-long acceptance |
-| [FP16 direct Save, three datasets 100k](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/fp16-direct-save-20261011) | Warm loaded-state Save about -73%, unchanged snapshot bytes | Seven paired runs; not cold I/O or fsync durability |
-| [Streamed RaBitQ Save, GIST/Cohere 100k](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-stream-save-20261011) | Warm Save 52.819 to 45.774 / 44.151 to 37.441 ms; after-Save HWM about 16 MiB lower | Seven pairs, loaded-state Save; prior build/query regressions remain separate |
-| [Visited workspace](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/query-visited-specialized-20261011) | 100k visited payload 100000 to 12504 bytes; cumulative ordinary allocation bytes -51.42% | Not process peak/RSS; this stage had about +1.17% GIST query P50 cost |
+| Native SIMD reuse, SIFT/GIST/Cohere 10k | RaBitQ query P50 about -18%/-51%/-44%, unchanged recall and ordered IDs | Compared with previous Lite RaBitQ, not Full; still slower than floating modes in this cohort |
+| Production RaBitQ local CRUD, GIST/Cohere 100k | 90k mutation API calls: 329487 to 35222 ms / 337975 to 30193 ms, about -89%/-91% | One paired run per dataset; final GIST recall .853, Cohere .953; quality gap not solved |
+| SIFT 100k persistent changed CRUD | FP32/FP16/RaBitQ: 8332/9636/7176 mutation API calls/s; final recall .989/.989/.983 | One fresh run/mode, serialized initial/final queries, not concurrent reads or hours-long acceptance |
+| FP16 direct Save, three datasets 100k | Warm loaded-state Save about -73%, unchanged snapshot bytes | Seven paired runs; not cold I/O or fsync durability |
+| Streamed RaBitQ Save, GIST/Cohere 100k | Warm Save 52.819 to 45.774 / 44.151 to 37.441 ms; after-Save HWM about 16 MiB lower | Seven pairs, loaded-state Save; prior build/query regressions remain separate |
+| Visited workspace | 100k visited payload 100000 to 12504 bytes; cumulative ordinary allocation bytes -51.42% | Not process peak/RSS; this stage had about +1.17% GIST query P50 cost |
 
 Latest routing specialization is a small optimization, not another SIMD-sized
 gain: the repeated GIST100k window improved mean wall latency about 1.87% versus
@@ -46,7 +45,7 @@ The shared library grew from 395648 to 412512 bytes (+4.26%).
 
 ## Native Full comparison boundary
 
-The pinned [expanded 600-query study](https://github.com/nw9663644-eng/vsag/tree/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/acceptance-full-expanded-r1-20261009)
+The pinned expanded 600-query study
 uses actual installed native HGraph, not old Lite. Lite query budget 512 versus
 Full 128 is not identical-budget or exact quality-matched acceptance.
 Observed Lite queries were slower; warm-load and total loaded RSS had advantages.
