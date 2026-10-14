@@ -30,7 +30,10 @@ avx_reduce_add_ps(__m256 a) {
 #include <cmath>
 #include <cstdint>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::avx {
 
@@ -700,6 +703,61 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    sse::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    sse::PQFastScanLookUp32HighAccOverwrite(
+        low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+    return sse::FP32LessThan32Mask(values, limit);
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    return sse::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                    filter_bits,
+                                                    delta,
+                                                    sum_vl,
+                                                    query_sum,
+                                                    query_norm,
+                                                    query_bucket_norm_sqr,
+                                                    inv_sqrt_d,
+                                                    f_add,
+                                                    f_scale,
+                                                    filter_norm_codes,
+                                                    valid_size,
+                                                    dists,
+                                                    filter_inner_products);
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_AVX)
     simd::BitAndImpl<simd::BitTraits<simd::AvxBitTag>>(x, y, num_byte, result, &sse::BitAnd);
@@ -802,4 +860,82 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::avx
+
+namespace vsag::avx {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 8, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 8, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 8, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 8, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 4, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 4, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, true, 4, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::AvxSQ8Tag>, false, 4, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::avx

@@ -27,14 +27,13 @@ using namespace vsag;
 
 namespace {
 
-uint64_t
+void
 QueryFirstWindow(const MutableSindiTermDataCellPtr& data_cell,
                  float* dists,
                  const SparseTermComputerPtr& computer,
                  Allocator* allocator) {
     SindiQueryContext query_context(allocator);
     data_cell->QueryWindow(dists, 0, computer, false, query_context);
-    return query_context.evaluation_tracker.Count();
 }
 
 }  // namespace
@@ -304,12 +303,12 @@ TEST_CASE("MutableSindiTermDataCell Basic Test", "[ut][MutableSindiTermDataCell]
 
     SECTION("test query") {
         std::vector<float> dists(count_base, 0);
-        REQUIRE(QueryFirstWindow(data_cell, dists.data(), computer, allocator.get()) == count_base);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
         for (auto i = 0; i < dists.size(); i++) {
             REQUIRE(std::abs(dists[i] - exp_dists[i]) < 1e-3);
         }
         std::fill(dists.begin(), dists.end(), 0.0F);
-        REQUIRE(QueryFirstWindow(data_cell, dists.data(), computer, allocator.get()) == count_base);
+        QueryFirstWindow(data_cell, dists.data(), computer, allocator.get());
     }
 
     SECTION("test insert heap in knn search") {

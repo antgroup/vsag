@@ -148,6 +148,11 @@ public:
         return 0;
     }
 
+    [[nodiscard]] bool
+    IsBound() const {
+        return io_ != nullptr;
+    }
+
     [[nodiscard]] uint64_t
     GetByteSize() const {
         return io_->Size();
@@ -156,6 +161,9 @@ public:
 private:
     [[nodiscard]] bool
     IsValidRange(uint64_t offset, uint64_t length) const {
+        if (not IsBound()) {
+            return false;
+        }
         const uint64_t byte_size = GetByteSize();
         return offset <= byte_size && length <= byte_size - offset;
     }

@@ -12,16 +12,128 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "search_reasoning.h"
+#include "reasoning_context.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 #include <string_view>
 
 #include "impl/allocator/default_allocator.h"
+#include "reasoning_capability.h"
 
 namespace vsag {
 
 TEST_CASE("ReasoningContext basic operations", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+    labels.push_back(200);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+    label_to_inner_id[200] = 1;
+
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+    ctx.SetTrueDistance(0, 0.0F);
+    REQUIRE(ctx.expected_traces_.size() == 2);
+}
+
+TEST_CASE("ReasoningContext GenerateReport meta section", "[reasoning]") {
+    DefaultAllocator allocator;
+    ReasoningContext ctx(&allocator);
+
+    Vector<int64_t> labels(&allocator);
+    labels.push_back(100);
+
+    UnorderedMap<int64_t, InnerIdType> label_to_inner_id(&allocator);
+    label_to_inner_id[100] = 0;
+    ctx.InitializeExpectedTargets(labels, label_to_inner_id);
+
+    Vector<InnerIdType> result_ids(&allocator);
+    result_ids.push_back(0);
+    ctx.MarkResult(result_ids);
+    ctx.DiagnoseExpectedTargets();
+
+    ctx.SetSearchParams(10, "HGraph", true, false, false);
+    ctx.SetTermination(ReasoningTermination::kHopsLimitReached);
+
+    std::string report = ctx.GenerateReport();
+    REQUIRE(report.find("1/1") != std::string::npos);
+    REQUIRE(report.find("0 missed") != std::string::npos);
+    REQUIRE(report.find("hops_limit_reached") != std::string::npos);
+    REQUIRE(report.find("HGraph") != std::string::npos);
+}
+
+TEST_CASE("ReasoningContext MakeStatusReport", "[reasoning]") {
+    const char* names[][2] = {{"hgraph", "HGraph"},
+                              {"ivf", "IVF"},
+                              {"sindi", "SINDI"},
+                              {"sindi_v2", "SINDI_V2"},
+                              {"brute_force", "BruteForce"},
+                              {"warp", "WARP"},
+                              {"pyramid", "Pyramid"}};
+    DefaultAllocator allocator;
+    for (const auto& pair : names) {
+        CAPTURE(pair[0]);
+        ReasoningContext ctx(&allocator);
+        ctx.SetSearchParams(10, pair[1], false, false);
+        const auto full_meta = nlohmann::json::parse(ctx.GenerateReport()).at("meta");
+        REQUIRE(full_meta.at("index_type") == pair[1]);
+        for (const auto* name : pair) {
+            const auto report = nlohmann::json::parse(
+                ReasoningContext::MakeStatusReport(ReasoningReportStatus::kEmptyIndex, name));
+            REQUIRE(report.size() == 1);
+            const auto& meta = report.at("meta");
+            REQUIRE(meta.size() == 3);
+            REQUIRE(meta.at("schema_version") == 1);
+            REQUIRE(meta.at("status") == "empty_index");
+            REQUIRE(meta.at("index_type") == full_meta.at("index_type"));
+        }
+    }
+
+    SECTION("Unknown names are preserved") {
+        for (const auto* name : {"NonexistentIndex", "unknown_index", ""}) {
+            const auto report = nlohmann::json::parse(
+                ReasoningContext::MakeStatusReport(ReasoningReportStatus::kEmptyIndex, name));
+            REQUIRE(report.at("meta").at("index_type") == name);
+        }
+    }
+}
+
+TEST_CASE("ReasoningContext reports complete enum metadata", "[reasoning]") {
+    DefaultAllocator allocator;
+    for (const auto* index_type : {"HGraph", "IVF", "SINDI", "SINDI_V2", "Pyramid"}) {
+        ReasoningContext ctx(&allocator);
+        ctx.SetSearchParams(10, index_type, false, false);
+        const auto meta = nlohmann::json::parse(ctx.GenerateReport()).at("meta");
+        const auto& diagnoses = meta.at("available_diagnoses");
+        REQUIRE(diagnoses.size() == static_cast<uint8_t>(ReasoningDiagnosis::kCount));
+        for (uint8_t i = 0; i < static_cast<uint8_t>(ReasoningDiagnosis::kCount); ++i) {
+            const auto diagnosis = static_cast<ReasoningDiagnosis>(i);
+            REQUIRE(diagnoses.at(i) == ToString(diagnosis));
+            if (diagnosis != ReasoningDiagnosis::kUnknown) {
+                REQUIRE(std::string_view(ToString(diagnosis)) != "unknown");
+            }
+        }
+        const auto* capability = GetReasoningCapability(index_type);
+        REQUIRE(capability != nullptr);
+        nlohmann::json expected_events = nlohmann::json::array();
+        for (uint8_t i = 0; i < static_cast<uint8_t>(ReasoningEvent::kCount); ++i) {
+            const auto event = static_cast<ReasoningEvent>(i);
+            REQUIRE(std::string_view(ToString(event)) != "unknown_event");
+            if (HasReasoningEvent(capability->event_mask, event)) {
+                expected_events.push_back(ToString(event));
+            }
+        }
+        REQUIRE(meta.at("available_events") == expected_events);
+    }
+}
+
+// Original regression coverage retained after the enum migration.
+
+TEST_CASE("ReasoningContext legacy basic operations", "[reasoning]") {
     DefaultAllocator allocator;
     ReasoningContext ctx(&allocator);
 
@@ -179,7 +291,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(4);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "not_reachable");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kNotReachable);
     }
 
     SECTION("Diagnose: filter_rejected") {
@@ -187,7 +299,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(2);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "filter_rejected");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kFilterRejected);
     }
 
     SECTION("Diagnose: ef_too_small") {
@@ -196,7 +308,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(3);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "ef_too_small");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kEfTooSmall);
     }
 
     SECTION("Diagnose: quantization_error") {
@@ -206,7 +318,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         it.value().quantized_distance = 1.0F;
         it.value().was_visited = true;
         ctx.DiagnoseExpectedTargets();
-        REQUIRE(it.value().diagnosis == "quantization_error");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kQuantizationError);
     }
 
     SECTION("Diagnose: reorder_evicted") {
@@ -216,7 +328,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(6);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "reorder_evicted");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kReorderEvicted);
     }
 
     SECTION("Diagnose: success") {
@@ -227,7 +339,7 @@ TEST_CASE("ReasoningContext diagnosis logic", "[reasoning]") {
         ctx.DiagnoseExpectedTargets();
         auto it = ctx.expected_traces_.find(0);
         REQUIRE(it != ctx.expected_traces_.end());
-        REQUIRE(it.value().diagnosis == "success");
+        REQUIRE(it.value().diagnosis == ReasoningDiagnosis::kSuccess);
     }
 }
 
@@ -264,11 +376,11 @@ TEST_CASE("ReasoningContext GenerateReport", "[reasoning]") {
 }
 
 TEST_CASE("ReasoningContext termination reasons are centralized", "[reasoning]") {
-    REQUIRE(std::string_view(ReasoningContext::kTerminationLowerBoundReached) ==
+    REQUIRE(std::string_view(ToString(ReasoningTermination::kLowerBoundReached)) ==
             "lower_bound_reached");
-    REQUIRE(std::string_view(ReasoningContext::kTerminationHopsLimitReached) ==
+    REQUIRE(std::string_view(ToString(ReasoningTermination::kHopsLimitReached)) ==
             "hops_limit_reached");
-    REQUIRE(std::string_view(ReasoningContext::kTerminationTimeout) == "timeout");
+    REQUIRE(std::string_view(ToString(ReasoningTermination::kTimeout)) == "timeout");
 }
 
 TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
@@ -276,16 +388,16 @@ TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
     ReasoningContext ctx(&allocator);
 
     SECTION("SetTermination stores reason") {
-        REQUIRE(ctx.termination_reason_.empty());
-        ctx.SetTermination(ReasoningContext::kTerminationLowerBoundReached);
-        REQUIRE(ctx.termination_reason_ == "lower_bound_reached");
+        REQUIRE(ctx.termination_ == ReasoningTermination::kNone);
+        ctx.SetTermination(ReasoningTermination::kLowerBoundReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kLowerBoundReached);
     }
 
     SECTION("SetTermination can be overwritten") {
-        ctx.SetTermination(ReasoningContext::kTerminationHopsLimitReached);
-        REQUIRE(ctx.termination_reason_ == "hops_limit_reached");
-        ctx.SetTermination(ReasoningContext::kTerminationTimeout);
-        REQUIRE(ctx.termination_reason_ == "timeout");
+        ctx.SetTermination(ReasoningTermination::kHopsLimitReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kHopsLimitReached);
+        ctx.SetTermination(ReasoningTermination::kTimeout);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kTimeout);
     }
 }
 

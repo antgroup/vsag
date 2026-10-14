@@ -113,6 +113,7 @@ struct NonContinuousBackendCapabilities {
     static constexpr bool AsyncReadable = false;
     static constexpr bool Writable = true;
     static constexpr bool Resizable = true;
+    static constexpr bool CanResizeForOverwrite = false;
 };
 
 /**

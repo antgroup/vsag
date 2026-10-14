@@ -55,6 +55,7 @@ init();
 #include "vsag/options.h"
 #include "vsag/readerset.h"
 #include "vsag/resource.h"
+#include "vsag/search_metrics.h"
 #include "vsag/search_request.h"
 #include "vsag/thread_pool.h"
 #include "vsag/utils.h"

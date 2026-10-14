@@ -26,7 +26,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "query_context.h"
 
 namespace vsag {
@@ -160,7 +160,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         QueryContext& ctx,
                         IteratorFilterContext* iter_ctx,
                         const DistanceRecordVector* rabitq_lower_bound_candidates,
-                        const std::optional<float>& distance_threshold) {
+                        const std::optional<float>& distance_threshold,
+                        const ComputerInterfacePtr& /*preset_computer*/) {
     // set query allocator
     Allocator* query_allocator = select_query_allocator(ctx.alloc, allocator_);
     auto is_distance_eligible = [&distance_threshold](float distance) {
@@ -210,7 +211,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second,
+                                                                 0);  // [reasoning]
                     }
                     reorder_heap->Pop();
                 }
@@ -311,7 +313,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second,
+                                                                 0);  // [reasoning]
                     }
                     reorder_heap->Pop();
                 }
@@ -349,7 +352,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
     for (uint64_t i = 0; i < bootstrap_size; ++i) {
         if (ctx.reasoning_ctx != nullptr) {
             const auto idx = order[i];
-            ctx.reasoning_ctx->RecordReorder(ids[i], lower_bound_probe_dists[idx], dists[i]);
+            ctx.reasoning_ctx->RecordReorder(
+                ids[i], lower_bound_probe_dists[idx], dists[i]);  // [reasoning]
         }
         if (not consume_if_ineligible(dists[i], ids[i])) {
             reorder_heap->Push(dists[i], ids[i]);
@@ -406,7 +410,8 @@ FlattenReorder::Reorder(const vsag::DistHeapPtr& input,
                         iter_ctx->AddDiscardNode(curr.first, curr.second);
                     }
                     if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second,
+                                                                 0);  // [reasoning]
                     }
                     reorder_heap->Pop();
                 }
@@ -494,7 +499,8 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                     const auto curr = reorder_heap->Top();
                     add_iterator_discard(curr.first, curr.second);
                     if (ctx.reasoning_ctx != nullptr) {
-                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second, 0);
+                        ctx.reasoning_ctx->RecordReorderEviction(reorder_heap->Top().second,
+                                                                 0);  // [reasoning]
                     }
                     reorder_heap->Pop();
                 }
@@ -595,7 +601,8 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
             return;
         }
         if (ctx.reasoning_ctx != nullptr) {
-            ctx.reasoning_ctx->RecordReorder(all_ids[idx], lower_bound_probe_dists[idx], distance);
+            ctx.reasoning_ctx->RecordReorder(
+                all_ids[idx], lower_bound_probe_dists[idx], distance);  // [reasoning]
         }
         if (consume_if_ineligible(distance, all_ids[idx])) {
             return;
@@ -606,7 +613,7 @@ FlattenReorder::ReorderFused(const vsag::DistHeapPtr& input,
                 const auto curr = reorder_heap->Top();
                 add_iterator_discard(curr.first, curr.second);
                 if (ctx.reasoning_ctx != nullptr) {
-                    ctx.reasoning_ctx->RecordReorderEviction(curr.second, 0);
+                    ctx.reasoning_ctx->RecordReorderEviction(curr.second, 0);  // [reasoning]
                 }
                 reorder_heap->Pop();
             }

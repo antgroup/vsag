@@ -54,6 +54,11 @@ public:
         return write_fd_;
     }
 
+    [[nodiscard]] bool
+    DirectRead() const {
+        return options_.direct_read;
+    }
+
     [[nodiscard]] uint64_t
     Size() const {
         return size_;

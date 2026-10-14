@@ -27,6 +27,7 @@
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/token_code_interface.h"
 #include "index_common_param.h"
 #include "simq_parameter.h"
 #include "typing.h"
@@ -44,6 +45,7 @@ struct SplitTask {
     std::unordered_set<InnerIdType> new_docs;  // Docs moving to new cluster
 };
 
+/** Single Index for Multi-vector Query (SIMQ) implementation. */
 class SIMQ : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -77,6 +79,11 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -98,18 +105,35 @@ public:
         return static_cast<int64_t>(total_count_);
     }
 
+    [[nodiscard]] std::string
+    GetStats() const override;
+
+    void
+    SetImmutable() override;
     void
     InitFeatures() override;
 
 private:
+    DatasetPtr
+    KnnSearchImpl(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter) const;
+
+    DatasetPtr
+    RangeSearchImpl(const DatasetPtr& query,
+                    float radius,
+                    const std::string& parameters,
+                    const FilterPtr& filter,
+                    int64_t limited_size) const;
     void
-    run_clustering(const float* flat_vecs,
+    run_clustering(const uint8_t* token_codes,
                    const Vector<InnerIdType>& vec_to_doc,
                    int64_t num_vecs,
                    int64_t dim);
 
     void
-    build_rep_hgraph(const float* flat_vecs, int64_t dim);
+    build_rep_hgraph(const uint8_t* token_codes, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
     coarse_search(const float* query_tokens,
@@ -125,9 +149,6 @@ private:
     deserialize_rep_hgraph(StreamReader& reader);
 
     void
-    split_cluster_incremental(InnerIdType cluster_idx);
-
-    void
     flush_pending_splits();
 
     void
@@ -137,6 +158,11 @@ private:
     prepare_and_execute_splits(std::vector<SplitTask>& tasks);
 
 private:
+    Vector<uint8_t> representative_codes_;
+    std::shared_ptr<TokenCodeInterface> token_codes_;
+    std::string quantization_type_{"fp32"};
+    std::string representative_quantization_type_{"fp32"};
+
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
 
@@ -183,17 +209,6 @@ private:
     int64_t default_rerank_k_{100};
 
     uint64_t resize_increase_count_bit_{10};
-
-    // Scratch buffers for coarse_search (flat-array fast-path). Mutable so const
-    // search methods can reuse them across calls without re-allocation.
-    //
-    // NOTE: using member buffers means concurrent searches on the same SIMQ
-    // instance are NOT safe. If concurrent search is needed, callers should use
-    // separate index instances.
-    mutable std::vector<float> coarse_score_buf_;
-    mutable std::vector<bool> coarse_seen_buf_;
-    mutable std::vector<InnerIdType> coarse_dirty_;
-    mutable std::vector<InnerIdType> coarse_seen_dirty_;
 
     mutable std::shared_mutex global_mutex_;
     mutable std::mutex rep_hgraph_mutex_;  // Protects rep_hgraph_ mutations in parallel splits

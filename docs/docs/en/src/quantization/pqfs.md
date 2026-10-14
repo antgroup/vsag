@@ -78,4 +78,4 @@ specific but transparently handled by the quantizer.
 - [Product Quantization (PQ)](pq.md)
 - [HGraph index](../indexes/hgraph.md)
 - [Transform Quantizer](../advanced/quantization_transform.md)
-- [Quantization overview](README.md)
+- [Quantization overview](./)

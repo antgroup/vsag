@@ -32,6 +32,10 @@ option (ENABLE_EXAMPLES "Whether compile examples" OFF)
 option (ENABLE_TESTS "Whether compile vsag tests" OFF)
 option (ENABLE_PYBINDS "Whether compile Python bindings" OFF)
 option (ENABLE_NODE_BINDS "Whether compile Node.js bindings" OFF)
+option (ENABLE_CUDA "Whether to build the optional CUDA backend (requires an NVIDIA toolkit)" OFF)
+# SASS for each entry, PTX only for the newest so a later device can JIT from it.
+set (VSAG_CUDA_ARCHITECTURES "75-real;80-real;86-real;89-real;90" CACHE STRING
+     "CUDA architectures to generate code for when ENABLE_CUDA is ON")
 option (ENABLE_LIBAIO "Whether to enable libaio support" ON)
 option (ENABLE_LIBURING "Whether to enable liburing support" OFF)
 option (ENABLE_SOVERSION "Whether to set SO version on the shared library" ON)

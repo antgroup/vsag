@@ -34,7 +34,7 @@ enum class SearchMode {
 
 | Field | Type | Default | Meaning |
 |-------|------|---------|---------|
-| `query_` | `DatasetPtr` | `nullptr` | The query. IVF KNN requests support multiple query vectors; other requests allow one. |
+| `query_` | `DatasetPtr` | `nullptr` | The query. HGraph and IVF KNN requests support multiple query vectors; other requests allow one. |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN vs. range search. |
 | `topk_` | `int64_t` | `10` | Neighbors to return (KNN mode). Must be positive. |
 | `radius_` | `float` | `0.5` | Distance threshold (range mode). Non-negative. |

@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "datacell/sindi_datacell_utils.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "simd/fp16_simd.h"
 #include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
@@ -219,7 +220,6 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
     (void)use_term_lists_heap_insert;
     CHECK_ARGUMENT(window_id < windows_.size(), "mutable SINDI window id out of range");
     const auto& window = windows_[window_id];
-    query_context.evaluation_tracker.BeginWindow(window_size_);
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
@@ -237,7 +237,7 @@ MutableSindiTermDataCell::QueryWindow(float* dists,
 
         const auto posting_count = window.term_sizes_[term];
         const auto term_size = computer->GetTermScanCount(posting_count);
-        query_context.evaluation_tracker.Mark(window.term_ids_[term]->data(), term_size);
+        query_context.has_untracked_approximate_evaluations |= term_size > 0;
 
         if (sparse_value_quant_type_ == SparseValueQuantizationType::SQ8) {
             computer->ScanForAccumulateSQ8(it,
@@ -371,7 +371,20 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                      float radius,
                                                      const FilterPtr& filter,
                                                      const std::optional<float>& threshold,
-                                                     bool enable_reorder) const {
+                                                     bool enable_reorder,
+                                                     ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id,
+                                   1.0F + dist,
+                                   reasoning_ctx->CurrentHop());  // [reasoning]
+    }
+    const auto rejected_by_filter = [&]() {
+        const bool rejected = not filter->CheckValid(id + offset_id);
+        if (rejected && reasoning_ctx != nullptr) {
+            reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+        }
+        return rejected;
+    };
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (threshold.has_value() and
             (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
@@ -386,9 +399,9 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
     }
     if constexpr (type != InnerSearchType::PURE) {
 #if __cplusplus >= 202002L
-        if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+        if (dist > cur_heap_top or rejected_by_filter()) [[likely]] {
 #else
-        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
+        if (__builtin_expect(dist > cur_heap_top or rejected_by_filter(), 1)) {
 #endif
             dist = 0;
             return;
@@ -406,6 +419,10 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() > n_candidate) {
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordEviction(heap.top().second,
+                                              reasoning_ctx->CurrentHop());  // [reasoning]
+            }
             heap.pop();
         }
         cur_heap_top =
@@ -427,7 +444,13 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
                                             uint32_t n_candidate,
                                             const FilterPtr& filter,
                                             const std::optional<float>& threshold,
-                                            bool enable_reorder) const {
+                                            bool enable_reorder,
+                                            ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id,
+                                   1.0F + dist,
+                                   reasoning_ctx->CurrentHop());  // [reasoning]
+    }
     if (threshold.has_value() and
         (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
         dist = 0.0F;
@@ -436,6 +459,9 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
     if (dist < 0) {
         if constexpr (type != InnerSearchType::PURE) {
             if (not filter->CheckValid(id + offset_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+                }
                 dist = 0;
                 return false;
             }
@@ -516,7 +542,8 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
                                                                      n_candidate,
                                                                      filter,
                                                                      param.distance_threshold,
-                                                                     param.enable_reorder);
+                                                                     param.enable_reorder,
+                                                                     param.reasoning_ctx);
                     if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                         if (filter_callback_remaining != nullptr and
                             *filter_callback_remaining == 0) {
@@ -548,7 +575,8 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
                                                    radius,
                                                    filter,
                                                    param.distance_threshold,
-                                                   param.enable_reorder);
+                                                   param.enable_reorder,
+                                                   param.reasoning_ctx);
             if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                 if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                     computer->ResetTerm();
@@ -594,7 +622,8 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                                                  n_candidate,
                                                                  filter,
                                                                  param.distance_threshold,
-                                                                 param.enable_reorder);
+                                                                 param.enable_reorder,
+                                                                 param.reasoning_ctx);
                 if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                     if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                         return true;
@@ -618,7 +647,8 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                                radius,
                                                filter,
                                                param.distance_threshold,
-                                               param.enable_reorder);
+                                               param.enable_reorder,
+                                               param.reasoning_ctx);
         if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
             if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                 return true;

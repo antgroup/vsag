@@ -38,6 +38,9 @@ public:
     std::vector<std::string>
     GetNeighbors(const std::string& source_id) const;
 
+    const Vector<InnerIdType>*
+    FindNeighborInnerIds(const std::string& source_id) const;
+
 public:
     Allocator* const allocator_;
 

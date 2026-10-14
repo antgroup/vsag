@@ -26,6 +26,7 @@
 #include "impl/inner_search_param.h"
 #include "index_common_param.h"
 #include "io/common/io_parameter.h"
+#include "layout/byte_range_layout.h"
 #include "quantization/sparse_quantization/sparse_term_computer.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -195,7 +196,8 @@ private:
                                float radius,
                                const FilterPtr& filter,
                                const std::optional<float>& threshold,
-                               bool enable_reorder) const;
+                               bool enable_reorder,
+                               ReasoningContext* reasoning_ctx = nullptr) const;
 
     template <InnerSearchType type>
     bool
@@ -207,7 +209,8 @@ private:
                       uint32_t n_candidate,
                       const FilterPtr& filter,
                       const std::optional<float>& threshold,
-                      bool enable_reorder) const;
+                      bool enable_reorder,
+                      ReasoningContext* reasoning_ctx = nullptr) const;
 
     void
     ValidateBoundLayout(uint64_t payload_size) const;
@@ -223,7 +226,7 @@ private:
     uint32_t window_size_{0};
     IOParamPtr io_param_{nullptr};
     IndexCommonParam common_param_;
-    std::shared_ptr<IOTmpl> io_{nullptr};
+    mutable ByteRangeLayout<IOTmpl> payload_layout_{};
 
     mutable std::shared_mutex term_layout_mutex_;
     std::vector<DiskTermEntry> term_dict_;

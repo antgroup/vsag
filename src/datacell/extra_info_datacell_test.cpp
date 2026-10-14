@@ -22,10 +22,50 @@
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "io/io_headers.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace {
+class ShrinkFailureLayout : public FixedLayout<MemoryBlockIO> {
+public:
+    using FixedLayout<MemoryBlockIO>::FixedLayout;
+
+    void
+    Shrink(uint64_t capacity) {
+        if (fail) {
+            throw std::bad_alloc();
+        }
+        FixedLayout<MemoryBlockIO>::Shrink(capacity);
+    }
+
+    bool fail{false};
+};
+}  // namespace
+
+TEST_CASE("Extra info shrink failure preserves logical truncation", "[ut][ExtraInfoDataCell]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.extra_info_size_ = 4;
+    auto params = std::make_shared<ExtraInfoDataCellParameter>();
+    params->FromJson(JsonType::Parse(R"({"io_params":{"type":"block_memory_io"}})"));
+    auto cell =
+        std::make_shared<ExtraInfoDataCell<ShrinkFailureLayout>>(params->io_parameter, common);
+    cell->Resize(1024);
+    cell->InsertExtraInfo("abcd", 0);
+    cell->InsertExtraInfo("efgh", 1);
+    cell->layout_->fail = true;
+    REQUIRE_THROWS_AS(cell->ShrinkToFit(1), std::bad_alloc);
+    cell->layout_->fail = false;
+    REQUIRE(cell->TotalCount() == 1);
+    cell->InsertExtraInfo("ijkl", std::numeric_limits<InnerIdType>::max());
+    REQUIRE(cell->TotalCount() == 2);
+    char bytes[4];
+    REQUIRE(cell->GetExtraInfoById(1, bytes));
+    REQUIRE(std::string(bytes, 4) == "ijkl");
+}
 
 void
 TestExtraInfoDataCell(ExtraInfoDataCellParamPtr& param,

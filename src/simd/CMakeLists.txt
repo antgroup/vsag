@@ -35,6 +35,8 @@ set (SIMD_SRCS
         bf16_simd.cpp
         pqfs_simd.cpp
         sq8_simd.cpp
+        sq8_local_simd.cpp
+        sq4_local_simd.cpp
         sq4_simd.cpp
         sq4_uniform_simd.cpp
         sq8_uniform_simd.cpp
@@ -124,8 +126,7 @@ simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
 simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
 
 target_link_libraries (simd
-    PRIVATE cpuinfo
-    INTERFACE coverage_config)
+    PRIVATE cpuinfo coverage_config)
 if (TARGET vsag_openmp)
     target_link_libraries (simd PRIVATE vsag_openmp)
 endif ()

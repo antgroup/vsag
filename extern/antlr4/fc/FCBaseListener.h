@@ -37,6 +37,12 @@ public:
   virtual void enterStrPipeListExpr(FCParser::StrPipeListExprContext * /*ctx*/) override { }
   virtual void exitStrPipeListExpr(FCParser::StrPipeListExprContext * /*ctx*/) override { }
 
+  virtual void enterFunctionExpr(FCParser::FunctionExprContext * /*ctx*/) override { }
+  virtual void exitFunctionExpr(FCParser::FunctionExprContext * /*ctx*/) override { }
+
+  virtual void enterRegionFilterExpr(FCParser::RegionFilterExprContext * /*ctx*/) override { }
+  virtual void exitRegionFilterExpr(FCParser::RegionFilterExprContext * /*ctx*/) override { }
+
   virtual void enterIntListExpr(FCParser::IntListExprContext * /*ctx*/) override { }
   virtual void exitIntListExpr(FCParser::IntListExprContext * /*ctx*/) override { }
 
@@ -79,8 +85,14 @@ public:
   virtual void enterStr_pipe_list(FCParser::Str_pipe_listContext * /*ctx*/) override { }
   virtual void exitStr_pipe_list(FCParser::Str_pipe_listContext * /*ctx*/) override { }
 
+  virtual void enterArg_pipe_list(FCParser::Arg_pipe_listContext * /*ctx*/) override { }
+  virtual void exitArg_pipe_list(FCParser::Arg_pipe_listContext * /*ctx*/) override { }
+
   virtual void enterField_name(FCParser::Field_nameContext * /*ctx*/) override { }
   virtual void exitField_name(FCParser::Field_nameContext * /*ctx*/) override { }
+
+  virtual void enterFunction_name(FCParser::Function_nameContext * /*ctx*/) override { }
+  virtual void exitFunction_name(FCParser::Function_nameContext * /*ctx*/) override { }
 
   virtual void enterNumeric(FCParser::NumericContext * /*ctx*/) override { }
   virtual void exitNumeric(FCParser::NumericContext * /*ctx*/) override { }

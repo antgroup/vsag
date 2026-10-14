@@ -128,6 +128,34 @@ MMapRegion::ResizePhysical(uint64_t size) {
 }
 
 void
+MMapRegion::ResizePhysicalForOverwrite(uint64_t size, uint64_t previous_logical_size) {
+    (void)previous_logical_size;
+    // reserve the blocks before the mapping grows: this extent is about to be
+    // filled concurrently, and on a sparse file a store into a page the
+    // filesystem can no longer back raises SIGBUS, which user space cannot
+    // recover from. Reserving up front turns that into an ENOSPC error here.
+    if (size > mapped_capacity_) {
+        const int ret = IOSyscall::Fallocate(fd_, size);
+        // a filesystem without fallocate support reports EOPNOTSUPP; losing the
+        // guarantee above is acceptable, so carry on with the plain grow
+        if (ret != 0 && ret != ENOTSUP && ret != EOPNOTSUPP) {
+            // ENOSPC is actionable by the operator (free space and retry),
+            // other errnos may indicate a real bug, so say which it is
+            const char* hint =
+                (ret == ENOSPC) ? "; the filesystem is full: free space and retry" : "";
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("fallocate(path={}, size={}) failed (errno={}): {}{}",
+                                            filepath_,
+                                            size,
+                                            ret,
+                                            std::error_code(ret, std::system_category()).message(),
+                                            hint));
+        }
+    }
+    ResizePhysical(size);
+}
+
+void
 MMapRegion::ShrinkPhysical(uint64_t size) {
     Remap(std::max(size, MINIMUM_MAPPING_SIZE));
 }
@@ -167,6 +195,24 @@ MMapRegion::Remap(uint64_t mapped_size) {
     mapped_data_ = static_cast<uint8_t*>(new_address);
     mapped_capacity_ = mapped_size;
     file_size_ = mapped_size;
+}
+
+void
+MMapRegion::Prefetch(uint64_t offset, uint64_t size) {
+    if (mapped_data_ == nullptr or size == 0 or offset >= mapped_capacity_) {
+        return;
+    }
+    static const auto page_size = []() -> uint64_t {
+        const auto result = sysconf(_SC_PAGESIZE);
+        return result > 0 ? static_cast<uint64_t>(result) : 0;
+    }();
+    if (page_size == 0) {
+        return;
+    }
+    const uint64_t aligned_offset = offset - offset % page_size;
+    const uint64_t end =
+        std::min(mapped_capacity_, offset + std::min(size, mapped_capacity_ - offset));
+    IOSyscall::MAdviseWillNeed(mapped_data_ + aligned_offset, end - aligned_offset);
 }
 
 void

@@ -146,12 +146,43 @@ TEST_CASE("Sgemm Basic Test", "[ut][BlasFunction]") {
     }
 }
 
+TEST_CASE("Ssyrk Basic Test", "[ut][BlasFunction]") {
+    constexpr int32_t n = 3;
+    constexpr int32_t k = 2;
+    const std::vector<float> a{1.0F, 2.0F, 3.0F, 4.0F, 5.0F, 6.0F};
+    std::vector<float> c(n * n, -1.0F);
+
+    BlasFunction::Ssyrk(BlasFunction::RowMajor,
+                        BlasFunction::CblasLower,
+                        BlasFunction::NoTrans,
+                        n,
+                        k,
+                        1.0F,
+                        a.data(),
+                        k,
+                        0.0F,
+                        c.data(),
+                        n);
+
+    for (int32_t row = 0; row < n; ++row) {
+        for (int32_t column = 0; column <= row; ++column) {
+            float expected = 0.0F;
+            for (int32_t dim = 0; dim < k; ++dim) {
+                expected += a[row * k + dim] * a[column * k + dim];
+            }
+            REQUIRE(std::abs(c[row * n + column] - expected) < EPSILON);
+        }
+    }
+}
+
 TEST_CASE("BlasFunction Constants Test", "[ut][BlasFunction]") {
     REQUIRE(BlasFunction::RowMajor == 101);
     REQUIRE(BlasFunction::ColMajor == 102);
     REQUIRE(BlasFunction::NoTrans == 111);
     REQUIRE(BlasFunction::Trans == 112);
     REQUIRE(BlasFunction::ConjTrans == 113);
+    REQUIRE(BlasFunction::CblasUpper == 121);
+    REQUIRE(BlasFunction::CblasLower == 122);
     REQUIRE(BlasFunction::JobV == 'V');
     REQUIRE(BlasFunction::JobN == 'N');
     REQUIRE(BlasFunction::Upper == 'U');

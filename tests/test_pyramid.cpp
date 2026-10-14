@@ -27,9 +27,13 @@
 #include <optional>
 #include <set>
 #include <sstream>
+#include <utility>
 
+#include "algorithm/pyramid/pyramid_build_cache.h"
 #include "functest.h"
+#include "impl/allocator/safe_allocator.h"
 #include "storage/serialization_tags.h"
+#include "storage/stream_reader.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
 #include "vsag/vsag.h"
@@ -239,12 +243,21 @@ private:
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build & ContinueAdd Test",
-                             "[ft][build][pyramid]") {
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+                             "[ft][build][pyramid][pipnn]") {
+    const auto build_case = GENERATE(std::make_pair(std::string("l2"), std::string("nsw")),
+                                     std::make_pair(std::string("ip"), std::string("nsw")),
+                                     std::make_pair(std::string("cosine"), std::string("nsw")),
+                                     std::make_pair(std::string("l2"), std::string("odescent")),
+                                     std::make_pair(std::string("ip"), std::string("odescent")),
+                                     std::make_pair(std::string("cosine"), std::string("odescent")),
+                                     std::make_pair(std::string("l2"), std::string("pipnn")),
+                                     std::make_pair(std::string("ip"), std::string("pipnn")),
+                                     std::make_pair(std::string("cosine"), std::string("pipnn")));
+    const auto& [metric_type, graph_type] = build_case;
     auto use_reorder = GENERATE(true, false);
     auto immutable = GENERATE(true, false);
     PyramidParam pyramid_param;
-    pyramid_param.graph_type = GENERATE("nsw", "odescent");
+    pyramid_param.graph_type = graph_type;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
     if (use_reorder) {
@@ -276,9 +289,37 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
-                             "Pyramid RangeSearch Returns Empty Result",
-                             "[ft][pyramid]") {
+                             "Pyramid PiPNN shares the supported NSW root contract",
+                             "[ft][build][pyramid][pipnn][pr]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    const auto root_graph_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto metric_type = GENERATE(std::string("l2"), std::string("ip"), std::string("cosine"));
+    CAPTURE(graph_type, root_graph_type, metric_type);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = graph_type;
+    pyramid_param.root_graph_type = root_graph_type;
+    pyramid_param.no_build_levels = {1, 2};
+    auto param_json = vsag::JsonType::Parse(
+        GeneratePyramidBuildParametersString(metric_type, 128, pyramid_param));
+    param_json["index_param"]["build_thread_count"].SetUint64(4);
+    const auto param = param_json.Dump();
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(128, 1000, metric_type, /*with_path=*/true);
+    const auto search_param = GeneratePyramidSearchParametersString(200);
+
+    TestContinueAdd(index, dataset, true);
+    TestKnnSearch(index, dataset, search_param, 0.94F, true);
+    TestFilterSearch(index, dataset, search_param, 0.94F, true);
+    TestRangeSearch(index, dataset, search_param, 0.94F, 10, true);
+    TestRangeSearch(index, dataset, search_param, 0.49F, 5, true);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid RangeSearch Returns Empty Result",
+                             "[ft][pyramid][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    PyramidParam pyramid_param;
+    pyramid_param.graph_type = graph_type;
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
 
@@ -293,10 +334,49 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid RangeSearch Preserves Caller Radius",
+                             "[ft][search][pyramid][range_radius]") {
+    const auto use_reorder = GENERATE(true, false);
+    CAPTURE(use_reorder);
+    PyramidParam pyramid_param;
+    pyramid_param.use_reorder = use_reorder;
+    // Both code stores are fp32; three points are below index_min_size, so no graph is built.
+    const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
+    auto index = TestFactory("pyramid", param, true);
+    auto base = MakeDenseDataset({{{std::sqrt(1.05F), 0.0F, 0.0F, 0.0F}},
+                                  {{0.5F, 0.5F, 0.0F, 0.0F}},
+                                  {{1.0F, 0.0F, 0.0F, 0.0F}}},
+                                 {105, 50, 100},
+                                 {"a/d/f", "a/d/f", "a/d/f"});
+    REQUIRE(index->Build(base).has_value());
+    auto query = MakeSingleQuery({0.0F, 0.0F, 0.0F, 0.0F}, "a/d/f");
+    constexpr float radius = 1.0F;
+    const auto use_request = GENERATE(true, false);
+    CAPTURE(use_request);
+    vsag::SearchRequest request;
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.query_ = query;
+    request.radius_ = radius;
+    request.params_str_ = GeneratePyramidSearchParametersString(20);
+    auto result = use_request ? index->SearchWithRequest(request)
+                              : index->RangeSearch(query, radius, request.params_str_);
+    REQUIRE(result.has_value());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        CAPTURE(result.value()->GetIds()[i]);
+        CHECK(result.value()->GetDistances()[i] <= radius);
+    }
+    REQUIRE(result.value()->GetDim() == 2);
+    REQUIRE(CollectIds(result.value()) == std::set<int64_t>{50, 100});
+    REQUIRE(result.value()->GetDistances()[0] == 0.5F);
+    REQUIRE(result.value()->GetDistances()[1] == radius);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Set Immutable",
-                             "[ft][immutable][pyramid]") {
+                             "[ft][immutable][pyramid][pipnn]") {
     const auto metric_type = "l2";
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     const auto param =
         GeneratePyramidBuildParametersString(metric_type, dims.front(), pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -325,12 +405,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid multi-bit RaBitQ fast encoding",
-                             "[ft][pyramid][rabitq]") {
+                             "[ft][pyramid][rabitq][pipnn]") {
     constexpr int64_t dim = 64;
     constexpr uint64_t count = 256;
     const bool fast_encode = GENERATE(false, true);
 
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.base_quantization_type = "rabitq";
     pyramid_param.precise_quantization_type = "fp32";
@@ -391,7 +472,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid split RaBitQ promotes without raw vectors",
-                             "[ft][pyramid][rabitq][add]") {
+                             "[ft][pyramid][rabitq][add][pipnn]") {
     constexpr int64_t dim = 64;
     constexpr uint64_t count = 128;
     constexpr auto parameter_temp = R"(
@@ -414,7 +495,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         }}
     }})";
 
-    auto param = fmt::format(parameter_temp, dim);
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
+    auto param_json = vsag::JsonType::Parse(fmt::format(parameter_temp, dim));
+    param_json[vsag::INDEX_PARAM]["graph_type"].SetString(graph_type);
+    auto param = param_json.Dump();
     auto index = TestFactory("pyramid", param, true);
     auto dataset = pool.GetDatasetAndCreate(dim, count, "l2", /*with_path=*/true);
     TestBuildIndex(index, dataset, true);
@@ -432,11 +517,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid MRLE RaBitQ Split",
-                             "[ft][pyramid][rabitq_split][MRLE]") {
+                             "[ft][pyramid][rabitq_split][MRLE][pipnn]") {
     constexpr int64_t dim = 64;
     constexpr uint64_t count = 256;
 
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.base_quantization_type = "tq";
     pyramid_param.precise_quantization_type = "rabitq";
@@ -472,10 +558,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Same Path",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
+    pyramid_param.graph_type = graph_type;
 
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -501,10 +590,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Prefix Descendant",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
+    pyramid_param.graph_type = graph_type;
 
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -540,10 +632,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Shared Prefix Visibility",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
+    pyramid_param.graph_type = graph_type;
 
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -585,10 +680,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Path Semantics Negative Control",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.support_duplicate = true;
+    pyramid_param.graph_type = graph_type;
 
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -614,8 +712,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid KnnSearch Expands Ef Search To Topk",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {};
 
     const auto param = GeneratePyramidBuildParametersString("l2", 4, pyramid_param);
@@ -706,12 +805,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Multi-Levels Test",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     for (auto& dim : dims) {
         for (const auto& level : levels) {
             INFO(fmt::format("metric_type={}, dim={}, no_build_levels={}",
@@ -735,7 +835,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid No Path Test",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
     auto metric_type = GENERATE("l2");
     std::string base_quantization_str = GENERATE("fp32");
     const std::string name = "pyramid";
@@ -751,6 +851,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     constexpr static const char* search_param_ignored_hops_limit_for_statistics =
         R"({"pyramid":{"ef_search":1,"hops_limit":1}})";
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     std::vector<std::vector<int>> tmp_levels = {{1, 2}, {0, 1, 2}};
     for (auto& dim : dims) {
         for (const auto& level : tmp_levels) {
@@ -793,12 +894,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Serialize File",
-                             "[ft][pyramid][serialization][serialize]") {
+                             "[ft][pyramid][serialization][serialize][pipnn]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
     auto use_reorder = GENERATE(true, false);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
     if (use_reorder) {
@@ -854,13 +956,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid multi-layer root streaming serialization",
-                             "[ft][pyramid][root_graph][streaming]") {
+                             "[ft][pyramid][root_graph][streaming][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     const auto graph_storage_type = GENERATE(std::string("flat"), std::string("compressed"));
-    CAPTURE(graph_storage_type);
+    CAPTURE(graph_type, graph_storage_type);
     PyramidParam pyramid_param;
     pyramid_param.no_build_levels = {1, 2};
     pyramid_param.root_graph_type = "multi_layer";
     pyramid_param.graph_storage_type = graph_storage_type;
+    pyramid_param.graph_type = graph_type;
     const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
     auto dataset = pool.GetDatasetAndCreate(16, 1000, "l2", /*with_path=*/true);
@@ -892,7 +996,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 }
 
 TEST_CASE("Pyramid applies root graph type per hierarchy",
-          "[ft][pyramid][root_graph][multi_hierarchy]") {
+          "[ft][pyramid][root_graph][multi_hierarchy][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(graph_type);
     constexpr int64_t dim = 16;
     constexpr int64_t count = 1000;
     std::vector<float> vectors(count * dim);
@@ -914,7 +1020,9 @@ TEST_CASE("Pyramid applies root graph type per hierarchy",
             ]
         }
     })";
-    auto index = vsag::Factory::CreateIndex("pyramid", params);
+    auto params_json = nlohmann::json::parse(params);
+    params_json["index_param"]["graph_type"] = graph_type;
+    auto index = vsag::Factory::CreateIndex("pyramid", params_json.dump());
     REQUIRE(index.has_value());
     auto base = vsag::Dataset::Make()
                     ->NumElements(count)
@@ -946,9 +1054,10 @@ TEST_CASE("Pyramid applies root graph type per hierarchy",
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid streaming compatibility",
-                             "[ft][pyramid][serialization][streaming][compatibility]") {
+                             "[ft][pyramid][serialization][streaming][compatibility][pipnn]") {
     BlockSizeLimitGuard block_size_limit_guard(1024 * 1024 * 2);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     const auto param = GeneratePyramidBuildParametersString("l2", 16, pyramid_param);
     auto index = TestFactory("pyramid", param, true);
@@ -994,11 +1103,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
     }
 }
 
-TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][clone][pyramid]") {
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid Clone",
+                             "[ft][clone][pyramid][pipnn]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
@@ -1016,12 +1128,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex, "Pyramid Clone", "[ft][
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Export Model",
-                             "[ft][export][pyramid]") {
+                             "[ft][export][pyramid][pipnn]") {
     auto size = GENERATE(1024 * 1024 * 2);
     BlockSizeLimitGuard block_size_limit_guard(size);
     auto metric_type = GENERATE("l2");
     auto use_reorder = GENERATE(true, false);
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     pyramid_param.use_reorder = use_reorder;
     if (use_reorder) {
@@ -1043,12 +1156,19 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Build Test With Random Allocator",
-                             "[ft][build][pyramid]") {
+                             "[ft][build][pyramid][pipnn]") {
     auto allocator = std::make_shared<fixtures::RandomAllocator>();
     auto origin_size = vsag::Options::Instance().block_size_limit();
     auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("l2", "ip", "cosine");
+    const auto build_case = GENERATE(std::make_pair(std::string("l2"), std::string("nsw")),
+                                     std::make_pair(std::string("ip"), std::string("nsw")),
+                                     std::make_pair(std::string("cosine"), std::string("nsw")),
+                                     std::make_pair(std::string("l2"), std::string("pipnn")),
+                                     std::make_pair(std::string("ip"), std::string("pipnn")),
+                                     std::make_pair(std::string("cosine"), std::string("pipnn")));
+    const auto& [metric_type, graph_type] = build_case;
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = graph_type;
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     for (auto& dim : dims) {
@@ -1091,9 +1211,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid OverTime Test",
-                             "[ft][search][pyramid]") {
+                             "[ft][search][pyramid][pipnn]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1};
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100, 20);
@@ -1125,18 +1246,23 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate Test",
-                             "[ft][concurrent][pyramid][build][duplicate]") {
+                             "[ft][concurrent][pyramid][build][duplicate][pipnn]") {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto metric_type = GENERATE("l2", "cosine");
+    const auto build_case = GENERATE(std::make_pair(std::string("l2"), std::string("nsw")),
+                                     std::make_pair(std::string("cosine"), std::string("nsw")),
+                                     std::make_pair(std::string("l2"), std::string("pipnn")));
+    const auto& [metric_type, graph_type] = build_case;
     auto size = GENERATE(1024 * 1024 * 2);
     auto name = "pyramid";
     auto duplicate_pos = GENERATE("prefix", "suffix", "middle");
+    CAPTURE(metric_type, graph_type, duplicate_pos);
     auto search_param = GeneratePyramidSearchParametersString(100);
     std::unordered_map<std::string, float> ratios{
         {"prefix", 0.9}, {"suffix", 0.9}, {"middle", 1.0}};
     auto recall = 0.98F;
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = graph_type;
     pyramid_param.support_duplicate = true;
     for (auto& dim : dims) {
         vsag::Options::Instance().set_block_size_limit(size);
@@ -1165,6 +1291,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
             REQUIRE(result->GetDim() == 10);
             for (size_t i = 0; i < result->GetDim(); ++i) {
                 auto distance = result->GetDistances()[i];
+                CAPTURE(i, result->GetIds()[i], distance);
                 REQUIRE(std::abs(distance) <= 2e-6);
             }
         }
@@ -1174,9 +1301,11 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Duplicate ID Test",
-                             "[ft][build][pyramid][duplicate]") {
+                             "[ft][build][pyramid][duplicate][pipnn]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    CAPTURE(pyramid_param.graph_type);
     pyramid_param.no_build_levels = {0, 1};
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100, 20);
@@ -1190,9 +1319,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Analyzer Test",
-                             "[ft][pyramid][analyzer][build]") {
+                             "[ft][pyramid][analyzer][build][pipnn]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(100);
@@ -1218,8 +1348,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid AnalyzeIndexBySearch honors paths and removals",
-                             "[ft][pyramid][analyzer]") {
+                             "[ft][pyramid][analyzer][pipnn]") {
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
 
     auto index =
@@ -1372,12 +1503,13 @@ struct MultiHierarchyFixture {
     }
 
     static std::string
-    build_reorder_stats_param(const std::string& precise_file_path) {
+    build_reorder_stats_param(const std::string& precise_file_path, const std::string& graph_type) {
         return R"({
             "dtype": "float32", "metric_type": "l2", "dim": 4,
             "index_param": {
                 "max_degree": 32, "alpha": 1.2,
-                "graph_type": "nsw",
+                "graph_type": ")" +
+               graph_type + R"(",
                 "graph_iter_turn": 15, "neighbor_sample_rate": 0.2,
                 "base_quantization_type": "rabitq",
                 "base_io_type": "memory_io",
@@ -1396,11 +1528,116 @@ struct MultiHierarchyFixture {
     }
 };
 
+struct MultiPathFixture {
+    static constexpr int64_t NUM = 4;
+    static constexpr int64_t DIM = 4;
+
+    static vsag::DatasetPtr
+    make_base() {
+        auto* vectors = new float[NUM * DIM]{1.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             1.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             1.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             0.0F,
+                                             1.0F};
+        auto* ids = new int64_t[NUM]{10, 11, 12, 13};
+        auto* host_paths = new std::string[NUM]{"host/one", "host/two", "host/three", "host/four"};
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(NUM)
+            ->Dim(DIM)
+            ->Float32Vectors(vectors)
+            ->Ids(ids)
+            ->Paths("host", host_paths)
+            ->Paths("tag",
+                    std::vector<std::vector<std::string>>{
+                        {"a/x", "a/y", "a/x", "literal|pipe"}, {"a/x"}, {"other"}, {""}})
+            ->Owner(true);
+        return dataset;
+    }
+
+    static vsag::DatasetPtr
+    make_legacy_query(const std::string& hierarchy_name, const std::string& path) {
+        auto* vector = new float[DIM]{1.0F, 0.0F, 0.0F, 0.0F};
+        auto* paths = new std::string[1]{path};
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(DIM)
+            ->Float32Vectors(vector)
+            ->Paths(hierarchy_name, paths)
+            ->Owner(true);
+        return query;
+    }
+
+    static vsag::DatasetPtr
+    make_structured_query(std::vector<std::string> paths) {
+        auto* vector = new float[DIM]{1.0F, 0.0F, 0.0F, 0.0F};
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)
+            ->Dim(DIM)
+            ->Float32Vectors(vector)
+            ->Paths("tag", std::vector<std::vector<std::string>>{std::move(paths)})
+            ->Owner(true);
+        return query;
+    }
+
+    static std::vector<int64_t>
+    search(const std::shared_ptr<vsag::Index>& index,
+           const vsag::DatasetPtr& query,
+           const std::string& hierarchy_name,
+           int64_t parallelism = 1) {
+        auto search_param = fmt::format(
+            R"({{"pyramid": {{"ef_search": 100, "parallelism": {}, "hierarchies": ["{}"]}}}})",
+            parallelism,
+            hierarchy_name);
+        auto result = index->KnnSearch(query, NUM, search_param);
+        REQUIRE(result.has_value());
+        std::vector<int64_t> ids;
+        const auto count = result.value()->GetDim();
+        if (count > 0) {
+            ids.assign(result.value()->GetIds(), result.value()->GetIds() + count);
+        }
+        std::sort(ids.begin(), ids.end());
+        return ids;
+    }
+
+    static std::string
+    build_param(const std::string& graph_type, bool skip_tag_prefix = false) {
+        const std::string tag_no_build_levels = skip_tag_prefix ? "[0, 1]" : "[]";
+        return R"({
+            "dtype": "float32", "metric_type": "l2", "dim": 4,
+            "index_param": {
+                "max_degree": 16, "alpha": 1.2,
+                "graph_type": ")" +
+               graph_type + R"(",
+                "graph_iter_turn": 15, "neighbor_sample_rate": 0.2,
+                "base_quantization_type": "fp32", "use_reorder": false,
+                "index_min_size": 0, "support_duplicate": false,
+                "hierarchies": [
+                    {"name": "tag", "no_build_levels": )" +
+               tag_no_build_levels + R"(},
+                    {"name": "host", "no_build_levels": []}
+                ]
+            }
+        })";
+    }
+};
+
 }  // namespace
 
-TEST_CASE("Multi-Hierarchy: NSW Build and Search", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: Graph Build and Search", "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
 
     auto build_result = index.value()->Build(f.make_base());
@@ -1449,9 +1686,10 @@ TEST_CASE("Multi-Hierarchy: ODescent Build and Search", "[ft][pyramid][multi_hie
     REQUIRE(cat_tech.count(101) == 1);
 }
 
-TEST_CASE("Multi-Hierarchy: Add after Build", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: Add after Build", "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
 
     // Build with first 2 vectors
@@ -1496,9 +1734,127 @@ TEST_CASE("Multi-Hierarchy: Add after Build", "[ft][pyramid][multi_hierarchy]") 
     REQUIRE(cat_science.count(103) == 1);
 }
 
-TEST_CASE("Multi-Hierarchy: Serialize and Deserialize", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Pyramid parallel ODescent build isolates hierarchy parameters",
+          "[ft][pyramid][multi_hierarchy][odescent_parameter_isolation][concurrent][pr]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 96;
+    auto params = vsag::JsonType::Parse(MultiHierarchyFixture::build_param("odescent"));
+    params["dim"].SetInt(dim);
+    auto external = params["index_param"];
+    external["base_quantization_type"].SetString("rabitq");
+    external["precise_quantization_type"].SetString("rabitq");
+    external["rabitq_bits_per_dim_base"].SetInt(3);
+    external["rabitq_bits_per_dim_precise"].SetInt(5);
+    external["rabitq_bits_per_dim_query"].SetInt(32);
+    external["use_reorder"].SetBool(true);
+    external["fast_encode_rabitq"].SetBool(true);
+    external["store_raw_vector"].SetBool(false);
+    external["max_degree"].SetInt(16);
+    external["index_min_size"].SetInt(8);
+    external["build_thread_count"].SetInt(4);
+    external["hierarchies"].SetJson(vsag::JsonType::Parse(R"(["site", "category"])"));
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> sites(count, "tenant/leaf");
+    std::vector<std::string> categories(count, "group");
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (int64_t i = 0; i < count; ++i) {
+        float norm = 0.0F;
+        for (int64_t d = 0; d < dim; ++d) {
+            const auto value = distribution(generator);
+            vectors[i * dim + d] = value;
+            norm += value * value;
+        }
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] /= std::sqrt(norm);
+        }
+    }
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Paths("site", sites.data())
+                    ->Paths("category", categories.data())
+                    ->Owner(false);
+    auto created = vsag::Factory::CreateIndex("pyramid", params.Dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(data).has_value());
+    REQUIRE(index->GetNumElements() == count);
+    for (const auto* hierarchy : {"site", "category"}) {
+        for (int64_t id : {0, 37, 95}) {
+            auto query = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(dim)
+                             ->Float32Vectors(vectors.data() + id * dim)
+                             ->Owner(false);
+            const auto search = fmt::format(
+                R"({{"pyramid":{{"ef_search":96,"hierarchies":["{}"],"rabitq_one_bit_search":true}}}})",
+                hierarchy);
+            auto result = index->KnnSearch(query, 1, search);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 1);
+            CHECK(result.value()->GetIds()[0] == ids[id]);
+            CHECK(std::isfinite(result.value()->GetDistances()[0]));
+        }
+    }
+}
+
+TEST_CASE("Multi-Hierarchy: Add after Build", "[ft][pyramid][multi_hierarchy]") {
     MultiHierarchyFixture f;
-    auto param_str = f.build_param("nsw");
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
+    REQUIRE(index.has_value());
+
+    // Build with first 2 vectors
+    auto* rv = new float[8];
+    auto* ri = new int64_t[2]{100, 101};
+    auto* rs = new std::string[2]{"www/news", "www/sports"};
+    auto* rc = new std::string[2]{"tech/ai", "tech/web"};
+    std::copy(f.vectors.begin(), f.vectors.begin() + 8, rv);
+    auto base1 = vsag::Dataset::Make();
+    base1->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(rv)
+        ->Ids(ri)
+        ->Paths("site", rs)
+        ->Paths("cat", rc)
+        ->Owner(true);
+    REQUIRE(index.value()->Build(base1).has_value());
+
+    // Add 2 more vectors
+    auto* rv2 = new float[8];
+    auto* ri2 = new int64_t[2]{102, 103};
+    auto* rs2 = new std::string[2]{"www/news", "www/sports"};
+    auto* rc2 = new std::string[2]{"science/bio", "science/phys"};
+    std::copy(f.vectors.begin() + 8, f.vectors.end(), rv2);
+    auto base2 = vsag::Dataset::Make();
+    base2->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(rv2)
+        ->Ids(ri2)
+        ->Paths("site", rs2)
+        ->Paths("cat", rc2)
+        ->Owner(true);
+    REQUIRE(index.value()->Add(base2).has_value());
+
+    // Verify all 4 vectors are searchable
+    auto site_news = f.search_ids(index.value(), "site", "www/news");
+    REQUIRE(site_news.count(100) == 1);
+    REQUIRE(site_news.count(102) == 1);
+
+    auto cat_science = f.search_ids(index.value(), "cat", "science");
+    REQUIRE(cat_science.count(102) == 1);
+    REQUIRE(cat_science.count(103) == 1);
+}
+
+TEST_CASE("Multi-Hierarchy: Serialize and Deserialize", "[ft][pyramid][multi_hierarchy][pipnn]") {
+    MultiHierarchyFixture f;
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_str = f.build_param(graph_type);
     auto index = vsag::Factory::CreateIndex("pyramid", param_str);
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
@@ -1524,10 +1880,140 @@ TEST_CASE("Multi-Hierarchy: Serialize and Deserialize", "[ft][pyramid][multi_hie
     REQUIRE(cat_tech.count(102) == 0);
 }
 
+TEST_CASE("Multi-Hierarchy: Multiple paths per vector",
+          "[ft][pyramid][multi_hierarchy][multi_path]") {
+    const std::string graph_type = GENERATE("nsw", "odescent", "pipnn");
+    CAPTURE(graph_type);
+    auto index = vsag::Factory::CreateIndex("pyramid", MultiPathFixture::build_param(graph_type));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(MultiPathFixture::make_base()).has_value());
+    REQUIRE(index.value()->GetNumElements() == MultiPathFixture::NUM);
+
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "a/x"),
+                                     "tag") == std::vector<int64_t>{10, 11});
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "a/y"),
+                                     "tag") == std::vector<int64_t>{10});
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "a"),
+                                     "tag") == std::vector<int64_t>{10, 11});
+
+    for (const auto parallelism : {1, 2}) {
+        CAPTURE(parallelism);
+        REQUIRE(MultiPathFixture::search(index.value(),
+                                         MultiPathFixture::make_legacy_query("tag", "a/x|a/y"),
+                                         "tag",
+                                         parallelism) == std::vector<int64_t>{10, 11});
+    }
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_structured_query({"a/x", "a/y"}),
+                                     "tag") == std::vector<int64_t>{10, 11});
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_structured_query({"literal|pipe"}),
+                                     "tag") == std::vector<int64_t>{10});
+
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_structured_query({""}),
+                                     "tag") == std::vector<int64_t>{10, 11, 12, 13});
+
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("host", "host/three"),
+                                     "host") == std::vector<int64_t>{12});
+}
+
+TEST_CASE("Multi-Hierarchy: Multiple paths survive serialization",
+          "[ft][pyramid][multi_hierarchy][multi_path][serialization]") {
+    const std::string graph_type = GENERATE("nsw", "pipnn");
+    CAPTURE(graph_type);
+    const auto param = MultiPathFixture::build_param(graph_type);
+    auto index = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(MultiPathFixture::make_base()).has_value());
+
+    auto binary_set = index.value()->Serialize();
+    REQUIRE(binary_set.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(restored.has_value());
+    REQUIRE(restored.value()->Deserialize(binary_set.value()).has_value());
+
+    REQUIRE(MultiPathFixture::search(restored.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "a/x"),
+                                     "tag") == std::vector<int64_t>{10, 11});
+    REQUIRE(MultiPathFixture::search(restored.value(),
+                                     MultiPathFixture::make_structured_query({"literal|pipe"}),
+                                     "tag") == std::vector<int64_t>{10});
+}
+
+TEST_CASE("Multi-Hierarchy: Multiple paths below an unbuilt prefix are deduplicated",
+          "[ft][pyramid][multi_hierarchy][multi_path]") {
+    const std::string graph_type = GENERATE("nsw", "odescent", "pipnn");
+    CAPTURE(graph_type);
+    auto index =
+        vsag::Factory::CreateIndex("pyramid", MultiPathFixture::build_param(graph_type, true));
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(MultiPathFixture::make_base()).has_value());
+
+    for (const auto parallelism : {1, 2}) {
+        CAPTURE(parallelism);
+        REQUIRE(MultiPathFixture::search(index.value(),
+                                         MultiPathFixture::make_legacy_query("tag", "a"),
+                                         "tag",
+                                         parallelism) == std::vector<int64_t>{10, 11});
+    }
+}
+
+TEST_CASE("Multi-Hierarchy: Add accepts multiple paths per vector",
+          "[ft][pyramid][multi_hierarchy][multi_path]") {
+    const std::string graph_type = GENERATE("nsw", "pipnn");
+    CAPTURE(graph_type);
+    auto index = vsag::Factory::CreateIndex("pyramid", MultiPathFixture::build_param(graph_type));
+    REQUIRE(index.has_value());
+
+    auto* base_vector = new float[4]{1.0F, 0.0F, 0.0F, 0.0F};
+    auto* base_id = new int64_t[1]{10};
+    auto* base_path = new std::string[1]{"seed"};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(1)
+        ->Dim(4)
+        ->Float32Vectors(base_vector)
+        ->Ids(base_id)
+        ->Paths("tag", base_path)
+        ->Owner(true);
+    REQUIRE(index.value()->Build(base).has_value());
+
+    auto* add_vectors = new float[8]{0.9F, 0.1F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F};
+    auto* add_ids = new int64_t[2]{10, 20};
+    auto add = vsag::Dataset::Make();
+    add->NumElements(2)
+        ->Dim(4)
+        ->Float32Vectors(add_vectors)
+        ->Ids(add_ids)
+        ->Paths("tag", std::vector<std::vector<std::string>>{{"ignored"}, {"b/x", "b/y"}})
+        ->Owner(true);
+    auto add_result = index.value()->Add(add);
+    REQUIRE(add_result.has_value());
+    REQUIRE(add_result.value() == std::vector<int64_t>{10});
+
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "b/x"),
+                                     "tag") == std::vector<int64_t>{20});
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_legacy_query("tag", "b/y"),
+                                     "tag") == std::vector<int64_t>{20});
+    REQUIRE(MultiPathFixture::search(
+                index.value(), MultiPathFixture::make_legacy_query("tag", "ignored"), "tag")
+                .empty());
+    REQUIRE(MultiPathFixture::search(index.value(),
+                                     MultiPathFixture::make_structured_query({""}),
+                                     "tag") == std::vector<int64_t>{10, 20});
+}
+
 TEST_CASE("Multi-Hierarchy: Different no_build_levels per hierarchy",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1541,9 +2027,11 @@ TEST_CASE("Multi-Hierarchy: Different no_build_levels per hierarchy",
     REQUIRE(cat_ai.count(100) == 1);
 }
 
-TEST_CASE("Multi-Hierarchy: Shared vector base distances", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: Shared vector base distances",
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1583,9 +2071,10 @@ TEST_CASE("Multi-Hierarchy: Shared vector base distances", "[ft][pyramid][multi_
 }
 
 TEST_CASE("Multi-Hierarchy: Partial paths - only some hierarchies provided",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
 
     // Build with only "site" paths, no "cat" paths
@@ -1614,9 +2103,10 @@ TEST_CASE("Multi-Hierarchy: Partial paths - only some hierarchies provided",
 }
 
 TEST_CASE("Multi-Hierarchy: Partial paths - Add to subset of hierarchies",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1640,9 +2130,10 @@ TEST_CASE("Multi-Hierarchy: Partial paths - Add to subset of hierarchies",
 }
 
 TEST_CASE("Multi-Hierarchy: Error - unknown hierarchy in search",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1656,9 +2147,11 @@ TEST_CASE("Multi-Hierarchy: Error - unknown hierarchy in search",
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("Multi-Hierarchy: Duplicate label rejected on Add", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: Duplicate label rejected on Add",
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1690,7 +2183,7 @@ TEST_CASE("Multi-Hierarchy: Duplicate label rejected on Add", "[ft][pyramid][mul
 }
 
 TEST_CASE("Multi-Hierarchy: Legacy single-hierarchy serialize compat",
-          "[ft][pyramid][multi_hierarchy][serialization]") {
+          "[ft][pyramid][multi_hierarchy][serialization][pipnn]") {
     // Build with single-hierarchy (no "hierarchies" param) -> serialize -> deserialize -> search
     std::string single_param = R"({
         "dtype": "float32", "metric_type": "l2", "dim": 4,
@@ -1702,6 +2195,10 @@ TEST_CASE("Multi-Hierarchy: Legacy single-hierarchy serialize compat",
         }
     })";
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_json = nlohmann::json::parse(single_param);
+    param_json["index_param"]["graph_type"] = graph_type;
+    single_param = param_json.dump();
     auto index1 = vsag::Factory::CreateIndex("pyramid", single_param);
     REQUIRE(index1.has_value());
 
@@ -1734,9 +2231,10 @@ TEST_CASE("Multi-Hierarchy: Legacy single-hierarchy serialize compat",
 }
 
 TEST_CASE("Multi-Hierarchy: Serialize roundtrip preserves isolation",
-          "[ft][pyramid][multi_hierarchy][serialization]") {
+          "[ft][pyramid][multi_hierarchy][serialization][pipnn]") {
     MultiHierarchyFixture f;
-    auto param_str = f.build_param("nsw");
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_str = f.build_param(graph_type);
 
     auto index1 = vsag::Factory::CreateIndex("pyramid", param_str);
     REQUIRE(index1.has_value());
@@ -1764,7 +2262,7 @@ TEST_CASE("Multi-Hierarchy: Serialize roundtrip preserves isolation",
 }
 
 TEST_CASE("Multi-Hierarchy: Per-hierarchy build params take effect",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     // Create with different max_degree per hierarchy
     std::string param = R"({
         "dtype": "float32", "metric_type": "l2", "dim": 4,
@@ -1781,6 +2279,10 @@ TEST_CASE("Multi-Hierarchy: Per-hierarchy build params take effect",
         }
     })";
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_json = nlohmann::json::parse(param);
+    param_json["index_param"]["graph_type"] = graph_type;
+    param = param_json.dump();
     MultiHierarchyFixture f;
     auto index = vsag::Factory::CreateIndex("pyramid", param);
     REQUIRE(index.has_value());
@@ -1820,42 +2322,44 @@ TEST_CASE("Multi-Hierarchy: AnalyzeIndexBySearch honors named query paths",
                                        0.0F};
     auto* base_ids = new int64_t[4]{100, 101, 102, 103};
     auto* site_paths = new std::string[4]{"z", "x", "y", "z"};
-    auto* cat_paths = new std::string[4]{"z/zero", "y/leaf", "x/leaf", "z/hundred"};
     auto base = vsag::Dataset::Make();
     base->NumElements(4)
         ->Dim(4)
         ->Float32Vectors(base_vectors)
         ->Ids(base_ids)
         ->Paths("site", site_paths)
-        ->Paths("cat", cat_paths)
+        ->Paths("cat",
+                std::vector<std::vector<std::string>>{
+                    {"z/zero"}, {"y/leaf"}, {"x/leaf", "y/leaf"}, {"z/hundred"}})
         ->Owner(true);
     REQUIRE(index.value()->Build(base).has_value());
 
     auto* query_vectors = new float[8]{0.0F, 0.0F, 0.0F, 0.0F, 100.0F, 0.0F, 0.0F, 0.0F};
-    auto* query_paths = new std::string[2]{"x", "y"};
     auto query = vsag::Dataset::Make();
     query->NumElements(2)
         ->Dim(4)
         ->Float32Vectors(query_vectors)
-        ->Paths("cat", query_paths)
+        ->Paths("cat", std::vector<std::vector<std::string>>{{"x", "y"}, {"x", "y"}})
         ->Owner(true);
 
     vsag::SearchRequest request;
     request.query_ = query;
-    request.topk_ = 1;
+    request.topk_ = 2;
     request.params_str_ = R"({"pyramid":{"ef_search":20,"hierarchies":["cat"]}})";
 
-    // Global GT is ids 100/103. If x/y were applied to site, its GT would be 101/102, while the
-    // selected cat hierarchy has GT 102/101. Only cat distances 400/8100 yield this average.
+    // Both query rows select x union y. The selected cat scope is ids 101/102 even though id 102
+    // belongs to both paths, so it must be counted only once in search and ground truth. The two
+    // queries have exact squared L2 distances {100, 400} and {6400, 8100} in that scope.
     const auto stats = nlohmann::json::parse(index.value()->AnalyzeIndexBySearch(request));
     REQUIRE(std::abs(stats["recall_query"].get<float>() - 1.0F) <= 1e-6F);
-    REQUIRE(std::abs(stats["avg_distance_query"].get<float>() - 4250.0F) <= 1e-6F);
+    REQUIRE(std::abs(stats["avg_distance_query"].get<float>() - 3750.0F) <= 1e-6F);
 }
 
 TEST_CASE("Multi-Hierarchy: AnalyzeIndexBySearch topk one has finite quantization metrics",
-          "[ft][pyramid][multi_hierarchy][analyzer]") {
+          "[ft][pyramid][multi_hierarchy][analyzer][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw", true));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type, true));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1871,9 +2375,10 @@ TEST_CASE("Multi-Hierarchy: AnalyzeIndexBySearch topk one has finite quantizatio
 }
 
 TEST_CASE("Multi-Hierarchy: Analyzer output format - multi hierarchy",
-          "[ft][pyramid][multi_hierarchy][analyzer]") {
+          "[ft][pyramid][multi_hierarchy][analyzer][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1895,7 +2400,7 @@ TEST_CASE("Multi-Hierarchy: Analyzer output format - multi hierarchy",
 }
 
 TEST_CASE("Multi-Hierarchy: Analyzer output format - single hierarchy compat",
-          "[ft][pyramid][multi_hierarchy][analyzer]") {
+          "[ft][pyramid][multi_hierarchy][analyzer][pipnn]") {
     std::string param = R"({
         "dtype": "float32", "metric_type": "l2", "dim": 4,
         "index_param": {
@@ -1905,6 +2410,10 @@ TEST_CASE("Multi-Hierarchy: Analyzer output format - single hierarchy compat",
             "no_build_levels": [0, 1, 2]
         }
     })";
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_json = nlohmann::json::parse(param);
+    param_json["index_param"]["graph_type"] = graph_type;
+    param = param_json.dump();
     auto index = vsag::Factory::CreateIndex("pyramid", param);
     REQUIRE(index.has_value());
 
@@ -1927,9 +2436,10 @@ TEST_CASE("Multi-Hierarchy: Analyzer output format - single hierarchy compat",
 }
 
 TEST_CASE("Multi-Hierarchy: Search without hierarchies param in multi-mode errors",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1944,9 +2454,10 @@ TEST_CASE("Multi-Hierarchy: Search without hierarchies param in multi-mode error
 }
 
 TEST_CASE("Multi-Hierarchy: Multi-hierarchy union/intersection rejected",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1961,9 +2472,10 @@ TEST_CASE("Multi-Hierarchy: Multi-hierarchy union/intersection rejected",
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("Multi-Hierarchy: RangeSearch works", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: RangeSearch works", "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw"));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -1983,9 +2495,11 @@ TEST_CASE("Multi-Hierarchy: RangeSearch works", "[ft][pyramid][multi_hierarchy]"
     REQUIRE(found.count(103) == 0);
 }
 
-TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy", "[ft][pyramid][multi_hierarchy]") {
+TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy",
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
-    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param("nsw", true));
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto index = vsag::Factory::CreateIndex("pyramid", f.build_param(graph_type, true));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -2000,11 +2514,12 @@ TEST_CASE("Multi-Hierarchy: Reorder with multi-hierarchy", "[ft][pyramid][multi_
 }
 
 TEST_CASE("Multi-Hierarchy: Reorder statistics include precise IO",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     MultiHierarchyFixture f;
     fixtures::TempDir temp_dir("pyramid_reorder_stats");
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     auto index = vsag::Factory::CreateIndex(
-        "pyramid", f.build_reorder_stats_param(temp_dir.GenerateRandomFile(false)));
+        "pyramid", f.build_reorder_stats_param(temp_dir.GenerateRandomFile(false), graph_type));
     REQUIRE(index.has_value());
     REQUIRE(index.value()->Build(f.make_base()).has_value());
 
@@ -2030,7 +2545,7 @@ TEST_CASE("Multi-Hierarchy: Reorder statistics include precise IO",
 }
 
 TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",
-          "[ft][pyramid][multi_hierarchy]") {
+          "[ft][pyramid][multi_hierarchy][pipnn]") {
     std::string param = R"({
         "dtype": "float32", "metric_type": "l2", "dim": 4,
         "index_param": {
@@ -2041,6 +2556,10 @@ TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",
         }
     })";
 
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto param_json = nlohmann::json::parse(param);
+    param_json["index_param"]["graph_type"] = graph_type;
+    param = param_json.dump();
     auto index = vsag::Factory::CreateIndex("pyramid", param);
     REQUIRE(index.has_value());
 
@@ -2065,9 +2584,10 @@ TEST_CASE("Multi-Hierarchy: Single hierarchy in hierarchies config",
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
                              "Pyramid Mark Remove",
-                             "[ft][remove][pyramid]") {
+                             "[ft][remove][pyramid][pipnn]") {
     auto metric_type = GENERATE("l2");
     PyramidParam pyramid_param;
+    pyramid_param.graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
     pyramid_param.no_build_levels = {0, 1, 2};
     const std::string name = "pyramid";
     auto search_param = GeneratePyramidSearchParametersString(200);
@@ -2164,10 +2684,12 @@ MakePyramidCacheQuery(int64_t dim, const std::vector<float>& query, const std::s
     dataset->NumElements(1)
         ->Dim(dim)
         ->Float32Vectors(raw_query_vec.get())
-        ->Paths(raw_paths.get())
+        ->Paths(path.empty() ? nullptr : raw_paths.get())
         ->Owner(true);
     raw_query_vec.release();
-    raw_paths.release();
+    if (!path.empty()) {
+        raw_paths.release();
+    }
     return dataset;
 }
 
@@ -2176,9 +2698,10 @@ MakePyramidCacheQuery(int64_t dim, const std::vector<float>& query, const std::s
 TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
           "[ft][pyramid][cache][pr]") {
     // End-to-end smoke test mirroring the HGraph cache test, adapted for the
-    // Pyramid tree-of-graphs structure: every inserted vector shares a single
-    // deep path so they all land in the same leaf IndexNode, which becomes a
-    // GRAPH that fulfill_cache() walks.
+    // Pyramid tree-of-graphs structure: every inserted vector shares a deep
+    // primary path, and half also use a second path. The primary leaf becomes
+    // a GRAPH that fulfill_cache() walks while structured paths exercise the
+    // warm-start tree population path.
     //   (1) Build a baseline Pyramid with N points carrying source_id.
     //   (2) ExportCache to an in-memory stream.
     //   (3) Fresh Pyramid, ImportCache, then Build the same dataset — Build
@@ -2234,7 +2757,17 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     }
 
     auto make_dataset = [&]() {
-        return MakePyramidCacheDataset(TEST_COUNT, TEST_DIM, vectors, ids, paths, source_ids);
+        auto dataset =
+            MakePyramidCacheDataset(TEST_COUNT, TEST_DIM, vectors, ids, paths, source_ids);
+        std::vector<std::vector<std::string>> structured_paths(TEST_COUNT);
+        for (int64_t i = 0; i < TEST_COUNT; ++i) {
+            structured_paths[i].push_back(paths[i]);
+            if (i % 2 == 0) {
+                structured_paths[i].push_back("alternate/cache/leaf");
+            }
+        }
+        dataset->Paths("", std::move(structured_paths));
+        return dataset;
     };
 
     // ---- (1) baseline build ----
@@ -2263,34 +2796,110 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     auto warmed_build = warmed->Build(make_dataset());
     REQUIRE(warmed_build.has_value());
     REQUIRE(warmed->GetNumElements() == TEST_COUNT);
-    auto restored_data = warmed->GetDataByIdsWithFlag(ids.data(), 1, DATA_FLAG_ID | DATA_FLAG_PATH);
+    auto restored_data =
+        warmed->GetDataByIdsWithFlag(ids.data() + 1, 1, DATA_FLAG_ID | DATA_FLAG_PATH);
     REQUIRE(restored_data.has_value());
     REQUIRE(restored_data.value()->GetPaths() != nullptr);
     REQUIRE(restored_data.value()->GetPaths()[0] == "a/b/c");
     auto warm_stats = vsag::JsonType::Parse(warmed->GetStats());
     REQUIRE(warm_stats["build_cache_hit_nodes"].GetInt() > 0);
+    REQUIRE(warm_stats["build_cache_hit_memberships"].GetInt() > 0);
+    REQUIRE(warm_stats["build_cache_restored_edges"].GetInt() > 0);
     REQUIRE(warm_stats["root_graphs"]["default"]["route_graph_count"].GetInt() > 0);
     std::vector<float> query_vec(TEST_DIM);
     std::copy(vectors.begin(), vectors.begin() + TEST_DIM, query_vec.begin());
-    // Pyramid navigates by path; the query must reference the same leaf.
-    auto query = MakePyramidCacheQuery(TEST_DIM, query_vec, "a/b/c");
-
     const auto* search_param = R"({"pyramid": {"ef_search": 50}})";
-    auto search_result = warmed->KnnSearch(query, TOPK, search_param);
-    REQUIRE(search_result.has_value());
-    auto knn = search_result.value();
-    REQUIRE(knn->GetNumElements() == 1);
-    REQUIRE(knn->GetDim() > 0);
-    REQUIRE(knn->GetDim() <= TOPK);
-    bool found_self = false;
-    for (int64_t i = 0; i < knn->GetDim(); ++i) {
-        if (knn->GetIds()[i] == ids[0]) {
-            found_self = true;
-            REQUIRE(knn->GetDistances()[i] < 1e-4F);
-            break;
+    const auto require_self_at_path = [&](const std::string& path) {
+        auto query = MakePyramidCacheQuery(TEST_DIM, query_vec, path);
+        auto search_result = warmed->KnnSearch(query, TOPK, search_param);
+        REQUIRE(search_result.has_value());
+        auto knn = search_result.value();
+        REQUIRE(knn->GetNumElements() == 1);
+        REQUIRE(knn->GetDim() > 0);
+        REQUIRE(knn->GetDim() <= TOPK);
+        bool found_self = false;
+        for (int64_t i = 0; i < knn->GetDim(); ++i) {
+            if (knn->GetIds()[i] == ids[0]) {
+                found_self = true;
+                REQUIRE(knn->GetDistances()[i] < 1e-4F);
+                break;
+            }
         }
+        REQUIRE(found_self);
+    };
+    // Verify both memberships survive cache import and warm-start tree population.
+    require_self_at_path("a/b/c");
+    require_self_at_path("alternate/cache/leaf");
+}
+
+TEST_CASE("Pyramid Build Cache clamps rows to the current maximum degree",
+          "[ft][pyramid][cache][pr]") {
+    constexpr int64_t test_dim = 32;
+    constexpr int64_t test_count = 200;
+    const auto source_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 64,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }}
+    }})",
+                                          test_dim);
+    const auto target_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "base_quantization_type": "fp32",
+            "max_degree": 8,
+            "ef_construction": 32,
+            "no_build_levels": [0, 1, 2],
+            "index_min_size": 28,
+            "persist_source_id": true
+        }}
+    }})",
+                                          test_dim);
+
+    std::mt19937 rng(99);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(test_dim * test_count);
+    for (auto& value : vectors) {
+        value = dist(rng);
     }
-    REQUIRE(found_self);
+    std::vector<int64_t> ids(test_count);
+    std::vector<std::string> paths(test_count, "a/b/c");
+    std::vector<std::string> source_ids(test_count);
+    for (int64_t i = 0; i < test_count; ++i) {
+        ids[i] = i + 1;
+        source_ids[i] = fmt::format("pyr_degree_sid_{}", i);
+    }
+    auto make_dataset = [&]() {
+        return MakePyramidCacheDataset(test_count, test_dim, vectors, ids, paths, source_ids);
+    };
+
+    auto source = vsag::Factory::CreateIndex("pyramid", source_param).value();
+    REQUIRE(source->Build(make_dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+
+    cache.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", target_param).value();
+    REQUIRE(warmed->ImportCache(cache).has_value());
+    REQUIRE(warmed->Build(make_dataset()).has_value());
+    auto stats = vsag::JsonType::Parse(warmed->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() > 0);
+
+    std::vector<float> query_vector(test_dim);
+    std::copy_n(vectors.data(), test_dim, query_vector.data());
+    auto query = MakePyramidCacheQuery(test_dim, query_vector, "a/b/c");
+    auto result = warmed->KnnSearch(query, 10, R"({"pyramid":{"ef_search":50}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() > 0);
 }
 
 TEST_CASE("Pyramid ExportCache + ImportCache + Build miss-only path", "[ft][pyramid][cache][pr]") {
@@ -2367,14 +2976,12 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build miss-only path", "[ft][pyra
     REQUIRE(baseline_parsed.Contains("build_cache_hit_rate"));
     REQUIRE(baseline_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
 
-    // warmed with disjoint source_ids -> 0 hit-rate, all missed
+    // Disjoint source IDs fall back to the regular cold builder before cache restoration.
     auto warmed_stats_str = warmed->GetStats();
     INFO(warmed_stats_str);
     auto warmed_parsed = vsag::JsonType::Parse(warmed_stats_str);
     REQUIRE(warmed_parsed.Contains("build_cache_hit_rate"));
-    REQUIRE(warmed_parsed["build_cache_hit_rate"].GetFloat() == 0.0F);
-    REQUIRE(warmed_parsed["build_cache_missed_nodes"].GetInt() == TEST_COUNT);
-    REQUIRE(warmed_parsed["build_cache_hit_nodes"].GetInt() == 0);
+    REQUIRE(warmed_parsed["build_cache_hit_rate"].Contains("skipped_reason"));
 }
 
 TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache][pr]") {
@@ -2445,10 +3052,1041 @@ TEST_CASE("Pyramid GetStats reports build cache hit-rate", "[ft][pyramid][cache]
     REQUIRE(warm_parsed.Contains("build_cache_hit_rate"));
     REQUIRE(warm_parsed.Contains("build_cache_hit_nodes"));
     REQUIRE(warm_parsed.Contains("build_cache_missed_nodes"));
+    REQUIRE(warm_parsed.Contains("build_cache_hit_memberships"));
+    REQUIRE(warm_parsed.Contains("build_cache_missed_memberships"));
+    REQUIRE(warm_parsed.Contains("build_cache_restored_edges"));
+    REQUIRE(warm_parsed["build_cache_hit_memberships"].GetInt() > 0);
+    REQUIRE(warm_parsed["build_cache_restored_edges"].GetInt() > 0);
     const float hit_rate = warm_parsed["build_cache_hit_rate"].GetFloat();
     REQUIRE(hit_rate > 0.0F);
     REQUIRE(hit_rate <= 1.0F);
     const auto hit_nodes = warm_parsed["build_cache_hit_nodes"].GetInt();
     const auto missed_nodes = warm_parsed["build_cache_missed_nodes"].GetInt();
     REQUIRE(hit_nodes + missed_nodes == TEST_COUNT);
+}
+
+TEST_CASE("Pyramid duplicate cache roundtrips and membership changes",
+          "[ft][pyramid][cache][duplicate_cache][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto change = GENERATE(std::string("reorder"),
+                                 std::string("remove-representative"),
+                                 std::string("remove-alias"),
+                                 std::string("move-path"),
+                                 std::string("all-identical"),
+                                 std::string("no-edges"),
+                                 std::string("repeated-label"));
+    const auto use_cache = GENERATE(false, true);
+    const auto serialized = GENERATE(false, true);
+    CAPTURE(root, change, use_cache, serialized);
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 120;
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"l2", "dim":8,
+        "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+        "ef_construction":64, "build_thread_count":1, "root_graph_type":"{}",
+        "index_min_size":8, "persist_source_id":true, "store_paths":true,
+        "support_duplicate":true}} }})",
+                                   root);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "a/b");
+    std::vector<std::string> sources(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        sources[i] = "duplicate-source-" + std::to_string(i);
+        const auto group = change == "all-identical" ? 0 : i / 10;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>(group * (d + 1));
+        }
+    }
+    auto dataset = [&]() {
+        return MakePyramidCacheDataset(ids.size(), dim, vectors, ids, paths, sources);
+    };
+    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(baseline->Build(dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(baseline->ExportCache(cache).has_value());
+    if (change == "remove-representative" || change == "remove-alias") {
+        const uint64_t offset = change == "remove-representative" ? 0 : 1;
+        ids.erase(ids.begin() + offset);
+        paths.erase(paths.begin() + offset);
+        sources.erase(sources.begin() + offset);
+        vectors.erase(vectors.begin() + offset * dim, vectors.begin() + (offset + 1) * dim);
+    } else if (change == "move-path") {
+        paths[0] = "other/path";
+    } else if (change == "no-edges") {
+        ids.resize(10);
+        paths.resize(10);
+        sources.resize(10);
+        vectors.resize(10 * dim);
+    } else if (change == "repeated-label") {
+        ids[1] = ids[0];
+    }
+    // Reverse input IDs without changing SourceID/vector identity; the actual
+    // representative is now not necessarily the minimum inner ID in its group.
+    std::reverse(ids.begin(), ids.end());
+    std::reverse(paths.begin(), paths.end());
+    std::reverse(sources.begin(), sources.end());
+    for (uint64_t i = 0; i < ids.size() / 2; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            std::swap(vectors[i * dim + d], vectors[(ids.size() - i - 1) * dim + d]);
+        }
+    }
+    for (int round = 0; round < 2; ++round) {
+        auto warm = vsag::Factory::CreateIndex("pyramid", param).value();
+        if (use_cache) {
+            cache.seekg(0);
+            REQUIRE(warm->ImportCache(cache).has_value());
+        }
+        auto built = warm->Build(dataset());
+        REQUIRE(built.has_value());
+        if (change == "repeated-label") {
+            REQUIRE_FALSE(built.value().empty());
+            return;
+        }
+        REQUIRE(built.value().empty());
+        REQUIRE(warm->GetNumElements() == static_cast<int64_t>(ids.size()));
+        if (use_cache && change == "remove-representative" && round == 0) {
+            const auto stats = vsag::JsonType::Parse(warm->GetStats());
+            // Only the affected ten-member class loses reuse; its nine survivors
+            // are inserted normally. The other eleven classes keep their cache rows.
+            REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 110);
+            REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 9);
+            REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+        }
+        if (use_cache && change == "reorder") {
+            auto stats = vsag::JsonType::Parse(warm->GetStats());
+            REQUIRE(stats["build_cache_hit_nodes"].GetInt() == static_cast<int64_t>(ids.size()));
+            REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+        }
+        auto binary = warm->Serialize();
+        REQUIRE(binary.has_value());
+        auto restored = vsag::Factory::CreateIndex("pyramid", param).value();
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+        if (!serialized) {
+            restored = warm;
+        }
+        for (uint64_t i = 0; i < ids.size(); ++i) {
+            std::vector<float> vector(vectors.begin() + i * dim, vectors.begin() + (i + 1) * dim);
+            for (const auto& path : {paths[i], std::string{}}) {
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result =
+                    restored->KnnSearch(query, ids.size(), R"({"pyramid":{"ef_search":256}})");
+                REQUIRE(result.has_value());
+                std::vector<int64_t> expected;
+                for (uint64_t j = 0; j < ids.size(); ++j) {
+                    if (path.empty() || paths[j] == path) {
+                        expected.push_back(ids[j]);
+                    }
+                }
+                REQUIRE(result.value()->GetDim() == static_cast<int64_t>(expected.size()));
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    actual.push_back(label);
+                    auto found = std::find(ids.begin(), ids.end(), label);
+                    REQUIRE(found != ids.end());
+                    const uint64_t offset = std::distance(ids.begin(), found);
+                    float distance = 0;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[offset * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(std::abs(result.value()->GetDistances()[j] - distance) < 0.01F);
+                }
+                std::sort(expected.begin(), expected.end());
+                std::sort(actual.begin(), actual.end());
+                REQUIRE(actual == expected);
+            }
+        }
+        cache.str("");
+        cache.clear();
+        REQUIRE(restored->ExportCache(cache).has_value());
+    }
+}
+
+static void
+CheckLargePyramidDuplicateCache(const std::string& root,
+                                const std::string& storage,
+                                int cold_threads,
+                                int warm_threads = 4,
+                                int copies = 2,
+                                bool production_construction = false) {
+    CAPTURE(root, storage, cold_threads);
+    constexpr int64_t groups = 1050;
+    const int64_t count = groups * copies;
+    constexpr int64_t dim = 2;
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"l2", "dim":2,
+        "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+        "ef_construction":32, "build_thread_count":4, "root_graph_type":"{}",
+        "graph_storage_type":"{}", "index_min_size":8,
+        "persist_source_id":true, "store_paths":true, "support_duplicate":true}} }})",
+                                   root,
+                                   storage);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "a/b");
+    std::vector<std::string> sources(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 10000 + i;
+        sources[i] = "large-duplicate-" + std::to_string(i);
+        vectors[i * dim] = static_cast<float>(i / copies);
+        vectors[i * dim + 1] = static_cast<float>((i / copies) % 17);
+    }
+    auto dataset = MakePyramidCacheDataset(count, dim, vectors, ids, paths, sources);
+    auto cold_param = vsag::JsonType::Parse(param);
+    if (production_construction) {
+        cold_param["index_param"]["max_degree"].SetInt(64);
+        cold_param["index_param"]["ef_construction"].SetInt(500);
+    }
+    cold_param["index_param"]["build_thread_count"].SetInt(cold_threads);
+    cold_param["index_param"]["support_duplicate"].SetBool(copies == 2);
+    auto cold = vsag::Factory::CreateIndex("pyramid", cold_param.Dump()).value();
+    REQUIRE(cold->Build(dataset).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    // Inspect the interchange representation, not private dense storage high-water IDs.
+    // Every group has exactly one physical row and every edge targets another owner.
+    {
+        auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+        vsag::PyramidBuildCache exported(allocator.get());
+        std::stringstream snapshot(cache.str());
+        vsag::IOStreamReader reader(snapshot);
+        exported.Deserialize(reader);
+        for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+            auto* graph = exported.GetGraphCache("", path);
+            const auto* owners = exported.GetGroupOwners("", path);
+            REQUIRE(graph != nullptr);
+            REQUIRE(owners != nullptr);
+            REQUIRE(owners->size() == static_cast<uint64_t>(count));
+            uint64_t representatives = 0;
+            for (uint64_t member = 0; member < owners->size(); ++member) {
+                const auto owner = (*owners)[member];
+                REQUIRE(owner < owners->size());
+                REQUIRE((*owners)[owner] == owner);
+                if (owner != member) {
+                    continue;
+                }
+                ++representatives;
+                const auto* row = graph->FindNeighborInnerIds(graph->source_ids_[member]);
+                REQUIRE(row != nullptr);
+                REQUIRE(row->size() <= static_cast<uint64_t>(production_construction ? 65 : 17));
+                REQUIRE(row->front() == member);
+                for (uint64_t edge = 1; edge < row->size(); ++edge) {
+                    REQUIRE((*row)[edge] < owners->size());
+                    REQUIRE((*owners)[(*row)[edge]] == (*row)[edge]);
+                }
+            }
+            REQUIRE(representatives == static_cast<uint64_t>(groups));
+        }
+    }
+    auto warm_param = vsag::JsonType::Parse(param);
+    if (production_construction) {
+        warm_param["index_param"]["max_degree"].SetInt(64);
+        warm_param["index_param"]["ef_construction"].SetInt(500);
+    }
+    warm_param["index_param"]["build_thread_count"].SetInt(warm_threads);
+    warm_param["index_param"]["support_duplicate"].SetBool(copies == 2);
+    auto warm = vsag::Factory::CreateIndex("pyramid", warm_param.Dump()).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(dataset).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    const auto& root_stats = stats["root_graphs"]["default"];
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == count);
+    REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    if (cold_threads == 1) {
+        // Dense routed roots report the high-water ID, not occupied row count.
+        REQUIRE(root_stats["bottom_graph_node_count"].GetInt() ==
+                (root == "multi_layer" ? count - 1 : groups));
+    }
+    if (root == "multi_layer") {
+        REQUIRE(root_stats["route_graph_count"].GetInt() > 0);
+    } else {
+        REQUIRE(root_stats["route_graph_count"].GetInt() == 0);
+    }
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", warm_param.Dump()).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    for (const auto& index : {cold, warm, restored}) {
+        CAPTURE(index == cold ? "cold" : (index == warm ? "warm" : "restored"));
+        for (const auto offset : {int64_t{0}, int64_t{1024}, count - 2}) {
+            for (const auto& path : {std::string("a/b"), std::string{}}) {
+                CAPTURE(offset, path);
+                std::vector<float> vector(vectors.begin() + offset * dim,
+                                          vectors.begin() + (offset + 1) * dim);
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result = index->KnnSearch(query, count, R"({"pyramid":{"ef_search":4096}})");
+                REQUIRE(result.has_value());
+                if (result.value()->GetDim() != count) {
+                    std::vector<bool> found(count, false);
+                    for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                        found[result.value()->GetIds()[j] - 10000] = true;
+                    }
+                    uint64_t partial_groups = 0;
+                    std::string missing;
+                    for (int64_t j = 0; j < count; ++j) {
+                        if (!found[j]) {
+                            missing += std::to_string(j) + ",";
+                        }
+                        if (j % 2 == 0 && found[j] != found[j + 1]) {
+                            ++partial_groups;
+                        }
+                    }
+                    WARN("missing IDs=" << missing << " partial_groups=" << partial_groups);
+                    auto range =
+                        index->RangeSearch(query, 1e12F, R"({"pyramid":{"ef_search":4096}})");
+                    REQUIRE(range.has_value());
+                    WARN("Range count=" << range.value()->GetDim());
+                }
+                REQUIRE(result.value()->GetDim() == count);
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < count; ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    REQUIRE(label >= 10000);
+                    REQUIRE(label < 10000 + count);
+                    actual.push_back(label);
+                    const auto id = label - 10000;
+                    float distance = 0.0F;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[id * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(result.value()->GetDistances()[j] == distance);
+                }
+                std::sort(actual.begin(), actual.end());
+                REQUIRE(actual == ids);
+            }
+        }
+    }
+    // Rehydrate transient admission from physical representatives after deserialize.
+    // Also exercise the existing cold and cache-restored registries with incremental Add.
+    if (copies == 2) {
+        std::vector<float> extra_vector(vectors.begin(), vectors.begin() + dim);
+        std::vector<int64_t> extra_ids{900000};
+        std::vector<std::string> extra_paths{"a/b"};
+        std::vector<std::string> extra_sources{"incremental-alias"};
+        auto extra =
+            MakePyramidCacheDataset(1, dim, extra_vector, extra_ids, extra_paths, extra_sources);
+        for (const auto& index : {cold, warm, restored}) {
+            REQUIRE(index->Add(extra).has_value());
+            auto query = MakePyramidCacheQuery(dim, extra_vector, "a/b");
+            auto result = index->KnnSearch(query, 3, R"({"pyramid":{"ef_search":256}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 3);
+            std::vector<int64_t> actual(result.value()->GetIds(), result.value()->GetIds() + 3);
+            std::sort(actual.begin(), actual.end());
+            REQUIRE(actual == std::vector<int64_t>{10000, 10001, 900000});
+        }
+    }
+}
+
+TEST_CASE("Pyramid duplicate cache restores more than 1024 representatives",
+          "[ft][pyramid][cache][duplicate_cache_large][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CheckLargePyramidDuplicateCache(root, storage, 1);
+}
+
+TEST_CASE("Pyramid parallel duplicate admission preserves connectivity and cache hits",
+          "[ft][pyramid][cache][duplicate_connectivity][pr][concurrent]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    const auto threads = GENERATE(4, 32);
+    CheckLargePyramidDuplicateCache(root, storage, threads, threads);
+}
+
+TEST_CASE("Pyramid production construction duplicate connectivity diagnostic",
+          "[ft][pyramid][cache][duplicate_connectivity_production][pr][concurrent]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CheckLargePyramidDuplicateCache(root, storage, 32, 32, 2, true);
+}
+
+namespace {
+
+struct DuplicateClassFixture {
+    static constexpr int64_t dim = 2;
+    std::vector<int64_t> ids;
+    std::vector<float> vectors;
+    std::vector<std::string> paths;
+    std::vector<std::string> sources;
+    std::string params;
+
+    explicit DuplicateClassFixture(const std::string& root) {
+        params = fmt::format(R"({{
+            "dtype":"float32", "metric_type":"l2", "dim":2,
+            "index_param":{{"base_quantization_type":"fp32", "max_degree":16,
+            "ef_construction":64, "build_thread_count":1, "root_graph_type":"{}",
+            "index_min_size":8, "persist_source_id":true, "store_paths":true,
+            "support_duplicate":true}} }})",
+                             root);
+        for (int64_t i = 0; i < 100; ++i) {
+            ids.push_back(1000 + i);
+            sources.push_back("focused-class-" + std::to_string(i));
+            paths.push_back("a/b");
+            vectors.push_back(static_cast<float>(i / 10));
+            vectors.push_back(static_cast<float>((i / 10) * 2));
+        }
+    }
+
+    void
+    CopyVector(uint64_t target, uint64_t source) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[target * dim + d] = vectors[source * dim + d];
+        }
+    }
+
+    auto
+    Dataset() const {
+        return MakePyramidCacheDataset(ids.size(), dim, vectors, ids, paths, sources);
+    }
+
+    void
+    Check(const vsag::IndexPtr& index) const {
+        // Full population, not top-k tie order: enforce every unique label and exact FP32 L2.
+        for (const auto& path : {std::string{}, std::string("a/b")}) {
+            for (const auto offset : {uint64_t{0}, uint64_t{10}, uint64_t{20}}) {
+                CAPTURE(path, offset);
+                std::vector<float> vector(vectors.begin() + offset * dim,
+                                          vectors.begin() + (offset + 1) * dim);
+                auto query = MakePyramidCacheQuery(dim, vector, path);
+                auto result =
+                    index->KnnSearch(query, ids.size(), R"({"pyramid":{"ef_search":256}})");
+                REQUIRE(result.has_value());
+                REQUIRE(result.value()->GetDim() == static_cast<int64_t>(ids.size()));
+                std::vector<int64_t> actual;
+                for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                    const auto label = result.value()->GetIds()[j];
+                    const auto found = std::find(ids.begin(), ids.end(), label);
+                    REQUIRE(found != ids.end());
+                    const auto row = static_cast<uint64_t>(found - ids.begin());
+                    float distance = 0.0F;
+                    for (int64_t d = 0; d < dim; ++d) {
+                        const auto delta = vector[d] - vectors[row * dim + d];
+                        distance += delta * delta;
+                    }
+                    REQUIRE(result.value()->GetDistances()[j] == distance);
+                    actual.push_back(label);
+                }
+                std::sort(actual.begin(), actual.end());
+                auto expected = ids;
+                std::sort(expected.begin(), expected.end());
+                REQUIRE(actual == expected);
+            }
+        }
+    }
+};
+
+}  // namespace
+
+TEST_CASE("Pyramid cache class demotion and membership threshold",
+          "[ft][pyramid][cache][duplicate_class_validation][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto change = GENERATE(std::string("three-merged-classes"),
+                                 std::string("split-matches-stable"),
+                                 std::string("exactly-80-percent"),
+                                 std::string("79-percent"));
+    CAPTURE(root, change);
+    DuplicateClassFixture fixture(root);
+    // For threshold cases: classes 0/1/2 have sizes 10/11/9; all others have size 10.
+    // This allows 80 and 79 surviving memberships with all 100 SourceIDs retained.
+    if (change == "exactly-80-percent" || change == "79-percent") {
+        fixture.CopyVector(20, 10);
+    }
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    const auto old_sources = fixture.sources;
+    const auto old_ids = fixture.ids;
+    int64_t expected_hits = 0;
+    if (change == "three-merged-classes") {
+        // A third collision must also demote: retaining it incorrectly reaches the 80% gate.
+        for (uint64_t i = 10; i < 30; ++i) {
+            fixture.CopyVector(i, 0);
+        }
+    } else if (change == "split-matches-stable") {
+        fixture.CopyVector(1, 10);
+        expected_hits = 90;
+    } else {
+        // Split entire classes by changing one alias, not their physical representative.
+        fixture.vectors[1 * fixture.dim] = 100.0F;
+        const uint64_t second_alias = change == "exactly-80-percent" ? 31 : 11;
+        fixture.vectors[second_alias * fixture.dim] = 101.0F;
+        expected_hits = change == "exactly-80-percent" ? 80 : 0;
+    }
+    REQUIRE(fixture.sources == old_sources);
+    REQUIRE(fixture.ids == old_ids);
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == expected_hits);
+    REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 100 - expected_hits);
+    if (expected_hits != 0) {
+        REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    } else {
+        REQUIRE(stats["build_cache_restored_edges"].GetInt() == 0);
+    }
+    fixture.Check(warm);
+    auto serialized = warm->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    fixture.Check(restored);
+}
+
+TEST_CASE("Pyramid cached owner survives filtered empty row and equal misses",
+          "[ft][pyramid][cache][duplicate_class_validation][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    CAPTURE(root);
+    DuplicateClassFixture fixture(root);
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream exported;
+    REQUIRE(cold->ExportCache(exported).has_value());
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    vsag::IOStreamReader reader(exported);
+    cache.Deserialize(reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        auto* graph = cache.GetGraphCache("", path);
+        const auto* owners = cache.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        auto owner_of = [&](const std::string& source) {
+            const auto found =
+                std::find(graph->source_ids_.begin(), graph->source_ids_.end(), source);
+            REQUIRE(found != graph->source_ids_.end());
+            return (*owners)[static_cast<uint64_t>(found - graph->source_ids_.begin())];
+        };
+        const auto invalid_owner = owner_of(fixture.sources[0]);
+        const auto stable_owner = owner_of(fixture.sources[10]);
+        REQUIRE(invalid_owner != stable_owner);
+        // Valid wire row, but its sole edge will be filtered when class 0 is demoted.
+        auto& row = graph->neighbors_.at(graph->source_ids_[stable_owner]);
+        row.clear();
+        row.push_back(stable_owner);
+        row.push_back(invalid_owner);
+    }
+    std::stringstream modified;
+    vsag::IOStreamWriter writer(modified);
+    cache.Serialize(writer);
+    fixture.CopyVector(1, 10);  // Demote class 0; its miss must join retained class 1.
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(modified).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 90);
+    REQUIRE(stats["build_cache_missed_nodes"].GetInt() == 10);
+    fixture.Check(warm);
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    fixture.Check(restored);
+    std::vector<float> added(fixture.vectors.begin() + 10 * fixture.dim,
+                             fixture.vectors.begin() + 11 * fixture.dim);
+    auto one = MakePyramidCacheDataset(1, fixture.dim, added, {2000}, {"a/b"}, {"focused-added"});
+    REQUIRE(warm->Add(one).has_value());
+    REQUIRE(restored->Add(one).has_value());
+    fixture.ids.push_back(2000);
+    fixture.sources.push_back("focused-added");
+    fixture.paths.push_back("a/b");
+    fixture.vectors.insert(fixture.vectors.end(), added.begin(), added.end());
+    fixture.Check(warm);
+    fixture.Check(restored);
+    auto after_add = restored->Serialize();
+    REQUIRE(after_add.has_value());
+    auto final_index = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(final_index->Deserialize(after_add.value()).has_value());
+    fixture.Check(final_index);
+}
+
+TEST_CASE("Pyramid cached source component remains reachable from routed entries",
+          "[ft][pyramid][cache][duplicate_class_validation][duplicate_return_connectivity][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto storage = GENERATE(std::string("flat"), std::string("compressed"));
+    CAPTURE(root, storage);
+    DuplicateClassFixture fixture(root);
+    auto params = vsag::JsonType::Parse(fixture.params);
+    params["index_param"]["graph_storage_type"].SetString(storage);
+    fixture.params = params.Dump();
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream exported;
+    REQUIRE(cold->ExportCache(exported).has_value());
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::PyramidBuildCache cache(allocator.get());
+    vsag::IOStreamReader reader(exported);
+    cache.Deserialize(reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        auto* graph = cache.GetGraphCache("", path);
+        const auto* owners = cache.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        std::vector<vsag::InnerIdType> representatives;
+        for (vsag::InnerIdType id = 0; id < owners->size(); ++id) {
+            if ((*owners)[id] == id) {
+                representatives.push_back(id);
+            }
+        }
+        REQUIRE(representatives.size() == 10);
+        // The first cached owner can reach every other owner, but nothing can return
+        // to it. This passes a forward-only repair and fails routed-entry reachability.
+        for (uint64_t i = 0; i < representatives.size(); ++i) {
+            const auto id = representatives[i];
+            auto& row = graph->neighbors_.at(graph->source_ids_[id]);
+            row.clear();
+            row.push_back(id);
+            row.push_back(representatives[i == 0 ? 1 : (i == 9 ? 1 : i + 1)]);
+        }
+    }
+    std::stringstream modified;
+    vsag::IOStreamWriter writer(modified);
+    cache.Serialize(writer);
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(modified).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    REQUIRE(vsag::JsonType::Parse(warm->GetStats())["build_cache_hit_nodes"].GetInt() == 100);
+    fixture.Check(warm);
+    std::stringstream checked;
+    REQUIRE(warm->ExportCache(checked).has_value());
+    vsag::PyramidBuildCache restored(allocator.get());
+    vsag::IOStreamReader checked_reader(checked);
+    restored.Deserialize(checked_reader);
+    for (const auto& path : {std::string{}, std::string("a"), std::string("a/b")}) {
+        const auto* graph = restored.GetGraphCache("", path);
+        const auto* owners = restored.GetGroupOwners("", path);
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        for (vsag::InnerIdType start = 0; start < owners->size(); ++start) {
+            if ((*owners)[start] != start) {
+                continue;
+            }
+            std::vector<bool> seen(owners->size());
+            std::vector<vsag::InnerIdType> queue{start};
+            seen[start] = true;
+            for (uint64_t offset = 0; offset < queue.size(); ++offset) {
+                const auto id = queue[offset];
+                const auto* row = graph->FindNeighborInnerIds(graph->source_ids_[id]);
+                REQUIRE(row != nullptr);
+                REQUIRE(row->size() <= 17);
+                for (uint64_t edge = 1; edge < row->size(); ++edge) {
+                    const auto target = (*row)[edge];
+                    REQUIRE(target < owners->size());
+                    REQUIRE((*owners)[target] == target);
+                    if (not seen[target]) {
+                        seen[target] = true;
+                        queue.push_back(target);
+                    }
+                }
+            }
+            REQUIRE(queue.size() == 10);
+        }
+    }
+}
+
+TEST_CASE("Pyramid warm cache preserves raw vectors and precise distances",
+          "[ft][pyramid][cache][raw_vector][duplicate_raw_cache][pr]") {
+    const auto duplicate = GENERATE(false, true);
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    DuplicateClassFixture fixture(root);
+    auto params = vsag::JsonType::Parse(fixture.params);
+    params["index_param"]["support_duplicate"].SetBool(duplicate);
+    params["index_param"]["base_quantization_type"].SetString("sq8");
+    params["index_param"]["store_raw_vector"].SetBool(true);
+    fixture.params = params.Dump();
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    REQUIRE(vsag::JsonType::Parse(warm->GetStats())["build_cache_hit_nodes"].GetInt() > 0);
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    for (const auto& index : {cold, warm, restored}) {
+        auto raw = index->GetRawVectorByIds(fixture.ids.data(), fixture.ids.size(), nullptr);
+        REQUIRE(raw.has_value());
+        REQUIRE(std::equal(
+            fixture.vectors.begin(), fixture.vectors.end(), raw.value()->GetFloat32Vectors()));
+        for (uint64_t row = 0; row < fixture.ids.size(); ++row) {
+            auto distance = index->CalcDistanceById(fixture.vectors.data(), fixture.ids[row], true);
+            REQUIRE(distance.has_value());
+            float expected = 0;
+            for (int64_t d = 0; d < fixture.dim; ++d) {
+                const auto delta = fixture.vectors[d] - fixture.vectors[row * fixture.dim + d];
+                expected += delta * delta;
+            }
+            REQUIRE(distance.value() == expected);
+        }
+    }
+}
+
+namespace {
+struct DuplicateMultiPathFixture {
+    static constexpr int64_t DIM = 2;
+    std::vector<int64_t> ids;
+    std::vector<float> vectors;
+    std::vector<std::string> sources;
+    std::vector<std::vector<std::string>> paths;
+
+    DuplicateMultiPathFixture() {
+        for (int64_t i = 0; i < 120; ++i) {
+            ids.push_back(1000 + i);
+            const auto group = i / 2;
+            vectors.push_back(static_cast<float>(group));
+            vectors.push_back(static_cast<float>(group * 2));
+            sources.push_back("multipath-source-" + std::to_string(i));
+            paths.push_back(i % 2 == 0
+                                ? std::vector<std::string>{"a/x", "a/y", "a/x", "literal|pipe"}
+                                : std::vector<std::string>{"a/x", "b/z"});
+        }
+    }
+
+    auto
+    Dataset() -> vsag::DatasetPtr {
+        return vsag::Dataset::Make()
+            ->NumElements(static_cast<int64_t>(ids.size()))
+            ->Dim(DIM)
+            ->Ids(ids.data())
+            ->Float32Vectors(vectors.data())
+            ->SourceID(sources.data())
+            ->Paths("tag", paths)
+            ->Owner(false);
+    }
+
+    void
+    Reverse() {
+        std::reverse(ids.begin(), ids.end());
+        std::reverse(sources.begin(), sources.end());
+        std::reverse(paths.begin(), paths.end());
+        for (uint64_t left = 0; left < ids.size() / 2; ++left) {
+            const auto right = ids.size() - 1 - left;
+            for (int64_t d = 0; d < DIM; ++d) {
+                std::swap(vectors[left * DIM + d], vectors[right * DIM + d]);
+            }
+        }
+    }
+
+    void
+    Check(const vsag::IndexPtr& index) const {
+        const std::vector<std::vector<std::string>> queries{
+            {""}, {"a"}, {"a/x"}, {"a/y"}, {"b/z"}, {"a/x", "a/y", "a/x"}, {"literal|pipe"}};
+        const float query_vector[2]{0.0F, 0.0F};
+        for (const auto& query_paths : queries) {
+            CAPTURE(query_paths);
+            std::vector<int64_t> expected;
+            for (uint64_t row = 0; row < ids.size(); ++row) {
+                bool matches = false;
+                for (const auto& prefix : query_paths) {
+                    for (const auto& path : paths[row]) {
+                        matches = matches || prefix.empty() || path == prefix ||
+                                  path.rfind(prefix + "/", 0) == 0;
+                    }
+                }
+                if (matches) {
+                    expected.push_back(ids[row]);
+                }
+            }
+            auto query = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(DIM)
+                             ->Float32Vectors(query_vector)
+                             ->Paths("tag", std::vector<std::vector<std::string>>{query_paths})
+                             ->Owner(false);
+            auto result =
+                index->KnnSearch(query,
+                                 static_cast<int64_t>(ids.size()),
+                                 R"({"pyramid":{"ef_search":512,"hierarchies":["tag"]}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == static_cast<int64_t>(expected.size()));
+            std::vector<int64_t> actual;
+            for (int64_t offset = 0; offset < result.value()->GetDim(); ++offset) {
+                const auto label = result.value()->GetIds()[offset];
+                const auto found = std::find(ids.begin(), ids.end(), label);
+                REQUIRE(found != ids.end());
+                const auto row = static_cast<uint64_t>(found - ids.begin());
+                const auto x = vectors[row * DIM];
+                const auto y = vectors[row * DIM + 1];
+                REQUIRE(result.value()->GetDistances()[offset] == x * x + y * y);
+                actual.push_back(label);
+            }
+            std::sort(actual.begin(), actual.end());
+            std::sort(expected.begin(), expected.end());
+            REQUIRE(actual == expected);  // Includes duplicate-label exclusion in path unions.
+        }
+    }
+};
+}  // namespace
+
+TEST_CASE("Pyramid duplicate cache preserves multipath memberships",
+          "[ft][pyramid][cache][duplicate_multipath_cache][concurrent][pr]") {
+    const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto threads = GENERATE(4, 32);
+    const auto move_owner = GENERATE(false, true);
+    CAPTURE(root, threads, move_owner);
+    auto params = vsag::JsonType::Parse(R"({
+        "dtype":"float32", "metric_type":"l2", "dim":2,
+        "index_param":{"graph_type":"nsw", "base_quantization_type":"fp32",
+            "use_reorder":false, "index_min_size":8, "max_degree":16,
+            "ef_construction":64, "support_duplicate":true,
+            "persist_source_id":true, "store_paths":true,
+            "hierarchies":[{"name":"tag", "no_build_levels":[]} ]}})");
+    params["index_param"]["build_thread_count"].SetInt(threads);
+    // Match established root_graph_type handling in existing duplicate-cache fixtures.
+    params["index_param"]["root_graph_type"].SetString(root);
+    const auto build_params = params.Dump();
+    DuplicateMultiPathFixture fixture;
+    auto day1 = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(day1->Build(fixture.Dataset()).has_value());
+    fixture.Check(day1);
+    std::stringstream exported;
+    REQUIRE(day1->ExportCache(exported).has_value());
+    const auto cache_bytes = exported.str();
+    if (move_owner) {
+        auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+        vsag::PyramidBuildCache metadata(allocator.get());
+        std::stringstream input(cache_bytes);
+        vsag::IOStreamReader reader(input);
+        metadata.Deserialize(reader);
+        const auto* graph = metadata.GetGraphCache("tag", "a/x");
+        const auto* owners = metadata.GetGroupOwners("tag", "a/x");
+        REQUIRE(graph != nullptr);
+        REQUIRE(owners != nullptr);
+        uint64_t owner = 0;
+        while (owner < owners->size() && (*owners)[owner] != owner) {
+            ++owner;
+        }
+        REQUIRE(owner < owners->size());
+        const auto found =
+            std::find(fixture.sources.begin(), fixture.sources.end(), graph->source_ids_[owner]);
+        REQUIRE(found != fixture.sources.end());
+        const auto row = static_cast<uint64_t>(found - fixture.sources.begin());
+        // Drop only this actual owner's a/x membership, retaining its other paths and SourceID.
+        auto& paths = fixture.paths[row];
+        paths.erase(std::remove(paths.begin(), paths.end(), "a/x"), paths.end());
+        REQUIRE(not paths.empty());
+    }
+    fixture.Reverse();
+    auto cold = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    fixture.Check(cold);
+    auto warm = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    std::stringstream cache_input(cache_bytes);
+    REQUIRE(warm->ImportCache(cache_input).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    fixture.Check(warm);
+    const auto stats = vsag::JsonType::Parse(warm->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetInt() > 0);
+    REQUIRE(stats["build_cache_restored_edges"].GetInt() > 0);
+    if (not move_owner) {
+        REQUIRE(stats["build_cache_hit_nodes"].GetInt() == 120);
+    }
+    auto serialized = warm->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    fixture.Check(restored);
+    float added_vector[2]{0.0F, 0.0F};
+    int64_t added_id = 9999;
+    std::string added_source = "multipath-added";
+    const std::vector<std::string> added_paths{"a/x", "a/y", "a/x"};
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(2)
+                     ->Float32Vectors(added_vector)
+                     ->Ids(&added_id)
+                     ->SourceID(&added_source)
+                     ->Paths("tag", std::vector<std::vector<std::string>>{added_paths})
+                     ->Owner(false);
+    REQUIRE(restored->Add(added).has_value());
+    fixture.ids.push_back(added_id);
+    fixture.sources.push_back(added_source);
+    fixture.vectors.insert(fixture.vectors.end(), {0.0F, 0.0F});
+    fixture.paths.push_back(added_paths);
+    fixture.Check(restored);
+    auto after_add = restored->Serialize();
+    REQUIRE(after_add.has_value());
+    auto roundtrip = vsag::Factory::CreateIndex("pyramid", build_params).value();
+    REQUIRE(roundtrip->Deserialize(after_add.value()).has_value());
+    fixture.Check(roundtrip);
+}
+
+TEST_CASE("Pyramid dense native distance contract", "[distance_contract]") {
+    using namespace fixtures;
+    for (const auto* quantizer : {"fp32", "sq8"}) {
+        PyramidParam build_param;
+        build_param.base_quantization_type = quantizer;
+        auto param = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", 16, build_param);
+        auto created = vsag::Factory::CreateIndex("pyramid", param);
+        REQUIRE(created.has_value());
+        auto index = created.value();
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+        std::vector<float> values(64 * 16);
+        std::vector<int64_t> labels(64);
+        std::vector<std::string> paths(64, "a/b");
+        for (int64_t i = 0; i < 64; ++i) {
+            labels[i] = 100 + i;
+            for (int64_t j = 0; j < 16; ++j) {
+                values[i * 16 + j] = static_cast<float>((i + j) % 23) / 23.0F;
+            }
+        }
+        auto base = vsag::Dataset::Make()
+                        ->NumElements(64)
+                        ->Dim(16)
+                        ->Ids(labels.data())
+                        ->Float32Vectors(values.data())
+                        ->Paths(paths.data())
+                        ->Owner(false);
+        REQUIRE(index->Build(base).has_value());
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(16)
+                         ->Float32Vectors(values.data())
+                         ->Owner(false);
+        for (bool precise : {false, true}) {
+            auto raw = index->CalcDistanceById(values.data(), labels[1], precise);
+            auto native = index->CalcDistanceById(query, labels[1], precise);
+            REQUIRE(raw.has_value());
+            REQUIRE(native.has_value());
+            REQUIRE(std::abs(raw.value() - native.value()) < 1e-5F);
+            int64_t candidates[] = {labels[1], -999, labels[0], labels[1], labels[0], -999};
+            query->NumElements(2);
+            auto batch = index->CalcDistancesById(query, candidates, 3, precise);
+            REQUIRE(batch.has_value());
+            REQUIRE(batch.value()->GetNumElements() == 2);
+            REQUIRE(batch.value()->GetDim() == 3);
+            REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
+            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
+            REQUIRE(top.has_value());
+            REQUIRE(top.value()->GetDim() == 2);
+            for (int i = 0; i < 4; ++i) {
+                REQUIRE(top.value()->GetIds()[i] != -999);
+            }
+            query->NumElements(1);
+        }
+    }
+}
+
+TEST_CASE("Pyramid with extra_info: build, search, get_extra_info", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 200;
+    int64_t extra_info_size = 64;
+
+    PyramidParam build_param;
+    build_param.no_build_levels = {};
+    auto param_str = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", dim, build_param);
+    auto j = nlohmann::json::parse(param_str);
+    j["extra_info_size"] = extra_info_size;
+    nlohmann::json extra_info_cfg;
+    extra_info_cfg["io_params"]["type"] = "block_memory_io";
+    j["index_param"]["extra_info"] = extra_info_cfg;
+    std::string param = j.dump();
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_GET_EXTRA_INFO_BY_ID));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_KNN_SEARCH_WITH_EX_FILTER));
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_UPDATE_EXTRA_INFO_CONCURRENT));
+
+    auto dataset = PyramidTestIndex::pool.GetDatasetAndCreate(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
+}
+
+TEST_CASE("Pyramid with extra_info: serialize roundtrip", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 200;
+    int64_t extra_info_size = 64;
+
+    PyramidParam build_param;
+    build_param.no_build_levels = {};
+    auto param_str = PyramidTestIndex::GeneratePyramidBuildParametersString("l2", dim, build_param);
+    auto j = nlohmann::json::parse(param_str);
+    j["extra_info_size"] = extra_info_size;
+    nlohmann::json extra_info_cfg;
+    extra_info_cfg["io_params"]["type"] = "block_memory_io";
+    j["index_param"]["extra_info"] = extra_info_cfg;
+    std::string param = j.dump();
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    auto dataset = PyramidTestIndex::pool.GetDatasetAndCreate(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    // file serialize roundtrip
+    auto created2 = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created2.has_value());
+    auto restored = created2.value();
+    TestIndex::TestSerializeFile(index,
+                                 restored,
+                                 dataset,
+                                 PyramidTestIndex::GeneratePyramidSearchParametersString(100),
+                                 true);
+    TestIndex::TestGetExtraInfoById(restored, dataset, extra_info_size);
+
+    // binary set serialize roundtrip
+    auto created3 = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created3.has_value());
+    auto streamed = created3.value();
+    TestIndex::TestSerializeBinarySet(index,
+                                      streamed,
+                                      dataset,
+                                      PyramidTestIndex::GeneratePyramidSearchParametersString(100),
+                                      true);
+    TestIndex::TestGetExtraInfoById(streamed, dataset, extra_info_size);
+}
+
+TEST_CASE("Pyramid with extra_info: PIPNN dedup path", "[ft][pyramid][extra_info]") {
+    using namespace fixtures;
+    const uint64_t dim = 16;
+    const uint64_t base_count = 50;
+    int64_t extra_info_size = 64;
+
+    auto param_str = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 16,
+        "extra_info_size": 64,
+        "index_param": {
+            "graph_type": "pipnn",
+            "extra_info": {
+                "io_params": {
+                    "type": "block_memory_io"
+                }
+            }
+        }
+    }
+    )";
+    std::string param = param_str;
+
+    auto created = vsag::Factory::CreateIndex("pyramid", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+
+    auto dataset = PyramidTestIndex::pool.GetDuplicateDataset(
+        dim, base_count, "l2", true, 0.8, extra_info_size);
+
+    TestIndex::TestBuildIndex(index, dataset, true);
+    TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
 }

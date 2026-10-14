@@ -36,7 +36,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
@@ -71,6 +71,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
+      pipnn_param_(hgraph_param->pipnn_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
@@ -83,6 +84,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (this->deduplicate_storage_ && not is_dense_vector) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage only supports dense vectors");
+    }
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -101,6 +112,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    this->hybrid_mci_searcher_ = std::make_shared<HybridMCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
     }
@@ -415,6 +427,37 @@ HGraph::generate_one_route_graph() {
 
 float
 HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    return calc_native_distance_by_id(query, id, calculate_precise_distance);
+}
+
+float
+HGraph::CalcDistanceById(const DatasetPtr& query,
+                         int64_t id,
+                         bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+    }
+    const auto* native_query = get_data(query);
+    CHECK_ARGUMENT(native_query != nullptr, "distance query representation must match index dtype");
+    if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        const auto& sparse = query->GetSparseVectors()[0];
+        const bool valid_sparse =
+            sparse.len_ == 0 || (sparse.ids_ != nullptr && sparse.vals_ != nullptr);
+        CHECK_ARGUMENT(valid_sparse, "sparse query requires term IDs and values");
+    }
+    return calc_native_distance_by_id(native_query, id, calculate_precise_distance);
+}
+
+float
+HGraph::calc_native_distance_by_id(const void* native_query,
+                                   int64_t id,
+                                   bool calculate_precise_distance) const {
+    const auto* query = static_cast<const float*>(native_query);
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
@@ -442,16 +485,12 @@ DatasetPtr
 HGraph::CalcDistancesById(const float* query,
                           const int64_t* ids,
                           int64_t count,
-                          bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-HGraph::CalDistanceById(const float* query,
-                        const int64_t* ids,
-                        int64_t count,
-                        bool calculate_precise_distance,
-                        int64_t topk) const {
+                          bool calculate_precise_distance,
+                          int64_t topk) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
+    const bool valid_topk = topk == -1 || topk > 0;
+    CHECK_ARGUMENT(valid_topk, "distance topk must be -1 or positive");
     FlattenInterfacePtr flat;
     std::shared_lock<std::shared_mutex> lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
@@ -473,7 +512,7 @@ HGraph::CalDistanceById(const float* query,
         lock.unlock();
     }
     std::vector<bool> validity;
-    auto result = InnerIndexInterface::cal_distance_by_id(query, ids, count, flat, &validity);
+    auto result = InnerIndexInterface::calc_distance_by_id(query, ids, count, flat, &validity);
     if (topk == -1) {
         return result;
     }
@@ -699,6 +738,10 @@ HGraph::GetStats() const {
         stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
         stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
         stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_retired_clique_count"].SetInt(
+            static_cast<int64_t>(mci_stats.retired_clique_count));
+        stats["mci_inactive_node_count"].SetInt(
+            static_cast<int64_t>(mci_stats.inactive_node_count));
         stats["mci_base_membership_count"].SetInt(
             static_cast<int64_t>(mci_stats.base_membership_count));
         stats["mci_delta_extra_membership_count"].SetInt(

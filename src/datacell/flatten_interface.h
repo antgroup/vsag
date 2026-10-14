@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <limits>
 #include <shared_mutex>
@@ -144,8 +145,48 @@ public:
         this->Query(result_dists, computer, idx, id_count, ctx);
     }
 
+    virtual void
+    QueryWithFilterInnerProduct(float* result_dists,
+                                const float* /*filter_inner_products*/,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) {
+        this->Query(result_dists, computer, idx, id_count, ctx);
+    }
+
     virtual ComputerInterfacePtr
     FactoryComputer(const void* query) = 0;
+
+    [[nodiscard]] virtual bool
+    SupportResidualQueryTransform() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetResidualQueryTransformSize() const {
+        return 0;
+    }
+
+    virtual void
+    TransformResidualQuery(const float* /*query*/, float* /*transformed_query*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual query transform is not supported");
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryComputerFromResidualQuery(const float* /*transformed_query*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "transformed residual query is not supported");
+    }
+
+    // Reinitializes a regular query computer from transformed residual data. Implementations may
+    // reuse the existing computer allocation. Any query-derived computer created from its previous
+    // state, such as a FastScan computer, must not be reused after this call.
+    virtual void
+    ResetComputerFromResidualQuery(const float* transformed_query, ComputerInterfacePtr& computer) {
+        computer = this->FactoryComputerFromResidualQuery(transformed_query);
+    }
 
     virtual void
     Train(const void* data, uint64_t count) = 0;
@@ -204,6 +245,174 @@ public:
     [[nodiscard]] virtual bool
     SupportSplitCodeStorage() const {
         return false;
+    }
+
+    [[nodiscard]] virtual bool
+    SupportFastScan32() const {
+        return false;
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFastScan32BlockSize() const {
+        return 0;
+    }
+
+    virtual ComputerInterfacePtr
+    FactoryFastScan32Computer(const ComputerInterfacePtr& /*computer*/) const {
+        return nullptr;
+    }
+
+    virtual void
+    PackageFastScan32(const InnerIdType* /*ids*/,
+                      InnerIdType /*valid_size*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan packaging is not supported");
+    }
+
+    virtual void
+    PackageFastScan32Residual(const InnerIdType* /*ids*/,
+                              InnerIdType /*valid_size*/,
+                              const float* /*transformed_centroid*/,
+                              uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual 32-vector FastScan packaging is not supported");
+    }
+
+    virtual void
+    QueryFastScan32Batch(float* /*result_dists*/,
+                         uint32_t* /*computed_masks*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const ComputerInterfacePtr& /*fastscan_computer*/,
+                         const uint8_t* /*blocks*/,
+                         InnerIdType /*total_size*/,
+                         float* /*filter_inner_products*/ = nullptr,
+                         QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "batched 32-vector FastScan query is not supported");
+    }
+
+    virtual void
+    QueryFastScan32BatchSharedResidual(float* /*result_dists*/,
+                                       uint32_t* /*computed_masks*/,
+                                       const ComputerInterfacePtr& /*computer*/,
+                                       const ComputerInterfacePtr& /*fastscan_computer*/,
+                                       const uint8_t* /*blocks*/,
+                                       InnerIdType /*total_size*/,
+                                       float /*query_bucket_norm_sqr*/,
+                                       float* /*filter_inner_products*/ = nullptr,
+                                       QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "shared residual FastScan query is not supported");
+    }
+
+    [[nodiscard]] virtual float
+    ComputeTransformedResidualQueryNormSqr(const float* /*transformed_query*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "transformed residual query norm is not supported");
+    }
+    virtual void
+    EnableExternalFilterCodeStorage() {
+    }
+
+    [[nodiscard]] virtual uint64_t
+    GetFilterCodeSize() const {
+        return 0;
+    }
+
+    virtual void
+    InsertVectorWithFilterCode(const void* /*vector*/,
+                               InnerIdType /*idx*/,
+                               uint8_t* /*filter_code*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "external filter-code insertion is not supported");
+    }
+
+    virtual void
+    SetFastScan32Code(const uint8_t* /*filter_code*/,
+                      InnerIdType /*index_in_block*/,
+                      uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code update is not supported");
+    }
+
+    virtual void
+    UnpackFastScan32Code(const uint8_t* /*block*/,
+                         InnerIdType /*index_in_block*/,
+                         uint8_t* /*filter_code*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "32-vector FastScan code unpacking is not supported");
+    }
+
+    virtual void
+    SetFastScan32ResidualCode(const uint8_t* /*filter_code*/,
+                              const float* /*transformed_centroid*/,
+                              InnerIdType /*index_in_block*/,
+                              uint8_t* /*block*/) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "residual 32-vector FastScan code update is not supported");
+    }
+
+    virtual void
+    QueryWithFilterCodes(float* /*result_dists*/,
+                         const float* /*hint_dists*/,
+                         const float* /*filter_inner_products*/,
+                         const ComputerInterfacePtr& /*computer*/,
+                         const InnerIdType* /*idx*/,
+                         const uint8_t* /*filter_codes*/,
+                         InnerIdType /*id_count*/,
+                         QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "query with external filter codes is not supported");
+    }
+
+    virtual void
+    QueryWithFilterInnerProducts(float* /*result_dists*/,
+                                 uint8_t* /*computed*/,
+                                 const float* /*filter_inner_products*/,
+                                 const ComputerInterfacePtr& /*computer*/,
+                                 const InnerIdType* /*idx*/,
+                                 InnerIdType /*id_count*/,
+                                 QueryContext* /*ctx*/ = nullptr) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "supplement-only query is not supported");
+    }
+
+    [[nodiscard]] virtual bool
+    GetCodesByIdWithFilterCode(InnerIdType /*id*/,
+                               const uint8_t* /*filter_code*/,
+                               uint8_t* /*codes*/) const {
+        return false;
+    }
+
+    virtual float
+    ComputePairVectorsWithFilterCodes(InnerIdType /*id1*/,
+                                      const uint8_t* /*filter_code1*/,
+                                      InnerIdType /*id2*/,
+                                      const uint8_t* /*filter_code2*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "pair distance with external filter codes is not supported");
+    }
+
+    virtual void
+    PrefetchSupplement(InnerIdType id) {
+        this->Prefetch(id);
+    }
+
+    virtual void
+    DiscardFilterCodes() {
+    }
+
+    // Only datacells that actually store filter codes override this to true.
+    [[nodiscard]] virtual bool
+    HasFilterCodes() const {
+        return false;
+    }
+
+    virtual void
+    MergeSupplementCodes(const FlattenInterfacePtr& /*other*/, InnerIdType /*bias*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "supplement-only merge is not supported");
     }
 
     [[nodiscard]] virtual MetricType
@@ -290,20 +499,81 @@ public:
 
     [[nodiscard]] virtual InnerIdType
     TotalCount() const {
-        std::shared_lock lock(mutex_);
-        return this->total_count_;
+        return this->total_count_.load(std::memory_order_acquire);
     }
 
     virtual void
     Serialize(StreamWriter& writer) {
-        StreamWriter::WriteObj(writer, this->total_count_);
+        StreamWriter::WriteObj(writer, this->total_count_.load(std::memory_order_acquire));
         StreamWriter::WriteObj(writer, this->max_capacity_);
         StreamWriter::WriteObj(writer, this->code_size_);
     }
 
+    /**
+     * @brief Byte size of the underlying io data (io_->size_) written by
+     * Serialize between the interface fields and the tail.
+     *
+     * A positive value also signals that this implementation serializes in
+     * the strict head / io data / tail form, so chunked serialization can
+     * precompute the boundaries; the default 0 opts out.
+     */
+    [[nodiscard]] virtual uint64_t
+    GetIOSize() const {
+        return 0;
+    }
+
+    /**
+     * @brief Chunked-restore hooks: ReserveIO, WriteRaw and DeserializeTail.
+     *
+     * Implement all three or none. The parallel load probes only ReserveIO and
+     * treats UNSUPPORTED_INDEX_OPERATION as "this io keeps no deserialized
+     * bytes", falling back to consuming the component in place; it then assumes
+     * the other two are available. An implementation that provided two of the
+     * three would fail in the tail phase, after the chunk writes already landed.
+     * Both current implementations gate the three on one `if constexpr`, so they
+     * cannot come apart; keep it that way rather than relying on a runtime check.
+     */
+    /**
+     * @brief Read the head (interface fields + io size) and pre-allocate
+     * the io data extent, so that WriteRaw can fill it concurrently.
+     *
+     * The extent is overwritten in full right after this call, so the io
+     * backing it should use a backend declaring
+     * Capabilities::CanResizeForOverwrite; without it the pre-allocation
+     * falls back to a zero-filling Resize, which is a measurable cost for
+     * large components.
+     *
+     * @return the io data size in bytes
+     */
+    virtual uint64_t
+    ReserveIO(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "FlattenInterface does not support ReserveIO");
+    }
+
+    /**
+     * @brief Write raw io data bytes into [offset, offset + size); the
+     * extent must be pre-allocated by ReserveIO. Callers may invoke this
+     * concurrently on non-overlapping ranges.
+     */
+    virtual void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "FlattenInterface does not support WriteRaw");
+    }
+
+    /// Read the tail (e.g. the quantizer) following the io data.
+    virtual void
+    DeserializeTail(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "FlattenInterface does not support DeserializeTail");
+    }
+
     virtual void
     Deserialize(LvalueOrRvalue<StreamReader> reader) {
-        StreamReader::ReadObj(reader, this->total_count_);
+        InnerIdType val;
+        StreamReader::ReadObj(reader, val);
+        this->total_count_.store(val, std::memory_order_release);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->code_size_);
     }
@@ -343,7 +613,7 @@ public:
 public:
     mutable std::shared_mutex mutex_;
 
-    InnerIdType total_count_{0};
+    std::atomic<InnerIdType> total_count_{0};
     InnerIdType max_capacity_{800};
     uint32_t code_size_{0};
     uint32_t prefetch_stride_code_{1};

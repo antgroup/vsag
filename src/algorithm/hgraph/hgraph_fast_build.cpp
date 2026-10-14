@@ -108,6 +108,11 @@ HGraphBuildTaskGuard::~HGraphBuildTaskGuard() {
 
 std::optional<std::vector<int64_t>>
 HGraph::try_optimized_build(const DatasetPtr& data) {
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        // PiPNN owns a one-shot parallel graph build and uses the normal flatten build path.
+        return std::nullopt;
+    }
+
     // Start the session before training so unsupported configurations fall through without
     // changing the training behavior of the normal build path.
     HGraphOptimizedBuildSession session(*this);
@@ -118,8 +123,11 @@ HGraph::try_optimized_build(const DatasetPtr& data) {
     std::vector<int64_t> result;
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
         result = this->add_impl(data);
-    } else {
+    } else if (graph_type_ == GRAPH_TYPE_VALUE_ODESCENT) {
         result = this->build_by_odescent(data);
+    } else {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "optimized HGraph build received an unknown graph_type");
     }
     session.Commit();
     return result;
@@ -154,17 +162,29 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
     HGraphBuildTaskGuard task_guard(futures, static_cast<uint64_t>(rows.size()));
     // Parallel graph insertion may probe rows from the same batch. Make every scalar code
     // visible before any of those probes starts.
-    for (const auto& row : rows) {
-        const auto inner_id = row.inner_id;
-        const auto input_idx = row.input_idx;
-        futures.emplace_back(
-            this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
-                if (this->rabitq_fused_datacell_ != nullptr) {
-                    this->insert_fused_optimized_build_codes(get_data(data, input_idx), inner_id);
-                } else {
-                    this->insert_persistent_codes(get_data(data, input_idx), inner_id);
-                }
-            }));
+    try {
+        for (const auto& row : rows) {
+            const auto inner_id = row.inner_id;
+            const auto input_idx = row.input_idx;
+            futures.emplace_back(
+                this->thread_pool_->GeneralEnqueue([this, data, inner_id, input_idx]() {
+                    if (this->rabitq_fused_datacell_ != nullptr) {
+                        this->insert_fused_optimized_build_codes(get_data(data, input_idx),
+                                                                 inner_id);
+                    } else {
+                        this->insert_persistent_codes(get_data(data, input_idx), inner_id);
+                    }
+                }));
+        }
+    } catch (...) {
+        const auto enqueue_exception = std::current_exception();
+        // A GeneralEnqueue future can become ready just before the underlying pool marks the
+        // wrapper task complete. Drain the pool before optimized-build state can be released.
+        try {
+            this->thread_pool_->WaitUntilEmpty();
+        } catch (...) {
+        }
+        std::rethrow_exception(enqueue_exception);
     }
     wait_all_futures(futures);
     futures.clear();

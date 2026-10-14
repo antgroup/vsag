@@ -123,6 +123,11 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
+        std::unique_lock lock(this->mutex_);
+        // Caller has moved survivors below capacity; only stale tail slots are truncated.
+        // Logical truncation must survive a best-effort physical shrink allocation failure.
+        const auto total_count = this->total_count_.load(std::memory_order_relaxed);
+        this->total_count_.store(std::min(total_count, capacity), std::memory_order_release);
         this->layout_->Shrink(capacity);
         this->max_capacity_ = capacity;
     }
@@ -171,6 +176,55 @@ public:
 
     void
     Serialize(StreamWriter& writer) override;
+
+    [[nodiscard]] uint64_t
+    GetIOSize() const override {
+        // any io whose Write persists the bytes (in-memory or file-backed)
+        // can be pre-allocated by ReserveIO and filled concurrently by
+        // WriteRaw; only SkipDeserialize ios (e.g. reader_io, whose Write is
+        // a no-op counter) opt out and fall back to the whole-component path
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            return this->layout_->GetIOSize();
+        } else {
+            return 0;
+        }
+    }
+
+    uint64_t
+    ReserveIO(StreamReader& reader) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            FlattenInterface::Deserialize(reader);
+            uint64_t io_size = 0;
+            StreamReader::ReadObj(reader, io_size);
+            this->layout_->ResizeForOverwrite(io_size);
+            return io_size;
+        } else {
+            return FlattenInterface::ReserveIO(reader);
+        }
+    }
+
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            this->layout_->WriteRaw(data, size, offset);
+        } else {
+            FlattenInterface::WriteRaw(data, size, offset);
+        }
+    }
+
+    void
+    DeserializeTail(StreamReader& reader) override {
+        if constexpr (not LayoutTmpl::IOType::SkipDeserialize) {
+            this->quantizer_->Deserialize(reader);
+            // mirror the sequential Deserialize path: refresh backend_ from the
+            // quantizer so the two stay consistent even if a future quantizer
+            // makes the backend depend on deserialized state
+            this->backend_ = QuantizerDistanceBackend<QuantTmpl>::Get(
+                static_cast<const QuantTmpl&>(*this->quantizer_));
+        } else {
+            FlattenInterface::DeserializeTail(reader);
+        }
+    }
 
     void
     Deserialize(LvalueOrRvalue<StreamReader> reader) override;
@@ -263,23 +317,26 @@ template <typename QuantTmpl, typename LayoutTmpl>
 void
 FlattenDataCell<QuantTmpl, LayoutTmpl>::InsertVector(const void* vector, InnerIdType idx) {
     {
-        std::lock_guard lock(mutex_);
         if (idx == std::numeric_limits<InnerIdType>::max()) {
-            idx = total_count_;
-            ++total_count_;
+            idx = total_count_.fetch_add(1, std::memory_order_acq_rel);
         } else {
-            total_count_ = std::max(total_count_, idx + 1);
+            auto prev = total_count_.load(std::memory_order_relaxed);
+            while (prev < idx + 1 &&
+                   !total_count_.compare_exchange_weak(
+                       prev, idx + 1, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+            }
         }
     }
     ByteBuffer codes(static_cast<uint64_t>(code_size_), allocator_);
     quantizer_->EncodeOne(static_cast<const float*>(vector), codes.data);
     layout_->Write(idx, codes.data);
+    std::atomic_thread_fence(std::memory_order_release);
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>
 bool
 FlattenDataCell<QuantTmpl, LayoutTmpl>::UpdateVector(const void* vector, InnerIdType idx) {
-    if (idx >= total_count_) {
+    if (idx >= total_count_.load(std::memory_order_acquire)) {
         return false;
     }
     std::lock_guard lock(mutex_);
@@ -299,13 +356,29 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
                          allocator_);
         quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
-        {
-            std::lock_guard lock(mutex_);
-            cur_count = total_count_;
-            total_count_ += count;
-        }
+        { cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel); }
         layout_->WriteRange(cur_count, codes.data, count);
+        std::atomic_thread_fence(std::memory_order_release);
     } else {
+        bool ids_are_contiguous = count > 0;
+        for (InnerIdType i = 1; i < count and ids_are_contiguous; ++i) {
+            ids_are_contiguous = idx_vec[i] == idx_vec[0] + i;
+        }
+        if (ids_are_contiguous) {
+            ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                             allocator_);
+            quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
+            std::lock_guard lock(mutex_);
+            {
+                auto prev = total_count_.load(std::memory_order_relaxed);
+                const auto target = idx_vec[0] + count;
+                if (target > prev) {
+                    total_count_.store(target, std::memory_order_release);
+                }
+                layout_->WriteRange(idx_vec[0], codes.data, count);
+            }
+            return;
+        }
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
             this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx_vec[i]);
@@ -340,6 +413,14 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               QueryContext* ctx) {
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
 
+    const auto total_count = this->TotalCount();
+    for (InnerIdType i = 0; i < id_count; ++i) {
+        if (idx[i] >= total_count) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "invalid internal id " + std::to_string(idx[i]));
+        }
+    }
+
     for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; i++) {
         this->layout_->Prefetch(idx[i], this->prefetch_depth_code_ * 64);
     }
@@ -351,7 +432,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
             double io_cost_ms = 0.0F;
             {
                 Timer timer(io_cost_ms);
-                this->layout_->MultiRead(idx, id_count, codes.data, search_alloc);
+                if (not this->layout_->MultiRead(idx, id_count, codes.data, search_alloc)) {
+                    throw VsagException(ErrorType::READ_ERROR,
+                                        "failed to read codes for batch distance evaluation");
+                }
             }
 
             if (ctx != nullptr and ctx->stats != nullptr) {
@@ -385,6 +469,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
         auto lease2 = this->layout_->Acquire(idx[i + 1]);
         auto lease3 = this->layout_->Acquire(idx[i + 2]);
         auto lease4 = this->layout_->Acquire(idx[i + 3]);
+        if (not lease1 or not lease2 or not lease3 or not lease4) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire codes for batch distance evaluation");
+        }
         computer->ComputeDistsBatch4(lease1.Data(),
                                      lease2.Data(),
                                      lease3.Data(),
@@ -396,6 +484,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
     }
     for (; i < id_count; ++i) {
         auto lease = this->layout_->Acquire(idx[i]);
+        if (not lease) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire codes for id " + std::to_string(idx[i]));
+        }
         computer->ComputeDist(lease.Data(), result_dists + i);
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
@@ -405,8 +497,17 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
 template <typename QuantTmpl, typename LayoutTmpl>
 float
 FlattenDataCell<QuantTmpl, LayoutTmpl>::ComputePairVectors(InnerIdType id1, InnerIdType id2) {
+    const auto total_count = this->TotalCount();
+    if (id1 >= total_count or id2 >= total_count) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "invalid internal id for pair distance evaluation");
+    }
     auto lease1 = this->layout_->Acquire(id1);
     auto lease2 = this->layout_->Acquire(id2);
+    if (not lease1 or not lease2) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "failed to acquire codes for pair distance evaluation");
+    }
     return this->quantizer_->Compute(lease1.Data(), lease2.Data());
 }
 
@@ -451,7 +552,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::MergeOther(const FlattenInterfacePtr& ot
                             "Merge flatten datacell failed: not match type");
     }
     constexpr uint64_t BUFFER_SIZE = 1024 * 1024 * 10;
-    uint64_t total_count = ptr->total_count_;
+    uint64_t total_count = ptr->total_count_.load(std::memory_order_acquire);
     uint64_t read_count = 0;
     while (read_count < total_count) {
         uint64_t count = std::min(BUFFER_SIZE / this->code_size_, total_count - read_count);
@@ -463,7 +564,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::MergeOther(const FlattenInterfacePtr& ot
         this->layout_->WriteRange(bias + read_count, lease.Data(), count);
         read_count += count;
     }
-    this->total_count_ += total_count;
+    this->total_count_.fetch_add(total_count, std::memory_order_release);
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>

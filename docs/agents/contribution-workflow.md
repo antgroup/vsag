@@ -118,3 +118,4 @@ Update relevant docs when behavior changes:
 - Website docs under `docs/docs/{en,zh}/src/` together with any related
   in-repo READMEs (`tools/eval/README.md`, `tools/eval/README_zh.md`, etc.).
   Keep English and Chinese versions in sync.
+- Run `node .github/scripts/check-docs.mjs` after documentation or referenced source-path changes.

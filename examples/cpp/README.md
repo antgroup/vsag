@@ -99,6 +99,7 @@ together when the directory is listed:
 | [`322_feature_hgraph_brute_force_threshold.cpp`](322_feature_hgraph_brute_force_threshold.cpp) | HGraph search-time `brute_force_threshold`: automatically switch to an exact scan under highly selective filters. |
 | [`324_feature_lazy_hgraph_extra_info.cpp`](324_feature_lazy_hgraph_extra_info.cpp) | LazyHGraph `extra_info` filtering across flat and graph phases. |
 | [`329_feature_ivf_precise_bucket.cpp`](329_feature_ivf_precise_bucket.cpp) | Disk-backed IVF precise codes using the bucket-aligned layout. |
+| [`330_feature_search_statistics.cpp`](330_feature_search_statistics.cpp) | Read typed query statistics, use the compatible JSON view, and disable result statistics per request. |
 
 ### Persistence (`4xx`)
 
@@ -108,6 +109,7 @@ together when the directory is listed:
 | [`402_persistent_streaming.cpp`](402_persistent_streaming.cpp) | Streaming serialization for large indexes. |
 | [`403_persistent_streaming_load.cpp`](403_persistent_streaming_load.cpp) | Static `Index::Load` from streaming serialization across index types. |
 | [`404_persistent_streaming_load_hybrid.cpp`](404_persistent_streaming_load_hybrid.cpp) | Static `Index::Load` for a hybrid HGraph index with memory and disk-backed RaBitQ split codes. |
+| [`408_feature_reader_prefetch.cpp`](408_feature_reader_prefetch.cpp) | Optional `ReaderPrefetcher` implementation, public load parameter activation, and observable search-time hints. |
 
 ### Quantization (`5xx`)
 

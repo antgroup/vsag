@@ -110,4 +110,15 @@ TEST_CASE("ByteRangeLayout rejects overflowing write ranges", "[ut][ByteRangeLay
     REQUIRE_THROWS_AS(layout.Write(1, &data, 1), VsagException);
 }
 
+TEST_CASE("ByteRangeLayout IsBound reports IO binding state", "[ut][ByteRangeLayout]") {
+    IndexCommonParam common_param;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+
+    ByteRangeLayout<MemoryIO> layout;
+    REQUIRE_FALSE(layout.IsBound());
+
+    layout.SetIO(std::make_shared<MemoryIO>(common_param.allocator_.get()));
+    REQUIRE(layout.IsBound());
+}
+
 }  // namespace vsag

@@ -372,8 +372,10 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
         "mci_alpha": 1.2,
         "mci_knng_source": "odescent",
         "mci_incremental_join_ratio_threshold": 0.7,
-        "mci_incremental_added_mct": 2,
-        "mci_incremental_clique_max": 4
+        "mci_incremental_degree_min": 70,
+        "mci_incremental_clique_max": 4,
+        "mci_delete_clique_size_threshold": 5,
+        "mci_delete_node_mct_threshold": 2
     })");
 
     vsag::IndexCommonParam common_param;
@@ -389,8 +391,10 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(typed_param->mci_parameters.alpha == 1.2F);
     REQUIRE(typed_param->mci_parameters.knng_source == "odescent");
     REQUIRE(typed_param->mci_parameters.incremental_join_ratio_threshold == 0.7F);
-    REQUIRE(typed_param->mci_parameters.incremental_added_mct == 2);
+    REQUIRE(typed_param->mci_parameters.incremental_degree_min == 70);
     REQUIRE(typed_param->mci_parameters.incremental_clique_max == 4);
+    REQUIRE(typed_param->mci_parameters.delete_clique_size_threshold == 5);
+    REQUIRE(typed_param->mci_parameters.delete_node_mct_threshold == 2);
 
     auto json = typed_param->ToJson();
     REQUIRE_FALSE(json.Contains("mci"));
@@ -399,6 +403,109 @@ TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
     REQUIRE(json["mci_clique_max"].GetInt() == 4);
     REQUIRE(json["mci_alpha"].GetFloat() == 1.2F);
     REQUIRE(json["mci_knng_source"].GetString() == "odescent");
+    REQUIRE(json["mci_delete_clique_size_threshold"].GetInt() == 5);
+    REQUIRE(json["mci_delete_node_mct_threshold"].GetInt() == 2);
+}
+
+TEST_CASE("HGraph MCI deletion threshold defaults and overrides round-trip",
+          "[ut][HGraphParameter][mci]") {
+    const vsag::HGraphMCIParameters defaults;
+    REQUIRE(defaults.delete_clique_size_threshold == 30);
+    REQUIRE(defaults.delete_node_mct_threshold == 3);
+    const bool explicit_threshold = GENERATE(false, true);
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+        "graph_type":"nsw","max_degree":32,"ef_construction":100,"use_mci":true})");
+    if (explicit_threshold) {
+        // Preserve explicitly configured historical thresholds rather than replacing them.
+        json["mci_delete_clique_size_threshold"].SetInt(3);
+    }
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param != nullptr);
+    const uint64_t expected = explicit_threshold ? 3 : 30;
+    REQUIRE(param->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(param->mci_parameters.delete_node_mct_threshold == 3);
+    REQUIRE(param->ToJson()["mci_delete_clique_size_threshold"].GetInt() == expected);
+    auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
+    REQUIRE(restored->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(restored->CheckCompatibility(param));
+}
+
+TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
+          "[ut][HGraphParameter][mci][degree_add]") {
+    vsag::HGraphMCIParameters defaults;
+    REQUIRE(defaults.IncrementalDegreeTarget(0) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(1) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(2) == 1);
+    REQUIRE(defaults.incremental_degree_min == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(50) == 49);
+    REQUIRE(defaults.IncrementalDegreeTarget(51) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(70) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(71) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(100) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(101) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(6000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(9999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(19999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(20000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(509999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(510000) == 51);
+    REQUIRE(defaults.IncrementalDegreeTarget(800000) == 80);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 100);
+    defaults.mcs = 32;
+    REQUIRE(defaults.IncrementalDegreeTarget(32) == 31);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 50);
+    defaults.mcs = 200;
+    defaults.incremental_degree_min = 40;
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 40);
+    defaults.incremental_degree_min = 100;
+    REQUIRE(defaults.IncrementalDegreeTarget(100) == 99);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 100);
+    defaults.incremental_degree_min = 70;
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 70);
+    defaults.mcs = 400;
+    REQUIRE(defaults.IncrementalDegreeTarget(1500000) == 150);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 200);
+    defaults.mcs = 1;
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 70);
+    defaults.mcs = 200;
+    defaults.incremental_degree_n_divisor = 1;
+    defaults.incremental_degree_mcs_divisor = 1;
+    REQUIRE(defaults.IncrementalDegreeTarget(3) == 2);
+
+    const std::string key = GENERATE("mci_incremental_degree_min",
+                                     "mci_incremental_degree_n_divisor",
+                                     "mci_incremental_degree_mcs_divisor");
+    CAPTURE(key);
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+        "graph_type":"nsw","max_degree":32,"ef_construction":100})");
+    json[key].SetInt(4);
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param->mci_parameters.enabled);
+    REQUIRE(param->mci_parameters.incremental_degree_min ==
+            (key == "mci_incremental_degree_min" ? 4 : 50));
+    REQUIRE(param->ToJson()["mci_incremental_degree_min"].GetInt() ==
+            (key == "mci_incremental_degree_min" ? 4 : 50));
+    REQUIRE(param->ToJson()[key].GetInt() == 4);
+    auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
+    REQUIRE(restored->CheckCompatibility(param));
+    auto changed = param->ToJson();
+    changed[key].SetInt(5);
+    auto incompatible = std::make_shared<vsag::HGraphParameter>(changed);
+    REQUIRE_FALSE(incompatible->CheckCompatibility(param));
+    for (int invalid : {0, -1}) {
+        json[key].SetInt(invalid);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    }
 }
 
 TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {
@@ -456,6 +563,31 @@ TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]")
         param["mci_knng_source"].SetString("odescent");
         REQUIRE(is_mci_enabled(param));
     }
+    SECTION("mci_incremental_join_ratio_threshold") {
+        auto param = make_param();
+        param["mci_incremental_join_ratio_threshold"].SetFloat(0.7F);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_degree_min") {
+        auto param = make_param();
+        param["mci_incremental_degree_min"].SetInt(70);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_clique_max") {
+        auto param = make_param();
+        param["mci_incremental_clique_max"].SetInt(4);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
 
     SECTION("internal knng path is rejected") {
         auto param = make_param();
@@ -464,7 +596,7 @@ TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]")
     }
 }
 
-TEST_CASE("HGraph rejects MCI with force remove", "[ut][HGraphParameter]") {
+TEST_CASE("HGraph accepts MCI with force remove", "[ut][HGraphParameter]") {
     auto param = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
         "graph_type": "nsw",
@@ -476,6 +608,8 @@ TEST_CASE("HGraph rejects MCI with force remove", "[ut][HGraphParameter]") {
     vsag::IndexCommonParam common_param;
     common_param.dim_ = 128;
     common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    param["support_duplicate"].SetBool(true);
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
 }
 
@@ -494,8 +628,10 @@ TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]")
             "use_reorder": true,
             "mci_mcs": 8,
             "mci_clique_max": 4,
-            "mci_incremental_added_mct": 2,
-            "mci_incremental_clique_max": 4
+            "mci_incremental_degree_min": 70,
+            "mci_incremental_clique_max": 4,
+            "mci_delete_clique_size_threshold": 3,
+            "mci_delete_node_mct_threshold": 3
         })");
     };
     vsag::IndexCommonParam common_param;
@@ -512,14 +648,24 @@ TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]")
         param["mci_clique_max"].SetInt(-1);
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
-    SECTION("mci_incremental_added_mct") {
+    SECTION("mci_incremental_degree_min") {
         auto param = make_param();
-        param["mci_incremental_added_mct"].SetInt(-1);
+        param["mci_incremental_degree_min"].SetInt(-1);
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
     SECTION("mci_incremental_clique_max") {
         auto param = make_param();
         param["mci_incremental_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(0);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(0);
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
     SECTION("mci_knng_source") {
@@ -569,6 +715,62 @@ TEST_CASE("HGraph Search Parameters parse MCI seed ratio", "[ut][HGraphParameter
             "mci_seed_ratio": -0.1
         }
     })"));
+}
+
+TEST_CASE("HGraph Search Parameters parse hybrid traversal and seed coverage",
+          "[ut][HGraphParameter]") {
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200
+        }
+    })");
+    REQUIRE_FALSE(defaults.use_hybrid_traversal);
+    REQUIRE(defaults.hybrid_vob == 0.0);
+    REQUIRE(defaults.hybrid_filter_cost_ratio == 1.0);
+    REQUIRE(defaults.mci_seed_coverage == 1.0F);
+    REQUIRE(defaults.mci_seed_max_count == 32768);
+
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 32.0,
+            "hybrid_filter_cost_ratio": 2.5,
+            "mci_seed_coverage": 0.1,
+            "mci_seed_max_count": 4096
+        }
+    })");
+    REQUIRE(params.use_hybrid_traversal);
+    REQUIRE(params.hybrid_vob == 32.0);
+    REQUIRE(params.hybrid_filter_cost_ratio == 2.5);
+    REQUIRE(params.mci_seed_coverage == 0.1F);
+    REQUIRE(params.mci_seed_max_count == 4096);
+
+    // hybrid_vob <= 0 is the documented way to disable the early stop, not an error.
+    auto unbounded = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 0.0
+        }
+    })");
+    REQUIRE(unbounded.hybrid_vob == 0.0);
+
+    // mci_seed_max_count == 0 means "unlimited" and must be accepted.
+    auto unlimited = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_max_count": 0
+        }
+    })");
+    REQUIRE(unlimited.mci_seed_max_count == 0);
+
+    for (const auto* bad : {R"({"hgraph":{"ef_search":200,"hybrid_vob":-1.0}})",
+                            R"({"hgraph":{"ef_search":200,"hybrid_filter_cost_ratio":-0.5}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_coverage":-0.1}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_max_count":-1}})"}) {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(bad));
+    }
 }
 
 TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {
@@ -773,12 +975,10 @@ TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
     auto base_json = typed_param->base_codes_param->ToJson();
     REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
     REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
-#if HAVE_LIBAIO
-    const std::string expected_supplement_io_type = "async_io";
-#else
-    const std::string expected_supplement_io_type = "buffer_io";
-#endif
-    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == expected_supplement_io_type);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter->GetTypeName() ==
+            std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
     REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
             std::string("/tmp/vsag_rabitq_split_supplement"));
     REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));

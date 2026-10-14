@@ -55,10 +55,15 @@ const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
 const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
 const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
     "mci_incremental_join_ratio_threshold";
-const char* const HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY = "mci_incremental_added_mct";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY = "mci_incremental_degree_min";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY = "mci_incremental_degree_n_divisor";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY =
+    "mci_incremental_degree_mcs_divisor";
 const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
 const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
 const char* const PYRAMID_STORE_PATHS_KEY = "store_paths";
+const char* const HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY = "mci_delete_clique_size_threshold";
+const char* const HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY = "mci_delete_node_mct_threshold";
 const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
 const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
 const char* const GRAPH_KEY = "graph";
@@ -76,6 +81,7 @@ const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
 const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
 const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
 const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
+const char* const IO_PREFETCH_HINT_KEY = "enable_prefetch_hint";
 const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
 
 // IO param for file
@@ -87,6 +93,8 @@ const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
 // quantization type
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
+const char* const QUANTIZATION_TYPE_VALUE_SQ8_LOCAL = "sq8_local";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM = "sq8_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
@@ -98,6 +106,7 @@ const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
 const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
 const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
 const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE_FP16 = "sparse_fp16";
 const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
 
 // vector transformer type
@@ -149,6 +158,7 @@ const char* const EF_CONSTRUCTION_KEY = "ef_construction";
 
 const char* const GRAPH_TYPE_KEY = "graph_type";
 const char* const GRAPH_TYPE_VALUE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_VALUE_PIPNN = "pipnn";
 const char* const GRAPH_TYPE_VALUE_NSW = "nsw";
 
 const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
@@ -174,6 +184,11 @@ const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
 const char* const IVF_ROUTE_MAX_DEGREE_KEY = "route_max_degree";
 const char* const IVF_ROUTE_EF_CONSTRUCTION_KEY = "route_ef_construction";
 const char* const IVF_USE_ROUTE_GRAPH_KEY = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD_KEY = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
 const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";

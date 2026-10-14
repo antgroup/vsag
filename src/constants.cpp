@@ -83,6 +83,18 @@ const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
+const char* const GRAPH_TYPE_PIPNN = "pipnn";
+
+const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE = "pipnn_max_leaf_size";
+const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE = "pipnn_min_leaf_size";
+const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE = "pipnn_leader_sample_rate";
+const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
+const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
+const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
+const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
+    "pipnn_adaptive_pruning_adjust_step";
 
 const char* const INDEX_PARAM = "index_param";
 
@@ -162,6 +174,7 @@ const char* const HGRAPH_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
 const char* const HGRAPH_GRAPH_ENABLE_READ_CACHE = "graph_enable_read_cache";
 const char* const HGRAPH_GRAPH_CACHE_TOTAL_SIZE = "graph_cache_total_size";
 const char* const HGRAPH_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const HGRAPH_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
 const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE = "raw_vector_enable_read_cache";
 const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE = "raw_vector_cache_total_size";
@@ -176,6 +189,11 @@ const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshol
 const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
 const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
 const char* const HGRAPH_USE_MCI = "use_mci";
+const char* const HGRAPH_USE_HYBRID_TRAVERSAL = "use_hybrid_traversal";
+const char* const HGRAPH_HYBRID_VOB = "hybrid_vob";
+const char* const HGRAPH_HYBRID_FILTER_COST_RATIO = "hybrid_filter_cost_ratio";
+const char* const HGRAPH_MCI_SEED_COVERAGE = "mci_seed_coverage";
+const char* const HGRAPH_MCI_SEED_MAX_COUNT = "mci_seed_max_count";
 const char* const HGRAPH_MCI_MCS = "mci_mcs";
 const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
 const char* const HGRAPH_MCI_ALPHA = "mci_alpha";
@@ -210,6 +228,11 @@ const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";
 const char* const IVF_TRAIN_TYPE = "ivf_train_type";
 const char* const IVF_USE_ROUTE_GRAPH = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT = "kmeans_iter_count";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";
@@ -218,6 +241,7 @@ const char* const IVF_BASE_FILE_PATH = "base_file_path";
 const char* const IVF_BASE_ENABLE_READ_CACHE = "base_enable_read_cache";
 const char* const IVF_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
 const char* const IVF_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const IVF_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
 const char* const IVF_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 
 const char* const PYRAMID_SUPPORT_DUPLICATE = SUPPORT_DUPLICATE;

@@ -67,8 +67,9 @@ main(int argc, char** argv) {
      * - metric_type: Distance metric type, currently only "ip" (inner product) is supported.
      * - index_param: Parameters specific to sparse indexing:
      *   - use_reorder: If true, enables candidate re-ranking with an extra forward store.
-     *   - rerank_type: Forward-store type used by reorder. "fp32" keeps exact values, while
-     *     "dmq8" uses compressed 8-bit DMQ codes.
+     *   - rerank_type: Forward-store type used by reorder. "fp32" keeps exact values, "fp16"
+     *     stores half-precision values and scores in FP32, while "dmq8" uses compressed 8-bit
+     *     DMQ codes.
      *   - term_id_limit: Maximum term id (e.g., when term_id_limit = 10, then, term [15: 0.1] in sparse vector is not allowed)
      *   - doc_prune_ratio: Ratio of term pruning in documents (0 = no pruning).
      *   - window_size: Window size for table scanning. Related to L3 cache size; 100000 is an empirically optimal value.
