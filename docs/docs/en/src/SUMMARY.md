@@ -39,6 +39,8 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ Design](development/lite_rabitq_design.md)
 - [C++ Coding Guide](development/coding_style.md)
 - [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
