@@ -44,6 +44,10 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 `hgraph`（默认）或 `odescent`。构建和过滤器要求见
 [MCI 挂件指南](../advanced/hgraph_mci_companion.md)。
 
+可选搜索参数 `use_hybrid_traversal` 将稀疏邻居和团邻居合并遍历；
+`hybrid_vob`、`hybrid_filter_cost_ratio`、`mci_seed_coverage` 和 `mci_seed_max_count`
+控制每次展开开销及 seed 预算。详见 [MCI 挂件指南](../advanced/hgraph_mci_companion.md#动态邻居遍历)。
+
 搜索时：
 
 ```json

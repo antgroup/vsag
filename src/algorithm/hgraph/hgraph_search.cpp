@@ -522,9 +522,35 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             ? &rabitq_lower_bound_candidates
             : nullptr;
 
+    Vector<InnerIdType> hybrid_seed_ids(this->allocator_);
+    bool hybrid_has_seed_list = false;
+    bool hybrid_seeds_exhaustive = false;
+    uint64_t hybrid_seed_budget = 0;
+    // One snapshot of the index size for this query. The seed budget, the non-empty
+    // guard and the companion availability check all read it, so a concurrent Add cannot
+    // leave them disagreeing about which count the companion was published for. A stale
+    // snapshot is still safe -- the searcher re-checks the companion against the flatten
+    // count -- it just cannot make the three reads diverge.
+    const uint64_t hybrid_total_count =
+        params.use_hybrid_traversal and not is_range ? this->total_count_.load() : 0;
+    if (hybrid_total_count > 0) {
+        hybrid_seed_ids = this->collect_hybrid_seeds(request,
+                                                     ft,
+                                                     params,
+                                                     hybrid_total_count,
+                                                     &hybrid_seed_budget,
+                                                     &hybrid_seeds_exhaustive,
+                                                     this->allocator_);
+        hybrid_has_seed_list = not hybrid_seed_ids.empty();
+    }
+
     DistHeapPtr search_result;
     bool brute_force_used = false;
     MCIHybridSearchResult mci_result(params, ft);
+    const bool hybrid_available =
+        params.use_hybrid_traversal and not is_range and search_param.executors.empty() and
+        search_param.ep != INVALID_ENTRY_POINT and this->mci_parameters_.enabled and
+        this->mci_cliques_ != nullptr and this->mci_cliques_->HasCliqueIndex(hybrid_total_count);
     if (params.brute_force_threshold > 0.0F and
         mci_result.valid_ratio <= params.brute_force_threshold) {
         if (is_range) {
@@ -536,6 +562,39 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         brute_force_used = true;
         mci_result.route = "brute_force";
+    } else if (hybrid_available) {
+        HybridTraversalParam hybrid_param;
+        hybrid_param.ef = search_param.ef;
+        // The result heap keeps ef candidates, not k: the reorder stage can only
+        // rescore the candidates it is handed, so a k-deep heap lets coarse
+        // quantization errors through unrecoverably. The outer layer trims to k
+        // after reorder, exactly like the plain bottom-graph search does.
+        hybrid_param.topk = static_cast<int64_t>(search_param.ef);
+        hybrid_param.entry_id = search_param.ep;
+        // Seeded from the predicate's valid set when the filter can enumerate it;
+        // otherwise the traversal falls back to the coarse-search entry point.
+        hybrid_param.seed_inner_ids = hybrid_has_seed_list ? &hybrid_seed_ids : nullptr;
+        // collect_hybrid_seeds already applied the whole budget, so the traversal
+        // must use the list as-is; a non-zero seed_count here would sample it a
+        // second time and silently shrink the budget.
+        hybrid_param.seed_count = 0;
+        // The seed list already covers every valid point, so every valid distance is
+        // known and the expansion cannot add anything: answer from the seeds directly.
+        hybrid_param.seeds_are_exhaustive = hybrid_seeds_exhaustive;
+        hybrid_param.hops_limit = params.hops_limit;
+        hybrid_param.vob = params.hybrid_vob;
+        hybrid_param.filter_cost_ratio = params.hybrid_filter_cost_ratio;
+        mci_result.result = this->hybrid_mci_searcher_->Search(this->bottom_graph_,
+                                                               this->mci_cliques_,
+                                                               this->basic_flatten_codes_,
+                                                               raw_query,
+                                                               ft,
+                                                               hybrid_param,
+                                                               &ctx,
+                                                               &mci_result.hybrid_stats);
+        mci_result.route = "hybrid";
+        mci_result.hybrid_seed_budget = hybrid_seed_budget;
+        search_result = std::move(mci_result.result);
     } else {
         mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
         if (mci_result.route == "mci") {

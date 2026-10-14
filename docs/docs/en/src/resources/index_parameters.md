@@ -45,6 +45,11 @@ The optional `mci_knng_source` build parameter enables the MCI companion and sel
 `hgraph` (default) or `odescent` for its candidate graph. See the
 [MCI companion guide](../advanced/hgraph_mci_companion.md) for construction and filter requirements.
 
+The opt-in `use_hybrid_traversal` search mode combines sparse and clique neighbors, with
+`hybrid_vob`, `hybrid_filter_cost_ratio`, `mci_seed_coverage`, and `mci_seed_max_count`
+controlling per-expansion work and seeds. See the
+[MCI companion guide](../advanced/hgraph_mci_companion.md#dynamic-neighbor-traversal).
+
 At search time:
 
 ```json
