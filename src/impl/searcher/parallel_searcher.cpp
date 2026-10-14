@@ -26,7 +26,8 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
+#include "impl/reasoning/reasoning_types.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
@@ -155,8 +156,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t count_no_visited = 0;
     uint32_t unrewarded_hops = 0;
     uint32_t empty_hops = 0;
-    const uint32_t max_unrewarded_hops = std::max<uint32_t>(ef, 500);
-    const uint32_t max_empty_hops = std::max<uint32_t>(10000, 10 * ef);
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
     uint64_t beam = 1;
     uint32_t vector_size = graph->MaximumDegree() * beam;
     uint32_t current_start = 0;
@@ -270,21 +271,21 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (empty_hops >= max_empty_hops) {
                     if (reasoning != nullptr) {
                         reasoning->SetTermination(
-                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
+                            ReasoningTermination::kEmptyTraversalLimitReached);
                     }
                     break;
                 }
             } else if ((-current_first_node_pair.first) > lower_bound) {
                 if (top_candidates->Size() >= ef) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                     }
                     break;
                 }
                 ++unrewarded_hops;
                 if (unrewarded_hops >= max_unrewarded_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                     }
                     break;
                 }

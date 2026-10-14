@@ -221,8 +221,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
     uint32_t unrewarded_hops = 0;
     uint32_t empty_hops = 0;
-    const uint32_t max_unrewarded_hops = std::max<uint32_t>(ef, 500);
-    const uint32_t max_empty_hops = std::max<uint32_t>(10000, 10 * ef);
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
     while (not candidate_set->Empty()) {
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
@@ -234,21 +234,21 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (empty_hops >= max_empty_hops) {
                     if (reasoning != nullptr) {
                         reasoning->SetTermination(
-                            ReasoningContext::kTerminationEmptyTraversalLimitReached);
+                            ReasoningTermination::kEmptyTraversalLimitReached);
                     }
                     break;
                 }
             } else if (-candidate_set->Top().first > lower_bound) {
                 if (top_candidates->Size() >= ef) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                     }
                     break;
                 }
                 ++unrewarded_hops;
                 if (unrewarded_hops >= max_unrewarded_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningContext::kTerminationLowerBoundReached);
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
                     }
                     break;
                 }
@@ -452,8 +452,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
     uint32_t unrewarded_hops = 0;
     uint32_t empty_hops = 0;
-    const uint32_t max_unrewarded_hops = std::max<uint32_t>(ef, 500);
-    const uint32_t max_empty_hops = std::max<uint32_t>(10000, 10 * ef);
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
 
     while (not candidate_set->Empty()) {
         hops++;
@@ -796,8 +796,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     vl->Set(ep);
     uint32_t unrewarded_hops = 0;
     uint32_t empty_hops = 0;
-    const uint32_t max_unrewarded_hops = std::max<uint32_t>(ef, 500);
-    const uint32_t max_empty_hops = std::max<uint32_t>(10000, 10 * ef);
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
 
     while (not candidate_set->Empty()) {
         ++hops;
