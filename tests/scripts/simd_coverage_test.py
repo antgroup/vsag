@@ -290,6 +290,7 @@ class ComparisonTest(unittest.TestCase):
             ".github/workflows/pr-simd-coverage.yml",
             "scripts/coverage/verify_cpp_coverage.py",
             "tests/scripts/simd_coverage_test.py",
+            "tests/scripts/pr_simd_merge_base_test.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(triggers(path))
@@ -309,7 +310,10 @@ class ComparisonTest(unittest.TestCase):
                           "ccache-action", "codecov-action", "id-token: write"):
             self.assertNotIn(forbidden, workflow)
         for required in ("contents: read", "persist-credentials: false", "timeout-minutes: 90",
-                         "github.event.pull_request.base.sha", "github.sha"):
+                         "github.event.pull_request.head.sha", "github.sha",
+                         'rev-parse --verify "${HEAD_SHA}^1"',
+                         'rev-parse --verify "${HEAD_SHA}^2"',
+                         'git -c safe.directory="$(pwd -P)"'):
             self.assertIn(required, workflow)
         runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
         self.assertIn("COMPILE_JOBS=4", runner)

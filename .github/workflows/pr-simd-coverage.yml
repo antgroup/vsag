@@ -20,6 +20,7 @@ on:
       - '.github/workflows/pr-simd-coverage.yml'
       - 'scripts/coverage/**'
       - 'tests/scripts/simd_coverage_test.py'
+      - 'tests/scripts/pr_simd_merge_base_test.py'
 
 permissions:
   contents: read
@@ -40,6 +41,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Test merge-base selection
+        run: python3 tests/scripts/pr_simd_merge_base_test.py
       - uses: ./.github/actions/prepare-fetchcontent
         with:
           include-tests: 'true'
@@ -57,9 +60,20 @@ jobs:
           make -C /tmp/lcov SHELL=/bin/bash install
       - name: Compare base and merge candidate
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
-        run: bash scripts/coverage/run_simd_coverage.sh "$BASE_SHA" "$HEAD_SHA"
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          # Event base.sha may differ from the parent of the queued merge ref.
+          # Compare the merge candidate with the base actually used to create it.
+          # Trust only this checkout for these commands, not global Git config.
+          base_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^1")
+          merge_pr_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^2")
+          if [ "$merge_pr_sha" != "$PR_HEAD_SHA" ]; then
+            echo '::error::Merge candidate does not contain the expected PR head.'
+            exit 1
+          fi
+          bash scripts/coverage/run_simd_coverage.sh "$base_sha" "$HEAD_SHA"
       - name: Publish scoped result
         if: always()
         run: |
