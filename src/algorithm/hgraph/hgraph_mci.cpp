@@ -29,7 +29,7 @@
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph.h"
-#include "hgraph_mci_add.h"
+#include "hgraph_mci_update.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -1578,22 +1578,23 @@ HGraph::search_mci_knn(InnerIdType query_inner_id,
 }
 
 bool
-HGraph::mci_repair_uses_fp32_pipeline() const {
-    const auto precise_codes = this->get_precise_codes();
-    return this->data_type_ == DataTypes::DATA_TYPE_FLOAT and precise_codes != nullptr and
-           this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
+MciIncrementalUpdateExecutor::RepairUsesFp32Pipeline() const {
+    const auto precise_codes = hgraph_.get_precise_codes();
+    return hgraph_.data_type_ == DataTypes::DATA_TYPE_FLOAT and precise_codes != nullptr and
+           hgraph_.basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
            precise_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
 }
 
 // Nearest live candidates of one repair row by stored-code distance. Distance work is O(total) and
 // scratch space is O(mcs), which is why quantized indexes keep their repair rows on the serial path.
 void
-HGraph::collect_mci_repair_knn(InnerIdType node_id, Vector<InnerIdType>& knn_ids) const {
-    const auto precise_codes = this->get_precise_codes();
-    const auto total = this->total_count_.load();
+MciIncrementalUpdateExecutor::CollectRepairKnn(InnerIdType node_id,
+                                               Vector<InnerIdType>& knn_ids) const {
+    const auto precise_codes = hgraph_.get_precise_codes();
+    const auto total = hgraph_.total_count_.load();
     knn_ids.clear();
-    const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
-    Vector<std::pair<float, InnerIdType>> candidates(this->allocator_);
+    const auto k = std::min<uint64_t>(hgraph_.mci_parameters_.mcs, total - 1);
+    Vector<std::pair<float, InnerIdType>> candidates(hgraph_.allocator_);
     candidates.reserve(k);
     // QueryById preserves stored-code pair semantics; codecs may reuse the seed code and prefetch a
     // batch without reconstructing an approximate raw query vector.
@@ -1603,7 +1604,7 @@ HGraph::collect_mci_repair_knn(InnerIdType node_id, Vector<InnerIdType>& knn_ids
     for (InnerIdType candidate = 0; k > 0 and candidate < total;) {
         InnerIdType count = 0;
         while (candidate < total and count < batch_size) {
-            if (candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
+            if (candidate != node_id and not hgraph_.label_table_->IsRemoved(candidate)) {
                 batch_ids[count++] = candidate;
             }
             ++candidate;
@@ -1632,10 +1633,10 @@ HGraph::collect_mci_repair_knn(InnerIdType node_id, Vector<InnerIdType>& knn_ids
 }
 
 void
-HGraph::decode_mci_repair_codes(InnerIdType node_id, Vector<float>& out) const {
-    const auto precise_codes = this->get_precise_codes();
-    out.resize(this->dim_);
-    Vector<uint8_t> codes(precise_codes->code_size_, this->allocator_);
+MciIncrementalUpdateExecutor::DecodeRepairCodes(InnerIdType node_id, Vector<float>& out) const {
+    const auto precise_codes = hgraph_.get_precise_codes();
+    out.resize(hgraph_.dim_);
+    Vector<uint8_t> codes(precise_codes->code_size_, hgraph_.allocator_);
     precise_codes->GetCodesById(node_id, codes.data());
     CHECK_ARGUMENT(precise_codes->Decode(codes.data(), out.data()),
                    "failed to decode hgraph mci repair query vector");
@@ -1650,9 +1651,9 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
     CHECK_ARGUMENT(this->get_precise_codes() != nullptr,
                    "hgraph mci repair requires available vector codes");
 
-    if (not this->mci_repair_uses_fp32_pipeline()) {
+    if (not MciIncrementalUpdateExecutor(*this).RepairUsesFp32Pipeline()) {
         Vector<InnerIdType> knn_ids(this->allocator_);
-        this->collect_mci_repair_knn(node_id, knn_ids);
+        MciIncrementalUpdateExecutor(*this).CollectRepairKnn(node_id, knn_ids);
         this->incremental_update_mci_clique(node_id, knn_ids, total);
         return;
     }
@@ -1667,7 +1668,7 @@ HGraph::repair_mci_clique(InnerIdType node_id) {
 
     // FP32 storage need not be contiguous (for example block_memory_io).
     Vector<float> query(this->allocator_);
-    this->decode_mci_repair_codes(node_id, query);
+    MciIncrementalUpdateExecutor(*this).DecodeRepairCodes(node_id, query);
     this->incremental_update_mci_clique(node_id, query.data(), total);
 }
 
@@ -1982,7 +1983,7 @@ constexpr uint64_t K_MCI_PARALLEL_DELETE_MIN_ROWS = 256;
 // Plan one row against a frozen read view: no shared state is written here, so workers only share
 // the row cursor their caller owns.
 void
-MciIncrementalAddExecutor::plan_incremental_mci_clique(
+MciIncrementalUpdateExecutor::plan_incremental_mci_clique(
     const std::shared_lock<std::shared_mutex>& view,
     const Vector<InnerIdType>& knn_ids,
     uint64_t visible_total,
@@ -2063,11 +2064,11 @@ MciIncrementalAddExecutor::plan_incremental_mci_clique(
 // depend on the planning schedule. min_memberships_to_skip is the delete repair guard: a row that
 // already reached that many live cliques is skipped, exactly like the serial repair loop.
 MCIPlanMergeStats
-HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
-                                           uint64_t plan_count,
-                                           uint64_t total,
-                                           uint64_t min_memberships_to_skip) {
-    Vector<uint64_t> order(this->allocator_);
+MciIncrementalUpdateExecutor::MergePlans(Vector<MciAddPlan>& plans,
+                                         uint64_t plan_count,
+                                         uint64_t total,
+                                         uint64_t min_memberships_to_skip) {
+    Vector<uint64_t> order(hgraph_.allocator_);
     order.reserve(plan_count);
     for (uint64_t i = 0; i < plan_count; ++i) {
         order.push_back(i);
@@ -2076,9 +2077,9 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
         return plans[lhs].inner_id < plans[rhs].inner_id;
     });
 
-    UnorderedSet<InnerIdType> neighbors(this->allocator_);
-    Vector<InnerIdType> members(this->allocator_);
-    Vector<InnerIdType> clique_ids(this->allocator_);
+    UnorderedSet<InnerIdType> neighbors(hgraph_.allocator_);
+    Vector<InnerIdType> members(hgraph_.allocator_);
+    Vector<InnerIdType> clique_ids(hgraph_.allocator_);
     MCIPlanMergeStats stats;
     const bool check_live_memberships = min_memberships_to_skip > 0;
     for (auto index : order) {
@@ -2094,9 +2095,9 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
             if (not plan.memberships_empty) {
                 continue;
             }
-            Vector<InnerIdType> singleton(this->allocator_);
+            Vector<InnerIdType> singleton(hgraph_.allocator_);
             singleton.push_back(plan.inner_id);
-            this->mci_cliques_->AppendNewClique(singleton, total);
+            hgraph_.mci_cliques_->AppendNewClique(singleton, total);
             continue;
         }
         neighbors.clear();
@@ -2104,16 +2105,16 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
             // Only a duplicate or pre-existing row can already carry memberships in the planning
             // view, and only there may the live superset matter for the degree target.
             clique_ids.clear();
-            this->mci_cliques_->CollectNodeCliqueIds(plan.inner_id, clique_ids);
+            hgraph_.mci_cliques_->CollectNodeCliqueIds(plan.inner_id, clique_ids);
             if (check_live_memberships and clique_ids.size() >= min_memberships_to_skip) {
                 ++stats.skipped_covered;
                 continue;
             }
             for (auto cid : clique_ids) {
                 members.clear();
-                this->mci_cliques_->GetCliqueMembers(cid, members);
+                hgraph_.mci_cliques_->GetCliqueMembers(cid, members);
                 for (auto id : members) {
-                    if (id != plan.inner_id and not this->label_table_->IsRemoved(id)) {
+                    if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
                         neighbors.insert(id);
                     }
                 }
@@ -2125,20 +2126,20 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
             }
             const auto clique_id = target.second;
             members.clear();
-            this->mci_cliques_->GetCliqueMembers(clique_id, members);
+            hgraph_.mci_cliques_->GetCliqueMembers(clique_id, members);
             const auto adds_neighbor = std::any_of(members.begin(), members.end(), [&](auto id) {
-                return id != plan.inner_id and not this->label_table_->IsRemoved(id) and
+                return id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id) and
                        neighbors.find(id) == neighbors.end();
             });
-            if (not adds_neighbor or not this->mci_cliques_->AppendNodeToClique(
+            if (not adds_neighbor or not hgraph_.mci_cliques_->AppendNodeToClique(
                                          plan.inner_id,
                                          clique_id,
                                          total,
-                                         this->mci_parameters_.incremental_clique_max)) {
+                                         hgraph_.mci_parameters_.incremental_clique_max)) {
                 continue;
             }
             for (auto id : members) {
-                if (id != plan.inner_id and not this->label_table_->IsRemoved(id)) {
+                if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
                     neighbors.insert(id);
                 }
             }
@@ -2147,9 +2148,9 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
             if (neighbors.size() >= plan.degree_target) {
                 break;
             }
-            this->mci_cliques_->AppendNewClique(clique, total);
+            hgraph_.mci_cliques_->AppendNewClique(clique, total);
             for (auto id : clique) {
-                if (id != plan.inner_id and not this->label_table_->IsRemoved(id)) {
+                if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
                     neighbors.insert(id);
                 }
             }
@@ -2159,32 +2160,32 @@ HGraph::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
             // view that is older than the live structure can never leave a row less covered than
             // the serial path would; when the target is genuinely unreachable this is a no-op.
             ++stats.fallbacks;
-            this->incremental_update_mci_clique(plan.inner_id, plan.knn_ids, plan.visible_total);
+            hgraph_.incremental_update_mci_clique(plan.inner_id, plan.knn_ids, plan.visible_total);
         }
     }
     return stats;
 }
 
 MCIPlanMergeStats
-HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
-                                        uint64_t min_memberships_to_skip,
-                                        bool compact_after_chunk) {
+MciIncrementalUpdateExecutor::ParallelUpdate(const Vector<MciUpdateRow>& rows,
+                                             uint64_t min_memberships_to_skip,
+                                             bool compact_after_chunk) {
     const auto row_count = static_cast<uint64_t>(rows.size());
     const auto thread_count = std::max<uint64_t>(
-        1, std::min<uint64_t>(static_cast<uint64_t>(this->build_thread_count_), row_count));
-    const auto total = this->total_count_.load();
+        1, std::min<uint64_t>(static_cast<uint64_t>(hgraph_.build_thread_count_), row_count));
+    const auto total = hgraph_.total_count_.load();
     // The incremental degree target is a batch constant: the caller holds mci_mutation_mutex_ and
     // a batch only appends, so the live count cannot move under the workers.
-    const auto degree_target = this->mci_parameters_.IncrementalDegreeTarget(
-        static_cast<uint64_t>(this->GetNumElements()));
+    const auto degree_target = hgraph_.mci_parameters_.IncrementalDegreeTarget(
+        static_cast<uint64_t>(hgraph_.GetNumElements()));
     // One reusable plan slot per row of a chunk; plans are reset instead of reallocated so the
     // planning buffers are only ever grown to the chunk size.
     const auto plan_capacity =
         std::min<uint64_t>(K_MCI_PLAN_CHUNK, std::max<uint64_t>(1, row_count));
-    Vector<MciAddPlan> plans(this->allocator_);
+    Vector<MciAddPlan> plans(hgraph_.allocator_);
     plans.reserve(plan_capacity);
     for (uint64_t i = 0; i < plan_capacity; ++i) {
-        plans.emplace_back(this->allocator_);
+        plans.emplace_back(hgraph_.allocator_);
     }
     MCIPlanMergeStats stats;
     // Planning and merge wall time, logged once per call so the split stays observable.
@@ -2203,7 +2204,7 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
         // before the merge mutates the cell, and compaction may renumber clique ids, so it stays
         // between chunks.
         {
-            auto view = this->mci_cliques_->AcquireReadLock();
+            auto view = hgraph_.mci_cliques_->AcquireReadLock();
             std::atomic<uint64_t> next_row{begin};
             std::vector<std::future<void>> workers;
             workers.reserve(workers_here);
@@ -2211,8 +2212,8 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
                 // Per-worker scratch reused across the rows this worker claims. Add passes a ready
                 // vector pointer, quantized repair passes candidates, and non-contiguous FP32 repair
                 // decodes the row's stored codes here.
-                Vector<InnerIdType> computed_knn(this->allocator_);
-                Vector<float> decoded(this->allocator_);
+                Vector<InnerIdType> computed_knn(hgraph_.allocator_);
+                Vector<float> decoded(hgraph_.allocator_);
                 while (true) {
                     const auto index = next_row.fetch_add(1, std::memory_order_relaxed);
                     if (index >= end) {
@@ -2229,21 +2230,21 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
                     if (knn == nullptr) {
                         const void* vector = row.vector;
                         if (vector == nullptr and row.decode_codes) {
-                            this->decode_mci_repair_codes(row.inner_id, decoded);
+                            this->DecodeRepairCodes(row.inner_id, decoded);
                             vector = decoded.data();
                         }
-                        computed_knn = this->search_mci_knn(row.inner_id, vector, visible_total);
+                        computed_knn = hgraph_.search_mci_knn(row.inner_id, vector, visible_total);
                         knn = &computed_knn;
                     }
                     // Per-row planning lives on the executor so the Add path keeps one
                     // implementation; this call only fills the worker's own plan slot.
-                    MciIncrementalAddExecutor(*this).plan_incremental_mci_clique(
+                    this->plan_incremental_mci_clique(
                         view, *knn, visible_total, degree_target, plan);
                 }
             };
             for (uint64_t worker_id = 0; worker_id < workers_here; ++worker_id) {
-                if (this->thread_pool_ != nullptr) {
-                    workers.emplace_back(this->thread_pool_->GeneralEnqueue(plan_one_row));
+                if (hgraph_.thread_pool_ != nullptr) {
+                    workers.emplace_back(hgraph_.thread_pool_->GeneralEnqueue(plan_one_row));
                 } else {
                     workers.emplace_back(std::async(std::launch::async, plan_one_row));
                 }
@@ -2253,8 +2254,8 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
             }
         }
         const auto phase_t1 = std::chrono::steady_clock::now();
-        const auto chunk_stats = this->merge_incremental_mci_clique_plans(
-            plans, chunk_rows, total, min_memberships_to_skip);
+        const auto chunk_stats =
+            this->MergePlans(plans, chunk_rows, total, min_memberships_to_skip);
         const auto phase_t2 = std::chrono::steady_clock::now();
         stats.fallbacks += chunk_stats.fallbacks;
         stats.skipped_covered += chunk_stats.skipped_covered;
@@ -2265,7 +2266,7 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
         // The counter is not atomic and mutation serialization is already held by the caller, so
         // the chunk is accounted once its workers have joined.
         if (compact_after_chunk) {
-            this->maybe_compact_mci(chunk_rows);
+            hgraph_.maybe_compact_mci(chunk_rows);
         }
     }
     // Planning is the parallel phase, the merge is the single-threaded ordered commit, and the
@@ -2274,7 +2275,7 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
     logger::info(
         "hgraph mci batched update finished, total={}, planned={}, skipped_covered={}, "
         "repair_fallbacks={}, plan_wall_s={:.3f}, merge_wall_s={:.3f}",
-        this->total_count_.load(),
+        hgraph_.total_count_.load(),
         row_count,
         stats.skipped_covered,
         stats.fallbacks,
@@ -2284,7 +2285,7 @@ HGraph::parallel_incremental_mci_update(const Vector<MciUpdateRow>& rows,
 }
 
 void
-MciIncrementalAddExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& data) {
+MciIncrementalUpdateExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& data) {
     const auto row_count = static_cast<uint64_t>(batch.rows.size());
     const auto thread_count = std::max<uint64_t>(
         1, std::min<uint64_t>(static_cast<uint64_t>(hgraph_.build_thread_count_), row_count));
@@ -2309,8 +2310,7 @@ MciIncrementalAddExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& 
         update.vector = hgraph_.get_data(data, row.input_idx);
         rows.push_back(update);
     }
-    hgraph_.parallel_incremental_mci_update(
-        rows, /*min_memberships_to_skip=*/0, /*compact_after_chunk=*/true);
+    this->ParallelUpdate(rows, /*min_memberships_to_skip=*/0, /*compact_after_chunk=*/true);
     logger::info("hgraph mci incremental add finished, total={}", hgraph_.total_count_.load());
 }
 
@@ -2410,19 +2410,19 @@ HGraph::repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdTyp
 }
 
 void
-HGraph::build_mci_repair_rows(const Vector<InnerIdType>& repair_node_ids,
-                              Vector<MciUpdateRow>& rows) const {
+MciIncrementalUpdateExecutor::BuildRepairRows(const Vector<InnerIdType>& repair_node_ids,
+                                              Vector<MciUpdateRow>& rows) const {
     rows.clear();
     rows.reserve(repair_node_ids.size());
-    const auto total = this->total_count_.load();
+    const auto total = hgraph_.total_count_.load();
     // Contiguous FP32 storage needs no per-row copy; every other layout is decoded by the worker.
     uint64_t stride = 0;
     const float* contiguous = nullptr;
-    if (this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-        const auto precise_codes = this->get_precise_codes();
+    if (hgraph_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        const auto precise_codes = hgraph_.get_precise_codes();
         if (precise_codes != nullptr) {
             contiguous = precise_codes->TryGetContiguousRawFloatData(&stride);
-            if (contiguous != nullptr and stride != this->dim_) {
+            if (contiguous != nullptr and stride != hgraph_.dim_) {
                 contiguous = nullptr;
             }
         }
@@ -2445,25 +2445,25 @@ HGraph::build_mci_repair_rows(const Vector<InnerIdType>& repair_node_ids,
 // Quantized indexes keep the serial per-row scan; small batches keep the serial loop as the
 // semantics baseline.
 uint64_t
-HGraph::repair_mci_cliques(const Vector<InnerIdType>& repair_node_ids) {
+MciIncrementalUpdateExecutor::RepairCliques(const Vector<InnerIdType>& repair_node_ids) {
     if (repair_node_ids.empty()) {
         return 0;
     }
     const auto thread_count =
-        std::max<uint64_t>(1, static_cast<uint64_t>(this->build_thread_count_));
+        std::max<uint64_t>(1, static_cast<uint64_t>(hgraph_.build_thread_count_));
     if (thread_count > 1 and repair_node_ids.size() >= K_MCI_PARALLEL_DELETE_MIN_ROWS and
-        this->mci_repair_uses_fp32_pipeline()) {
-        Vector<MciUpdateRow> rows(this->allocator_);
-        this->build_mci_repair_rows(repair_node_ids, rows);
+        this->RepairUsesFp32Pipeline()) {
+        Vector<MciUpdateRow> rows(hgraph_.allocator_);
+        this->BuildRepairRows(repair_node_ids, rows);
         // Repair does not compact per chunk: the delete path compacts once after the whole set.
-        const auto stats = this->parallel_incremental_mci_update(
-            rows, this->mci_parameters_.delete_node_mct_threshold, /*compact_after_chunk=*/false);
+        const auto stats = this->ParallelUpdate(
+            rows, hgraph_.mci_parameters_.delete_node_mct_threshold, /*compact_after_chunk=*/false);
         return repair_node_ids.size() - stats.skipped_covered;
     }
     uint64_t repaired_node_count = 0;
-    Vector<InnerIdType> memberships(this->allocator_);
+    Vector<InnerIdType> memberships(hgraph_.allocator_);
     for (auto repair_node_id : repair_node_ids) {
-        if (this->repair_mci_clique_if_undercovered(repair_node_id, memberships)) {
+        if (hgraph_.repair_mci_clique_if_undercovered(repair_node_id, memberships)) {
             ++repaired_node_count;
         }
     }
@@ -2471,16 +2471,16 @@ HGraph::repair_mci_cliques(const Vector<InnerIdType>& repair_node_ids) {
 }
 
 MCIDeleteSnapshot
-HGraph::prepare_mci_delete(const Vector<InnerIdType>& removed_inner_ids,
-                           uint64_t clique_size_threshold,
-                           uint64_t node_mct_threshold) {
+MciIncrementalUpdateExecutor::PrepareDelete(const Vector<InnerIdType>& removed_inner_ids,
+                                            uint64_t clique_size_threshold,
+                                            uint64_t node_mct_threshold) {
     const auto thread_count =
-        std::max<uint64_t>(1, static_cast<uint64_t>(this->build_thread_count_));
+        std::max<uint64_t>(1, static_cast<uint64_t>(hgraph_.build_thread_count_));
     if (thread_count <= 1 or removed_inner_ids.size() < K_MCI_PARALLEL_DELETE_MIN_ROWS) {
-        return this->mci_cliques_->PrepareDelete(
+        return hgraph_.mci_cliques_->PrepareDelete(
             removed_inner_ids, clique_size_threshold, node_mct_threshold);
     }
-    return this->mci_cliques_->PrepareDeleteParallel(
+    return hgraph_.mci_cliques_->PrepareDeleteParallel(
         removed_inner_ids, clique_size_threshold, node_mct_threshold, thread_count);
 }
 
@@ -2492,13 +2492,14 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
     }
     std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
     // Project the whole batch before repairing: no temporary cliques for later deletions.
-    const auto snapshot =
-        this->prepare_mci_delete(removed_inner_ids,
-                                 this->mci_parameters_.delete_clique_size_threshold,
-                                 this->mci_parameters_.delete_node_mct_threshold);
+    const auto snapshot = MciIncrementalUpdateExecutor(*this).PrepareDelete(
+        removed_inner_ids,
+        this->mci_parameters_.delete_clique_size_threshold,
+        this->mci_parameters_.delete_node_mct_threshold);
     this->mci_cliques_->CommitDelete(
         removed_inner_ids, snapshot.retired_clique_ids, this->total_count_.load());
-    const auto repaired_node_count = this->repair_mci_cliques(snapshot.repair_node_ids);
+    const auto repaired_node_count =
+        MciIncrementalUpdateExecutor(*this).RepairCliques(snapshot.repair_node_ids);
     logger::info(
         "hgraph mci mark remove repaired, removed={}, affected_cliques={}, retired_cliques={}, "
         "repair_candidates={}, repaired_nodes={}",
@@ -2542,10 +2543,10 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     for (const auto& target : targets) {
         removed.push_back(target.first);
     }
-    const auto snapshot =
-        this->prepare_mci_delete(removed,
-                                 this->mci_parameters_.delete_clique_size_threshold,
-                                 this->mci_parameters_.delete_node_mct_threshold);
+    const auto snapshot = MciIncrementalUpdateExecutor(*this).PrepareDelete(
+        removed,
+        this->mci_parameters_.delete_clique_size_threshold,
+        this->mci_parameters_.delete_node_mct_threshold);
     this->mci_cliques_->MarkUnavailable();
     // On failure, never expose the old CSR under moved vector IDs. Physical deletions, like
     // the existing HGraph FORCE_REMOVE operation, are not transactionally rolled back.
@@ -2581,7 +2582,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
             }
             translated.push_back(id);
         }
-        this->repair_mci_cliques(translated);
+        MciIncrementalUpdateExecutor(*this).RepairCliques(translated);
     }
     force_lock.lock();
     this->mci_cliques_->Flush(total, static_cast<uint64_t>(this->build_thread_count_));

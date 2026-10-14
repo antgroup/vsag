@@ -30,7 +30,7 @@
 #include "dataset_impl.h"
 #include "hgraph.h"
 #include "hgraph_fast_build.h"
-#include "hgraph_mci_add.h"  // IWYU pragma: keep
+#include "hgraph_mci_update.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -512,7 +512,7 @@ HGraph::add_impl(const DatasetPtr& data) {
             force_remove_rlock.unlock();
         }
         if (had_mci_clique_index) {
-            MciIncrementalAddExecutor(*this).Run(batch, data);
+            MciIncrementalUpdateExecutor(*this).Run(batch, data);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
         } else {
             const void* vectors = nullptr;
