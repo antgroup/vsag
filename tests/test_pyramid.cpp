@@ -4000,8 +4000,12 @@ TEST_CASE("Pyramid root KNN returns all duplicate IDs for identical vectors",
     vectors[0] = vectors[32] = vectors[64] = 1.0F;
 
     auto make_dataset = [&](int offset, int count) {
-        auto data = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(count)
-                        ->Ids(ids.data() + offset)->Float32Vectors(vectors.data() + offset * 32);
+        auto data = vsag::Dataset::Make()
+                        ->Owner(false)
+                        ->Dim(32)
+                        ->NumElements(count)
+                        ->Ids(ids.data() + offset)
+                        ->Float32Vectors(vectors.data() + offset * 32);
         data->Paths("host", paths.data() + offset);
         return data;
     };
@@ -4020,8 +4024,8 @@ TEST_CASE("Pyramid root KNN returns all duplicate IDs for identical vectors",
 
     REQUIRE(index->GetNumElements() == 3);
 
-    auto query = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(1)
-                     ->Float32Vectors(vectors.data());
+    auto query = vsag::Dataset::Make()->Owner(false)->Dim(32)->NumElements(1)->Float32Vectors(
+        vectors.data());
     const std::string search_params = R"({"pyramid":{"ef_search":200,"hierarchies":["host"]}})";
     auto result = index->KnnSearch(query, 10, search_params);
     REQUIRE(result.has_value());
