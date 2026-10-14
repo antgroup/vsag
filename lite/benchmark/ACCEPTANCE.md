@@ -61,9 +61,13 @@ binaries. Report-specific frozen Full/quality runners intentionally enforce thei
 historical feature identity: use the matching pinned checkout to replay those
 protocols, rather than removing guards or claiming they measured this new head.
 
-Historical dataset preparation, comparison and diagnostic runners are retained
-for provenance. The default production API is solely #2904's; obsolete SQ8/codec
-probes are not exposed as current supported backend options.
+Only the formal acceptance runners and their dependency/test closure remain in
+the current review tree. 32 historical exploration tools/redundant documents are
+preserved at immutable `c072a42`; `RAW_MANIFEST.json` records their paths/hashes/URLs.
+Historical exploratory replay must use that checkout. Negative experiment reports
+remain linked above, so pruning review code does not hide failed candidates.
+The default production API is solely #2904's; obsolete SQ8/codec probes and graph
+candidates are neither current supported backend options nor acceptance defaults.
 
 ## Community review and remaining acceptance
 

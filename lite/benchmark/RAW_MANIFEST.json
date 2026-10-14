@@ -2113,5 +2113,200 @@
       "sha256": "e0d58695586424146453424c78a04ce4ec1c35bb3864423bb039a5d1449ce0f4",
       "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/verification.log"
     }
+  ],
+  "archived_tool_snapshot": "c072a42dbfeb29da0b6965750750bf73e1b50d21",
+  "archived_tools": [
+    {
+      "path": "lite/benchmark/ACCEPTANCE_STATUS_20261012.md",
+      "bytes": 648,
+      "sha256": "ee3e1fb882e9a8e4804c17f84076c549e68c4675784b68821cfcbf487891a704",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/ACCEPTANCE_STATUS_20261012.md"
+    },
+    {
+      "path": "lite/benchmark/FINAL_REPORT.md",
+      "bytes": 299,
+      "sha256": "9ee8d45f2a6065ebac07735bd08a725add5a7a9edd195c6a5e1a586dddcee55c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/FINAL_REPORT.md"
+    },
+    {
+      "path": "lite/benchmark/RABITQ_LITE_BACKEND_DESIGN.md",
+      "bytes": 327,
+      "sha256": "e936d3ce4b18230460142fec7d4ddf64839d5560f5d397385510160894af6cb6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/RABITQ_LITE_BACKEND_DESIGN.md"
+    },
+    {
+      "path": "lite/benchmark/RABITQ_LITE_FEASIBILITY.md",
+      "bytes": 321,
+      "sha256": "2ff6f14a2f4933f1910325dd568927e616e45863a52dcf36aed71eba6c175109",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/RABITQ_LITE_FEASIBILITY.md"
+    },
+    {
+      "path": "lite/benchmark/fp32_dispatch_probe.cpp",
+      "bytes": 830,
+      "sha256": "71d8956cf73984492f5339a9576eabdbdc6d7dbe645db9df73d666673d0eab08",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/fp32_dispatch_probe.cpp"
+    },
+    {
+      "path": "lite/benchmark/prepare_candidate_replay.py",
+      "bytes": 2781,
+      "sha256": "957cac83f65613a1334112792020e8185edbd5bff960d8626a1f13dbca7f8862",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/prepare_candidate_replay.py"
+    },
+    {
+      "path": "lite/benchmark/quantization_probe.cpp",
+      "bytes": 16485,
+      "sha256": "578335943a0a9c9843862cb6ef54b2d7aa02ff9ff2fff29945b1a5c42ac76626",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/quantization_probe.cpp"
+    },
+    {
+      "path": "lite/benchmark/rabitq_filter_ip.cpp",
+      "bytes": 1510,
+      "sha256": "b740a16d48ee7238e9590846cf50c35eddedd4e25dc429740daeef78e6df9241",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_filter_ip.cpp"
+    },
+    {
+      "path": "lite/benchmark/rabitq_filter_ip.h",
+      "bytes": 575,
+      "sha256": "7baed903363367622d76867e25f95b4146271dde7184493b32e304f911e75a5d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_filter_ip.h"
+    },
+    {
+      "path": "lite/benchmark/rabitq_filter_ip_avx2.cpp",
+      "bytes": 509,
+      "sha256": "bde82ab3d3ea5a7e7de42e96528f79262a8b49731db5606da4ee4bf764ac2226",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_filter_ip_avx2.cpp"
+    },
+    {
+      "path": "lite/benchmark/rabitq_filter_ip_avx512.cpp",
+      "bytes": 515,
+      "sha256": "17baca7c7db53d017e9321d3c1c8b3d978710f6b3a41d1eea9decf594d85ce5e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_filter_ip_avx512.cpp"
+    },
+    {
+      "path": "lite/benchmark/rabitq_lite_codec_probe.cpp",
+      "bytes": 102061,
+      "sha256": "ec952075e9e85858e4afbbf9d0fc37a6fc1cf529b111bf770ed0ecf18162c996",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_lite_codec_probe.cpp"
+    },
+    {
+      "path": "lite/benchmark/rabitq_lite_layout_probe.cpp",
+      "bytes": 4053,
+      "sha256": "13fcb08d3c1fe5d9014c41112b584117edace7a4aff8633a93b78d6394da6f0c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/rabitq_lite_layout_probe.cpp"
+    },
+    {
+      "path": "lite/benchmark/run_aligned_followup.py",
+      "bytes": 4020,
+      "sha256": "ba67754f69dd45ac0bb3e83b528396f3f84edff293d11c9a592faa792f1303eb",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_aligned_followup.py"
+    },
+    {
+      "path": "lite/benchmark/run_aligned_fp32_full.py",
+      "bytes": 12786,
+      "sha256": "e6875062da0800162079fbb369a962cf76fda3df85c6633eb9a83c196cf05971",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_aligned_fp32_full.py"
+    },
+    {
+      "path": "lite/benchmark/run_baseline.sh",
+      "bytes": 2113,
+      "sha256": "7c431f144498b90c85fcf5865bef8ab05c14c4110d123f2f036ae66f55c1956b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_baseline.sh"
+    },
+    {
+      "path": "lite/benchmark/run_build_diversity_pilot.py",
+      "bytes": 9615,
+      "sha256": "13881e7c7bf03ec2a9d400e35b8848a5c7c2fe9389dee32dd4bb40602d0692c5",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_build_diversity_pilot.py"
+    },
+    {
+      "path": "lite/benchmark/run_comparison.sh",
+      "bytes": 3357,
+      "sha256": "734869c7c8203144fd4e2755ea75321cb541a1754bea39b29d527a432dac00e4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_comparison.sh"
+    },
+    {
+      "path": "lite/benchmark/run_fp32_dispatch_probe.py",
+      "bytes": 3522,
+      "sha256": "2bb44ff258c165ccd92db7e59d021ab5f49162b7ba2022dfd4afee5cbefcff3a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_fp32_dispatch_probe.py"
+    },
+    {
+      "path": "lite/benchmark/run_query_loss_trace.py",
+      "bytes": 5591,
+      "sha256": "3a3d18a4408abab4f3ed1a807578088f1d9c4832485a3c0b8404ef169d93ff1c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_query_loss_trace.py"
+    },
+    {
+      "path": "lite/benchmark/run_rabitq_reference.sh",
+      "bytes": 2502,
+      "sha256": "eb430f04cb91fd30bbd348a171b0907bd7fcb8a64ec631faa05cf612f5f62bca",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_rabitq_reference.sh"
+    },
+    {
+      "path": "lite/benchmark/run_rabitq_single_core.sh",
+      "bytes": 4245,
+      "sha256": "8433740be25720635dd7956a6836ca94cf55040e7f20365dd9fa049222fb63f6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_rabitq_single_core.sh"
+    },
+    {
+      "path": "lite/benchmark/run_reciprocal_budget.py",
+      "bytes": 6058,
+      "sha256": "4ac037b5167525fe614796522bc14d9d6548021f27c5a71b8098ba666646a7c8",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_reciprocal_budget.py"
+    },
+    {
+      "path": "lite/benchmark/run_sift.sh",
+      "bytes": 1580,
+      "sha256": "ce190a648fec3820289623d84f8ebdd4c8113d0e4002bfb6e4091ea03a4cd7d4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_sift.sh"
+    },
+    {
+      "path": "lite/benchmark/run_sift_comparison.sh",
+      "bytes": 3019,
+      "sha256": "37cdf32c89ba064f6663416041335f7bd4ca0cb8b16dc312a74c8083fec3516d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/run_sift_comparison.sh"
+    },
+    {
+      "path": "lite/benchmark/test_query_loss_trace.py",
+      "bytes": 1235,
+      "sha256": "e94bb98bd5d58d89172f1c11bae4ba880c66a299549b980b341ee0ee827c7d64",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/test_query_loss_trace.py"
+    },
+    {
+      "path": "lite/benchmark/trace_query_losses.cpp",
+      "bytes": 7116,
+      "sha256": "51a78b81575f47a117fb8f6bb275546bf2abc405e6022b11d3a1b53baceb6c41",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/trace_query_losses.cpp"
+    },
+    {
+      "path": "lite/benchmark/verify_aligned_followup.py",
+      "bytes": 3087,
+      "sha256": "3b684be2db1e773a32eb4b4ab2560d924d7fd7cf7332739cec5a26270846e008",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_aligned_followup.py"
+    },
+    {
+      "path": "lite/benchmark/verify_aligned_fp32_full.py",
+      "bytes": 5918,
+      "sha256": "dd3d3a4f770308306c65103f620419b2d34dd2d862e58266a8527e7a75c9d4b6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_aligned_fp32_full.py"
+    },
+    {
+      "path": "lite/benchmark/verify_build_diversity_pilot.py",
+      "bytes": 4797,
+      "sha256": "1bfa3d3fc7eeddd331c04f9222473366f6f704ab2765f2623afb7620ecfea76d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_build_diversity_pilot.py"
+    },
+    {
+      "path": "lite/benchmark/verify_query_loss_trace.py",
+      "bytes": 5283,
+      "sha256": "3e23b04ad22c9a2cd749c89f59f47a550df21c30eec2a40a691bdd5a5e9e9d91",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_query_loss_trace.py"
+    },
+    {
+      "path": "lite/benchmark/verify_reciprocal_budget.py",
+      "bytes": 5699,
+      "sha256": "a1bde2737e6bb2442a836e43dc152156f4618ca2b31ab16cb55badef036ec44d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_reciprocal_budget.py"
+    }
   ]
 }
