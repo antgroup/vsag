@@ -1,6 +1,7 @@
 # VSAG Lite reproducible acceptance tools
 
 [Start here: requirements, reports, commands and limitations](ACCEPTANCE.md).
+[详细综合验收报告：三数据集、Full对照、CRUD、CPU、优化及限制](ACCEPTANCE_REPORT.md).
 
 - Functionality/architecture/regressions: PR #2904, feature baseline `74a9420`.
 - Benchmark and audit tools: this directory; `ENABLE_BENCHMARKS` defaults OFF.
@@ -22,12 +23,12 @@ The current integration does not retrospectively rerun or relabel old experiment
 
 ## Maintained review scope
 
-The current tree retains 27 source/script/test files, plus this guide, the
+The current tree retains 29 source/script/test files, plus this guide, the
 acceptance index, manifest and final-version evidence. The supported feature
 contract is documented in [English](../../docs/docs/en/src/development/lite_first.md)
 and [Chinese](../../docs/docs/zh/src/development/lite_first.md), owned by #2904.
 
-- Data preparation: `prepare_sift.py`, `prepare_gist.cpp`.
+- Data preparation: `prepare_sift.py`, `prepare_gist.cpp`, `prepare_cohere.py` and its regression fixture.
 - Optional Lite/native Full consumers: the four Lite CMake targets and `full/`.
 - Resident CRUD/CPU: `run_mixed_cpu_acceptance.py`, verifier, packer and tests.
 - Pinned native Full: fresh build, comparison runner, verifier and regression test.
@@ -41,6 +42,23 @@ checkout, not by mixing archived candidates into current production. No history
 was rewritten and no original server dataset/raw result was deleted.
 
 ## Dependencies and scope validation
+
+Cohere preparation requires NumPy, PyArrow and h5py (the shared SIFT utility
+module imports h5py). For the validation environment use
+`python -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0` in an isolated
+environment. Run `python lite/benchmark/test_prepare_cohere.py`; its synthetic
+Parquet fixtures check normalization, FP64 truth/ties, original-ID mapping,
+query offsets and pre-write rejection of invalid vectors/IDs/ranges. Without
+optional dependencies unittest discovery explicitly skips this fixture; a skip
+is not a successful data-preparation test. With dependencies it runs all checks
+during import; the standalone command is the explicit execution receipt.
+
+Prepare source `train.parquet` / `test.parquet` with
+`python lite/benchmark/prepare_cohere.py /path/to/cohere-source /path/to/new-output --counts 10000 100000 --queries 100 --k 10`.
+It refuses existing output, records source/output hashes and source-ID files,
+normalizes with FP64 then stores FP32, and audits cosine-to-L2 rounding. Historical
+10k/100k Cohere reports are linked from the comprehensive report; no new Cohere
+performance matrix is claimed by restoring these tools.
 
 SIFT preparation requires Python3, NumPy and h5py. A separate environment can use
 `python -m pip install numpy==1.26.4 h5py==3.11.0`; these are the versions used by

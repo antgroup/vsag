@@ -1,5 +1,10 @@
 # VSAG Lite acceptance: reviewer entry point
 
+[详细综合报告 / comprehensive evidence report](ACCEPTANCE_REPORT.md) covers the
+four outputs, three datasets, Lite/native Full comparisons, real CRUD, CPU/memory,
+100k experiments, measured optimizations and failed quality gates. Historical
+Cohere coverage is not the latest SIFT/GIST resident rerun.
+
 ## Scope and source identity
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
