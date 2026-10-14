@@ -10,7 +10,7 @@ import subprocess
 import sys
 
 
-CPP_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
+CPP_SUFFIXES = {".c", ".cc", ".cpp", ".cu", ".cxx", ".h", ".hh", ".hpp", ".hxx", ".inl"}
 CAMEL_CASE = re.compile(r"^[A-Z][A-Za-z0-9]*$")
 EXCLUDED_PREFIXES = ("extern/", "vendor/", "third_party/", "build/", "build-")
 EXCLUDED_PARTS = {"generated", "hnsw", "diskann"}

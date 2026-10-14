@@ -42,11 +42,9 @@ a single search call. The `search_allocator_` field is optional — when left at
 index falls back to the allocator that was attached to its owning `Resource`.
 
 > **Availability.** `Index::SearchWithRequest` has a default implementation that returns an
-> *unsupported* error. HGraph, IVF, BruteForce, WARP, SINDI and Pyramid implement it today.
-> Pyramid supports KNN request searches, including `expected_labels_` reasoning reports; range
-> requests with expected labels are not supported. For indexes that do not yet override
-> `SearchWithRequest` (SINDI_V2), use the legacy `SearchParam`
-> path described below.
+> *unsupported* error. HGraph, IVF, BruteForce, WARP, SINDI, SINDI_V2 and Pyramid implement it
+> today. Pyramid supports KNN request searches, including `expected_labels_` reasoning reports;
+> range requests with expected labels are not supported.
 
 ## Legacy API — `SearchParam::allocator` *(deprecated)*
 
@@ -122,6 +120,10 @@ arena.reset();              // drops every per-query buffer at once
 | `KnnSearch(query, k, parameters_str)` | No per-search allocator hook; uses the index allocator. |
 | Dedicated `RangeSearch(...)` overloads | No allocator parameter; use the index allocator. |
 | Range-mode `SearchWithRequest` | Follows the same index-specific rules as KNN-mode `SearchWithRequest`. |
+
+SINDI and IVF reasoning containers also use the selected search allocator:
+`search_allocator_` when non-null, otherwise the index allocator. This does not mean
+that all standard-library allocations (such as JSON or string storage) use that allocator.
 
 Setting a per-search allocator never affects the index's permanent data structures. It only
 narrows the lifetime of memory touched by one specific search call, and only to the extent that

@@ -108,3 +108,96 @@ TEST_CASE("IVF Partition Strategy Routing Parameters", "[ut][IVFPartitionStrateg
         "route_ef_construction": 300
     })"));
 }
+
+TEST_CASE("IVF Partition Strategy GPU Build Parameters", "[ut][IVFPartitionStrategyParameters]") {
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+
+    // Off, on device 0, with both budgets derived, unless the caller says
+    // otherwise. An index built without asking for the backend is unaffected.
+    REQUIRE_FALSE(param->enable_gpu_build);
+    REQUIRE(param->gpu_device_id == 0);
+    REQUIRE(param->gpu_memory_budget == 0);
+    REQUIRE(param->gpu_min_work_threshold == 0);
+
+    param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "enable_gpu_build": true,
+        "gpu_device_id": 3,
+        "gpu_memory_budget": 1073741824,
+        "gpu_min_work_threshold": 2147483648
+    })");
+    REQUIRE(param->enable_gpu_build);
+    REQUIRE(param->gpu_device_id == 3);
+    REQUIRE(param->gpu_memory_budget == 1073741824ULL);
+    REQUIRE(param->gpu_min_work_threshold == 2147483648ULL);
+    vsag::ParameterTest::TestToJson(param);
+
+    // All three are read as signed and stored as an ordinal or a size, so a
+    // negative has to be rejected rather than wrapped into a plausible value.
+    //
+    // Every case below carries ivf_train_type, without which FromJson throws for
+    // its own reasons and the assertion would pass whatever the value is.
+    REQUIRE_NOTHROW(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_device_id": 1,
+        "gpu_memory_budget": 1024,
+        "gpu_min_work_threshold": 1024
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_device_id": -1
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_memory_budget": -1
+    })"));
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_min_work_threshold": -1
+    })"));
+
+    // The ordinal is the only one of the three that narrows: it is read as a
+    // 64-bit integer and stored in an int32_t, so both sides of that range are
+    // pinned here. The two budgets widen into a uint64_t and have no such edge.
+    REQUIRE_NOTHROW(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_device_id": 2147483647
+    })"));
+    REQUIRE(param->gpu_device_id == 2147483647);
+    REQUIRE_THROWS(param->FromString(R"(
+    {
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "kmeans",
+        "gpu_device_id": 2147483648
+    })"));
+}
+
+TEST_CASE("IVF Partition Strategy GPU Settings Do Not Affect Compatibility",
+          "[ut][IVFPartitionStrategyParameters]") {
+    // These decide how the centroids are computed, not what the index looks
+    // like afterwards, so an index trained on a device has to stay loadable by
+    // a reader configured for the host and the other way round.
+    auto host = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    host->FromString(R"({"partition_strategy_type": "ivf", "ivf_train_type": "kmeans"})");
+
+    auto device = std::make_shared<vsag::IVFPartitionStrategyParameters>(*host);
+    device->enable_gpu_build = true;
+    device->gpu_device_id = 2;
+    device->gpu_memory_budget = 1ULL << 30;
+    device->gpu_min_work_threshold = 1ULL << 31;
+
+    REQUIRE(host->CheckCompatibility(device));
+    REQUIRE(device->CheckCompatibility(host));
+}

@@ -45,6 +45,19 @@ public:
         filter_impl_->GetValidIds(valid_ids, count);
     }
 
+    [[nodiscard]] const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        // The wrapped filter observes labels, so the bitmap it can offer is indexed by label. It is
+        // usable as an inner-id bitmap only when labels and inner ids are the same ids.
+        if (not label_table_.IsIdentityMapping()) {
+            if (size != nullptr) {
+                *size = 0;
+            }
+            return nullptr;
+        }
+        return filter_impl_->GetValidBitmap(size);
+    }
+
 private:
     const FilterPtr filter_impl_;
     const LabelTable& label_table_;

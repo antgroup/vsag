@@ -27,6 +27,7 @@
 #include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
@@ -944,6 +945,95 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
         delete[] item.vals_;
         delete[] item.ids_;
     }
+}
+
+TEST_CASE("SINDI FP16 rerank build search add and serialize", "[ut][SINDI][fp16]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 16,
+        "window_size": 10000,
+        "doc_prune_ratio": 0.0,
+        "use_quantization": false,
+        "use_reorder": true,
+        "rerank_type": "fp16",
+        "avg_doc_term_length": 3
+    })"));
+
+    uint32_t ids0[] = {1, 4, 7};
+    float values0[] = {100.1F, 0.3333F, 0.2F};
+    uint32_t ids1[] = {1, 4};
+    float values1[] = {0.1F, 0.15F};
+    uint32_t ids2[] = {2, 7};
+    float values2[] = {1.0F, 0.05F};
+    SparseVector vectors[] = {{3, ids0, values0}, {2, ids1, values1}, {2, ids2, values2}};
+    int64_t labels[] = {10, 20, 30};
+    auto base = Dataset::Make();
+    base->NumElements(3)->SparseVectors(vectors)->Ids(labels)->Owner(false);
+
+    SINDI built(parameter, common_param);
+    REQUIRE(built.Build(base).empty());
+    SINDI loaded(parameter, common_param);
+    test_serializion(built, loaded);
+
+    auto unchanged = Dataset::Make();
+    unchanged->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(loaded.UpdateVector(labels[0], unchanged));
+
+    float changed_values[] = {101.0F, values0[1], values0[2]};
+    SparseVector changed_vector{3, ids0, changed_values};
+    auto changed = Dataset::Make();
+    changed->NumElements(1)->SparseVectors(&changed_vector)->Owner(false);
+    REQUIRE_FALSE(loaded.UpdateVector(labels[0], changed));
+
+    SparseVector query_vector{3, ids0, values0};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const std::string search_parameters = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 3
+        }
+    })";
+    auto result = loaded.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 10);
+    const auto statistics = JsonType::Parse(result->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["sparse_fp16"].GetUint64() > 0);
+
+    const auto rounded = [](float value) {
+        return generic::FP16ToFloat(generic::FloatToFP16(value));
+    };
+    const float expected_distance = 1.0F - values0[0] * rounded(values0[0]) -
+                                    values0[1] * rounded(values0[1]) -
+                                    values0[2] * rounded(values0[2]);
+    REQUIRE(std::abs(loaded.CalcDistanceById(query, 10, true) - expected_distance) < 1e-6F);
+
+    float added_value = 0.75F;
+    uint32_t added_id = 4;
+    int64_t added_label = 40;
+    SparseVector added_vector{1, &added_id, &added_value};
+    auto added = Dataset::Make();
+    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+    REQUIRE(loaded.Add(added).empty());
+    REQUIRE(loaded.GetNumElements() == 4);
+
+    auto fp32_parameter = std::make_shared<SINDIParameter>();
+    auto fp32_json = parameter->ToJson();
+    fp32_json[SPARSE_RERANK_TYPE].SetString(SPARSE_RERANK_TYPE_FP32);
+    fp32_parameter->FromJson(fp32_json);
+    SINDI fp32(fp32_parameter, common_param);
+    constexpr uint64_t estimate_count = 10'000;
+    const uint64_t fp16_memory = loaded.EstimateMemory(estimate_count);
+    const uint64_t fp32_memory = fp32.EstimateMemory(estimate_count);
+    REQUIRE(fp16_memory < fp32_memory);
+    REQUIRE(fp32_memory - fp16_memory == estimate_count * 4);
 }
 
 TEST_CASE("SINDI range search ignores repeated zero-distance candidates", "[ut][SINDI]") {

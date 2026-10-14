@@ -30,6 +30,7 @@ public:
            BucketIdType buckets_per_data,
            DistHeapPtr& heap,
            Vector<float>& dist,
+           Vector<InnerIdType>& scanned_inner_ids,
            ReasoningContext* reasoning_ctx) const override;
 };
 

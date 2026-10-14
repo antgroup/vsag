@@ -71,6 +71,7 @@ public:
     GraphInterfaceParamPtr graph_param{nullptr};
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     ODescentParameterPtr odescent_param{nullptr};
+    PiPNNGraphBuilderParameter pipnn_param{};
 
     std::vector<int32_t> no_build_levels;
     std::vector<PyramidHierarchyParameters> hierarchies;

@@ -174,5 +174,17 @@ endif ()
 add_executable(329_feature_ivf_precise_bucket 329_feature_ivf_precise_bucket.cpp)
 target_link_libraries(329_feature_ivf_precise_bucket vsag)
 
+add_executable(330_feature_search_statistics 330_feature_search_statistics.cpp)
+target_link_libraries(330_feature_search_statistics vsag)
+
 add_executable(114_index_simq 114_index_simq.cpp)
 target_link_libraries(114_index_simq vsag)
+
+add_executable(330_feature_timeout_search 330_feature_timeout_search.cpp)
+target_link_libraries(330_feature_timeout_search vsag)
+
+add_executable(332_feature_search_session 332_feature_search_session.cpp)
+target_link_libraries(332_feature_search_session vsag)
+
+add_executable(327_feature_search_reasoning 327_feature_search_reasoning.cpp)
+target_link_libraries(327_feature_search_reasoning vsag)

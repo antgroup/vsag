@@ -35,6 +35,63 @@ private:
     std::shared_mutex& delete_ids_mutex_;
 };
 
+class RemoveListReadView : public Filter {
+public:
+    // The guard pins ids against mutation, but does not own its LabelTable or mutex.
+    // The caller must keep the table alive until every copy of the view is destroyed.
+    RemoveListReadView(const UnorderedSet<InnerIdType>& ids,
+                       std::shared_lock<std::shared_mutex>&& guard)
+        : guard_(std::move(guard)), ids_(ids) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return ids_.count(id) == 0;
+    }
+
+private:
+    std::shared_lock<std::shared_mutex> guard_;
+    const UnorderedSet<InnerIdType>& ids_;
+};
+
+FilterPtr
+LabelTable::GetDeletedIdsReadView() const {
+    std::shared_lock guard(delete_ids_mutex_);
+    if (deleted_ids_.empty()) {
+        return nullptr;
+    }
+    return std::make_shared<RemoveListReadView>(deleted_ids_, std::move(guard));
+}
+
+void
+LabelTable::RestoreDeletedIds(const Vector<InnerIdType>& ids, uint64_t total) {
+    std::scoped_lock lock(delete_ids_mutex_);
+    CHECK_ARGUMENT(total <= label_table_.size(), "logical count exceeds label storage");
+    UnorderedSet<InnerIdType> restored(allocator_);
+    for (auto id : ids) {
+        CHECK_ARGUMENT(id < total, "deleted inner ID exceeds logical count");
+        restored.insert(id);
+    }
+    deleted_ids_.swap(restored);
+    // Deserialization may have recorded -1 slots before the persisted MCI mask was known.
+    // Only occupied live rows count; unused label capacity may also contain -1.
+    active_padding_label_ids_.clear();
+    // Prefer the live incarnation when tombstone moves changed physical row order.
+    // This O(total) pass is required for shadowed labels; restoring deleted IDs alone
+    // cannot identify all live labels overwritten by tombstones during deserialization.
+    for (uint64_t id = 0; id < total; ++id) {
+        if (deleted_ids_.count(static_cast<InnerIdType>(id)) == 0) {
+            if (label_table_[id] == -1) {
+                active_padding_label_ids_.insert(static_cast<InnerIdType>(id));
+            }
+            if (use_reverse_map_) {
+                label_remap_.InsertOrAssign(label_table_[id], static_cast<InnerIdType>(id));
+            }
+        }
+    }
+    total_count_.store(static_cast<int64_t>(total));
+}
+
 LabelTable::LabelTable(Allocator* allocator,
                        bool use_reverse_map,
                        bool compress_redundant_data,
@@ -153,6 +210,7 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 void
 LabelTable::Deserialize(StreamReader& reader) {
     StreamReader::ReadVector(reader, label_table_);
+    MarkLabelsMutated();
     RebuildActivePaddingLabelIds();
     if (use_reverse_map_) {
         this->label_remap_.Clear();
@@ -168,6 +226,24 @@ LabelTable::Deserialize(StreamReader& reader) {
     is_legacy_duplicate_format_ = false;
 
     this->total_count_.store(static_cast<int64_t>(label_table_.size()));
+}
+
+void
+LabelTable::TrimUnusedSlots(uint64_t valid_count) {
+    if (valid_count > label_table_.size()) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "label table is smaller than the stored vector count");
+    }
+    label_table_.resize(valid_count);
+    total_count_.store(static_cast<int64_t>(valid_count));
+    RebuildActivePaddingLabelIds();
+    if (use_reverse_map_) {
+        label_remap_.Clear();
+        label_remap_.Reserve(valid_count);
+        for (InnerIdType id = 0; id < valid_count; ++id) {
+            label_remap_.InsertOrAssign(label_table_[id], id);
+        }
+    }
 }
 
 void
@@ -200,6 +276,7 @@ LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) 
             }
         }
     }
+    MarkLabelsMutated();
     total_count_ += static_cast<int64_t>(other_size_u);
 }
 }  // namespace vsag
