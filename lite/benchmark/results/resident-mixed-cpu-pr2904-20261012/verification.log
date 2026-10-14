@@ -1,8 +1,0 @@
-{
-  "audit": "PASS",
-  "processes": 18,
-  "datasets": 2,
-  "mutation_calls": 270000,
-  "interleaved_queries": 270000,
-  "source_sha": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2"
-}

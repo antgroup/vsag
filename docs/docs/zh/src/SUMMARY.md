@@ -39,6 +39,8 @@
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ 设计](development/lite_rabitq_design.md)
 - [C++ 编码指南](development/coding_style.md)
 - [新索引接入检查清单](development/new_index_checklist.md)
 - [编译构建](development/building.md)

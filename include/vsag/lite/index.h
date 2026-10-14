@@ -12,7 +12,7 @@
 
 namespace vsag::lite {
 
-/** One owned search result, ordered by squared L2 then ascending external ID. */
+/** One owned result, ordered by L2 distance (or quantized estimate), then external ID. */
 struct Neighbor {
     int64_t id;
     float distance;
@@ -25,10 +25,17 @@ using IdFilter = std::function<bool(int64_t)>;
 enum class BackendKind { BRUTE_FORCE, GRAPH };
 
 /** Vector storage used by the active backend. */
-enum class VectorStorage { FP32, FP16 };
+// RABITQ8 is available only with ENABLE_RABITQ_LITE_BACKEND; distances are
+// quantized L2 estimates. Build requires nonempty training data and fixes the model.
+enum class VectorStorage { FP32, FP16, RABITQ8 };
+
+/** Per-call graph query budget; zero uses the configured default. */
+struct SearchOptions {
+    uint64_t ef_search = 0;
+};
 
 /**
- * Minimal FP32, squared-L2 index. No concurrent calls are supported.
+ * FP32-input L2 index; RABITQ8 returns quantized estimates. No concurrent calls are supported.
  * Input vectors are borrowed for the duration of a call; stored data is owned.
  * This API and its versioned snapshot are separate from the Full Index ABI/format.
  */
@@ -57,10 +64,14 @@ public:
     /** Insert one finite vector. Duplicate IDs fail without changing logical contents. */
     tl::expected<void, Error>
     Add(int64_t id, const float* vector, uint64_t dim);
-    /** Update an existing ID; a missing ID or invalid vector is an error. */
+    /** Update an existing ID; a missing ID or invalid vector is an error.
+     * Graph updates preserve topology when the complete stored representation is identical.
+     */
     tl::expected<void, Error>
     Update(int64_t id, const float* vector, uint64_t dim);
-    /** Physically remove a record. Returns false for a missing ID; capacity is retained. */
+    /** Physically remove a record; capacity is retained.
+     * Returns false for a missing ID or failed graph allocation; contents remain unchanged.
+     */
     bool
     Remove(int64_t id);
     /** k=0 or an empty index returns an empty result; k is capped at the record count. */
@@ -69,6 +80,19 @@ public:
     /** Return only records whose external ID is accepted; an empty filter accepts all. */
     tl::expected<std::vector<Neighbor>, Error>
     Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filter) const;
+
+    /**
+     * Search with a per-call graph budget. BruteForce ignores the budget.
+     * Graph ef is clamped to [min(k, Size()), Size()]. Zero uses the stored default.
+     * Does not change construction/CRUD settings or persisted options.
+     * The existing externally serialized-call requirement still applies.
+     */
+    tl::expected<std::vector<Neighbor>, Error>
+    SearchWithOptions(const float* query,
+                      uint64_t dim,
+                      uint64_t k,
+                      const SearchOptions& options,
+                      const IdFilter& filter = {}) const;
 
     /** Write a little-endian snapshot at the current stream position; no atomic file replace. */
     tl::expected<void, Error>

@@ -21,9 +21,11 @@ using detail::failure;
 
 void
 write(std::ostream& out, uint64_t value, uint64_t bytes = 8) {
+    char encoded[8];
     for (uint64_t i = 0; i < bytes; ++i) {
-        out.put(static_cast<char>((value >> (8 * i)) & 255));
+        encoded[i] = static_cast<char>((value >> (8 * i)) & 255);
     }
+    out.write(encoded, static_cast<std::streamsize>(bytes));
 }
 
 void
@@ -118,14 +120,32 @@ Index::BuildGraph(VectorStorage storage, uint64_t max_degree, uint64_t ef_search
     if (impl_->backend->Kind() != BackendKind::BRUTE_FORCE) {
         return failure(ErrorType::INVALID_ARGUMENT, "index is already a graph");
     }
-    auto graph = storage == VectorStorage::FP16
-                     ? detail::make_fp16_graph_backend(*impl_->backend, max_degree, ef_search)
-                     : detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
-    if (not graph) {
-        return tl::unexpected(graph.error());
+    try {
+        tl::expected<std::unique_ptr<detail::Backend>, Error> graph =
+            failure(ErrorType::UNSUPPORTED_INDEX_OPERATION, "unsupported vector storage");
+        switch (storage) {
+            case VectorStorage::FP32:
+                graph = detail::make_graph_backend(*impl_->backend, max_degree, ef_search);
+                break;
+            case VectorStorage::FP16:
+                graph = detail::make_fp16_graph_backend(*impl_->backend, max_degree, ef_search);
+                break;
+            case VectorStorage::RABITQ8:
+#ifdef VSAG_LITE_HAS_RABITQ_BACKEND
+                graph = detail::make_rabitq_graph_backend(*impl_->backend, max_degree, ef_search);
+#endif
+                break;
+        }
+        if (not graph) {
+            return tl::unexpected(graph.error());
+        }
+        impl_->backend = std::move(*graph);
+        return {};
+    } catch (const std::bad_alloc&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "build graph allocation failed");
+    } catch (const std::length_error&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "build graph capacity exceeded");
     }
-    impl_->backend = std::move(*graph);
-    return {};
 }
 
 BackendKind
@@ -174,12 +194,25 @@ Index::Search(const float* query, uint64_t dim, uint64_t k, const IdFilter& filt
                   : impl_->backend->Search(query, dim, k);
 }
 
+tl::expected<std::vector<Neighbor>, Error>
+Index::SearchWithOptions(const float* query,
+                         uint64_t dim,
+                         uint64_t k,
+                         const SearchOptions& options,
+                         const IdFilter& filter) const {
+    return impl_->backend->SearchWithOptions(query, dim, k, options, filter);
+}
+
 tl::expected<void, Error>
 Index::Save(std::ostream& output) const {
+    if (ActiveVectorStorage() == VectorStorage::RABITQ8) {
+        return impl_->backend->SaveEncoded(output);
+    }
     const bool graph = ActiveBackend() == BackendKind::GRAPH;
     const bool fp16 = graph and ActiveVectorStorage() == VectorStorage::FP16;
     const uint64_t vector_bytes = fp16 ? 2 : 4;
-    if (Dim() > (UINT64_MAX - 8) / vector_bytes or
+    if (Dim() > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max()) / vector_bytes or
+        Dim() > (UINT64_MAX - 8) / vector_bytes or
         Size() > (UINT64_MAX - K_HEADER_BYTES) / (8 + vector_bytes * Dim())) {
         return failure(ErrorType::INVALID_ARGUMENT, "snapshot size overflow");
     }
@@ -215,16 +248,45 @@ Index::Save(std::ostream& output) const {
         }
         // Caller-owned FP16 decode storage is reused across slots; FP32 backends ignore it.
         std::vector<float> scratch;
+        std::vector<char> encoded_fp16(fp16 ? Dim() * 2 : 0);
         for (uint64_t slot = 0; slot < Size(); ++slot) {
-            const auto* vector = impl_->backend->VectorAt(slot, scratch);
-            for (uint64_t i = 0; i < Dim(); ++i) {
-                if (fp16) {
-                    write(output, detail::encode_fp16(vector[i]), 2);
-                } else {
-                    uint32_t bits;
-                    std::memcpy(&bits, vector + i, 4);
-                    write(output, bits, 4);
+            if (fp16) {
+                const auto* encoded = impl_->backend->FP16VectorAt(slot);
+                if (encoded != nullptr) {
+                    if (native_little_endian()) {
+                        output.write(reinterpret_cast<const char*>(encoded),
+                                     static_cast<std::streamsize>(Dim() * sizeof(uint16_t)));
+                    } else {
+                        for (uint64_t i = 0; i < Dim(); ++i) {
+                            encoded_fp16[2 * i] = static_cast<char>(encoded[i] & 255U);
+                            encoded_fp16[2 * i + 1] = static_cast<char>(encoded[i] >> 8U);
+                        }
+                        output.write(encoded_fp16.data(),
+                                     static_cast<std::streamsize>(encoded_fp16.size()));
+                    }
+                    continue;
                 }
+            }
+            const auto* vector = impl_->backend->VectorAt(slot, scratch);
+            if (not fp16 and native_little_endian()) {
+                output.write(reinterpret_cast<const char*>(vector),
+                             static_cast<std::streamsize>(Dim() * sizeof(float)));
+                continue;
+            }
+            if (fp16) {
+                for (uint64_t i = 0; i < Dim(); ++i) {
+                    const auto value = detail::encode_fp16(vector[i]);
+                    encoded_fp16[2 * i] = static_cast<char>(value & 255U);
+                    encoded_fp16[2 * i + 1] = static_cast<char>(value >> 8U);
+                }
+                output.write(encoded_fp16.data(),
+                             static_cast<std::streamsize>(encoded_fp16.size()));
+                continue;
+            }
+            for (uint64_t i = 0; i < Dim(); ++i) {
+                uint32_t bits;
+                std::memcpy(&bits, vector + i, sizeof(bits));
+                write(output, bits, 4);
             }
         }
         if (graph) {
@@ -260,6 +322,17 @@ Index::Load(std::istream& input) {
         const auto available = static_cast<uint64_t>(end - start);
         char magic[8];
         input.read(magic, 8);
+#ifdef VSAG_LITE_HAS_RABITQ_BACKEND
+        if (input and std::memcmp(magic, "VSAGLQ01", 8) == 0) {
+            input.seekg(start);
+            auto backend = detail::load_rabitq_graph_backend(input);
+            if (not backend) {
+                return tl::unexpected(backend.error());
+            }
+            auto impl = std::make_unique<Impl>(std::move(*backend));
+            return std::unique_ptr<Index>(new Index(std::move(impl)));
+        }
+#endif
         if (not input or std::memcmp(magic, K_MAGIC, 8) != 0) {
             return failure(ErrorType::INVALID_BINARY, "invalid snapshot magic");
         }

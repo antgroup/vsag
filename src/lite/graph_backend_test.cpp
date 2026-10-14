@@ -27,10 +27,107 @@
 #include <vector>
 
 #include "lite/backend.h"
+#include "lite/fp16_codec.h"
+#include "lite/query_heap.h"
+#include "lite/query_visited.h"
 
 using vsag::lite::detail::make_brute_force_backend;
 using vsag::lite::detail::make_fp16_graph_backend;
 using vsag::lite::detail::make_graph_backend;
+
+TEST_CASE("query visited bitmap keeps slots independent across word boundaries", "[lite-graph]") {
+    using vsag::lite::detail::QueryVisited;
+    for (uint64_t count : {uint64_t{0},
+                           uint64_t{1},
+                           uint64_t{63},
+                           uint64_t{64},
+                           uint64_t{65},
+                           uint64_t{129},
+                           uint64_t{100000}}) {
+        QueryVisited<true> visited(count);
+        QueryVisited<true> independent(count);
+        REQUIRE(visited.PayloadBytes() ==
+                (count / 64 + static_cast<uint64_t>(count % 64 != 0)) * 8);
+        for (uint64_t slot = count; slot > 0; --slot) {
+            REQUIRE_FALSE(visited.TestAndSet(slot - 1));
+            REQUIRE(visited.TestAndSet(slot - 1));
+        }
+        for (uint64_t slot = 0; slot < count; ++slot) {
+            REQUIRE(visited.TestAndSet(slot));
+            REQUIRE_FALSE(independent.TestAndSet(slot));
+        }
+    }
+}
+
+TEST_CASE("query visited byte specialization retains byte-array semantics", "[lite-graph]") {
+    using vsag::lite::detail::QueryVisited;
+    for (uint64_t count : {uint64_t{0},
+                           uint64_t{1},
+                           uint64_t{65},
+                           uint64_t{65535},
+                           uint64_t{65536},
+                           uint64_t{65537}}) {
+        QueryVisited<false> visited(count);
+        REQUIRE(visited.PayloadBytes() == count);
+        for (uint64_t slot = 0; slot < count; ++slot) {
+            REQUIRE_FALSE(visited.TestAndSet(slot));
+            REQUIRE(visited.TestAndSet(slot));
+        }
+    }
+}
+
+TEST_CASE("bounded query heap root replacement matches priority queue", "[lite-graph]") {
+    using Record = std::pair<int64_t, uint64_t>;
+    using Compare = std::less<Record>;
+    using vsag::lite::detail::QueryHeap;
+    std::mt19937 random(1701);
+    for (uint64_t limit : {uint64_t{1}, uint64_t{2}, uint64_t{3}, uint64_t{16}, uint64_t{512}}) {
+        QueryHeap<Record, Compare> actual;
+        std::priority_queue<Record, std::vector<Record>, Compare> expected;
+        for (uint64_t id = 0; id < 4096; ++id) {
+            const Record value{static_cast<int64_t>(random() % 31), id};
+            if (expected.size() < limit) {
+                actual.push(value);
+                expected.push(value);
+            } else if (Compare{}(value, expected.top())) {
+                actual.ReplaceTop(value);
+                expected.push(value);
+                expected.pop();
+            }
+            REQUIRE(actual.size() == expected.size());
+            REQUIRE(actual.top() == expected.top());
+            REQUIRE(std::is_heap(actual.GetData().begin(), actual.GetData().end(), Compare{}));
+        }
+        while (not expected.empty()) {
+            REQUIRE(actual.top() == expected.top());
+            actual.pop();
+            expected.pop();
+        }
+        REQUIRE(actual.empty());
+    }
+}
+
+namespace {
+void
+require_incoming_matches(const vsag::lite::detail::Backend& graph) {
+    std::vector<std::vector<uint64_t>> expected(graph.Size());
+    for (uint64_t source = 0; source < graph.Size(); ++source) {
+        for (uint64_t edge = 0; edge < graph.LinkCountAt(source); ++edge) {
+            expected[graph.LinkAt(source, edge)].push_back(source);
+        }
+    }
+    for (uint64_t target = 0; target < graph.Size(); ++target) {
+        std::vector<uint64_t> actual;
+        actual.reserve(graph.IncomingLinkCountAt(target));
+        for (uint64_t edge = 0; edge < graph.IncomingLinkCountAt(target); ++edge) {
+            actual.push_back(graph.IncomingLinkAt(target, edge));
+        }
+        std::sort(expected[target].begin(), expected[target].end());
+        std::sort(actual.begin(), actual.end());
+        REQUIRE(actual == expected[target]);
+    }
+}
+}  // namespace
 
 TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]") {
     auto flat = make_brute_force_backend(2);
@@ -46,6 +143,7 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     auto graph = make_graph_backend(**flat, 4, 32);
     REQUIRE(graph);
     REQUIRE((*graph)->Size() == 3);
+    require_incoming_matches(**graph);
     const std::array<float, 2> nonfinite{std::numeric_limits<float>::quiet_NaN(), 0};
     REQUIRE_FALSE((*graph)->Add(4, nonfinite.data(), 2));
     REQUIRE_FALSE((*graph)->Update(2, nonfinite.data(), 2));
@@ -58,8 +156,10 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     REQUIRE_FALSE((*graph)->Add(4, a.data(), 1));
     REQUIRE_FALSE((*graph)->Update(9, a.data(), 2));
     REQUIRE((*graph)->Update(2, a.data(), 2));
+    require_incoming_matches(**graph);
     REQUIRE((*graph)->Search(a.data(), 2, 2)->size() == 2);
     REQUIRE((*graph)->Remove(1));
+    require_incoming_matches(**graph);
     REQUIRE_FALSE((*graph)->Remove(1));
     REQUIRE((*graph)->Size() == 2);
     for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
@@ -72,6 +172,7 @@ TEST_CASE("Lite graph backend validates input and survives CRUD", "[lite-graph]"
     REQUIRE(result->size() == 2);
     REQUIRE(std::none_of(result->begin(), result->end(), [](const auto& n) { return n.id == 1; }));
     REQUIRE((*graph)->Add(1, b.data(), 2));
+    require_incoming_matches(**graph);
     REQUIRE((*graph)->Search(b.data(), 2, 3)->size() == 3);
 }
 
@@ -80,7 +181,9 @@ TEST_CASE("Lite graph removal cleans asymmetric restored links", "[lite-graph]")
     auto graph = restore_graph_backend(
         2, 2, 8, {10, 11, 12, 13}, {0, 0, 1, 0, 0, 1, 1, 1}, {{1}, {}, {3}, {}});
     REQUIRE(graph);
+    require_incoming_matches(**graph);
     REQUIRE((*graph)->Remove(11));
+    require_incoming_matches(**graph);
     REQUIRE((*graph)->Size() == 3);
     REQUIRE((*graph)->LinkCountAt(0) == 0);
     REQUIRE((*graph)->LinkCountAt(2) == 1);
@@ -113,6 +216,14 @@ TEST_CASE("Lite FP16 VectorAt uses caller-owned scratch", "[lite-graph]") {
     REQUIRE(first[1] == first_vector[1]);
     REQUIRE(second[0] == second_vector[0]);
     REQUIRE(second[1] == second_vector[1]);
+
+    require_incoming_matches(**graph);
+    REQUIRE((*graph)->Update(2, first_vector.data(), 2));
+    require_incoming_matches(**graph);
+    REQUIRE((*graph)->Remove(1));
+    require_incoming_matches(**graph);
+    REQUIRE((*graph)->Add(3, second_vector.data(), 2));
+    require_incoming_matches(**graph);
 }
 
 TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load", "[lite-graph]") {
@@ -223,6 +334,68 @@ TEST_CASE("Lite graph update removes obsolete reverse links", "[lite-graph]") {
         REQUIRE_FALSE(still_linked);
     }
     REQUIRE(obsolete > 0);
+}
+
+TEST_CASE("Lite graph repeated CRUD repairs affected adjacency", "[lite-graph]") {
+    constexpr uint64_t dim = 8;
+    constexpr uint64_t count = 256;
+    constexpr uint64_t max_degree = 12;
+    auto flat = make_brute_force_backend(dim);
+    REQUIRE(flat);
+    std::mt19937 rng(20260926);
+    std::normal_distribution<float> normal(0.0F, 1.0F);
+    std::array<float, dim> values{};
+    for (uint64_t id = 0; id < count; ++id) {
+        for (float& value : values) {
+            value = normal(rng);
+        }
+        REQUIRE((*flat)->Add(static_cast<int64_t>(id), values.data(), dim));
+    }
+    auto graph = make_graph_backend(**flat, max_degree, 64);
+    REQUIRE(graph);
+    auto edge_count = [&graph]() {
+        uint64_t total = 0;
+        for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+            total += (*graph)->LinkCountAt(slot);
+        }
+        return total;
+    };
+    auto zero_incoming = [&graph]() {
+        uint64_t total = 0;
+        for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+            total += (*graph)->IncomingLinkCountAt(slot) == 0 ? 1 : 0;
+        }
+        return total;
+    };
+    const uint64_t initial_edges = edge_count();
+    for (uint64_t step = 0; step < 2000; ++step) {
+        for (float& value : values) {
+            value = normal(rng);
+        }
+        REQUIRE((*graph)->Update(static_cast<int64_t>(step), values.data(), dim));
+        const uint64_t compactions = (*graph)->IncomingCompactionCount();
+        const uint64_t zero_incoming_before_remove = zero_incoming();
+        REQUIRE((*graph)->Remove(static_cast<int64_t>(step)));
+        REQUIRE(zero_incoming() <= zero_incoming_before_remove);
+        if ((*graph)->IncomingCompactionCount() != compactions) {
+            REQUIRE((*graph)->IncomingCapacityBytes() - (*graph)->IncomingLogicalBytes() <=
+                    (*graph)->IncomingLogicalBytes() / 4 + sizeof(uint64_t));
+        }
+        const uint64_t zero_incoming_before_add = zero_incoming();
+        REQUIRE((*graph)->Add(static_cast<int64_t>(count + step), values.data(), dim));
+        REQUIRE((*graph)->IncomingLinkCountAt((*graph)->Size() - 1) > 0);
+        REQUIRE(zero_incoming() <= zero_incoming_before_add);
+        require_incoming_matches(**graph);
+    }
+    REQUIRE((*graph)->Size() == count);
+    REQUIRE((*graph)->IncomingCompactionCount() > 0);
+    REQUIRE(edge_count() + max_degree >= initial_edges);
+    for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+        for (uint64_t edge = 0; edge < (*graph)->LinkCountAt(slot); ++edge) {
+            REQUIRE((*graph)->LinkAt(slot, edge) < (*graph)->Size());
+            REQUIRE((*graph)->LinkAt(slot, edge) != slot);
+        }
+    }
 }
 
 TEST_CASE("Lite graph backend validates restored adjacency bounds", "[lite-graph]") {
@@ -730,4 +903,282 @@ TEST_CASE("Lite graph SIFT fresh-process load probe", "[.][lite-sift-load]") {
               << steady_rss_kib << ',' << usage.ru_maxrss << ','
               << std::filesystem::file_size(snapshot_path) << '\n';
     REQUIRE(hits >= queries.size() * 5);
+}
+
+TEST_CASE("Lite FP16 snapshots preserve every finite binary16 encoding", "[lite-graph]") {
+    using vsag::lite::Index;
+    std::vector<uint16_t> bits;
+    std::vector<float> values;
+    for (uint64_t value = 0; value < 65536; ++value) {
+        const auto encoded = static_cast<uint16_t>(value);
+        if (vsag::lite::detail::is_finite_fp16(encoded)) {
+            bits.push_back(encoded);
+            values.push_back(vsag::lite::detail::decode_fp16(encoded));
+            REQUIRE(vsag::lite::detail::encode_fp16(values.back()) == encoded);
+        }
+    }
+    REQUIRE(bits.size() == 63488);
+    auto index = Index::Create(values.size());
+    REQUIRE(index);
+    REQUIRE((*index)->Add(17, values.data(), values.size()));
+    REQUIRE((*index)->BuildGraph(vsag::lite::VectorStorage::FP16, 2, 2));
+    std::stringstream output;
+    REQUIRE((*index)->Save(output));
+    const auto snapshot = output.str();
+    constexpr uint64_t vector_offset = 72;  // v3 header + graph options + one ID.
+    for (uint64_t i = 0; i < bits.size(); ++i) {
+        REQUIRE(static_cast<uint8_t>(snapshot[vector_offset + 2 * i]) == (bits[i] & 255U));
+        REQUIRE(static_cast<uint8_t>(snapshot[vector_offset + 2 * i + 1]) == (bits[i] >> 8U));
+    }
+    auto restored = Index::Load(output);
+    REQUIRE(restored);
+    std::stringstream again;
+    REQUIRE((*restored)->Save(again));
+    REQUIRE(again.str() == snapshot);
+}
+
+TEST_CASE("Lite restore rejects invalid layouts and duplicate FP16 IDs", "[lite-graph]") {
+    REQUIRE_FALSE(vsag::lite::detail::restore_brute_force_backend(0, {1}, {1.0F}));
+    REQUIRE_FALSE(vsag::lite::detail::restore_brute_force_backend(1, {1}, {}));
+    REQUIRE_FALSE(
+        vsag::lite::detail::restore_fp16_graph_backend(1, 2, 8, {1, 1}, {0, 0}, {{}, {}}));
+}
+
+TEST_CASE("Lite FP16 restore and conversion reject unsafe inputs", "[lite-graph]") {
+    using vsag::lite::detail::restore_fp16_graph_backend;
+    REQUIRE_FALSE(restore_fp16_graph_backend(1, 2, 8, {1}, {}, {{}}));
+    REQUIRE_FALSE(restore_fp16_graph_backend(1, 2, 8, {1, 2}, {0, 0}, {{0}, {}}));
+    REQUIRE_FALSE(
+        restore_fp16_graph_backend(1, 2, 8, {1, 2, 3, 4}, {0, 0, 0, 0}, {{1, 2, 3}, {}, {}, {}}));
+    auto flat = make_brute_force_backend(1);
+    REQUIRE(flat);
+    const float huge = 70000.0F;
+    REQUIRE((*flat)->Add(17, &huge, 1));
+    REQUIRE_FALSE(make_fp16_graph_backend(**flat, 2, 8));
+    REQUIRE_FALSE(make_fp16_graph_backend(**flat, 1, 8));
+    const float small = 1.0F;
+    REQUIRE((*flat)->Update(17, &small, 1));
+    auto graph = make_fp16_graph_backend(**flat, 2, 8);
+    REQUIRE(graph);
+    REQUIRE_FALSE((*graph)->Search(&huge, 1, 1));
+    REQUIRE((*graph)->Search(&small, 1, 1)->front().id == 17);
+}
+
+TEST_CASE("Lite update repairs old outgoing targets that lose their only incoming edge",
+          "[lite-graph]") {
+    const std::vector<int64_t> ids{0, 1, 2, 3};
+    const std::vector<float> vectors{0.0F, 100.0F, 1.0F, 2.0F};
+    const std::vector<std::vector<uint64_t>> links{{1, 2}, {2, 3}, {0, 3}, {0, 2}};
+    for (const bool fp16 : {false, true}) {
+        for (const float replacement : {0.0F, 0.25F}) {
+            auto graph =
+                fp16 ? vsag::lite::detail::restore_fp16_graph_backend(
+                           1,
+                           2,
+                           128,
+                           ids,
+                           {vsag::lite::detail::encode_fp16(0.0F),
+                            vsag::lite::detail::encode_fp16(100.0F),
+                            vsag::lite::detail::encode_fp16(1.0F),
+                            vsag::lite::detail::encode_fp16(2.0F)},
+                           links)
+                     : vsag::lite::detail::restore_graph_backend(1, 2, 128, ids, vectors, links);
+            REQUIRE(graph);
+            REQUIRE((*graph)->IncomingLinkCountAt(1) == 1);
+            require_incoming_matches(**graph);
+            REQUIRE((*graph)->Update(0, &replacement, 1));
+            REQUIRE((*graph)->IncomingLinkCountAt(1) > 0);
+            require_incoming_matches(**graph);
+            for (uint64_t slot = 0; slot < (*graph)->Size(); ++slot) {
+                REQUIRE((*graph)->LinkCountAt(slot) <= 2);
+                REQUIRE((*graph)->IncomingLinkCountAt(slot) > 0);
+            }
+            const float query = 100.0F;
+            auto found = (*graph)->Search(&query, 1, 4);
+            REQUIRE(found);
+            REQUIRE(found->size() == 4);
+            REQUIRE(found->front().id == 1);
+            REQUIRE(found->front().distance == 0.0F);
+            const vsag::lite::IdFilter only_target = [](int64_t id) { return id == 1; };
+            auto filtered = (*graph)->Search(&query, 1, 1, only_target);
+            REQUIRE(filtered);
+            REQUIRE(filtered->size() == 1);
+            REQUIRE(filtered->front().id == 1);
+        }
+    }
+}
+
+TEST_CASE("Lite routing admission must not discard allowed coarse-rejected entries",
+          "[lite-graph]") {
+    for (const auto storage : {vsag::lite::VectorStorage::FP32, vsag::lite::VectorStorage::FP16}) {
+        auto created = vsag::lite::Index::Create(1);
+        REQUIRE(created);
+        for (int64_t id = 0; id < 64; ++id) {
+            const auto value = static_cast<float>(id);
+            REQUIRE((*created)->Add(id, &value, 1));
+        }
+        REQUIRE((*created)->BuildGraph(storage, 4, 16));
+        const float query = 0;
+        const vsag::lite::SearchOptions options{4};
+        // Entry54 is encountered after the best heap is full of closer entries.
+        auto result = (*created)->SearchWithOptions(
+            &query, 1, 1, options, [](int64_t id) { return id == 54; });
+        REQUIRE(result);
+        REQUIRE(result->size() == 1);
+        REQUIRE(result->front().id == 54);
+        REQUIRE(result->front().distance == 2916.0F);
+        auto rejected =
+            (*created)->SearchWithOptions(&query, 1, 1, options, [](int64_t) { return false; });
+        REQUIRE(rejected);
+        REQUIRE(rejected->empty());
+    }
+}
+
+namespace {
+class ScratchRowsBackend final : public vsag::lite::detail::Backend {
+public:
+    explicit ScratchRowsBackend(const Backend& source, bool invalid = false)
+        : source_(source), invalid_(invalid) {
+    }
+    tl::expected<void, vsag::Error>
+    Add(int64_t /*id*/, const float* /*vector*/, uint64_t /*dim*/) override {
+        return tl::unexpected(
+            vsag::Error(vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION, "read only"));
+    }
+    tl::expected<void, vsag::Error>
+    Update(int64_t id, const float* vector, uint64_t dim) override {
+        return Add(id, vector, dim);
+    }
+    bool
+    Remove(int64_t /*id*/) override {
+        return false;
+    }
+    tl::expected<std::vector<vsag::lite::Neighbor>, vsag::Error>
+    Search(const float* query, uint64_t dim, uint64_t k) const override {
+        return source_.Search(query, dim, k);
+    }
+    tl::expected<std::vector<vsag::lite::Neighbor>, vsag::Error>
+    Search(const float* query,
+           uint64_t dim,
+           uint64_t k,
+           const vsag::lite::IdFilter& filter) const override {
+        return source_.Search(query, dim, k, filter);
+    }
+    [[nodiscard]] uint64_t
+    Size() const override {
+        return source_.Size();
+    }
+    [[nodiscard]] uint64_t
+    Dim() const override {
+        return source_.Dim();
+    }
+    [[nodiscard]] int64_t
+    IdAt(uint64_t slot) const override {
+        return source_.IdAt(slot);
+    }
+    [[nodiscard]] vsag::lite::BackendKind
+    Kind() const override {
+        return source_.Kind();
+    }
+    const float*
+    VectorAt(uint64_t slot, std::vector<float>& scratch) const override {
+        std::vector<float> original;
+        const auto* row = source_.VectorAt(slot, original);
+        scratch.assign(row, row + Dim());
+        if (invalid_ and slot + 1 == Size()) {
+            scratch.front() = std::numeric_limits<float>::quiet_NaN();
+        }
+        return scratch.data();
+    }
+
+private:
+    const Backend& source_;
+    bool invalid_;
+};
+}  // namespace
+
+TEST_CASE("Lite borrowed topology matches owned graph and outlives its source", "[lite-graph]") {
+    using vsag::lite::detail::build_graph_topology;
+    for (const uint64_t dim : {1ULL, 17ULL, 128ULL, 768ULL}) {
+        auto flat = make_brute_force_backend(dim);
+        REQUIRE(flat);
+        std::vector<float> vector(dim);
+        for (uint64_t slot = 0; slot < 32; ++slot) {
+            const uint64_t duplicate_row = slot / 2;
+            for (uint64_t d = 0; d < dim; ++d) {
+                vector[d] = std::sin(static_cast<float>(duplicate_row * 13 + d) * .17F);
+            }
+            REQUIRE((*flat)->Add(100 - static_cast<int64_t>(slot * 7), vector.data(), dim));
+        }
+        auto owned = make_graph_backend(**flat, 4, 16);
+        REQUIRE(owned);
+        ScratchRowsBackend scratch(**flat);
+        auto borrowed = build_graph_topology(**flat, 4, 16);
+        auto buffered = build_graph_topology(scratch, 4, 16);
+        REQUIRE(borrowed);
+        REQUIRE(buffered);
+        REQUIRE(*borrowed == *buffered);
+        ScratchRowsBackend invalid(**flat, true);
+        REQUIRE_FALSE(build_graph_topology(invalid, 4, 16));
+        REQUIRE((*flat)->Size() == 32);
+        REQUIRE_FALSE(build_graph_topology(**flat, 1, 16));
+        REQUIRE_FALSE(build_graph_topology(**flat, 4, 2));
+        REQUIRE_FALSE(build_graph_topology(**owned, 4, 16));
+        flat->reset();
+        for (uint64_t slot = 0; slot < (*owned)->Size(); ++slot) {
+            REQUIRE((*borrowed)[slot].size() == (*owned)->LinkCountAt(slot));
+            for (uint64_t edge = 0; edge < (*borrowed)[slot].size(); ++edge) {
+                REQUIRE((*borrowed)[slot][edge] == (*owned)->LinkAt(slot, edge));
+            }
+        }
+    }
+    auto empty = make_brute_force_backend(1);
+    REQUIRE(empty);
+    auto links = build_graph_topology(**empty, 2, 2);
+    REQUIRE(links);
+    REQUIRE(links->empty());
+}
+
+TEST_CASE("Lite query heap data preserves priority queue contents", "[lite-graph]") {
+    using Record = std::pair<float, uint64_t>;
+    const auto check = [](auto compare) {
+        for (uint64_t capacity : {0ULL, 1ULL, 2ULL, 3ULL, 16ULL, 512ULL}) {
+            std::priority_queue<Record, std::vector<Record>, decltype(compare)> reference(compare);
+            vsag::lite::detail::QueryHeap<Record, decltype(compare)> candidate(compare);
+            std::mt19937 random(47);
+            for (uint64_t step = 0; step < 2000; ++step) {
+                const Record value{static_cast<float>(random() % 17), random() % 31};
+                if (capacity != 0) {
+                    reference.push(value);
+                    candidate.push(value);
+                    if (reference.size() > capacity) {
+                        reference.pop();
+                        candidate.pop();
+                    }
+                }
+                REQUIRE(candidate.size() == reference.size());
+                REQUIRE(candidate.GetData().size() == reference.size());
+                if (not reference.empty()) {
+                    REQUIRE(candidate.top() == reference.top());
+                }
+                if (step % 37 == 0) {
+                    auto expected = reference;
+                    auto actual = candidate;
+                    auto values = actual.TakeData();
+                    std::sort(
+                        values.begin(), values.end(), [&](const auto& left, const auto& right) {
+                            return compare(right, left);
+                        });
+                    REQUIRE(values.size() == expected.size());
+                    for (const auto& value : values) {
+                        REQUIRE(value == expected.top());
+                        expected.pop();
+                    }
+                    REQUIRE(expected.empty());
+                }
+            }
+        }
+    };
+    check(std::less<Record>{});
+    check(std::greater<Record>{});
 }

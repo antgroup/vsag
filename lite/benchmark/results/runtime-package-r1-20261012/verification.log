@@ -1,7 +1,0 @@
-{
-  "audit": "PASS",
-  "payload_reduction_percent": 93.25988287658191,
-  "compressed_reduction_percent": 90.10629496123069,
-  "relocated_smokes": 6,
-  "profile": "Native C++ index application + recursive dynamic ELF runtime + loader + launcher + license texts"
-}

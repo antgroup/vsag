@@ -1,0 +1,2117 @@
+{
+  "immutable_source": "800a82232da3a91dfc90229c3a8fdbf4fa9b428a",
+  "files": [
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/README.md",
+      "bytes": 1693,
+      "sha256": "ef546efd022fd4b5d692b05774bc1812c6690176ba02fe4861c31cc471b88819",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/archive.json",
+      "bytes": 120,
+      "sha256": "0282c005aa79db31e4d1d84ad2f78585d3850cb8861e823e3eea6789f92842ed",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/manifest.json",
+      "bytes": 10075,
+      "sha256": "3c8cf0c0894aac962ce861260baceada1d78e91b8434aae0368497ecb593ebed",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/raw.tar.gz",
+      "bytes": 168424,
+      "sha256": "121c22d176d6c5caa92044830a9f13e64840480f52b8def849afec60909dc122",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/summary.json",
+      "bytes": 1203,
+      "sha256": "af9fe9c896f12329d515beda6c8db5590bc8eedd2538e35ab0285e00562a2750",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/summary.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-followup-r1-20261012/verification.json",
+      "bytes": 1488,
+      "sha256": "687f03fbf4fe83251fe0cf56e71b7d82b85da8f23a6d715e7efa55c474a155ba",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-followup-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/README.md",
+      "bytes": 649,
+      "sha256": "b505be694530899a9d55e306b96475aa08555be31452111350438849ce2d328b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/commands.json",
+      "bytes": 968,
+      "sha256": "b7f845db2bd9573d67e9484e41d9c0386f6041904431d068e7bba03431a4a6e2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-build.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-build.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-build.stdout",
+      "bytes": 15760,
+      "sha256": "225d3403110f1985b2c6e4b36be69c066e526db49ba5f48ca44da00a0400fd71",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-build.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-configure.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-configure.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-configure.stdout",
+      "bytes": 795,
+      "sha256": "66b503c9d62be9733b87100dd136ce87c471a08ab827ee107f8241e0c970b1f4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-configure.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-tests.stderr",
+      "bytes": 27,
+      "sha256": "18e00877dc1071c85cd4f479d451bebeef8309022e46cf8c63b0bed5151984a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-tests.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/control-tests.stdout",
+      "bytes": 9424,
+      "sha256": "e8186dd731a030585d8bc2541cf378d6ac33e327bbb874eccf4f649c62ba3af2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/control-tests.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r1-20261012/protocol.json",
+      "bytes": 744,
+      "sha256": "523b57942d1101dfb92834b4750fcf3da2eff463f26c606b4f4131bc93822c24",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r1-20261012/protocol.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/README.md",
+      "bytes": 5572,
+      "sha256": "ab4f8a4501590ba6abf5f083ea2e010b39b176c0d8751c2a8f4e58413124889c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/archive.json",
+      "bytes": 122,
+      "sha256": "754f347284f965975beb71c939e633481e8c40fae627b438be72fea47bca41b4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/fp64-neighbors.csv",
+      "bytes": 317205,
+      "sha256": "37151ff6cded88a946c42a956464d467b16a21d3a02ef296d9a4b59897b24345",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/fp64-neighbors.csv"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/fp64-oracle.json",
+      "bytes": 562,
+      "sha256": "ce0320f592af08afd1fab8e7bc6bb6a223c4f50eb78b4b8de541942fa1ed086e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/fp64-oracle.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/libraries.json",
+      "bytes": 372,
+      "sha256": "69b16cc9f6743decd16f74293257a38769c4b0d1c28aa8387ff65ce6a35b5c14",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/libraries.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/manifest.json",
+      "bytes": 23717,
+      "sha256": "e02dd385826ddbabd6918448852d131e156f3e28d0aee252a8e684f0813296fa",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/protocol.json",
+      "bytes": 729,
+      "sha256": "53f549b602cdfb302069c848187fd4f65bcdb3ac490d99c579a52f2f999c89b0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/protocol.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/raw.tar.gz",
+      "bytes": 22397608,
+      "sha256": "c38e5a8405cdfda0cd20fd2ef9d2ea9b41f4d11cd70f796b267f6344bd4784e4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/replay-summary.json",
+      "bytes": 1804,
+      "sha256": "83acff4b05a51afe30f0bc7814b9ea1e9e97c44eefc52c4d127e1e93f2981f53",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/replay-summary.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/summary.json",
+      "bytes": 1612,
+      "sha256": "37d406bae73454b85c6e501bca9b9a3a2245e07abbacd961cab2d0ebbad9a40f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/summary.json"
+    },
+    {
+      "path": "lite/benchmark/results/aligned-fp32-full-r2-20261012/verification.json",
+      "bytes": 4972,
+      "sha256": "dad3757025c513b27e98059e4fed7f4b0c19cbafd466a9036b93b446f225510f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/README.md",
+      "bytes": 3087,
+      "sha256": "85f1169cf060bddd3f820246d05c874cf9e12c4ef6415f7de394b783b98d0490",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/archive.json",
+      "bytes": 119,
+      "sha256": "72c0b84c1bbdfa9424a9dde72ed062b0ae9c0cda1cbc3ee44655d4c8f5b9f5d0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/candidate.patch",
+      "bytes": 1679,
+      "sha256": "81524873afa0bad3d3dc6ea10b9ba78cecb2fc1780c3b3778a12ee214e4cedfd",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/candidate.patch"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/identity.json",
+      "bytes": 441,
+      "sha256": "3fb661bba3ae5ae59f7e7e98cafdc3cb5fd4d7b610a3d32556d861a24a8c593f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/manifest.json",
+      "bytes": 7801,
+      "sha256": "19fb4f38f239347be61331110ad161e6562ba4a64a55cd028f1843daa02ea1d4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/raw.tar.gz",
+      "bytes": 684132,
+      "sha256": "0122e1546b60ecfc9406610a0ed1ffbcac494abf696662bebb573006ae846ee1",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/rows.json",
+      "bytes": 7293,
+      "sha256": "1cfb792647cf51fee1f823ffd19609e66dc50d6f91e63c2cd1c29c159f58b427",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/build-diversity-pilot-r1-20261012/verification.json",
+      "bytes": 1214,
+      "sha256": "76784655acd3a558c8dfd406ba4a8b20d59764ac88707e5bbd1c879ea069b5ae",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/build-diversity-pilot-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/README.md",
+      "bytes": 8154,
+      "sha256": "437fe09214df87ea493823ab2509286521ce02770fb5b28efbf24f30ba3e5f32",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/archive.json",
+      "bytes": 151,
+      "sha256": "825190cc776923136ea3e14c377e3a65d30f5036f4b31af6dda2213632fd9493",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/lite-ctest.log",
+      "bytes": 748,
+      "sha256": "420684c5ff5f6307781198273de5b434dc929e3787624355444ae9d0f6d625af",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/lite-ctest.log"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/manifest.json",
+      "bytes": 84954,
+      "sha256": "52675c2b039176b1064f1db19b8ad7d3108763e8d2037f7b02827a70907ba806",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/measurements/summary.json",
+      "bytes": 5466,
+      "sha256": "63102c2673d493fa00a33fda59fa618d7f670c0fbbf633e29c4506c3e600ba10",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/measurements/summary.json"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/provenance.json",
+      "bytes": 7627,
+      "sha256": "7aa40dee7a175daba32039d5cbb1d03eb7f5d8bba589e5f6cef0eda30c7dff7a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/provenance.json"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/raw.tar.gz",
+      "bytes": 484101,
+      "sha256": "0c6697115a21dc210ab63cc0dfd659c53614d39ffc89115292765a1565ca9b54",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/tests.log",
+      "bytes": 361,
+      "sha256": "a9c9ba9e7c1d2a998b4162dbf159ef5a76eafcee4f9b761b47930c9fee01ebaf",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/equal-ef-native-full-20261012/verification.log",
+      "bytes": 185,
+      "sha256": "9d362bd6b12dea418b030b11aaebb99e8db7868c1232eb0ecae6183cb6ba3f86",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/equal-ef-native-full-20261012/verification.log"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/commands.json",
+      "bytes": 531,
+      "sha256": "c74bdbecc34c9acf91d76ce719f119fb9c582342e26929c090e7b41509cb5d23",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/lite-compile.stderr",
+      "bytes": 562,
+      "sha256": "9a8c6d101ea32c998734a935c6166e192e50f241409e4ef6bdf8ce063897cacb",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/lite-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/lite-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r1-20261012/lite-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/commands.json",
+      "bytes": 1410,
+      "sha256": "f6264d16078f82a545288b76d7edaf3930d5c7aeeda9884ffc9a39af62aaa11e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-runtime.stdout",
+      "bytes": 718,
+      "sha256": "a6f3b97e2005296474075f4fc19cdfc1890ba66c632c4b8d4f356a49e9477831",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/full-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-runtime.stdout",
+      "bytes": 34,
+      "sha256": "b2a7ad17b2b808153cd23072f4a4677b720ca1b24ac783d916d5121030de6a39",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r2-20261012/lite-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/README.md",
+      "bytes": 1663,
+      "sha256": "90017e3e8f93ac932fb9eac66cddcd5bf649fcf8612a25712df91c9ccad9de75",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/commands.json",
+      "bytes": 1486,
+      "sha256": "112ea0e901ce2123881643ec6855f2fdabc8960a0c8498185bbcb2b7ff63cba8",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/cpu.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/cpu.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/cpu.stdout",
+      "bytes": 3133,
+      "sha256": "9dd1b7b69e1ce7ef8f691330320d3324f606eae096cca13113239d14a38ebe4d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/cpu.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-runtime.stdout",
+      "bytes": 718,
+      "sha256": "275b5519b79c0f29779e1541d8759c0015431b0a066ff12857f5d55cd01f70b1",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/full-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-runtime.stdout",
+      "bytes": 34,
+      "sha256": "b2a7ad17b2b808153cd23072f4a4677b720ca1b24ac783d916d5121030de6a39",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/lite-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/receipt.json",
+      "bytes": 579,
+      "sha256": "22a6dd744cd9ab790c9e82e74c7ec36e214244d478983f210243e8e7701901a1",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-r3-20261012/receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/commands.json",
+      "bytes": 1458,
+      "sha256": "0e11ab3c568e0e23329e6f3f57f7e0228a0865d9b2242959ffabf96650c76be6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/cpu.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/cpu.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/cpu.stdout",
+      "bytes": 3133,
+      "sha256": "9dd1b7b69e1ce7ef8f691330320d3324f606eae096cca13113239d14a38ebe4d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/cpu.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-runtime.stdout",
+      "bytes": 718,
+      "sha256": "1a27bd1997d485c81e7cce0a4ccdddd01a137a69a0398bb66103956c3333f5ee",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/full-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-compile.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-compile.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-compile.stdout",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-compile.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-runtime.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-runtime.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-runtime.stdout",
+      "bytes": 34,
+      "sha256": "b2a7ad17b2b808153cd23072f4a4677b720ca1b24ac783d916d5121030de6a39",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/lite-runtime.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/receipt.json",
+      "bytes": 511,
+      "sha256": "6ea7c1e74e016d6f492ad32c2e65c87d9aac983463da0f100636a1be6072aebd",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/fp32-runtime-dispatch-strict-r1-20261012/receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/CMakeCache.txt",
+      "bytes": 32003,
+      "sha256": "34e237a3ed2bf36c901fa3a2931227d02739415da975a529a59bd7ec5d0df996",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/CMakeCache.txt"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/build.log",
+      "bytes": 28347,
+      "sha256": "4ce830d5d55186be6ed5678f12c64743fac274d8fdf99e1f030083612b8b5ebd",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/build.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/commands.json",
+      "bytes": 1676,
+      "sha256": "f85f5427b2a059bbe6356e270640bfd751cb5155e85ce1ef5c2de6890180bd35",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/compile_commands.json",
+      "bytes": 357118,
+      "sha256": "aad8cf85df3dbf8702bff1b919977427e08dc4293b1e7b293bb965c2f9ffe01a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/compile_commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/configure.log",
+      "bytes": 3988,
+      "sha256": "801f559faf8d36d88e1e1b3bdeb6a4ada9b56525ff68da45badf50db7e4a2405",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/configure.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/core-objects.json",
+      "bytes": 42940,
+      "sha256": "94761ba662500933490ffbe2ec811097d8956d5417943f3c048544dd1184e9e0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/core-objects.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/generated-version.h",
+      "bytes": 711,
+      "sha256": "121caa46f3a6105a35c661266cdf8123795977e5d61990cc156d9efd86b5d829",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/generated-version.h"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/ldd.txt",
+      "bytes": 1138,
+      "sha256": "f31c7e79f68c953ccda1708fae78ce8563580af4c4a37c82dfa5afe0a4f8e28a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/ldd.txt"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/ninja-build.log",
+      "bytes": 34849,
+      "sha256": "f163633b1f3bd26399ec1eb1b5c15f37017099d7a4db4e161e8244021e09ca9f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/ninja-build.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-build-r4-20261012/receipt.json",
+      "bytes": 3878,
+      "sha256": "2b0ad6fb020b8aba7e09666cb55d1b33a800cfd6005afe2dba7a98666757f5b9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-build-r4-20261012/receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/README.md",
+      "bytes": 5180,
+      "sha256": "2a8c7f6219b8aad0a21eea131f686029f96fd9f19e178c6c378cc93d4eff49f2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/archive.json",
+      "bytes": 151,
+      "sha256": "6499ae7619358eb68622d1872ef4ae60f2f5bd88dbf6fbb638c6b0e77136ccfb",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/lite-ctest.log",
+      "bytes": 748,
+      "sha256": "34d1594d251f617b050eb30bc9971cf6ef1766b8e8df72001ce12786df084156",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/lite-ctest.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/manifest.json",
+      "bytes": 85051,
+      "sha256": "39acef7cf4d8ec203831751efda2f0a6434c80fd308e21e84848775e5764d4ee",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/measurements/summary.json",
+      "bytes": 5470,
+      "sha256": "3872d2e4fd10ea913c5972cfbe61fc49a53938c6722404e66099e933e8b970f9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/measurements/summary.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/provenance.json",
+      "bytes": 7955,
+      "sha256": "d026794c925a4f3507907b2a60ef75e58eee9b55a9eb40a0d045f34a96acbf22",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/provenance.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/raw.tar.gz",
+      "bytes": 489003,
+      "sha256": "13f08607e3efb79a1e752f460085795a85f0ebb56eeb23aba5e89b14ed019b81",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/tests.log",
+      "bytes": 527,
+      "sha256": "8f75f6d058433da656f91f7a36adbb2cf281e035f4ad542726846936a67ce69e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-fresh-equal-r1-20261012/verification.log",
+      "bytes": 185,
+      "sha256": "12adf155e98efd3727a2803286224d59b7a6d06e45c154dbcc305d9146766d10",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/verification.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/CMakeCache.txt",
+      "bytes": 31969,
+      "sha256": "ad2b2156dbdafaa454e5af1ca1a56d227efef08dec5694413153f7362d3b9f68",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/CMakeCache.txt"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/build.log",
+      "bytes": 28323,
+      "sha256": "49a4dc90589ed3b7082e09f06f2e03bd144642e442d02c4e5d150f89688abc7e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/build.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/commands.json",
+      "bytes": 1665,
+      "sha256": "f3b99e32c6680edde0ba876f442643408f4a84fb545224957cab2cf0add8fa00",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/compile_commands.json",
+      "bytes": 344509,
+      "sha256": "bd4ea452fab7c184b8dc5154c7f672d58337a09de34b47d22dd256461eb0093f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/compile_commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/configure.log",
+      "bytes": 3994,
+      "sha256": "31b38246532db64518c591304541aaa25d865c099235490977205393553e9523",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/configure.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/core-objects.json",
+      "bytes": 42939,
+      "sha256": "562d91302cadeba30e46baf97deeb87e82f03b8ea20a17f1d5d0f1b6ef8a992a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/core-objects.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/generated-version.h",
+      "bytes": 711,
+      "sha256": "121caa46f3a6105a35c661266cdf8123795977e5d61990cc156d9efd86b5d829",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/generated-version.h"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/ldd.txt",
+      "bytes": 1138,
+      "sha256": "e0ef637d93129296ce38f8ed5b3edfd4b110a4788837f7a297bbb99e3c23f2e9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/ldd.txt"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/ninja-build.log",
+      "bytes": 34844,
+      "sha256": "14a605fe7026f9d97d6ad35e85c7043962362269f10bf1df8694ee2f903bc802",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/ninja-build.log"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/receipt.json",
+      "bytes": 3879,
+      "sha256": "d34095ef68d721787880ae2049d6be0e34b319abd985765f54b894633395c84a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/strict-fp-receipt.json",
+      "bytes": 273,
+      "sha256": "481ff226f393550304eeb668a99537d9dd5e4396ef9ed31a2988d782ed0ed386",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/strict-fp-receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/full-strict-build-r1-20261012/strict-fp.patch",
+      "bytes": 372,
+      "sha256": "e6a38e793fba8187665c60185bb725e0a6653b6ce3c631b5d32835b2a7e86a1b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-strict-build-r1-20261012/strict-fp.patch"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/CMakeCache.txt",
+      "bytes": 27410,
+      "sha256": "7161a967061a8419aafc7288489b38aa6cd9d8488936a177404f2171ebd1c4ca",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/CMakeCache.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/README.md",
+      "bytes": 8631,
+      "sha256": "59c5019c6f26a9507d85d41e8c3687328e781115e3dd88ddb320dd8bb4a48faf",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/benchmark-tidy.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/benchmark-tidy.log"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/compile.json",
+      "bytes": 482,
+      "sha256": "dd3b3ff7542ec537652b8969eaeeb964bde6634dfab41b8e8b8dda51abad669d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/compile.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/compile.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/compile.log"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/compile_commands.json",
+      "bytes": 87589,
+      "sha256": "d01782dfc249b89c9799fce62657e5ae34f0a84f72516c7243516563d8e6a634",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/compile_commands.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/feature-ctest.log",
+      "bytes": 748,
+      "sha256": "420684c5ff5f6307781198273de5b434dc929e3787624355444ae9d0f6d625af",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/feature-ctest.log"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.command.json",
+      "bytes": 670,
+      "sha256": "49c5d84c6c9073c73af5f81737002eb4a9260c90274b7c5a553a7993b93ad3d7",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.resources.txt",
+      "bytes": 969,
+      "sha256": "d00f6f1cb00e4901ce4aca6ae541fa890a6f6a8d31676b82b75d056c120a6a1a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.stdout",
+      "bytes": 107,
+      "sha256": "5175cf861b0912f3ad3927c2a1fee01856671e244743c70b00d1943fad543a4d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/audit.json",
+      "bytes": 2759,
+      "sha256": "e8992e9069d9343d4ca316e46d0306ffb51127f93cdb72a5118069610d30de4a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/quality.csv",
+      "bytes": 2157,
+      "sha256": "f60f040f75888414cd06caf994b83215b77a74183e1e2f80c768016f146dd185",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/samples.csv",
+      "bytes": 71927,
+      "sha256": "353953f6a59256ee29c4159da4153fe562366bf707d6db7b9c8bac68a5616b7f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/states.csv",
+      "bytes": 161,
+      "sha256": "bd77fbb6613f6eec1f8dbac53dabd5387fe35c2606cd4657d17dffb514c232ec",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.command.json",
+      "bytes": 670,
+      "sha256": "560ded0e8892635d74b7bf86580094b4092a41889dbcfade65e063485aabf60d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.resources.txt",
+      "bytes": 969,
+      "sha256": "f54ec511372c929a69228ffde827878c0d0f82655d69f279bca74c4e72e8906d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.stdout",
+      "bytes": 107,
+      "sha256": "5175cf861b0912f3ad3927c2a1fee01856671e244743c70b00d1943fad543a4d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/audit.json",
+      "bytes": 2770,
+      "sha256": "4dd89cb8b166017e069e66560dffa42d3888e1b409894f8f72d910a60e02ddf6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/quality.csv",
+      "bytes": 2157,
+      "sha256": "f60f040f75888414cd06caf994b83215b77a74183e1e2f80c768016f146dd185",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/samples.csv",
+      "bytes": 72059,
+      "sha256": "f86b4869feab65e901fb54c288a20d04f8880569db5dfbf21e8e52ed601add4a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/states.csv",
+      "bytes": 161,
+      "sha256": "8b5024363566867ac433cc148dd4ffd2e717069e115ece7733c96023d03ff431",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.command.json",
+      "bytes": 670,
+      "sha256": "02d1f4e30e846940845ae7698d58fdcf2295070c9832940b6ba51945806d6a21",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.resources.txt",
+      "bytes": 969,
+      "sha256": "dda1b10eda8cb6f1006926e12330033a2a37a72ad61452a211611c93ca4b03b2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.stdout",
+      "bytes": 107,
+      "sha256": "5175cf861b0912f3ad3927c2a1fee01856671e244743c70b00d1943fad543a4d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/audit.json",
+      "bytes": 2747,
+      "sha256": "9d674f3fad4b10a571bc23cd237038deb7173425d24feb54ae06797c93d6cdb5",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/quality.csv",
+      "bytes": 2157,
+      "sha256": "f60f040f75888414cd06caf994b83215b77a74183e1e2f80c768016f146dd185",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/samples.csv",
+      "bytes": 71618,
+      "sha256": "8203cd807dcb598d2713ffe7f525204f5fcb6096d04101aea7389bd77c518c15",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/states.csv",
+      "bytes": 161,
+      "sha256": "a8481ca21cce9f615aeed188ee31c01b9676e37786db5b2f0df8ff0f632f4f67",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp16-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.command.json",
+      "bytes": 670,
+      "sha256": "a1b1f345f598259976c89cdd90bd1ab9d7d09c956ad2332c12edfccb37cf0abc",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.resources.txt",
+      "bytes": 969,
+      "sha256": "6154ca820cb35d47a5324367a257c4cdfe80055a13b4375f1d1c137abac97427",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.stdout",
+      "bytes": 107,
+      "sha256": "c1dfaf1cbcf4b439ee961fbdcaeb011755f94ba7e6addc520cc9ecef5f90b7c0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/audit.json",
+      "bytes": 2794,
+      "sha256": "ff4c0c6ea0a1ffb515ec6a8234570140eae646f97f495e70a3f37aa4e22082a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/quality.csv",
+      "bytes": 2157,
+      "sha256": "1c82cd9d0912e84f8dc27f3f5949acce4516f2ad31772ee351b54b140af47337",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/samples.csv",
+      "bytes": 72189,
+      "sha256": "23d800a0252b4699b69cd7c49b58d26c3da90002f749ee9ca74012865a563d61",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/states.csv",
+      "bytes": 161,
+      "sha256": "c7e3116d3490410bf6b9db20bf1dbee6425ae42fa8ce5fbabbcc33832f2e93c2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.command.json",
+      "bytes": 670,
+      "sha256": "d907943d810dbb0ef1f7f11338e8e541a3b344987bc50128cf02883e388d747c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.resources.txt",
+      "bytes": 969,
+      "sha256": "37704e8d91bd9162f11c490c7e1f2014b9a229361f2b542514c5faab8fc36564",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.stdout",
+      "bytes": 107,
+      "sha256": "c1dfaf1cbcf4b439ee961fbdcaeb011755f94ba7e6addc520cc9ecef5f90b7c0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/audit.json",
+      "bytes": 2746,
+      "sha256": "3ad91be1e188456301dbe32f7438731904fd3116cac7e6466f3194e7ad7a5786",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/quality.csv",
+      "bytes": 2157,
+      "sha256": "1c82cd9d0912e84f8dc27f3f5949acce4516f2ad31772ee351b54b140af47337",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/samples.csv",
+      "bytes": 72109,
+      "sha256": "4d7f14c2f741d52f266bc0a32f50f0bafc3beed1ca7059670520f03050f579a7",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/states.csv",
+      "bytes": 161,
+      "sha256": "ec64ecbef3a4b71e8baa2c1b71aac4ba972f7ec43577f016819e9bb0d5bab92b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.command.json",
+      "bytes": 670,
+      "sha256": "466557d1c9e2b3b5753c71a12bf7ac10578e5696f7571f81d6ceb690a9fd70f3",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.resources.txt",
+      "bytes": 969,
+      "sha256": "2da437d5f71b2acef4c87ab911d99197e980b6ab6fc52738e041503222437211",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.stdout",
+      "bytes": 107,
+      "sha256": "c1dfaf1cbcf4b439ee961fbdcaeb011755f94ba7e6addc520cc9ecef5f90b7c0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/audit.json",
+      "bytes": 2806,
+      "sha256": "d4667801577554dfa520fd08228e4fbbee9a90bc9f9bb63f701512a21d668b6c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/quality.csv",
+      "bytes": 2157,
+      "sha256": "1c82cd9d0912e84f8dc27f3f5949acce4516f2ad31772ee351b54b140af47337",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/samples.csv",
+      "bytes": 72008,
+      "sha256": "d451122f3299374ecc20681aa16167fff8792438660af529d8d6a4cf61376f1b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/states.csv",
+      "bytes": 161,
+      "sha256": "c7704f9abecdbcce3b021417393cb80b12fdb6cfa8f4edf39a5d907f94b90aa6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-fp32-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.command.json",
+      "bytes": 682,
+      "sha256": "80116943711d9cc3836cc7fc07e147d495b827220c87bd1201463e92cb2e5206",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.resources.txt",
+      "bytes": 978,
+      "sha256": "a7053e010022ebc6194cca844652c5c5f7e27dd1bf54d2ea198ca453fad1bee9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.stdout",
+      "bytes": 110,
+      "sha256": "44e6c6f26bab3380e26bd13fdce57ed27e2d8406af142c61c25a68316cc09609",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/audit.json",
+      "bytes": 2734,
+      "sha256": "4b48521fef74bb6829cbd8e5ba35e284937e65d19296a24ab717d2a8938c5ae0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/quality.csv",
+      "bytes": 2148,
+      "sha256": "0ebe40c2a3eb83abcd4da2ab69570ea0624657f0321a9fc1f8a04d280b1ef383",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/samples.csv",
+      "bytes": 72093,
+      "sha256": "530f2bb9cf3c1420ab3ccc2633c9768e5f368b2181d3083d4c6e0732590713a7",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/states.csv",
+      "bytes": 160,
+      "sha256": "36c674e7a412d6f8a81a09cf88cdc81e259a8277286de2eb57661158a5073a11",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.command.json",
+      "bytes": 682,
+      "sha256": "13829b97e7e3c2c746fa6e589b0a44831c53972b60323211c2cd942b92c3f683",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.resources.txt",
+      "bytes": 978,
+      "sha256": "697f8b21c742a4a10aca56609008c6cc106770150f18999f9496a6343ca247df",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.stdout",
+      "bytes": 110,
+      "sha256": "44e6c6f26bab3380e26bd13fdce57ed27e2d8406af142c61c25a68316cc09609",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/audit.json",
+      "bytes": 2779,
+      "sha256": "f0989132e91977bb3b5d3e31568439b51666787b175df33fc441b8e60bf3b765",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/quality.csv",
+      "bytes": 2148,
+      "sha256": "0ebe40c2a3eb83abcd4da2ab69570ea0624657f0321a9fc1f8a04d280b1ef383",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/samples.csv",
+      "bytes": 71957,
+      "sha256": "c057db489406b2aff888ecc5517b31737c8c0fd99153fe358ec56338ad5901e0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/states.csv",
+      "bytes": 160,
+      "sha256": "70649ab5ff09543c30b45b055e157433ca6ab07324d26590a3478c18fdf7afa0",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.command.json",
+      "bytes": 682,
+      "sha256": "223380b5e1d30f4045599432ad430c27602009bd24a3e47438fe4582fbaacb83",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.resources.txt",
+      "bytes": 979,
+      "sha256": "501a061d64636a7312ed5b2078b0264280f3befa62dec36fe772ab99ed3500d5",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.stdout",
+      "bytes": 110,
+      "sha256": "44e6c6f26bab3380e26bd13fdce57ed27e2d8406af142c61c25a68316cc09609",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/audit.json",
+      "bytes": 2734,
+      "sha256": "7094f062248d1dc47c19298863aef176f9e8e36585131502dbe7f95479078881",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/quality.csv",
+      "bytes": 2148,
+      "sha256": "0ebe40c2a3eb83abcd4da2ab69570ea0624657f0321a9fc1f8a04d280b1ef383",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/samples.csv",
+      "bytes": 72095,
+      "sha256": "6b6469ef2c2be3814602141a3a321a550d03951c742ea25387ee506784ef1a30",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/states.csv",
+      "bytes": 160,
+      "sha256": "36c674e7a412d6f8a81a09cf88cdc81e259a8277286de2eb57661158a5073a11",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/gist10k-rabitq8-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/identity.json",
+      "bytes": 9742,
+      "sha256": "3a1dddf4d792fe807912fc735f8c0d0a6f4c2ce5b45e4de3eecde535d5465c8d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/manifest.json",
+      "bytes": 14993,
+      "sha256": "4e7b62abecd5de69f261e182a7e508c565c3e0f5b942961830073d3ec0635e72",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/rows.json",
+      "bytes": 53558,
+      "sha256": "4a0cd318f93a25c917103b291a43d848a14a954a763083c77c79a070750887c6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/runner-tests.log",
+      "bytes": 365,
+      "sha256": "beadb82e74eece531753b8c8aeed85cfc3893842da8be246bf0a25cafce6a9e4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/runner-tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.command.json",
+      "bytes": 670,
+      "sha256": "78ecbfe6460daae70e47a7eaeda2eaca353b8c37730e2ec114fc6257075ce3dc",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.resources.txt",
+      "bytes": 966,
+      "sha256": "99733bec3f8a93bc51a2e851f73e3c8ba27de20d752821baf417de6857cdb81a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.stdout",
+      "bytes": 107,
+      "sha256": "a1f16e9c57d334e6e8ca62b43579a942ceec0bc76ca28f2e1d4cdc06d3daf036",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/audit.json",
+      "bytes": 2737,
+      "sha256": "f3d9f6a7c289d0716b01584fcf6ee5c7c5ae0f51dcd29552ace2d7cd5d5a0e50",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/samples.csv",
+      "bytes": 67887,
+      "sha256": "cda2a3a79d394d54a70ab54a5501e550293018cf7926544242f307b9445049e2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/states.csv",
+      "bytes": 150,
+      "sha256": "4ee9e214149e80c98f4408feec4b027455b54149e614583d749cb26c5c622614",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.command.json",
+      "bytes": 670,
+      "sha256": "0a52bf4e51992960a362db0776d40edaaf7427f25c9d3e2774781c94e3ab84aa",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.resources.txt",
+      "bytes": 966,
+      "sha256": "6d836207ddfe436e036cacc406021b80cabe0549630b26e09e3a6abb9df5bcea",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.stdout",
+      "bytes": 107,
+      "sha256": "a1f16e9c57d334e6e8ca62b43579a942ceec0bc76ca28f2e1d4cdc06d3daf036",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/audit.json",
+      "bytes": 2715,
+      "sha256": "674b52d775721c798fb1133f742f0f9109bc63de343da602540da0fa0e13d805",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/samples.csv",
+      "bytes": 68111,
+      "sha256": "cee81b3cc9ba3ac8410c80c1caea789f3bb18a1358dd84ee4caec20aab53b815",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/states.csv",
+      "bytes": 150,
+      "sha256": "b350c0325cd731d1261e63d4add2fb37e781c700dad1182595206415656d0685",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.command.json",
+      "bytes": 670,
+      "sha256": "92277655d992013b072bc6ca8b51f1403bfc494a19c8dc3fda19e94942b8058f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.resources.txt",
+      "bytes": 967,
+      "sha256": "589d59c41df70f9688157315fd4f98c1da2b28901e82a247791a2fa61e164c2f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.stdout",
+      "bytes": 107,
+      "sha256": "a1f16e9c57d334e6e8ca62b43579a942ceec0bc76ca28f2e1d4cdc06d3daf036",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/audit.json",
+      "bytes": 2720,
+      "sha256": "d00a3553a2b1814be1011560f9a3695512b2fb0d2996763d25eae1fd767ccfef",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/samples.csv",
+      "bytes": 67697,
+      "sha256": "8c15368288162458d52e9ec54bad4e4fa45de74b14383e0ebf26b1489f50f4a2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/states.csv",
+      "bytes": 150,
+      "sha256": "f4d6c782199aae0de5e19958577002fa1bb98ac7a52ad27deab3b8a396eea852",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp16-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.command.json",
+      "bytes": 670,
+      "sha256": "5c898f7c3938a6481031ec23b9f722142ae4656d855e88926718f2527394e847",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.resources.txt",
+      "bytes": 969,
+      "sha256": "e5605acaa45171d7a5ccb89d8848fd3fa6fc018eaf3e435167f55c0c663cf63d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.stdout",
+      "bytes": 107,
+      "sha256": "1623e3cef7313b8e029c4f81ba0ec0d1ae672bf4b9dba22604a05d1fb5322d30",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/audit.json",
+      "bytes": 2713,
+      "sha256": "c838d6f422476c56dbfe53e0074cdf6b0263218d4bb13044115556da02ba2b4e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/samples.csv",
+      "bytes": 68317,
+      "sha256": "4e67438524529ebf765a314f3fc14de5c069ebbaa6ff03a0ff70535007898c35",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/states.csv",
+      "bytes": 150,
+      "sha256": "a025603e1195f3b04c1237cf344924c3554002b60e5bf34c7979e581e61ce01a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.command.json",
+      "bytes": 670,
+      "sha256": "d607f21d4e41ff484a3570b675edc653d424adc5bec2459a92d6e1814518d982",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.resources.txt",
+      "bytes": 968,
+      "sha256": "3ed652218d6e7e6fd1c2597a5cf5bd7ec3cd2122bd8b14eeae060be4046a74bd",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.stdout",
+      "bytes": 107,
+      "sha256": "1623e3cef7313b8e029c4f81ba0ec0d1ae672bf4b9dba22604a05d1fb5322d30",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/audit.json",
+      "bytes": 2702,
+      "sha256": "44b4148f85837c30ac0307516a6d5b80629203a3a5c0bbac4f5cfa87004b2afc",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/samples.csv",
+      "bytes": 68434,
+      "sha256": "64208bf9e464705221b26b775e8a2afc8c1a53ed142dcfe4ba14d3a6e3899e54",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/states.csv",
+      "bytes": 150,
+      "sha256": "c713efbc0b06254fc3736a02baf3e82f37e3e6a35008740a91fcad64cad66d7b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.command.json",
+      "bytes": 670,
+      "sha256": "10e53a21a4c7ab5f0d552b7bc4201f1df00dffc8bb286d073de80cee9990adea",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.resources.txt",
+      "bytes": 968,
+      "sha256": "acb1d29e610d4efb066a886c98e96147037d76d0e1850c6211cd7876619acb2d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.stdout",
+      "bytes": 107,
+      "sha256": "1623e3cef7313b8e029c4f81ba0ec0d1ae672bf4b9dba22604a05d1fb5322d30",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/audit.json",
+      "bytes": 2773,
+      "sha256": "d7bd184f26982fc57cea05c2b9765fd47c50b8ba0e1ddd74009a667040709592",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/quality.csv",
+      "bytes": 2189,
+      "sha256": "74bdc7a842966db6878571aba8499d8ce1cb6ed093e35831c99630f85e4953a4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/samples.csv",
+      "bytes": 68402,
+      "sha256": "4f47b6cf9d10a0f59597975a472759b564ffa5ffd26df367748568b53c06436f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/states.csv",
+      "bytes": 150,
+      "sha256": "bd89ad594392889378663e6b8da56220720ff0dbbfa18ce789bcdb030aef6b5b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-fp32-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.command.json",
+      "bytes": 682,
+      "sha256": "9ba3c67065fec6e80e82f71a8362691db6b50a4e05a9ef521e1aa0ed3a597d44",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.resources.txt",
+      "bytes": 976,
+      "sha256": "0b865ff95b72e45676ecd4d70003848319a004bf0e900628503c4faf7e6283c2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.stdout",
+      "bytes": 110,
+      "sha256": "e9dacfb8560cd38201492a16e58daabd958985acc5ea13700a1a6bff3f34f483",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/audit.json",
+      "bytes": 2710,
+      "sha256": "21e6420659166aabcf73b2cb8cb552eb96290d62efa2a2041ffa159d56763584",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/quality.csv",
+      "bytes": 2175,
+      "sha256": "9aa5a392d6a3ea92116f9bab7478383033fcf1e17a9e15b2403d3b2228874ade",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/samples.csv",
+      "bytes": 66711,
+      "sha256": "18a187b75cdb3fa870eec644298a97bc8211c0caffc942e5283a66eeb9656f8c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/states.csv",
+      "bytes": 150,
+      "sha256": "8602fc54336e0be10dce5681224a13178e30fa7dc07c9c5f5de39722242f5de9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-0/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.command.json",
+      "bytes": 682,
+      "sha256": "94eda7312913b1152a14e2003f094d462eaa55b1f8a30ca0d14fa6954ca59c30",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.resources.txt",
+      "bytes": 975,
+      "sha256": "d4f6a0ec4b22d6d24f8d0f7b5603c9273d1db93e74e80148783420f79aa6c748",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.stdout",
+      "bytes": 110,
+      "sha256": "e9dacfb8560cd38201492a16e58daabd958985acc5ea13700a1a6bff3f34f483",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/audit.json",
+      "bytes": 2718,
+      "sha256": "edc580b421ee6e52effb4d92798df2b3e783717056899f5cb5986f75d6be42ab",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/quality.csv",
+      "bytes": 2175,
+      "sha256": "9aa5a392d6a3ea92116f9bab7478383033fcf1e17a9e15b2403d3b2228874ade",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/samples.csv",
+      "bytes": 66611,
+      "sha256": "5b9717da0e261c032c59bdd42920accec05772ee131e1309fa1dcec99975842b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/states.csv",
+      "bytes": 150,
+      "sha256": "316aaf232679c0133cb4ad0ca5605b2ddab962c15f6c2501028624a4eaf73613",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-1/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.command.json",
+      "bytes": 682,
+      "sha256": "04d091dbe1fbc5f6fb649e76b38629e04cb518fb9d2283f93479d37301df86a5",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.command.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.resources.txt",
+      "bytes": 976,
+      "sha256": "f1060f4fbca99b6276be4482e00f5fae4229ca2165bb2a309998d7cef20fc231",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.resources.txt"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.stdout",
+      "bytes": 110,
+      "sha256": "e9dacfb8560cd38201492a16e58daabd958985acc5ea13700a1a6bff3f34f483",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/audit.json",
+      "bytes": 2704,
+      "sha256": "acc099eaed16e97199310f70e46fddd0af3e1070b20820342c2f5af2515f709c",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/audit.json"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/quality.csv",
+      "bytes": 2175,
+      "sha256": "9aa5a392d6a3ea92116f9bab7478383033fcf1e17a9e15b2403d3b2228874ade",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/quality.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/samples.csv",
+      "bytes": 66668,
+      "sha256": "b18f5c2e77500393023c728ff20fb96b2868303a5805cdecb324f99b0af6a575",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/samples.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/states.csv",
+      "bytes": 150,
+      "sha256": "b80eb3b440c26cc0fdcb82c39ed60bf2cf38ef9f4dc3af13a37bc796ce127151",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/sift10k-rabitq8-2/states.csv"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/source.cpp",
+      "bytes": 11859,
+      "sha256": "a489aeee30cd097fcd02a1ff9084b76c96437ea9379cf707a3e56a631aa74bd7",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/source.cpp"
+    },
+    {
+      "path": "lite/benchmark/results/mixed-cpu-pr2904-20261012/verification.log",
+      "bytes": 177,
+      "sha256": "b052bb16415c37a10315bb35747147e048f37f2dd9138b7831419582a2cc6438",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/verification.log"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/README.md",
+      "bytes": 5595,
+      "sha256": "3d5b73733c594c030fb81d17f3a61ceb9e4ef769bfe3f456ef6eafcba0b3a370",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/archive.json",
+      "bytes": 121,
+      "sha256": "515025001036c72f8a46ff1d98766c76b6ba3f019662831e26684c4523a1bf39",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/audit-archive.json",
+      "bytes": 119,
+      "sha256": "2df49d57703ef7626de500d87a3b69eb73e6f5d44345f24ae2a3cdf397f21338",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/audit-archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/audit-evidence.tar.gz",
+      "bytes": 148029,
+      "sha256": "69d3fe79766559e9da17cde7b19db6fd611447f05f35ef3936e93e355e67ef80",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/audit-evidence.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/audit-manifest.json",
+      "bytes": 1005,
+      "sha256": "b06fd056e41dd3f04b71af87b195965d3b12bca44ab185e7771cd19685c1ba13",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/audit-manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/dataset-receipt.json",
+      "bytes": 515,
+      "sha256": "0984b19ac2c6ed90dc4148befd2826530646826f7ee475b116367f23d508940f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/dataset-receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/fp64-oracle.json",
+      "bytes": 562,
+      "sha256": "40f2569b9ea179964da0acfd82f09bc6d21ccbd1819b4c6f50beaa1a53c3cf3b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/fp64-oracle.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/frozen-selections.json",
+      "bytes": 445,
+      "sha256": "61e522c0a68e797f88455302d8433fce2a591ef107f5b4cc0f25f068b8319288",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/frozen-selections.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/manifest.json",
+      "bytes": 66421,
+      "sha256": "212b99a0b200ab9338b9cb5a0e39145b45acc41bdea5176cdca5de345f999006",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/protocol.json",
+      "bytes": 4731,
+      "sha256": "29e0ec3f38655aba34f6fd947716a64652ddcb8de3d8c82bc351cda3f8271536",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/protocol.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/raw-input-receipt.json",
+      "bytes": 429,
+      "sha256": "a76c051d1220060fa4dc5387836544cd5f905cd3cde5226208b0e4d484193181",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/raw-input-receipt.json"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/raw.tar.gz",
+      "bytes": 3729401,
+      "sha256": "bac805acedd7032ba2580be616634ca64207078657687ddbc348facc12997498",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/quality-target-r2-20261012/verification.json",
+      "bytes": 2323,
+      "sha256": "dd46f864ba61c92294b244e50807c55ac22468805700318d6a963cf8d5b8be46",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/README.md",
+      "bytes": 3803,
+      "sha256": "3e19e4ceb0abe81cc75458f187e0783da5ee3c5da381dea81c0edd27a47bbee8",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/archive.json",
+      "bytes": 119,
+      "sha256": "34fbb9db252b80d46a2900add83c4578173f81d0e34724897afdc70dde62d042",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/identity.json",
+      "bytes": 1180,
+      "sha256": "3d760fbb73500ff18a385e40d0d32e8b317b47892db39afbf7c81dbedda3d451",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/manifest.json",
+      "bytes": 3664,
+      "sha256": "b062ecabb8b8287a138bef4f8b24f27e59a477adbe38a1effb3cff254ef6dd88",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/raw.tar.gz",
+      "bytes": 727288,
+      "sha256": "2c7a14012f30ba8e98bcd96bb89fd447cfce4522f7260838e54b9c1b1e87170d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/tests.log",
+      "bytes": 1441,
+      "sha256": "4b3ef0c7eed8ea920ce9ff2d39c003918d763ddf6c6fd4a4dcb8f5ed51c01e7e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/tidy.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/tidy.log"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/verification.json",
+      "bytes": 1126,
+      "sha256": "246208148cb3e682a60a5be8f6740e960af4b6eac83e5ca3c25a7a11a2c45d80",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/query-loss-trace-r1-20261012/verification.log",
+      "bytes": 1126,
+      "sha256": "246208148cb3e682a60a5be8f6740e960af4b6eac83e5ca3c25a7a11a2c45d80",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/query-loss-trace-r1-20261012/verification.log"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/README.md",
+      "bytes": 3385,
+      "sha256": "83c8296545668c49d65a03f1cfdf1e71949ef2b4578276fe7c819acadf371180",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/archive.json",
+      "bytes": 121,
+      "sha256": "4481e096b512fe796b5375f32188cada6296502a2a1bbbec50461d158e3268c4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/candidate.patch",
+      "bytes": 3227,
+      "sha256": "e377e6918491d8966c76602ef9fcee6fafd502e5400d0918e7fc82c4f11c33b9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/candidate.patch"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/identity.json",
+      "bytes": 445,
+      "sha256": "fb8c9209b25d59bb5965bab7fb7f4a36600c2ae5ab47431f8c38ff6d5c50963e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/manifest.json",
+      "bytes": 18157,
+      "sha256": "e5a13d0f2d3f86a893c5ca843fff29d07794340601cd1c46fe39cb4c672ca4f2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/raw.tar.gz",
+      "bytes": 1692648,
+      "sha256": "cbe76274e3e42bcd7b66ec909edcfe81411d76d82175d60f66a1d98fdb908dd3",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/rows.json",
+      "bytes": 18804,
+      "sha256": "f0e59df19a773423acb27b32afbd93559f67c284996f23aeed12569754c79265",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-budget-r1-20261012/verification.json",
+      "bytes": 2529,
+      "sha256": "b42d2fab05c0bd23c25a716cac440d85b4701a5c6a6a11e1d15b10ee1f05571a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-budget-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/README.md",
+      "bytes": 2975,
+      "sha256": "6f36533206f9f7733cd765216d33341ecdaec0e8b5b234bcfc3f9baf11bfeee2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/archive.json",
+      "bytes": 121,
+      "sha256": "cfe30e8fbaf0fefd3badc161779c2b16c9369e3f7272148c4c2e180030257c3f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/candidate.patch",
+      "bytes": 3227,
+      "sha256": "e377e6918491d8966c76602ef9fcee6fafd502e5400d0918e7fc82c4f11c33b9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/candidate.patch"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-0.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-0.log"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-1.log",
+      "bytes": 795,
+      "sha256": "3071d09c5baa8e3fd415e090077ff2fd76f2851ae1845fbff90c196d1a3a4938",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-1.log"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-2.log",
+      "bytes": 15627,
+      "sha256": "76349a03580f96d5ed2f7aa469d4e77d35b5aeb1013a14b37eadc683893282c2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-2.log"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-3.log",
+      "bytes": 704,
+      "sha256": "d603daffeeba89643aaf571ac2bbc521503fc5e31166b9ad50bd281563d27bd7",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-3.log"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-validation.json",
+      "bytes": 1220,
+      "sha256": "c1609139678f196ba9f5410b9f14b9c146a281f030c85eff4d666a0876f697b4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/functional-validation.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/identity.json",
+      "bytes": 412,
+      "sha256": "55ee3d12d02b8b8e99ebd6ea8455816511649564c046d77ff6187dfe13e1cd70",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/manifest.json",
+      "bytes": 11671,
+      "sha256": "500c81994f3056a1b5f7f0e74bebf2dbf2f6783690823c03d941d28987a044e2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/nearest-control.json",
+      "bytes": 102,
+      "sha256": "b6e4f7881654a16fffb4e4c8d842af5f88c9a8a11ba762c1bdc0274ce9b62752",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/nearest-control.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/raw.tar.gz",
+      "bytes": 1022313,
+      "sha256": "728f307895a9fc9f601b41526b47d358f32b4928107737ac080bcfa00990487b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/rows.json",
+      "bytes": 10932,
+      "sha256": "fbb6758ddf696a9c386ebd861ddc44d04141690019415fba75d5d9124f400131",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-diversity-r1-20261012/verification.json",
+      "bytes": 1662,
+      "sha256": "bbc59863201046f8785154e82da1c8504ed22a6f4615c56d0f06c4256bd5045f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-diversity-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/README.md",
+      "bytes": 3099,
+      "sha256": "554f3819022da1ba815bc4dc8e2a40e5972b591c8434ff78034ad646a797c285",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/archive.json",
+      "bytes": 121,
+      "sha256": "722232f33bbe53ff011868981ba19dc27234b13ab160e957d20b4918ae7dd35d",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/candidate.patch",
+      "bytes": 3227,
+      "sha256": "e377e6918491d8966c76602ef9fcee6fafd502e5400d0918e7fc82c4f11c33b9",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/candidate.patch"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/identity.json",
+      "bytes": 445,
+      "sha256": "fb8c9209b25d59bb5965bab7fb7f4a36600c2ae5ab47431f8c38ff6d5c50963e",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/manifest.json",
+      "bytes": 28198,
+      "sha256": "49e0187ad54bd9437de33c9468bb08f321b667935cc9e07c4d144764ee5a783f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/protocol.json",
+      "bytes": 151,
+      "sha256": "7b4ea4c1090585ac7ac1f240f298612defdc82834bfa413c994b46d1ee1e6734",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/protocol.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/raw.tar.gz",
+      "bytes": 2701546,
+      "sha256": "16c44d5db1563e5ae0c1bc51db989995f1eacce91241b8af4ff59398391e93c6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/rows.json",
+      "bytes": 30047,
+      "sha256": "0b98d1795fbcaf0cc0dc73efa46b01f78873f65ac4f05ecce89897c6d14eda83",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/reciprocal-paired-low-r1-20261012/verification.json",
+      "bytes": 3991,
+      "sha256": "6cacf6344ca24a46de8f5eef3db91148644e7aee9a38746439208862b3b1e872",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/reciprocal-paired-low-r1-20261012/verification.json"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md",
+      "bytes": 9215,
+      "sha256": "5047b69a4b768dacb39a8073d002f33da524212018dbfecd1c154b641494b2b5",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/archive.json",
+      "bytes": 431,
+      "sha256": "92be69b7c35c55e9938e7acdb4bf95470eff42198ba4abdd8e324e5821190a29",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/archive.json"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/feature-ctest.log",
+      "bytes": 748,
+      "sha256": "34d1594d251f617b050eb30bc9971cf6ef1766b8e8df72001ce12786df084156",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/feature-ctest.log"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/identity.json",
+      "bytes": 9831,
+      "sha256": "4a7c638bfeccdcf72abe1734762a7717b531dc5c142d0178acc9b4b949075773",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/identity.json"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/manifest.json",
+      "bytes": 14993,
+      "sha256": "72a14c5c5378ad804e8c817fc5031c325afcf6a6bca805b32dc500246d9d1f26",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/raw.tar.gz",
+      "bytes": 4390665,
+      "sha256": "fc0fd66ae375e8a9b016127c3abc7124a9bf9345977a07142af6e542b5ae1e5b",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/raw.tar.gz"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/rows.json",
+      "bytes": 173498,
+      "sha256": "160e3bd2786c36fb5b5fc0350fc5d4bde7e426d3a445922621f6ceb5323ffe4f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/rows.json"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/tests.log",
+      "bytes": 710,
+      "sha256": "499a731efd3365484207cab7336872780a904d9e9bd3aef844f001332acb7e66",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/tidy.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/tidy.log"
+    },
+    {
+      "path": "lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/verification.log",
+      "bytes": 179,
+      "sha256": "9735bc23083aed49b35809898c0f566008c303b1c7bdb8f0c115830bc9729f6a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/verification.log"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/README.md",
+      "bytes": 6685,
+      "sha256": "b865bdc5216cdd5dff4fe5735c83240bc2932f7c731f44348efef263a8594850",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/README.md"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-compile.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-compile.log"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-fp16.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-fp16.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-fp16.stdout",
+      "bytes": 1220,
+      "sha256": "69ff75ba48e4148e52591995329dc3aa99a789006291d0508b3c14aa2fe479e8",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-fp16.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-fp32.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-fp32.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-fp32.stdout",
+      "bytes": 1220,
+      "sha256": "57a4b1caa8ce0095a2100a46667bd6694ea8c89a3de41f42bad26c962e9ad90f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-fp32.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-loader-list.txt",
+      "bytes": 1837,
+      "sha256": "40d5b5c0a964b56b90fec892ac6e9622e8cb245b4ede2cfe3be19700b7d1274a",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-loader-list.txt"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-rabitq8.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-rabitq8.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/full-rabitq8.stdout",
+      "bytes": 1225,
+      "sha256": "278b0e100ceb6ec29b0a444c48126b90eb3f7648f38602cccbd0f494a11e53f6",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/full-rabitq8.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-compile.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-compile.log"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-fp16.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-fp16.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-fp16.stdout",
+      "bytes": 292,
+      "sha256": "14898d600c944f06f2d09faed88d9ade3e61662596893873c6ea3e6a534cfc82",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-fp16.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-fp32.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-fp32.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-fp32.stdout",
+      "bytes": 292,
+      "sha256": "5eea7f07734963543b765ab4337dcb970557625d5f437d79a43de55ce5874527",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-fp32.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-loader-list.txt",
+      "bytes": 715,
+      "sha256": "f8b712c3324e20d60c5c1c176d7c04ead46703dc4f375856e94db9378e413674",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-loader-list.txt"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-rabitq8.stderr",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-rabitq8.stderr"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/lite-rabitq8.stdout",
+      "bytes": 295,
+      "sha256": "a01d75a8193ae215a6b09c2d3a82e75ebd7139967c20ac919c7996eb77d4a553",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/lite-rabitq8.stdout"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/manifest.json",
+      "bytes": 1548,
+      "sha256": "7f09aacadcadb07e450918b0d166d5be962bcae33bb3fd1b799538b37a6dae7f",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/manifest.json"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/report.json",
+      "bytes": 53899,
+      "sha256": "f53debc0c32361011efa20e470a9719cca489ef4e1d46436adbfa1996ccb1f78",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/report.json"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/tests.log",
+      "bytes": 357,
+      "sha256": "feefe5397d182cacac4539b10788d79634f2d54049cbd7ef0dc89e9798293fa2",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/tests.log"
+    },
+    {
+      "path": "lite/benchmark/results/runtime-package-r1-20261012/verification.log",
+      "bytes": 263,
+      "sha256": "e0d58695586424146453424c78a04ce4ec1c35bb3864423bb039a5d1449ce0f4",
+      "url": "https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/verification.log"
+    }
+  ]
+}

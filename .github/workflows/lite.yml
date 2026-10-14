@@ -7,6 +7,7 @@ on:
     paths:
       - "include/vsag/lite/**"
       - "src/lite/**"
+      - "src/simd/**"
       - "lite/**"
       - ".github/workflows/lite.yml"
 
@@ -19,8 +20,12 @@ permissions:
 
 jobs:
   build-test-install:
-    name: Build, test, and install
+    name: Lite ${{ matrix.mode }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default-off, rabitq-on, sanitizer, coverage]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -29,84 +34,75 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang-format-15 clang-tidy-15 ninja-build
-      - name: Check formatting
+      - name: Check all Lite formatting
         run: |
-          clang-format-15 --dry-run --Werror \
-            include/vsag/lite/index.h \
-            src/lite/backend.h \
-            src/lite/bruteforce_backend.cpp \
-            src/lite/graph_backend.cpp \
-            src/lite/graph_backend_test.cpp \
-            src/lite/fp16_codec.h \
-            src/lite/fp16_distance.h \
-            src/lite/fp32_distance.h \
-            src/lite/fp16_distance.cpp \
-            src/lite/fp16_distance_avx.cpp \
-            src/lite/fp16_distance_avx2.cpp \
-            src/lite/fp16_distance_avx512.cpp \
-            src/lite/fp32_distance.cpp \
-            src/lite/fp32_distance_sse.cpp \
-            src/lite/fp32_distance_avx2.cpp \
-            src/lite/fp32_distance_avx512.cpp \
-            src/lite/index.cpp \
-            src/lite/index_test.cpp \
-            lite/example/main.cpp \
-            lite/benchmark/quantization_probe.cpp
-      - name: Configure Debug tests
+          clang-format-15 --dry-run --Werror include/vsag/lite/*.h src/lite/*.h src/lite/*.cpp lite/example/*.cpp src/simd/kernels/rabitq_compute.h
+      - name: Configure
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
         run: |
-          cmake -S lite -B build-lite-first-debug -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-            -DENABLE_TESTS=ON \
-            -DENABLE_QUANTIZATION_PROBE=ON
-      - name: Run clang-tidy
+          flags=(-DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
+          if [[ "$MODE" == rabitq-on ]]; then
+            flags+=(-DENABLE_BENCHMARKS=ON)
+          fi
+          # default-off deliberately omits the option to verify its default.
+          if [[ "$MODE" != default-off ]]; then
+            flags+=(-DENABLE_RABITQ_LITE_BACKEND=ON)
+          fi
+          if [[ "$MODE" == sanitizer ]]; then
+            flags+=(-DCMAKE_BUILD_TYPE=Debug
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+              '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
+              '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined')
+          elif [[ "$MODE" == coverage ]]; then
+            flags+=(-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON)
+          fi
+          cmake -S lite -B build-lite -G Ninja "${flags[@]}"
+      - name: Check every configured Lite translation unit
+        if: matrix.mode == 'rabitq-on'
+        run: python3 lite/tools/check_tidy.py --build build-lite
+      - name: Build and test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
         run: |
-          clang-tidy-15 \
-            src/lite/bruteforce_backend.cpp \
-            src/lite/graph_backend.cpp \
-            src/lite/graph_backend_test.cpp \
-            src/lite/fp16_distance.cpp \
-            src/lite/fp16_distance_avx.cpp \
-            src/lite/fp16_distance_avx2.cpp \
-            src/lite/fp16_distance_avx512.cpp \
-            src/lite/fp32_distance.cpp \
-            src/lite/fp32_distance_sse.cpp \
-            src/lite/fp32_distance_avx2.cpp \
-            src/lite/fp32_distance_avx512.cpp \
-            src/lite/index.cpp \
-            src/lite/index_test.cpp \
-            lite/benchmark/quantization_probe.cpp \
-            -p build-lite-first-debug \
-            --header-filter='.*/include/vsag/lite/.*'
-      - name: Build and test Debug
+          cmake --build build-lite -j2
+          ctest --test-dir build-lite --output-on-failure
+      - name: Benchmark audit guard fixtures
+        if: matrix.mode == 'rabitq-on'
+        run: python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
+      - name: Coverage collector fixtures and 90 percent gate
+        if: matrix.mode == 'coverage'
         run: |
-          cmake --build build-lite-first-debug -j2
-          ctest --test-dir build-lite-first-debug --output-on-failure -j2
-      - name: Build and install Release library
+          python3 -m unittest discover -s lite/tools -p 'test_*.py'
+          python3 lite/tools/collect_coverage.py --root "$PWD" --build build-lite --output lite-coverage.json --fail-under 90
+      - name: Install and check shared/static consumers
+        if: matrix.mode == 'default-off' || matrix.mode == 'rabitq-on'
         run: |
-          cmake -S lite -B build-lite-first-release -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX="$PWD/install-lite-first" \
-            -DENABLE_TESTS=OFF
-          cmake --build build-lite-first-release -j2
-          cmake --install build-lite-first-release
-          test -f build-lite-first-release/libvsag-lite.a
-          test -f "$PWD/install-lite-first/lib/libvsag-lite.a"
-          if ldd build-lite-first-release/libvsag-lite.so | grep -q 'libvsag\.so'; then
-            echo 'Standalone Lite unexpectedly depends on the Full library' >&2
+          cmake --install build-lite --prefix "$PWD/install-lite"
+          test -f install-lite/lib/libvsag-lite.a
+          if ldd build-lite/libvsag-lite.so | grep -q 'libvsag\.so'; then
+            echo 'Standalone Lite unexpectedly depends on Full VSAG' >&2
             exit 1
           fi
-      - name: Build installed consumer
+          cmake -S lite/example -B build-consumer -G Ninja -DCMAKE_PREFIX_PATH="$PWD/install-lite"
+          cmake --build build-consumer -j2
+          ./build-consumer/lite_example "$RUNNER_TEMP/lite-shared.snapshot"
+          c++ -std=c++17 -Iinstall-lite/include lite/example/main.cpp install-lite/lib/libvsag-lite.a -o lite-static-consumer
+          ./lite-static-consumer "$RUNNER_TEMP/lite-static.snapshot"
+      - name: Installed RaBitQ lifecycle
+        if: matrix.mode == 'rabitq-on'
         run: |
-          cmake -S lite/example -B build-lite-consumer -G Ninja \
-            -DCMAKE_PREFIX_PATH="$PWD/install-lite-first"
-          cmake --build build-lite-consumer -j2
-          ./build-lite-consumer/lite_example "$RUNNER_TEMP/lite-example.snapshot"
-      - name: Build installed static consumer
-        run: |
-          c++ -std=c++17 \
-            -I"$PWD/install-lite-first/include" \
-            lite/example/main.cpp \
-            "$PWD/install-lite-first/lib/libvsag-lite.a" \
-            -o build-lite-static-consumer
-          ./build-lite-static-consumer "$RUNNER_TEMP/lite-static-example.snapshot"
+          c++ -std=c++17 -Iinstall-lite/include lite/example/rabitq_example.cpp -Linstall-lite/lib -Wl,-rpath,"$PWD/install-lite/lib" -lvsag-lite -o lite-rabitq-consumer
+          ./lite-rabitq-consumer
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-${{ matrix.mode }}-diagnostics
+          if-no-files-found: ignore
+          path: |
+            build-lite/Testing/Temporary/*.log
+            build-lite/CMakeFiles/CMakeOutput.log
+            lite-coverage.json

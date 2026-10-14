@@ -1,8 +1,0 @@
-{
-  "source_head": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2",
-  "control_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
-  "candidate_sha256": "e770efebca674b9c6e7cece2b175aaa76c935c8875f34c1584daef4e1e551f8b",
-  "patch_sha256": "e377e6918491d8966c76602ef9fcee6fafd502e5400d0918e7fc82c4f11c33b9",
-  "candidate_bytes": 412688,
-  "scope": "FP32 reciprocal candidate query-budget calibration; development data only"
-}
