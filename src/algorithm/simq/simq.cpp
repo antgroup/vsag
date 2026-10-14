@@ -1381,6 +1381,8 @@ SIMQ::KnnSearchImpl(const DatasetPtr& query,
     }
 
     CHECK_ARGUMENT(query->GetNumElements() > 0, "simq search: query.num_elements must be > 0");
+    CHECK_ARGUMENT(query->GetNumElements() == 1,
+                   "simq search: query.num_elements must be 1, batch search is not supported");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq search: query.multi_vectors is nullptr");
     CHECK_ARGUMENT(query_mvs[0].len_ > 0, "simq search: query multi_vector length must be > 0");
@@ -1556,6 +1558,9 @@ SIMQ::RangeSearchImpl(const DatasetPtr& query,
 
     CHECK_ARGUMENT(query->GetNumElements() > 0,
                    "simq range search: query.num_elements must be > 0");
+    CHECK_ARGUMENT(
+        query->GetNumElements() == 1,
+        "simq range search: query.num_elements must be 1, batch search is not supported");
     const MultiVector* query_mvs = query->GetMultiVectors();
     CHECK_ARGUMENT(query_mvs != nullptr, "simq range search: query.multi_vectors is nullptr");
     CHECK_ARGUMENT(query_mvs[0].len_ > 0,
