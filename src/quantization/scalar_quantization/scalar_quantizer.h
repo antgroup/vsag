@@ -58,6 +58,9 @@ public:
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
     bool
+    EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) const;
+
+    bool
     DecodeOneImpl(const uint8_t* codes, float* data);
 
     float
@@ -90,6 +93,9 @@ public:
     static constexpr int MAX_CODE_PER_DIM = 1 << BIT_PER_DIM;  // 2^Bit_PER_DIM
 
 private:
+    bool
+    EncodeOneWithScratch(const float* data, uint8_t* codes, float* normalized) const;
+
     std::vector<float> lower_bound_{};
     std::vector<float> diff_{};
 };

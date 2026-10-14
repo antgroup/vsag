@@ -79,7 +79,7 @@ UT_SHARD = ""
 ifdef SHARD
   UT_SHARD = $(SHARD)
 endif
-UNITTEST_MODULES := simd common algorithm factory attr datacell layout quantization storage io utils impl
+UNITTEST_MODULES := gpu simd common algorithm factory attr datacell layout quantization storage io utils impl
 
 
 .PHONY: help

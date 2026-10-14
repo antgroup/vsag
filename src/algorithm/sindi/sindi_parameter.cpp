@@ -134,10 +134,12 @@ SINDIParameter::FromJson(const JsonType& json) {
     } else {
         rerank_type = SPARSE_RERANK_TYPE_FP32;
     }
-    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
-                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 ||
+                       rerank_type == SPARSE_RERANK_TYPE_FP16 ||
+                       rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32, fp16, or dmq8, got {}", rerank_type));
     CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
-                   "rerank_type=dmq8 requires use_reorder=true");
+                   fmt::format("rerank_type={} requires use_reorder=true", rerank_type));
 
     if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
         const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
@@ -219,6 +221,9 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(INDEX_SINDI),
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     const auto search_json = json[INDEX_SINDI];
+
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;

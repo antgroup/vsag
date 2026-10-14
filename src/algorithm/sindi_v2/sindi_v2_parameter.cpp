@@ -153,10 +153,12 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
     } else {
         rerank_type = SPARSE_RERANK_TYPE_FP32;
     }
-    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
-                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 ||
+                       rerank_type == SPARSE_RERANK_TYPE_FP16 ||
+                       rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32, fp16, or dmq8, got {}", rerank_type));
     CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
-                   "rerank_type=dmq8 requires use_reorder=true");
+                   fmt::format("rerank_type={} requires use_reorder=true", rerank_type));
 
     if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
         const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
@@ -327,8 +329,12 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contain {}", INDEX_SINDI_V2));
     const auto search_json = json[INDEX_SINDI_V2];
 
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
+
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    filter_callback_limit = DEFAULT_FILTER_CALLBACK_LIMIT;
     if (search_json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
         term_prune_ratio = search_json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
         CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
@@ -346,6 +352,20 @@ SINDIV2SearchParameter::FromJson(const JsonType& json) {
                 threshold >= 0,
                 fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
             term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+    if (search_json.Contains(SPARSE_FILTER_CALLBACK_LIMIT)) {
+        const auto limit_json = search_json[SPARSE_FILTER_CALLBACK_LIMIT];
+        CHECK_ARGUMENT(limit_json.IsNumberInteger(),
+                       "filter_callback_limit must be a non-negative integer");
+        if (limit_json.IsNumberUnsigned()) {
+            filter_callback_limit = limit_json.GetUint64();
+        } else {
+            const auto limit = limit_json.GetInt();
+            CHECK_ARGUMENT(
+                limit >= 0,
+                fmt::format("filter_callback_limit must be non-negative, got {}", limit));
+            filter_callback_limit = static_cast<uint64_t>(limit);
         }
     }
 
@@ -376,6 +396,7 @@ SINDIV2SearchParameter::ToJson() const {
     json[INDEX_SINDI_V2].SetJson(JsonType());
     json[INDEX_SINDI_V2][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI_V2][SPARSE_N_CANDIDATE].SetInt(n_candidate);
+    json[INDEX_SINDI_V2][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI_V2][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI_V2][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     return json;

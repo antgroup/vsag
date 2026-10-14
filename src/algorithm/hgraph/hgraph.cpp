@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/flatten_interface.h"
@@ -36,7 +37,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
@@ -71,6 +72,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
+      pipnn_param_(hgraph_param->pipnn_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
@@ -83,6 +85,16 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     if (this->deduplicate_storage_ && not is_dense_vector) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph deduplicate_storage only supports dense vectors");
+    }
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -101,6 +113,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     }
     this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
     this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    this->hybrid_mci_searcher_ = std::make_shared<HybridMCISearcher>(common_param);
     if (this->mci_parameters_.enabled) {
         this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
     }
@@ -696,14 +709,28 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
+AnalyzerBasePtr
+HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<HGraphAnalyzer>(this, param);
+}
+
 std::string
 HGraph::GetStats() const {
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = DEFAULT_TOPK;
     analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
     // Build-time cache hit-rate is a transient property of the
     // build_with_cache() path (taken only after ImportCache()), so it lives on
@@ -726,6 +753,10 @@ HGraph::GetStats() const {
         stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
         stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
         stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
+        stats["mci_retired_clique_count"].SetInt(
+            static_cast<int64_t>(mci_stats.retired_clique_count));
+        stats["mci_inactive_node_count"].SetInt(
+            static_cast<int64_t>(mci_stats.inactive_node_count));
         stats["mci_base_membership_count"].SetInt(
             static_cast<int64_t>(mci_stats.base_membership_count));
         stats["mci_delta_extra_membership_count"].SetInt(
@@ -743,6 +774,7 @@ HGraph::GetStats() const {
         stats["mci_memory_usage"].SetInt(
             static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
     }
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
 
@@ -906,10 +938,25 @@ HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
 
 std::string
 HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(
+        stats, GetName(), "search", "complete", request.query_->GetNumElements(), request.topk_);
     return stats.Dump(4);
 }
 

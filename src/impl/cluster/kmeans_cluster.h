@@ -29,11 +29,31 @@ enum class KMeansInitMethod {
     KMEANS_PLUS_PLUS,
 };
 
+/// Opt-in settings for the CUDA build backend; the defaults leave it off.
+///
+/// IVFPartitionStrategyParameters carries the same four under their JSON names.
+/// They are two structs because this layer cannot depend on the IVF parameters,
+/// and ivf_nearest_partition.cpp copies them across in four adjacent lines so
+/// that there is one place to change rather than several.
+struct KMeansGpuConfig {
+    /// Allow the CUDA backend during training. Off unless asked for.
+    bool enabled{false};
+    /// CUDA device ordinal. One the machine does not have keeps the run on the CPU
+    /// rather than falling through to another device.
+    int32_t device_id{0};
+    /// Ceiling in bytes on what any pass asks for; 0 derives it from what the
+    /// device has free and leaves the chunked passes their own default ceiling.
+    uint64_t memory_budget{0};
+    /// Smallest `count * k * dim` worth offloading; 0 uses the calibrated default.
+    uint64_t min_work_threshold{0};
+};
+
 class KMeansCluster {
 public:
     explicit KMeansCluster(int32_t dim,
                            Allocator* allocator,
-                           SafeThreadPoolPtr thread_pool = nullptr);
+                           SafeThreadPoolPtr thread_pool = nullptr,
+                           KMeansGpuConfig gpu_config = {});
 
     ~KMeansCluster();
 
@@ -77,6 +97,8 @@ private:
     SafeThreadPoolPtr thread_pool_{nullptr};
 
     const int32_t dim_{0};
+
+    const KMeansGpuConfig gpu_config_{};
 
     static constexpr uint64_t THRESHOLD_FOR_HGRAPH = 10000ULL;
 };
