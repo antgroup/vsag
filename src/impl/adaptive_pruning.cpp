@@ -25,7 +25,9 @@ namespace vsag {
 
 void
 AdaptivePruningParameter::FromJson(const JsonType& json) {
-    CHECK_ARGUMENT(json.IsObject(), "index parameters must be an object");
+    CHECK_ARGUMENT(json.IsObject(),
+                   "adaptive_pruning must be an object; use the flat bool field "
+                   "adaptive_pruning under index_param");
     const bool has_removed_fill =
         json.Contains("fill_rejected") || json.Contains("adaptive_pruning_fill_rejected");
     CHECK_ARGUMENT(not has_removed_fill,
@@ -33,6 +35,9 @@ AdaptivePruningParameter::FromJson(const JsonType& json) {
     // Parse a complete configuration: omitted fields reset to defaults on every call.
     *this = AdaptivePruningParameter{};
     if (json.Contains("adaptive_pruning")) {
+        CHECK_ARGUMENT(json["adaptive_pruning"].IsBool(),
+                       "adaptive_pruning must be a boolean; the experimental nested object "
+                       "schema is no longer supported, rebuild the index with flat keys");
         enabled = json["adaptive_pruning"].GetBool();
     }
     if (json.Contains("adaptive_pruning_adjust_step")) {
@@ -65,9 +70,13 @@ AdaptivePruningParameter::Validate(float alpha) const {
                                   adjust_step >= 0 && alpha - 2 * adjust_step > 0 &&
                                   std::isfinite(alpha + 3 * adjust_step);
     CHECK_ARGUMENT(valid_thresholds,
-                   "adaptive_pruning requires finite alpha/step, step >= 0 and alpha - 2*step > 0");
+                   "adaptive_pruning requires finite alpha/step, step >= 0 and "
+                   "alpha - 2*step > 0 (alpha=" +
+                       std::to_string(alpha) + ", adjust_step=" + std::to_string(adjust_step) +
+                       ")");
     CHECK_ARGUMENT(not apply_to_upper,
-                   "adaptive_pruning currently supports only bottom-layer selection");
+                   "adaptive_pruning_apply_to_upper is reserved for future use and is not "
+                   "supported yet; set it to false to use bottom-layer selection");
 }
 
 Vector<PruningCandidate>
@@ -162,15 +171,19 @@ select_edges_adaptive(Vector<PruningCandidate>& candidates,
             steps = 1;
         }
         result.second_alpha = alpha - static_cast<float>(steps) * parameter.adjust_step;
-        accepted.clear();
-        // Reuse the allocation while separating first-pass rejects from tightened-pass failures.
-        auto tightened_rejects = std::move(rejected);
-        tightened_rejects.clear();
-        // The normalized original list is exactly sorted(A+B) followed by unscanned tail T.
-        scan(candidates, result.second_alpha, tightened_rejects);
-        if (accepted.size() < target_degree) {
-            Vector<PruningCandidate> remaining(allocator);
-            scan(tightened_rejects, alpha, remaining);
+        // With zero tightening steps the first pass already has the same result.
+        if (steps != 0) {
+            accepted.clear();
+            // Reuse the first-pass reject allocation, kept separate so the fallback below
+            // can tell tightened-pass failures apart from the original rejects.
+            auto tightened_rejects = std::move(rejected);
+            tightened_rejects.clear();
+            // The normalized original list is exactly sorted(A+B) followed by unscanned tail T.
+            scan(candidates, result.second_alpha, tightened_rejects);
+            if (accepted.size() < target_degree) {
+                Vector<PruningCandidate> remaining(allocator);
+                scan(tightened_rejects, alpha, remaining);
+            }
         }
     }
     std::sort(accepted.begin(), accepted.end());

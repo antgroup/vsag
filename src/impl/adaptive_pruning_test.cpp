@@ -57,7 +57,7 @@ TEST_CASE("Adaptive pruning tightening boundaries", "[ut][adaptive_pruning]") {
     auto allocator = Engine::CreateDefaultAllocator();
     AdaptivePruningParameter p;
     p.enabled = true;
-    for (uint64_t rejected : {0, 4, 5, 9, 10}) {
+    for (uint64_t rejected : {0, 4, 5, 9, 10, 11}) {
         CAPTURE(rejected);
         Vector<PruningCandidate> candidates(allocator.get());
         for (InnerIdType id = 1; id <= rejected + 2; ++id) {
@@ -80,6 +80,12 @@ TEST_CASE("Adaptive pruning tightening boundaries", "[ut][adaptive_pruning]") {
         CHECK(stats.branch == AdaptivePruningBranch::TIGHTEN);
         const float expected = rejected >= 10 ? 1.06F : (rejected >= 5 ? 1.0F : 0.94F);
         CHECK(stats.second_alpha == Catch::Approx(expected));
+        CHECK(selected[0].second == 1);
+        CHECK(selected[1].second == rejected + 2);
+        // Every pass compares each reject and the second accepted candidate against ID 1.
+        // ratio >= 5 keeps the first pass, including its statistics, without rescanning.
+        const uint64_t passes = rejected >= 10 ? 1 : 2;
+        CHECK(stats.distance_calls == passes * (rejected + 1));
     }
 }
 

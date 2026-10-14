@@ -163,8 +163,10 @@ HGraph::Build(const DatasetPtr& data) {
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
     if (using_build_cache) {
-        CHECK_ARGUMENT(not adaptive_pruning_.enabled,
-                       "adaptive_pruning does not yet support building from imported cache");
+        CHECK_ARGUMENT(
+            not adaptive_pruning_.enabled,
+            "adaptive_pruning does not yet support building from imported cache; disable "
+            "adaptive_pruning or build without importing a cache");
         this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,

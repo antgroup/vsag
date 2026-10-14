@@ -352,6 +352,8 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 
 完整规则、几何示例与相关研究见[自适应剪枝算法文档](adaptive_pruning.md)。
 
+参数平铺在 `index_param` 下，`adaptive_pruning` 是布尔开关；旧实验版嵌套对象和已删除的 `fill_rejected` 参数会报错。使用旧实验格式的索引需重新构建。
+
 `index_param.adaptive_pruning` 为 NSW **底层新节点正向选边**启用多轮 L2 剪枝，默认关闭。
 普通 `Build`、并行插入、`Add` 以及 NSW 优化构建（包括 RaBitQ split/fused）共用该选择器。
 设置 `adaptive_pruning_apply_to_reverse: true` 后，底层已满的反向邻居表也使用自适应剪枝。
@@ -400,4 +402,3 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 序列化保存该配置。加载时 adaptive_pruning 必须相同；启用时还要求 alpha、步长和作用范围一致，
 否则兼容性检查失败。没有该字段的旧索引按关闭处理。
 
-参数平铺在 `index_param` 下；`adaptive_pruning` 是布尔开关。旧实验版嵌套对象和已删除的 `fill_rejected` 参数会报错，旧实验索引需重新构建。

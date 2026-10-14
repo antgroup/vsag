@@ -77,6 +77,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
+    // No-op unless adaptive pruning is enabled.
     adaptive_pruning_.Validate(alpha_);
     if (adaptive_pruning_.enabled) {
         CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,

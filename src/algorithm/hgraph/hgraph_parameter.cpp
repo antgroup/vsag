@@ -129,6 +129,8 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
     }
 
+    // FromJson replaces the whole sub-struct, so it must run before any field that lives on
+    // AdaptivePruningParameter is parsed. alpha stays on HGraphParameter and is unaffected.
     adaptive_pruning.FromJson(json);
     if (json.Contains(ALPHA_KEY)) {
         this->alpha = json[ALPHA_KEY].GetFloat();
@@ -325,8 +327,8 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(HGraphParameter, p, other);
     CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
     if (adaptive_pruning.enabled) {
-        CHECK_FIELD_EQ(*this, *p, alpha);
-        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.adjust_step);
+        CHECK_FIELD_NEAR(*this, *p, alpha, 1e-6F);
+        CHECK_FIELD_NEAR(*this, *p, adaptive_pruning.adjust_step, 1e-6F);
         CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
         CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
     }

@@ -143,6 +143,7 @@ const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
 const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
 const char* const HGRAPH_BUILD_ALPHA = "alpha";
 const char* const HGRAPH_ADAPTIVE_PRUNING = "adaptive_pruning";
+const char* const PYRAMID_ADAPTIVE_PRUNING = "adaptive_pruning";
 const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
 const char* const RESIZE_INCREASE_COUNT_BIT = "resize_increase_count_bit";
 const char* const HGRAPH_GRAPH_TYPE = "graph_type";

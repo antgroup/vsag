@@ -1,6 +1,8 @@
-# Adaptive neighbor pruning in HGraph
+# Adaptive neighbor pruning in HGraph and Pyramid
 
 HGraph offers an experimental, opt-in adaptive selector for NSW bottom-layer construction. It changes the graph built by `Build` and `Add`, including the optimized RaBitQ split/fused build path. It does not run during queries. See [HGraph configuration](hgraph.md#experimental-adaptive-pruning) for the public parameters and defaults.
+
+Pyramid uses the same selector for NSW bottom graphs, with one global policy and each hierarchy's effective alpha. See [Pyramid configuration and scope](pyramid.md#experimental-adaptive-nsw-pruning). Pyramid routing layers are not adapted; this extension does not enable HGraph's temporary RaBitQ build storage in Pyramid.
 
 ## Scope and compatibility
 
@@ -26,7 +28,7 @@ Candidates are sorted by `(distance, internal ID)`. Self edges and duplicate IDs
 
 ## Adaptive schedule
 
-Write `alpha0` for the existing HGraph `alpha` parameter and `delta` for `adaptive_pruning_adjust_step`. A scan processes candidates in order, accepting non-rejected entries until `K` is reached or the input is exhausted. Rejected entries are recorded separately; unscanned entries are not counted as rejects.
+Write `alpha0` for the existing HGraph `alpha` parameter or the current Pyramid hierarchy's effective `alpha` and `delta` for `adaptive_pruning_adjust_step`. A scan processes candidates in order, accepting non-rejected entries until `K` is reached or the input is exhausted. Rejected entries are recorded separately; unscanned entries are not counted as rejects.
 
 1. Scan the normalized candidates at `alpha0`, obtaining accepted list `A` and rejected list `B`.
 2. If `delta=0`, return the first-pass result without filling unused capacity. This is not equivalent to disabling the policy.
@@ -53,6 +55,8 @@ Clear `A` and rescan the **entire original normalized list**, including its prev
 Return the accepted list sorted by `(distance, internal ID)`. Empty inputs, self-only inputs and `K=0` produce no neighbors. The algorithm can return fewer than `K` neighbors; it does not invent candidates.
 
 Configuration requires finite `alpha0` and `delta`, `delta >= 0`, `alpha0 - 2*delta > 0`, and finite `alpha0 + 3*delta`. The GIST reference configuration `alpha0=1.06, delta=0.06` yields relaxed values 1.12/1.18/1.24 and tightened values 1.06/1.00/0.94. These are explicit experiment settings, not dimension-specific defaults.
+
+When the first pass rejects at least `5K` candidates, the tightening step count is zero. Keep the first-pass result without repeating the same-alpha scan. This differs from `delta=0`: the configured step may be positive, but the feedback rule chooses no tightening.
 
 ## Worked example
 
@@ -83,3 +87,5 @@ These establish related public techniques, not a proven derivation chain or prio
 Tests tagged `[adaptive_pruning]` cover ratio boundaries, strict equality, unused capacity without filling, zero step, self/duplicate normalization, invalid inputs, a real L2 tightening example across input permutations, forward/reverse scope, cache rejection, parameter compatibility, and FP32/RaBitQ split/fused build–serialize–reload–Add with one and four construction threads. `[pruning_strategy]`, `[HGraphParameter]`, `[hgraph]`, and `[build_cache]` provide surrounding regression coverage.
 
 Parameters are flat fields under `index_param`; `adaptive_pruning` is a boolean. The former experimental nested object and removed `fill_rejected` option are rejected; rebuild indexes created with that experimental schema.
+
+Pyramid integration tests additionally cover flat-node promotion, single-layer and multi-layer roots, root and path queries, FP32/RaBitQ + SQ8 build–reload–Add with one and four threads, imported-cache rejection, and validation of hierarchy alpha and serialization policy compatibility.

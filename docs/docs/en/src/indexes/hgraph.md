@@ -240,6 +240,10 @@ still controlled by `base_quantization_type` (and optionally `precise_quantizati
 
 See [algorithm details, examples and related work](adaptive_pruning.md).
 
+Parameters are flat fields under `index_param` and `adaptive_pruning` is a boolean; the former
+experimental nested object and the removed `fill_rejected` option are rejected. Indexes created
+with that experimental schema must be rebuilt.
+
 `index_param.adaptive_pruning` enables a multi-pass L2 neighbor selector for NSW bottom-layer
 **new-node forward edges**. It is disabled by default. Ordinary `Build`, parallel insertion,
 `Add`, and the NSW optimized build path (including RaBitQ split/fused) use this selector.
@@ -438,4 +442,3 @@ strongly I/O-bound on a SSD, compare against [IVF](ivf.md) before committing to 
 - [Optimizer (Tune)](../advanced/optimizer.md)
 - [Serialization](../advanced/serialization.md)
 
-Parameters are flat fields under `index_param`; `adaptive_pruning` is a boolean. The former experimental nested object and removed `fill_rejected` option are rejected; rebuild indexes created with that experimental schema.

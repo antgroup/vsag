@@ -41,13 +41,18 @@ struct AdaptivePruningStats {
     uint64_t initial_accepted{0};
     uint64_t initial_rejected{0};
     uint64_t distance_calls{0};
+    // Alpha used by the second pass. In the TIGHTEN fallback the rejects are rescanned at
+    // the original alpha, so this stays the tightened value and does not describe that scan.
     float second_alpha{0};
     AdaptivePruningBranch branch{AdaptivePruningBranch::SINGLE};
 };
 
 using PruningCandidate = std::pair<float, InnerIdType>;
 
-// Pure L2 selector. Candidates are normalized in place; the returned list is nearest first.
+// Applies adaptive pruning using the supplied distance function.
+// Requires finite, non-negative squared L2 distances; callers enforce the metric choice.
+// Candidates are normalized in place: sorted by distance, deduplicated, and stripped of the
+// center self-edge. The returned list is nearest first.
 // The caller decides whether this policy applies to its graph layer and selection role.
 Vector<PruningCandidate>
 select_edges_adaptive(Vector<PruningCandidate>& candidates,
