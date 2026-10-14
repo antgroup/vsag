@@ -109,7 +109,9 @@ public:
         if (len > buffer_.size() or offset > buffer_.size() - len) {
             throw std::out_of_range("read beyond the in-memory file");
         }
-        std::memcpy(dest, buffer_.data() + offset, len);
+        if (len > 0) {
+            std::memcpy(dest, buffer_.data() + offset, len);
+        }
     }
 
 protected:
@@ -178,7 +180,9 @@ std::string
 RewriteChunkedManifest(const std::string& buffer,
                        const std::function<void(nlohmann::json&)>& mutate) {
     auto read_func = [&buffer](uint64_t offset, uint64_t len, void* dest) {
-        std::memcpy(dest, buffer.data() + offset, len);
+        if (len > 0) {
+            std::memcpy(dest, buffer.data() + offset, len);
+        }
     };
     vsag::ReadFuncStreamReader footer_reader(read_func, 0, buffer.size());
     auto footer = vsag::Footer::Parse(footer_reader);
@@ -789,6 +793,67 @@ TEST_CASE("HGraph ParallelDeserialize Mci Index Round-Trip", "[ut][hgraph][paral
         REQUIRE(loaded->ParallelDeserialize(reader).has_value());
         REQUIRE(loaded->GetNumElements() == data.count);
         RequireSameKnnResults(index, loaded, data);
+    }
+}
+
+TEST_CASE("HGraph parallel restore preserves MCI tombstones and later mutations",
+          "[ut][hgraph][mci][parallel_deserialize]") {
+    const auto mode = GENERATE(0, 1, 2, 3);
+    auto data = MakeTestData(8, 96);
+    auto params = MakeMciHGraphJson();
+    params["graph_type"].SetString("nsw");
+    params["base_io_type"].SetString("memory_io");
+    params["support_force_remove"].SetBool(true);
+    params["mci_delete_clique_size_threshold"].SetInt(3);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), params);
+    REQUIRE(index->Build(MakeDataset(data)).has_value());
+    REQUIRE(index->Remove({0, 1, 2}, vsag::RemoveMode::MARK_REMOVE).value() == 3);
+    auto first = vsag::Dataset::Make();
+    first->NumElements(1)
+        ->Dim(data.dim)
+        ->Ids(data.ids.data())
+        ->Float32Vectors(data.vectors.data())
+        ->Owner(false);
+    REQUIRE(index->Add(first).has_value());
+
+    auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), params);
+    if (mode == 0) {
+        FrameSerializeWriter writer;
+        REQUIRE(index->Serialize(writer, 512).has_value());
+        FrameMemoryReader reader(writer.buffer_);
+        REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+    } else if (mode == 1 or mode == 2) {
+        BufferSerializeWriter writer;
+        REQUIRE(index->Serialize(writer, 512).has_value());
+        if (mode == 1) {
+            PlainMemoryReader reader(writer.buffer_);
+            REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+        } else {
+            std::istringstream reader(writer.buffer_);
+            REQUIRE(loaded->Deserialize(reader).has_value());
+        }
+    } else {
+        std::ostringstream writer;
+        REQUIRE(index->Serialize(writer).has_value());
+        PlainMemoryReader reader(writer.str());
+        REQUIRE(loaded->ParallelDeserialize(reader).has_value());
+    }
+    REQUIRE(loaded->GetNumElements() == data.count - 2);
+    RequireSameKnnResults(index, loaded, data);
+    REQUIRE(loaded->Remove({1, 2}, vsag::RemoveMode::MARK_REMOVE).value() == 0);
+    REQUIRE(loaded->Remove({0, 3}, vsag::RemoveMode::FORCE_REMOVE).value() == 2);
+    REQUIRE(loaded->GetNumElements() == data.count - 4);
+    REQUIRE(loaded->Add(first).has_value());
+    REQUIRE(loaded->GetNumElements() == data.count - 3);
+    auto result = loaded->KnnSearch(first, 10, R"({"hgraph":{"ef_search":96}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+    REQUIRE(result.value()->GetIds()[0] == 0);
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        const auto id = result.value()->GetIds()[i];
+        REQUIRE(id != 1);
+        REQUIRE(id != 2);
+        REQUIRE(id != 3);
     }
 }
 

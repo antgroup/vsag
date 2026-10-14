@@ -88,11 +88,13 @@ public:
     void
     Resize(InnerIdType new_capacity) override {
         std::lock_guard lock(mutex_);
-        const InnerIdType effective_capacity = std::max(new_capacity, total_count_);
+        const InnerIdType effective_capacity =
+            std::max(new_capacity, total_count_.load(std::memory_order_relaxed));
         if (effective_capacity <= this->max_capacity_) {
             return;
         }
-        const uint64_t additional_count = static_cast<uint64_t>(effective_capacity - total_count_);
+        const uint64_t additional_count = static_cast<uint64_t>(
+            effective_capacity - total_count_.load(std::memory_order_relaxed));
         const uint64_t current_size = layout_.GetNextOffset();
         if (max_code_size_ != 0 &&
             additional_count >
@@ -199,6 +201,11 @@ private:
     [[nodiscard]] ReadLease
     acquire_codes_by_id_no_lock(InnerIdType id) const;
 
+    [[nodiscard]] const QuantTmpl&
+    typed_quantizer() const {
+        return static_cast<const QuantTmpl&>(*quantizer_);
+    }
+
 private:
     // Packed so each entry is exactly 12 bytes on disk and in the layout location table. The
     // unpacked layout would round sizeof up to 16 due to the uint64 alignment requirement,
@@ -225,6 +232,7 @@ private:
     // overflowed, since the modulo-2^32 value remains 4-byte aligned.
     static constexpr uint32_t SERIALIZE_FORMAT_SENTINEL = std::numeric_limits<uint32_t>::max();
     static constexpr uint32_t SERIALIZE_FORMAT_VERSION_V2 = 2;
+    static constexpr uint32_t SERIALIZE_FORMAT_VERSION_V3 = 3;
 
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
     QueryIOStrategy query_io_strategy_{QueryIOStrategy::MULTI_READ};

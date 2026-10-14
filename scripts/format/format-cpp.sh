@@ -45,7 +45,7 @@ echo "Using clang-format version $ACTUAL_VERSION (required: $REQUIRED_VERSION)"
 
 # Format code using the resolved clang-format binary.
 find include/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
-find src/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
+find src/ -iname "*.h" -o -iname "*.cpp" -o -iname "*.cu" | xargs "$CLANG_FORMAT" -i
 find python_bindings/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find examples/cpp/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i
 find tests/ -iname "*.h" -o -iname "*.cpp" | xargs "$CLANG_FORMAT" -i

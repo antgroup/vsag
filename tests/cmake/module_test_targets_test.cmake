@@ -27,10 +27,11 @@ function (require_text content text description)
     endif ()
 endfunction ()
 
-set (expected_modules simd common algorithm factory attr datacell layout quantization storage io
+set (expected_modules gpu simd common algorithm factory attr datacell layout quantization storage io
                       utils impl)
-set (expected_libraries simd_test vsag_test algorithm_test factory_test attr_test datacell_test
-                        layout_test quantizer_test storage_test io_test utils_test impl_test)
+set (expected_libraries gpu_test simd_test vsag_test algorithm_test factory_test attr_test
+                        datacell_test layout_test quantizer_test storage_test io_test utils_test
+                        impl_test)
 
 foreach (module IN LISTS expected_modules)
     require_text ("${test_cmake}" "        ${module}\n" "${module} unit-test module")
