@@ -66,8 +66,9 @@ jobs:
           set -eu
           # Event base.sha may differ from the parent of the queued merge ref.
           # Compare the merge candidate with the base actually used to create it.
-          base_sha=$(git rev-parse --verify "${HEAD_SHA}^1")
-          merge_pr_sha=$(git rev-parse --verify "${HEAD_SHA}^2")
+          # Trust only this checkout for these commands, not global Git config.
+          base_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^1")
+          merge_pr_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^2")
           if [ "$merge_pr_sha" != "$PR_HEAD_SHA" ]; then
             echo '::error::Merge candidate does not contain the expected PR head.'
             exit 1

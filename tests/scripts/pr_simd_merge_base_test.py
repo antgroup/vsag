@@ -39,13 +39,19 @@ class MergeBaseSelection(unittest.TestCase):
         return subprocess.check_output(['git', *arguments], cwd=self.root,
                                        env=self.env, input=input, text=True).strip()
 
-    def run_selection(self, head, pr):
+    def run_selection(self, head, pr, **extra_env):
         env = dict(self.env, HEAD_SHA=head, PR_HEAD_SHA=pr, BASE_SHA=self.new_main)
+        env.update(extra_env)
         return subprocess.run(['bash', '-c', snippet()], cwd=self.root,
                               env=env, text=True, capture_output=True)
 
     def test_stale_event_base_uses_actual_merge_parent(self):
         result = self.run_selection(self.merge, self.pr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [self.base, self.merge])
+
+    def test_container_ownership_is_scoped_to_checkout(self):
+        result = self.run_selection(self.merge, self.pr, GIT_TEST_ASSUME_DIFFERENT_OWNER='1')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [self.base, self.merge])
 

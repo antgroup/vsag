@@ -311,8 +311,9 @@ class ComparisonTest(unittest.TestCase):
             self.assertNotIn(forbidden, workflow)
         for required in ("contents: read", "persist-credentials: false", "timeout-minutes: 90",
                          "github.event.pull_request.head.sha", "github.sha",
-                         'git rev-parse --verify "${HEAD_SHA}^1"',
-                         'git rev-parse --verify "${HEAD_SHA}^2"'):
+                         'rev-parse --verify "${HEAD_SHA}^1"',
+                         'rev-parse --verify "${HEAD_SHA}^2"',
+                         'git -c safe.directory="$(pwd -P)"'):
             self.assertIn(required, workflow)
         runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
         self.assertIn("COMPILE_JOBS=4", runner)
