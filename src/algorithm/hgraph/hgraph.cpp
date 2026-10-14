@@ -716,12 +716,50 @@ HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
 
 std::string
 HGraph::GetStats() const {
+    auto populate_mci_stats = [this](JsonType& stats) {
+        if (this->mci_cliques_ != nullptr) {
+            const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+            stats["mci_has_index"].SetBool(mci_stats.has_index);
+            stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+            stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+            stats["mci_covered_node_ratio"].SetFloat(
+                static_cast<float>(mci_stats.covered_node_ratio));
+            stats["mci_base_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_clique_count));
+            stats["mci_delta_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_count));
+            stats["mci_total_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_clique_count));
+            stats["mci_retired_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.retired_clique_count));
+            stats["mci_inactive_node_count"].SetInt(
+                static_cast<int64_t>(mci_stats.inactive_node_count));
+            stats["mci_base_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_membership_count));
+            stats["mci_delta_extra_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+            stats["mci_delta_clique_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+            stats["mci_total_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_membership_count));
+            stats["mci_avg_membership_per_node"].SetFloat(
+                static_cast<float>(mci_stats.avg_membership_per_node));
+            stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+            stats["mci_max_membership_per_node"].SetInt(
+                static_cast<int64_t>(mci_stats.max_membership_per_node));
+            stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+            stats["mci_memory_usage"].SetInt(
+                static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
+        }
+    };
+
     if (GetNumElements() == 0) {
         JsonType stats;
         stats["total_count"].SetInt64(0);
         stats["live_count"].SetInt64(0);
         stats["deleted_count"].SetInt64(GetNumberRemoved());
         stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        populate_mci_stats(stats);
         AddAnalysisMetadata(stats, GetName(), "stats", "partial");
         return stats.Dump(4);
     }
@@ -744,36 +782,7 @@ HGraph::GetStats() const {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
     }
-    if (this->mci_cliques_ != nullptr) {
-        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
-        stats["mci_has_index"].SetBool(mci_stats.has_index);
-        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
-        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
-        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
-        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
-        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
-        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
-        stats["mci_retired_clique_count"].SetInt(
-            static_cast<int64_t>(mci_stats.retired_clique_count));
-        stats["mci_inactive_node_count"].SetInt(
-            static_cast<int64_t>(mci_stats.inactive_node_count));
-        stats["mci_base_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.base_membership_count));
-        stats["mci_delta_extra_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
-        stats["mci_delta_clique_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
-        stats["mci_total_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.total_membership_count));
-        stats["mci_avg_membership_per_node"].SetFloat(
-            static_cast<float>(mci_stats.avg_membership_per_node));
-        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
-        stats["mci_max_membership_per_node"].SetInt(
-            static_cast<int64_t>(mci_stats.max_membership_per_node));
-        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
-        stats["mci_memory_usage"].SetInt(
-            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
-    }
+    populate_mci_stats(stats);
     AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
