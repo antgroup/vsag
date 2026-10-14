@@ -79,7 +79,7 @@ percentile(std::vector<double> values, double fraction) {
         std::max<uint64_t>(
             1, static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size())))) -
         1;
-    return values[rank];
+    return values[std::min<uint64_t>(rank, values.size() - 1)];
 }
 
 uint64_t
@@ -143,6 +143,8 @@ search(const std::shared_ptr<vsag::Index>& index,
        int32_t k,
        const std::string& parameters) {
     auto result = index->KnnSearch(query, k, parameters);
+    // A native single-query result has one row and Dim() returned neighbors.
+    // GetNumElements() is not the number of neighbors for this result layout.
     require(static_cast<bool>(result) and (*result)->GetDim() == k, "search failed");
     std::vector<Neighbor> neighbors;
     neighbors.reserve(k);

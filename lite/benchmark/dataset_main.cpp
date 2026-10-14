@@ -38,10 +38,12 @@ std::vector<std::vector<T>>
 read_records(const std::string& path, int32_t expected_dim) {
     std::ifstream input(path, std::ios::binary | std::ios::ate);
     require(static_cast<bool>(input), "input open failed");
-    const auto size = input.tellg();
-    require(size > 0 and size % (sizeof(int32_t) + sizeof(T) * expected_dim) == 0,
-            "invalid input file length");
-    const auto count = static_cast<uint64_t>(size / (sizeof(int32_t) + sizeof(T) * expected_dim));
+    const auto position = input.tellg();
+    require(position > 0 and expected_dim > 0, "invalid input file length or dimension");
+    const uint64_t size = static_cast<uint64_t>(position);
+    const uint64_t record_bytes = sizeof(int32_t) + sizeof(T) * static_cast<uint64_t>(expected_dim);
+    require(size % record_bytes == 0, "invalid input file length");
+    const uint64_t count = size / record_bytes;
     input.seekg(0);
     std::vector<std::vector<T>> records;
     records.reserve(count);
@@ -65,7 +67,7 @@ percentile(std::vector<double> values, double fraction) {
         std::max<uint64_t>(
             1, static_cast<uint64_t>(std::ceil(fraction * static_cast<double>(values.size())))) -
         1;
-    return values[rank];
+    return values[std::min<uint64_t>(rank, values.size() - 1)];
 }
 
 int

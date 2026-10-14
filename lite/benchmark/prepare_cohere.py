@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pyarrow.parquet as pq
 
-from prepare_sift import sha256, write_neighbors, write_vectors
+from prepare_sift import file_sha256, write_neighbors, write_vectors
 
 
 def read_vectors(path):
@@ -57,7 +57,7 @@ def main():
     raw_queries = raw_queries[args.query_offset:end]
     base, base_norms = normalize(raw_base)
     queries, query_norms = normalize(raw_queries)
-    source_hashes = {name: sha256(args.source / name) for name in ['train.parquet', 'test.parquet']}
+    source_hashes = {name: file_sha256(args.source / name) for name in ['train.parquet', 'test.parquet']}
     args.output.mkdir(parents=True)
     for count in args.counts:
         directory = args.output / f'scale-{count}'
@@ -98,7 +98,7 @@ def main():
                                'mean_topk_set_overlap': float(np.mean(overlaps)),
                                'minimum_topk_set_overlap': min(overlaps),
                                'max_absolute_distance_vs_twice_cosine_error': maximum_error},
-            'files_sha256': {p.name: sha256(p) for p in directory.iterdir() if p.is_file()},
+            'files_sha256': {p.name: file_sha256(p) for p in directory.iterdir() if p.is_file()},
         }
         (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         print(json.dumps({'directory': str(directory), 'rounding_audit': manifest['rounding_audit']}), flush=True)

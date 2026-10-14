@@ -147,6 +147,8 @@ std::vector<Neighbor>
 search(const std::shared_ptr<vsag::Index>& index, const vsag::DatasetPtr& query, uint64_t k) {
     auto result = index->KnnSearch(query, static_cast<int64_t>(k), "");
     require(static_cast<bool>(result), "search failed");
+    // Native single-query search results have one row; Dim() is the neighbor count,
+    // not the input vector dimension. This check bounds the array reads below.
     require((*result)->GetDim() == static_cast<int64_t>(k), "unexpected search result size");
     std::vector<Neighbor> neighbors;
     neighbors.reserve(k);

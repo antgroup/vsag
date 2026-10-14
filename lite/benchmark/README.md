@@ -24,7 +24,7 @@ The current integration does not retrospectively rerun or relabel old experiment
 
 ## Maintained review scope
 
-The current tree retains 29 source/script/test files, plus this guide, the
+The current tree retains 30 source/script/test files, plus this guide, the
 acceptance index, manifest and final-version evidence. The supported feature
 contract is documented in [English](../../docs/docs/en/src/development/lite_first.md)
 and [Chinese](../../docs/docs/zh/src/development/lite_first.md), owned by #2904.
@@ -73,6 +73,12 @@ native Full development install, including `lib/cmake/vsag`, not just the copied
 runtime library/headers used by some frozen measurement receipts. Configure with
 `cmake -S lite/benchmark/full -B /path/to/build -DCMAKE_PREFIX_PATH=/path/to/full-sdk`.
 Frozen Full comparison runners use their own explicitly recorded link paths.
+
+`test_benchmark_contracts.py` compiles the actual percentile and record-reader
+helpers without timing an index. It checks P0/P50/P99/P100, singleton/empty and
+invalid fractions, input preservation, and malformed records/dimensions. Native
+single-query results use one row with the neighbor count in `GetDim()`; switching
+the count check to `GetNumElements()==k` would not follow the Full API contract.
 
 `run_quality_target.py` intentionally replays a pinned historical protocol, not
 an automatic latest-source benchmark. It requires `--full-receipt /path/to/receipt.json`

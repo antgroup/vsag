@@ -26,7 +26,7 @@ def write_neighbors(path, values):
     records.tofile(path)
 
 
-def sha256(path):
+def file_sha256(path):
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
@@ -58,7 +58,7 @@ def main():
             parser.error("k exceeds base count")
         queries = np.asarray(test[: args.queries], dtype="<f4")
         args.output.mkdir(parents=True)
-        source_hash = sha256(args.source)
+        source_hash = file_sha256(args.source)
         for count in args.counts:
             base = np.asarray(train[:count], dtype="<f4")
             directory = args.output / f"scale-{count}"
@@ -84,7 +84,7 @@ def main():
                 "k": args.k,
                 "groundtruth": "recomputed squared-L2, ties by ascending ID on selected prefix",
                 "files_sha256": {
-                    path.name: sha256(path) for path in [base_file, query_file, truth_file]
+                    path.name: file_sha256(path) for path in [base_file, query_file, truth_file]
                 },
             }
             (directory / "manifest.json").write_text(
