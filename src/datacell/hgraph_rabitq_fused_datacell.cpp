@@ -270,7 +270,7 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
     neighbor_ids.clear();
     neighbor_ids.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
-        if (input[i] < total_count_) {
+        if (input[i] < total_count_.load(std::memory_order_relaxed)) {
             neighbor_ids.push_back(input[i]);
         }
     }
@@ -278,7 +278,7 @@ HGraphRaBitQFusedDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& nei
 
 bool
 HGraphRaBitQFusedDataCell::CheckIdExists(InnerIdType id) const {
-    return id < total_count_ and id < max_capacity_;
+    return id < total_count_.load(std::memory_order_relaxed) and id < max_capacity_;
 }
 
 void
@@ -343,7 +343,8 @@ HGraphRaBitQFusedDataCell::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, layout.supplement_offset);
     StreamReader::ReadObj(reader, layout.one_bit_code_size);
     StreamReader::ReadObj(reader, layout.supplement_code_size);
-    CHECK_ARGUMENT(total_count_ <= max_capacity_, "invalid fused graph count and capacity");
+    CHECK_ARGUMENT(total_count_.load(std::memory_order_relaxed) <= max_capacity_,
+                   "invalid fused graph count and capacity");
     CHECK_ARGUMENT(maximum_degree_ == expected_maximum_degree,
                    "fused graph maximum degree does not match construction parameters");
 

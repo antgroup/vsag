@@ -16,6 +16,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -36,13 +37,23 @@ enum class SearchMode {
     RANGE_SEARCH = 2,
 };
 
+class AttrTypeSchema;
+class Expression;
+using ExprPtr = std::shared_ptr<Expression>;
+
+/**
+ * @brief Parse an attribute filter expression.
+ */
+ExprPtr
+AstParse(const std::string& filter_condition_str, const AttrTypeSchema* schema = nullptr);
+
 class SearchRequest {
 public:
     // basic params
     /** 
      * @brief Query dataset containing the vector or vectors to search for
      * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
+     *          HGraph and IVF KNN requests, plus supported AnalyzeIndexBySearch implementations, accept
      *          multiple query vectors; other requests allow one.
      */
     DatasetPtr query_{nullptr};
@@ -225,6 +236,13 @@ public:
      *          the specified buckets. Empty means "use default bucket routing".
      */
     std::vector<std::vector<int64_t>> bucket_ids_{};
+
+    /**
+     * @brief Pre-built attribute expression used instead of attribute_filter_str_
+     * @details When non-null and enable_attribute_filter_ is true, this expression has priority
+     *          over parsing attribute_filter_str_. Appended to preserve aggregate initialization.
+     */
+    ExprPtr expression_{nullptr};
 };
 
 }  // namespace vsag

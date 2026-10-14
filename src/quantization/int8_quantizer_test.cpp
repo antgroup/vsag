@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "catch2/catch_test_macros.hpp"
+#include "catch2/matchers/catch_matchers_floating_point.hpp"
 #include "impl/allocator/safe_allocator.h"
 #include "metric_type.h"
 #include "quantization/computer.h"
@@ -196,7 +197,14 @@ TestComputerINT8(Quantizer<INT8Quantizer<metric>>& quant,
             uint8_t* code = codes1.data() + j * quant.GetCodeSize();
             quant.EncodeOne(reinterpret_cast<float*>(vecs.data() + j * dim), code);
             quant.ComputeDist(*computer, code, dists1.data() + j);
-            REQUIRE(gt == dists1[j]);
+            if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+                // Stored norms and the reference can round differently. Use the caller's
+                // absolute tolerance, including for zero distances, on every result.
+                REQUIRE_THAT(dists1[j], Catch::Matchers::WithinAbs(gt, error));
+            } else {
+                // L2 and IP are exact for the integer sums at these test dimensions.
+                REQUIRE(gt == dists1[j]);
+            }
             if (std::abs(gt - dists1[j]) > error) {
                 count_unbounded_numeric_error++;
             }

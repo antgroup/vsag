@@ -4,7 +4,7 @@
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
 This evidence branch now incorporates feature commit
-`8e82a2a7cd0f3b93925e8a81e754252650e91fc9` through a normal merge; its production
+`74a9420c771e75dea5e56324775d8db5d1472459` through a normal merge; its production
 `src/lite` and public Lite headers match that feature version. No rejected graph
 policy is enabled by this benchmark integration. `ENABLE_BENCHMARKS` defaults OFF.
 Older evidence explicitly measures `dbb2fe0` or its report-specific source, not
@@ -28,7 +28,13 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
-All links are to immutable experiment snapshot800a822; follow each report's own
+Start with the [2026-10-14 final-version audit](results/final-version-20261014/README.md)
+for the four-output verdict, fresh resident CRUD matrix and compiler dependency
+closure/library-hash binding to historical Lite measurements. It preserves the
+GIST/RaBitQ quality limits and outstanding community gates; it does not relabel
+historical Full/package measurements as new runs.
+
+The following historical links use immutable snapshot800a822; follow each report's own
 measured source SHA, input hashes, commands, configuration and raw verification.
 
 - [Mixed CPU/CRUD](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/mixed-cpu-pr2904-20261012/README.md): SIFT/GIST10k, three storages, CPU vs wall and permanent changes, per-call data.

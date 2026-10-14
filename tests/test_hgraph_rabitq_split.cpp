@@ -150,6 +150,7 @@ public:
     void
     WaitUntilEmpty() override {
         release_.store(true, std::memory_order_release);
+        allow_finish_.store(true, std::memory_order_release);
         if (worker_.joinable()) {
             worker_.join();
         }
@@ -177,6 +178,11 @@ public:
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             task();
+            // GeneralEnqueue's packaged-task future is ready here, before the underlying pool
+            // task returns. Keep that boundary deterministic for the drain regression.
+            while (not allow_finish_.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
             task_finished_.store(true, std::memory_order_release);
         });
         return {};
@@ -190,6 +196,7 @@ public:
 private:
     std::atomic<uint64_t> submissions_{0};
     std::atomic<bool> release_{false};
+    std::atomic<bool> allow_finish_{false};
     std::atomic<bool> task_finished_{false};
     std::thread worker_{};
 };
@@ -376,6 +383,47 @@ TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
     REQUIRE(valid_result.has_value());
     REQUIRE(valid_result.value().empty());
     REQUIRE(index->GetNumElements() == base_count);
+}
+
+TEST_CASE("HGraph PiPNN publishes fused RaBitQ codes during batch build",
+          "[ft][rabitq_split][hgraph][fused][pipnn]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 64;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["graph_type"].SetString("pipnn");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(4);
+
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    REQUIRE(index->Build(dataset->base_).has_value());
+
+    const auto* vectors = dataset->base_->GetFloat32Vectors();
+    const auto* labels = dataset->base_->GetIds();
+    const auto self_distance = index->CalcDistanceById(vectors, labels[0]);
+    const auto other_distance = index->CalcDistanceById(vectors, labels[1]);
+    REQUIRE(self_distance.has_value());
+    REQUIRE(other_distance.has_value());
+    REQUIRE(self_distance.value() < other_distance.value());
+
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Float32Vectors(vectors)->Owner(false);
+    const auto result = index->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":32,"rabitq_one_bit_search":true,"enable_reorder":false}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == labels[0]);
 }
 
 TEST_CASE("HGraph fused RaBitQ rejects ExportModel",

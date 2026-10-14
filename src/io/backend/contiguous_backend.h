@@ -37,6 +37,7 @@ struct ContiguousBackendCapabilities {
     static constexpr bool AsyncReadable = false;
     static constexpr bool Writable = true;
     static constexpr bool Resizable = true;
+    static constexpr bool CanResizeForOverwrite = Region::CanResizeForOverwrite;
 };
 
 template <typename Region>
@@ -126,13 +127,21 @@ public:
     }
 
     void
+    ResizePhysicalForOverwrite(uint64_t size, uint64_t previous_logical_size) {
+        region_.ResizePhysicalForOverwrite(size, previous_logical_size);
+    }
+
+    void
     ShrinkPhysical(uint64_t size) {
         region_.ShrinkPhysical(size);
     }
 
     void
-    Prefetch(uint64_t offset, uint64_t cache_line) {
-        PrefetchLines(region_.Data() + offset, cache_line);
+    Prefetch(uint64_t offset, uint64_t size) {
+        PrefetchLines(region_.Data() + offset, size);
+        if constexpr (not Region::InMemory) {
+            region_.Prefetch(offset, size);
+        }
     }
 
     [[nodiscard]] int64_t

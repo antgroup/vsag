@@ -87,6 +87,8 @@ enum IndexFeature {
                                            distances[q * count + j] is query q vs ids[q * count + j],
                                            and -1 indicates an invalid id. */
 
+    SUPPORT_CONTINUE_SEARCH_SESSION, /**< Supports owning continuation sessions */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

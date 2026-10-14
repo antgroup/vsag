@@ -23,7 +23,10 @@
 #include <cstring>
 #include <memory>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 constexpr auto
 generate_bit_lookup_table() {
     std::array<std::array<uint8_t, 8>, 256> table{};
@@ -1417,6 +1420,61 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
 }
 
 void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    neon::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    neon::PQFastScanLookUp32HighAccOverwrite(
+        low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+    return neon::FP32LessThan32Mask(values, limit);
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    return neon::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                     filter_bits,
+                                                     delta,
+                                                     sum_vl,
+                                                     query_sum,
+                                                     query_norm,
+                                                     query_bucket_norm_sqr,
+                                                     inv_sqrt_d,
+                                                     f_add,
+                                                     f_scale,
+                                                     filter_norm_codes,
+                                                     valid_size,
+                                                     dists,
+                                                     filter_inner_products);
+}
+
+void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_SVE)
     uint64_t n = len / 2;
@@ -1605,4 +1663,42 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::sve
+
+namespace vsag::sve {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+}
 }  // namespace vsag::sve

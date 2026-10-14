@@ -34,7 +34,7 @@ enum class SearchMode {
 
 | 字段 | 类型 | 默认值 | 含义 |
 |------|------|--------|------|
-| `query_` | `DatasetPtr` | `nullptr` | 查询。IVF KNN 请求支持多个查询向量，其他请求只允许一个。 |
+| `query_` | `DatasetPtr` | `nullptr` | 查询。HGraph 和 IVF KNN 请求支持多个查询向量，其他请求只允许一个。 |
 | `mode_` | `SearchMode` | `KNN_SEARCH` | KNN 还是范围搜索。 |
 | `topk_` | `int64_t` | `10` | 要返回的邻居数（KNN 模式）。必须为正。 |
 | `radius_` | `float` | `0.5` | 距离阈值（范围模式）。非负。 |

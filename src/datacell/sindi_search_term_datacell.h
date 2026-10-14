@@ -48,14 +48,6 @@ public:
         } else {
             ++generation_;
         }
-        evaluated_ = 0;
-    }
-
-    void
-    Mark(const uint16_t* ids, uint32_t count) {
-        for (uint32_t i = 0; i < count; ++i) {
-            MarkOne(ids[i]);
-        }
     }
 
     bool
@@ -64,19 +56,12 @@ public:
             return false;
         }
         generations_[id] = generation_;
-        ++evaluated_;
         return true;
-    }
-
-    [[nodiscard]] uint64_t
-    Count() const {
-        return evaluated_;
     }
 
 private:
     Vector<uint16_t> generations_;
     uint16_t generation_{0};
-    uint64_t evaluated_{0};
 };
 
 struct SindiTermBuffer {
@@ -139,13 +124,12 @@ struct SindiQueryContext {
     explicit SindiQueryContext(Allocator* allocator)
         : query_term_buffers(allocator),
           mapped_query_terms(allocator),
-          evaluation_tracker(allocator),
           candidate_tracker(allocator) {
     }
 
     QueryTermBuffers query_term_buffers;
     MappedQueryTerms mapped_query_terms;
-    SparseEvaluationTracker evaluation_tracker;
+    bool has_untracked_approximate_evaluations{false};
     mutable SparseEvaluationTracker candidate_tracker;
 };
 

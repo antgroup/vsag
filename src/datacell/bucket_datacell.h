@@ -63,9 +63,14 @@ public:
     void
     ScanBucketById(float* result_dists,
                    const ComputerInterfacePtr& computer,
-                   const BucketIdType& bucket_id) override {
+                   const BucketIdType& bucket_id,
+                   QueryContext* = nullptr,
+                   InnerIdType* scanned_inner_ids = nullptr,
+                   InnerIdType max_scan_size = std::numeric_limits<InnerIdType>::max(),
+                   InnerIdType* scanned_size = nullptr) override {
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
-        return this->scan_bucket_by_id(result_dists, comp, bucket_id);
+        return this->scan_bucket_by_id(
+            result_dists, comp, bucket_id, scanned_inner_ids, max_scan_size, scanned_size);
     }
 
     float
@@ -87,9 +92,10 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         if (id_count > 0 and GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
-            throw VsagException(ErrorType::INTERNAL_ERROR,
-                                "PQFastScan doesn't support ComputeDist, only support "
-                                "ComputeBatchDist");
+            for (InnerIdType i = 0; i < id_count; ++i) {
+                result_dists[i] = QueryOneById(computer, bucket_ids[i], offset_ids[i]);
+            }
+            return;
         }
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         this->query(result_dists, comp, bucket_ids, offset_ids, id_count, ctx);
@@ -183,6 +189,13 @@ public:
         return this->bucket_sizes_[bucket_id];
     }
 
+    [[nodiscard]] InnerIdType
+    GetBucketScanCapacity(BucketIdType bucket_id) override {
+        check_valid_bucket_id(bucket_id);
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        return this->bucket_sizes_[bucket_id];
+    }
+
     void
     GetCodesById(BucketIdType bucket_id, InnerIdType offset_id, uint8_t* data) const override;
 
@@ -251,7 +264,10 @@ private:
     inline void
     scan_bucket_by_id(float* result_dists,
                       Computer<QuantTmpl>* computer,
-                      const BucketIdType& bucket_id);
+                      const BucketIdType& bucket_id,
+                      InnerIdType* scanned_inner_ids,
+                      InnerIdType max_scan_size,
+                      InnerIdType* scanned_size);
 
     inline float
     query_one_by_id(const std::shared_ptr<Computer<QuantTmpl>>& computer,
@@ -359,8 +375,20 @@ BucketDataCell<QuantTmpl, IOTmpl>::query_one_by_id(
                         offset_id));
     }
     float ret;
-    auto lease = this->datas_[bucket_id].Acquire(offset_id * code_size_, code_size_);
-    computer->ComputeDist(lease.Data(), &ret);
+    if (GetQuantizerName() == QUANTIZATION_TYPE_VALUE_PQFS) {
+        // PQFS stores transposed 32-vector packages, including a padded final package.
+        // A single code is not independently addressable; scan its package and select its lane.
+        constexpr InnerIdType package_size = 32;
+        const auto package_begin = offset_id / package_size * package_size;
+        auto lease =
+            this->datas_[bucket_id].Acquire(package_begin * code_size_, package_size * code_size_);
+        float package_distances[package_size];
+        computer->ScanBatchDists(package_size, lease.Data(), package_distances);
+        ret = package_distances[offset_id - package_begin];
+    } else {
+        auto lease = this->datas_[bucket_id].Acquire(offset_id * code_size_, code_size_);
+        computer->ComputeDist(lease.Data(), &ret);
+    }
 
     if (use_residual_) {
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
@@ -522,7 +550,10 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
                                                      Computer<QuantTmpl>* computer,
-                                                     const BucketIdType& bucket_id) {
+                                                     const BucketIdType& bucket_id,
+                                                     InnerIdType* scanned_inner_ids,
+                                                     InnerIdType max_scan_size,
+                                                     InnerIdType* scanned_size) {
     if (bucket_id >= this->bucket_count_ or bucket_id < 0) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "visited invalid bucket id");
     }
@@ -530,7 +561,14 @@ BucketDataCell<QuantTmpl, IOTmpl>::scan_bucket_by_id(float* result_dists,
     constexpr InnerIdType scan_block_size = 32;
     InnerIdType offset = 0;
     this->check_valid_bucket_id(bucket_id);
-    auto data_count = this->bucket_sizes_[bucket_id];
+    const auto bucket_size = std::min(this->bucket_sizes_[bucket_id], max_scan_size);
+    if (scanned_size != nullptr) {
+        *scanned_size = bucket_size;
+    }
+    if (scanned_inner_ids != nullptr) {
+        std::copy_n(this->inner_ids_[bucket_id].begin(), bucket_size, scanned_inner_ids);
+    }
+    auto data_count = bucket_size;
     while (data_count > 0) {
         auto compute_count = std::min(data_count, scan_block_size);
         auto lease =

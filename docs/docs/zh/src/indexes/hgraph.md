@@ -13,10 +13,10 @@ HGraph 都是推荐的默认索引。
 ## 工作原理
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
-   `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）
-   或 ODescent（`graph_type: "odescent"`）。
+   `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）、
+   ODescent（`graph_type: "odescent"`）或 PiPNN（`graph_type: "pipnn"`）。
 2. **量化。** 底层存储使用可配置的量化器进行压缩（`base_quantization_type` —
-   `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。
+   `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。
    可选地再保留一份高精度副本（`use_reorder: true` 搭配 `precise_quantization_type`），
    用于对粗排结果进行重打分。
 3. **搜索。** 自顶向下在图上做贪心 beam search，扩展候选集到 `ef_search` 个节点；如启用精排，
@@ -58,10 +58,20 @@ auto result = index->KnnSearch(
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/README.md) |
+| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/) |
 | `max_degree` | int | `64` | 图节点最大出度 |
 | `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
-| `graph_type` | string | `"nsw"` | 构图算法：`nsw` 或 `odescent` |
+| `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
+| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
+| `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
+| `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
+| `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
+| `pipnn_fanout` | int[] | `[10, 2]` | 每个列出的分区层级中，一个点加入的最近 leader 分区数；更深层使用 `1` |
+| `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；小于 `pipnn_min_leaf_size` 的叶子至少使用 `4` |
+| `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
+| `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
@@ -89,17 +99,45 @@ auto result = index->KnnSearch(
 | `use_conjugate_graph` | bool | `false` | 启用 `Feedback`/`Pretrain` 图增强；详见[图索引增强](../advanced/enhance_graph.md) |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
+`sq8_local` 和 `sq4_local` 支持 float32 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
+
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
 存储约翻倍，因此默认关闭。
 
 `label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
 `"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
 
+### PiPNN 构建边界
+
+设置 `graph_type: "pipnn"` 可让初次全量 `Build` 使用
+[PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
+`metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
+HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建和向量存储去重
+暂不支持 PiPNN。上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
+
+`build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
+`OPENBLAS_NUM_THREADS=1`，避免 BLAS 线程影响构建线程扩展性。可复现配置
+`tools/eval/pipnn_parallel.yaml` 会在 SIFT1M 上以相同 Recall@10 目标比较 NSW、ODescent 和
+PiPNN，并通过查询验证每一份生成的图。
+
+
+### 实验性 PiPNN 动态 alpha
+
+在 `index_param` 中设置 `pipnn_adaptive_pruning: true`，将 [PR #2933](https://github.com/antgroup/vsag/pull/2933) 的逐点计数反馈规则用于 PiPNN 最终 reservoir 剪枝。此实验功能默认关闭，仅支持 L2 和初始批量 `Build`；分区、leaf 内候选、relative hash、reservoir 内容、后续增量 `Add` 及 ODescent 路由层构建保持原有行为。
+
+设目标度数为 K，首轮按配置的 alpha 扫描原有有序 reservoir，得到接受集合 A 和已扫描的拒绝集合 B；未扫描尾部不计入 B。步长非零时，若 `0 < |A| < K`，保留 A，根据 `K/|A| <= 1.5`、`(1.5, 3]`、`> 3` 分别将 alpha 增加 1、2、3 个步长，重扫 B。若 `|A| = K`，根据 `|B|/K < 2.5`、`[2.5, 5)`、`>= 5` 分别将 alpha 减少 2、1、0 个步长，清空 A 并重扫完整原候选列表（包括首轮未扫描尾部）。收紧后若不足 K，保留当前接受项，按原 alpha 重扫收紧阶段新产生的拒绝集合。不会无条件补入被拒绝的邻居。
+
+拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
+
+策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
+
 ### 向量存储去重
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
 同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
+稠密向量 HGraph 索引；`graph_type: "odescent"` 和 `graph_type: "pipnn"` 不支持。
 
 启用存储去重后，暂不支持以下操作和配置：
 

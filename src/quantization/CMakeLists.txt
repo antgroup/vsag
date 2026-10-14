@@ -20,6 +20,7 @@ set (QUANTIZER_SRC
         int8_quantizer.cpp
         multi_vector_computer.cpp
         scalar_quantization/scalar_quantizer.cpp
+        scalar_quantization/local_scalar_quantizer.cpp
         scalar_quantization/half_precision_quantizer.cpp
         scalar_quantization/sq4_uniform_quantizer.cpp
         scalar_quantization/sq8_uniform_quantizer.cpp

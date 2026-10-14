@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -52,6 +53,7 @@
 #include <iostream>
 #include <random>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <vector>
 
@@ -699,4 +701,359 @@ TEST_CASE("SIMQ: incremental Add triggers split and preserves recall", "[simq][a
     std::cout << "\n[SIMQ Add] Mean Recall@" << TOP_K << " after incremental Add = " << mean_recall
               << "\n";
     REQUIRE(mean_recall >= 0.3f);
+}
+
+TEST_CASE("SIMQ distance-by-ID native query contract", "[simq][distance_contract]") {
+    TempFile tmp;
+    std::array<float, SIMQ_DIM> values{};
+    values[0] = 2.0F;
+    MultiVector mv{1, values.data()};
+    int64_t label = 7;
+    auto base = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(SIMQ_DIM)
+                    ->Ids(&label)
+                    ->MultiVectors(&mv)
+                    ->MultiVectorDim(SIMQ_DIM)
+                    ->Owner(false);
+    auto created = Factory::CreateIndex("simq", make_build_param(tmp.path, 1.0F, 4, 2, 1, 1));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+    REQUIRE(index->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+    auto empty_distance = index->CalcDistanceById(base, label);
+    REQUIRE(empty_distance.has_value());
+    REQUIRE(empty_distance.value() == -1.0F);
+    REQUIRE(index->Build(base).has_value());
+    auto search = index->KnnSearch(base, 1, make_search_param(1, 1), FilterPtr{});
+    REQUIRE(search.has_value());
+    REQUIRE(search.value()->GetDim() == 1);
+    const auto expected = search.value()->GetDistances()[0];
+    REQUIRE(expected < 0.0F);
+    for (const auto precise : {false, true}) {
+        auto single = index->CalcDistanceById(base, label, precise);
+        REQUIRE(single.has_value());
+        REQUIRE(single.value() == expected);
+        MultiVector queries[] = {mv, mv};
+        auto query = Dataset::Make()
+                         ->NumElements(2)
+                         ->Dim(SIMQ_DIM)
+                         ->MultiVectors(queries)
+                         ->MultiVectorDim(SIMQ_DIM)
+                         ->Owner(false);
+        int64_t ids[] = {999, label, label, 999};
+        auto batch = index->CalcDistancesById(query, ids, 2, precise);
+        REQUIRE(batch.has_value());
+        REQUIRE(batch.value()->GetNumElements() == 2);
+        REQUIRE(batch.value()->GetDim() == 2);
+        REQUIRE(batch.value()->GetDistances()[0] == -1.0F);
+        REQUIRE(batch.value()->GetDistances()[1] == expected);
+        REQUIRE(batch.value()->GetDistances()[2] == expected);
+        REQUIRE(batch.value()->GetDistances()[3] == -1.0F);
+        auto top = index->CalcDistancesById(query, ids, 2, precise, 1);
+        REQUIRE(top.has_value());
+        REQUIRE(top.value()->GetDim() == 1);
+        REQUIRE(top.value()->GetIds()[0] == label);
+        REQUIRE(top.value()->GetIds()[1] == label);
+        REQUIRE(top.value()->GetDistances()[0] == expected);
+        REQUIRE(top.value()->GetDistances()[1] == expected);
+    }
+    REQUIRE_FALSE(index->CalcDistanceById(DatasetPtr{}, label).has_value());
+}
+TEST_CASE("SIMQ timeout search", "[simq][timeout]") {
+    TempFile tf;
+    auto build_param = make_build_param(tf.path);
+    auto search_param = make_search_param();
+    auto ds = generate_dataset();
+    auto r = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r.has_value());
+    auto index = r.value();
+
+    auto build_ds = vsag::Dataset::Make();
+    build_ds->NumElements(static_cast<int64_t>(BASE_DOCS))
+        ->Dim(SIMQ_DIM)
+        ->Ids(ds.base_ids.data())
+        ->MultiVectors(ds.base_mvs.data())
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+    REQUIRE(index->Build(build_ds).has_value());
+
+    auto query_ds = vsag::Dataset::Make();
+    query_ds->NumElements(1)
+        ->Dim(SIMQ_DIM)
+        ->MultiVectors(&ds.query_mvs[0])
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+
+    // Test with a very short timeout — should trigger timeout
+    const std::string timeout_param = R"({"simq":{"coarse_k":10,"rerank_k":1000,"timeout_ms":0}})";
+    auto sr = index->KnnSearch(query_ds, TOP_K, timeout_param, vsag::FilterPtr(nullptr));
+    REQUIRE(sr.has_value());
+    auto result = sr.value();
+    auto stats = result->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+
+    // Test without timeout — should complete normally
+    sr = index->KnnSearch(query_ds, TOP_K, search_param, vsag::FilterPtr(nullptr));
+    REQUIRE(sr.has_value());
+    result = sr.value();
+    stats = result->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+
+    const auto normal_result = result;
+    const std::string generous_param =
+        R"({"simq":{"coarse_k":10,"rerank_k":1000,"timeout_ms":60000}})";
+    auto complete = index->KnnSearch(query_ds, TOP_K, generous_param);
+    REQUIRE(complete.has_value());
+    REQUIRE(complete.value()->GetDim() == normal_result->GetDim());
+    stats = complete.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    for (int64_t i = 0; i < normal_result->GetDim(); ++i) {
+        REQUIRE(complete.value()->GetIds()[i] == normal_result->GetIds()[i]);
+        REQUIRE(complete.value()->GetDistances()[i] == normal_result->GetDistances()[i]);
+    }
+
+    auto range =
+        index->RangeSearch(query_ds, 100.0F, timeout_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+    REQUIRE(range.value()->GetDim() == 0);
+    range = index->RangeSearch(query_ds, 100.0F, generous_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(range.has_value());
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "false");
+    auto normal_range =
+        index->RangeSearch(query_ds, 100.0F, search_param, vsag::FilterPtr(nullptr), TOP_K);
+    REQUIRE(normal_range.has_value());
+    REQUIRE(normal_range.value()->GetDim() <= TOP_K);
+    REQUIRE(normal_range.value()->GetDim() > 0);
+    REQUIRE(range.value()->GetDim() == normal_range.value()->GetDim());
+    for (int64_t i = 0; i < normal_range.value()->GetDim(); ++i) {
+        REQUIRE(range.value()->GetIds()[i] == normal_range.value()->GetIds()[i]);
+        REQUIRE(range.value()->GetDistances()[i] == normal_range.value()->GetDistances()[i]);
+    }
+
+    // Deadlines are cooperative: even a callback on the final candidate must
+    // be reflected in the returned statistics. Rejecting it avoids rerank work.
+    class SlowRejectFilter : public vsag::Filter {
+    public:
+        explicit SlowRejectFilter(std::chrono::milliseconds delay) : delay_(delay) {
+        }
+
+        bool
+        CheckValid(int64_t) const override {
+            std::this_thread::sleep_for(delay_);
+            return false;
+        }
+
+    private:
+        std::chrono::milliseconds delay_;
+    };
+    constexpr auto timeout = std::chrono::milliseconds(1);
+    const auto short_param = fmt::format(
+        R"({{"simq":{{"coarse_k":10,"rerank_k":1,"timeout_ms":{}}}}})", timeout.count());
+    // Exercise the real clock with a delay well beyond the budget. Scheduling
+    // delays may lengthen the sleep; this test asserts no wall-clock upper bound.
+    auto filter = std::make_shared<SlowRejectFilter>(10 * timeout);
+    auto filtered = index->KnnSearch(query_ds, 1, short_param, filter);
+    REQUIRE(filtered.has_value());
+    REQUIRE(filtered.value()->GetDim() == 0);
+    stats = filtered.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+    range = index->RangeSearch(query_ds, 100.0F, short_param, filter, 1);
+    REQUIRE(range.has_value());
+    REQUIRE(range.value()->GetDim() == 0);
+    stats = range.value()->GetStatistics({"is_timeout"});
+    REQUIRE(stats.size() == 1);
+    REQUIRE(stats[0] == "true");
+}
+
+TEST_CASE("SIMQ GetStats reports doc vector count distribution", "[simq][stats][analyzer]") {
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    auto build_param = make_build_param(tmp.path);
+    auto result = Factory::CreateIndex("simq", build_param);
+    REQUIRE(result.has_value());
+    auto index = result.value();
+    auto build_result = index->Build(ds.base_dataset);
+    REQUIRE(build_result.has_value());
+
+    auto stats_str = index->GetStats();
+    REQUIRE_FALSE(stats_str.empty());
+    auto stats = JsonType::Parse(stats_str);
+
+    REQUIRE(stats.Contains("total_count"));
+    REQUIRE(stats["total_count"].GetUint64() == BASE_DOCS);
+
+    REQUIRE(stats.Contains("doc_vector_count_distribution"));
+    const auto& dist = stats["doc_vector_count_distribution"];
+
+    REQUIRE(dist.Contains("mean"));
+    REQUIRE(dist.Contains("p90"));
+    REQUIRE(dist.Contains("p99"));
+    REQUIRE(dist.Contains("min"));
+    REQUIRE(dist.Contains("max"));
+
+    // All docs have DOC_TOKENS token vectors
+    float expected = static_cast<float>(DOC_TOKENS);
+    REQUIRE(dist["mean"].GetFloat() == expected);
+    REQUIRE(dist["p90"].GetFloat() == expected);
+    REQUIRE(dist["p99"].GetFloat() == expected);
+    REQUIRE(dist["min"].GetInt() == static_cast<int64_t>(DOC_TOKENS));
+    REQUIRE(dist["max"].GetInt() == static_cast<int64_t>(DOC_TOKENS));
+}
+TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
+    const auto quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    constexpr int64_t dim = 32;
+    constexpr int64_t docs = 96;
+    constexpr uint32_t tokens = 4;
+    std::mt19937 random(424242);
+    std::vector<float> values((docs + 8) * tokens * dim);
+    fill_normalized(values.data(), (docs + 8) * tokens, dim, random);
+    std::fill(values.begin(), values.begin() + dim, 0.0F);
+    std::vector<MultiVector> mvs(docs + 8);
+    std::vector<int64_t> labels(docs + 8);
+    for (int64_t i = 0; i < docs + 8; ++i) {
+        mvs[i] = MultiVector{tokens, values.data() + i * tokens * dim};
+        labels[i] = 1000 + i;
+    }
+    auto data = [&](int64_t start, int64_t count) {
+        return Dataset::Make()
+            ->NumElements(count)
+            ->Dim(dim)
+            ->MultiVectorDim(dim)
+            ->MultiVectors(mvs.data() + start)
+            ->Ids(labels.data() + start)
+            ->Owner(false);
+    };
+    const auto parameters = fmt::format(
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},"index_param":{{"base_io_type":"memory_io","quantization_type":"{}","init_cluster_ratio":0.05,"max_cluster_size":16,"split_start_idx":8,"build_thread_count":2}}}})",
+        dim,
+        quantization);
+    auto created = Factory::CreateIndex("simq", parameters);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(data(0, docs / 2)).has_value());
+    REQUIRE(index->Add(data(docs / 2, docs / 2)).has_value());
+    std::vector<float> zero_values(2 * dim, 0.0F);
+    MultiVector zero_mv{2, zero_values.data()};
+    auto zero_query = Dataset::Make()
+                          ->NumElements(1)
+                          ->Dim(dim)
+                          ->MultiVectorDim(dim)
+                          ->MultiVectors(&zero_mv)
+                          ->Owner(false);
+    auto zero_result =
+        index->KnnSearch(zero_query, 10, R"({"simq":{"coarse_k":10000,"rerank_k":10000}})");
+    REQUIRE(zero_result.has_value());
+    REQUIRE(zero_result.value()->GetDim() == 10);
+    std::unordered_set<int64_t> zero_ids;
+    for (int64_t i = 0; i < zero_result.value()->GetDim(); ++i) {
+        REQUIRE(zero_ids.insert(zero_result.value()->GetIds()[i]).second);
+    }
+    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    auto query = data(3, 1);
+    auto result = index->KnnSearch(query, 10, search);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+    std::unordered_set<int64_t> unique;
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(unique.insert(result.value()->GetIds()[i]).second);
+        auto distance = index->CalcDistanceById(query, result.value()->GetIds()[i]);
+        REQUIRE(distance.has_value());
+        REQUIRE(std::abs(distance.value() - result.value()->GetDistances()[i]) < 1e-5F);
+    }
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    auto roundtrip = restored->KnnSearch(query, 10, search);
+    REQUIRE(roundtrip.has_value());
+    REQUIRE(roundtrip.value()->GetDim() == result.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(roundtrip.value()->GetIds()[i] == result.value()->GetIds()[i]);
+        REQUIRE(roundtrip.value()->GetDistances()[i] == result.value()->GetDistances()[i]);
+    }
+    REQUIRE(restored->Add(data(docs, 8)).has_value());
+    REQUIRE(restored->GetNumElements() == docs + 8);
+    auto added = restored->KnnSearch(data(docs, 1), 10, search);
+    REQUIRE(added.has_value());
+    bool found = false;
+    for (int64_t i = 0; i < added.value()->GetDim(); ++i) {
+        found = found or added.value()->GetIds()[i] == labels[docs];
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serialization]") {
+    const auto mode = GENERATE("future", "count", "legacy");
+    const std::string parameters =
+        R"({"dtype":"float32","metric_type":"ip","dim":4,"index_param":{"base_io_type":"memory_io","build_thread_count":2,"init_cluster_ratio":1.0}})";
+    auto index = Factory::CreateIndex("simq", parameters).value();
+    float values[] = {1, 0, 0, 0, 0, 1, 0, 0};
+    MultiVector mv{2, values};
+    int64_t id = 10;
+    auto data = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(4)
+                    ->MultiVectorDim(4)
+                    ->MultiVectors(&mv)
+                    ->Ids(&id)
+                    ->Owner(false);
+    REQUIRE(index->Build(data).has_value());
+    std::stringstream original;
+    REQUIRE(index->Serialize(original).has_value());
+    auto bytes = original.str();
+    IOStreamReader reader(original);
+    auto footer = Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    auto metadata = footer->GetMetadata();
+    auto info = metadata->Get("basic_info");
+    // init ratio1 with two distinct tokens produces two representatives,16B each.
+    const uint64_t payload_end = bytes.size() - footer->Length();
+    const uint64_t cache_bytes = 2 * 4 * sizeof(float);
+    REQUIRE(payload_end >= cache_bytes + sizeof(uint64_t));
+    const uint64_t cache_offset = payload_end - cache_bytes - sizeof(uint64_t);
+    uint64_t stored = 0;
+    std::memcpy(&stored, bytes.data() + cache_offset, sizeof(stored));
+    REQUIRE(stored == cache_bytes);
+    if (std::string(mode) == "future")
+        info["simq_format_version"].SetInt(999);
+    if (std::string(mode) == "count") {
+        stored = std::numeric_limits<uint64_t>::max();
+        std::memcpy(bytes.data() + cache_offset, &stored, sizeof(stored));
+    }
+    if (std::string(mode) == "legacy") {
+        info["simq_format_version"].SetInt(0);
+        bytes.resize(cache_offset);
+    } else
+        bytes.resize(payload_end);
+    metadata->Set("basic_info", info);
+    std::stringstream rebuilt;
+    rebuilt.write(bytes.data(), bytes.size());
+    IOStreamWriter writer(rebuilt);
+    Footer new_footer(metadata);
+    new_footer.Write(writer);
+    rebuilt.seekg(0);
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    auto loaded = restored->Deserialize(rebuilt);
+    if (std::string(mode) != "legacy") {
+        REQUIRE_FALSE(loaded.has_value());
+    } else {
+        REQUIRE(loaded.has_value());
+        auto result = restored->KnnSearch(data, 1, "{}");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetIds()[0] == id);
+        id = 11;
+        REQUIRE(restored->Add(data).has_value());
+        REQUIRE(restored->GetNumElements() == 2);
+    }
 }

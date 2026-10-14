@@ -15,20 +15,42 @@ VSAG 采用 [Catch2](https://github.com/catchorg/Catch2) 作为测试框架，�
 make test
 ```
 
+## 构建并运行单个单元测试模块
+
+为了缩短编辑、构建和测试周期，可以只构建并运行一个仍在维护的单元测试子系统：
+
+```bash
+make test-module MODULE=datacell
+make test-module MODULE=algorithm CASE='[ut][sample_train_data]'
+```
+
+可用模块名为 `simd`、`common`、`algorithm`、`factory`、`attr`、`datacell`、`layout`、
+`quantization`、`storage`、`io`、`utils` 和 `impl`。每条命令都会构建共享的生产代码与测试夹具依赖，
+但只编译所选模块的测试源码。对应的 CMake 目标和可执行文件名为 `unittests_<module>`：
+
+```bash
+cmake -S . -B build -DENABLE_TESTS=ON
+cmake --build build --target unittests_datacell
+./build/tests/unittests_datacell '[ut][AttributeInvertedInterfaceParameter]'
+```
+
+模块目标仅用于加速本地开发。完整验证仍应运行 `make test`；其中聚合的 `unittests` 可执行文件包含所有模块。
+
 说明：
 
 1. 运行 `src/` 下的单元测试；
 2. 运行 `tests/` 下的功能测试；
 3. `make test` 并未开启覆盖率（`ENABLE_COVERAGE=ON`）。需要覆盖率报告时请使用
-   `make cov`：该目标仅完成带覆盖率插桩的编译，随后需要手动运行测试二进制以生成报告。
+   `make cov`：该目标仅完成带覆盖率插桩的编译，随后按下文命令以固定随机种子运行
+   与覆盖率 CI 相同的非 daily 单元测试和功能测试并生成报告。
 
 ## 仅运行单个测试二进制
 
 构建完成后，可直接运行单个测试：
 
 ```bash
-./build-debug/tests/functional_tests "[hgraph]"
-./build-debug/tests/functional_tests "[hgraph][concurrent]"
+./build/tests/functests "[hgraph]"
+./build/tests/functests "[hgraph][concurrent]"
 ```
 
 Catch2 支持按名字、tag、通配符等方式筛选用例，详见 `--help`。
@@ -39,11 +61,46 @@ Catch2 支持按名字、tag、通配符等方式筛选用例，详见 `--help`�
 
 ```bash
 make cov
-# 然后运行测试二进制以采集覆盖率，例如：
-./build-debug/tests/functional_tests
+VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
+bash scripts/coverage/collect_cpp_coverage.sh
+bash scripts/coverage/check_cov.sh
 ```
 
-报告会输出到 `build-debug/coverage/` 下，可用浏览器打开 `index.html` 查看未覆盖的分支。
+采集脚本会生成包含分支数据和仓库相对路径的 `coverage/coverage.info`。统计范围仅包括
+`src/` 下的维护中生产代码和 `include/` 下的公共头文件，并排除 `src/` 下的
+`version.h`（构建时由 `cmake/GenerateVersionHeader.cmake` 从纳入版本控制的模板
+`src/version.h.in` 生成）与引入的兼容头文件 `include/vsag/expected.hpp`。仅在其他平台编译的路径
+明确不属于 Linux x86 报告的统计范围，必须由平台专用覆盖率任务统计，不能视为已覆盖。
+
+### 合并前的 SIMD 覆盖率阶段
+
+`PR SIMD Coverage` 仅在目标分支为 `main` 的 PR 修改 SIMD 源码、测试或其构建与覆盖率基础设施时运行。
+本阶段有意仅在 `main` 推出。发布分支保留现有的 PR CI，但不包含这项新的 SIMD 覆盖率检查；扩展到发布分支需要单独推进。
+任务在同一台 Linux x86 运行器上依次构建 PR 的基准版本和 GitHub 合并候选版本，
+使用四个并行构建任务、OpenBLAS、`[simd]~[!benchmark]` 测试筛选条件、
+Catch2 随机种子 `424242` 和字典序执行顺序。每次测试限时 15 分钟，整个任务限时 90 分钟。
+此阶段仍需构建聚合测试可执行文件。合并后及手动触发的完整单元测试与功能测试覆盖率流程保持不变。
+
+Actions 摘要和产物**仅报告维护中的 `src/simd/` 代码行覆盖率**。
+纳入测量的新增可执行代码行覆盖率必须达到 80%；该范围的行覆盖率不得低于本次重新测量的基准，
+比较时使用未经四舍五入的比例。新文件计入候选版本及补丁的总量，不虚构文件级基准。
+覆盖率数据缺失、SHA 或测试配置不匹配、变更文件未被测量，或未删除源码的记录消失，都会导致失败。
+没有测量到新增可执行代码行时，结果为 N/A，而不是 100%。
+
+这是范围有限的第一阶段，尚未提供全项目覆盖率回退保护。任务运行时会列出其他已变更但不受支持的 C++ 路径；
+未涉及触发路径的 PR 不会获得此项测量。条件编译路径仍受运行器平台限制。部分测试使用 `random_device`，
+因此 Catch2 种子无法控制所有输入。局部覆盖率数据不会上传到 Codecov，也不会与完整测试套件的覆盖率比较。
+任务仅使用 PR 的只读权限，不使用密钥、不持久化检出凭据，也不恢复或保存构建缓存。
+依赖定义发生变更时会报告无法比较，因为依赖固定版本不同时，两次构建无法安全地共用一份预先准备的依赖源码。
+
+如需比较已收集的数据，将 `base.info`、`head.info` 和 JSON 元数据文件
+`base.json`、`head.json` 放入报告目录。每份元数据须包含 `sha` 和 `profile`，
+其中 `profile` 必须与 `scripts/coverage/compare_simd_coverage.py` 中的 `PROFILE` 常量完全一致。然后运行：
+
+```bash
+python3 scripts/coverage/compare_simd_coverage.py --root . \
+  --base "$BASE_SHA" --head "$MERGE_SHA" --reports simd-coverage
+```
 
 ## 内存泄漏与多线程
 

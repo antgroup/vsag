@@ -132,6 +132,26 @@ public:
         cache_.Clear(old_size);
     }
 
+    /**
+     * @brief Grow the storage to size without zero-filling the freshly
+     * allocated region, for callers that guarantee they overwrite the whole
+     * grown range afterwards (e.g. parallel deserialization).
+     *
+     * Falls back to Resize when the backend cannot skip the fill, so it is
+     * always safe to call.
+     */
+    void
+    ResizeForOverwrite(uint64_t size) {
+        if constexpr (Backend::Capabilities::CanResizeForOverwrite) {
+            uint64_t old_size = Size();
+            backend_.ResizePhysicalForOverwrite(size, old_size);
+            size_.store(size, std::memory_order_release);
+            cache_.Clear(old_size);
+        } else {
+            Resize(size);
+        }
+    }
+
     void
     Shrink(uint64_t size) {
         uint64_t old_size = Size();
@@ -144,9 +164,10 @@ public:
     }
 
     void
-    Prefetch(uint64_t offset, uint64_t cache_line = 64) {
-        if (offset < Size()) {
-            backend_.Prefetch(offset, cache_line);
+    Prefetch(uint64_t offset, uint64_t size = 64) {
+        const auto published_size = Size();
+        if (offset < published_size and (InMemory or enable_prefetch_hint_)) {
+            backend_.Prefetch(offset, std::min(size, published_size - offset));
         }
     }
 
@@ -292,6 +313,7 @@ public:
         const auto old_size = Size();
         cache_.Clear(old_size);
         cache_.Configure(io_param);
+        enable_prefetch_hint_ = io_param != nullptr and io_param->enable_prefetch_hint_;
         if constexpr (Backend::Capabilities::RequiresInitialization) {
             const auto initialized_size =
                 backend_.Initialize(io_param, has_deserialized_, start_, old_size);
@@ -302,6 +324,7 @@ public:
     void
     EnableReadCache(const IOParamPtr& io_param) {
         cache_.Configure(io_param);
+        enable_prefetch_hint_ = io_param != nullptr and io_param->enable_prefetch_hint_;
     }
 
     void
@@ -367,6 +390,7 @@ private:
     std::atomic<uint64_t> size_{0};
     uint64_t start_{0};
     bool has_deserialized_{false};
+    bool enable_prefetch_hint_{false};
 };
 
 }  // namespace vsag

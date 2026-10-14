@@ -85,14 +85,42 @@ fill_codes(uint8_t* codes, uint8_t value, uint8_t value_bit_size, uint64_t index
 template <MetricType metric, int bit>
 bool
 ScalarQuantizer<metric, bit>::EncodeOneImpl(const float* data, uint8_t* codes) const {
+    Vector<float> normalized(this->allocator_);
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        normalized.resize(this->dim_);
+    }
+    return EncodeOneWithScratch(data, codes, normalized.data());
+}
+
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::EncodeBatchImpl(const float* data,
+                                              uint8_t* codes,
+                                              uint64_t count) const {
+    Vector<float> normalized(this->allocator_);
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        normalized.resize(this->dim_);
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+        if (not EncodeOneWithScratch(
+                data + i * this->dim_, codes + i * this->code_size_, normalized.data())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <MetricType metric, int bit>
+bool
+ScalarQuantizer<metric, bit>::EncodeOneWithScratch(const float* data,
+                                                   uint8_t* codes,
+                                                   float* normalized) const {
     float delta = 0;
     uint8_t scaled = 0;
     const float* cur = data;
-    Vector<float> tmp(this->allocator_);
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
-        tmp.resize(this->dim_);
-        Normalize(data, tmp.data(), this->dim_);
-        cur = tmp.data();
+        Normalize(data, normalized, this->dim_);
+        cur = normalized;
     }
     memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; d++) {

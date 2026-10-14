@@ -645,6 +645,17 @@ TEST_CASE("LazyHGraph calculates distance by id in flat and graph phases", "[ut]
     REQUIRE(index->Add(data).empty());
     auto expected = L2(vectors.data(), vectors.data() + DIM);
     REQUIRE(index->CalcDistanceById(vectors.data(), 1701) == expected);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(DIM)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    vsag::InnerIndexPtr interface = index;
+    REQUIRE(interface->CalcDistanceById(query, 1701) == expected);
+    int64_t candidates[] = {1701, -999, 1700};
+    auto flat_top = interface->CalcDistancesById(query, candidates, 3, true, 1);
+    REQUIRE(flat_top->GetIds()[0] == 1700);
+    REQUIRE(flat_top->GetDistances()[0] == 0.0F);
 
     std::vector<float> more_vectors;
     std::vector<int64_t> more_ids;
@@ -652,6 +663,10 @@ TEST_CASE("LazyHGraph calculates distance by id in flat and graph phases", "[ut]
     REQUIRE(index->Add(more).empty());
     REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
     REQUIRE(index->CalcDistanceById(more_vectors.data(), 1800) == 0.0F);
+    REQUIRE(interface->CalcDistanceById(query, 1701) == expected);
+    auto graph_top = interface->CalcDistancesById(query, candidates, 3, true, 1);
+    REQUIRE(graph_top->GetIds()[0] == flat_top->GetIds()[0]);
+    REQUIRE(graph_top->GetDistances()[0] == flat_top->GetDistances()[0]);
 }
 
 TEST_CASE("LazyHGraph supports concurrent search during transition", "[ut][lazy_hgraph]") {

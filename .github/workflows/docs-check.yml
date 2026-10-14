@@ -1,0 +1,36 @@
+name: Docs Check
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'examples/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - '.github/scripts/check-docs.mjs'
+      - '.github/workflows/docs-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'examples/**'
+      - 'include/**'
+      - 'src/**'
+      - 'tests/**'
+      - '.github/scripts/check-docs.mjs'
+      - '.github/workflows/docs-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Check documentation structure and links
+        run: node .github/scripts/check-docs.mjs
