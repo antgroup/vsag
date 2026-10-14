@@ -16,7 +16,8 @@ claim current-version measurements. Main/current dataset targets retain the
 Native Full consumers are independently built via `benchmark/full`, never
 substituted by an old Lite baseline.
 
-The latest tree excludes large raw outputs from the review diff; project history
+The latest tree excludes historical bulk raw outputs from the review diff, but
+retains one compressed final-version raw archive and its receipt; project history
 and original server evidence remain intact. New performance output goes to a
 fresh external directory and must record source/configuration/input identities.
 The current integration does not retrospectively rerun or relabel old experiments.
@@ -50,8 +51,9 @@ environment. Run `python lite/benchmark/test_prepare_cohere.py`; its synthetic
 Parquet fixtures check normalization, FP64 truth/ties, original-ID mapping,
 query offsets and pre-write rejection of invalid vectors/IDs/ranges. Without
 optional dependencies unittest discovery explicitly skips this fixture; a skip
-is not a successful data-preparation test. With dependencies it runs all checks
-during import; the standalone command is the explicit execution receipt.
+is not a successful data-preparation test. With dependencies it runs four normal
+unittest cases, not import-time assertions. The RaBitQ-ON CI installs dependencies
+and checks imports before running discovery, so missing packages fail that job.
 
 Prepare source `train.parquet` / `test.parquet` with
 `python lite/benchmark/prepare_cohere.py /path/to/cohere-source /path/to/new-output --counts 10000 100000 --queries 100 --k 10`.
@@ -71,6 +73,15 @@ native Full development install, including `lib/cmake/vsag`, not just the copied
 runtime library/headers used by some frozen measurement receipts. Configure with
 `cmake -S lite/benchmark/full -B /path/to/build -DCMAKE_PREFIX_PATH=/path/to/full-sdk`.
 Frozen Full comparison runners use their own explicitly recorded link paths.
+
+`run_quality_target.py` intentionally replays a pinned historical protocol, not
+an automatic latest-source benchmark. It requires `--full-receipt /path/to/receipt.json`
+from a matching fresh Full build, plus matching feature/build/install/data paths.
+The recorded receipt is preserved with the fresh Full report linked from ACCEPTANCE.md;
+it is not implicitly available in this checkout. Missing receipt arguments/files
+are rejected before output creation. Do not bypass source/library identity guards.
+Example entry: `python3 lite/benchmark/run_quality_target.py --full-receipt /path/to/receipt.json --feature /path/to/pinned-feature --lite-build /path/to/matching-build --full-install /path/to/matching-full --output /path/to/new-results`.
+Use `--help` for raw GIST and prepared dataset path overrides.
 
 After pruning: fresh Lite ReleaseON/benchmarks build and CTest5/5, OFF4/4,
 three Full consumer builds against the known historical Full SDK, Python19pass/

@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from run_quality_target import audit_query
@@ -9,6 +11,18 @@ from verify_quality_target import quantile, verify
 
 
 class QualityTargetTests(unittest.TestCase):
+    def test_explicit_receipt_required_before_output_creation(self):
+        script = Path(__file__).with_name('run_quality_target.py')
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / 'output'
+            for options in [[], ['--full-receipt', str(Path(directory) / 'missing.json')]]:
+                with self.subTest(options=options):
+                    result = subprocess.run([sys.executable, str(script), '--output', str(output), *options],
+                                            capture_output=True, text=True)
+                    self.assertEqual(result.returncode, 2)
+                    self.assertIn('--full-receipt', result.stderr)
+                    self.assertFalse(output.exists())
+
     def fixture(self, directory, corruption=None):
         stem=Path(directory)/'sample'
         Path(str(stem)+'.queries.csv').write_text('query,latency_us\n0,1\n1,2\n')

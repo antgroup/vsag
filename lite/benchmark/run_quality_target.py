@@ -48,11 +48,14 @@ def main():
     parser.add_argument('--full-install', type=Path, default=Path('/home/ubuntu/project/vsag-full-fresh-install-20261012'))
     parser.add_argument('--source-repo', type=Path, default=Path('/home/ubuntu/project/vsag-lite-baseline-v01'))
     parser.add_argument('--source-ref', default='a62e62e08db3f0d7da2e4439785feed6fcf90257')
-    parser.add_argument('--full-receipt', type=Path)
+    parser.add_argument('--full-receipt', type=Path, required=True,
+                        help='Explicit fresh Full build receipt JSON for the pinned replay')
     parser.add_argument('--raw-gist', type=Path, default=Path('/home/ubuntu/project/vsag-lite-datasets/gist/hf-100k'))
     parser.add_argument('--prior-dataset', type=Path, default=Path('/home/ubuntu/project/vsag-lite-datasets/gist/prepared-10k-100k/scale-10000'))
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    if not args.full_receipt.is_file():
+        parser.error('--full-receipt must name an existing build receipt JSON')
     root = Path(__file__).resolve().parent
     feature = args.feature
     lite_build = args.lite_build
@@ -62,7 +65,7 @@ def main():
     expected = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    receipt_path = args.full_receipt or root/'results/full-fresh-build-r4-20261012/receipt.json'
+    receipt_path = args.full_receipt
     receipt = json.loads(receipt_path.read_text())
     validate_fresh_receipt(receipt, expected, full)
     assert sha(full/'lib/libvsag.so') == receipt['library_sha256']

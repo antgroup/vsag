@@ -69,9 +69,14 @@ jobs:
         run: |
           cmake --build build-lite -j2
           ctest --test-dir build-lite --output-on-failure
+      - name: Install benchmark preparation dependencies
+        if: matrix.mode == 'rabitq-on'
+        run: python3 -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
       - name: Benchmark audit guard fixtures
         if: matrix.mode == 'rabitq-on'
-        run: python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
+        run: |
+          python3 -c 'import numpy, h5py, pyarrow'
+          python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
       - name: Coverage collector fixtures and 90 percent gate
         if: matrix.mode == 'coverage'
         run: |
