@@ -95,6 +95,10 @@ const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
 const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
 const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
     "pipnn_adaptive_pruning_adjust_step";
+const char* const PIPNN_ENABLE_GPU_BUILD = "pipnn_enable_gpu_build";
+const char* const PIPNN_GPU_DEVICE_ID = "pipnn_gpu_device_id";
+const char* const PIPNN_GPU_MEMORY_BUDGET = "pipnn_gpu_memory_budget";
+const char* const PIPNN_GPU_MIN_WORK_THRESHOLD = "pipnn_gpu_min_work_threshold";
 
 const char* const INDEX_PARAM = "index_param";
 

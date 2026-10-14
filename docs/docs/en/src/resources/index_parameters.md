@@ -74,9 +74,14 @@ When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build
 | `pipnn_leaf_neighbor_count` | `5` | Positive nearest-candidate count per point and leaf; undersized leaves use at least `4`. |
 | `pipnn_hash_plane_count` | `12` | Direction-hash bits in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | `64` | Positive per-point candidate capacity before final pruning; effective capacity is `max(value, max_degree)` and must not exceed `65535`. |
+| `pipnn_enable_gpu_build` | `false` | Opt in to CUDA acceleration for sufficiently large Partition and leaf Pick work. |
+| `pipnn_gpu_device_id` | `0` | Non-negative CUDA device ordinal. |
+| `pipnn_gpu_memory_budget` | `0` | CUDA working-set cap in bytes; `0` derives a safe budget from free device memory. |
+| `pipnn_gpu_min_work_threshold` | `0` | Smallest stage work estimate worth offloading; `0` uses calibrated defaults for Partition and Pick. |
 
 The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
 and has no effect on PiPNN.
+GPU acceleration transparently falls back to the CPU implementation when it cannot run.
 
 HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). These options are not exposed by Pyramid.
 

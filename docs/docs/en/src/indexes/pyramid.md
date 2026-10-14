@@ -106,6 +106,10 @@ Build-time parameters live under `index_param`.
 | `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point and leaf; the primary PiPNN quality/build-work knob. Undersized leaves use at least `4`. |
 | `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_enable_gpu_build` | bool | `false` | Offload sufficiently large PiPNN partition assignments and leaf Pick batches to CUDA when available. |
+| `pipnn_gpu_device_id` | int | `0` | Non-negative CUDA device ordinal used by the PiPNN builder. |
+| `pipnn_gpu_memory_budget` | int | `0` | Maximum CUDA working-set bytes; `0` derives a safe budget from currently free device memory. |
+| `pipnn_gpu_min_work_threshold` | int | `0` | Smallest stage work estimate worth offloading; `0` uses PiPNN-calibrated defaults for Partition and Pick. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
@@ -131,6 +135,12 @@ behavior. Levels in `no_build_levels` are still skipped.
 The `pipnn_*` values are global to the Pyramid index; hierarchy objects may continue to override
 `max_degree` and `alpha`, and those overrides are applied when PiPNN builds that hierarchy.
 `ef_construction` does not tune PiPNN.
+
+GPU build is opt-in and accelerates sufficiently large partition assignments and batched leaf Pick
+work. Pick transfers duplicate source vectors once per batch and computes symmetric leaf products
+and deterministic top-k candidates on the GPU; direction-hash insertion and final pruning remain
+on the CPU. Missing CUDA support or device, insufficient work or memory, or a CUDA failure
+transparently uses the unchanged CPU path.
 
 ### RaBitQ split configuration
 

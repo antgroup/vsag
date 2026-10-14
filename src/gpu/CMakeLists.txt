@@ -16,6 +16,7 @@ if (ENABLE_CUDA)
     add_library (vsag_gpu STATIC
         cuda_backend.cu
         cuda_assign.cu
+        cuda_inner_products.cu
         cuda_seed.cu
         cuda_accumulate.cu)
     # The tree's C/C++ flags are language-scoped and do not reach nvcc; the
