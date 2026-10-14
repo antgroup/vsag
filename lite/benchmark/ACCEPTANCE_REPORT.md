@@ -1,32 +1,40 @@
 # VSAG Lite / OSPP 综合产出与性能验收报告
 
-本次发布验证：Cohere synthetic Parquet回归独立执行通过，覆盖归一化、真值/ties、
-sourceID、offset、重复ID/非法向量/范围和已有输出拒绝；非真实Cohere性能重跑。
-临时依赖NumPy1.26.4/h5py3.11.0/PyArrow17.0.0，无系统环境修改。默认Python套件
-19pass/3skip(其中Cohere可选依赖缺失)；有依赖时19pass/2skip，并额外执行Cohere
-import-time fixture，不能将fixture说成新增一组正式unittest计数。固定报告目标
-gitblob、原始包解包及production parity/diffcheck通过；没有新增C++编译、SAN、
-coverage、Full性能或社区CI结论。
+项目已经具备 Lite 功能实现、架构说明、复现工具和主要性能指标。
+明确的收益是定义范围内的包体缩减，以及部分加载与进程内存改善。
+仍需完善的是高维动态检索质量、同质量原生 Full 对照、长期稳定性和社区测试。
+因此，本报告不宣称整个项目已经全部验收通过。
 
-证据汇总日期：2026-10-14。本文汇总已有实验，不是一次新的性能测量。
-结论：功能、架构、复现工具和主要指标已具备；定义范围内的包体、部分加载和
-进程内存收益明确。但动态高维图质量、统一同质量原生 Full 对照、长时耐久及
-社区 CI 尚未完全闭环，不宣称整个项目完成。
+本文重点展示数据、比较结果和解释。源码身份、运行日志和复现细节由文末证据入口
+提供，不在正文展开。以下是已有实验的汇总，并非一次新的性能测试。
 
-## 1. 版本与比较口径
+## 1. 比较范围与阅读说明
 
-功能归 PR #2904，源码 `74a9420c771e75dea5e56324775d8db5d1472459`；验收工具与
-证据归 #2926。最终 Lite 的15个生产编译单元仓库依赖哈希与 `dbb2fe0` 全部一致，
-新库SHA256 `3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330`，
-412512bytes，与历史被测 Lite 库一致。这是工件身份关联，不是重跑历史 Full。
+功能实现由 PR #2904 承载，性能验收由 PR #2926 承载。
+不同实验的工作负载和比较对象不同，不能把它们混成一组“最好成绩”。
 
-| 证据组 | 被测版本/范围 | 可支持的结论 |
+### 正式验收数据如何选择
+
+验收使用的是已经通过功能检查的交付实现，在固定工作负载下重复测量的结果，
+而不是从多次试验中挑出最快的一次。相同条件的重复结果以中位数为主要汇总，并说明
+波动范围。算法候选只有在正确性、改值后质量及重复性能验证通过后，才可替代交付实现。
+
+本报告将数据分成三种用途：
+
+- **当前验收证据：**当前实现的重复真实 CRUD、持久化与查询结果。
+- **有条件的对照证据：**原生 Full 和包体实验；按表旁的配置、质量与范围限制判断收益。
+- **补充研究证据：**单次 100k 观察、历史优化和未通过的候选，不作为最终全面通过依据。
+
+现有结果可以作为验收证据，但还不足以宣布所有要求均已通过；不把“最优”理解为
+只保留最好数值、删掉质量下降或重复中的慢值。
+
+| 实验类别 | 数据与比较范围 | 可以说明什么 |
 | --- | --- | --- |
-| 20261014 final resident | 当前74a9420库，SIFT/GIST10k | 最新真实交错CRUD、CPU、延迟、质量、持久化 |
-| 20261012 fresh Full | 两边源dbb2fe0；Full空目录243核心对象重新构建 | 同degree/build/query预算的原生Full对照 |
-| 20261011 三数据集600queries | Lite a492b6f/记录3298616，Full d18c82a增量安装 | SIFT/GIST/Cohere历史对照，不能伪称最新Full |
-| 100k与优化专项 | 各报告自己的parent/candidate/source/library | 历史规模覆盖或特定真实代码修改收益 |
-| 图候选 | 隔离候选，不是当前默认实现 | 初始收益及改值后失败，不能作生产成绩 |
+| 当前真实混合 CRUD | SIFT/GIST 各 10k，三种存储 | 当前交错增删改查、CPU、延迟、质量和持久化 |
+| 同源码原生 Full 对照 | SIFT/GIST 各 10k，新构建原生 Full | 对应图参数和查询预算下的性能与效果 |
+| 三数据集历史对照 | SIFT/GIST/Cohere 各 10k，600 个查询 | 三种真实分布的历史比较，不冒充当前版本复测 |
+| 100k 和专项优化 | 对应实验各自的输入和前后配置 | 大规模覆盖及具体修改的收益和代价 |
+| 图候选实验 | 隔离候选，不是当前默认实现 | 候选初始表现及改值后失败，不能作交付成绩 |
 
 旧Lite不是Full；同ef不等于同质量；重复执行数不是独立查询数；原始审计PASS不等于
 质量PASS；候选最好成绩不等于交付成绩。表中分位数通常是三个进程分位数的中位数，
@@ -124,19 +132,46 @@ Add/Update要维护邻居和编码，成本较高；以上观察不代替完整�
 同进程未控制缓存/无fsync，非冷启动或耐久落盘。RaBitQ高维持久化较快，但SIFT
 并不优于FP16；构建均更慢。Build每进程只有一次，不能把其P99解释为丰富构建尾样本。
 
-## 5. 最新CPU资源与内存
+## 5. CPU 资源与内存：调用成本和测试进程分开看
 
-整进程包括构建、真值、持久化副本及记账。各列独立取三次中位数，不要求相加严格
-等于wall。平均GNUtime CPU约99–100%单核，不是全服务器100%或瞬时峰值。
+### 5.1 查询调用累计 CPU
 
-| 数据/存储 | user s | system s | wall s | 进程peak KiB | query user/system ms(15000calls) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| SIFT FP32 | 5.43 | 0.07 | 5.51 | 40328 | 2556.202 / 17.901 |
-| SIFT FP16 | 5.25 | 0.04 | 5.30 | 32872 | 2479.734 / 6.206 |
-| SIFT RaBitQ | 6.48 | 0.03 | 6.52 | 30644 | 3007.702 / 5.842 |
-| GIST FP32 | 19.91 | 0.53 | 20.48 | 166328 | 7390.116 / 22.028 |
-| GIST FP16 | 17.44 | 0.24 | 17.66 | 146860 | 5694.645 / 9.533 |
-| GIST RaBitQ | 20.51 | 0.15 | 20.64 | 144552 | 6738.520 / 15.478 |
+每个进程执行 15,000 次交错查询，下面分别列出三次进程结果的中位数。
+“用户态”是应用计算消耗的 CPU 时间；“系统态”是内核执行消耗的 CPU 时间。
+单位均为 **毫秒**，不是 CPU 使用率，也不是单次查询延迟。
+
+| 数据集／存储 | 查询用户态 CPU（ms） | 查询系统态 CPU（ms） |
+| --- | ---: | ---: |
+| SIFT FP32 | 2,556.202 | 17.901 |
+| SIFT FP16 | 2,479.734 | 6.206 |
+| SIFT RaBitQ | 3,007.702 | 5.842 |
+| GIST FP32 | 7,390.116 | 22.028 |
+| GIST FP16 | 5,694.645 | 9.533 |
+| GIST RaBitQ | 6,738.520 | 15.478 |
+
+查询主要消耗用户态 CPU。SIFT RaBitQ 的累计查询 CPU 高于 FP32/FP16；
+GIST RaBitQ 低于 FP32，但高于 FP16。每调用的统计本身有测量开销，不视为无扰动服务成本。
+
+### 5.2 整个测试进程资源：辅助验收，不是单个 API 成绩
+
+以下包含构建、增删改查、精确真值计算、保存加载副本、结果检查和测试记账。
+不能把它解释为索引单独耗时、纯查询 CPU 或业务服务吞吐。
+已重新核对全部 18 份资源记录；每单元三个独立进程，各列单独取中位数。
+因此用户态加系统态不必严格等于表中的墙钟中位数。
+
+| 数据集／存储 | 用户态 CPU（秒） | 系统态 CPU（秒） | 总运行时长中位数（秒） | 三次时长范围（秒） | 进程峰值内存（KiB） |
+| --- | ---: | ---: | ---: | --- | ---: |
+| SIFT FP32 | 5.43 | 0.07 | 5.51 | 5.50～5.51 | 40,328 |
+| SIFT FP16 | 5.25 | 0.04 | 5.30 | 5.25～5.32 | 32,872 |
+| SIFT RaBitQ | 6.48 | 0.03 | 6.52 | 6.45～6.53 | 30,644 |
+| GIST FP32 | 19.91 | 0.53 | 20.48 | 20.39～20.87 | 166,328 |
+| GIST FP16 | 17.44 | 0.24 | 17.66 | 17.63～18.33 | 146,860 |
+| GIST RaBitQ | 20.51 | 0.15 | 20.64 | 20.59～20.71 | 144,552 |
+
+例如 **0.07 秒系统态 CPU** 指内核累计消耗 70 毫秒，不是 7% 使用率，也不是
+新增或删除一次需要 0.07 秒。平均 CPU 使用率约为一个核的 99%～100%，不是整台
+多核服务器的 100%。此表没有挑最快进程，也不是随便一次记录；但三次重复不能
+代替多日统计或小时级耐久验证。
 
 自愿切换0–2，非自愿13–96；major faults多数0，首SIFT FP32有2。不是完整硬件
 cycles/instructions/IPC/cachemiss/branchmiss采集。历史perf权限受限；未改权限设置。
@@ -144,7 +179,7 @@ peak含输入/原始向量/真值/预触碰记录/构建和两份索引，不是
 
 ## 6. 同源码新构建原生Full对照
 
-dbb2fe0两边；Full空目录243核心对象，ccache OFF；SIFT/GIST10k各100queries，
+两边使用同一源码基线，原生 Full 从空目录重新构建；SIFT/GIST 各 10k、100 个查询，
 degree16/build128/query512/top10、CPU0/thread1；36builders/108loaders/3600queries。
 Full为HGraph小配置，Lite单层图；Full Ofast/g、Lite O3，非全flag/ISA对齐或同质量。
 以下所有斜杠为Lite/Full。warm fresh-process Load不是冷磁盘。
@@ -175,7 +210,7 @@ loaded-minus-before-load增量RSS六组Lite更高，不把Full运行时基线误
 
 可运行C++应用包包含consumer、递归ELF/loader、aliases、launcher及已记录notices，
 双方同样strip；打包/解包/异目录三storage共六次smoke，maps显示包内依赖。
-Lite dbb库对历史Full d18c82a增量库，不是新构建Full，也非SDK/wheel/container。
+这里使用对应的历史原生 Full 安装，并非本报告另一组新构建 Full；也不是完整 SDK、Python 包或容器。
 
 | 指标 | Lite | Full | 减少 |
 | --- | ---: | ---: | ---: |
@@ -188,7 +223,7 @@ Lite dbb库对历史Full d18c82a增量库，不是新构建Full，也非SDK/whee
 
 ## 8. 包含Cohere的三数据集历史Full对照
 
-Lite a492b6f/记录3298616，Full d18c82a原生增量安装；10k/600observedqueries，
+这一组是历史 Lite 与当时的原生 Full 安装对照；各 10k 向量、600 个已观察查询，
 query来源[400,1000)，degree16/build128、Liteef512/Fullef128，54builders/162loaders。
 不是盲测/同budget/同recall。以下按Lite/Full列出，与源报告Full/Lite顺序相反。
 
@@ -218,7 +253,7 @@ Cohere资源Lite/Full如下；历史FP16 Save劣势不能冒称当前未测最�
 
 ## 9. 100k历史真实改值
 
-SIFT a126a53，每storage一次新进程/固定顺序，非统计重复。30k真替换/90kAPIcalls，
+SIFT 100k 使用对应历史实现，每种存储一次新进程、固定顺序，不是重复统计试验。每种存储 30,000 次真实替换、90,000 次增删改调用，
 三storage270kcalls；查询仅前后，不交错。当前FP64真值/SaveLoad结果验证PASS。
 
 | SIFT100k | FP32 | FP16 | RaBitQ |
@@ -307,7 +342,7 @@ FP32/FP16 的正负变化也保留在原报告，不只展示 RaBitQ 的收益�
 
 ### 10.3 反向邻接一致性验证改用连续缓冲
 
-**实际修改：**保留完整正反向一致性校验，用连续 offsets、cursors 和 source 缓冲
+**实际修改：**保留完整正反向一致性校验，用连续的偏移、游标和来源缓冲
 替代逐行构建临时反向图、复制及排序。没有关闭验证，没有改变图边、查询或格式。
 
 **实验条件：**GIST960、归一化 Cohere768，各 100k 向量；CPU0；每数据集 Load 和
@@ -329,7 +364,7 @@ FP32/FP16 的正负变化也保留在原报告，不只展示 RaBitQ 的收益�
 | Cohere100k | 113,944→113,300 | 137,540→134,244 |
 
 **结论：**连续缓冲减少了该校验阶段的临时分配和重复组织成本，所有 Save 输出
-与输入快照的 SHA256 一致，支持在保持验证与格式的情况下改进性能。
+与输入快照一致，支持在保持验证与格式的情况下改进性能。
 
 **限制：**这是已加载状态下的 Save，不是“真实 CRUD 后从构建到保存”的整流程。
 RSS 差异包括分配器保留的临时页面，不是永久布局压缩。RAM／热缓存 Load 不是冷磁盘。
@@ -451,8 +486,8 @@ GIST 来源查询上有很好的初始结果。该查询组来自原始 base 的
 
 ### 12.3 历史同库 resident RSS 轨迹
 
-以下为 10 月 12 日同库实验，单位 **KiB**，每轮变更后、该轮保存加载前采样。
-不是最新 10 月 14 日的每轮数值，也不是独立 index-owned 内存。
+以下来自同一 Lite 库的历史稳定性实验，单位 **KiB**，每轮变更后、该轮保存加载前采样。
+不是当前复测的每轮数值，也不是独立归属于索引的内存。
 
 | 数据集／存储 | 初始 | 第 5 轮 | 第 10 轮 | 第 20 轮 |
 | --- | ---: | ---: | ---: | ---: |
@@ -473,37 +508,39 @@ RaBitQ 后半窗口各次重复都有约 264 KiB 的增长。它不直接证明�
 [resident 稳定性与资源报告](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md)。
 
 
-## 13. 测试、门禁与下一步
+## 13. 当前验收结论与下一步
 
-当前精简ReleaseON5/OFF4、3Fullconsumer编译、Python19pass2skip、raw解包PASS；
-本次添加Cohere测试单独验证，不冒称新Full性能。历史最终Lite行覆盖3072/3233=
-95.0201%，是Lite生产并集非全仓/branchcoverage；历史ASan/UBSan/rollback记录按
-各自版本归属。coverage编译通过≠coverage统计通过。最近核实社区Actions需审批、
-2926缺kind标签；本文不实时监控，不称全绿或以后不会失败。
+已经有依据的成果是：基础增删改查和持久化功能、架构说明、三数据集实验、明确包体
+收益、部分加载与进程内存收益，以及多项真实结构优化。对应功能和数据检查已有通过记录。
 
-优先：补全三数据集证据入口→诊断并修复GIST初始/动态图质量→冻结最终版本进行
-同质量/编译/选定ISA的生产Lite与原生Full矩阵→100k/Cohere长时resident真实CRUD→
-针对路由/精排/维护/持久化做有因果profile与配对验证→处理真实社区CI日志和门禁。
+不能宣称完成的部分是：RaBitQ 全面快于 FP16、GIST 动态质量稳定、所有索引文件和保存
+都优于 Full、所有高维构建峰值更低、小时级耐久及内部并发读写。社区检查也尚未全部闭环。
 
-## 14. 固定证据索引与复现
+后续工作按以下顺序推进：
 
-以下报告保留每组完整条件、原始结果/commands/hashes/负面结果；不是所有历史探索
-逐项复审清单。RAW_MANIFEST.json提供800a822历史文件与c072a42归档工具路径/哈希。
+1. 优先诊断并修复 GIST 初始图和改值后的检索质量。
+2. 固定最终实现，补同质量、编译条件和 SIMD 对齐的 Lite／原生 Full 对照。
+3. 补三数据集 100k 的长时真实交错增删改查，观察质量、CPU 和内存变化。
+4. 根据瓶颈继续优化路由、精排、动态维护和保存加载，不牺牲正确性换速度。
+5. 完成社区编译、测试和评审门禁。
 
-- [当前resident及raw](results/final-version-20261014/README.md)、[当前全API汇总](results/final-version-20261014/summary.json)。raw4483066bytes/152files，SHA256 `6dd27f9d041df80d619602f1a494de39f4c8d4f778fc4719a6d025fc21e67391`；解包后运行verify_mixed_cpu_acceptance.py raw。
-- [Fresh原生Full](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/README.md)。raw489003bytes/702members，SHA `13f08607e3efb79a1e752f460085795a85f0ebb56eeb23aba5e89b14ed019b81`。
-- [运行包](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/README.md)。inventory/maps/license/manifest各有记录。
-- [历史resident/RSS](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md)。raw4390665bytes/152members。
-- [冻结质量失败](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/README.md)。raw3729401bytes/597members，SHA `bac805acedd7032ba2580be616634ca64207078657687ddbc348facc12997498`。
-- [严格O3候选与CRUD失败](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/README.md)。raw22397608bytes/228members，SHA `c38e5a8405cdfda0cd20fd2ef9d2ea9b41f4d11cd70f796b267f6344bd4784e4`。
-- [三数据集600queries历史Full](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/current-full-10k600-20261011/README.md)。含全部Build/Save/Load/snapshot/peak与1041成员原始记录。
-- [SIFT100kCRUD](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/sift-production-100k-crud-20261011/README.md)。270k三storage调用/当前真值/操作分位数。
-- [GIST/Cohere100k reverseCRUD](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-production-100k-crud-20261011/README.md)。单pair/90kcalls数据集，baseline库hash缺失也披露。
-- [共享原生内核](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/shared-rabitq-kernels-20261009/README.md)。原生SIMD舍入/FP32FP16负面结果也保留。
-- [I/O/route stages](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-stages-20261009/README.md)。诊断插桩与未插桩配对分开。
-- [连续校验缓冲](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-validation-scratch-20261011/README.md)。SaveLoad40rows/43commands及lint边界。
-- [GIST100k重复查询](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-routing-repeat-20261011/README.md)。21kexecutions/100distinct，recall未修。
+功能正确、质量稳定、性能更优和长期可靠是不同判断，不把其中一项通过当作全部通过。
 
-正式脚本保留source/hash guards；历史重放使用对应固定checkout和外部数据，不能删除
-guard后冒充最新结果。一般依赖/构建说明见README.md；原始数据不因评审精简而删除。
-本报告没有新增性能结果，不认证许可、所有平台并发能力或未来CI必过。
+## 14. 完整数据与复现依据
+
+正文只呈现性能、产出和解释。需要复核实验条件、原始数据或复现方法时，可以打开
+以下入口。源码记录、校验信息和运行日志仍完整保留，不因报告简化而删除。
+
+- [当前真实混合 CRUD 报告](results/final-version-20261014/README.md)与[全部操作性能数据](results/final-version-20261014/summary.json)。
+- [新构建原生 Full 对照](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/README.md)。
+- [可运行应用包体比较](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/README.md)。
+- [原索引持续保留的混合测试与内存轨迹](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md)。
+- [冻结参数后的质量验证](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/quality-target-r2-20261012/README.md)。
+- [严格编译条件下的候选及改值失败](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/aligned-fp32-full-r2-20261012/README.md)。
+- [SIFT／GIST／Cohere 三数据集历史 Full 对照](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/current-full-10k600-20261011/README.md)。
+- [SIFT100k 三种存储的真实改值](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/sift-production-100k-crud-20261011/README.md)。
+- [GIST／Cohere100k 反向邻接改进](https://github.com/nw9663644-eng/vsag/blob/a62e62e08db3f0d7da2e4439785feed6fcf90257/lite/benchmark/results/rabitq-production-100k-crud-20261011/README.md)。
+- [复现工具说明](README.md)与[完整原始证据索引](RAW_MANIFEST.json)。
+
+其他优化的原始报告已链接在各项实验之后。各组结果按各自条件解释，不把历史或
+候选结果冒充当前成绩；本报告也不承诺所有平台能力或未来社区检查必然通过。
