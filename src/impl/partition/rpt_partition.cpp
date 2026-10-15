@@ -102,11 +102,8 @@ RPTPartition::Run(const float* datas, uint64_t count, const RPTPartitionParams& 
     this->split(0, count, leaves, 0, mix_seed(params.seed));
 
     ids_.clear();
-    ids_.shrink_to_fit();
     projections_.clear();
-    projections_.shrink_to_fit();
     direction_.clear();
-    direction_.shrink_to_fit();
     datas_ = nullptr;
     return std::move(partitions_);
 }
