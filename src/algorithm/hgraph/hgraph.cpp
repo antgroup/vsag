@@ -688,6 +688,7 @@ HGraph::SetImmutable() {
     }
     this->neighbors_mutex_ = empty_mutex;
     this->immutable_.store(true, std::memory_order_release);
+    this->cal_memory_usage();
 }
 
 void
@@ -699,6 +700,8 @@ HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     }
     basic_flatten_codes_->InitIO(reader_param);
     bottom_graph_->InitIO(reader_param);
+    this->reader_ = reader;
+    this->precise_reader_.reset();
 }
 
 void
@@ -706,6 +709,7 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
     high_precise_codes_->InitIO(reader_param);
+    this->precise_reader_ = reader;
 }
 
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
@@ -967,11 +971,34 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
     this->attr_filter_index_->GetAttribute(0, inner_id, attr);
 }
 
+uint64_t
+HGraph::get_reader_memory_usage(const ReaderPtr& reader) {
+    const auto* memory_usage_reader = dynamic_cast<const MemoryUsageReader*>(reader.get());
+    if (memory_usage_reader == nullptr) {
+        return 0;
+    }
+    return memory_usage_reader->GetMemoryUsage();
+}
+
+uint64_t
+HGraph::GetMemoryUsage() const {
+    auto memory = InnerIndexInterface::GetMemoryUsage();
+    if (this->pool_ != nullptr) {
+        memory += this->pool_->GetMemoryUsage();
+    }
+    if (this->reader_ != nullptr) {
+        memory += get_reader_memory_usage(this->reader_);
+    }
+    if (this->precise_reader_ != nullptr && this->precise_reader_.get() != this->reader_.get()) {
+        memory += get_reader_memory_usage(this->precise_reader_);
+    }
+    return memory;
+}
+
 void
 HGraph::cal_memory_usage() {
     auto memory = sizeof(HGraph);
     memory += this->neighbors_mutex_->GetMemoryUsage();
-    memory += this->pool_->GetMemoryUsage();
     memory += this->label_table_->GetMemoryUsage();
     memory += this->basic_flatten_codes_->GetMemoryUsage();
     if (this->code_slot_map_ != nullptr) {
