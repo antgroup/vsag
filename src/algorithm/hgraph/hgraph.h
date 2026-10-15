@@ -17,6 +17,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -98,6 +99,7 @@ public:
     friend class HGraphAnalyzer;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
+    friend struct HGraphMemoryEstimateTestAccess;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -147,6 +149,12 @@ public:
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
+
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override;
+
+    [[nodiscard]] bool
+    CheckFeature(IndexFeature feature) const override;
 
     void
     GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
@@ -425,10 +433,12 @@ public:
     /// Sample a random level from the exponential distribution for a new node.
     int
     get_random_level() {
-        std::uniform_real_distribution<double> distribution(0.0, 1.0);
-        double r = -log(distribution(level_generator_)) * mult_;
-        return static_cast<int>(r);
+        return static_cast<int>(random_level_draw(level_generator_, mult_));
     }
+
+    /// Shared level draw expression for Build and the build-memory replay: -log(U(0,1)) * mult.
+    static double
+    random_level_draw(std::default_random_engine& engine, double mult);
 
     /**
      * @brief Allocate a contiguous block of fresh internal IDs.
@@ -700,6 +710,38 @@ private:
 
     void
     insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch);
+
+    /// Stack context shared by the bounded parallel row-insertion workers.
+    struct InsertAddBatchWorkContext {
+        using RowFunction = void (*)(void* row_state, uint64_t row);
+
+        RowFunction row_function{nullptr};
+        void* row_state{nullptr};
+        uint64_t row_count{0};
+        std::atomic<uint64_t> next_row{0};
+        std::mutex error_mutex;
+        uint64_t error_row{std::numeric_limits<uint64_t>::max()};
+        std::exception_ptr error{nullptr};
+
+        /// Claims rows until exhausted; keeps the exception of the lowest failing row.
+        void
+        RunRows() noexcept;
+    };
+
+    /// Zero-argument task submitted to the pool; it only references the shared context.
+    struct InsertAddBatchWorker {
+        InsertAddBatchWorkContext* context{nullptr};
+
+        void
+        operator()() const;
+    };
+
+    /// Runs min(max(thread_count, 1), row_count) workers, drains them, then rethrows the
+    /// lowest-row exception or a submission failure.
+    static void
+    run_insert_add_batch_workers(SafeThreadPool& pool,
+                                 uint64_t thread_count,
+                                 InsertAddBatchWorkContext& context);
 
     [[nodiscard]] bool
     graph_read_codes_is_temporary(const AddContext& context) const;
@@ -1347,5 +1389,20 @@ private:
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
     uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+
+    // Cleared at entry to Tune, Merge and both deserialize paths; never set again.
+    std::atomic<bool> build_estimate_lifecycle_clean_{true};
+    uint64_t build_estimate_initial_capacity_{0};     // constructor capacity C0
+    uint64_t build_estimate_fresh_cache_buckets_{0};  // fresh cache_->neighbors_ buckets
+    uint64_t build_estimate_owned_pool_threads_{0};   // threads of a constructor-owned pool
+
+    /// The single live predicate behind SUPPORT_ESTIMATE_BUILD_MEMORY and EstimateBuildMemory.
+    [[nodiscard]] bool
+    build_memory_estimate_supported() const;
+
+    /// Returns next_multiple(num_elements, 2^resize_bit); INVALID_ARGUMENT unless resize_bit is
+    /// in [1, 30] and num_elements <= 2^31 - 2^resize_bit.
+    static uint64_t
+    build_estimate_checked_capacity(uint64_t num_elements, uint64_t resize_bit);
 };
 }  // namespace vsag

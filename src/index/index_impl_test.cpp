@@ -21,6 +21,7 @@
 #include "index_common_param.h"
 #include "unittest.h"
 #include "vsag/engine.h"
+#include "vsag_exception.h"
 
 TEST_CASE("immutable index test", "[ut][index_impl]") {
     vsag::IndexCommonParam common_param;
@@ -252,4 +253,77 @@ TEST_CASE("index clone with allocator", "[ut][index_impl]") {
     auto allocator = std::make_shared<IdentifyAllocator>(2ULL);
 
     auto cloned_index = index->Clone(allocator).value();
+}
+
+TEST_CASE("index build memory estimation contract",
+          "[ut][index_impl][build_memory_contract][estimate_build_memory]") {
+    static_assert(vsag::IndexFeature::SUPPORT_ESTIMATE_MEMORY == 39);
+    static_assert(vsag::IndexFeature::SUPPORT_GET_MEMORY_USAGE == 40);
+    static_assert(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY == 55);
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.allocator_ = vsag::Engine::CreateDefaultAllocator();
+    auto build_parameter_json = R"(
+        {
+            "base_quantization_type": "fp32",
+            "max_degree": 16,
+            "ef_construction": 100,
+            "build_thread_count": 1,
+            "support_duplicate": false,
+            "deduplicate_storage": false
+        }
+    )";
+
+    vsag::JsonType hgraph_json;
+    hgraph_json = vsag::JsonType::Parse(build_parameter_json);
+    vsag::IndexPtr index =
+        std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_MEMORY));
+    REQUIRE(index->EstimateMemory(1000) > 0);
+
+    // Expected profile classification is independent of the production capability result.
+#if (defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION == 15007 || _LIBCPP_VERSION == 210106) && \
+     defined(_LIBCPP_ABI_VERSION) && _LIBCPP_ABI_VERSION == 1 &&                            \
+     !defined(_LIBCPP_ABI_OPTIMIZED_FUNCTION)) ||                                           \
+    defined(__GLIBCXX__)
+    constexpr bool expected_modeled_profile = true;
+#else
+    constexpr bool expected_modeled_profile = false;
+#endif
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) ==
+            expected_modeled_profile);
+    if constexpr (expected_modeled_profile) {
+        REQUIRE(index->EstimateBuildMemory(0) > 0);
+        REQUIRE(index->EstimateBuildMemory(1000) >= index->EstimateMemory(1000));
+    } else {
+        for (uint64_t count : {uint64_t{0}, uint64_t{1000}}) {
+            bool caught = false;
+            try {
+                (void)index->EstimateBuildMemory(count);
+            } catch (const vsag::VsagException& error) {
+                REQUIRE(error.error_.type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+                caught = true;
+            }
+            REQUIRE(caught);
+        }
+    }
+
+    hgraph_json["support_duplicate"].SetBool(true);
+    vsag::IndexPtr unsupported =
+        std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+    REQUIRE_FALSE(unsupported->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    for (uint64_t count : {uint64_t{0}, uint64_t{1000}}) {
+        bool caught = false;
+        try {
+            (void)unsupported->EstimateBuildMemory(count);
+        } catch (const vsag::VsagException& e) {
+            REQUIRE(e.error_.type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+            caught = true;
+        }
+        REQUIRE(caught);
+    }
 }

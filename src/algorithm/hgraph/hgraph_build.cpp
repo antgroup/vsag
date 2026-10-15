@@ -14,12 +14,15 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <future>
 #include <limits>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -792,10 +795,51 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 }
 
 void
-HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+HGraph::InsertAddBatchWorkContext::RunRows() noexcept {
+    while (true) {
+        uint64_t row = next_row.fetch_add(1, std::memory_order_relaxed);
+        if (row >= row_count) {
+            return;
+        }
+        try {
+            row_function(row_state, row);
+        } catch (...) {
+            std::lock_guard<std::mutex> error_lock(error_mutex);
+            if (error == nullptr or row < error_row) {
+                error_row = row;
+                error = std::current_exception();
+            }
+        }
+    }
+}
+
+void
+HGraph::InsertAddBatchWorker::operator()() const {
+    context->RunRows();
+}
+
+void
+HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
+                                     uint64_t thread_count,
+                                     InsertAddBatchWorkContext& context) {
+    uint64_t worker_count =
+        std::min<uint64_t>(std::max<uint64_t>(thread_count, 1), context.row_count);
+    if (worker_count == 0) {
+        return;
+    }
     std::vector<std::future<void>> futures;
-    HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    HGraphBuildTaskGuard guard(futures, worker_count);
+    for (uint64_t i = 0; i < worker_count; ++i) {
+        futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
+    }
+    wait_all_futures(futures);
+    if (context.error != nullptr) {
+        std::rethrow_exception(context.error);
+    }
+}
+
+void
+HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
     this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
@@ -814,24 +858,49 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         this->insert_one_logical_point(vector_data, row, context);
     };
 
-    for (const auto& row : batch.rows) {
-        const auto* extra_info =
-            extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
-        const AttributeSet* cur_attr_set = nullptr;
-        if (attr_sets != nullptr) {
-            cur_attr_set = attr_sets + row.input_idx;
-        }
-        if (context.use_parallel_add) {
-            auto future = this->thread_pool_->GeneralEnqueue(
-                add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
-            futures.emplace_back(std::move(future));
-        } else {
+    if (not context.use_parallel_add) {
+        for (const auto& row : batch.rows) {
+            const auto* extra_info =
+                extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
+            const AttributeSet* cur_attr_set = nullptr;
+            if (attr_sets != nullptr) {
+                cur_attr_set = attr_sets + row.input_idx;
+            }
             add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
         }
+        return;
     }
-    if (context.use_parallel_add) {
-        wait_all_futures(futures);
-    }
+
+    struct RowState {
+        HGraph* self;
+        const DatasetPtr* data;
+        const AddBatch* batch;
+        const char* extra_infos;
+        const AttributeSet* attr_sets;
+        uint64_t extra_info_size;
+        decltype(add_func)* insert_row;
+    };
+
+    RowState state{this, &data, &batch, extra_infos, attr_sets, this->extra_info_size_, &add_func};
+
+    InsertAddBatchWorkContext work;
+    work.row_function = [](void* raw_state, uint64_t row_idx) {
+        auto* row_state = static_cast<RowState*>(raw_state);
+        const auto& row = row_state->batch->rows[row_idx];
+        const auto* extra_info =
+            row_state->extra_infos == nullptr
+                ? nullptr
+                : row_state->extra_infos + row.input_idx * row_state->extra_info_size;
+        const AttributeSet* cur_attr_set =
+            row_state->attr_sets == nullptr ? nullptr : row_state->attr_sets + row.input_idx;
+        (*row_state->insert_row)(row_state->self->get_data(*row_state->data, row.input_idx),
+                                 row,
+                                 extra_info,
+                                 cur_attr_set);
+    };
+    work.row_state = &state;
+    work.row_count = batch.rows.size();
+    run_insert_add_batch_workers(*this->thread_pool_, this->build_thread_count_, work);
 }
 
 bool
