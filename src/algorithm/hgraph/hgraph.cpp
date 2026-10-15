@@ -482,9 +482,9 @@ HGraph::calc_native_distance_by_id(const void* native_query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -515,9 +515,9 @@ HGraph::CalcDistancesById(const float* query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -625,6 +625,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
         }
         this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
     }
     if (this->odescent_param_ == nullptr) {
         odescent_param_ = std::make_shared<ODescentParameter>();
