@@ -243,12 +243,12 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             CHECK_ARGUMENT(inner_ids.size() == static_cast<uint64_t>(batch_count),
                            "batched code insertion requires one inner id per row");
         }
-        ParallelBatchInsertVector(flatten,
-                                  batch_count,
-                                  inner_ids.data(),
-                                  this->thread_pool_.get(),
-                                  this->build_thread_count_,
-                                  [&](InnerIdType begin) { return get_data(data, begin); });
+        parallel_batch_insert_vector(flatten,
+                                     batch_count,
+                                     inner_ids.data(),
+                                     this->thread_pool_.get(),
+                                     this->build_thread_count_,
+                                     [&](InnerIdType begin) { return get_data(data, begin); });
     };
     auto batch_insert_persistent_codes = [&]() {
         batch_insert_flatten_codes(this->basic_flatten_codes_);

@@ -27,17 +27,17 @@ namespace vsag {
 
 template <typename VectorAt>
 inline void
-ParallelBatchInsertVector(const FlattenInterfacePtr& flatten,
-                          InnerIdType count,
-                          InnerIdType* ids,
-                          SafeThreadPool* thread_pool,
-                          uint64_t thread_count,
-                          VectorAt&& vector_at) {
-    constexpr InnerIdType BATCH_SIZE = 4096;
+parallel_batch_insert_vector(const FlattenInterfacePtr& flatten,
+                             InnerIdType count,
+                             InnerIdType* ids,
+                             SafeThreadPool* thread_pool,
+                             uint64_t thread_count,
+                             VectorAt&& vector_at) {
+    constexpr InnerIdType batch_size = 4096;
     std::vector<std::future<void>> futures;
     std::exception_ptr first_exception = nullptr;
-    for (InnerIdType begin = 0; begin < count; begin += BATCH_SIZE) {
-        const auto batch_count = std::min<InnerIdType>(BATCH_SIZE, count - begin);
+    for (InnerIdType begin = 0; begin < count; begin += batch_size) {
+        const auto batch_count = std::min<InnerIdType>(batch_size, count - begin);
         auto insert_batch = [&flatten, &ids, &vector_at, begin, batch_count]() {
             if (ids != nullptr) {
                 flatten->BatchInsertVector(vector_at(begin), batch_count, ids + begin);
