@@ -15,6 +15,9 @@
 include_guard (GLOBAL)
 
 add_library (vsag_src_common INTERFACE)
+if (TARGET vsag_fmt_headers)
+    target_link_libraries (vsag_src_common INTERFACE vsag_fmt_headers)
+endif ()
 target_link_libraries (vsag_src_common INTERFACE
     fmt::fmt
     nlohmann_json::nlohmann_json

@@ -15,11 +15,12 @@
 
 #pragma once
 
+#include <fmt/format.h>
+
 #include <cstdint>
 #include <string>
 
 #include "./formatter.h"
-#include "fmt/core.h"
 
 namespace vsag::eval {
 

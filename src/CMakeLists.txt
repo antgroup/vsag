@@ -87,11 +87,11 @@ endforeach ()
 # is what gives us both: PUBLIC propagation in-tree, no leakage on install.
 target_link_libraries (vsag_objects PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config)
 target_link_libraries (vsag
-    PUBLIC $<BUILD_INTERFACE:vsag_src_common>
-    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+    PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config
+    INTERFACE $<BUILD_INTERFACE:vsag_src_common>)
 target_link_libraries (vsag_static
-    PUBLIC $<BUILD_INTERFACE:vsag_src_common>
-    PRIVATE ${VSAG_DEP_LIBS} coverage_config)
+    PRIVATE vsag_src_common ${VSAG_DEP_LIBS} coverage_config
+    INTERFACE $<BUILD_INTERFACE:vsag_src_common>)
 
 if (TARGET vsag_openmp)
     foreach (_vsag_openmp_target IN ITEMS algorithm analyzer cluster factory hgraph odescent pyramid)
