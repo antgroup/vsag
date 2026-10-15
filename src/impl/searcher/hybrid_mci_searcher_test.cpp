@@ -440,8 +440,12 @@ TEST_CASE("HybridMCISearcher orders NaN bridges without returning NaN distances"
                               param,
                               nullptr,
                               &stats);
-    std::vector<InnerIdType> expected{0, 1, 2, 3, 4, 5};
-    expected.erase(std::remove(expected.begin(), expected.end(), nan_id), expected.end());
+    std::vector<InnerIdType> expected;
+    for (InnerIdType id = 0; id < 6; ++id) {
+        if (id != nan_id) {
+            expected.push_back(id);
+        }
+    }
     REQUIRE(ResultIds(result) == expected);
     REQUIRE(stats.expanded_nodes == 6);
     REQUIRE(stats.dist_computations == 6);
