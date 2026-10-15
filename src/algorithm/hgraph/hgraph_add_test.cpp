@@ -1534,6 +1534,15 @@ TEST_CASE("HGraph build memory uses stored blocks and monotone count dimension d
 
 #endif  // HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
 
+TEST_CASE("HGraph memory block option rejects zero without changing the limit",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const auto limit = vsag::Options::Instance().block_size_limit();
+    RequireEstimateError([] { vsag::Options::Instance().set_block_size_limit(0); },
+                         vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(vsag::Options::Instance().block_size_limit() == limit);
+}
+
 TEST_CASE("HGraph build memory rejects invalid rounded capacity before replay",
           "[ut][hgraph][estimate_build_memory]") {
     BlockSizeLimitGuard blocks(uint64_t{1} << 18);
@@ -1867,6 +1876,45 @@ TEST_CASE("HGraph bounded workers select the lowest row error and attempt every 
     REQUIRE(lowest_rethrown);
     for (const auto& attempts : rows.attempts) {
         REQUIRE(attempts.load() == 1);
+    }
+}
+
+TEST_CASE("HGraph bounded workers retain non-standard row exceptions and attempt every row",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    struct RowFailure {
+        uint64_t row;
+    };
+    static_assert(not std::is_base_of_v<std::exception, RowFailure>);
+    auto pool =
+        std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+    for (uint64_t threads : {uint64_t{1}, uint64_t{4}}) {
+        CAPTURE(threads);
+        std::array<std::atomic<uint64_t>, 7> attempts{};
+        for (auto& attempt : attempts) {
+            attempt.store(0);
+        }
+        Access::WorkContext context;
+        context.row_count = attempts.size();
+        context.row_state = &attempts;
+        context.row_function = [](void* opaque, uint64_t row) {
+            auto& visited = *static_cast<std::array<std::atomic<uint64_t>, 7>*>(opaque);
+            ++visited[row];
+            if (row == 0 or row == 3) {
+                throw RowFailure{row};
+            }
+        };
+        bool caught = false;
+        try {
+            Access::RunWorkers(*pool, threads, context);
+        } catch (const RowFailure& error) {
+            REQUIRE(error.row == 0);
+            caught = true;
+        }
+        REQUIRE(caught);
+        for (const auto& attempt : attempts) {
+            REQUIRE(attempt.load() == 1);
+        }
     }
 }
 

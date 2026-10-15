@@ -413,8 +413,11 @@ estimate_checked_add(uint64_t lhs, uint64_t rhs) {
     return lhs + rhs;
 }
 
+// Requires positive block_size: Options rejects sizes below 256 KiB; modeled blocks are checked.
 uint64_t
 estimate_block_memory_ceil(uint64_t memory, uint64_t block_size) {
+    const bool valid_size = block_size > 0;
+    CHECK_ARGUMENT(valid_size, "memory estimate block size must be positive");
     const auto remainder = memory % block_size;
     if (remainder == 0) {
         return memory;
@@ -535,14 +538,19 @@ estimate_checked_sum(std::initializer_list<uint64_t> values) {
     return total;
 }
 
+// Requires a positive divisor: callers use validated blocks, positive constants, or sizeof values.
 uint64_t
 estimate_ceil_div(uint64_t value, uint64_t divisor) {
+    const bool valid_size = divisor > 0;
+    CHECK_ARGUMENT(valid_size, "memory estimate divisor must be positive");
     return value / divisor + static_cast<uint64_t>(value % divisor != 0);
 }
 
 // Retained capacity plus the coexisting old array of a geometrically grown vector.
 uint64_t
 estimate_grown_vector(uint64_t count, uint64_t element_size) {
+    const bool valid_size = element_size > 0;
+    CHECK_ARGUMENT(valid_size, "memory estimate element size must be positive");
     const uint64_t retained_count = estimate_checked_mul(count, 2);
     const uint64_t max_count =
         static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) / element_size;
@@ -618,8 +626,11 @@ estimate_packaged_task_request() {
 }
 
 // Deque block and map envelope for the given occupancy, including map reallocation overlap.
+// Requires positive element_size; callers pass sizeof values, keeping per_block positive.
 uint64_t
 estimate_deque_request(uint64_t element_size, uint64_t occupancy) {
+    const bool valid_size = element_size > 0;
+    CHECK_ARGUMENT(valid_size, "memory estimate element size must be positive");
 #if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP)
     const uint64_t per_block = element_size < 256 ? 4096 / element_size : 16;
     const uint64_t blocks = estimate_checked_add(estimate_ceil_div(occupancy, per_block), 2);
@@ -962,11 +973,25 @@ struct HGraph::BuildMemoryEstimateContext {
                                                              index.resize_increase_count_bit_));
         steady = index.EstimateMemory(num_elements);
 
+        // Sole caller EstimateBuildMemory validated these parameter types before construction.
+        // That validation remains valid under the required absence of concurrent mutation.
         param = std::dynamic_pointer_cast<HGraphParameter>(index.create_param_ptr_);
+        if (param == nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "HGraph parameter types do not support EstimateBuildMemory");
+        }
         codes_param = std::dynamic_pointer_cast<FlattenDataCellParameter>(param->base_codes_param);
         graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(param->bottom_graph_param);
+        if (codes_param == nullptr or graph_param == nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "HGraph parameter types do not support EstimateBuildMemory");
+        }
         code_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(codes_param->io_parameter);
         graph_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(graph_param->io_parameter_);
+        if (code_io == nullptr or graph_io == nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "HGraph parameter types do not support EstimateBuildMemory");
+        }
         code_block = MemoryBlockIOParameter::NearestPowerOfTwo(code_io->block_size_);
         graph_block = MemoryBlockIOParameter::NearestPowerOfTwo(graph_io->block_size_);
 
@@ -994,9 +1019,12 @@ struct HGraph::BuildMemoryEstimateContext {
     void
     ReplayRoutes() {
         // Degree-4 level replay through the Build draw expression; fixed storage, O(N) time.
+        // Build uses the configured degree; the minimum supported degree (4) conservatively
+        // covers route levels for larger configured degrees.
         route_counts = {};
         route_levels = 0;
         {
+            // Copying preserves index RNG state; it provides no synchronization.
             auto engine = index.level_generator_;
             const double mult = 1 / log(1.0 * static_cast<double>(4));
             for (uint64_t i = 0; i < n; ++i) {
