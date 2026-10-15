@@ -217,6 +217,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
+    // Entry invalidation is conservative, including failed and count-zero tuning calls.
     this->build_estimate_lifecycle_clean_.store(false, std::memory_order_release);
     this->check_fused_mutation_supported("Tune");
     std::scoped_lock lock(this->add_mutex_);
@@ -825,21 +826,14 @@ HGraph::build_estimate_checked_capacity(uint64_t num_elements, uint64_t resize_b
 }
 
 bool
-HGraph::build_memory_estimate_supported() const {
-    if (not K_BUILD_ESTIMATE_STDLIB_MODELED) {
-        return false;
-    }
-    const auto param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
-    if (param == nullptr) {
-        return false;
-    }
+HGraph::build_memory_estimate_index_supported(const HGraphParameter& param) const {
     const bool modeled_index =
         this->data_type_ == DataTypes::DATA_TYPE_FLOAT and
-        this->graph_type_ == GRAPH_TYPE_VALUE_NSW and param->graph_type == GRAPH_TYPE_VALUE_NSW and
+        this->graph_type_ == GRAPH_TYPE_VALUE_NSW and param.graph_type == GRAPH_TYPE_VALUE_NSW and
         (this->metric_ == MetricType::METRIC_TYPE_L2SQR or
          this->metric_ == MetricType::METRIC_TYPE_IP or
          this->metric_ == MetricType::METRIC_TYPE_COSINE) and
-        this->rabitq_fused_datacell_ == nullptr and not param->rabitq_fused_datacell and
+        this->rabitq_fused_datacell_ == nullptr and not param.rabitq_fused_datacell and
         not this->mci_parameters_.enabled and not this->use_elp_optimizer_ and
         not this->support_duplicate_ and not this->deduplicate_storage_ and
         not this->support_force_remove_ and not this->use_conjugate_graph_ and
@@ -850,15 +844,16 @@ HGraph::build_memory_estimate_supported() const {
         this->reorder_ == nullptr and this->optimizer_ == nullptr and
         this->code_slot_map_ == nullptr and this->optimized_build_codes_ == nullptr and
         this->conjugate_graph_ == nullptr and this->mci_cliques_ == nullptr and
-        param->label_remap_type == LabelRemapType::PG and param->precise_codes_param == nullptr and
-        param->raw_vector_param == nullptr and param->attr_inverted_interface_param == nullptr and
-        param->odescent_param == nullptr;
-    if (not modeled_index) {
-        return false;
-    }
+        param.label_remap_type == LabelRemapType::PG and param.precise_codes_param == nullptr and
+        param.raw_vector_param == nullptr and param.attr_inverted_interface_param == nullptr and
+        param.odescent_param == nullptr;
+    return modeled_index;
+}
 
+bool
+HGraph::build_memory_estimate_codec_supported(const HGraphParameter& param) const {
     const auto codes_param =
-        std::dynamic_pointer_cast<FlattenDataCellParameter>(param->base_codes_param);
+        std::dynamic_pointer_cast<FlattenDataCellParameter>(param.base_codes_param);
     const bool modeled_codes =
         codes_param != nullptr and codes_param->name == FLATTEN_DATA_CELL and
         estimate_is_modeled_quantizer_param(codes_param->quantizer_parameter) and
@@ -869,8 +864,8 @@ HGraph::build_memory_estimate_supported() const {
          this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SQ8 or
          this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM);
     const auto graph_param =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(param->bottom_graph_param);
-    const auto route_param = param->hierarchical_graph_param;
+        std::dynamic_pointer_cast<GraphDataCellParameter>(param.bottom_graph_param);
+    const auto route_param = param.hierarchical_graph_param;
     const bool modeled_graph =
         graph_param != nullptr and estimate_is_block_memory_io(graph_param->io_parameter_) and
         not graph_param->support_remove_ and not graph_param->use_reverse_edges_ and
@@ -880,12 +875,13 @@ HGraph::build_memory_estimate_supported() const {
         not route_param->support_delete_ and not route_param->use_reverse_edges_ and
         not route_param->support_duplicate_;
     const bool modeled_extra_info =
-        param->extra_info_param == nullptr or
-        estimate_is_block_memory_io(param->extra_info_param->io_parameter);
-    if (not modeled_codes or not modeled_graph or not modeled_extra_info) {
-        return false;
-    }
+        param.extra_info_param == nullptr or
+        estimate_is_block_memory_io(param.extra_info_param->io_parameter);
+    return modeled_codes and modeled_graph and modeled_extra_info;
+}
 
+bool
+HGraph::build_memory_estimate_state_supported() const {
     const auto initial_capacity = this->build_estimate_initial_capacity_;
     const bool valid_capacity =
         this->resize_increase_count_bit_ >= 1 and this->resize_increase_count_bit_ <= 30 and
@@ -903,6 +899,20 @@ HGraph::build_memory_estimate_supported() const {
 }
 
 bool
+HGraph::build_memory_estimate_supported() const {
+    if (not K_BUILD_ESTIMATE_STDLIB_MODELED) {
+        return false;
+    }
+    const auto param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (param == nullptr) {
+        return false;
+    }
+    return this->build_memory_estimate_index_supported(*param) and
+           this->build_memory_estimate_codec_supported(*param) and
+           this->build_memory_estimate_state_supported();
+}
+
+bool
 HGraph::CheckFeature(IndexFeature feature) const {
     if (feature == IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) {
         return this->build_memory_estimate_supported();
@@ -910,327 +920,424 @@ HGraph::CheckFeature(IndexFeature feature) const {
     return InnerIndexInterface::CheckFeature(feature);
 }
 
+// Per-call fixed storage only: no HGraph object members or proportional allocations.
+// Stages follow the original evaluation order, including checked arithmetic and replay.
+struct HGraph::BuildMemoryEstimateContext {
+    const HGraph& index;
+    uint64_t n{};
+    uint64_t c0{};
+    uint64_t c{};
+    uint64_t steady{};
+    std::shared_ptr<HGraphParameter> param{};
+    std::shared_ptr<FlattenDataCellParameter> codes_param{};
+    std::shared_ptr<GraphDataCellParameter> graph_param{};
+    std::shared_ptr<MemoryBlockIOParameter> code_io{};
+    std::shared_ptr<MemoryBlockIOParameter> graph_io{};
+    uint64_t code_block{};
+    uint64_t graph_block{};
+    uint64_t dim{};
+    uint64_t code_size{};
+    uint64_t degree{};
+    uint64_t route_degree{};
+    uint64_t graph_line{};
+    uint64_t ef{};
+    bool nonempty{};
+    bool has_pool{};
+    uint64_t workers{};
+    uint64_t visited_lists{};
+    uint64_t sample_floor{};
+    uint64_t sample{};
+    uint64_t quant_sample{};
+    std::array<uint64_t, K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS> route_counts{};
+    uint64_t route_levels{0};
+    uint64_t route_headers{0};
+    bool pool_replaced{false};
+
+    explicit BuildMemoryEstimateContext(const HGraph& index_ref, uint64_t num_elements)
+        : index(index_ref) {
+        n = num_elements;
+        c0 = index.build_estimate_initial_capacity_;
+        c = std::max(c0,
+                     HGraph::build_estimate_checked_capacity(num_elements,
+                                                             index.resize_increase_count_bit_));
+        steady = index.EstimateMemory(num_elements);
+
+        param = std::dynamic_pointer_cast<HGraphParameter>(index.create_param_ptr_);
+        codes_param = std::dynamic_pointer_cast<FlattenDataCellParameter>(param->base_codes_param);
+        graph_param = std::dynamic_pointer_cast<GraphDataCellParameter>(param->bottom_graph_param);
+        code_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(codes_param->io_parameter);
+        graph_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(graph_param->io_parameter_);
+        code_block = MemoryBlockIOParameter::NearestPowerOfTwo(code_io->block_size_);
+        graph_block = MemoryBlockIOParameter::NearestPowerOfTwo(graph_io->block_size_);
+
+        dim = static_cast<uint64_t>(index.dim_);
+        code_size = index.basic_flatten_codes_->code_size_;
+        degree = static_cast<uint64_t>(index.bottom_graph_->MaximumDegree());
+        route_degree = static_cast<uint64_t>(index.hierarchical_datacell_param_->max_degree_);
+        graph_line = estimate_checked_mul(estimate_checked_add(degree, 1), sizeof(InnerIdType));
+        ef = index.ef_construct_;
+        nonempty = n > 0;
+        has_pool = index.thread_pool_ != nullptr;
+        workers =
+            nonempty
+                ? (has_pool ? std::min(n, std::max<uint64_t>(1, index.build_thread_count_)) : 1)
+                : 0;
+        visited_lists = nonempty ? estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
+                                                        std::max<uint64_t>(1, workers))
+                                 : 1;
+        sample_floor = static_cast<uint64_t>(std::max<int64_t>(
+            static_cast<int64_t>(K_BUILD_ESTIMATE_MIN_TRAIN_SAMPLE), index.train_sample_count_));
+        sample = std::min(n, sample_floor);
+        quant_sample = std::min(sample, K_BUILD_ESTIMATE_TRAINER_SAMPLE_CAP);
+    }
+
+    void
+    ReplayRoutes() {
+        // Degree-4 level replay through the Build draw expression; fixed storage, O(N) time.
+        route_counts = {};
+        route_levels = 0;
+        {
+            auto engine = index.level_generator_;
+            const double mult = 1 / log(1.0 * static_cast<double>(4));
+            for (uint64_t i = 0; i < n; ++i) {
+                const double draw = HGraph::random_level_draw(engine, mult);
+                const bool representable =
+                    std::isfinite(draw) and draw >= 0.0 and
+                    draw < static_cast<double>(K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS);
+                if (not representable) {
+                    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                        "build memory estimate level replay is not representable");
+                }
+                const auto levels = static_cast<uint64_t>(draw);
+                if (levels > 0) {
+                    ++route_counts[levels - 1];
+                    route_levels = std::max(route_levels, levels);
+                }
+            }
+            for (uint64_t level = K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS - 1; level > 0; --level) {
+                route_counts[level - 1] =
+                    estimate_checked_add(route_counts[level - 1], route_counts[level]);
+            }
+        }
+    }
+
+    void
+    RouteAllocations(uint64_t& route_resident, uint64_t& route_transient) {
+        using RouteBucket = tsl::detail_robin_hash::
+            bucket_entry<std::pair<InnerIdType, std::unique_ptr<Vector<InnerIdType>>>, false>;
+        route_headers = 0;
+        for (uint64_t level = 0; level < route_levels; ++level) {
+            const uint64_t keys = route_counts[level];
+            uint64_t buckets = estimate_power_of_two_table(keys).buckets;
+            if (keys > K_BUILD_ESTIMATE_NOMINAL_HASH_KEYS) {
+                buckets = std::max(buckets, estimate_next_power_of_two(estimate_checked_mul(2, c)));
+            }
+            const uint64_t bucket_bytes = estimate_checked_mul(buckets, sizeof(RouteBucket));
+            const uint64_t neighbor_bytes = estimate_checked_mul(
+                estimate_checked_mul(keys, estimate_checked_mul(2, route_degree)),
+                sizeof(InnerIdType));
+            route_resident = estimate_checked_sum({route_resident, bucket_bytes, neighbor_bytes});
+            route_transient = estimate_checked_add(route_transient, bucket_bytes);
+            route_headers =
+                estimate_checked_sum({route_headers,
+                                      estimate_shared_request<SparseGraphDataCell>(),
+                                      estimate_checked_mul(keys, sizeof(Vector<InnerIdType>))});
+        }
+    }
+
+    [[nodiscard]] uint64_t
+    WorkerScratch() const {
+        // Per-worker allocator scratch: one insertion's search, filter, pruning and IO sites.
+        const uint64_t record = sizeof(std::pair<float, InnerIdType>);
+        const uint64_t worker_scratch = estimate_checked_sum({
+            estimate_grown_vector(c, record),  // visited-guarded frontier is not capped by ef
+            estimate_checked_mul(3, estimate_grown_vector(estimate_checked_add(ef, 1), record)),
+            estimate_grown_vector(ef, record),
+            estimate_checked_mul(2, estimate_grown_vector(estimate_checked_add(degree, 1), record)),
+            estimate_checked_mul(
+                2, estimate_grown_vector(degree, sizeof(std::pair<float, InnerIdType>))),
+            estimate_checked_mul(estimate_checked_mul(4, degree), sizeof(InnerIdType)),
+            estimate_checked_mul(degree, sizeof(InnerIdType)),
+            estimate_checked_mul(2, estimate_grown_vector(degree, sizeof(InnerIdType))),
+            estimate_checked_mul(estimate_checked_mul(3, route_degree), sizeof(InnerIdType)),
+            std::max(estimate_checked_mul(dim, sizeof(float)), code_size),
+            estimate_checked_mul(K_BUILD_ESTIMATE_QUERY_LEASES, code_size),
+            code_size,
+        });
+
+        return worker_scratch;
+    }
+
+    uint64_t
+    AllocatorPayload() {
+        // Allocator-routed resident (R_A) and transient/overlap (T_A) payloads.
+        const uint64_t code_bytes = estimate_checked_mul(c, code_size);
+        const uint64_t graph_bytes = estimate_checked_mul(c, graph_line);
+        const uint64_t code_blocks = estimate_ceil_div(code_bytes, code_block);
+        const uint64_t graph_blocks = estimate_ceil_div(graph_bytes, graph_block);
+        const uint64_t block_pointers =
+            estimate_checked_mul(estimate_checked_add(code_blocks, graph_blocks), sizeof(uint8_t*));
+        const uint64_t label_bytes = estimate_checked_mul(c, sizeof(LabelType));
+        using LabelBucket =
+            tsl::detail_robin_hash::bucket_entry<std::pair<LabelType, InnerIdType>, false>;
+        using PaddingBucket = tsl::detail_robin_hash::bucket_entry<InnerIdType, false>;
+        const auto label_table = estimate_prime_table(n, 0.75F);
+        const uint64_t mutex_blocks = estimate_ceil_div(c, K_BUILD_ESTIMATE_MUTEXES_PER_BLOCK);
+        const uint64_t mutex_block_bytes =
+            K_BUILD_ESTIMATE_MUTEXES_PER_BLOCK * sizeof(std::shared_mutex);
+        // Each MutexBlockPtr owns a block pointer and an allocator-pointer deleter
+        // on these targets.
+        const uint64_t mutex_pointers = estimate_checked_mul(mutex_blocks, 2 * sizeof(void*));
+        const uint64_t visited_list_bytes =
+            estimate_checked_mul(estimate_ceil_div(c, VisitedList::kBitsPerWord),
+                                 sizeof(VisitedList::WordType) + sizeof(VisitedList::TagType));
+        const uint64_t visited_deques =
+            estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
+                                 estimate_deque_request(sizeof(std::shared_ptr<VisitedList>),
+                                                        std::max<uint64_t>(1, workers)));
+        pool_replaced = c > c0;
+
+        uint64_t route_resident = 0;
+        uint64_t route_transient = 0;
+        RouteAllocations(route_resident, route_transient);
+        const uint64_t route_pointer_vector =
+            estimate_grown_vector(route_levels, sizeof(GraphInterfacePtr));
+
+        const uint64_t resident_payload = estimate_checked_sum({
+            estimate_block_memory_ceil(code_bytes, code_block),
+            estimate_block_memory_ceil(graph_bytes, graph_block),
+            estimate_checked_mul(block_pointers, 2),
+            estimate_checked_mul(label_bytes, 2),
+            estimate_checked_mul(label_table.buckets, sizeof(LabelBucket)),
+            estimate_checked_mul(mutex_blocks, mutex_block_bytes),
+            mutex_pointers,
+            estimate_checked_mul(visited_lists, visited_list_bytes),
+            visited_deques,
+            route_resident,
+            nonempty ? 2 * sizeof(PaddingBucket) : 0,
+        });
+
+        const uint64_t worker_scratch = WorkerScratch();
+
+        const uint64_t transient_payload = estimate_checked_sum({
+            block_pointers,
+            label_bytes,
+            estimate_checked_mul(label_table.previous, sizeof(LabelBucket)),
+            mutex_pointers,
+            pool_replaced ? visited_list_bytes : 0,
+            pool_replaced ? estimate_checked_mul(
+                                K_BUILD_ESTIMATE_SUB_POOLS,
+                                estimate_deque_request(sizeof(std::shared_ptr<VisitedList>), 1))
+                          : 0,
+            route_transient,
+            route_pointer_vector,
+            nonempty
+                ? estimate_checked_add(estimate_checked_mul(estimate_checked_mul(8, sample), dim),
+                                       estimate_checked_mul(24, sample))
+                : 0,
+            estimate_grown_vector(n, sizeof(AddRow)),
+            nonempty ? sizeof(InnerIdType) : 0,
+            estimate_checked_mul(workers, worker_scratch),
+        });
+        const uint64_t allocator_model =
+            estimate_checked_add(std::max(steady, resident_payload), transient_payload);
+
+        return allocator_model;
+    }
+
+    [[nodiscard]] uint64_t
+    FixedObjects() const {
+        // Standard-library allocations (G_model).
+        uint64_t fixed_objects = estimate_checked_sum({
+            estimate_shared_request<IndexImpl<HGraph>>(),
+            estimate_shared_request<HGraph>(),
+            estimate_shared_request<LabelTable>(),
+            sizeof(PGUnorderedMap<LabelType, InnerIdType>),
+            sizeof(IndexFeatureList),
+            (static_cast<uint64_t>(IndexFeature::INDEX_FEATURE_COUNT) + 7) / 8,
+            sizeof(BuildCache),
+            estimate_shared_request<PointsMutex>(),
+            estimate_shared_request<BasicSearcher>(),
+            estimate_shared_request<MCISearcher>(),
+            estimate_shared_request<HybridMCISearcher>(),
+            estimate_shared_request<ParallelSearcher>(),
+            estimate_shared_request<GraphDataCell<MemoryBlockIO>>(),
+            estimate_shared_request<MemoryBlockIO>(),
+            estimate_shared_request<HGraphParameter>(),
+            estimate_shared_request<FlattenDataCellParameter>(),
+            std::max({estimate_shared_request<FP32QuantizerParameter>(),
+                      estimate_shared_request<ScalarQuantizerParameter<8>>(),
+                      estimate_shared_request<SQ8UniformQuantizerParameter>()}),
+            estimate_shared_request<GraphDataCellParameter>(),
+            estimate_shared_request<SparseGraphDatacellParameter>(),
+            2 * estimate_shared_request<MemoryBlockIOParameter>(),
+            estimate_string_request(param->graph_type),
+            estimate_string_request(param->name),
+            estimate_string_request(param->reorder_source),
+            estimate_string_request(param->mci_parameters.knng_source),
+            estimate_string_request(param->mci_parameters.knng_path),
+            estimate_checked_mul(param->pipnn_param.fanout.capacity(), sizeof(uint64_t)),
+            estimate_string_request(codes_param->name),
+            estimate_string_request(codes_param->quantizer_parameter->GetTypeName()),
+            estimate_string_request(code_io->GetTypeName()),
+            estimate_string_request(graph_io->GetTypeName()),
+            estimate_string_request(index.graph_type_),
+            estimate_string_request(index.mci_parameters_.knng_source),
+            estimate_string_request(index.mci_parameters_.knng_path),
+            estimate_checked_mul(index.pipnn_param_.fanout.capacity(), sizeof(uint64_t)),
+        });
+        {
+            // RemoveListFilter is file-local: Filter base followed by two reference members.
+            constexpr uint64_t filter_align = std::max(alignof(Filter), alignof(void*));
+            struct alignas(filter_align) FilterLayoutBound {
+                unsigned char
+                    bytes[(sizeof(Filter) + filter_align - 1) / filter_align * filter_align +
+                          2 * sizeof(void*)];
+            };
+            fixed_objects =
+                estimate_checked_add(fixed_objects, estimate_shared_request<FilterLayoutBound>());
+        }
+        if (param->extra_info_param != nullptr) {
+            fixed_objects = estimate_checked_sum(
+                {fixed_objects,
+                 estimate_shared_request<ExtraInfoDataCellParameter>(),
+                 estimate_shared_request<MemoryBlockIOParameter>(),
+                 estimate_string_request(param->extra_info_param->io_parameter->GetTypeName())});
+        }
+        if (index.build_estimate_owned_pool_threads_ > 0) {
+            const uint64_t threads =
+                std::max(index.build_estimate_owned_pool_threads_, index.build_thread_count_);
+            fixed_objects = estimate_checked_sum(
+                {fixed_objects,
+                 estimate_shared_request<SafeThreadPool>(),
+                 sizeof(DefaultThreadPool),
+                 sizeof(progschj::ThreadPool),
+                 estimate_grown_vector(threads, sizeof(std::thread)),
+                 nonempty ? 0 : estimate_deque_request(sizeof(std::function<void()>), 0)});
+        }
+
+        return fixed_objects;
+    }
+
+    static uint64_t
+    WorkerObjects(uint64_t computer_request) {
+        // The two implementation-local skip strategies derive from this complete base. Preserve
+        // its padding, then bound either two doubles or an aligned generator followed by a double.
+        constexpr uint64_t strategy_align = std::max({alignof(FilterSearchSkipStrategy),
+                                                      alignof(LinearCongruentialGenerator),
+                                                      alignof(double)});
+        constexpr uint64_t strategy_base = (sizeof(FilterSearchSkipStrategy) + strategy_align - 1) /
+                                           strategy_align * strategy_align;
+        constexpr uint64_t generator_slot =
+            (sizeof(LinearCongruentialGenerator) + strategy_align - 1) / strategy_align *
+            strategy_align;
+        constexpr uint64_t strategy_fields =
+            std::max<uint64_t>(2 * sizeof(double), generator_slot + sizeof(double));
+        constexpr uint64_t strategy_request =
+            (strategy_base + strategy_fields + strategy_align - 1) / strategy_align *
+            strategy_align;
+        const uint64_t worker_objects = estimate_checked_sum({
+            K_BUILD_ESTIMATE_HEAP_SITES * estimate_shared_request<StandardHeap<true, false>>(),
+            computer_request,
+            strategy_request,
+        });
+
+        return worker_objects;
+    }
+
+    [[nodiscard]] uint64_t
+    Training() const {
+        uint64_t training = 0;
+        if (nonempty) {
+            // Trainer sample copy, uniform upper/lower vectors and the two truncation heaps.
+            const auto ignore = std::max<uint64_t>(
+                1, static_cast<uint64_t>(static_cast<double>(quant_sample - 1) * 0.001));
+            training = estimate_checked_sum({
+                estimate_checked_mul(estimate_checked_mul(quant_sample, dim), sizeof(float)),
+                estimate_checked_mul(estimate_checked_mul(2, dim), sizeof(float)),
+                estimate_checked_mul(2, estimate_grown_vector(ignore + 1, sizeof(float))),
+            });
+        }
+
+        return training;
+    }
+
+    [[nodiscard]] uint64_t
+    Scheduler() const {
+        uint64_t scheduler = 0;
+        if (has_pool and nonempty) {
+            scheduler = estimate_checked_sum({
+                estimate_checked_mul(workers,
+                                     estimate_scheduler_task_request<InsertAddBatchWorker>()),
+                estimate_checked_mul(workers, sizeof(std::future<void>)),
+                estimate_deque_request(sizeof(std::function<void()>), workers),
+            });
+        }
+
+        return scheduler;
+    }
+
+    [[nodiscard]] uint64_t
+    StandardAllocations(uint64_t fixed_objects) const {
+        uint64_t flatten_fixed = 0;
+        uint64_t computer_request = 0;
+        if (index.metric_ == MetricType::METRIC_TYPE_L2SQR) {
+            flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_L2SQR>();
+            computer_request = estimate_computer_request<MetricType::METRIC_TYPE_L2SQR>();
+        } else if (index.metric_ == MetricType::METRIC_TYPE_IP) {
+            flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_IP>();
+            computer_request = estimate_computer_request<MetricType::METRIC_TYPE_IP>();
+        } else {
+            flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_COSINE>();
+            computer_request = estimate_computer_request<MetricType::METRIC_TYPE_COSINE>();
+        }
+        // Common retained SQ bound arrays (lower_bound_, diff_) charged to every quantizer.
+        const uint64_t quantizer_arrays =
+            estimate_checked_mul(estimate_checked_mul(2, dim), sizeof(float));
+
+        const uint64_t pool_objects =
+            estimate_shared_request<VisitedListPool>() +
+            K_BUILD_ESTIMATE_SUB_POOLS * sizeof(Deque<std::shared_ptr<VisitedList>>) +
+            estimate_function_target_request<BuildEstimatePoolConstructor>();
+        const uint64_t pool_model = estimate_checked_sum({
+            pool_objects,
+            estimate_checked_mul(visited_lists, estimate_shared_request<VisitedList>()),
+            pool_replaced ? pool_objects + estimate_shared_request<VisitedList>() : 0,
+        });
+
+        const uint64_t worker_objects = WorkerObjects(computer_request);
+
+        const uint64_t training = Training();
+
+        const uint64_t scheduler = Scheduler();
+
+        const uint64_t standard_model = estimate_checked_sum({
+            fixed_objects,
+            flatten_fixed,
+            quantizer_arrays,
+            pool_model,
+            route_headers,
+            estimate_checked_mul(workers, worker_objects),
+            training,
+            nonempty ? estimate_sampled_dataset_request() : 0,
+            estimate_grown_vector(n, sizeof(int64_t)),
+            scheduler,
+        });
+        return standard_model;
+    }
+};
+
 uint64_t
 HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     if (not this->build_memory_estimate_supported()) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "HGraph configuration or state does not support EstimateBuildMemory");
     }
-    const uint64_t n = num_elements;
-    const uint64_t c0 = this->build_estimate_initial_capacity_;
-    const uint64_t c = std::max(
-        c0, build_estimate_checked_capacity(num_elements, this->resize_increase_count_bit_));
-    const uint64_t steady = this->EstimateMemory(num_elements);
-
-    const auto param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
-    const auto codes_param =
-        std::dynamic_pointer_cast<FlattenDataCellParameter>(param->base_codes_param);
-    const auto graph_param =
-        std::dynamic_pointer_cast<GraphDataCellParameter>(param->bottom_graph_param);
-    const auto code_io =
-        std::dynamic_pointer_cast<MemoryBlockIOParameter>(codes_param->io_parameter);
-    const auto graph_io =
-        std::dynamic_pointer_cast<MemoryBlockIOParameter>(graph_param->io_parameter_);
-    const uint64_t code_block = MemoryBlockIOParameter::NearestPowerOfTwo(code_io->block_size_);
-    const uint64_t graph_block = MemoryBlockIOParameter::NearestPowerOfTwo(graph_io->block_size_);
-
-    const auto dim = static_cast<uint64_t>(this->dim_);
-    const uint64_t code_size = this->basic_flatten_codes_->code_size_;
-    const auto degree = static_cast<uint64_t>(this->bottom_graph_->MaximumDegree());
-    const auto route_degree =
-        static_cast<uint64_t>(this->hierarchical_datacell_param_->max_degree_);
-    const uint64_t graph_line =
-        estimate_checked_mul(estimate_checked_add(degree, 1), sizeof(InnerIdType));
-    const uint64_t ef = this->ef_construct_;
-    const bool nonempty = n > 0;
-    const bool has_pool = this->thread_pool_ != nullptr;
-    const uint64_t workers =
-        nonempty ? (has_pool ? std::min(n, std::max<uint64_t>(1, this->build_thread_count_)) : 1)
-                 : 0;
-    const uint64_t visited_lists =
-        nonempty ? estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS, std::max<uint64_t>(1, workers))
-                 : 1;
-    const uint64_t sample_floor = static_cast<uint64_t>(std::max<int64_t>(
-        static_cast<int64_t>(K_BUILD_ESTIMATE_MIN_TRAIN_SAMPLE), this->train_sample_count_));
-    const uint64_t sample = std::min(n, sample_floor);
-    const uint64_t quant_sample = std::min(sample, K_BUILD_ESTIMATE_TRAINER_SAMPLE_CAP);
-
-    // Degree-4 level replay through the Build draw expression; fixed storage, O(N) time.
-    std::array<uint64_t, K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS> route_counts{};
-    uint64_t route_levels = 0;
-    {
-        auto engine = this->level_generator_;
-        const double mult = 1 / log(1.0 * static_cast<double>(4));
-        for (uint64_t i = 0; i < n; ++i) {
-            const double draw = random_level_draw(engine, mult);
-            const bool representable =
-                std::isfinite(draw) and draw >= 0.0 and
-                draw < static_cast<double>(K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS);
-            if (not representable) {
-                throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                    "build memory estimate level replay is not representable");
-            }
-            const auto levels = static_cast<uint64_t>(draw);
-            if (levels > 0) {
-                ++route_counts[levels - 1];
-                route_levels = std::max(route_levels, levels);
-            }
-        }
-        for (uint64_t level = K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS - 1; level > 0; --level) {
-            route_counts[level - 1] =
-                estimate_checked_add(route_counts[level - 1], route_counts[level]);
-        }
-    }
-
-    // Allocator-routed resident (R_A) and transient/overlap (T_A) payloads.
-    const uint64_t code_bytes = estimate_checked_mul(c, code_size);
-    const uint64_t graph_bytes = estimate_checked_mul(c, graph_line);
-    const uint64_t code_blocks = estimate_ceil_div(code_bytes, code_block);
-    const uint64_t graph_blocks = estimate_ceil_div(graph_bytes, graph_block);
-    const uint64_t block_pointers =
-        estimate_checked_mul(estimate_checked_add(code_blocks, graph_blocks), sizeof(uint8_t*));
-    const uint64_t label_bytes = estimate_checked_mul(c, sizeof(LabelType));
-    using LabelBucket =
-        tsl::detail_robin_hash::bucket_entry<std::pair<LabelType, InnerIdType>, false>;
-    using RouteBucket = tsl::detail_robin_hash::
-        bucket_entry<std::pair<InnerIdType, std::unique_ptr<Vector<InnerIdType>>>, false>;
-    using PaddingBucket = tsl::detail_robin_hash::bucket_entry<InnerIdType, false>;
-    const auto label_table = estimate_prime_table(n, 0.75F);
-    const uint64_t mutex_blocks = estimate_ceil_div(c, K_BUILD_ESTIMATE_MUTEXES_PER_BLOCK);
-    const uint64_t mutex_block_bytes =
-        K_BUILD_ESTIMATE_MUTEXES_PER_BLOCK * sizeof(std::shared_mutex);
-    // Each MutexBlockPtr owns a block pointer and one allocator-pointer deleter on these targets.
-    const uint64_t mutex_pointers = estimate_checked_mul(mutex_blocks, 2 * sizeof(void*));
-    const uint64_t visited_list_bytes =
-        estimate_checked_mul(estimate_ceil_div(c, VisitedList::kBitsPerWord),
-                             sizeof(VisitedList::WordType) + sizeof(VisitedList::TagType));
-    const uint64_t visited_deques =
-        estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
-                             estimate_deque_request(sizeof(std::shared_ptr<VisitedList>),
-                                                    std::max<uint64_t>(1, workers)));
-    const bool pool_replaced = c > c0;
-
-    uint64_t route_resident = 0;
-    uint64_t route_transient = 0;
-    uint64_t route_headers = 0;
-    for (uint64_t level = 0; level < route_levels; ++level) {
-        const uint64_t keys = route_counts[level];
-        uint64_t buckets = estimate_power_of_two_table(keys).buckets;
-        if (keys > K_BUILD_ESTIMATE_NOMINAL_HASH_KEYS) {
-            buckets = std::max(buckets, estimate_next_power_of_two(estimate_checked_mul(2, c)));
-        }
-        const uint64_t bucket_bytes = estimate_checked_mul(buckets, sizeof(RouteBucket));
-        const uint64_t neighbor_bytes = estimate_checked_mul(
-            estimate_checked_mul(keys, estimate_checked_mul(2, route_degree)), sizeof(InnerIdType));
-        route_resident = estimate_checked_sum({route_resident, bucket_bytes, neighbor_bytes});
-        route_transient = estimate_checked_add(route_transient, bucket_bytes);
-        route_headers =
-            estimate_checked_sum({route_headers,
-                                  estimate_shared_request<SparseGraphDataCell>(),
-                                  estimate_checked_mul(keys, sizeof(Vector<InnerIdType>))});
-    }
-    const uint64_t route_pointer_vector =
-        estimate_grown_vector(route_levels, sizeof(GraphInterfacePtr));
-
-    const uint64_t resident_payload = estimate_checked_sum({
-        estimate_block_memory_ceil(code_bytes, code_block),
-        estimate_block_memory_ceil(graph_bytes, graph_block),
-        estimate_checked_mul(block_pointers, 2),
-        estimate_checked_mul(label_bytes, 2),
-        estimate_checked_mul(label_table.buckets, sizeof(LabelBucket)),
-        estimate_checked_mul(mutex_blocks, mutex_block_bytes),
-        mutex_pointers,
-        estimate_checked_mul(visited_lists, visited_list_bytes),
-        visited_deques,
-        route_resident,
-        nonempty ? 2 * sizeof(PaddingBucket) : 0,
-    });
-
-    // Per-worker allocator scratch: one insertion's search, filter, pruning and IO sites.
-    const uint64_t record = sizeof(std::pair<float, InnerIdType>);
-    const uint64_t worker_scratch = estimate_checked_sum({
-        estimate_grown_vector(c, record),  // visited-guarded frontier is not capped by ef
-        estimate_checked_mul(3, estimate_grown_vector(estimate_checked_add(ef, 1), record)),
-        estimate_grown_vector(ef, record),
-        estimate_checked_mul(2, estimate_grown_vector(estimate_checked_add(degree, 1), record)),
-        estimate_checked_mul(2,
-                             estimate_grown_vector(degree, sizeof(std::pair<float, InnerIdType>))),
-        estimate_checked_mul(estimate_checked_mul(4, degree), sizeof(InnerIdType)),
-        estimate_checked_mul(degree, sizeof(InnerIdType)),
-        estimate_checked_mul(2, estimate_grown_vector(degree, sizeof(InnerIdType))),
-        estimate_checked_mul(estimate_checked_mul(3, route_degree), sizeof(InnerIdType)),
-        std::max(estimate_checked_mul(dim, sizeof(float)), code_size),
-        estimate_checked_mul(K_BUILD_ESTIMATE_QUERY_LEASES, code_size),
-        code_size,
-    });
-
-    const uint64_t transient_payload = estimate_checked_sum({
-        block_pointers,
-        label_bytes,
-        estimate_checked_mul(label_table.previous, sizeof(LabelBucket)),
-        mutex_pointers,
-        pool_replaced ? visited_list_bytes : 0,
-        pool_replaced
-            ? estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
-                                   estimate_deque_request(sizeof(std::shared_ptr<VisitedList>), 1))
-            : 0,
-        route_transient,
-        route_pointer_vector,
-        nonempty ? estimate_checked_add(estimate_checked_mul(estimate_checked_mul(8, sample), dim),
-                                        estimate_checked_mul(24, sample))
-                 : 0,
-        estimate_grown_vector(n, sizeof(AddRow)),
-        nonempty ? sizeof(InnerIdType) : 0,
-        estimate_checked_mul(workers, worker_scratch),
-    });
-    const uint64_t allocator_model =
-        estimate_checked_add(std::max(steady, resident_payload), transient_payload);
-
-    // Standard-library allocations (G_model).
-    uint64_t fixed_objects = estimate_checked_sum({
-        estimate_shared_request<IndexImpl<HGraph>>(),
-        estimate_shared_request<HGraph>(),
-        estimate_shared_request<LabelTable>(),
-        sizeof(PGUnorderedMap<LabelType, InnerIdType>),
-        sizeof(IndexFeatureList),
-        (static_cast<uint64_t>(IndexFeature::INDEX_FEATURE_COUNT) + 7) / 8,
-        sizeof(BuildCache),
-        estimate_shared_request<PointsMutex>(),
-        estimate_shared_request<BasicSearcher>(),
-        estimate_shared_request<MCISearcher>(),
-        estimate_shared_request<HybridMCISearcher>(),
-        estimate_shared_request<ParallelSearcher>(),
-        estimate_shared_request<GraphDataCell<MemoryBlockIO>>(),
-        estimate_shared_request<MemoryBlockIO>(),
-        estimate_shared_request<HGraphParameter>(),
-        estimate_shared_request<FlattenDataCellParameter>(),
-        std::max({estimate_shared_request<FP32QuantizerParameter>(),
-                  estimate_shared_request<ScalarQuantizerParameter<8>>(),
-                  estimate_shared_request<SQ8UniformQuantizerParameter>()}),
-        estimate_shared_request<GraphDataCellParameter>(),
-        estimate_shared_request<SparseGraphDatacellParameter>(),
-        2 * estimate_shared_request<MemoryBlockIOParameter>(),
-        estimate_string_request(param->graph_type),
-        estimate_string_request(param->name),
-        estimate_string_request(param->reorder_source),
-        estimate_string_request(param->mci_parameters.knng_source),
-        estimate_string_request(param->mci_parameters.knng_path),
-        estimate_checked_mul(param->pipnn_param.fanout.capacity(), sizeof(uint64_t)),
-        estimate_string_request(codes_param->name),
-        estimate_string_request(codes_param->quantizer_parameter->GetTypeName()),
-        estimate_string_request(code_io->GetTypeName()),
-        estimate_string_request(graph_io->GetTypeName()),
-        estimate_string_request(this->graph_type_),
-        estimate_string_request(this->mci_parameters_.knng_source),
-        estimate_string_request(this->mci_parameters_.knng_path),
-        estimate_checked_mul(this->pipnn_param_.fanout.capacity(), sizeof(uint64_t)),
-    });
-    {
-        // RemoveListFilter is file-local: Filter base followed by two reference members.
-        constexpr uint64_t filter_align = std::max(alignof(Filter), alignof(void*));
-        struct alignas(filter_align) FilterLayoutBound {
-            unsigned char bytes[(sizeof(Filter) + filter_align - 1) / filter_align * filter_align +
-                                2 * sizeof(void*)];
-        };
-        fixed_objects =
-            estimate_checked_add(fixed_objects, estimate_shared_request<FilterLayoutBound>());
-    }
-    if (param->extra_info_param != nullptr) {
-        fixed_objects = estimate_checked_sum(
-            {fixed_objects,
-             estimate_shared_request<ExtraInfoDataCellParameter>(),
-             estimate_shared_request<MemoryBlockIOParameter>(),
-             estimate_string_request(param->extra_info_param->io_parameter->GetTypeName())});
-    }
-    if (this->build_estimate_owned_pool_threads_ > 0) {
-        const uint64_t threads =
-            std::max(this->build_estimate_owned_pool_threads_, this->build_thread_count_);
-        fixed_objects = estimate_checked_sum(
-            {fixed_objects,
-             estimate_shared_request<SafeThreadPool>(),
-             sizeof(DefaultThreadPool),
-             sizeof(progschj::ThreadPool),
-             estimate_grown_vector(threads, sizeof(std::thread)),
-             nonempty ? 0 : estimate_deque_request(sizeof(std::function<void()>), 0)});
-    }
-
-    uint64_t flatten_fixed = 0;
-    uint64_t computer_request = 0;
-    if (this->metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_L2SQR>();
-        computer_request = estimate_computer_request<MetricType::METRIC_TYPE_L2SQR>();
-    } else if (this->metric_ == MetricType::METRIC_TYPE_IP) {
-        flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_IP>();
-        computer_request = estimate_computer_request<MetricType::METRIC_TYPE_IP>();
-    } else {
-        flatten_fixed = estimate_flatten_fixed_request<MetricType::METRIC_TYPE_COSINE>();
-        computer_request = estimate_computer_request<MetricType::METRIC_TYPE_COSINE>();
-    }
-    // Common retained SQ bound arrays (lower_bound_, diff_) charged to every quantizer.
-    const uint64_t quantizer_arrays =
-        estimate_checked_mul(estimate_checked_mul(2, dim), sizeof(float));
-
-    const uint64_t pool_objects =
-        estimate_shared_request<VisitedListPool>() +
-        K_BUILD_ESTIMATE_SUB_POOLS * sizeof(Deque<std::shared_ptr<VisitedList>>) +
-        estimate_function_target_request<BuildEstimatePoolConstructor>();
-    const uint64_t pool_model = estimate_checked_sum({
-        pool_objects,
-        estimate_checked_mul(visited_lists, estimate_shared_request<VisitedList>()),
-        pool_replaced ? pool_objects + estimate_shared_request<VisitedList>() : 0,
-    });
-
-    // The two implementation-local skip strategies derive from this complete base. Preserve
-    // its padding, then bound either two doubles or an aligned generator followed by a double.
-    constexpr uint64_t strategy_align = std::max(
-        {alignof(FilterSearchSkipStrategy), alignof(LinearCongruentialGenerator), alignof(double)});
-    constexpr uint64_t strategy_base =
-        (sizeof(FilterSearchSkipStrategy) + strategy_align - 1) / strategy_align * strategy_align;
-    constexpr uint64_t generator_slot = (sizeof(LinearCongruentialGenerator) + strategy_align - 1) /
-                                        strategy_align * strategy_align;
-    constexpr uint64_t strategy_fields =
-        std::max<uint64_t>(2 * sizeof(double), generator_slot + sizeof(double));
-    constexpr uint64_t strategy_request =
-        (strategy_base + strategy_fields + strategy_align - 1) / strategy_align * strategy_align;
-    const uint64_t worker_objects = estimate_checked_sum({
-        K_BUILD_ESTIMATE_HEAP_SITES * estimate_shared_request<StandardHeap<true, false>>(),
-        computer_request,
-        strategy_request,
-    });
-
-    uint64_t training = 0;
-    if (nonempty) {
-        // Trainer sample copy, uniform upper/lower vectors and the two truncation heaps.
-        const auto ignore = std::max<uint64_t>(
-            1, static_cast<uint64_t>(static_cast<double>(quant_sample - 1) * 0.001));
-        training = estimate_checked_sum({
-            estimate_checked_mul(estimate_checked_mul(quant_sample, dim), sizeof(float)),
-            estimate_checked_mul(estimate_checked_mul(2, dim), sizeof(float)),
-            estimate_checked_mul(2, estimate_grown_vector(ignore + 1, sizeof(float))),
-        });
-    }
-
-    uint64_t scheduler = 0;
-    if (has_pool and nonempty) {
-        scheduler = estimate_checked_sum({
-            estimate_checked_mul(workers, estimate_scheduler_task_request<InsertAddBatchWorker>()),
-            estimate_checked_mul(workers, sizeof(std::future<void>)),
-            estimate_deque_request(sizeof(std::function<void()>), workers),
-        });
-    }
-
-    const uint64_t standard_model = estimate_checked_sum({
-        fixed_objects,
-        flatten_fixed,
-        quantizer_arrays,
-        pool_model,
-        route_headers,
-        estimate_checked_mul(workers, worker_objects),
-        training,
-        nonempty ? estimate_sampled_dataset_request() : 0,
-        estimate_grown_vector(n, sizeof(int64_t)),
-        scheduler,
-    });
+    BuildMemoryEstimateContext context(*this, num_elements);
+    context.ReplayRoutes();
+    const uint64_t allocator_model = context.AllocatorPayload();
+    const uint64_t fixed_objects = context.FixedObjects();
+    const uint64_t standard_model = context.StandardAllocations(fixed_objects);
     return estimate_checked_add(allocator_model, standard_model);
 }
 
@@ -1393,6 +1500,8 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    // resize() precedes later merge validation; even a failed call can retain changed storage.
+    // Invalidate at entry, as for Tune, rather than certify a pristine state after failure.
     this->build_estimate_lifecycle_clean_.store(false, std::memory_order_release);
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
