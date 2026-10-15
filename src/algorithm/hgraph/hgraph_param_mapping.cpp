@@ -150,7 +150,9 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     for (const auto& [key, ignored] : hgraph_json.GetInnerJson()->items()) {
         (void)ignored;
         auto value = hgraph_json[key];
-        if (key == HGRAPH_USE_REORDER) {
+        if (key == "merge_strategy" || key == "fgim_refinement_iterations") {
+            inner_json[key].SetJson(value);
+        } else if (key == HGRAPH_USE_REORDER) {
             inner_json[USE_REORDER_KEY].SetJson(value);
         } else if (key == HGRAPH_REORDER_SOURCE) {
             inner_json[REORDER_SOURCE_KEY].SetJson(value);

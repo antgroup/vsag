@@ -46,6 +46,7 @@ set (ALGORITHM_LIBS
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
+    list (APPEND ALGORITHM_TESTS "${PROJECT_SOURCE_DIR}/test/hgraph_fgim_test.cpp")
     add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
     target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     vsag_link_openmp_private (algorithm_test)
