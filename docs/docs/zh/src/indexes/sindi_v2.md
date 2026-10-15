@@ -84,6 +84,7 @@ auto result = index->KnnSearch(
 | `remap_term_ids` | bool | `false` | 压缩稀疏或间隔很大的外部 term ID。 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算。 |
 | `immutable` | bool | `false` | 选择紧凑的只读内存 term DataCell。 |
+| `posting_cache_capacity_bytes` | uint64 | `0` | 磁盘读取后端的倒排 term LRU 缓存容量，单位为字节；`0` 关闭。内存和 mmap 后端不填充此缓存。 |
 | `term_io` | object | `{"type": "reader_io"}` | 加载后保存 term-first posting 的后端。 |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | 保存重排向量的后端。 |
 | `rerank_layout` | uint32 | `0` | top-terms-signature 布局使用的前导 term 数量；`0` 表示关闭。 |
@@ -138,3 +139,5 @@ SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_pr
 
 完整稀疏索引常驻内存、且 window-first 序列化合适时选择 SINDI。需要按 term
 组织持久化 posting，或希望搜索时只从外部存储读取查询 term list 时选择 SINDI_V2。
+
+倒排缓存仅存在于运行时，重新加载或绑定 IO 时清空。容量统计包括驻留的解析后 buffer 和估算的条目开销。查询持有的 buffer 可在淘汰后继续存活，因此进程内存可能暂时超过该预算。此缓存不缓存重排向量。

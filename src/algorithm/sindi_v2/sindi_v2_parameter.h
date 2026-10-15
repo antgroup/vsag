@@ -67,6 +67,8 @@ public:
 
     uint32_t avg_doc_term_length{100};
 
+    uint64_t posting_cache_capacity_bytes{0};
+
     IOParamPtr term_io_parameter{nullptr};
     IOParamPtr rerank_io_parameter{nullptr};
 };

@@ -86,6 +86,7 @@ Build parameters live under `index_param`.
 | `remap_term_ids` | bool | `false` | Compact sparse or widely separated external term IDs. |
 | `avg_doc_term_length` | int | `100` | Memory-estimation hint only. |
 | `immutable` | bool | `false` | Select the compact read-only in-memory term DataCell. |
+| `posting_cache_capacity_bytes` | uint64 | `0` | LRU budget in bytes for parsed term postings on disk read backends. `0` disables caching; memory and mmap backends do not populate this cache. |
 | `term_io` | object | `{"type": "reader_io"}` | Backend used for term-first postings after load. |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | Backend used for rerank vectors. |
 | `rerank_layout` | uint32 | `0` | Number of leading terms in the top-terms-signature layout; `0` disables it. |
@@ -147,3 +148,5 @@ Use SINDI when the full sparse index remains in memory and window-first
 serialization is appropriate. Use SINDI_V2 when persisted postings should be
 organized by term or when searches should fetch only the query's term lists
 from external storage.
+
+The posting cache is runtime-only and is cleared on reload or IO rebinding. Its budget covers resident parsed buffers and estimated entry overhead. Query-held buffers can outlive eviction, so process memory can temporarily exceed this budget. It does not cache rerank vectors.
