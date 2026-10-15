@@ -25,6 +25,31 @@
 #include "utils/util_functions.h"
 
 namespace vsag {
+namespace {
+// Pin one deletion generation while filtering; release it before any label lookup.
+void
+filter_deleted_candidates(const DistHeapPtr& result,
+                          const LabelTablePtr& labels,
+                          Allocator* allocator) {
+    const auto deleted_view = labels->GetDeletedIdsReadView();
+    if (deleted_view == nullptr) {
+        return;
+    }
+    DistanceRecordVector live_records(allocator);
+    live_records.reserve(result->Size());
+    while (not result->Empty()) {
+        const auto record = result->Top();
+        result->Pop();
+        if (deleted_view->CheckValid(record.second)) {
+            live_records.push_back(record);
+        }
+    }
+    for (const auto& record : live_records) {
+        result->Push(record);
+    }
+}
+
+}  // namespace
 
 static DatasetPtr
 make_empty_dataset_with_stats() {
@@ -627,6 +652,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                search_param.enable_reorder and params.rabitq_one_bit_search) {
         auto limit = is_range ? request.limited_size_ : k;
         this->reorder(raw_query, this->basic_flatten_codes_, search_result, limit, nullptr, ctx);
+    }
+
+    if (mci_result.route != "mci") {
+        filter_deleted_candidates(search_result, this->label_table_, ctx.alloc);
     }
 
     // Trim and pack results

@@ -125,6 +125,9 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
+        std::unique_lock lock(this->mutex_);
+        // Retire logical tail slots even if physical shrinking fails.
+        this->total_count_ = std::min(this->total_count_, capacity);
         uint64_t io_size = static_cast<uint64_t>(capacity) * static_cast<uint64_t>(code_size_);
         this->io_->Shrink(io_size);
         this->max_capacity_ = capacity;

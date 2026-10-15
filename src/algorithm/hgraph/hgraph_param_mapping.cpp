@@ -498,10 +498,26 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
-            HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+            HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY,
             {
-                HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY,
+                HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY,
             },
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY,
+            {HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY},
+        },
+        {
+            HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY,
+            {HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY},
+        },
+        {
+            HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY,
+            {HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY},
+        },
+        {
+            HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY,
+            {HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY},
         },
         {
             HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
