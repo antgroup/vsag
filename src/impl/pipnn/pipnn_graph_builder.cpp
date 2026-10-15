@@ -156,6 +156,10 @@ group_duplicate_rows(const Vector<InnerIdType>& ids,
     const uint64_t row_bytes = checked_product(dimensions, sizeof(float), "row");
     require_argument(row_bytes <= std::numeric_limits<std::size_t>::max(),
                      "PiPNN row size exceeds the platform limit");
+    // Deduplication is intentionally bitwise: the key is a string_view over the raw
+    // float bytes, so two rows compare equal only when every byte matches. This is what
+    // PiPNN wants (a duplicate vector is one that is identical on disk), and it means
+    // -0.0f and +0.0f are treated as distinct rows rather than being merged.
     UnorderedMap<std::string_view, InnerIdType> representatives(allocator);
     representatives.reserve(rows.size());
 
@@ -1203,8 +1207,11 @@ PiPNNPipeline::distance_from_dot(uint32_t lhs, uint32_t rhs, float dot) const {
         return std::max(0.0F, sanitize_distance(sum - dot - dot));
     }
     if (metric_ == MetricType::METRIC_TYPE_IP) {
+        // norms_ is never allocated for IP (see prepare()), so this branch must
+        // return before the norm lookups below.
         return sanitize_distance(1.0F - dot);
     }
+    // Cosine (and any other norm-normalized metric).
     const float similarity = std::clamp(dot * norms_[lhs] * norms_[rhs], -1.0F, 1.0F);
     return sanitize_distance(1.0F - similarity);
 }
