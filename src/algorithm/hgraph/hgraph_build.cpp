@@ -828,6 +828,7 @@ HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
         return;
     }
     std::vector<std::future<void>> futures;
+    // Drain submitted workers before their stack-owned context expires if submission fails.
     HGraphBuildTaskGuard guard(futures, worker_count);
     for (uint64_t i = 0; i < worker_count; ++i) {
         futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
