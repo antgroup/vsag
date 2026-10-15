@@ -191,8 +191,7 @@ TEST_CASE("HGraph PiPNN batch build over the RaBitQ split datacell",
     constexpr int64_t dim = 128;
     constexpr uint64_t base_count = 64;
 
-    auto param =
-        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "");
+    auto param = HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "");
     auto param_json = vsag::JsonType::Parse(param);
     param_json["index_param"]["graph_io_type"].SetString("memory_io");
     param_json["index_param"]["graph_storage_type"].SetString("flat");

@@ -120,8 +120,7 @@ TEST_CASE("HGraph PiPNN builds and searches with all supported metrics",
     REQUIRE(search_result.value()->GetIds()[0] == labels[0]);
 }
 
-TEST_CASE("HGraph PiPNN keeps configured ODescent routing parameters",
-          "[ut][pipnn][hgraph]") {
+TEST_CASE("HGraph PiPNN keeps configured ODescent routing parameters", "[ut][pipnn][hgraph]") {
     constexpr int64_t dimensions = 4;
     constexpr int64_t count = 32;
     auto common_param = MakePiPNNCommonParam(dimensions);

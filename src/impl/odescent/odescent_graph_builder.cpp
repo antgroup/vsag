@@ -205,6 +205,10 @@ ODescent::add_reverse_edges() {
         };
         parallelize_task(allocate_rows);
 
+        // Thread safety: every row of reverse_graph was sized above to hold exactly
+        // the number of incoming edges counted in `count_edges`, so the atomic
+        // fetch_add hands each writer a disjoint slot and no two threads touch the
+        // same element. Writers only read graph_, which is immutable at this point.
         auto fill_edges = [&](int64_t start, int64_t end) {
             for (int64_t i = start; i < end; ++i) {
                 for (const auto& node : graph_[i].neighbors) {
