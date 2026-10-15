@@ -45,6 +45,11 @@ The optional `mci_knng_source` build parameter enables the MCI companion and sel
 `hgraph` (default) or `odescent` for its candidate graph. See the
 [MCI companion guide](../advanced/hgraph_mci_companion.md) for construction and filter requirements.
 
+MCI maintenance uses `mci_incremental_degree_min`, `mci_incremental_degree_n_divisor`,
+`mci_incremental_degree_mcs_divisor`, `mci_delete_clique_size_threshold`, and
+`mci_delete_node_mct_threshold`. Physical removal requires `support_force_remove: true`;
+see the [maintenance guide](../advanced/hgraph_mci_companion.md) for defaults and restrictions.
+
 The opt-in `use_hybrid_traversal` search mode combines sparse and clique neighbors, with
 `hybrid_vob`, `hybrid_filter_cost_ratio`, `mci_seed_coverage`, and `mci_seed_max_count`
 controlling per-expansion work and seeds. See the

@@ -88,11 +88,11 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
+        this->total_count_ = std::min(this->total_count_, capacity);
         uint64_t io_size =
             static_cast<uint64_t>(capacity) * static_cast<uint64_t>(extra_info_size_);
         this->io_->Shrink(io_size);
         this->max_capacity_ = capacity;
-        this->total_count_ = std::min(this->total_count_, capacity);
     }
 
     inline void

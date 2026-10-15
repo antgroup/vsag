@@ -99,6 +99,9 @@ public:
     void
     Deserialize(StreamReader& reader) override;
 
+    void
+    FinishDeserialize() override;
+
     bool
     InMemory() const override {
         return IOTmpl::InMemory;
@@ -249,16 +252,20 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
             auto neighbor_id = neighbor_ids[i];
             neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
         }
-        this->io_->Write((uint8_t*)(neighbor_ids_ptr.data()),
-                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                         start);
+        if (neighbor_count > 0) {
+            this->io_->Write((uint8_t*)(neighbor_ids_ptr.data()),
+                             static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                             start);
+        }
     } else {
         uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
         this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
         start += sizeof(neighbor_count);
-        this->io_->Write((uint8_t*)(neighbor_ids.data()),
-                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                         start);
+        if (neighbor_count > 0) {
+            this->io_->Write((uint8_t*)(neighbor_ids.data()),
+                             static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                             start);
+        }
     }
 }
 
@@ -277,7 +284,8 @@ GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbo
     auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
     this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
-    if (neighbor_count > this->maximum_degree_) {
+    // Main's byte I/O skips zero-length copies; 1.0 MemoryIO requires this guard.
+    if (neighbor_count == 0 or neighbor_count > this->maximum_degree_) {
         neighbor_ids.clear();
         return;
     }
@@ -345,6 +353,25 @@ GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     StreamReader::ReadObj(reader, this->code_line_size_);
     if (is_support_delete_) {
         StreamReader::ReadVector(reader, node_versions_);
+    }
+    this->FinishDeserialize();
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::FinishDeserialize() {
+    if (reverse_edges_) {
+        // Reverse edges are derived state, not part of the serialized graph. Restore them
+        // after node versions, before any physical deletion can move a referenced tail ID.
+        auto restored = std::make_unique<ReverseEdge>(this->allocator_);
+        Vector<InnerIdType> neighbors(this->allocator_);
+        for (InnerIdType id = 0; id < this->total_count_; ++id) {
+            this->GetNeighbors(id, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(id, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
     }
 }
 

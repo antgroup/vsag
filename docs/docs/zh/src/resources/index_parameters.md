@@ -44,6 +44,11 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 `hgraph`（默认）或 `odescent`。构建和过滤器要求见
 [MCI 挂件指南](../advanced/hgraph_mci_companion.md)。
 
+MCI 维护参数包括 `mci_incremental_degree_min`、`mci_incremental_degree_n_divisor`、
+`mci_incremental_degree_mcs_divisor`、`mci_delete_clique_size_threshold` 和
+`mci_delete_node_mct_threshold`。物理删除要求 `support_force_remove: true`；
+默认值与限制详见[维护指南](../advanced/hgraph_mci_companion.md)。
+
 可选搜索参数 `use_hybrid_traversal` 将稀疏邻居和团邻居合并遍历；
 `hybrid_vob`、`hybrid_filter_cost_ratio`、`mci_seed_coverage` 和 `mci_seed_max_count`
 控制每次展开开销及 seed 预算。详见 [MCI 挂件指南](../advanced/hgraph_mci_companion.md#动态邻居遍历)。

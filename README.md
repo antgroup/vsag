@@ -266,6 +266,7 @@ Thrive together in VSAG community with users and developers from all around the 
     Its opt-in hybrid traversal combines sparse and clique neighbors with per-query budgets.
     Its optional [MCI companion](docs/docs/en/src/advanced/hgraph_mci_companion.md)
     supports selective filtered KNN search.
+    MCI supports incremental addition, deletion repair, physical removal, and automatic compaction.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector

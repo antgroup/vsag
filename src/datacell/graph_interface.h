@@ -102,6 +102,11 @@ public:
         }
     }
 
+    // Rebuild derived state after the serialized graph and node versions are loaded.
+    virtual void
+    FinishDeserialize() {
+    }
+
     virtual void
     Move(InnerIdType from, InnerIdType to) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in GraphInterface");
