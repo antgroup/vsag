@@ -76,11 +76,26 @@ region_filter(region_type, region_list, residence_tag_list, "10|20", "30", "40")
 | 5 | R AND NOT H |
 
 未出现的值对应空匹配；其他类型值没有接受分支。字段不存在或类型不兼容会报错。
-该专用 executor 不支持非 FastBitset 属性存储，可以与普通 AND/OR/NOT 条件组合。
+该专用 executor 不支持非 FastBitset 属性存储，可以与普通 AND/OR 条件组合。
+解析器接受 `!(...)`，但 `NotExpression` 的执行仍不受支持（`INTERNAL_ERROR`，`Unsupported expression type`）；工厂分发不改变这一既有行为。
 
 类型字段必须是能表示 -1 的有符号整数。地域和常住地字段可使用有符号或无符号整数；查询值必须同时满足字段类型和有符号 64 位输入范围，越界时报错而不是截断。
 
 `FUNCTION(name,"arg1|arg2","type1|type2")` 仅为兼容 `ads` 保留语法和 AST，**不提供**回调注册或搜索时函数执行能力；将此类表达式传给 executor 不受支持。
+
+### 内部 executor 工厂
+
+Region 表达式默认通过不可变的命名 `ExecutorFactoryRegistry` 创建 executor，无需请求开关。
+`Executor::MakeInstance` 委托给 `src/attr/executor/builtin_executor.cpp` 中的内置适配器，将现有的强类型 region AST 映射到编译链接的 `region_filter` 工厂。
+注册胶水与可复用的 registry 实现分离；工厂仍创建同一个 `RegionFilterExecutor`，schema、范围、FastBitset 校验和位图算法均不改变。
+
+这是**内部、编译链接的扩展点**，不是可由用户注入的 registry、公开插件 SDK、动态库加载器或运行时注册/注销 API。
+新增内置实现需要修改源码并重新编译 VSAG；它不扩展语法，也不会让通用 `FUNCTION(...)` 可执行。现有搜索入口签名不变。
+
+内置 registry 只初始化一次，此后只读。每次工厂调用创建独立 executor，拥有自己的可变临时位图和结果位图；表达式与属性索引通过共享所有权保留，allocator 则必须比 executor 活得更久。
+共享表达式和索引不能在求值期间被并发修改。使用前调用 `Init()`，每次组合表达式 `Run(bucket_id)` 前调用 `Clear()`，与搜索调用方式一致；逻辑 AND/OR 可能就地修改子节点的结果位图，但不修改借用的索引 posting。
+命名查找只发生在每个 region executor 创建时，不发生在 `Run` 或逐候选 `CheckValid` 内。
+IVF 为每个并行搜索 worker 创建 executor 树，每个 region 叶子分别解析工厂，因此不能笼统地说每个请求只查找一次。
 
 ### 更新时引入字段
 
@@ -227,7 +242,7 @@ for (int64_t i = 0; i < result->GetDim(); ++i) {
 | NOT   | `!(expr)`             |
 | 分组  | `(...)`               |
 
-`NOT` 仅支持前缀写法 `!(...)`。
+解析器仅识别前缀写法 `!(...)` 的 `NOT`；目前不支持执行，详见 [Region filter](#region-filter)。
 
 ### 比较运算符
 
@@ -291,8 +306,8 @@ category = "electronics"
 # 数值范围 + 多值字段
 price >= 100 AND price <= 1000 AND tag IN ["promo", "new"]
 
-# 取反
-!(status = "archived") AND multi_notin(region, "us-east|us-west", "|")
+# 排除，不使用尚不支持执行的 NOT 表达式
+status != "archived" AND multi_notin(region, "us-east|us-west", "|")
 
 # 比较左侧的算术运算
 (end_ts - start_ts) > 3600 AND charge_type = 5
