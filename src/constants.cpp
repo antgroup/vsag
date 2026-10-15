@@ -117,6 +117,9 @@ const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
 const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
 const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
 const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
+    "pipnn_adaptive_pruning_adjust_step";
 
 const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HNSW_PARAMETER_M = "max_degree";

@@ -72,6 +72,8 @@ PiPNN 仅适用于 HGraph；Pyramid 索引不支持 `graph_type: "pipnn"`。
 现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
 对 PiPNN 不生效。
 
+HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 未暴露这两个选项。
+
 搜索时：
 
 ```json

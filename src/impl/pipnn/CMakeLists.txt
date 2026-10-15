@@ -14,6 +14,8 @@
 
 
 set (PIPNN_SRC
+    pipnn_adaptive_pruning.cpp
+    pipnn_adaptive_pruning.h
     pipnn_graph_builder.cpp
     pipnn_graph_builder.h
 )

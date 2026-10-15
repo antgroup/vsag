@@ -575,6 +575,20 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                 GRAPH_KEY,
                 PIPNN_PARAMETER_RESERVOIR_SIZE,
             },
+        },
+        {
+            PIPNN_PARAMETER_ADAPTIVE_PRUNING,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_ADAPTIVE_PRUNING,
+            },
+        },
+        {
+            PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP,
+            },
         }};
     const std::string hgraph_params_template =
         R"(
