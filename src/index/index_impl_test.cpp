@@ -257,6 +257,7 @@ TEST_CASE("index clone with allocator", "[ut][index_impl]") {
 
 TEST_CASE("index build memory estimation contract",
           "[ut][index_impl][build_memory_contract][estimate_build_memory]") {
+    // Pin public numeric values to detect accidental enum renumbering.
     static_assert(vsag::IndexFeature::SUPPORT_ESTIMATE_MEMORY == 39);
     static_assert(vsag::IndexFeature::SUPPORT_GET_MEMORY_USAGE == 40);
     static_assert(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY == 55);

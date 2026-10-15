@@ -804,6 +804,8 @@ HGraph::InsertAddBatchWorkContext::RunRows() {
         try {
             row_function(row_state, row);
         } catch (...) {
+            // Retain arbitrary C++ row exceptions and continue attempts;
+            // the exception from the lowest failing row is rethrown after workers complete.
             std::lock_guard<std::mutex> error_lock(error_mutex);
             if (error == nullptr or row < error_row) {
                 error_row = row;
@@ -834,6 +836,7 @@ HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
         futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
     }
     wait_all_futures(futures);
+    // Worker completion synchronizes error-record reads below; no lock is needed after the wait.
     if (context.error != nullptr) {
         std::rethrow_exception(context.error);
     }
@@ -872,6 +875,8 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         return;
     }
 
+    // RowState borrows the stack lambda and call state; synchronous worker draining keeps
+    // them alive until every submitted worker completes, including exceptional exits.
     struct RowState {
         HGraph* self;
         const DatasetPtr* data;
