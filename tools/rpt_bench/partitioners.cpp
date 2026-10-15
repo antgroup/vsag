@@ -13,10 +13,11 @@
 // limitations under the License.
 
 #include "partitioners.h"
-#include <limits>
+
 #include <algorithm>
 #include <chrono>
 #include <fstream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <string>
@@ -68,6 +69,15 @@ cut_into_chunks(const std::vector<int64_t>& ids, uint64_t leaves) {
     return partitions;
 }
 
+bool
+validate_request(const PartitionRequest& request, PartitionResult& result) {
+    if (request.bucket_size == 0) {
+        result.error = "bucket_size must be positive";
+        return false;
+    }
+    return true;
+}
+
 /// Runs `body` while measuring wall time and the growth of the peak RSS.
 template <typename Body>
 PartitionResult
@@ -87,6 +97,9 @@ measure(Body&& body) {
 PartitionResult
 partition_by_rpt(const PartitionRequest& request) {
     return measure([&](PartitionResult& result) {
+        if (not validate_request(request, result) || request.count == 0) {
+            return;
+        }
         RPTPartitionParams params;
         params.bucket_size = request.bucket_size;
         params.seed = request.seed;
@@ -102,6 +115,9 @@ partition_by_rpt(const PartitionRequest& request) {
 PartitionResult
 partition_by_random(const PartitionRequest& request) {
     return measure([&](PartitionResult& result) {
+        if (not validate_request(request, result) || request.count == 0) {
+            return;
+        }
         std::vector<int64_t> ids(request.count);
         std::iota(ids.begin(), ids.end(), 0);
         std::mt19937_64 generator(request.seed);
@@ -113,6 +129,9 @@ partition_by_random(const PartitionRequest& request) {
 PartitionResult
 partition_by_single_dim(const PartitionRequest& request) {
     return measure([&](PartitionResult& result) {
+        if (not validate_request(request, result) || request.count == 0) {
+            return;
+        }
         // Pick the dimension with the largest variance, then sort the ids along it.
         std::vector<double> sums(request.dim, 0.0);
         std::vector<double> square_sums(request.dim, 0.0);
@@ -153,6 +172,9 @@ partition_by_single_dim(const PartitionRequest& request) {
 PartitionResult
 partition_by_kmeans(const PartitionRequest& request) {
     return measure([&](PartitionResult& result) {
+        if (not validate_request(request, result) || request.count == 0) {
+            return;
+        }
         uint64_t clusters = ceil_div(request.count, request.bucket_size);
         if (clusters > request.count) {
             result.error = "bucket_size yields more clusters than vectors";
