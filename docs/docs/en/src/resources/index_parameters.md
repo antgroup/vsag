@@ -39,6 +39,7 @@ HGraph places its build parameters under the generic `index_param` key (see
 |-------|---------|-------------|
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
+| `alpha` | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0` |
 | `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/README.md) for all supported values |
 
 The optional `mci_knng_source` build parameter enables the MCI companion and selects
@@ -54,6 +55,25 @@ The opt-in `use_hybrid_traversal` search mode combines sparse and clique neighbo
 `hybrid_vob`, `hybrid_filter_cost_ratio`, `mci_seed_coverage`, and `mci_seed_max_count`
 controlling per-expansion work and seeds. See the
 [MCI companion guide](../advanced/hgraph_mci_companion.md#dynamic-neighbor-traversal).
+
+### PiPNN build parameters
+
+When `graph_type` is `pipnn` on HGraph, the following build parameters are also accepted under
+`index_param`. PiPNN is available for HGraph only; the Pyramid index does not support
+`graph_type: "pipnn"`.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `pipnn_max_leaf_size` | `1024` | Maximum partition leaf size, in `[2, 2147483647]`. |
+| `pipnn_min_leaf_size` | `64` | Target for merging undersized leaves; must be positive and no larger than `pipnn_max_leaf_size`. |
+| `pipnn_leader_sample_rate` | `0.005` | Fraction sampled as leaders, in `(0, 1]`; each partition uses `2` to `1000`, bounded by its point count. |
+| `pipnn_fanout` | `[10, 2]` | Positive nearest-leader fanout at successive partition levels; deeper levels use `1`. |
+| `pipnn_leaf_neighbor_count` | `5` | Positive nearest-candidate count per point and leaf; undersized leaves use at least `4`. |
+| `pipnn_hash_plane_count` | `12` | Direction-hash bits in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | `64` | Positive per-point candidate capacity before final pruning; effective capacity is `max(value, max_degree)` and must not exceed `65535`. |
+
+The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
+and has no effect on PiPNN.
 
 At search time:
 
@@ -139,6 +159,9 @@ Pyramid supports organising multiple subgraphs by tag:
     }
 }
 ```
+
+`graph_type: "pipnn"` is not supported by Pyramid; the PiPNN build parameters above apply to
+HGraph only.
 
 ## SINDI (sparse vectors)
 

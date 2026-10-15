@@ -329,6 +329,10 @@ VSAG referenced the following works during its implementation:
   Sebastiano Vigna  
    [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
 
+3. PiPNN: Ultra-Scalable Graph-Based Nearest Neighbor Indexing [_arXiv_, 2026] \
+  Tobias Rubel, Richard Wen, Laxman Dhulipala, Lars Gottesbüren, Rajesh Jayaram, Jakub Łącki \
+   [PDF](https://arxiv.org/pdf/2602.21247) | [CODE](https://github.com/ParAlg/PiPNN)
+
 ## Contributors
 
 <!-- prettier-ignore-start -->
