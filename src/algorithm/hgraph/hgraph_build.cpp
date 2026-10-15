@@ -345,6 +345,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             }
         }
     } else {
+        // Note: odescent_param_ is a shared member and this mutates it in place, so
+        // max_degree is left at the bottom-graph degree after this call. That is
+        // pre-existing 1.0 behaviour (the route-graph loop below has always
+        // overwritten the same shared field), and the PiPNN route-graph path copies
+        // the parameter before adjusting it for exactly this reason.
         odescent_param_->max_degree = bottom_graph_->MaximumDegree();
         ODescent odescent_builder(
             odescent_param_, build_data, allocator_, this->thread_pool_.get());
