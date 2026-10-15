@@ -725,7 +725,7 @@ private:
 
         /// Claims rows until exhausted; keeps the exception of the lowest failing row.
         void
-        RunRows() noexcept;
+        RunRows();
     };
 
     /// Zero-argument task submitted to the pool; it only references the shared context.

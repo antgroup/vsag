@@ -795,7 +795,7 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 }
 
 void
-HGraph::InsertAddBatchWorkContext::RunRows() noexcept {
+HGraph::InsertAddBatchWorkContext::RunRows() {
     while (true) {
         uint64_t row = next_row.fetch_add(1, std::memory_order_relaxed);
         if (row >= row_count) {

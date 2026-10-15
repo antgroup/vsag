@@ -1830,6 +1830,9 @@ TEST_CASE("HGraph build memory lifecycle markers precede Merge and both componen
 TEST_CASE("HGraph bounded workers select the lowest row error and attempt every row",
           "[ut][hgraph][build_dispatch]") {
     using Access = vsag::HGraphMemoryEstimateTestAccess;
+    // Error-recording mutex failures must be allowed to propagate through the worker future.
+    static_assert(!std::is_nothrow_invocable_v<decltype(&Access::WorkContext::RunRows),
+                                               Access::WorkContext&>);
     ControlledRows rows;
     Access::WorkContext context;
     context.row_function = &ControlledRows::Invoke;
