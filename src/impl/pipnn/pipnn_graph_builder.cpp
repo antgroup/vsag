@@ -90,7 +90,9 @@ public:
     }
 
     ~UninitializedFloatBuffer() {
-        allocator_->Deallocate(data_);
+        if (data_ != nullptr) {
+            allocator_->Deallocate(data_);
+        }
     }
 
     UninitializedFloatBuffer(const UninitializedFloatBuffer&) = delete;
