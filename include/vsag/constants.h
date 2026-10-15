@@ -227,6 +227,7 @@ extern const char* const HGRAPH_RABITQ_FUSED_DATACELL;
 extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
 extern const char* const HGRAPH_PARAMETER_SKIP_RATIO;
 extern const char* const HGRAPH_PARAMETER_SKIP_STRATEGY;
+extern const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP;
 extern const char* const HGRAPH_USE_MCI;
 extern const char* const HGRAPH_USE_HYBRID_TRAVERSAL;
 extern const char* const HGRAPH_HYBRID_VOB;
