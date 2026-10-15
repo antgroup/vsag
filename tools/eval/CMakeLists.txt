@@ -16,6 +16,7 @@
 
 set (eval_srcs
     case/eval_case.cpp
+    case/search_pass_runner.cpp
     case/search_eval_case.cpp
     case/build_eval_case.cpp
     exporter/exporter.cpp

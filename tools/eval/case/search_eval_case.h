@@ -68,10 +68,16 @@ private:
     do_knn_search();
 
     void
+    run_knn_search_pass(Monitor* monitor, bool collect_statistics);
+
+    void
     do_range_search();
 
     void
     do_knn_filter_search();
+
+    void
+    run_knn_filter_search_pass(Monitor* monitor);
 
     void
     do_range_filter_search();
@@ -92,6 +98,8 @@ private:
     std::vector<MonitorPtr> monitors_{};
 
     std::shared_ptr<LatencyMonitor> latency_monitor_{nullptr};
+
+    MonitorPtr memory_monitor_{nullptr};
 
     SearchType search_type_{SearchType::KNN};
 

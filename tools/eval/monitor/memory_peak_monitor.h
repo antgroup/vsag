@@ -15,11 +15,13 @@
 
 #pragma once
 
-#include <unistd.h>
-
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <fstream>
+#include <functional>
+#include <mutex>
+#include <string>
 #include <thread>
 
 #include "monitor.h"
@@ -28,7 +30,20 @@ namespace vsag::eval {
 
 class MemoryPeakMonitor : public Monitor {
 public:
-    explicit MemoryPeakMonitor(const std::string& name);
+    class MemoryReadResult {
+    public:
+        bool available{false};
+        uint64_t bytes{0};
+        std::string error{};
+    };
+
+    using MemoryReader = std::function<MemoryReadResult()>;
+
+    explicit MemoryPeakMonitor(std::string name);
+
+    MemoryPeakMonitor(std::string name,
+                      MemoryReader reader,
+                      std::chrono::milliseconds sample_interval);
 
     ~MemoryPeakMonitor() override;
 
@@ -42,23 +57,41 @@ public:
     GetResult() override;
 
     void
-    Record(void* input) override;
+    Record(void* input = nullptr) override;
 
 private:
+    MemoryReadResult
+    read_memory() const;
+
     void
-    sample();
+    sample_memory();
 
-    uint64_t max_memory_{0};
-    uint64_t init_memory_{0};
-    std::string process_name_{};
+    void
+    sampling_loop();
 
-    pid_t pid_{0};
+    void
+    stop_sampling();
 
-    std::ifstream infile_{};
-    std::mutex sampling_mutex_{};
-    std::condition_variable sampling_condition_{};
-    std::thread sampling_thread_{};
-    bool sampling_{false};
+    std::string
+    metric_name(const std::string& metric) const;
+
+private:
+    MemoryReader reader_;
+    std::chrono::milliseconds sample_interval_;
+    std::string process_name_;
+
+    mutable std::mutex state_mutex_;
+    std::condition_variable stop_condition_;
+    std::thread sampling_thread_;
+    bool running_{false};
+    bool worker_ready_{false};
+
+    bool available_{false};
+    uint64_t baseline_bytes_{0};
+    uint64_t absolute_peak_bytes_{0};
+    uint64_t sample_count_{0};
+    uint64_t failure_count_{0};
+    std::string last_error_{"memory monitor has not been started"};
 };
 
 }  // namespace vsag::eval

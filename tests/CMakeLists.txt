@@ -15,6 +15,7 @@
 
 # fixtures is already added by top-level CMakeLists.txt before src
 
+find_package (Threads REQUIRED)
 
 # Unit tests are compiled into module-owned static libraries under src/. Keep the aggregate
 # executable for CI and full validation, and expose opt-in module executables for local iteration.
@@ -125,7 +126,9 @@ vsag_add_unittest_executable (unittests
 
 add_executable (eval_monitor_test
         ${PROJECT_SOURCE_DIR}/tools/eval/monitor/latency_monitor_test.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/memory_peak_monitor_test.cpp
         ${PROJECT_SOURCE_DIR}/tools/eval/monitor/latency_monitor.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/memory_peak_monitor.cpp
         ${PROJECT_SOURCE_DIR}/tools/eval/monitor/monitor.cpp
 )
 
@@ -139,6 +142,24 @@ target_link_libraries (eval_monitor_test PRIVATE
 )
 
 add_dependencies (eval_monitor_test Catch2)
+
+add_executable (eval_search_pass_runner_test
+        ${PROJECT_SOURCE_DIR}/tools/eval/case/search_pass_runner_test.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/case/search_pass_runner.cpp
+        ${PROJECT_SOURCE_DIR}/tools/eval/monitor/monitor.cpp
+)
+
+target_include_directories (eval_search_pass_runner_test PRIVATE
+        ${PROJECT_SOURCE_DIR}/tools/eval
+)
+
+target_link_libraries (eval_search_pass_runner_test PRIVATE
+        Catch2::Catch2WithMain
+        nlohmann_json::nlohmann_json
+        vsag
+)
+
+add_dependencies (eval_search_pass_runner_test Catch2)
 
 # function tests
 file (GLOB FUNCTION_TESTS "test_*.cpp")

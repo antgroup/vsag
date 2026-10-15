@@ -455,13 +455,14 @@ TEST_CASE("EvaluateSearch validates inputs and propagates search errors", "[ut][
     REQUIRE(build_result.contains("duration(s)"));
     REQUIRE(build_result.contains("cpu_duration(s)"));
     REQUIRE(build_result.contains("average_cpu_cores"));
-    REQUIRE(build_result.contains("memory_rss_before_build(B)"));
-    REQUIRE(build_result.contains("memory_rss_peak_build(B)"));
-    REQUIRE(build_result.contains("memory_rss_increment_build(B)"));
+    REQUIRE(build_result.contains("memory_peak(build)"));
+    REQUIRE(build_result.contains("memory_rss_baseline_bytes(build)"));
+    REQUIRE(build_result.contains("memory_rss_peak_bytes(build)"));
+    REQUIRE(build_result.contains("memory_peak_delta_bytes(build)"));
     REQUIRE(build_result["cpu_duration(s)"].get<double>() >= 0.0);
     REQUIRE(build_result["average_cpu_cores"].get<double>() >= 0.0);
-    REQUIRE(build_result["memory_rss_peak_build(B)"].get<uint64_t>() >=
-            build_result["memory_rss_before_build(B)"].get<uint64_t>());
+    REQUIRE(build_result["memory_rss_peak_bytes(build)"].get<uint64_t>() >=
+            build_result["memory_rss_baseline_bytes(build)"].get<uint64_t>());
     REQUIRE_FALSE(build_result.contains("tps"));
     REQUIRE(build_result["index_info"].is_object());
     REQUIRE(build_result["index_info"].empty());
