@@ -181,6 +181,22 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
+    // See BasicSearcher: the entry point's duplicate labels are only expanded from this seed block.
+    if (inner_search_param.consider_duplicate and is_result_distance_eligible(dist)) {
+        for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(dist, duplicate_id);
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            while (top_candidates->Size() > ef) {
+                top_candidates->Pop();
+            }
+        }
+        if (not top_candidates->Empty()) {
+            lower_bound = top_candidates->Top().first;
+        }
+    }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
         if (dist > inner_search_param.radius and not top_candidates->Empty()) {
             top_candidates->Pop();
