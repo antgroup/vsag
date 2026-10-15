@@ -178,13 +178,13 @@ group_duplicate_rows(const Vector<InnerIdType>& ids,
     }
 }
 
-struct ReservoirEntry {
-    // A slot is fully assigned before ReservoirState::size makes it readable.
+struct reservoir_entry {
+    // A slot is fully assigned before reservoir_state::size makes it readable.
     // NOLINTNEXTLINE(modernize-use-equals-default)
-    ReservoirEntry() noexcept {
+    reservoir_entry() noexcept {
     }
 
-    ReservoirEntry(InnerIdType input_neighbor, uint16_t input_hash, uint16_t input_distance)
+    reservoir_entry(InnerIdType input_neighbor, uint16_t input_hash, uint16_t input_distance)
         : neighbor(input_neighbor), hash(input_hash), distance(input_distance) {
     }
 
@@ -193,15 +193,15 @@ struct ReservoirEntry {
     uint16_t distance;
 };
 
-static_assert(sizeof(ReservoirEntry) == 8);
+static_assert(sizeof(reservoir_entry) == 8);
 
-struct ReservoirState {
+struct reservoir_state {
     uint16_t size{0};
     uint16_t farthest{0};
 };
 
-struct WorkItem {
-    WorkItem(Vector<uint32_t>&& input_points, uint64_t input_level, uint64_t input_seed)
+struct work_item {
+    work_item(Vector<uint32_t>&& input_points, uint64_t input_level, uint64_t input_seed)
         : points(std::move(input_points)), level(input_level), seed(input_seed) {
     }
 
@@ -213,11 +213,11 @@ struct WorkItem {
 using Leaf = Vector<uint32_t>;
 using Leaves = Vector<Leaf>;
 
-struct SplitResult {
-    explicit SplitResult(Allocator* allocator) : pending(allocator), finished(allocator) {
+struct split_result {
+    explicit split_result(Allocator* allocator) : pending(allocator), finished(allocator) {
     }
 
-    Vector<WorkItem> pending;
+    Vector<work_item> pending;
     Leaves finished;
 };
 
@@ -286,16 +286,16 @@ private:
     partition() const;
 
     void
-    split_work_item(const WorkItem& item,
-                    Vector<WorkItem>& pending,
+    split_work_item(const work_item& item,
+                    Vector<work_item>& pending,
                     Leaves& finished,
                     bool allow_inner_parallelism) const;
 
     [[nodiscard]] Vector<uint32_t>
-    sample_leaders(const WorkItem& item) const;
+    sample_leaders(const work_item& item) const;
 
     [[nodiscard]] Leaves
-    assign_to_leaders(const WorkItem& item,
+    assign_to_leaders(const work_item& item,
                       const Vector<uint32_t>& leaders,
                       uint64_t fanout,
                       bool allow_parallelism) const;
@@ -322,7 +322,7 @@ private:
     distance_from_dot(uint32_t lhs, uint32_t rhs, float dot) const;
 
     Vector<InnerIdType>
-    robust_prune(uint32_t source, const ReservoirEntry* row, uint16_t size) const;
+    robust_prune(uint32_t source, const reservoir_entry* row, uint16_t size) const;
 
     void
     write_graph() const;
@@ -352,8 +352,8 @@ private:
     Vector<InnerIdType> ids_;
     float* norms_{nullptr};
     float* sketches_{nullptr};
-    Vector<ReservoirEntry> reservoirs_;
-    Vector<ReservoirState> reservoir_states_;
+    Vector<reservoir_entry> reservoirs_;
+    Vector<reservoir_state> reservoir_states_;
     std::unique_ptr<PointsMutex> point_locks_;
     uint32_t point_lock_count_{0};
 };
@@ -495,10 +495,10 @@ PiPNNPipeline::partition() const {
         return finished;
     }
 
-    Vector<WorkItem> work(allocator_);
+    Vector<work_item> work(allocator_);
     work.emplace_back(std::move(initial), 0, PARTITION_SEED);
     for (uint64_t iteration = 0; iteration < MAX_PARTITION_ITERATIONS; ++iteration) {
-        Vector<WorkItem> pending(allocator_);
+        Vector<work_item> pending(allocator_);
         const bool all_items_are_small =
             std::all_of(work.begin(), work.end(), [](const auto& item) {
                 return item.points.size() < MIN_PARALLEL_PARTITION_POINTS;
@@ -508,10 +508,10 @@ PiPNNPipeline::partition() const {
                                             work.size() > 1 and
                                             (work.size() >= thread_count_ or all_items_are_small);
         if (parallelize_work_items) {
-            Vector<std::unique_ptr<SplitResult>> results(allocator_);
+            Vector<std::unique_ptr<split_result>> results(allocator_);
             results.reserve(work.size());
             for (uint64_t item = 0; item < work.size(); ++item) {
-                results.emplace_back(std::make_unique<SplitResult>(allocator_));
+                results.emplace_back(std::make_unique<split_result>(allocator_));
             }
             Vector<uint64_t> schedule(allocator_);
             schedule.resize(work.size());
@@ -586,8 +586,8 @@ PiPNNPipeline::partition() const {
 }
 
 void
-PiPNNPipeline::split_work_item(const WorkItem& item,
-                               Vector<WorkItem>& pending,
+PiPNNPipeline::split_work_item(const work_item& item,
+                               Vector<work_item>& pending,
                                Leaves& finished,
                                bool allow_inner_parallelism) const {
     const uint64_t requested_fanout =
@@ -653,7 +653,7 @@ PiPNNPipeline::split_work_item(const WorkItem& item,
 }
 
 Vector<uint32_t>
-PiPNNPipeline::sample_leaders(const WorkItem& item) const {
+PiPNNPipeline::sample_leaders(const work_item& item) const {
     const auto sampled = static_cast<uint64_t>(
         std::ceil(static_cast<double>(item.points.size()) * parameter_.leader_sample_rate));
     const uint64_t leader_count =
@@ -682,7 +682,7 @@ PiPNNPipeline::sample_leaders(const WorkItem& item) const {
 }
 
 Leaves
-PiPNNPipeline::assign_to_leaders(const WorkItem& item,
+PiPNNPipeline::assign_to_leaders(const work_item& item,
                                  const Vector<uint32_t>& leaders,
                                  uint64_t fanout,
                                  bool allow_parallelism) const {
@@ -1133,7 +1133,7 @@ PiPNNPipeline::insert_candidate(uint32_t source, uint32_t target, float distance
         if (entry.neighbor == target) {
             if (incoming_key < std::make_tuple(entry.distance, ids_[entry.neighbor], entry.hash)) {
                 const bool was_farthest = index == state.farthest;
-                entry = ReservoirEntry{target, hash, distance_key};
+                entry = reservoir_entry{target, hash, distance_key};
                 if (was_farthest) {
                     update_farthest(source);
                 }
@@ -1148,7 +1148,7 @@ PiPNNPipeline::insert_candidate(uint32_t source, uint32_t target, float distance
         // remaining entries. Returning here is intentional, not a missed scan.
         if (incoming_key < std::make_tuple(entry.distance, ids_[entry.neighbor], entry.hash)) {
             const bool was_farthest = index == state.farthest;
-            entry = ReservoirEntry{target, hash, distance_key};
+            entry = reservoir_entry{target, hash, distance_key};
             if (was_farthest) {
                 update_farthest(source);
             }
@@ -1158,7 +1158,7 @@ PiPNNPipeline::insert_candidate(uint32_t source, uint32_t target, float distance
 
     if (state.size < reservoir_size_) {
         const uint16_t inserted = state.size;
-        row[inserted] = ReservoirEntry{target, hash, distance_key};
+        row[inserted] = reservoir_entry{target, hash, distance_key};
         ++state.size;
         if (inserted == 0) {
             state.farthest = 0;
@@ -1173,7 +1173,7 @@ PiPNNPipeline::insert_candidate(uint32_t source, uint32_t target, float distance
         return;
     }
 
-    row[state.farthest] = ReservoirEntry{target, hash, distance_key};
+    row[state.farthest] = reservoir_entry{target, hash, distance_key};
     update_farthest(source);
 }
 
@@ -1217,7 +1217,7 @@ PiPNNPipeline::distance_from_dot(uint32_t lhs, uint32_t rhs, float dot) const {
 }
 
 Vector<InnerIdType>
-PiPNNPipeline::robust_prune(uint32_t source, const ReservoirEntry* row, uint16_t size) const {
+PiPNNPipeline::robust_prune(uint32_t source, const reservoir_entry* row, uint16_t size) const {
     Vector<std::pair<float, uint32_t>> ordered(allocator_);
     ordered.reserve(size);
     for (uint16_t index = 0; index < size; ++index) {
