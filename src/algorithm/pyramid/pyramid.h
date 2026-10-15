@@ -368,6 +368,19 @@ private:
                      const Vector<int64_t>& input_indices,
                      int64_t first_inner_id);
 
+    void
+    add_to_path(Hierarchy& hierarchy,
+                const std::string& path,
+                InnerIdType inner_id,
+                const float* vector,
+                int sampled_root_level);
+
+    bool
+    matches_scope(const IndexNode* node, InnerIdType id) const;
+
+    FilterPtr
+    create_hierarchy_filter(const Hierarchy& hierarchy, const std::string& path) const;
+
     /// Search a single hierarchy along a path prefix, accumulating candidates.
     void
     search_hierarchy(const Hierarchy& h,
@@ -390,7 +403,7 @@ private:
                 int64_t final_topk,
                 std::optional<int64_t> reorder_candidate_limit,
                 QueryContext& ctx,
-                const std::string& hierarchy_name,
+                const PyramidSearchParameters& parsed_param,
                 const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
     InnerSearchParam
