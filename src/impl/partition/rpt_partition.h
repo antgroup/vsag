@@ -18,10 +18,10 @@
 #include <vector>
 
 #include "typing.h"
-#include "vsag/utils.h"
 
 namespace vsag {
 class Allocator;
+struct RPTPartitionParams;
 
 /**
  * @brief Random projection tree (RPT) partitioner.
@@ -71,7 +71,7 @@ private:
     Allocator* const allocator_{nullptr};
 
     const float* datas_{nullptr};
-    RPTPartitionParams params_;
+    uint64_t max_depth_{0};
 
     Vector<InnerIdType> ids_;    // permutation of vector ids, partitioned in place
     Vector<float> projections_;  // projection value of each vector on the current node
