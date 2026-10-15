@@ -70,6 +70,7 @@ public:
           pipnn_param_(pyramid_param->pipnn_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
+          adaptive_pruning_(pyramid_param->adaptive_pruning),
           default_rabitq_one_bit_search_(pyramid_param->use_reorder and
                                          pyramid_param->base_codes_param->name ==
                                              RABITQ_SPLIT_DATA_CELL),
@@ -77,6 +78,17 @@ public:
           persist_source_id_(pyramid_param->persist_source_id),
           store_paths_(pyramid_param->store_paths),
           cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
+        // No-op unless adaptive pruning is enabled.
+        adaptive_pruning_.Validate(pyramid_param->alpha);
+        if (adaptive_pruning_.enabled) {
+            CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                           "adaptive_pruning currently supports only nsw graph construction");
+            CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                           "adaptive_pruning currently supports only L2 distance");
+            for (const auto& hierarchy : pyramid_param->hierarchies) {
+                adaptive_pruning_.Validate(hierarchy.alpha);
+            }
+        }
         if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN and
             (common_param.repr_ != RecordRepr::DENSE or
              common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT)) {
@@ -589,6 +601,7 @@ private:
     mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
     PiPNNGraphBuilderParameter pipnn_param_{};             // PiPNN build parameters
+    AdaptivePruningParameter adaptive_pruning_;            // bottom-layer adaptive NSW policy
     bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
 
     std::mutex random_generator_mutex_;
