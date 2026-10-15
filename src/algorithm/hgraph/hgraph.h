@@ -1400,6 +1400,18 @@ private:
     [[nodiscard]] bool
     build_memory_estimate_supported() const;
 
+    [[nodiscard]] bool
+    build_memory_estimate_index_supported(const HGraphParameter& param) const;
+
+    [[nodiscard]] bool
+    build_memory_estimate_codec_supported(const HGraphParameter& param) const;
+
+    [[nodiscard]] bool
+    build_memory_estimate_state_supported() const;
+
+    // Defined in hgraph.cpp and instantiated only on the estimator's stack.
+    struct BuildMemoryEstimateContext;
+
     /// Returns next_multiple(num_elements, 2^resize_bit); INVALID_ARGUMENT unless resize_bit is
     /// in [1, 30] and num_elements <= 2^31 - 2^resize_bit.
     static uint64_t
