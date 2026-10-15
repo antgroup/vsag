@@ -16,10 +16,34 @@
 
 #include <cstdint>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "autotune.h"
+
+namespace {
+
+class ParityFilter : public vsag::Filter {
+public:
+    explicit ParityFilter(int64_t parity) : parity_(parity) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return id % 2 == parity_;
+    }
+
+    float
+    ValidRatio() const override {
+        return 0.5F;
+    }
+
+private:
+    int64_t parity_;
+};
+
+}  // namespace
 
 int
 main() {
@@ -57,6 +81,11 @@ main() {
                             ->Dim(1)
                             ->Ids(ground_truth_ids.data())
                             ->Owner(false);
+    std::vector<vsag::FilterPtr> filters;
+    filters.reserve(QUERY_COUNT);
+    for (int64_t i = 0; i < QUERY_COUNT; ++i) {
+        filters.emplace_back(std::make_shared<ParityFilter>(ground_truth_ids[i] % 2));
+    }
 
     const std::string create_params = R"(
         {
@@ -84,6 +113,7 @@ main() {
     vsag::autotune::SearchRequest request;
     request.index = index;
     request.workload = {queries, ground_truth, 1, 1};
+    request.workload.query_filters = filters;
     request.parameter_space = R"({"hgraph":{"ef_search":[4,8,16]}})";
     request.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0}};
     request.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
@@ -110,7 +140,7 @@ main() {
                      ->Dim(DIM)
                      ->Float32Vectors(query_vectors.data())
                      ->Owner(false);
-    auto neighbors = index->KnnSearch(query, 1, result.parameters);
+    auto neighbors = index->KnnSearch(query, 1, result.parameters, filters[0]);
     if (!neighbors.has_value()) {
         std::cerr << "Search failed: " << neighbors.error().message << std::endl;
         return 1;
