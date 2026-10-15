@@ -1,11 +1,11 @@
 # Pyramid
 
-![Pyramid: a tree of per-node proximity sub-graphs keyed by a path string; the search walks down the tree along the query's path prefix and runs ef_search inside the leaf sub-graph](../figures/indexes/pyramid-overview.svg)
+![Pyramid: a tree of per-node proximity sub-graphs keyed by path strings; vectors can belong to multiple paths and search walks the requested path prefixes](../figures/indexes/pyramid-overview.svg)
 
-Pyramid is VSAG's **hierarchical, path-partitioned** graph index. Every vector is
-tagged with a path string such as `"a/d/f"`, and Pyramid builds a graph per node
-in that path tree. At query time you supply a path prefix, and Pyramid restricts
-the search to the corresponding sub-tree.
+Pyramid is VSAG's **hierarchical, path-partitioned** graph index. A vector can be
+tagged with one or multiple path strings such as `"a/d/f"`, and Pyramid
+builds a graph per node in those path trees. At query time you supply one or more
+path prefixes, and Pyramid restricts the search to the corresponding sub-trees.
 
 This is ideal for multi-tenant deployments, tag-partitioned catalogs, or any
 scenario where one logical index serves many groups that must not cross-contaminate
@@ -17,9 +17,10 @@ results.
 
 ## How it works
 
-1. **Path tree.** Each vector carries a `path` in addition to its id. Paths use
-   `/` as separator (e.g. `"tenant_a/lang_en/topic_news"`). Pyramid builds one
-   sub-index for every path prefix seen during build.
+1. **Path tree.** Each vector can carry independent paths in addition to its id.
+   Paths use `/` as separator (e.g. `"tenant_a/lang_en/topic_news"`). Pyramid
+   builds one sub-index for every path prefix seen during build. The vector data
+   and id are stored once even when the vector belongs to multiple paths.
 2. **Per-level sub-graphs.** By default every level gets its own proximity graph.
    Use `no_build_levels` to skip levels that are too small or too coarse to
    benefit from graph indexing — those levels still exist as passthrough
@@ -88,17 +89,24 @@ Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq`). See the [Quantization chapter](../quantization/README.md) for per-quantizer details. |
+| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
 | `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
-| `graph_type` | string | `"nsw"` | `nsw` or `odescent`. |
+| `graph_type` | string | `"nsw"` | `nsw`, `odescent`, or `pipnn`. PiPNN batch-builds every constructed graph in each hierarchy, including root routing layers for `multi_layer` roots. |
 | `graph_storage_type` | string | `"flat"` | Bottom-graph storage for a `multi_layer` root: `flat` favors construction and search speed, while `compressed` reduces graph memory. Compressed storage requires `max_degree <= 255`. Single-layer roots, routing graphs, and child graphs remain sparse. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
-| `alpha` | float | `1.2` | Pruning factor during graph construction. |
+| `alpha` | float | `1.2` | Pruning factor during graph construction; PiPNN requires a finite value at least `1.0`. |
 | `adaptive_pruning` | boolean | `false` | Optional NSW bottom forward/reverse L2 selector; see [configuration and scope](#experimental-adaptive-nsw-pruning). |
 | `graph_iter_turn` | int | — | ODescent iterations (effective with `graph_type: "odescent"`). |
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
+| `pipnn_max_leaf_size` | int | `1024` | Maximum PiPNN partition leaf size. |
+| `pipnn_min_leaf_size` | int | `64` | Target used when PiPNN merges undersized leaves. |
+| `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as leaders; each partition uses `2` to `1000`, bounded by its point count. |
+| `pipnn_fanout` | int[] | `[10, 2]` | Nearest leader partitions joined at successive PiPNN partition levels. |
+| `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point and leaf; the primary PiPNN quality/build-work knob. Undersized leaves use at least `4`. |
+| `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
@@ -111,10 +119,19 @@ Build-time parameters live under `index_param`.
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
 | `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
-| `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` requires `graph_type: "nsw"`. Do not specify this option when `no_build_levels` disables level 0. |
-| `support_duplicate` | bool | `false` | Allow duplicate ids. |
+| `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` supports `graph_type: "nsw"` and `"pipnn"`. Do not specify this option when `no_build_levels` disables level 0. |
+| `support_duplicate` | bool | `false` | Group code-equivalent vectors with distinct external labels, using construction-code `CompareVectors` semantics. External labels must remain unique. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
+
+PiPNN supports Pyramid builds with `dtype: "float32"` and `metric_type` set to `"l2"`, `"ip"`, or
+`"cosine"`. It batch-builds every constructed graph in each hierarchy; with
+`root_graph_type: "multi_layer"`, this also includes every root routing layer. Search, incremental
+`Add`, removal, duplicate handling, reorder, and serialization retain the standard Pyramid
+behavior. Levels in `no_build_levels` are still skipped.
+The `pipnn_*` values are global to the Pyramid index; hierarchy objects may continue to override
+`max_degree` and `alpha`, and those overrides are applied when PiPNN builds that hierarchy.
+`ef_construction` does not tune PiPNN.
 
 ### RaBitQ split configuration
 
@@ -159,7 +176,13 @@ reduce recall unless the embedding model was trained for prefix dimensions.
 
 ## Build cache
 
-`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` for every vector in both builds. Cache warm builds apply only to `graph_type: "nsw"`; ODescent, duplicate-ID mode, missing source IDs, and duplicate source IDs automatically fall back to a normal cold build. `ef_construction` is not an eligibility condition for the cache path. At least 80% of the input source IDs must overlap the imported cache; lower overlap falls back to a normal cold build. Cache misses are constructed normally. Single-layer root hits receive a low-cost, block-parallel forward-row repair, while smaller tagged graphs retain their restored rows. Multi-layer nodes still rebuild routing overlays because route graphs are not stored in the cache. `GetStats()` reports vector hit/miss counts as well as graph-membership hit/miss counts and the number of restored edges.
+`ExportCache` captures per-hierarchy, per-node NSW graph seeds and `ImportCache` makes them available to a later `Build`. Cache data uses the index cache payload format, not the streaming index serialization format. Set `persist_source_id: true` before footer-serializing an index whose cache will be reused, and provide a unique `Dataset::SourceID` and external label for every vector in both builds. Cache warm builds apply only to `graph_type: "nsw"`; ODescent, missing source IDs, and repeated source IDs or labels fall back to a normal cold build (which retains its normal repeated-label rejection behavior). `ef_construction` is not an eligibility condition. At least 80% of input source IDs must overlap the imported cache. Cache misses are constructed normally. Single-layer root hits receive forward-row repair; multi-layer nodes rebuild routing overlays, which are not cached.
+
+With `support_duplicate: true`, Pyramid stores explicit per-graph group membership and the actual adjacency-row owner, not the minimum label or inner ID. Warm construction remaps SourceIDs and verifies current graph membership and construction-code equality. Missing or moved representatives, changed equivalence classes and unusable class rows turn the affected classes into misses; unrelated valid classes remain reusable. Removed aliases alone do not invalidate their class. Newly merged code classes are conservatively rebuilt. Hash-keyed ordered indexes compare exact construction-code bytes to resolve collisions, rather than assuming hash equality. At least 80% of each graph's memberships must remain reusable; missing/legacy group metadata or insufficient reuse triggers graph-level cold fallback. All-identical graphs without useful cached adjacency still cold-build. Representative adjacency is restored before aliases, and edges to invalid classes are filtered. Aliases count as memberships, not restored edges or routing entries.
+
+Concurrent insertion uses a transient graph-local exact-code representative registry, holding only the corresponding admission stripe through representative publication. It references existing construction codes instead of copying full vectors and is rehydrated when needed after loading an index. After cold construction and warm refinement, duplicate-enabled NSW `Build` checks both forward reachability from each bottom graph's entry and return reachability to that entry. When needed, bounded, geometrically selected bridges preserve the protected forward tree and maximum degree. Together these checks ensure strong connectivity among the graph's physical representatives, including those selected as query-specific entries by routed descent. Return-path checking uses CSR reverse adjacency with O(R + E) temporary memory for R representatives and E edges, released per graph. This is a Build-time invariant, not a guarantee for arbitrary later `Add` operations. Finite-budget approximate search can still miss whole vector groups. No universal recall or construction speedup is guaranteed. After deserialization, sparse empty adjacency rows retain physical-owner identity. Legacy dense/compressed storage can lose that identity for an isolated empty duplicate group; admission first preserves owners observable through rows, incoming edges or routing, then normalizes an otherwise unobservable persisted duplicate group without changing its labels. This does not recover historical owner identity or restore arbitrary incremental graph connectivity. The one-time legacy admission scan uses O(H + A + E) traversal work and O(H) visitation memory, where H is the stored ID high-water mark, A is the visited duplicate membership count and E is the traversed edge count; exact-code ordered-index operations add their usual comparison cost.
+
+Duplicate-aware cache payloads use a versioned Pyramid-only format. This reader accepts legacy ordinary caches; older readers cannot read the new duplicate payload. Ordinary caches without group metadata retain the legacy format. HGraph cache and index serialization formats are unchanged. `GetStats()` separates vector and graph-membership hit/miss counts from restored-edge counts; graph fallback contributes misses, not restored groups.
 
 ## Search parameters
 
@@ -171,6 +194,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
+| `parallelism` | int | `1` | Values greater than `1` enable parallel search of the sub-graphs reached by the query paths; the per-subgraph results are merged and de-duplicated before reordering. It is a switch rather than a concurrency limit — see the note below the table. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
@@ -180,6 +204,13 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
 ```
+
+### Thread pool requirement for `parallelism`
+
+`parallelism` only takes effect when the index owns a thread pool. An index created through an `Engine` whose `Resource` supplies a `ThreadPool` (for example `Engine::CreateThreadPool(n)`), or an index built with `build_thread_count > 1`, has one. `Factory::CreateIndex` and `Index::Load` do not attach a thread pool, so on those paths `parallelism` is ignored and the routed sub-graphs are searched one after another. When the parameter cannot be honored, Pyramid logs a warning once per index.
+
+Values `<= 0` are clamped to `1`. With `parallelism >= 2`, Pyramid submits one task per resolved sub-graph to the index's thread pool, waits for all of them, and then merges the candidates by inner id (keeping the smallest distance). The value is not a concurrency cap: `parallelism: 2` can still run more than two sub-graph searches at the same time. The effective concurrency is
+`min(number of resolved sub-graphs, free workers in the index thread pool)`, and that pool is fixed in size and shared by every request on the index. Note that one path does not always map to one task: a path that ends at an intermediate node expands to all of its descendant index nodes.
 
 ## Multi-Hierarchy Support
 
@@ -207,10 +238,10 @@ Overridable per-hierarchy parameters: `max_degree`, `ef_construction`, `alpha`,
 `root_graph_type: "multi_layer"` changes only the selected hierarchy's root. Its bottom graph uses
 the top-level `graph_storage_type`: Flat by default, or Compressed to trade construction and search
 speed for lower graph memory. Sparse routing graphs choose a better entry point before the bottom
-search; child graphs remain sparse. Bulk Build and incremental Add jointly construct the route and
-bottom layers with the same HGraph-style insertion protocol. This layout requires
-`graph_type: "nsw"`; combining `multi_layer` with `odescent` is rejected during parameter
-validation. Bottom and routing edges use the precise codes when an independent precise store
+search; child graphs remain sparse. NSW Build and incremental Add jointly construct the route and
+bottom layers with the same HGraph-style insertion protocol. PiPNN Build batch-constructs both
+layers. Combining `multi_layer` with `odescent` is rejected during parameter validation. Bottom
+and routing edges use the precise codes when an independent precise store
 exists, otherwise they use the base codes. Query traversal continues to use the base codes, and
 final reordering uses the configured reorder source.
 
@@ -239,9 +270,9 @@ final reordering uses the configured reorder source.
 
 ### Dataset API for named hierarchies
 
-Use the overloaded `Paths(hierarchy_name, paths)` method to assign paths per
+Use the overloaded `Paths(hierarchy_name, paths)` methods to assign paths per
 hierarchy. The same `Ids()` and `Float32Vectors()` are shared across all
-hierarchies:
+hierarchies. The pointer overload keeps the existing one-path-per-vector form:
 
 ```cpp
 auto base = vsag::Dataset::Make();
@@ -273,10 +304,45 @@ const std::string* category_paths = data->GetPaths("category");
 
 `GetDataByIds` and `GetDataByIdsWithFlag` calls without `DATA_FLAG_PATH` do not attach path arrays.
 Selecting `DATA_FLAG_PATH` while `store_paths` is `false` returns an invalid-argument error. When
-path storage is enabled, a hierarchy is included only if every requested ID has a recorded path in
-that hierarchy. If even one requested ID was built or added without that hierarchy's path, its
-getter returns `nullptr`; other hierarchies whose requested paths are complete are still returned.
-In single-hierarchy mode, the same completeness rule applies to `GetPaths()`.
+path storage is enabled, these legacy getters include a hierarchy only if every requested ID has
+exactly one recorded path in that hierarchy. If any requested ID has no recorded path or multiple
+paths, its getter returns `nullptr`; other hierarchies whose requested paths are complete are returned.
+In single-hierarchy mode, the same rule applies to `GetPaths()`.
+
+Use the structured overload to retrieve every path regardless of the stored representation:
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths;
+if (data->GetPaths("tag", tag_paths)) {
+    // tag_paths[i] contains every path for requested_ids[i].
+}
+```
+
+To assign multiple independent paths to one vector in the same hierarchy, pass
+a nested vector. The outer vector has one entry per dataset element; each inner
+vector has one or multiple paths:
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths = {
+    {"technology", "military"}, // vector 0 belongs to both paths
+    {"sports"},                  // vector 1 belongs to one path
+    {""},                        // vector 2 belongs to the hierarchy root
+};
+
+auto base = vsag::Dataset::Make();
+base->NumElements(3)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("tag", std::move(tag_paths))
+    ->Paths("site", site_paths) // legacy pointer form can coexist
+    ->Owner(false);
+index->Build(base);
+```
+
+An empty inner vector is invalid. An inner vector containing `""` assigns the vector to the root.
+Duplicate paths and shared prefixes are inserted once per tree node. `Add()` accepts the same form,
+and serialization preserves every resulting path assignment.
 
 ### Searching a specific hierarchy
 
@@ -296,10 +362,25 @@ auto result = index->KnnSearch(
     R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})").value();
 ```
 
+The legacy query form uses `|` for a union of path alternatives, for example
+`"technology|military"`; a vector reachable through both alternatives appears
+once in the result. In this legacy string form, `|` is reserved and has no
+escaping syntax. A structured query avoids that delimiter convention and also
+allows a literal `|` inside a path segment:
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("tag", std::vector<std::vector<std::string>>{{"technology", "military"}})
+    ->Owner(false);
+```
+
 ### Incremental insertion (Add)
 
-`Add()` works the same as `Build()` — provide named paths and the index inserts
-into all matching hierarchies:
+`Add()` works the same as `Build()` — provide either single or structured named
+paths and the index inserts each accepted vector into all matching paths:
 
 ```cpp
 auto new_data = vsag::Dataset::Make();
@@ -358,9 +439,11 @@ For each hierarchy, `root_graphs` reports `root_graph_type`, `bottom_graph_stora
 `route_graph_size`.
 `AnalyzeIndexBySearch` also reports path-scoped query recall, distance, latency, and, when reorder
 is enabled, quantization metrics. Its query dataset must carry the same default or named-hierarchy
-paths required by `KnnSearch`; when paths are required or supplied for a batched dataset, provide
-one path per query. The `analyze_index` tool cannot currently load hierarchy paths from its dense
-query file, so use the C++ API for path-scoped dynamic analysis.
+paths required by `KnnSearch`. For a batched dataset, the outer path collection has one row per
+query: the legacy overload supplies one path string per row (and uses `|` for a union), while the
+structured overload supplies one or many atomic paths per row and permits literal `|`
+characters. The `analyze_index` tool cannot currently load hierarchy paths from its dense query
+file, so use the C++ API for path-scoped dynamic analysis.
 
 ## Mark remove
 
@@ -372,6 +455,18 @@ the running total. Removing an id that is absent or already removed is a no-op.
 
 Mark-removed vectors still occupy memory until the index is rebuilt; the space is
 not physically reclaimed.
+
+## Label lookup and persistence
+
+Label `0` is valid. Reserved capacity does not create labels: `CheckIdExist(0)` is false
+when no vector has that label, and single-ID `CalcDistanceById` returns an error for a
+missing or mark-removed label.
+
+Pyramid writes only populated label slots using the existing length-prefixed vector format.
+When reading older payloads containing unused slots, it uses the stored vector count to
+discard the unused suffix and rebuild label mappings. Both seekable and streaming formats
+support this recovery. Older readers can still parse newly written payloads, but do not gain
+the corrected lookup behavior; upgrade the reader as well.
 
 ## See also
 

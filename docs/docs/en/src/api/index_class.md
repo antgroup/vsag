@@ -109,7 +109,7 @@ bytes (at the given source pointer) at logical `OffsetType` in the output.
 | `Build` | `tl::expected<std::vector<int64_t>, Error> Build(const DatasetPtr& base)` | *(pure virtual)* Builds the index from all vectors. Returns the ids that failed to insert. |
 | `Train` | `tl::expected<void, Error> Train(const DatasetPtr& data)` | Trains an index (e.g. IVF centroids, quantizer) without inserting. |
 | `Tune` | `tl::expected<bool, Error> Tune(const std::string& parameters, bool disable_future_tuning = false)` | Applies runtime tuning. See [Optimizer (Tune)](../advanced/optimizer.md). |
-| `ContinueBuild` | `tl::expected<Checkpoint, Error> ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set)` | Adds dynamism to indexes that cannot insert incrementally; drive it with the returned [`Checkpoint`](#checkpoint). |
+| <a id="continuebuild"></a>`ContinueBuild` | `tl::expected<Checkpoint, Error> ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set)` | Adds dynamism to indexes that cannot insert incrementally; drive it with the returned [`Checkpoint`](#checkpoint). |
 | `Add` | `tl::expected<std::vector<int64_t>, Error> Add(const DatasetPtr& base)` | Inserts new vectors into an already-built index. Returns ids that failed to insert. |
 
 See [Build and Train](../advanced/build_and_train.md) and `examples/cpp/311_feature_train.cpp`.
@@ -118,7 +118,7 @@ See [Build and Train](../advanced/build_and_train.md) and `examples/cpp/311_feat
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `Remove` | `tl::expected<uint32_t, Error> Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE)` | Removes many ids; returns the count removed. |
+| <a id="remove"></a>`Remove` | `tl::expected<uint32_t, Error> Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE)` | Removes many ids; returns the count removed. |
 | `Remove` | `tl::expected<uint32_t, Error> Remove(int64_t id, RemoveMode mode = RemoveMode::MARK_REMOVE)` | Single-id convenience overload. |
 | `UpdateId` | `tl::expected<bool, Error> UpdateId(int64_t old_id, int64_t new_id)` | Relabels a base point. |
 | `UpdateVector` | `tl::expected<bool, Error> UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false)` | Replaces the vector for `id`. `force_update = false` performs a connectivity check. |
@@ -134,9 +134,10 @@ The recommended entry point is [`SearchWithRequest`](#searchwithrequest), which 
 [`SearchRequest`](search.md#searchrequest) carrying the query, mode, top-k / radius, and any filters.
 The older per-argument `KnnSearch` / `RangeSearch` overloads remain for compatibility.
 
-Every search returns a `DatasetPtr`: for KNN, `num_elements == 1` and `ids` / `distances` have
-length `k`; for range search, the result length is the number of matches. See [Dataset](dataset.md)
-for how to read results.
+Every search returns a `DatasetPtr`: single-query KNN has `num_elements == 1`; HGraph and IVF also
+support batched KNN with a row-major `num_elements x dim` result. HGraph pads missing neighbors with
+`id == -1` and infinite distance. For range search, the result length is the number of matches. See
+[Dataset](dataset.md) for how to read results.
 
 ### `SearchWithRequest`
 
@@ -212,7 +213,7 @@ RangeSearch(const DatasetPtr& query, float radius, const std::string& parameters
             const FilterPtr& filter, int64_t limited_size = -1) const;
 ```
 
-`radius` bounds the distance; `limited_size` caps the result count (`<= 0` means no limit, `0` is an
+`radius` bounds the distance; `limited_size` caps the result count (`< 0` means no limit, `0` is an
 error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_feature_range_search.cpp`.
 
 ## Distance by id
@@ -220,10 +221,10 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 | Method | Signature | Notes |
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and invalid `-1` distances are ordered last. |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting one native query: dense Float32Vectors, sparse SparseVectors, or WARP/SIMQ MultiVectors with MultiVectorDim. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and missing IDs are ordered last (valid distances may also be negative). |
 | `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. |
-| `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated compatibility alias; use `CalcDistancesById` for new code. |
+| `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated public forwarding alias to the canonical virtual `CalcDistancesById`; new implementations override the canonical name. See [C++ implementation migration](../advanced/calc_distance_by_id.md#c-implementation-migration). |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and
@@ -246,7 +247,7 @@ See [Graph Enhancement](../advanced/enhance_graph.md).
 | `GetExtraInfoByIds` | `tl::expected<void, Error> GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const` | Copies extra-info blobs for `ids` into a caller-provided buffer. |
 | `GetRawVectorByIds` | `tl::expected<DatasetPtr, Error> GetRawVectorByIds(const int64_t* ids, int64_t count, Allocator* specified_allocator = nullptr) const` | Returns stored vectors. Values are *close to* the originals but not guaranteed bit-identical (quantization/precision). |
 | `GetDataByIds` | `tl::expected<DatasetPtr, Error> GetDataByIds(const int64_t* ids, int64_t count) const` | Returns the implementation's default stored fields for `ids`; optional fields may require explicit selection. |
-| `GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | Selects supported fields via [`DATA_FLAG_*`](#data-selection-flags). Pyramid paths require `store_paths: true` and `DATA_FLAG_PATH`. |
+| <a id="getdatabyidswithflag"></a>`GetDataByIdsWithFlag` | `tl::expected<DatasetPtr, Error> GetDataByIdsWithFlag(const int64_t* ids, int64_t count, uint64_t selected_data_flag) const` | Selects supported fields via [`DATA_FLAG_*`](#data-selection-flags). Pyramid paths require `store_paths: true` and `DATA_FLAG_PATH`. |
 | `GetIndexDetailInfos` | `tl::expected<std::vector<IndexDetailInfo>, Error> GetIndexDetailInfos() const` | Lists the introspectable detail fields. See [`IndexDetailInfo`](types.md#index-detail-info). |
 | `GetDetailDataByName` | `tl::expected<DetailDataPtr, Error> GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const` | Fetches one detail-data payload by name. |
 
@@ -257,8 +258,8 @@ See [Index Introspection](../advanced/introspection.md) and
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `CheckFeature` | `bool CheckFeature(IndexFeature feature) const` | Probes whether an optional capability is supported. See [`IndexFeature`](types.md#indexfeature). |
-| `Merge` | `tl::expected<void, Error> Merge(const std::vector<MergeUnit>& merge_units)` | Merges same-type sub-indexes with id remapping. See [`MergeUnit`](#mergeunit-and-idmapfunction). |
+| <a id="checkfeature"></a>`CheckFeature` | `bool CheckFeature(IndexFeature feature) const` | Probes whether an optional capability is supported. See [`IndexFeature`](types.md#indexfeature). |
+| <a id="merge"></a>`Merge` | `tl::expected<void, Error> Merge(const std::vector<MergeUnit>& merge_units)` | Merges same-type sub-indexes with id remapping. See [`MergeUnit`](#mergeunit-and-idmapfunction). |
 | `Clone` | `tl::expected<IndexPtr, Error> Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const` | Deep-copies the index. |
 | `ExportModel` | `tl::expected<IndexPtr, Error> ExportModel() const` | Returns an empty index carrying only the trained model. |
 | `ExportIDs` | `tl::expected<DatasetPtr, Error> ExportIDs() const` | Returns all ids as a dataset. |
@@ -271,7 +272,7 @@ See `examples/cpp/309_feature_clone.cpp`, `310_feature_export_model.cpp`, and
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `Serialize` | `tl::expected<BinarySet, Error> Serialize() const` | *(pure virtual)* Serializes to an in-memory [`BinarySet`](serialization.md#binaryset). |
+| <a id="serialize"></a>`Serialize` | `tl::expected<BinarySet, Error> Serialize() const` | *(pure virtual)* Serializes to an in-memory [`BinarySet`](serialization.md#binaryset). |
 | `Serialize` | `tl::expected<void, Error> Serialize(WriteFuncType write_func) const` | Streams the serialized index through a [`WriteFuncType`](#writefunctype) sink. |
 | `Serialize` | `tl::expected<void, Error> Serialize(std::ostream& out_stream)` | Serializes to an open output stream. |
 | `Deserialize` | `tl::expected<void, Error> Deserialize(const BinarySet& binary_set)` | *(pure virtual)* Restores from a `BinarySet`. Fails if the index is not empty. |
@@ -299,7 +300,7 @@ Unless noted, these return values directly. **The methods marked "throws" raise
 
 | Method | Signature | Notes |
 |--------|-----------|-------|
-| `GetIndexType` | `IndexType GetIndexType() const` | **Throws** if unsupported. |
+| <a id="getindextype"></a>`GetIndexType` | `IndexType GetIndexType() const` | **Throws** if unsupported. |
 | `GetNumElements` | `int64_t GetNumElements() const` | *(pure virtual)* Live element count. |
 | `GetNumberRemoved` | `int64_t GetNumberRemoved() const` | **Throws** if unsupported. Count of removed elements. |
 | `GetMemoryUsage` | `int64_t GetMemoryUsage() const` | *(pure virtual)* Bytes occupied by the index. |

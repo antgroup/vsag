@@ -74,4 +74,4 @@
 - [乘积量化（PQ）](pq.md)
 - [HGraph 索引](../indexes/hgraph.md)
 - [量化变换](../advanced/quantization_transform.md)
-- [量化总览](README.md)
+- [量化总览](./)

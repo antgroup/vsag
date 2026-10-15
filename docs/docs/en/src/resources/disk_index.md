@@ -220,7 +220,7 @@ settle search-time parameters automatically.
 ## See also
 
 - [HGraph](../indexes/hgraph.md) — the flagship index and its full parameter table
-- [Quantization Overview](../quantization/README.md) — choosing a base/precise quantizer
+- [Quantization Overview](../quantization/) — choosing a base/precise quantizer
 - [Best Practices](best_practices.md) — general production guidance
 - [Serialization](../advanced/serialization.md) — persisting and loading indexes
 - [Evaluation Tool](eval.md) and [Optimizer (Tune)](../advanced/optimizer.md) — measuring and

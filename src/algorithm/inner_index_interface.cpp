@@ -29,12 +29,14 @@
 
 #include "algorithm/bruteforce/bruteforce.h"
 #include "algorithm/hgraph/hgraph.h"
+#include "analyzer/analyzer.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/label_table/label_table.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_detail_data.h"
 #include "index_feature_list.h"
+#include "inner_string_params.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
@@ -72,6 +74,8 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
         std::make_shared<LabelTable>(allocator_, true, false, index_param->label_remap_type);
     this->index_feature_list_ = std::make_unique<IndexFeatureList>();
     this->index_feature_list_->SetFeature(SUPPORT_EXPORT_IDS);
+    this->index_feature_list_->SetFeature(SUPPORT_GET_STATS);
+    this->index_feature_list_->SetFeature(SUPPORT_ANALYZE_INDEX_BY_SEARCH);
     this->extra_info_size_ = common_param.extra_info_size_;
     if (this->extra_info_size_ > 0) {
         this->extra_infos_ =
@@ -92,6 +96,25 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
 }
 
 InnerIndexInterface::~InnerIndexInterface() = default;
+
+AnalyzerBasePtr
+InnerIndexInterface::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<BasicIndexAnalyzer>(this, param);
+}
+
+std::string
+InnerIndexInterface::GetStats() const {
+    AnalyzerParam param(allocator_);
+    return CreateAnalyzer(param)->GetStats().Dump(4);
+}
+
+std::string
+InnerIndexInterface::AnalyzeIndexBySearch(const SearchRequest& request) {
+    AnalyzerParam param(allocator_);
+    param.topk = request.topk_;
+    param.search_params = request.params_str_;
+    return CreateAnalyzer(param)->AnalyzeIndexBySearch(request).Dump(4);
+}
 
 std::vector<int64_t>
 InnerIndexInterface::Build(const DatasetPtr& base) {
@@ -440,22 +463,14 @@ DatasetPtr
 InnerIndexInterface::CalcDistancesById(const float* query,
                                        const int64_t* ids,
                                        int64_t count,
-                                       bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-InnerIndexInterface::CalDistanceById(const float* query,
-                                     const int64_t* ids,
-                                     int64_t count,
-                                     bool calculate_precise_distance,
-                                     int64_t topk) const {
-    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+                                       bool calculate_precise_distance,
+                                       int64_t topk) const {
+    CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
     const bool invalid_topk = topk != -1 && topk <= 0;
-    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     if (count > 0) {
-        CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+        CHECK_ARGUMENT(query != nullptr, "CalcDistancesById query must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalcDistancesById ids must not be null");
     }
     const int64_t result_count = (topk == -1) ? count : std::min(topk, count);
     auto result = Dataset::Make();
@@ -483,42 +498,39 @@ DatasetPtr
 InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
                                        const int64_t* ids,
                                        int64_t count,
-                                       bool calculate_precise_distance) const {
-    return this->CalDistanceById(query, ids, count, calculate_precise_distance);
-}
-
-DatasetPtr
-InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
-                                     const int64_t* ids,
-                                     int64_t count,
-                                     bool calculate_precise_distance,
-                                     int64_t topk) const {
-    CHECK_ARGUMENT(query != nullptr, "CalDistanceById query must not be null");
-    CHECK_ARGUMENT(count >= 0, "CalDistanceById count must be non-negative");
+                                       bool calculate_precise_distance,
+                                       int64_t topk) const {
+    CHECK_ARGUMENT(query != nullptr, "CalcDistancesById query must not be null");
+    CHECK_ARGUMENT(count >= 0, "CalcDistancesById count must be non-negative");
     const bool invalid_topk = topk != -1 && topk <= 0;
-    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     if (count > 0) {
-        CHECK_ARGUMENT(ids != nullptr, "CalDistanceById ids must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "CalcDistancesById ids must not be null");
     }
     auto result = Dataset::Make();
     result->Owner(true, allocator_);
     const int64_t num_queries = query->GetNumElements();
-    CHECK_ARGUMENT(num_queries > 0, "CalDistanceById query count must be positive");
+    CHECK_ARGUMENT(num_queries > 0, "CalcDistancesById query count must be positive");
     const bool unsupported_multi_query =
         num_queries != 1 and
         not this->CheckFeature(IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID);
     CHECK_ARGUMENT(not unsupported_multi_query,
-                   "Index does not support multi-query CalDistanceById");
+                   "Index does not support multi-query CalcDistancesById");
     const int64_t result_count = (topk == -1) ? count : std::min(topk, count);
     const auto count_size = static_cast<uint64_t>(count);
     const auto num_queries_size = static_cast<uint64_t>(num_queries);
     const auto max_distance_count = std::numeric_limits<uint64_t>::max() / sizeof(float);
     const bool distance_count_overflows =
         count_size != 0 && num_queries_size > max_distance_count / count_size;
-    CHECK_ARGUMENT(not distance_count_overflows, "CalDistanceById distance buffer size overflows");
+    CHECK_ARGUMENT(not distance_count_overflows,
+                   "CalcDistancesById distance buffer size overflows");
     const bool is_sparse = (query->GetSparseVectors() != nullptr);
-    if (query->GetFloat32Vectors() != nullptr) {
-        CHECK_ARGUMENT(query->GetDim() == dim_, "CalDistanceById query dimension mismatch");
+    const bool is_float_query = query->GetFloat32Vectors() != nullptr && !is_sparse &&
+                                query->GetMultiVectors() == nullptr &&
+                                query->GetInt8Vectors() == nullptr &&
+                                query->GetFloat16Vectors() == nullptr;
+    if (is_float_query) {
+        CHECK_ARGUMENT(query->GetDim() == dim_, "CalcDistancesById query dimension mismatch");
     }
     result->NumElements(num_queries)->Dim(result_count);
     if (count == 0) {
@@ -526,7 +538,7 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
     }
     auto release_distance_buffer = [this](float* ptr) { allocator_->Deallocate(ptr); };
     auto release_id_buffer = [this](int64_t* ptr) { allocator_->Deallocate(ptr); };
-    if (query->GetFloat32Vectors() != nullptr && topk != -1) {
+    if (is_float_query && topk != -1) {
         const auto total_result =
             static_cast<uint64_t>(num_queries) * static_cast<uint64_t>(result_count);
         std::unique_ptr<float, decltype(release_distance_buffer)> out_dists_guard(
@@ -542,8 +554,8 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
         for (int64_t q = 0; q < num_queries; ++q) {
             const int64_t* row_ids = ids + q * count;
             const float* query_ptr = query->GetFloat32Vectors() + q * query->GetDim();
-            auto row_result =
-                this->CalDistanceById(query_ptr, row_ids, count, calculate_precise_distance, topk);
+            auto row_result = this->CalcDistancesById(
+                query_ptr, row_ids, count, calculate_precise_distance, topk);
             std::memcpy(out_dists + q * result_count,
                         row_result->GetDistances(),
                         sizeof(float) * result_count);
@@ -563,22 +575,33 @@ InnerIndexInterface::CalDistanceById(const DatasetPtr& query,
         validity.assign(num_queries_size * count_size, false);
     }
     DatasetPtr sub;
-    if (query->GetFloat32Vectors() == nullptr) {
+    if (!is_float_query) {
         sub = Dataset::Make();
         sub->Owner(false);
     }
     for (int64_t q = 0; q < num_queries; ++q) {
         const int64_t* row_ids = ids + q * count;
         float* row = all_distances + q * count;
-        if (query->GetFloat32Vectors() != nullptr) {
+        if (is_float_query) {
             const float* query_ptr = query->GetFloat32Vectors() + q * query->GetDim();
             auto row_result =
-                this->CalDistanceById(query_ptr, row_ids, count, calculate_precise_distance, -1);
+                this->CalcDistancesById(query_ptr, row_ids, count, calculate_precise_distance, -1);
             std::memcpy(row, row_result->GetDistances(), sizeof(float) * count);
         } else {
             sub->NumElements(1)->Dim(query->GetDim())->Owner(false);
+            // Keep every supplied representation: the concrete single-ID adapter chooses the
+            // field matching its index configuration, not the presence of auxiliary fields.
+            if (query->GetFloat32Vectors() != nullptr) {
+                sub->Float32Vectors(query->GetFloat32Vectors() + q * query->GetDim());
+            }
             if (is_sparse) {
                 sub->SparseVectors(query->GetSparseVectors() + q);
+            }
+            if (query->GetInt8Vectors() != nullptr) {
+                sub->Int8Vectors(query->GetInt8Vectors() + q * query->GetDim());
+            }
+            if (query->GetFloat16Vectors() != nullptr) {
+                sub->Float16Vectors(query->GetFloat16Vectors() + q * query->GetDim());
             }
             if (query->GetMultiVectors() != nullptr) {
                 sub->MultiVectors(query->GetMultiVectors() + q)
@@ -617,7 +640,7 @@ ApplyTopkWithValidity(const float* distances,
                       const std::vector<bool>& validity,
                       Allocator* allocator) {
     const bool invalid_topk = topk != -1 && topk <= 0;
-    CHECK_ARGUMENT(not invalid_topk, "CalDistanceById topk must be -1 or positive");
+    CHECK_ARGUMENT(not invalid_topk, "CalcDistancesById topk must be -1 or positive");
     const int64_t result_count = (topk == -1) ? per_row_count : std::min(topk, per_row_count);
     auto result = Dataset::Make();
     result->NumElements(num_rows)->Dim(result_count)->Owner(true, allocator);
@@ -631,12 +654,12 @@ ApplyTopkWithValidity(const float* distances,
         static_cast<float*>(allocator->Allocate(sizeof(float) * total_result)),
         release_distance_buffer);
     CHECK_ARGUMENT(out_dists_guard.get() != nullptr,
-                   "CalDistanceById topk output distances allocation failed");
+                   "CalcDistancesById topk output distances allocation failed");
     std::unique_ptr<int64_t, decltype(release_id_buffer)> out_ids_guard(
         static_cast<int64_t*>(allocator->Allocate(sizeof(int64_t) * total_result)),
         release_id_buffer);
     CHECK_ARGUMENT(out_ids_guard.get() != nullptr,
-                   "CalDistanceById topk output IDs allocation failed");
+                   "CalcDistancesById topk output IDs allocation failed");
     auto* out_dists = out_dists_guard.get();
     auto* out_ids = out_ids_guard.get();
     std::vector<int64_t> idx(per_row_count);
@@ -982,41 +1005,55 @@ InnerIndexInterface::analyze_quantizer(JsonType& stats,
         logger::info("analyze_quantizer: sample_data_size = {}, topk = {}", sample_data_size, topk);
         float bias_ratio = 0.0F;
         float inversion_count_rate = 0.0F;
+        JsonType coarse_param;
+        if (not search_param.empty() && search_param != "default") {
+            coarse_param = JsonType::Parse(search_param);
+            CHECK_ARGUMENT(coarse_param.IsObject(), "search parameters must be a JSON object");
+        }
+        const auto index_name = this->GetName();
+        const bool has_valid_search_param =
+            not coarse_param.Contains(index_name) || coarse_param[index_name].IsObject();
+        CHECK_ARGUMENT(has_valid_search_param,
+                       fmt::format("search parameters for {} must be a JSON object", index_name));
+        coarse_param[index_name][SEARCH_PARAM_ENABLE_REORDER].SetBool(false);
+        const auto coarse_param_str = coarse_param.Dump();
         for (uint64_t i = 0; i < sample_data_size; ++i) {
             float tmp_bias_ratio = 0.0F;
             float tmp_inversion_count_rate = 0.0F;
-            this->use_reorder_ = false;
             const auto* query_data = data + i * dim_;
             auto query = Dataset::Make();
             FilterPtr filter = nullptr;
             query->Owner(false)->NumElements(1)->Float32Vectors(query_data)->Dim(dim_);
-            auto search_result = this->KnnSearch(query, topk, search_param, filter);
-            this->use_reorder_ = true;
+            auto search_result = this->KnnSearch(query, topk, coarse_param_str, filter);
             auto distance_result = this->CalcDistancesById(
                 query_data, search_result->GetIds(), search_result->GetDim());
             const auto* ground_distances = distance_result->GetDistances();
             const auto* approximate_distances = search_result->GetDistances();
-            for (int64_t j = 0; j < topk; ++j) {
+            const auto result_count = search_result->GetDim();
+            CHECK_ARGUMENT(result_count > 0,
+                           "analysis search returned no candidates for a non-empty index");
+            for (int64_t j = 0; j < result_count; ++j) {
                 if (ground_distances[j] > 0) {
                     tmp_bias_ratio += std::abs(approximate_distances[j] - ground_distances[j]) /
                                       ground_distances[j];
                 }
             }
-            tmp_bias_ratio /= static_cast<float>(topk);
+            tmp_bias_ratio /= static_cast<float>(result_count);
             bias_ratio += tmp_bias_ratio;
             // calculate inversion count rate
             int64_t inversion_count = 0;
-            for (int64_t j = 0; j < search_result->GetDim() - 1; ++j) {
-                for (int64_t k = j + 1; k < search_result->GetDim(); ++k) {
+            for (int64_t j = 0; j < result_count - 1; ++j) {
+                for (int64_t k = j + 1; k < result_count; ++k) {
                     if (ground_distances[j] > ground_distances[k]) {
                         inversion_count++;
                     }
                 }
             }
-            int64_t search_count = search_result->GetDim();
-            tmp_inversion_count_rate =
-                static_cast<float>(inversion_count) /
-                (static_cast<float>(search_count * (search_count - 1)) / 2.0F);
+            if (result_count > 1) {
+                tmp_inversion_count_rate =
+                    static_cast<float>(inversion_count) /
+                    (static_cast<float>(result_count * (result_count - 1)) / 2.0F);
+            }
             inversion_count_rate += tmp_inversion_count_rate;
         }
         stats["quantization_bias_ratio"].SetFloat(bias_ratio /
@@ -1061,44 +1098,59 @@ float
 InnerIndexInterface::calc_distance_by_id(const float* query,
                                          int64_t id,
                                          const FlattenInterfacePtr& data) const {
-    auto result = cal_distance_by_id(query, &id, 1, data);
+    auto result = calc_distance_by_id(query, &id, 1, data);
     return result->GetDistances()[0];
 }
 
 DatasetPtr
-InnerIndexInterface::cal_distance_by_id(const float* query,
-                                        const int64_t* ids,
-                                        int64_t count,
-                                        const FlattenInterfacePtr& data,
-                                        std::vector<bool>* validity) const {
+InnerIndexInterface::calc_distance_by_id(const float* query,
+                                         const int64_t* ids,
+                                         int64_t count,
+                                         const FlattenInterfacePtr& data,
+                                         std::vector<bool>* validity) const {
+    CHECK_ARGUMENT(count >= 0, "distance count must be non-negative");
+    CHECK_ARGUMENT(
+        static_cast<uint64_t>(count) <= std::numeric_limits<uint64_t>::max() / sizeof(float),
+        "distance buffer size overflows");
+    if (count > 0) {
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(ids != nullptr, "distance IDs must not be null");
+    }
     auto result = Dataset::Make();
     result->NumElements(1)->Dim(count)->Owner(true, allocator_);
-    auto* distances = (float*)allocator_->Allocate(sizeof(float) * count);
-    result->Distances(distances);
-    auto computer = data->FactoryComputer(query);
-    Vector<InnerIdType> inner_ids(count, 0, allocator_);
-    Vector<InnerIdType> invalid_id_loc(allocator_);
     if (validity != nullptr) {
         validity->assign(count, false);
     }
+    if (count == 0) {
+        return result;
+    }
+    auto* distances = static_cast<float*>(allocator_->Allocate(sizeof(float) * count));
+    CHECK_ARGUMENT(distances != nullptr, "failed to allocate distance buffer");
+    result->Distances(distances);
+    std::fill(distances, distances + count, -1.0F);
+    Vector<InnerIdType> inner_ids(allocator_);
+    Vector<int64_t> positions(allocator_);
     {
         std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
             auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
             if (success) {
-                inner_ids[i] = inner_id;
+                inner_ids.push_back(inner_id);
+                positions.push_back(i);
                 if (validity != nullptr) {
                     (*validity)[i] = true;
                 }
-            } else {
-                logger::debug(fmt::format("failed to find id: {}", ids[i]));
-                invalid_id_loc.push_back(i);
             }
         }
     }
-    data->Query(distances, computer, inner_ids.data(), count);
-    for (unsigned int i : invalid_id_loc) {
-        distances[i] = -1;
+    // Do not read a placeholder internal ID for missing labels, especially on an empty index.
+    if (not inner_ids.empty()) {
+        auto computer = data->FactoryComputer(query);
+        Vector<float> valid_distances(inner_ids.size(), allocator_);
+        data->Query(valid_distances.data(), computer, inner_ids.data(), inner_ids.size());
+        for (uint64_t i = 0; i < positions.size(); ++i) {
+            distances[positions[i]] = valid_distances[i];
+        }
     }
     return result;
 }

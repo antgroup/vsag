@@ -200,7 +200,7 @@ direct IO，并针对实际负载对比两种模式。
 ## 参见
 
 - [HGraph](../indexes/hgraph.md)——旗舰索引及其完整参数表
-- [量化总览](../quantization/README.md)——如何选择 base/precise 量化器
+- [量化总览](../quantization/)——如何选择 base/precise 量化器
 - [最佳实践](best_practices.md)——通用生产建议
 - [序列化格式](../advanced/serialization.md)——索引的持久化与加载
 - [性能评估工具](eval.md) 与 [优化器](../advanced/optimizer.md)——度量与调优

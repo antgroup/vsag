@@ -18,8 +18,9 @@
 #include <limits>
 
 #include "attr/executor/executor.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/basic_searcher.h"
+#include "utils/float_utils.h"
 
 namespace vsag {
 
@@ -33,15 +34,26 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                            BucketIdType buckets_per_data,
                            DistHeapPtr& heap,
                            Vector<float>& dist,
+                           Vector<InnerIdType>& scanned_inner_ids,
                            ReasoningContext* reasoning_ctx) const {
-    auto bucket_size = bucket->GetBucketSize(bucket_id);
-    const auto* ids = bucket->GetInnerIds(bucket_id);
-    if (bucket_size > static_cast<int64_t>(dist.size())) {
+    auto bucket_size = bucket->GetBucketScanCapacity(bucket_id);
+    if (static_cast<uint64_t>(bucket_size) > dist.size()) {
         dist.resize(bucket_size);
     }
 
-    bucket->ScanBucketById(dist.data(), computer, bucket_id);
-    if (param.query_context != nullptr and param.query_context->stats != nullptr and
+    const InnerIdType scan_capacity = bucket_size;
+    scanned_inner_ids.resize(scan_capacity);
+    InnerIdType scanned_size = 0;
+    bucket->ScanBucketById(dist.data(),
+                           computer,
+                           bucket_id,
+                           param.query_context,
+                           scanned_inner_ids.data(),
+                           scan_capacity,
+                           &scanned_size);
+    bucket_size = scanned_size;
+    const auto* ids = scanned_inner_ids.data();
+    if (param.query_context != nullptr and param.query_context->stats != nullptr &&
         bucket_size > 0) {
         param.query_context->stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
                                                 bucket->backend_,
@@ -72,16 +84,16 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);  // [reasoning]
             }
             if (param.distance_threshold.has_value() and
-                (not std::isfinite(dist[j]) or
+                (not IsFiniteFloatBits(dist[j]) or
                  (not param.enable_reorder and dist[j] > param.distance_threshold.value()))) {
                 continue;
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -91,7 +103,8 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
+                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data,
+                                                      0);  // [reasoning]
                     }
                     heap->Pop();
                 }
@@ -99,7 +112,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordFilterReject(origin_id);
+                reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
             }
         }
     } else {  // RANGE_SEARCH
@@ -109,11 +122,11 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
             }
             auto origin_id = ids[j] / buckets_per_data;
             if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);
+                reasoning_ctx->RecordVisit(origin_id, dist[j], 0);  // [reasoning]
             }
             if (attr_ft != nullptr and not attr_ft->CheckValid(j)) {
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);
+                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
                 }
                 continue;
             }
@@ -123,7 +136,8 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                 }
                 while (heap->Size() > topk_u) {
                     if (reasoning_ctx != nullptr) {
-                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data, 0);
+                        reasoning_ctx->RecordEviction(heap->Top().second / buckets_per_data,
+                                                      0);  // [reasoning]
                     }
                     heap->Pop();
                 }
@@ -131,7 +145,7 @@ FlatBucketSearcher::Search(BucketIdType bucket_id,
                     cur_heap_top = heap->Top().first;
                 }
             } else if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordFilterReject(origin_id);
+                reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
             }
         }
     }

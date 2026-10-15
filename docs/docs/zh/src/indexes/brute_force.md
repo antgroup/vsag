@@ -18,7 +18,7 @@ top-k —— 没有图遍历、没有倒排表、不做近似。它的主要用�
 3. **Search。** 针对每条查询，按照配置的 `metric_type`（`l2`、`ip` 或 `cosine`）逐条计算
    距离，再用 top-k 小顶堆得到最近邻 id。距离计算使用 SIMD 内核，并支持**单查询内并行**：
    通过 `parallelism` 搜索参数可以把同一条查询的扫描拆分到多个线程上（实现见
-   `BruteForce::SearchWithRequest`，`src/algorithm/brute_force.cpp`）。
+   `BruteForce::SearchWithRequest`，`src/algorithm/bruteforce/bruteforce.cpp`）。
 
 由于索引保留了每一条向量（除非选择了有损量化器），当 `base_quantization_type = fp32` 时
 结果是**完全精确的**，因此 `eval_performance` 工具默认用 BruteForce 作为生成 ground truth 的
@@ -65,7 +65,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/README.md) |
+| `base_quantization_type` | string | `"fp32"` | `fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq` —— 各量化器细节见[量化章节](../quantization/) |
 | `use_attribute_filter` | bool | `false` | 启用属性过滤（参见 [属性过滤](../advanced/attribute_filter.md)） |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
@@ -145,7 +145,7 @@ BruteForce 默认使用 `block_memory_io` 存储向量。每个成功的物理�
 ## 索引能力
 
 BruteForce 声明的能力标志如下（参见 `BruteForce::InitFeatures`，
-`src/algorithm/brute_force.cpp`）：
+`src/algorithm/bruteforce/bruteforce.cpp`）：
 
 | 能力                                | 说明 |
 |-------------------------------------|------|

@@ -41,6 +41,7 @@ struct PosixFileBackendCapabilities {
     static constexpr bool AsyncReadable = BatchReadPolicy::AsyncReadable;
     static constexpr bool Writable = true;
     static constexpr bool Resizable = true;
+    static constexpr bool CanResizeForOverwrite = false;
 };
 
 template <typename SingleReadPolicy,

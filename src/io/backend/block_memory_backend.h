@@ -40,6 +40,7 @@ struct BlockMemoryBackendCapabilities {
     static constexpr bool AsyncReadable = false;
     static constexpr bool Writable = true;
     static constexpr bool Resizable = true;
+    static constexpr bool CanResizeForOverwrite = true;
 };
 
 class BlockMemoryBackend {
@@ -47,6 +48,13 @@ public:
     using Capabilities = BlockMemoryBackendCapabilities;
     using Lease = AllocatorLease;
     using Operation = ImmediateOperation;
+
+#ifndef NDEBUG
+    /// Debug-build fill byte for the range grown by ResizePhysicalForOverwrite:
+    /// a caller that fails to overwrite every byte reads this back instead of
+    /// plausible recycled allocator data.
+    static constexpr uint8_t kPoisonByte = 0xCD;
+#endif
 
     explicit BlockMemoryBackend(uint64_t block_size, Allocator* allocator)
         : allocator_(allocator),
@@ -172,6 +180,46 @@ public:
         EnsureCapacity(size);
     }
 
+    /**
+     * @brief Grows the physical capacity to size without zero-filling the new
+     * blocks; only the unwritten tail of the last block is cleared. For callers
+     * that overwrite the whole [previous_logical_size, size) range afterwards
+     * (e.g. parallel deserialization).
+     *
+     * @param size The new total size the storage must be able to hold.
+     * @param previous_logical_size The logical size published before the grow;
+     *        bytes below it keep their current contents untouched.
+     */
+    void
+    ResizePhysicalForOverwrite(uint64_t size, uint64_t previous_logical_size) {
+        if (size <= previous_logical_size) {
+            return;
+        }
+        EnsureCapacity(size, /*zero_fill=*/false);
+        // the caller overwrites [previous_logical_size, size), but the last
+        // block extends past size; clear that unwritten tail so reads there
+        // stay deterministic even if the allocator handed back recycled pages
+        const uint64_t tail_offset = size & in_block_mask_;
+        if (tail_offset != 0) {
+            std::memset(blocks_[size >> block_bit_] + tail_offset, 0, block_size_ - tail_offset);
+        }
+#ifndef NDEBUG
+        // debug builds poison the grown range instead of leaving whatever the
+        // allocator returned. A caller that fails to overwrite every byte then
+        // reads back the poison byte rather than plausible recycled data, which
+        // is the point: zero-filling here would make the bug reproducible-
+        // looking and hide it, while release keeps the skip this method exists
+        // for.
+        for (uint64_t pos = previous_logical_size; pos < size;) {
+            const uint64_t block_no = pos >> block_bit_;
+            const uint64_t in_block = pos & in_block_mask_;
+            const uint64_t span = std::min(block_size_ - in_block, size - pos);
+            std::memset(blocks_[block_no] + in_block, kPoisonByte, span);
+            pos += span;
+        }
+#endif
+    }
+
     void
     ShrinkPhysical(uint64_t size) {
         uint64_t block_count = size == 0 ? 0 : ((size - 1) >> block_bit_) + 1;
@@ -238,7 +286,7 @@ private:
     }
 
     void
-    EnsureCapacity(uint64_t size) {
+    EnsureCapacity(uint64_t size, bool zero_fill = true) {
         uint64_t required_blocks = size == 0 ? 0 : ((size - 1) >> block_bit_) + 1;
         blocks_.reserve(required_blocks);
         while (blocks_.size() < required_blocks) {
@@ -247,7 +295,9 @@ private:
                 throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
                                     "BlockMemoryBackend allocation failed");
             }
-            std::memset(block, 0, block_size_);
+            if (zero_fill) {
+                std::memset(block, 0, block_size_);
+            }
             blocks_.emplace_back(block);
         }
     }

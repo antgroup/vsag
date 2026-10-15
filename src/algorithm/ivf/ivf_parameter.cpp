@@ -45,6 +45,15 @@ IVFParameter::FromJson(const JsonType& json) {
         this->buckets_per_data = static_cast<BucketIdType>(json[BUCKET_PER_DATA_KEY].GetInt());
     }
 
+    if (this->use_reorder && this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_FLAT &&
+        this->precise_codes_param != nullptr &&
+        this->precise_codes_param->quantizer_parameter != nullptr) {
+        CHECK_ARGUMENT(this->precise_codes_param->quantizer_parameter->GetTypeName() !=
+                           QUANTIZATION_TYPE_VALUE_PQFS,
+                       "flat precise_codes does not support pqfs; use pqfs base codes with a "
+                       "supported precise quantizer instead");
+    }
+
     if (this->precise_codes_layout == PRECISE_CODES_LAYOUT_VALUE_BUCKET) {
         CHECK_ARGUMENT(this->use_reorder, "precise_codes_layout=bucket requires use_reorder=true");
         CHECK_ARGUMENT(this->buckets_per_data == 1,

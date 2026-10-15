@@ -53,7 +53,7 @@ public:
     /** 
      * @brief Query dataset containing the vector or vectors to search for
      * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
+     *          HGraph and IVF KNN requests, plus supported AnalyzeIndexBySearch implementations, accept
      *          multiple query vectors; other requests allow one.
      */
     DatasetPtr query_{nullptr};

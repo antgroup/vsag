@@ -81,7 +81,7 @@ save, and load:
 | `get_min_max_id()` | `(min_id, max_id)` | Returns `(-1, -1)` if the operation fails. |
 | `add(vectors, ids, num_elements, dim)` | `None` | Adds a contiguous dense vector matrix; dtype must match the index. |
 | `remove(ids)` | `int` | Removes a one-dimensional `int64` ID array. Returns `0` both when no ID is removed and when the underlying operation fails. |
-| `cal_distance_by_id(query, ids)` | `numpy.ndarray` | Returns one float32 distance per ID. Invalid IDs produce `-1`; an underlying operation failure leaves the entire result at `-1`. |
+| `calc_distances_by_id(query, ids)` / `cal_distance_by_id(query, ids)` (legacy alias) | `numpy.ndarray` | Returns one float32 distance per ID in a 1D array. Missing IDs produce `-1`; underlying invalid/unsupported operations raise `RuntimeError` with the C++ error message. |
 
 ```python
 # Add two dense vectors.
@@ -104,9 +104,15 @@ removed = index.remove(candidate_ids)
 `add` accepts a flat contiguous array or a row-major two-dimensional matrix. For
 `dtype: "float16"`, pass `numpy.float16`; for `dtype: "bfloat16"`, pass a `numpy.uint16`
 array containing BF16 bit patterns. Operation support remains index-dependent. Input validation
-and operations such as `add` raise Python exceptions, but `remove`, `cal_distance_by_id`, `save`,
+and operations such as `add` and `calc_distances_by_id` raise Python exceptions, but `remove`, `save`,
 and `load` use the sentinel or unchecked behaviors described above instead of consistently
 propagating underlying operation failures.
+
+### Distance binding input safety
+
+`calc_distances_by_id` and its legacy alias accept one 1D dense query whose length must equal the index dimension, plus a 1D ID array. Short, long, and empty queries are rejected by the C++ Dataset validation, not treated as missing IDs. NumPy inputs are converted to contiguous float32 / int64 arrays as needed, so positive- and negative-stride query and ID views retain their logical order. This does not add sparse, multi-vector, or multi-query support to the binding.
+
+The Node.js equivalents `calcDistancesById(query, ids)` and legacy `calDistanceById(query, ids)` retain their 1D `Float32Array` result. They require exactly `Float32Array` queries and `BigInt64Array` IDs (other array kinds throw `TypeError`), validate the actual query length through the C++ Dataset API, and throw `Error` with the C++ message on operation failure. Missing IDs still produce `-1`; they are not operation failures.
 
 ## Relationship with the C++ Library
 

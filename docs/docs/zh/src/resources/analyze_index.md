@@ -16,21 +16,59 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **输入**：`SearchRequest`（查询数据集 + `topk` + 搜索参数 JSON）。
 - **输出**：JSON 字符串，包含基于查询的动态指标。
-- **支持的索引类型**：当前支持 `HGraph`、`IVF`、`Pyramid` 与 `SINDI`。未实现该接口的
-  索引在调用时会抛出异常。
+- **支持的索引类型**：工厂注册的全部索引，即 `HGraph`、`IVF`、`Pyramid`、`SINDI`、
+  `SINDI_V2`、`SIMQ`、`BruteForce`、`WARP` 与 `LazyHGraph`。
 
 该接口与 `Index::GetStats()` 互为补充：后者无需查询数据，只输出索引的静态结构指标。
 对于基于图的索引，度分布、入口点质量、子索引召回率以及低召回热点节点等图健康度信息，
 通过 `GetStats()` 而非 `AnalyzeIndexBySearch` 输出。
 
+### 公共输出契约
+
+每次成功的静态或动态分析都会返回 JSON 对象，并包含 `_analysis` 成员：
+
+```json
+{
+  "_analysis": {
+    "schema_version": 1,
+    "index_type": "brute_force",
+    "analysis_type": "search",
+    "status": "partial",
+    "sample_count": 10,
+    "topk": 10,
+    "consistency": "weak_snapshot",
+    "skipped": { "recall_query": "ground truth was not requested" }
+  }
+}
+```
+
+为保持兼容，已有索引专属字段继续位于 JSON 根节点。全部适用指标均已计算时 `status` 为
+`complete`；部分指标因依赖不足而位于 `skipped` 时为 `partial`；请求合法但无法计算任何指标
+（例如对空索引执行搜索分析）时为 `not_applicable`。非法参数和执行失败仍然抛出异常。
+专用 Analyzer 可以把不可用的根级指标表示为包含字符串 `skipped_reason` 的对象；公共元数据层
+会将该原因同步到 `_analysis.skipped.<metric>`。基线 Analyzer 则直接写入相同的公共表示
+`_analysis.skipped`。使用方应以 `_analysis.skipped` 为准，而将 `skipped_reason` 视为索引专属的
+兼容性细节。
+
+`BruteForce` 与 `WARP` 提供精确搜索基线计数及耗时；`SINDI_V2` 与 `SIMQ` 提供基线计数和
+查询耗时，并将尚无真值的专属质量指标标记为 skipped。`LazyHGraph` 委托当前 BruteForce 或
+HGraph 后端，并追加 `phase` 与 `transition_threshold`；其 `index_type` 始终为 `lazy_hgraph`。
+
+Analysis 是同步、面向离线诊断的操作，可能扫描大量索引数据，专用 Analyzer 还可能计算精确
+真值。Analysis 不修改搜索或序列化配置，可与只读 Search 并发执行。除非索引提供更强的加锁
+快照，否则 `_analysis.consistency` 为 `weak_snapshot`；不要让 Analysis 与 Add、Remove、Update
+或 phase transition 并发执行。
+
 Pyramid 的查询分析遵循与 `KnnSearch` 相同的路径限定语义。对于默认 hierarchy，
-使用 `Dataset::Paths` 为每条 query 设置路径；对于命名 hierarchy，使用
+使用 `Dataset::Paths` 设置路径；对于命名 hierarchy，使用
 `Dataset::Paths(hierarchy_name, paths)` 设置路径，并在 Pyramid 搜索参数中选择该
-hierarchy。当选中 hierarchy 的根节点为 `NO_INDEX` 时必须提供路径。批量 query
-数据集在需要或提供路径时，必须为每条 query 提供对应路径。Pyramid 只在每条 query 的
-hierarchy 和路径所允许的向量中计算真值集，并排除已标记删除的向量。Pyramid 查询分析
-目前只支持 KNN 请求，并使用 `SearchRequest` 中的 `query_`、`topk_` 和 `params_str_`；不支持
-带过滤条件或 iterator 的请求。分析期间应保持索引稳定，不要并发执行 add 或 remove。
+hierarchy。当选中 hierarchy 的根节点为 `NO_INDEX` 时必须提供路径。批量 query 数据集的
+外层路径集合每行对应一条 query：旧重载每行保存一个路径字符串，并将 `|` 解释为并集；
+结构化重载每行可保存一条或多条原子路径，并将 `|` 当作普通路径字符。Pyramid 只在
+每条 query 的 hierarchy 和路径并集所允许的向量中计算真值集，并排除已标记删除的向量。
+Pyramid 查询分析目前只支持 KNN 请求，并使用 `SearchRequest` 中的 `query_`、`topk_` 和
+`params_str_`；不支持带过滤条件或 iterator 的请求。分析期间应保持索引稳定，不要并发执行
+add 或 remove。
 
 ### `GetStats()` 输出的静态指标
 

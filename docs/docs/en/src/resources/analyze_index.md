@@ -17,23 +17,65 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 - **Input**: a `SearchRequest` (query dataset + `topk` + search parameter JSON).
 - **Output**: a JSON-formatted string containing dynamic, query-driven metrics.
-- **Supported indexes**: currently `HGraph`, `IVF`, `Pyramid`, and `SINDI`. Indexes that do not
-  implement this API will throw an exception when called.
+- **Supported indexes**: all factory-registered indexes: `HGraph`, `IVF`, `Pyramid`, `SINDI`,
+  `SINDI_V2`, `SIMQ`, `BruteForce`, `WARP`, and `LazyHGraph`.
 
 It is complementary to `Index::GetStats()`, which reports static structural properties of the
 index without needing query data. For graph-based indexes, additional graph-health details such
 as degree distribution, entry-point quality, sub-index recall and low-recall hot-spots are
 exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 
+### Common output contract
+
+Every successful static or dynamic analysis returns a JSON object with an `_analysis` member:
+
+```json
+{
+  "_analysis": {
+    "schema_version": 1,
+    "index_type": "brute_force",
+    "analysis_type": "search",
+    "status": "partial",
+    "sample_count": 10,
+    "topk": 10,
+    "consistency": "weak_snapshot",
+    "skipped": { "recall_query": "ground truth was not requested" }
+  }
+}
+```
+
+Existing index-specific fields remain at the JSON root for compatibility. `status` is `complete`
+when all applicable metrics were computed, `partial` when individual metrics are listed under
+`skipped`, and `not_applicable` when the request is valid but no metric can be computed (for
+example, search analysis on an empty index). Invalid arguments and execution failures still throw.
+Specialized analyzers may report an unavailable root-level metric as an object containing a
+string `skipped_reason`; the common metadata layer mirrors that reason into
+`_analysis.skipped.<metric>`. Baseline analyzers write the same public representation directly to
+`_analysis.skipped`. Consumers should rely on `_analysis.skipped`, while `skipped_reason` remains
+an index-specific compatibility detail.
+
+`BruteForce` and `WARP` provide exact-search baseline counts and latency. `SINDI_V2` and `SIMQ`
+provide baseline counts and query latency while index-specific quality metrics are reported as
+skipped. `LazyHGraph` delegates to its active BruteForce or HGraph backend and adds its current
+`phase` and `transition_threshold`; its reported `index_type` remains `lazy_hgraph`.
+
+Analysis is synchronous and intended for offline diagnostics. It can scan substantial parts of an
+index and specialized analyzers may compute exact ground truth. Analysis never changes search or
+serialization configuration and is safe with concurrent read-only search. Unless an index offers a
+stronger lock-protected view, `_analysis.consistency` is `weak_snapshot`; do not run analysis
+concurrently with Add, Remove, Update, or phase transition.
+
 Pyramid query analysis follows the same path-scoping rules as `KnnSearch`. For the default
-hierarchy, attach one path per query with `Dataset::Paths`. For a named hierarchy, attach paths
-with `Dataset::Paths(hierarchy_name, paths)` and select that hierarchy in the Pyramid search
-parameters. A path is required when the selected hierarchy's root is `NO_INDEX`. Batched query
-datasets must provide a corresponding path for every query when paths are required or supplied.
-Pyramid calculates ground truth only from vectors eligible for each query's hierarchy and path,
-excluding mark-removed vectors. Pyramid query analysis currently supports KNN requests only and
-uses `query_`, `topk_`, and `params_str_` from `SearchRequest`; filtered and iterator requests are
-not supported. Run analysis against a stable index without concurrent add or remove operations.
+hierarchy, attach paths with `Dataset::Paths`. For a named hierarchy, use
+`Dataset::Paths(hierarchy_name, paths)` and select that hierarchy in the Pyramid search parameters.
+A path is required when the selected hierarchy's root is `NO_INDEX`. In a batched query dataset,
+the outer path collection has one row per query. The legacy overload stores one path string per
+row and interprets `|` as a union; the structured overload stores one or many atomic paths
+per row and treats `|` as an ordinary path character. Pyramid calculates ground truth only from
+vectors eligible for each query's hierarchy and path union, excluding mark-removed vectors.
+Pyramid query analysis currently supports KNN requests only and uses `query_`, `topk_`, and
+`params_str_` from `SearchRequest`; filtered and iterator requests are not supported. Run analysis
+against a stable index without concurrent add or remove operations.
 
 ### Static metrics from `GetStats()`
 

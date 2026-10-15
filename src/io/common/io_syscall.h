@@ -16,12 +16,16 @@
 
 #include <fcntl.h>
 #include <unistd.h>
+#ifndef __APPLE__
+#include <linux/falloc.h>
+#endif
 
 #if defined(__APPLE__) || defined(__linux__)
 #include <sys/mman.h>
 #endif
 
 #include <algorithm>
+#include <cerrno>
 #include <climits>
 #include <cstdint>
 #include <limits>
@@ -94,6 +98,38 @@ public:
 #else
         (void)address;
         (void)length;
+#endif
+    }
+
+    /// Reserve blocks for [0, length) so a later store into a mapping of this
+    /// file cannot fail with SIGBUS once the filesystem is full, and so the
+    /// extent is allocated in one step instead of by scattered page faults.
+    /// The file size is left untouched, so the caller still sizes the file with
+    /// FTruncate. This does not change the fact that unwritten bytes read as
+    /// zero.
+    ///
+    /// Uses the raw fallocate(2) rather than posix_fallocate on purpose: glibc
+    /// emulates posix_fallocate by writing zeros block by block when the
+    /// filesystem lacks support, which silently turns a metadata-only
+    /// reservation into an O(length) write and never reports EOPNOTSUPP.
+    ///
+    /// Returns 0 on success or an errno value; EOPNOTSUPP (or ENOTSUP where the
+    /// platform has no equivalent at all) means the extent was not reserved,
+    /// which callers should treat as a missing guarantee rather than a failure.
+    /// macOS has no fallocate(2) and always reports ENOTSUP: callers there lose
+    /// the SIGBUS-prevention and one-step-allocation guarantees, and growth
+    /// proceeds as plain truncate + remap.
+    static FORCEINLINE int
+    Fallocate(int fd, uint64_t length) {
+#ifdef __APPLE__
+        (void)fd;
+        (void)length;
+        return ENOTSUP;
+#else
+        if (fallocate(fd, FALLOC_FL_KEEP_SIZE, 0, static_cast<off_t>(length)) == 0) {
+            return 0;
+        }
+        return errno;
 #endif
     }
 };

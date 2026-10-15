@@ -24,6 +24,7 @@ namespace vsag {
 class MMapRegion {
 public:
     static constexpr bool InMemory = false;
+    static constexpr bool CanResizeForOverwrite = true;
     static constexpr uint64_t MINIMUM_MAPPING_SIZE = 4096;
 
     MMapRegion(std::string filename, Allocator* allocator);
@@ -68,6 +69,27 @@ public:
 
     void
     ResizePhysical(uint64_t size);
+
+    /**
+     * @brief Grows the mapping like ResizePhysical, for an extent the caller
+     * overwrites in full.
+     *
+     * In addition to growing the file it reserves the blocks up front, so a
+     * later concurrent store cannot hit SIGBUS once the filesystem is full and
+     * the extent is allocated in one step instead of through scattered page
+     * faults. The kernel still zero-fills each page on its first write fault;
+     * that cost is inherent to a file-backed mapping and is not removed here.
+     *
+     * The reservation uses Linux fallocate(2); macOS has no equivalent
+     * (IOSyscall::Fallocate reports ENOTSUP there), so the pre-allocation
+     * benefit is Linux-only and growth proceeds without the reservation.
+     *
+     * @param size The new size of the mapped region.
+     * @param previous_logical_size Unused; freshly mapped file pages read as
+     *        zero, so there is no recycled content to mask.
+     */
+    void
+    ResizePhysicalForOverwrite(uint64_t size, uint64_t previous_logical_size);
 
     void
     ShrinkPhysical(uint64_t size);

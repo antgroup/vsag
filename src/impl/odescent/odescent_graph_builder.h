@@ -160,6 +160,9 @@ private:
     void
     repair_no_in_edge();
 
+    Vector<int>
+    count_in_edges();
+
     void
     prune_graph();
 
