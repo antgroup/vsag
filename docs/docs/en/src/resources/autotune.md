@@ -262,3 +262,54 @@ result.
 V1 evaluates one KNN workload and performs a full sweep except for the supported HGraph
 `ef_search` adaptive search. It does not provide filtered or range-search workloads, adaptive query
 sampling, cross-request build cache, or model-based candidate generation.
+
+## Python: tune an existing index
+
+`pyvsag.Index.autotune_search` exposes the synchronous C++ `TuneSearch` engine.
+No HDF5 input or command-line invocation is needed. See the complete
+[Python example](https://github.com/antgroup/vsag/blob/main/examples/python/111_autotune_search.py)
+for index construction, exact ground truth and a search using the recommendation.
+
+```python
+result = index.autotune_search(
+    queries=queries,
+    ground_truth=ground_truth,
+    top_k=10,
+    parameter_space={"hgraph": {"ef_search": [16, 32, 128]}},
+    constraints={"recall_at_k": 0.95},
+    objective="latency_avg_ms",
+)
+if result["status"] == "success":
+    ids, distances = index.knn_search(queries[0], 10, result["search_parameters"])
+else:
+    print(result["best_effort"])
+```
+
+Inputs must be aligned, C-contiguous NumPy matrices: `queries` is `float32`
+with shape `(query_count, dim)` and `ground_truth` is `int64` with shape
+`(query_count, ground_truth_k)`. Both must be non-empty; `ground_truth_k >= top_k > 0`.
+Ground truth contains actual index IDs in nearest-neighbor rank order, using the
+index's distance metric. This Python workflow supports existing float32 HGraph and IVF indexes.
+
+`parameter_space` uses the C++ candidate syntax. `constraints` is a non-empty
+metric-to-threshold dictionary; recall and QPS are lower bounds, other metrics
+are upper bounds. `objective` defaults to `latency_avg_ms`. The same metric
+availability and candidate-selection rules as C++ apply. Optional keyword-only
+arguments are `concurrency=1` (1–200 evaluator threads), `max_trials=1000`
+(1–100000 planned trials), and `include_raw_evaluation=False`.
+
+The returned dictionary contains `status`, `search_parameters`, `metrics`,
+`best_effort` and `report`. On `success`, `search_parameters` is a JSON string
+accepted directly by `knn_search`, and `metrics` contains validated measurements.
+On `no_feasible_candidate`, `search_parameters` is `None`, `metrics` is empty,
+and `best_effort` describes the closest candidate, which did not satisfy all
+constraints. `report` contains the complete C++ report in either case.
+Invalid inputs raise `ValueError` or `TypeError`; execution failures raise
+`RuntimeError`.
+
+The call holds the Python GIL and borrows input buffers until completion. Do not
+mutate the index or input arrays during tuning. It does not rebuild or change
+the index, or automatically apply the recommendation to future searches.
+Python index tuning (`TuneIndex`), filtered workloads and asynchronous execution
+are outside this API's scope. Python builds include the AutoTune/evaluator code
+and its build dependencies automatically, even with `ENABLE_TOOLS=OFF`.
