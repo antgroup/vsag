@@ -1,0 +1,179 @@
+{
+  "feature_sha": "74a9420c771e75dea5e56324775d8db5d1472459",
+  "baseline_sha": "dbb2fe0bec685ae7a343b1d2060d0553a98e20d2",
+  "translation_units": 15,
+  "repository_compilation_closure": {
+    "src/lite/bruteforce_backend.cpp": {
+      "current": "5ada90f39e6d332b11215444855ab1a00b5332828d5079facd92574dd4dc084c",
+      "dbb2fe0": "5ada90f39e6d332b11215444855ab1a00b5332828d5079facd92574dd4dc084c"
+    },
+    "src/lite/backend.h": {
+      "current": "10103cd3d9e1abc8111d9e3df1f3a1a646fd82e17f12afc428ec7c867c78fad4",
+      "dbb2fe0": "10103cd3d9e1abc8111d9e3df1f3a1a646fd82e17f12afc428ec7c867c78fad4"
+    },
+    "include/vsag/lite/index.h": {
+      "current": "cd774cb186934902eea938b7624e2bbde371130f0fabb0c76a8ae7ae8d75a31b",
+      "dbb2fe0": "cd774cb186934902eea938b7624e2bbde371130f0fabb0c76a8ae7ae8d75a31b"
+    },
+    "include/vsag/errors.h": {
+      "current": "35476be261afa1262cafd90c4fd6add2d00d85cc57ed50b62803319b673a63eb",
+      "dbb2fe0": "35476be261afa1262cafd90c4fd6add2d00d85cc57ed50b62803319b673a63eb"
+    },
+    "include/vsag/expected.hpp": {
+      "current": "9ce60a8265f68dd5cd236ec976df5f0499e09af2a0a7b630cd0761f7b7802039",
+      "dbb2fe0": "9ce60a8265f68dd5cd236ec976df5f0499e09af2a0a7b630cd0761f7b7802039"
+    },
+    "include/vsag/options.h": {
+      "current": "d9a358995dd2eea80d2f2dfb4d160a5c7e363170d53dfa97bcabbf8e2aa3e253",
+      "dbb2fe0": "d9a358995dd2eea80d2f2dfb4d160a5c7e363170d53dfa97bcabbf8e2aa3e253"
+    },
+    "include/vsag/allocator.h": {
+      "current": "ba39f89aecf7bcb327e893365edcff202d313df4baf070d45107c84085b5aaa6",
+      "dbb2fe0": "ba39f89aecf7bcb327e893365edcff202d313df4baf070d45107c84085b5aaa6"
+    },
+    "include/vsag/logger.h": {
+      "current": "07273aab1a6f3f1ae7b75f626394a442fd940f2d33ceff6218b9e66db7565c81",
+      "dbb2fe0": "07273aab1a6f3f1ae7b75f626394a442fd940f2d33ceff6218b9e66db7565c81"
+    },
+    "src/lite/backend_utils.h": {
+      "current": "c3042e488e176651e433e91bb5c46d3cc2c2561df1d7077809f0f8e87f948a08",
+      "dbb2fe0": "c3042e488e176651e433e91bb5c46d3cc2c2561df1d7077809f0f8e87f948a08"
+    },
+    "src/lite/fp32_distance.h": {
+      "current": "0210bd81d89d852010744b84b6c7b1b1d272112dc03cff3199effba6cb349fd2",
+      "dbb2fe0": "0210bd81d89d852010744b84b6c7b1b1d272112dc03cff3199effba6cb349fd2"
+    },
+    "src/lite/fp16_distance.cpp": {
+      "current": "06cdf14b13cc47c317afada4e0cb100cb8eba6f13b30788fbb77d7c716d44bd2",
+      "dbb2fe0": "06cdf14b13cc47c317afada4e0cb100cb8eba6f13b30788fbb77d7c716d44bd2"
+    },
+    "src/lite/fp16_distance.h": {
+      "current": "a435d5e1583ea9990a474442df09abdfc6eec63b0c8580cb2db406524cf0ae29",
+      "dbb2fe0": "a435d5e1583ea9990a474442df09abdfc6eec63b0c8580cb2db406524cf0ae29"
+    },
+    "src/simd/kernels/half_compute.h": {
+      "current": "6715931a2d2cf80655c832b2f396725d84507db986ec35ce8a971526ed759979",
+      "dbb2fe0": "6715931a2d2cf80655c832b2f396725d84507db986ec35ce8a971526ed759979"
+    },
+    "src/simd/traits/simd_traits_generic.h": {
+      "current": "14fbbb4eabfc37ea3cc13d01089ec0471f87421d8747e21d089bade719ace097",
+      "dbb2fe0": "14fbbb4eabfc37ea3cc13d01089ec0471f87421d8747e21d089bade719ace097"
+    },
+    "src/lite/fp16_distance_avx.cpp": {
+      "current": "8d11ea4c0e3d5caa816fb419e395a9f77442f4576d120e52b3a744b1c10eba03",
+      "dbb2fe0": "8d11ea4c0e3d5caa816fb419e395a9f77442f4576d120e52b3a744b1c10eba03"
+    },
+    "src/simd/traits/simd_traits_avx.h": {
+      "current": "cd5e330968275fac0e312463d206ba160d4f07e4a494c57010351b9a8418359f",
+      "dbb2fe0": "cd5e330968275fac0e312463d206ba160d4f07e4a494c57010351b9a8418359f"
+    },
+    "src/lite/fp16_distance_avx2.cpp": {
+      "current": "6f997ce293c952ef8c789b8d68b36439a9cbc416018fe0445cf1594742f029c7",
+      "dbb2fe0": "6f997ce293c952ef8c789b8d68b36439a9cbc416018fe0445cf1594742f029c7"
+    },
+    "src/simd/traits/simd_traits_avx2.h": {
+      "current": "774f96a5cc9af0afe900b916301ea0be19745dc380f7c7e69dd977c7632d6e54",
+      "dbb2fe0": "774f96a5cc9af0afe900b916301ea0be19745dc380f7c7e69dd977c7632d6e54"
+    },
+    "src/lite/fp16_distance_avx512.cpp": {
+      "current": "2d710f301bd2f47a5231b2f3be80e93aed9f443647e2f540075689db80089329",
+      "dbb2fe0": "2d710f301bd2f47a5231b2f3be80e93aed9f443647e2f540075689db80089329"
+    },
+    "src/simd/traits/simd_traits_avx512.h": {
+      "current": "f57d9e2260b4f59e9ddce73f8a40a6eb6c982da1c6edc3f28849c3386e6fe149",
+      "dbb2fe0": "f57d9e2260b4f59e9ddce73f8a40a6eb6c982da1c6edc3f28849c3386e6fe149"
+    },
+    "src/lite/fp32_distance.cpp": {
+      "current": "a67dcde37bdd6d76f6a1c3c224bafa91dc44b14ae4a5762efa0c7d4f3601f40b",
+      "dbb2fe0": "a67dcde37bdd6d76f6a1c3c224bafa91dc44b14ae4a5762efa0c7d4f3601f40b"
+    },
+    "src/simd/kernels/compute_l2.h": {
+      "current": "279dd5f0ef17610fc716559d594e4920af7543c973a3321d052a0f7fe8da0c67",
+      "dbb2fe0": "279dd5f0ef17610fc716559d594e4920af7543c973a3321d052a0f7fe8da0c67"
+    },
+    "src/lite/fp32_distance_avx2.cpp": {
+      "current": "c274ad176cee0180be06eacf0e66a50673bfe308f4485c317f2016c457aa8c37",
+      "dbb2fe0": "c274ad176cee0180be06eacf0e66a50673bfe308f4485c317f2016c457aa8c37"
+    },
+    "src/lite/fp32_distance_avx512.cpp": {
+      "current": "f2f06a590bdc14c5aa97d8f4896aabad191877ead5e9245c96850f1a188ba7e2",
+      "dbb2fe0": "f2f06a590bdc14c5aa97d8f4896aabad191877ead5e9245c96850f1a188ba7e2"
+    },
+    "src/lite/fp32_distance_sse.cpp": {
+      "current": "635bdb10f311f394f29c35e23d46c9c28a0ff4c9a59ac33cddb16ca8f23a9095",
+      "dbb2fe0": "635bdb10f311f394f29c35e23d46c9c28a0ff4c9a59ac33cddb16ca8f23a9095"
+    },
+    "src/simd/traits/simd_traits_sse.h": {
+      "current": "a612d031c53b30ba3865dd259a80970b477b1c818c39b6f68280aa323c0188cb",
+      "dbb2fe0": "a612d031c53b30ba3865dd259a80970b477b1c818c39b6f68280aa323c0188cb"
+    },
+    "src/lite/graph_backend.cpp": {
+      "current": "275b4e58993d07fba8552487957848e6c6543c8227f401ccfee14605bc383e00",
+      "dbb2fe0": "275b4e58993d07fba8552487957848e6c6543c8227f401ccfee14605bc383e00"
+    },
+    "src/lite/fp16_codec.h": {
+      "current": "c5b9c78e4bf6140355b76a57ee19c743cc0b7d1e8ac060153f70e0f6f85b4164",
+      "dbb2fe0": "c5b9c78e4bf6140355b76a57ee19c743cc0b7d1e8ac060153f70e0f6f85b4164"
+    },
+    "src/lite/query_heap.h": {
+      "current": "e12f5b8dbe78237137f5abfb81df15678b9fe41950420f628de5ecce6daa48ee",
+      "dbb2fe0": "e12f5b8dbe78237137f5abfb81df15678b9fe41950420f628de5ecce6daa48ee"
+    },
+    "src/lite/index.cpp": {
+      "current": "ef73a1d8aeaff7dd8b268e4753a0da4f61f450fb877cdf0228e8359bab78131a",
+      "dbb2fe0": "ef73a1d8aeaff7dd8b268e4753a0da4f61f450fb877cdf0228e8359bab78131a"
+    },
+    "src/lite/rabitq_backend.cpp": {
+      "current": "6052e313a16ac9744d918e571c03f5e12ddfd72b9c76d7f1816cd2338be85949",
+      "dbb2fe0": "6052e313a16ac9744d918e571c03f5e12ddfd72b9c76d7f1816cd2338be85949"
+    },
+    "src/lite/rabitq_snapshot.h": {
+      "current": "035574726724ed6dfef6e77fc76d034b8de3f85698b4c75091e4afa48113f40d",
+      "dbb2fe0": "035574726724ed6dfef6e77fc76d034b8de3f85698b4c75091e4afa48113f40d"
+    },
+    "src/lite/rabitq_graph_state.h": {
+      "current": "c848126eb863a1dab4c291ff7232f9268e0ca9733dd6688f562245470995d7a4",
+      "dbb2fe0": "c848126eb863a1dab4c291ff7232f9268e0ca9733dd6688f562245470995d7a4"
+    },
+    "src/lite/query_visited.h": {
+      "current": "c9a2e68d50b41c76a7bb9ac9c17c57b4a4de9b142943abdca5513460826062d4",
+      "dbb2fe0": "c9a2e68d50b41c76a7bb9ac9c17c57b4a4de9b142943abdca5513460826062d4"
+    },
+    "src/lite/rabitq_codec.h": {
+      "current": "69a9e8f1ee1d458e07dfc113c3daf3cd4c5f250a148f819b78a4fd0b28181795",
+      "dbb2fe0": "69a9e8f1ee1d458e07dfc113c3daf3cd4c5f250a148f819b78a4fd0b28181795"
+    },
+    "src/simd/kernels/rabitq_pack.h": {
+      "current": "d97d4393103880fad69bb87a43ec38b08f0c02095d848189c5df30c6ee109574",
+      "dbb2fe0": "d97d4393103880fad69bb87a43ec38b08f0c02095d848189c5df30c6ee109574"
+    },
+    "src/lite/rabitq_constants.h": {
+      "current": "436a6203d12857b36ecf27d2e6df61ddfc1624e3caf7ce38e5a55c932b38e3dd",
+      "dbb2fe0": "436a6203d12857b36ecf27d2e6df61ddfc1624e3caf7ce38e5a55c932b38e3dd"
+    },
+    "src/lite/rabitq_filter_ip.h": {
+      "current": "afdf7e994a83d521bcbde592b9cb1e0cf353e01b81a5d878cfafca8307249aea",
+      "dbb2fe0": "afdf7e994a83d521bcbde592b9cb1e0cf353e01b81a5d878cfafca8307249aea"
+    },
+    "src/lite/rabitq_filter_ip.cpp": {
+      "current": "63e877e0963db0e8e6485120379d3ca471cb2793c7be6f0572facc3730953efb",
+      "dbb2fe0": "63e877e0963db0e8e6485120379d3ca471cb2793c7be6f0572facc3730953efb"
+    },
+    "src/simd/kernels/rabitq_compute.h": {
+      "current": "4a2c6ad5514a1bc06e371e578a79f5af66420b5b52beaead5d568a66eeac6a57",
+      "dbb2fe0": "4a2c6ad5514a1bc06e371e578a79f5af66420b5b52beaead5d568a66eeac6a57"
+    },
+    "src/lite/rabitq_filter_ip_avx2.cpp": {
+      "current": "1466157828cef8bb2b3d962abfa181177e2a8f470c10143ff8fae7cd85a5a3ac",
+      "dbb2fe0": "1466157828cef8bb2b3d962abfa181177e2a8f470c10143ff8fae7cd85a5a3ac"
+    },
+    "src/lite/rabitq_filter_ip_avx512.cpp": {
+      "current": "ebc51410d4ac3f378db90f2e9f417c10b01eab100fabd3b18877d375f634b23a",
+      "dbb2fe0": "ebc51410d4ac3f378db90f2e9f417c10b01eab100fabd3b18877d375f634b23a"
+    }
+  },
+  "changed_compiled_files": [],
+  "library_sha256": "3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330",
+  "library_bytes": 412512,
+  "boundary": "Source equality is not a rerun of historical Full/package performance."
+}

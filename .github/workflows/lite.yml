@@ -1,0 +1,113 @@
+name: Standalone Lite
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: ["main", "0.*"]
+    paths:
+      - "include/vsag/lite/**"
+      - "src/lite/**"
+      - "src/simd/**"
+      - "lite/**"
+      - ".github/workflows/lite.yml"
+
+concurrency:
+  group: standalone-lite-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-install:
+    name: Lite ${{ matrix.mode }}
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default-off, rabitq-on, sanitizer, coverage]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install required tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15 clang-tidy-15 ninja-build
+      - name: Check all Lite formatting
+        run: |
+          clang-format-15 --dry-run --Werror include/vsag/lite/*.h src/lite/*.h src/lite/*.cpp lite/example/*.cpp src/simd/kernels/rabitq_compute.h
+      - name: Configure
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          flags=(-DCMAKE_BUILD_TYPE=Release -DENABLE_TESTS=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON)
+          if [[ "$MODE" == rabitq-on ]]; then
+            flags+=(-DENABLE_BENCHMARKS=ON)
+          fi
+          # default-off deliberately omits the option to verify its default.
+          if [[ "$MODE" != default-off ]]; then
+            flags+=(-DENABLE_RABITQ_LITE_BACKEND=ON)
+          fi
+          if [[ "$MODE" == sanitizer ]]; then
+            flags+=(-DCMAKE_BUILD_TYPE=Debug
+              '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer'
+              '-DCMAKE_SHARED_LINKER_FLAGS=-fsanitize=address,undefined'
+              '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined')
+          elif [[ "$MODE" == coverage ]]; then
+            flags+=(-DCMAKE_BUILD_TYPE=Debug -DENABLE_COVERAGE=ON)
+          fi
+          cmake -S lite -B build-lite -G Ninja "${flags[@]}"
+      - name: Check every configured Lite translation unit
+        if: matrix.mode == 'rabitq-on'
+        run: python3 lite/tools/check_tidy.py --build build-lite
+      - name: Build and test
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          cmake --build build-lite -j2
+          ctest --test-dir build-lite --output-on-failure
+      - name: Install benchmark preparation dependencies
+        if: matrix.mode == 'rabitq-on'
+        run: python3 -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
+      - name: Benchmark audit guard fixtures
+        if: matrix.mode == 'rabitq-on'
+        run: |
+          python3 -c 'import numpy, h5py, pyarrow'
+          python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
+      - name: Coverage collector fixtures and 90 percent gate
+        if: matrix.mode == 'coverage'
+        run: |
+          python3 -m unittest discover -s lite/tools -p 'test_*.py'
+          python3 lite/tools/collect_coverage.py --root "$PWD" --build build-lite --output lite-coverage.json --fail-under 90
+      - name: Install and check shared/static consumers
+        if: matrix.mode == 'default-off' || matrix.mode == 'rabitq-on'
+        run: |
+          cmake --install build-lite --prefix "$PWD/install-lite"
+          test -f install-lite/lib/libvsag-lite.a
+          if ldd build-lite/libvsag-lite.so | grep -q 'libvsag\.so'; then
+            echo 'Standalone Lite unexpectedly depends on Full VSAG' >&2
+            exit 1
+          fi
+          cmake -S lite/example -B build-consumer -G Ninja -DCMAKE_PREFIX_PATH="$PWD/install-lite"
+          cmake --build build-consumer -j2
+          ./build-consumer/lite_example "$RUNNER_TEMP/lite-shared.snapshot"
+          c++ -std=c++17 -Iinstall-lite/include lite/example/main.cpp install-lite/lib/libvsag-lite.a -o lite-static-consumer
+          ./lite-static-consumer "$RUNNER_TEMP/lite-static.snapshot"
+      - name: Installed RaBitQ lifecycle
+        if: matrix.mode == 'rabitq-on'
+        run: |
+          c++ -std=c++17 -Iinstall-lite/include lite/example/rabitq_example.cpp -Linstall-lite/lib -Wl,-rpath,"$PWD/install-lite/lib" -lvsag-lite -o lite-rabitq-consumer
+          ./lite-rabitq-consumer
+      - name: Retain diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lite-${{ matrix.mode }}-diagnostics
+          if-no-files-found: ignore
+          path: |
+            build-lite/Testing/Temporary/*.log
+            build-lite/CMakeFiles/CMakeOutput.log
+            lite-coverage.json

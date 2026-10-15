@@ -1,0 +1,426 @@
+{
+  "scope": "Fresh resident Lite only; medians of 3 process summaries",
+  "feature_sha": "74a9420c771e75dea5e56324775d8db5d1472459",
+  "cells": [
+    {
+      "dataset": "sift",
+      "storage": "fp32",
+      "trials": 3,
+      "recall_initial": 0.993,
+      "recall_final": 0.997,
+      "build": {
+        "count": 1,
+        "p50_us": 544479.886,
+        "p99_us": 544479.886,
+        "wall_sum_ms": 544.4798860000001,
+        "call_only_ops_per_second": 1.8366151362292928,
+        "user_sum_ms": 542.385,
+        "system_sum_ms": 2.174
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 69.249,
+        "p99_us": 85.279,
+        "wall_sum_ms": 343.26422799999983,
+        "call_only_ops_per_second": 14566.03861442854,
+        "user_sum_ms": 343.4939999999988,
+        "system_sum_ms": 2.4369999999999865
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 12.67,
+        "p99_us": 19.599,
+        "wall_sum_ms": 66.95011199999986,
+        "call_only_ops_per_second": 74682.47401886364,
+        "user_sum_ms": 67.70699999997072,
+        "system_sum_ms": 0.46399999999998004
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 76.358,
+        "p99_us": 106.078,
+        "wall_sum_ms": 383.7656979999998,
+        "call_only_ops_per_second": 13028.782994565612,
+        "user_sum_ms": 383.35699999997564,
+        "system_sum_ms": 2.6399999999999713
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 168.767,
+        "p99_us": 203.985,
+        "wall_sum_ms": 2563.227465000001,
+        "call_only_ops_per_second": 5851.997220231095,
+        "user_sum_ms": 2556.2019999999425,
+        "system_sum_ms": 17.900999999999904
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 3774.473,
+        "p99_us": 4072.128,
+        "wall_sum_ms": 76.13192800000002,
+        "call_only_ops_per_second": 262.7018719399829,
+        "user_sum_ms": 49.784,
+        "system_sum_ms": 26.359
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 2934.218,
+        "p99_us": 4034.295,
+        "wall_sum_ms": 60.078112999999995,
+        "call_only_ops_per_second": 332.89993645439563,
+        "user_sum_ms": 46.461,
+        "system_sum_ms": 13.627
+      }
+    },
+    {
+      "dataset": "sift",
+      "storage": "fp16",
+      "trials": 3,
+      "recall_initial": 0.993,
+      "recall_final": 0.997,
+      "build": {
+        "count": 1,
+        "p50_us": 523525.648,
+        "p99_us": 523525.648,
+        "wall_sum_ms": 523.5256479999999,
+        "call_only_ops_per_second": 1.910126091854816,
+        "user_sum_ms": 517.386,
+        "system_sum_ms": 5.024
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 66.619,
+        "p99_us": 81.788,
+        "wall_sum_ms": 331.2130630000007,
+        "call_only_ops_per_second": 15096.022948829132,
+        "user_sum_ms": 331.7219999999888,
+        "system_sum_ms": 0.8379999999999909
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 12.29,
+        "p99_us": 19.15,
+        "wall_sum_ms": 65.00597999999984,
+        "call_only_ops_per_second": 76916.00065101721,
+        "user_sum_ms": 66.0949999999557,
+        "system_sum_ms": 0.167999999999998
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 73.788,
+        "p99_us": 103.057,
+        "wall_sum_ms": 371.54958300000027,
+        "call_only_ops_per_second": 13457.154115551777,
+        "user_sum_ms": 371.98399999999026,
+        "system_sum_ms": 0.9449999999999938
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 163.817,
+        "p99_us": 193.596,
+        "wall_sum_ms": 2481.12082999998,
+        "call_only_ops_per_second": 6045.654777724034,
+        "user_sum_ms": 2479.7339999999617,
+        "system_sum_ms": 6.2059999999999995
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 3205.822,
+        "p99_us": 3413.829,
+        "wall_sum_ms": 64.352457,
+        "call_only_ops_per_second": 310.78844433243626,
+        "user_sum_ms": 51.36,
+        "system_sum_ms": 13.125
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 2611.962,
+        "p99_us": 3298.671,
+        "wall_sum_ms": 52.183513000000005,
+        "call_only_ops_per_second": 383.26281329507265,
+        "user_sum_ms": 43.724,
+        "system_sum_ms": 8.691
+      }
+    },
+    {
+      "dataset": "sift",
+      "storage": "rabitq8",
+      "trials": 3,
+      "recall_initial": 0.987,
+      "recall_final": 0.994,
+      "build": {
+        "count": 1,
+        "p50_us": 602295.316,
+        "p99_us": 602295.316,
+        "wall_sum_ms": 602.295316,
+        "call_only_ops_per_second": 1.6603150870261791,
+        "user_sum_ms": 599.997,
+        "system_sum_ms": 3.987
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 101.527,
+        "p99_us": 119.128,
+        "wall_sum_ms": 503.2437140000007,
+        "call_only_ops_per_second": 9935.543874473498,
+        "user_sum_ms": 503.09599999999,
+        "system_sum_ms": 0.9279999999999979
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 22.58,
+        "p99_us": 34.45,
+        "wall_sum_ms": 113.20598300000015,
+        "call_only_ops_per_second": 44167.276918570584,
+        "user_sum_ms": 114.15499999993344,
+        "system_sum_ms": 0.22099999999999603
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 109.308,
+        "p99_us": 178.307,
+        "wall_sum_ms": 563.1737530000006,
+        "call_only_ops_per_second": 8878.254665394526,
+        "user_sum_ms": 562.9299999999757,
+        "system_sum_ms": 0.978999999999994
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 198.285,
+        "p99_us": 237.685,
+        "wall_sum_ms": 3012.655392999977,
+        "call_only_ops_per_second": 4978.996281769594,
+        "user_sum_ms": 3007.7020000000316,
+        "system_sum_ms": 5.84199999999999
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 4728.093,
+        "p99_us": 5691.341,
+        "wall_sum_ms": 93.800516,
+        "call_only_ops_per_second": 213.21844327594104,
+        "user_sum_ms": 85.166,
+        "system_sum_ms": 8.41
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 3478.27,
+        "p99_us": 3890.461,
+        "wall_sum_ms": 70.34187700000003,
+        "call_only_ops_per_second": 284.32565141814445,
+        "user_sum_ms": 63.179999999999794,
+        "system_sum_ms": 7.49
+      }
+    },
+    {
+      "dataset": "gist",
+      "storage": "fp32",
+      "trials": 3,
+      "recall_initial": 0.971,
+      "recall_final": 0.97,
+      "build": {
+        "count": 1,
+        "p50_us": 1386652.69,
+        "p99_us": 1386652.69,
+        "wall_sum_ms": 1386.65269,
+        "call_only_ops_per_second": 0.7211611149724882,
+        "user_sum_ms": 1356.607,
+        "system_sum_ms": 29.976
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 176.446,
+        "p99_us": 254.444,
+        "wall_sum_ms": 893.8577979999989,
+        "call_only_ops_per_second": 5593.730916917062,
+        "user_sum_ms": 894.5829999999561,
+        "system_sum_ms": 2.304999999999986
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 20.459,
+        "p99_us": 49.05,
+        "wall_sum_ms": 111.06144600000006,
+        "call_only_ops_per_second": 45020.123364862346,
+        "user_sum_ms": 112.18199999988707,
+        "system_sum_ms": 0.32799999999994905
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 222.696,
+        "p99_us": 434.291,
+        "wall_sum_ms": 1159.8443600000053,
+        "call_only_ops_per_second": 4310.923234562246,
+        "user_sum_ms": 1159.9099999999848,
+        "system_sum_ms": 3.69900000000002
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 488.239,
+        "p99_us": 683.158,
+        "wall_sum_ms": 7406.757121999997,
+        "call_only_ops_per_second": 2025.1777873809435,
+        "user_sum_ms": 7390.1160000000455,
+        "system_sum_ms": 22.027999999999683
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 16100.02,
+        "p99_us": 16697.725,
+        "wall_sum_ms": 322.81764499999997,
+        "call_only_ops_per_second": 61.95448207299822,
+        "user_sum_ms": 72.855,
+        "system_sum_ms": 250.65
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 16741.155,
+        "p99_us": 17388.494,
+        "wall_sum_ms": 334.19310199999995,
+        "call_only_ops_per_second": 59.84563978223585,
+        "user_sum_ms": 129.13,
+        "system_sum_ms": 205.003
+      }
+    },
+    {
+      "dataset": "gist",
+      "storage": "fp16",
+      "trials": 3,
+      "recall_initial": 0.971,
+      "recall_final": 0.969,
+      "build": {
+        "count": 1,
+        "p50_us": 1336927.454,
+        "p99_us": 1336927.454,
+        "wall_sum_ms": 1336.927454,
+        "call_only_ops_per_second": 0.7479837421305585,
+        "user_sum_ms": 1313.486,
+        "system_sum_ms": 23.384
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 154.308,
+        "p99_us": 204.795,
+        "wall_sum_ms": 773.900637000005,
+        "call_only_ops_per_second": 6460.777729014801,
+        "user_sum_ms": 774.7999999997879,
+        "system_sum_ms": 1.25700000000002
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 16.66,
+        "p99_us": 44.969,
+        "wall_sum_ms": 92.4318259999998,
+        "call_only_ops_per_second": 54093.92215187885,
+        "user_sum_ms": 93.65799999976421,
+        "system_sum_ms": 0.13999999999995802
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 183.236,
+        "p99_us": 374.832,
+        "wall_sum_ms": 966.3185200000015,
+        "call_only_ops_per_second": 5174.277318000686,
+        "user_sum_ms": 967.1309999999423,
+        "system_sum_ms": 1.431999999999936
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 372.233,
+        "p99_us": 544.429,
+        "wall_sum_ms": 5695.995067000013,
+        "call_only_ops_per_second": 2633.4292469639117,
+        "user_sum_ms": 5694.645000000165,
+        "system_sum_ms": 9.532999999999943
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 10160.806,
+        "p99_us": 11343.324,
+        "wall_sum_ms": 203.468799,
+        "call_only_ops_per_second": 98.29516907897019,
+        "user_sum_ms": 63.979,
+        "system_sum_ms": 141.585
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 6806.907,
+        "p99_us": 10535.698,
+        "wall_sum_ms": 142.71193100000002,
+        "call_only_ops_per_second": 140.1424524204637,
+        "user_sum_ms": 110.54,
+        "system_sum_ms": 32.186
+      }
+    },
+    {
+      "dataset": "gist",
+      "storage": "rabitq8",
+      "trials": 3,
+      "recall_initial": 0.97,
+      "recall_final": 0.963,
+      "build": {
+        "count": 1,
+        "p50_us": 1679404.805,
+        "p99_us": 1679404.805,
+        "wall_sum_ms": 1679.404805,
+        "call_only_ops_per_second": 0.5954490525588321,
+        "user_sum_ms": 1653.094,
+        "system_sum_ms": 23.656
+      },
+      "add": {
+        "count": 5000,
+        "p50_us": 288.745,
+        "p99_us": 343.792,
+        "wall_sum_ms": 1448.5670530000057,
+        "call_only_ops_per_second": 3451.6869548046943,
+        "user_sum_ms": 1449.4949999999562,
+        "system_sum_ms": 3.4540000000000384
+      },
+      "remove": {
+        "count": 5000,
+        "p50_us": 36.059,
+        "p99_us": 101.169,
+        "wall_sum_ms": 205.3793240000006,
+        "call_only_ops_per_second": 24345.196500890153,
+        "user_sum_ms": 206.56899999995417,
+        "system_sum_ms": 0.49999999999998707
+      },
+      "update": {
+        "count": 5000,
+        "p50_us": 338.504,
+        "p99_us": 1194.75,
+        "wall_sum_ms": 1999.2707290000071,
+        "call_only_ops_per_second": 2500.9119212688593,
+        "user_sum_ms": 1999.2370000001497,
+        "system_sum_ms": 4.645000000000048
+      },
+      "query": {
+        "count": 15000,
+        "p50_us": 443.992,
+        "p99_us": 598.468,
+        "wall_sum_ms": 6737.015432999978,
+        "call_only_ops_per_second": 2226.5052157258506,
+        "user_sum_ms": 6738.519999999954,
+        "system_sum_ms": 15.477999999999906
+      },
+      "save": {
+        "count": 20,
+        "p50_us": 7564.048,
+        "p99_us": 8799.867,
+        "wall_sum_ms": 150.136078,
+        "call_only_ops_per_second": 133.21248474334064,
+        "user_sum_ms": 95.938,
+        "system_sum_ms": 55.844
+      },
+      "load": {
+        "count": 20,
+        "p50_us": 5228.563,
+        "p99_us": 5700.351,
+        "wall_sum_ms": 105.68897,
+        "call_only_ops_per_second": 189.23450573886754,
+        "user_sum_ms": 77.694,
+        "system_sum_ms": 28.009000000000007
+      }
+    }
+  ]
+}
