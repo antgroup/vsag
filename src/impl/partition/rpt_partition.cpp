@@ -17,10 +17,10 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <random>
 
 #include "impl/allocator/safe_allocator.h"
 #include "simd/fp32_simd.h"
+#include "vsag/utils.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -41,6 +41,25 @@ mix_seed(uint64_t seed) {
 
 constexpr uint64_t LEFT_CHILD_SALT = 0x1ULL;
 constexpr uint64_t RIGHT_CHILD_SALT = 0x2ULL;
+constexpr float TWO_PI = 6.283185307179586F;
+constexpr float UNIFORM_SCALE = 1.0F / 16777216.0F;  // 2^-24
+
+// splitmix64 as a generator: four instructions of state advance per draw, against the
+// 312 words std::mt19937_64 would initialise at every one of the ~n/L tree nodes.
+uint64_t
+next_random(uint64_t& state) {
+    state += 0x9E3779B97F4A7C15ULL;
+    uint64_t value = state;
+    value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    value = (value ^ (value >> 27)) * 0x94D049BB133111EBULL;
+    return value ^ (value >> 31);
+}
+
+// Uniform over (0, 1]. Zero is excluded because the Box-Muller transform takes its log.
+float
+next_uniform(uint64_t& state) {
+    return (static_cast<float>(next_random(state) >> 40) + 1.0F) * UNIFORM_SCALE;
+}
 
 }  // namespace
 
@@ -65,7 +84,7 @@ RPTPartition::Run(const float* datas, uint64_t count, const RPTPartitionParams& 
     }
 
     datas_ = datas;
-    params_ = params;
+    max_depth_ = params.max_depth;
     partitions_.clear();
     if (count == 0) {
         return {};
@@ -99,7 +118,7 @@ RPTPartition::split(
         this->emit_leaf(begin, end);
         return;
     }
-    if (depth >= params_.max_depth) {
+    if (depth >= max_depth_) {
         this->emit_chunks(begin, end, leaves);
         return;
     }
@@ -136,19 +155,32 @@ RPTPartition::split(
 
 void
 RPTPartition::generate_direction(uint64_t node_seed, float* direction) const {
-    std::mt19937_64 generator(node_seed);
-    std::normal_distribution<float> gaussian(0.0F, 1.0F);
+    // Box-Muller turns each pair of uniforms into two standard normal values, which makes
+    // the resulting direction uniform over the unit sphere.
+    uint64_t state = node_seed;
     float norm = 0.0F;
-    for (uint64_t i = 0; i < dim_; ++i) {
-        direction[i] = gaussian(generator);
+    for (uint64_t i = 0; i < dim_; i += 2) {
+        float radius = std::sqrt(-2.0F * std::log(next_uniform(state)));
+        float angle = TWO_PI * next_uniform(state);
+        direction[i] = radius * std::cos(angle);
         norm += direction[i] * direction[i];
+        if (i + 1 < dim_) {
+            direction[i + 1] = radius * std::sin(angle);
+            norm += direction[i + 1] * direction[i + 1];
+        }
     }
+
     norm = std::sqrt(norm);
     if (norm > 0.0F) {
         for (uint64_t i = 0; i < dim_; ++i) {
             direction[i] /= norm;
         }
+        return;
     }
+    // Unreachable in practice, but a zero direction would make every projection value
+    // identical and silently degrade the cut to id order. Pick a fixed axis instead.
+    std::fill(direction, direction + dim_, 0.0F);
+    direction[0] = 1.0F;
 }
 
 void
