@@ -13,6 +13,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#define VSAG_IVF_NEAREST_PARTITION_TEST_ACCESS
 #include "ivf_nearest_partition.h"
 
 #include <algorithm>
@@ -30,6 +31,20 @@
 #include "storage/serialization_template_test.h"
 #include "unittest.h"
 using namespace vsag;
+
+class IVFNearestPartitionTestAccess {
+public:
+    static Vector<BucketIdType>
+    ClassifyDatasByScan(const IVFNearestPartition& partition,
+                        const void* datas,
+                        int64_t count,
+                        BucketIdType buckets_per_data,
+                        QueryContext* ctx,
+                        uint64_t dots_buffer_size_bytes) {
+        return partition.classify_datas_by_scan(
+            datas, count, buckets_per_data, ctx, dots_buffer_size_bytes);
+    }
+};
 
 TEST_CASE("IVF Nearest Partition Basic Test", "[ut][IVFNearestPartition]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -238,6 +253,66 @@ TEST_CASE("IVF Nearest Partition Centroid Scan Test", "[ut][IVFNearestPartition]
         REQUIRE(restored->route_index_ptr_ == nullptr);
         REQUIRE(restored->ClassifyDatas(queries.data(), data_count, buckets_per_data, nullptr) ==
                 actual);
+    }
+}
+
+TEST_CASE("IVF Nearest Partition Centroid Scan Batches Test", "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto thread_pool = SafeThreadPool::FactoryDefaultThreadPool();
+    constexpr int64_t dim = 32;
+    constexpr BucketIdType bucket_count = 16;
+    constexpr int64_t data_count = 64;
+    constexpr BucketIdType buckets_per_data = 4;
+    const std::vector<MetricType> metrics{
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE};
+    const std::vector<SafeThreadPoolPtr> pools{thread_pool, nullptr};
+    const std::vector<uint64_t> dots_buffer_sizes_bytes{
+        1, static_cast<uint64_t>(bucket_count) * sizeof(float) * 3};
+
+    for (const auto metric : metrics) {
+        for (const auto& pool : pools) {
+            IndexCommonParam common_param;
+            common_param.dim_ = dim;
+            common_param.metric_ = metric;
+            common_param.allocator_ = allocator;
+            common_param.thread_pool_ = pool;
+
+            auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+            strategy_param->use_route_graph = false;
+            auto partition =
+                std::make_unique<IVFNearestPartition>(bucket_count, common_param, strategy_param);
+
+            auto vectors = fixtures::generate_vectors(data_count, dim, true, 95);
+            auto dataset = Dataset::Make();
+            dataset->Float32Vectors(vectors.data())
+                ->Dim(dim)
+                ->NumElements(data_count)
+                ->Owner(false);
+            partition->Train(dataset);
+            const auto expected =
+                partition->ClassifyDatas(vectors.data(), data_count, buckets_per_data, nullptr);
+
+            for (const auto dots_buffer_size_bytes : dots_buffer_sizes_bytes) {
+                SearchStatistics stats;
+                QueryContext ctx;
+                ctx.stats = &stats;
+                const auto actual =
+                    IVFNearestPartitionTestAccess::ClassifyDatasByScan(*partition,
+                                                                       vectors.data(),
+                                                                       data_count,
+                                                                       buckets_per_data,
+                                                                       &ctx,
+                                                                       dots_buffer_size_bytes);
+                REQUIRE(actual == expected);
+
+                const uint64_t distance_evaluations =
+                    static_cast<uint64_t>(data_count) * bucket_count;
+                REQUIRE(stats.dist_cmp.load() == distance_evaluations);
+                const auto dumped = JsonType::Parse(stats.Dump());
+                REQUIRE(dumped["distance_evaluations_by_phase"]["routing"].GetUint64() ==
+                        distance_evaluations);
+            }
+        }
     }
 }
 

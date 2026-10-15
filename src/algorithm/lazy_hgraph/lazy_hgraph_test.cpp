@@ -420,6 +420,22 @@ TEST_CASE("LazyHGraph threshold one transitions immediately", "[ut][lazy_hgraph]
     REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
 }
 
+TEST_CASE("LazyHGraph analysis identifies the active phase", "[ut][lazy_hgraph][analysis]") {
+    auto index = MakeLazyIndex(1);
+    auto stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == "lazy_hgraph");
+    REQUIRE(stats["_analysis"]["phase"].GetString() == "flat");
+    REQUIRE(stats["_analysis"]["status"].GetString() == "complete");
+
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    REQUIRE(index->Add(MakeDataset(1, 650, vectors, ids)).empty());
+    stats = vsag::JsonType::Parse(index->GetStats());
+    REQUIRE(stats["_analysis"]["index_type"].GetString() == "lazy_hgraph");
+    REQUIRE(stats["_analysis"]["phase"].GetString() == "graph");
+    REQUIRE(stats["_analysis"]["status"].GetString() == "partial");
+}
+
 TEST_CASE("LazyHGraph factory and flat serialization round trip", "[ut][lazy_hgraph]") {
     auto index = vsag::Factory::CreateIndex("lazy_hgraph", MakeFactoryParam(10));
     REQUIRE(index.has_value());
