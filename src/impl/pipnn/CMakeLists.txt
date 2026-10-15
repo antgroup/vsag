@@ -21,4 +21,4 @@ set (PIPNN_SRC
 )
 
 add_library (pipnn OBJECT ${PIPNN_SRC})
-target_link_libraries (pipnn PRIVATE coverage_config vsag_src_common vsag_blas)
+target_link_libraries (pipnn PRIVATE coverage_config vsag_src_common vsag_blas vsag_gpu)

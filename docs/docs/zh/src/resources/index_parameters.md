@@ -71,9 +71,14 @@ HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantizati
 | `pipnn_leaf_neighbor_count` | `5` | 每个点在每个叶子中贡献的最近候选数，必须为正数；过小叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | `12` | 方向 hash 位数，范围 `[1, 15]`，且 `max_degree <= 2^pipnn_hash_plane_count` |
 | `pipnn_reservoir_size` | `64` | 最终剪枝前每个点的候选容量，必须为正数；实际容量为 `max(value, max_degree)` 且不能超过 `65535` |
+| `pipnn_enable_gpu_build` | `false` | 选择对规模足够大的 Partition 和叶子 Pick 工作启用 CUDA 加速 |
+| `pipnn_gpu_device_id` | `0` | 非负 CUDA 设备序号 |
+| `pipnn_gpu_memory_budget` | `0` | CUDA 工作集字节上限；`0` 表示根据空闲显存推导安全预算 |
+| `pipnn_gpu_min_work_threshold` | `0` | 值得下放的最小阶段工作量；`0` 使用 Partition 和 Pick 的标定默认值 |
 
 现有的 `alpha` 字段控制 PiPNN 的最终 robust pruning。`ef_construction` 只调节 NSW，
 对 PiPNN 不生效。
+GPU 加速无法运行时会透明回退到 CPU 实现。
 
 HGraph 还支持实验性的 L2 参数 `pipnn_adaptive_pruning`（默认 `false`）和 `pipnn_adaptive_pruning_adjust_step`（默认 `0.06`），在首次 `Build` 时逐点调整最终剪枝阈值。详情见 [HGraph 动态 PiPNN 剪枝](../indexes/hgraph.md)。Pyramid 未暴露这两个选项。
 

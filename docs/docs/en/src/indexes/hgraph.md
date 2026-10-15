@@ -78,6 +78,10 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
 | `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
+| `pipnn_enable_gpu_build` | bool | `false` | Offload sufficiently large PiPNN partition assignments and leaf Pick batches to CUDA when available. |
+| `pipnn_gpu_device_id` | int | `0` | Non-negative CUDA device ordinal used by the PiPNN builder. |
+| `pipnn_gpu_memory_budget` | int | `0` | Maximum CUDA working-set bytes; `0` derives a safe budget from currently free device memory. |
+| `pipnn_gpu_min_work_threshold` | int | `0` | Smallest stage work estimate worth offloading; `0` uses PiPNN-calibrated defaults for Partition and Pick. |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
@@ -131,7 +135,6 @@ final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads d
 builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
 ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
 
-
 ### Experimental PiPNN adaptive alpha
 
 Set `pipnn_adaptive_pruning: true` under `index_param` to apply [PR #2933](https://github.com/antgroup/vsag/pull/2933)'s per-node count-based schedule to the final PiPNN reservoir pruning. This opt-in experiment supports L2 and affects the initial batch `Build` only. It leaves partitioning, leaf neighbors, relative hashes, reservoir contents, incremental `Add`, and ODescent route-layer construction unchanged.
@@ -141,6 +144,16 @@ For target degree K, scan the existing ordered reservoir at the configured `alph
 The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
 
 The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
+GPU build is opt-in. It keeps dot products and nearest-leader selection for large partition
+assignments on the device. During Pick, overlapping leaves are batched, duplicate source vectors
+are transferred once per batch through bounded pinned staging, and the GPU computes symmetric
+leaf products plus deterministic per-source top-k candidates. Direction-hash insertion,
+HashPrune, and RobustPrune remain on the CPU. A build falls back to the unchanged CPU path when
+CUDA is compiled out, the requested device is absent, a stage is below its work threshold, the
+memory budget is insufficient, or a CUDA operation fails. With an explicit threshold, Partition
+uses `points * leaders * dim` and Pick uses the sum of `leaf_size^2 * dim`; `0` selects calibrated
+stage-specific defaults.
 
 ### Deduplicating vector storage
 

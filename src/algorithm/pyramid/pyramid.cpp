@@ -2290,7 +2290,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                    key == PIPNN_PARAMETER_LEADER_SAMPLE_RATE or key == PIPNN_PARAMETER_FANOUT or
                    key == PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT or
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
-                   key == PIPNN_PARAMETER_RESERVOIR_SIZE) {
+                   key == PIPNN_PARAMETER_RESERVOIR_SIZE or key == PIPNN_ENABLE_GPU_BUILD or
+                   key == PIPNN_GPU_DEVICE_ID or key == PIPNN_GPU_MEMORY_BUDGET or
+                   key == PIPNN_GPU_MIN_WORK_THRESHOLD) {
             inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == PYRAMID_INDEX_MIN_SIZE) {
             inner_json[INDEX_MIN_SIZE].SetJson(value);
