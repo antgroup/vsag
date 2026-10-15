@@ -31,6 +31,10 @@ MemoryPeakMonitor::MemoryPeakMonitor(const std::string& name)
     this->infile_.open(GetProcFileName(pid_));
 }
 
+// Lifetime contract: Start() spins up the sampling thread and Stop() joins it.
+// Stop() is idempotent (guarded on `sampling_` and `joinable()`), and the destructor
+// always calls it, so automatic, static, or smart-pointer ownership is exception-safe.
+// Only a raw `new` whose delete is skipped would leak the running thread.
 MemoryPeakMonitor::~MemoryPeakMonitor() {
     this->Stop();
 }

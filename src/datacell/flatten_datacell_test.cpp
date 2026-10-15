@@ -110,6 +110,8 @@ TEST_CASE("FP32 FlattenDataCell shrink truncates logical rows before subsequent 
     REQUIRE(flatten->TotalCount() == 0);
     flatten->InsertVector(vectors.data());
     REQUIRE(flatten->TotalCount() == 1);
+}
+
 TEST_CASE("FlattenDataCell supports concurrent contiguous batch insertion",
           "[ut][FlattenDataCell][pipnn]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();

@@ -227,13 +227,24 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     // Backport: 1.0 lacks the fused/dedup variants of this path, so only the
     // "all rows are valid" (no duplicate label was filtered out) case can use
     // the parallel batch insert; the default build_type_ below stays FP32.
+    // When every row passed validation, valid_indices is the identity mapping 0..total-1
+    // and the batched insertion paths below can use it directly as inner id -> row index.
+    // If any row was filtered, those paths are skipped and we fall back to per-row inserts.
     const bool all_rows_are_valid = valid_indices.size() == static_cast<uint64_t>(total);
+    // Every caller below is guarded by `all_rows_are_valid`, which is exactly the
+    // condition that makes inner_ids cover all `total` rows. Assert the invariant so
+    // that relaxing that guard cannot silently read past inner_ids.
     auto batch_insert_flatten_codes = [&](const FlattenInterfacePtr& flatten) {
         if (flatten == nullptr) {
             return;
         }
+        const auto batch_count = static_cast<InnerIdType>(total);
+        if (batch_count > 0) {
+            CHECK_ARGUMENT(inner_ids.size() == static_cast<uint64_t>(batch_count),
+                           "batched code insertion requires one inner id per row");
+        }
         ParallelBatchInsertVector(flatten,
-                                  static_cast<InnerIdType>(total),
+                                  batch_count,
                                   inner_ids.data(),
                                   this->thread_pool_.get(),
                                   this->build_thread_count_,

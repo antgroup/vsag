@@ -38,7 +38,7 @@ ParallelBatchInsertVector(const FlattenInterfacePtr& flatten,
     std::exception_ptr first_exception = nullptr;
     for (InnerIdType begin = 0; begin < count; begin += BATCH_SIZE) {
         const auto batch_count = std::min<InnerIdType>(BATCH_SIZE, count - begin);
-        auto insert_batch = [=]() {
+        auto insert_batch = [&flatten, &ids, &vector_at, begin, batch_count]() {
             if (ids != nullptr) {
                 flatten->BatchInsertVector(vector_at(begin), batch_count, ids + begin);
                 return;

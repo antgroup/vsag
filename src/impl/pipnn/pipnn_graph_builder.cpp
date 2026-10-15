@@ -41,6 +41,7 @@
 #include "pipnn_adaptive_pruning.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
+#include "utils/float_utils.h"
 #include "utils/lock_strategy.h"
 
 namespace vsag {
@@ -113,7 +114,7 @@ mix_seed(uint64_t seed, uint64_t salt) {
 
 float
 sanitize_distance(float distance) {
-    if (not std::isfinite(distance)) {
+    if (not IsFiniteFloatBits(distance)) {
         return std::numeric_limits<float>::infinity();
     }
     return distance == 0.0F ? 0.0F : distance;
@@ -454,7 +455,7 @@ PiPNNPipeline::prepare_sketches() {
                 if (metric_ == MetricType::METRIC_TYPE_COSINE) {
                     const float length = std::sqrt(std::max(0.0F, norm));
                     norms_[local_id] =
-                        length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                        length > 0.0F and IsFiniteFloatBits(length) ? 1.0F / length : 0.0F;
                 } else {
                     norms_[local_id] = norm;
                 }
@@ -1136,6 +1137,9 @@ PiPNNPipeline::insert_candidate(uint32_t source, uint32_t target, float distance
         if (entry.hash != hash or (hash & COINCIDENT_HASH_FLAG) != 0) {
             continue;
         }
+        // Same direction hash: this bucket already holds the best key seen for it,
+        // so a worse incoming key must neither displace it nor keep probing the
+        // remaining entries. Returning here is intentional, not a missed scan.
         if (incoming_key < std::make_tuple(entry.distance, ids_[entry.neighbor], entry.hash)) {
             const bool was_farthest = index == state.farthest;
             entry = ReservoirEntry{target, hash, distance_key};
@@ -1408,7 +1412,7 @@ PiPNNGraphBuilderParameter::Validate(uint64_t max_degree) const {
                      "PiPNN min_leaf_size must not exceed max_leaf_size");
     require_argument(max_leaf_size <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
                      "PiPNN max_leaf_size exceeds the BLAS limit");
-    require_argument(std::isfinite(leader_sample_rate) and leader_sample_rate > 0.0F and
+    require_argument(IsFiniteFloatBits(leader_sample_rate) and leader_sample_rate > 0.0F and
                          leader_sample_rate <= 1.0F,
                      "PiPNN leader_sample_rate must be in (0, 1]");
     require_argument(not fanout.empty(), "PiPNN fanout must not be empty");
@@ -1419,7 +1423,7 @@ PiPNNGraphBuilderParameter::Validate(uint64_t max_degree) const {
     require_argument(hash_plane_count > 0 and hash_plane_count <= MAX_HASH_PLANES,
                      "PiPNN hash_plane_count must be in [1, 15]");
     require_argument(reservoir_size > 0, "PiPNN reservoir_size must be positive");
-    require_argument(std::isfinite(alpha) and alpha >= 1.0F,
+    require_argument(IsFiniteFloatBits(alpha) and alpha >= 1.0F,
                      "PiPNN alpha must be finite and at least 1");
     if (adaptive_pruning) {
         validate_pipnn_adaptive_pruning(alpha, adaptive_pruning_adjust_step);
