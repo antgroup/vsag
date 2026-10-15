@@ -1031,10 +1031,15 @@ TEST_CASE("Pyramid rejects TQ-only fields for non-TQ quantizers", "[ut][pyramid]
 
 TEST_CASE("Pyramid multi-layer root builds routes and survives serialization",
           "[ut][pyramid][root_graph][adaptive_pruning][pipnn]") {
+    // Adaptive pruning is NSW-only, so pair PiPNN with the disabled policy and vary
+    // the adaptive axes only on the NSW builds.
     const auto graph_type = GENERATE(std::string(vsag::GRAPH_TYPE_VALUE_NSW),
                                      std::string(vsag::GRAPH_TYPE_VALUE_PIPNN));
-    const bool adaptive = GENERATE(false, true);
-    const bool reverse = GENERATE(false, true);
+    const bool adaptive_generated = GENERATE(false, true);
+    const bool reverse_generated = GENERATE(false, true);
+    // Adaptive pruning only supports NSW, so PiPNN builds always use the disabled policy.
+    const bool adaptive = graph_type == vsag::GRAPH_TYPE_VALUE_NSW ? adaptive_generated : false;
+    const bool reverse = graph_type == vsag::GRAPH_TYPE_VALUE_NSW ? reverse_generated : false;
     const auto graph_storage_type =
         GENERATE(std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT),
                  std::string(vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED));
@@ -1708,6 +1713,9 @@ TEST_CASE("Pyramid adaptive pruning rejects nonempty imported build cache",
     } else {
         REQUIRE(target.index->Build(dataset).empty());
         CHECK(target.index->GetNumElements() == 1);
+    }
+}
+
 TEST_CASE("Pyramid PiPNN multi-layer root supports RaBitQ with SQ8 reorder",
           "[ut][pipnn][pyramid]") {
     constexpr int64_t count = 48;
@@ -2139,6 +2147,7 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
     // same ranked result as the serial path.
     auto pooled_index = MakePyramidIndex(1,
                                          1,
+                                         false,
                                          false,
                                          false,
                                          false,
