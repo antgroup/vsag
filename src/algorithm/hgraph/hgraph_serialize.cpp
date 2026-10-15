@@ -904,11 +904,9 @@ HGraph::restore_mci_label_state(const JsonType& basic_info) {
         throw VsagException(ErrorType::INVALID_BINARY,
                             "serialized HGraph MCI node and label counts are inconsistent");
     }
-    if (this->support_force_remove()) {
-        const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
-        this->label_table_->RestoreDeletedIds(removed_ids, total);
-        this->delete_count_.store(static_cast<int64_t>(removed_ids.size()));
-    }
+    const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
+    this->label_table_->RestoreDeletedIds(removed_ids, total);
+    this->delete_count_.store(static_cast<int64_t>(removed_ids.size()));
 }
 
 std::unordered_map<std::string, uint64_t>

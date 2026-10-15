@@ -242,7 +242,7 @@ private:
         }
         auto append_live = [&](auto begin, auto end, bool from_base) {
             for (auto iter = begin; iter != end; ++iter) {
-                if (not is_node_inactive_unlocked(*iter)) {
+                if (*iter < inactive_nodes_.size() and not is_node_inactive_unlocked(*iter)) {
                     visit(*iter, from_base);
                 }
             }

@@ -606,7 +606,7 @@ CliqueDataCell::Deserialize(StreamReader& reader,
     // conservative compaction for tombstones and malformed member IDs, as well as real delta.
     needs_compaction_ =
         base_total != total or not delta_cliques_.empty() or inactive_node_count_ != 0 or
-        retired_clique_count_ != 0 or delta_clique_extra_.size() != total_clique_count_ or
+        retired_clique_count_ != 0 or
         std::adjacent_find(p_maxc_.begin(), p_maxc_.end()) != p_maxc_.end() or
         has_members(delta_clique_extra_) or has_members(delta_node_to_cids_) or
         std::any_of(maxcs_.begin(), maxcs_.end(), [total](auto id) { return id >= total; }) or
@@ -731,6 +731,8 @@ CliqueDataCell::validate(uint64_t total) const {
                                total + 1));
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total,
                    "clique datacell delta node rows size mismatch");
+    CHECK_ARGUMENT(delta_clique_extra_.size() == total_clique_count_,
+                   "clique datacell base clique extra rows size mismatch");
     CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
         p_maxc_.front() == 0 and p_node_to_cid_.front() == 0,
         "clique datacell CSR offsets must start from 0");

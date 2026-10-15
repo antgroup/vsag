@@ -426,11 +426,9 @@ HGraph::Add(const DatasetPtr& data) {
                 vectors = this->get_data(data);
             }
             this->build_mci_clique_index(vectors);
-            if (this->support_force_remove()) {
-                const auto removed = this->label_table_->GetAllDeletedIds(this->allocator_);
-                this->remove_from_mci(removed);
-                this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            }
+            const auto removed = this->label_table_->GetAllDeletedIds(this->allocator_);
+            this->remove_from_mci(removed);
+            this->mci_cliques_->MarkAvailable(this->total_count_.load());
         }
         this->cal_memory_usage();
     }

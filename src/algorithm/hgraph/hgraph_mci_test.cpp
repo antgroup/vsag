@@ -3896,3 +3896,141 @@ TEST_CASE("HGraph MCI bitmap remains equivalent after removal readdition and rel
     reload();
     verify(false, false);
 }
+
+TEST_CASE("HGraph MCI restores default MARK_REMOVE tombstones after rebuild and reload",
+          "[ut][hgraph][mci][review_regression]") {
+    const bool remove_all = GENERATE(false, true);
+    const bool binary_set = GENERATE(false, true);
+    constexpr int64_t total = 8;
+    constexpr int64_t dim = 2;
+    std::vector<int64_t> ids(total + 1);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors((total + 1) * dim);
+    for (int64_t i = 0; i <= total; ++i) {
+        vectors[i * dim] = static_cast<float>(i);
+    }
+    const auto config = generate_hgraph_mci_params(dim);
+    auto index = vsag::Factory::CreateIndex("hgraph", config).value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    std::vector<int64_t> removed{0};
+    if (remove_all) {
+        removed.assign(ids.begin(), ids.begin() + total);
+    }
+    REQUIRE(index->Remove(removed, vsag::RemoveMode::MARK_REMOVE).value() == removed.size());
+    if (remove_all) {
+        REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).value().empty());
+    }
+    auto verify = [&]() {
+        REQUIRE(index->GetNumElements() == (remove_all ? 1 : total - 1));
+        const auto cell = vsag::HGraphMCITestAccess::GetCliques(index);
+        REQUIRE(cell->GetInactiveNodeIds().size() == removed.size());
+        for (bool use_mci : {false, true}) {
+            auto params = vsag::JsonType::Parse(
+                R"({"hgraph":{"ef_search":100,"skip_ratio":0,"mci_seed_ratio":10}})");
+            params["hgraph"]["use_mci"].SetBool(use_mci);
+            auto result = index->KnnSearch(
+                make_dataset(ids, vectors, total, 1, dim), total + 1, params.Dump());
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == (remove_all ? 1 : total - 1));
+            for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+                REQUIRE(std::find(removed.begin(), removed.end(), result.value()->GetIds()[i]) ==
+                        removed.end());
+            }
+        }
+    };
+    verify();
+    auto restored = vsag::Factory::CreateIndex("hgraph", config).value();
+    if (binary_set) {
+        auto bytes = index->Serialize();
+        REQUIRE(bytes.has_value());
+        REQUIRE(restored->Deserialize(bytes.value()).has_value());
+    } else {
+        std::stringstream stream;
+        REQUIRE(index->Serialize(stream).has_value());
+        REQUIRE(restored->Deserialize(stream).has_value());
+    }
+    index = restored;
+    verify();
+    REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).value().empty());
+    REQUIRE(index->GetNumElements() == (remove_all ? 2 : total));
+    auto result =
+        index->KnnSearch(make_dataset(ids, vectors, 0, 1, dim),
+                         1,
+                         R"({"hgraph":{"ef_search":100,"use_mci":false,"skip_ratio":0}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == 0);
+}
+
+TEST_CASE("Clique malformed snapshot validates extra rows and bounds compaction members",
+          "[ut][hgraph][mci][review_regression]") {
+    vsag::DefaultAllocator allocator;
+    const char* scenario = GENERATE("missing_extra", "excess_extra", "base", "extra", "delta");
+    const bool remap = GENERATE(false, true);
+    const std::string kind(scenario);
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    auto write_ids = [&](std::initializer_list<vsag::InnerIdType> ids) {
+        vsag::StreamWriter::WriteVector(writer, vsag::Vector<vsag::InnerIdType>(ids, &allocator));
+    };
+    // Two physical nodes; member ID 2 is invalid in each storage origin.
+    write_ids({0, 2});
+    write_ids({0, kind == "base" ? 2U : 1U});
+    write_ids({0, 1, 2});
+    write_ids({0, 0});
+    vsag::StreamWriter::WriteObj(writer, uint64_t{1});
+    vsag::StreamWriter::WriteObj(writer, uint64_t{kind == "delta" ? 1U : 0U});
+    if (kind == "delta") {
+        write_ids({0, 2});
+    }
+    const uint64_t extra_rows = kind == "missing_extra" ? 0 : (kind == "excess_extra" ? 2 : 1);
+    vsag::StreamWriter::WriteObj(writer, extra_rows);
+    for (uint64_t i = 0; i < extra_rows; ++i) {
+        if (kind == "extra") {
+            write_ids({2});
+        } else {
+            write_ids({});
+        }
+    }
+    vsag::StreamWriter::WriteObj(writer, uint64_t{2});
+    write_ids({});
+    write_ids({});
+    vsag::StreamWriter::WriteVector(writer, vsag::Vector<uint8_t>({0, 0}, &allocator));
+    vsag::Vector<uint8_t> retired(kind == "delta" ? 2 : 1, 0, &allocator);
+    vsag::StreamWriter::WriteVector(writer, retired);
+    vsag::IOStreamReader reader(stream);
+    vsag::CliqueDataCell cell(&allocator);
+    if (kind == "missing_extra" or kind == "excess_extra") {
+        REQUIRE_THROWS_AS(cell.Deserialize(reader, 2, 2), vsag::VsagException);
+        vsag::CliqueDataCellSearchView view;
+        REQUIRE_FALSE(cell.TryGetSearchView(2, view));
+        return;
+    }
+    REQUIRE_NOTHROW(cell.Deserialize(reader, 2, 2));
+    if (remap) {
+        vsag::Vector<vsag::InnerIdType> permutation({1, 0}, &allocator);
+        REQUIRE_NOTHROW(cell.RemapNodes(permutation, 2));
+        cell.MarkAvailable(2);
+    } else {
+        REQUIRE_NOTHROW(cell.Flush(2));
+    }
+    vsag::CliqueDataCellSearchView view;
+    REQUIRE(cell.TryGetSearchView(2, view));
+    std::vector<vsag::InnerIdType> members;
+    view.ForEachMember(0, [&](auto id) {
+        members.push_back(id);
+        return true;
+    });
+    std::sort(members.begin(), members.end());
+    if (kind == "base") {
+        REQUIRE(members == std::vector<vsag::InnerIdType>{remap ? 1U : 0U});
+    } else {
+        REQUIRE(members == std::vector<vsag::InnerIdType>{0, 1});
+    }
+    REQUIRE(view.total_clique_count == (kind == "delta" ? 2 : 1));
+    if (kind == "delta") {
+        members.clear();
+        view.ForEachMember(1, [&](auto id) { members.push_back(id); });
+        REQUIRE(members == std::vector<vsag::InnerIdType>{remap ? 1U : 0U});
+    }
+}
