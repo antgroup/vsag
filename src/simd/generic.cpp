@@ -19,6 +19,7 @@
 #include "simd.h"
 #include "simd/int8_simd.h"
 #include "simd/kernels/kernels.h"
+#include "simd/kernels/rabitq_compute.h"
 #include "simd/kernels/rabitq_pack.h"
 #include "simd/traits/simd_traits_generic.h"
 #include "sq4_local_simd.h"
@@ -847,25 +848,8 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             const uint8_t* supplement_code,
                             uint64_t dim,
                             uint32_t supplement_bits) {
-    if (dim == 0 or supplement_bits == 0) {
-        return 0.0F;
-    }
-
-    const uint64_t plane_bytes = (dim + 7) / 8;
-    float result = 0.0F;
-    for (uint64_t d = 0; d < dim; ++d) {
-        const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
-        uint32_t code = 0;
-        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
-            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
-            if ((plane[byte_idx] & bit_mask) != 0U) {
-                code += 1U << bit;
-            }
-        }
-        result += vector[d] * static_cast<float>(code);
-    }
-    return result;
+    return simd::RaBitQFloatSupplementCodeIPScalarImpl(
+        vector, supplement_code, dim, supplement_bits);
 }
 
 float
