@@ -213,7 +213,9 @@ RPTPartition::emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves) {
     uint64_t cursor = begin;
     for (uint64_t i = 0; i < leaves; ++i) {
         uint64_t chunk = quotient + (i < remainder ? 1 : 0);
-        this->emit_leaf(cursor, cursor + chunk);
+        if (chunk > 0) {
+            this->emit_leaf(cursor, cursor + chunk);
+        }
         cursor += chunk;
     }
 }
