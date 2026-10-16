@@ -31,6 +31,17 @@ public:
     InputData(const RPTPartition& partitioner) {
         return partitioner.datas_;
     }
+
+    static std::vector<std::vector<int64_t>>
+    EmitChunks(RPTPartition& partitioner, uint64_t count, uint64_t leaves) {
+        partitioner.ids_.resize(count);
+        for (uint64_t i = 0; i < count; ++i) {
+            partitioner.ids_[i] = static_cast<InnerIdType>(i);
+        }
+        partitioner.partitions_.clear();
+        partitioner.emit_chunks(0, count, leaves);
+        return partitioner.partitions_;
+    }
 };
 
 }  // namespace vsag
@@ -171,6 +182,27 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         auto datas = fixtures::generate_vectors(count, dim);
         auto partitions = partitioner.Run(datas.data(), count, params);
         CheckPartitions(partitions, count, params.bucket_size);
+    }
+}
+
+TEST_CASE("RPTPartition Fallback Skips Empty Chunks", "[ut][RPTPartition]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::RPTPartition partitioner(1, allocator.get());
+
+    SECTION("more leaves than vectors") {
+        auto partitions = vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 3, 5);
+        Partitions expected{{0}, {1}, {2}};
+        REQUIRE(partitions == expected);
+    }
+
+    SECTION("empty range") {
+        REQUIRE(vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 0, 5).empty());
+    }
+
+    SECTION("nonempty chunks retain order") {
+        auto partitions = vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 5, 3);
+        Partitions expected{{0, 1}, {2, 3}, {4}};
+        REQUIRE(partitions == expected);
     }
 }
 
