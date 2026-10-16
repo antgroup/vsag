@@ -229,6 +229,7 @@ extern const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
 extern const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT;
 extern const char* const HGRAPH_MCI_SEED_RATIO;
 extern const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD;
+extern const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
 extern const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD;
