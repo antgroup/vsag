@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "fp32_simd.h"
+#include "kernels/rabitq_compute.h"
 #include "simd_status.h"
 #include "unittest.h"
 
@@ -1031,6 +1032,11 @@ TEST_CASE("RaBitQ FP32 supplement-code SIMD Compute Codes", "[ut][simd]") {
             }
 
             const auto* supplement = supplement_bits == 0 ? nullptr : supplement_code.data();
+            // Standalone Lite shares this scalar kernel even without AVX512 support.
+            const auto shared_scalar_result = simd::RaBitQFloatSupplementCodeIPScalarImpl(
+                query.data(), supplement, dim, supplement_bits);
+            REQUIRE(std::abs(expected - shared_scalar_result) < 1e-4F);
+
             auto generic_result = generic::RaBitQFloatSupplementCodeIP(
                 query.data(), supplement, dim, supplement_bits);
             REQUIRE(std::abs(expected - generic_result) < 1e-4F);
