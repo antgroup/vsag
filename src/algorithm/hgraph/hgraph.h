@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <exception>
@@ -441,7 +442,7 @@ public:
     random_level_draw(std::default_random_engine& engine, double mult);
 
     /// Check a copied RNG prefix before publishing IDs/labels; consumes no RNG state.
-    /// Caller must hold add_mutex_ or have exclusive Build access to the index.
+    /// Caller must hold add_prepare_mutex_ or have exclusive Build access to the index.
     void
     validate_random_levels(uint64_t count) const;
 
@@ -649,7 +650,7 @@ private:
     ///
     /// Drawing all levels before the parallel insert phase makes level assignment a pure
     /// function of the batch contents instead of a function of worker scheduling.
-    /// Caller holds add_mutex_ from RNG preflight through metadata preparation.
+    /// Caller holds add_prepare_mutex_ from RNG preflight through metadata preparation.
     void
     assign_batch_levels(Vector<AddRow>& rows);
 
@@ -741,6 +742,17 @@ private:
         void
         operator()() const;
     };
+
+    /// Shared bound used by the dispatch and the build-memory estimate: an empty batch
+    /// runs no workers; a supplied pool launches at most
+    /// min(row_count, max(thread_count, 1)), and a serial run uses exactly one.
+    static uint64_t
+    insert_worker_count(bool has_pool, uint64_t thread_count, uint64_t row_count) {
+        if (row_count == 0) {
+            return 0;
+        }
+        return has_pool ? std::min(row_count, std::max<uint64_t>(1, thread_count)) : 1;
+    }
 
     /// Runs min(max(thread_count, 1), row_count) workers, drains them, then rethrows the
     /// lowest-row exception or a submission failure.
@@ -1341,6 +1353,11 @@ private:
     mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    // Serializes one Add's whole preparation (RNG preflight, duplicate checks, ID
+    // reservation, label publication and level assignment) against other Adds. Acquired
+    // only at the top of prepare_add_batch, never while holding add_mutex_,
+    // global_mutex_ or label_lookup_mutex_.
+    mutable std::mutex add_prepare_mutex_;
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;

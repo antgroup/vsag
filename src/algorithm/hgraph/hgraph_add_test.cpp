@@ -37,6 +37,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -113,6 +114,11 @@ struct HGraphMemoryEstimateTestAccess {
     static std::default_random_engine
     Generator(const HGraph& graph) {
         return graph.level_generator_;
+    }
+
+    static uint64_t
+    InsertWorkerCount(bool has_pool, uint64_t thread_count, uint64_t row_count) {
+        return HGraph::insert_worker_count(has_pool, thread_count, row_count);
     }
 
     static double
@@ -1443,6 +1449,336 @@ TEST_CASE("HGraph batch and cache builds reject invalid levels before publishing
     for (const auto id : data.ids) {
         REQUIRE(index->CheckIdExist(id));
     }
+}
+
+// Labels the index held before the operation, from the dataset's own ids.
+static std::unordered_set<int64_t>
+RngPresentLabels(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index,
+                 const vsag::DatasetPtr& dataset) {
+    std::unordered_set<int64_t> present;
+    const auto* labels = dataset->GetIds();
+    for (int64_t row = 0; row < dataset->GetNumElements(); ++row) {
+        if (index->CheckIdExist(labels[row])) {
+            present.insert(labels[row]);
+        }
+    }
+    return present;
+}
+
+// The oracle: one test-local uniform draw per accepted label on the engine copy.
+// A label is accepted when it was absent before the operation and is not repeated inside
+// the batch; failed_ids rows consume no live draw. random_level_draw is not called.
+static void
+RngAdvanceAccepted(std::default_random_engine& engine,
+                   const vsag::DatasetPtr& dataset,
+                   const std::unordered_set<int64_t>& present) {
+    std::unordered_set<int64_t> seen;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    const auto* labels = dataset->GetIds();
+    for (int64_t row = 0; row < dataset->GetNumElements(); ++row) {
+        const bool accepted = present.count(labels[row]) == 0 and seen.insert(labels[row]).second;
+        if (accepted) {
+            (void)distribution(engine);
+        }
+    }
+}
+
+TEST_CASE("HGraph build advances the level generator once per accepted row",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    const uint64_t pool_width = threads == 1 ? 0 : 8;
+    auto index =
+        MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), MakeCommonParam(16, pool_width));
+    BuildMemoryData data(48, 16);
+    for (auto& id : data.ids) {
+        id += 500;
+    }
+    const auto present = RngPresentLabels(index, data.dataset);
+    auto expected = Access::Generator(*InnerHGraph(index));
+    REQUIRE(index->Build(data.dataset).has_value());
+    RngAdvanceAccepted(expected, data.dataset, present);
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph consecutive Adds advance the generator once per accepted row",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), MakeCommonParam(16, 8));
+    BuildMemoryData base(16, 16);
+    REQUIRE(index->Build(base.dataset).has_value());
+    BuildMemoryData first(24, 16);
+    for (auto& id : first.ids) {
+        id += 100;
+    }
+    {
+        const auto present = RngPresentLabels(index, first.dataset);
+        auto expected = Access::Generator(*InnerHGraph(index));
+        REQUIRE(index->Add(first.dataset).has_value());
+        RngAdvanceAccepted(expected, first.dataset, present);
+        CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    }
+    BuildMemoryData second(12, 16);
+    for (auto& id : second.ids) {
+        id += 300;
+    }
+    {
+        const auto present = RngPresentLabels(index, second.dataset);
+        auto expected = Access::Generator(*InnerHGraph(index));
+        REQUIRE(index->Add(second.dataset).has_value());
+        RngAdvanceAccepted(expected, second.dataset, present);
+        CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    }
+}
+
+TEST_CASE("HGraph duplicate and existing labels consume no generator draws",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), MakeCommonParam(16, 8));
+    BuildMemoryData base(16, 16);
+    REQUIRE(index->Build(base.dataset).has_value());
+    BuildMemoryData addition(8, 16);
+    // Existing label 5, in-batch duplicate of the first new label, then fresh labels.
+    addition.ids = {100, 5, 100, 101, 102, 103, 104, 105};
+    addition.RefreshChecksum();
+    addition.dataset = MakeFloatDataset(
+        addition.vectors, addition.ids, 16, static_cast<int64_t>(addition.ids.size()));
+    const auto present = RngPresentLabels(index, addition.dataset);
+    auto expected = Access::Generator(*InnerHGraph(index));
+    REQUIRE(index->Add(addition.dataset).has_value());
+    RngAdvanceAccepted(expected, addition.dataset, present);
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    for (const auto id : {100, 101, 102, 103, 104, 105}) {
+        CHECK(index->CheckIdExist(id));
+    }
+}
+
+TEST_CASE("HGraph estimate and feature checks leave the generator unchanged",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    const auto before = Access::Generator(*InnerHGraph(index));
+    RequireExpectedBuildMemoryProfile(index);
+    if constexpr (EXPECT_MODELED_BUILD_MEMORY) {
+        (void)index->EstimateBuildMemory(4096);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == before);
+}
+
+// Deterministic fp32 vector for a label, so GetDataByIds can be checked exactly.
+static std::vector<float>
+ConcurrentAddVectorFor(int64_t label, int64_t dim) {
+    std::vector<float> vector(dim);
+    for (int64_t col = 0; col < dim; ++col) {
+        vector[col] = static_cast<float>((label * 131 + col * 17) % 1021) / 1021.0F;
+    }
+    return vector;
+}
+
+static std::vector<float>
+ConcurrentAddVectorsFor(const std::vector<int64_t>& labels, int64_t dim) {
+    std::vector<float> vectors(labels.size() * dim);
+    for (uint64_t row = 0; row < labels.size(); ++row) {
+        const auto value = ConcurrentAddVectorFor(labels[row], dim);
+        std::copy(value.begin(), value.end(), vectors.begin() + row * dim);
+    }
+    return vectors;
+}
+
+static void
+RequireExactLabelVector(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index,
+                        int64_t label,
+                        int64_t dim) {
+    REQUIRE(index->CheckIdExist(label));
+    auto data = index->GetDataByIds(&label, 1);
+    REQUIRE(data.has_value());
+    const auto expected = ConcurrentAddVectorFor(label, dim);
+    const auto* actual = data.value()->GetFloat32Vectors();
+    REQUIRE(actual != nullptr);
+    for (int64_t col = 0; col < dim; ++col) {
+        REQUIRE(actual[col] == expected[col]);
+    }
+}
+
+TEST_CASE("HGraph concurrent mixed-size Adds preserve every accepted label",
+          "[ut][hgraph][concurrent_add]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    constexpr int64_t dim = 16;
+    // No Resource pool: T1 inserts serially in its caller thread; T4 uses the
+    // constructor-owned internal pool. nullptr does not mean globally serial.
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 8, threads);
+    hgraph_json["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(16));
+
+    std::vector<int64_t> base_ids(100);
+    std::iota(base_ids.begin(), base_ids.end(), int64_t{0});
+    auto base_vectors = ConcurrentAddVectorsFor(base_ids, dim);
+    REQUIRE(index
+                ->Build(MakeFloatDataset(
+                    base_vectors, base_ids, dim, static_cast<int64_t>(base_ids.size())))
+                .has_value());
+    const auto before_rng = Access::Generator(*InnerHGraph(index));
+
+    const auto add_batch = [&](int64_t first_label, uint64_t count) {
+        std::vector<int64_t> ids(count);
+        std::iota(ids.begin(), ids.end(), first_label);
+        auto vectors = ConcurrentAddVectorsFor(ids, dim);
+        return index->Add(MakeFloatDataset(vectors, ids, dim, static_cast<int64_t>(ids.size())));
+    };
+    using AddOutcome = std::pair<bool, std::vector<int64_t>>;
+    std::vector<std::future<AddOutcome>> futures;
+    // One caller adds 5000 rows in five calls of 1000.
+    futures.emplace_back(std::async(std::launch::async, [&]() -> AddOutcome {
+        std::vector<int64_t> failed;
+        for (int64_t call = 0; call < 5; ++call) {
+            auto result = add_batch(1000000 + call * 1000, 1000);
+            if (not result.has_value()) {
+                return {false, failed};
+            }
+            failed.insert(failed.end(), result->begin(), result->end());
+        }
+        return {true, failed};
+    }));
+    // Four callers add 50 batches of 10 each; all label sets disjoint.
+    for (int64_t t = 0; t < 4; ++t) {
+        futures.emplace_back(std::async(std::launch::async, [&, t]() -> AddOutcome {
+            std::vector<int64_t> failed;
+            for (int64_t batch = 0; batch < 50; ++batch) {
+                auto result = add_batch(2000000 + t * 1000000 + batch * 10, 10);
+                if (not result.has_value()) {
+                    return {false, failed};
+                }
+                failed.insert(failed.end(), result->begin(), result->end());
+            }
+            return {true, failed};
+        }));
+    }
+    for (auto& future : futures) {
+        const auto outcome = future.get();
+        REQUIRE(outcome.first);
+        REQUIRE(outcome.second.empty());
+    }
+    const uint64_t submitted = 5000 + 4 * 50 * 10;
+    REQUIRE(index->GetNumElements() == base_ids.size() + submitted);
+    for (const auto label : base_ids) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    for (int64_t label = 1000000; label < 1000000 + 5000; ++label) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    for (int64_t t = 0; t < 4; ++t) {
+        for (int64_t label = 2000000 + t * 1000000; label < 2000000 + t * 1000000 + 500; ++label) {
+            RequireExactLabelVector(index, label, dim);
+        }
+    }
+    // Every submitted label is disjoint, so every row was accepted: exactly one draw each.
+    auto expected = before_rng;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    for (uint64_t accepted = 0; accepted < submitted; ++accepted) {
+        (void)distribution(expected);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph concurrent overlapping Adds keep one ID and exact data per label",
+          "[ut][hgraph][concurrent_add]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    constexpr int64_t dim = 16;
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 8, threads);
+    hgraph_json["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(16));
+
+    // Base labels B0 = {0..49}.
+    std::vector<int64_t> base_ids(50);
+    std::iota(base_ids.begin(), base_ids.end(), int64_t{0});
+    auto base_vectors = ConcurrentAddVectorsFor(base_ids, dim);
+    REQUIRE(index
+                ->Build(MakeFloatDataset(
+                    base_vectors, base_ids, dim, static_cast<int64_t>(base_ids.size())))
+                .has_value());
+    const auto before_rng = Access::Generator(*InnerHGraph(index));
+
+    // Overlapping batches; every occurrence of a label carries the same f(label).
+    // Union of all batches and B0 is exactly {0..119}; new labels beyond B0 are {50..119}.
+    const std::vector<std::vector<int64_t>> batches = {
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.end(), int64_t{30});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.end(), int64_t{50});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.begin() + 20, int64_t{40});
+            std::iota(v.begin() + 20, v.end(), int64_t{100});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(50);
+            std::iota(v.begin(), v.begin() + 40, int64_t{60});
+            std::iota(v.begin() + 40, v.end(), int64_t{0});
+            return v;
+        }(),
+    };
+    uint64_t submitted = 0;
+    for (const auto& batch : batches) {
+        submitted += batch.size();
+    }
+
+    std::vector<std::future<tl::expected<std::vector<int64_t>, vsag::Error>>> futures;
+    for (const auto& labels : batches) {
+        futures.emplace_back(std::async(std::launch::async, [&]() {
+            auto vectors = ConcurrentAddVectorsFor(labels, dim);
+            auto ids = labels;
+            return index->Add(
+                MakeFloatDataset(vectors, ids, dim, static_cast<int64_t>(ids.size())));
+        }));
+    }
+    uint64_t failed_count = 0;
+    for (auto& future : futures) {
+        const auto result = future.get();
+        REQUIRE(result.has_value());
+        failed_count += result->size();
+    }
+    // |union B0..I4| = 120; accepted = |(union Ii) \ B0| = 70; failed = submitted - 70.
+    REQUIRE(index->GetNumElements() == 120);
+    CHECK(submitted - failed_count == 70);
+    for (int64_t label = 0; label < 120; ++label) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    auto expected = before_rng;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    for (uint64_t accepted = 0; accepted < submitted - failed_count; ++accepted) {
+        (void)distribution(expected);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph insert worker count literal bounds", "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    CHECK(Access::InsertWorkerCount(true, 4, 10) == 4);
+    CHECK(Access::InsertWorkerCount(true, 4, 2) == 2);
+    CHECK(Access::InsertWorkerCount(true, 8, 64) == 8);
+    CHECK(Access::InsertWorkerCount(true, 0, 10) == 1);
+    CHECK(Access::InsertWorkerCount(false, 4, 10) == 1);
+    CHECK(Access::InsertWorkerCount(false, 0, 10) == 1);
+    CHECK(Access::InsertWorkerCount(true, 4, 0) == 0);
+    CHECK(Access::InsertWorkerCount(false, 4, 0) == 0);
+    CHECK(Access::InsertWorkerCount(true, 0, 0) == 0);
 }
 
 TEST_CASE("HGraph build memory validates the profile and reports modeled ownership cells",
