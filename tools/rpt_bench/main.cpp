@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include <argparse/argparse.hpp>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -69,24 +70,24 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
         .help("Comma separated strategies: rpt, random, single_dim, kmeans");
 
     parser.add_argument("--seed")
-        .default_value(0)
+        .default_value(uint64_t{0})
         .help("Random seed passed to the strategies")
-        .scan<'i', int>();
+        .scan<'i', uint64_t>();
 
     parser.add_argument("--topk", "-k")
-        .default_value(10)
+        .default_value(uint64_t{10})
         .help("Number of ground-truth neighbours used for the locality metrics")
-        .scan<'i', int>();
+        .scan<'i', uint64_t>();
 
     parser.add_argument("--max_queries")
-        .default_value(0)
+        .default_value(uint64_t{0})
         .help("Limit the queries used for the locality metrics; 0 means all")
-        .scan<'i', int>();
+        .scan<'i', uint64_t>();
 
     parser.add_argument("--max_base")
-        .default_value(0)
+        .default_value(uint64_t{0})
         .help("Use only the first N base vectors; 0 means all")
-        .scan<'i', int>();
+        .scan<'i', uint64_t>();
 
     parser.add_argument<std::string>("--output", "-o")
         .default_value(std::string(""))
@@ -163,10 +164,10 @@ run(int argc, char** argv) {
     auto dataset_path = parser.get<std::string>("--dataset");
     auto bucket_sizes = parse_bucket_sizes(parser.get<std::string>("--bucket_sizes"));
     auto strategies = split_list(parser.get<std::string>("--strategies"));
-    auto seed = static_cast<uint64_t>(parser.get<int>("--seed"));
-    auto topk = static_cast<uint64_t>(parser.get<int>("--topk"));
-    auto max_queries = static_cast<uint64_t>(parser.get<int>("--max_queries"));
-    auto max_base = static_cast<uint64_t>(parser.get<int>("--max_base"));
+    auto seed = parser.get<uint64_t>("--seed");
+    auto topk = parser.get<uint64_t>("--topk");
+    auto max_queries = parser.get<uint64_t>("--max_queries");
+    auto max_base = parser.get<uint64_t>("--max_base");
     auto output_path = parser.get<std::string>("--output");
 
     vsag::init();
