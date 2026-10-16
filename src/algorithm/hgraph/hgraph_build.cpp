@@ -476,13 +476,23 @@ HGraph::materialize_pipnn_storage(const DatasetPtr& data,
     for (uint64_t i = 0; i < inner_ids.size(); ++i) {
         const auto id = inner_ids[i];
         if (bottom_graph_->GetGroupId(id) == id) {
-            representatives.push_back({id, code_slot_map_->AllocateSlot(), valid_indices[i]});
+            representatives.push_back({id, 0, valid_indices[i]});
         }
     }
-    this->ensure_physical_code_capacity(code_slot_map_->PhysicalCount());
+    // Build is exclusive. Encode into provisional slots so a failed task does not consume
+    // slot IDs or change logical mappings. The allocated buffers can be reused after failure.
+    const auto first_slot = code_slot_map_->PhysicalCount();
+    CHECK_ARGUMENT(
+        representatives.size() <= std::numeric_limits<CodeSlotIdType>::max() - first_slot,
+        "PiPNN storage exceeds the code slot limit");
+    for (uint64_t i = 0; i < representatives.size(); ++i) {
+        representatives[i].slot = first_slot + static_cast<CodeSlotIdType>(i);
+    }
+    this->ensure_physical_code_capacity(first_slot +
+                                        static_cast<CodeSlotIdType>(representatives.size()));
 
-    // Capacity is fixed before any worker writes. Drain every task before publishing mappings
-    // or releasing the representative rows, including when scheduling or encoding throws.
+    // Capacity is fixed before workers write. Wait for every scheduled task before publishing
+    // mappings or letting representative rows go out of scope, even if scheduling/encoding fails.
     const uint64_t workers = std::min<uint64_t>(
         representatives.size(),
         thread_pool_ != nullptr ? std::max<uint64_t>(1, build_thread_count_) : 1);
@@ -493,7 +503,7 @@ HGraph::materialize_pipnn_storage(const DatasetPtr& data,
         for (uint64_t worker = 0; worker < workers; ++worker) {
             const auto begin = representatives.size() * worker / workers;
             const auto end = representatives.size() * (worker + 1) / workers;
-            auto encode = [this, &representatives, &data, begin, end]() {
+            auto encode = [this, &representatives, data, begin, end]() {
                 for (auto i = begin; i < end; ++i) {
                     const auto& representative = representatives[i];
                     this->insert_persistent_codes_to_slot(get_data(data, representative.row),
@@ -522,7 +532,7 @@ HGraph::materialize_pipnn_storage(const DatasetPtr& data,
         std::rethrow_exception(failure);
     }
     for (const auto& representative : representatives) {
-        code_slot_map_->PublishSlot(representative.inner_id, representative.slot);
+        code_slot_map_->PublishSlot(representative.inner_id, code_slot_map_->AllocateSlot());
     }
     for (auto id : inner_ids) {
         const auto group = bottom_graph_->GetGroupId(id);
@@ -1017,7 +1027,7 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                        const DistHeapPtr& neighbors,
                                        const FlattenInterfacePtr& flatten_codes) {
     LockGuard cur_lock(neighbors_mutex_, inner_id);
-    if (neighbors != nullptr) {
+    if (neighbors != nullptr and not neighbors->Empty()) {
         mutually_connect_new_element(inner_id,
                                      neighbors,
                                      this->bottom_graph_,
@@ -1075,6 +1085,8 @@ HGraph::publish_unique_to_route_graphs(const void* data,
 
 void
 HGraph::ensure_physical_code_capacity(CodeSlotIdType required_capacity) {
+    // Capacity is atomic. The resize mutex serializes growers; the exclusive global lock
+    // below excludes graph/code readers before any physical flatten is resized.
     if (not this->using_dedup_storage()) {
         return;
     }

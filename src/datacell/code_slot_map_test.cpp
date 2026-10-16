@@ -370,7 +370,7 @@ TEST_CASE("CodeSlotFlattenAdapter maps logical ids before calling flatten",
     REQUIRE(physical_codes->prefetched_ids == std::vector<vsag::InnerIdType>{1});
 
     bool need_release = false;
-    auto* codes = adapter->GetCodesById(2, need_release);
+    const auto* codes = adapter->GetCodesById(2, need_release);
     REQUIRE_FALSE(need_release);
     uint32_t decoded = 0;
     std::memcpy(&decoded, codes, sizeof(decoded));
@@ -409,4 +409,47 @@ TEST_CASE("CodeSlotFlattenAdapter maps logical ids before calling flatten",
     adapter->ExportModel(model_adapter);
     REQUIRE(physical_codes->exported_models.size() == 1);
     REQUIRE(physical_codes->exported_models[0] == model_physical_codes);
+}
+
+TEST_CASE("CodeSlotMap rejects serialized slots outside the physical range",
+          "[ut][datacell][code_slot_map]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto invalid_slot = GENERATE(1U, 100U);
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    constexpr vsag::CodeSlotIdType physical_count = 1;
+    std::vector<vsag::CodeSlotIdType> slots{
+        0, std::numeric_limits<vsag::CodeSlotIdType>::max(), invalid_slot};
+    vsag::StreamWriter::WriteObj(writer, physical_count);
+    vsag::StreamWriter::WriteVector(writer, slots);
+
+    vsag::CodeSlotMap mapping(allocator.get());
+    vsag::IOStreamReader reader(stream);
+    REQUIRE_THROWS_AS(mapping.Deserialize(reader), vsag::VsagException);
+}
+
+TEST_CASE("CodeSlotFlattenAdapter accepts repeated ids beyond the logical count",
+          "[ut][datacell][code_slot_map]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto mapping = std::make_shared<vsag::CodeSlotMap>(allocator.get());
+    mapping->ReserveLogicalSize(1);
+    mapping->PublishSlot(0, mapping->AllocateSlot());
+    auto physical_codes = std::make_shared<RecordingFlatten>();
+    std::atomic<uint64_t> logical_total_count{1};
+    auto adapter = vsag::MakeCodeSlotFlattenAdapter(
+        physical_codes, mapping, allocator.get(), &logical_total_count);
+    const auto count = GENERATE(1U, 128U, 129U);
+    std::vector<vsag::InnerIdType> ids(count, 0);
+    std::vector<float> distances(count);
+    std::vector<float> bounds(count);
+    std::vector<float> hints(count, 2.0F);
+    adapter->Query(distances.data(), nullptr, ids.data(), count);
+    REQUIRE(physical_codes->queried_ids == ids);
+    adapter->QueryWithDistanceFilter(distances.data(), nullptr, ids.data(), count, 1.0F);
+    REQUIRE(physical_codes->filtered_ids == ids);
+    adapter->QueryWithDistanceLowerBound(
+        distances.data(), bounds.data(), nullptr, ids.data(), count);
+    REQUIRE(physical_codes->lower_bound_ids == ids);
+    adapter->QueryWithDistanceHint(distances.data(), hints.data(), nullptr, ids.data(), count);
+    REQUIRE(physical_codes->hinted_ids == ids);
 }

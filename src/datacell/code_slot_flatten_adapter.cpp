@@ -274,10 +274,10 @@ public:
 private:
     [[noreturn]] static void
     reject_physical_operation(const char* operation) {
-        throw VsagException(
-            ErrorType::INTERNAL_ERROR,
-            fmt::format("{} requires the physical flatten behind CodeSlotFlattenAdapter",
-                        operation));
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("{} is not supported on CodeSlotFlattenAdapter; "
+                                        "use the underlying physical flatten",
+                                        operation));
     }
 
     void

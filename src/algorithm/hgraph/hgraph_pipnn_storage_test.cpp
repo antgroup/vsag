@@ -13,19 +13,61 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <numeric>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
+#include "datacell/flatten_datacell.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
+#include "quantization/fp32_quantizer.h"
 #include "unittest.h"
 #include "vsag/options.h"
 
+namespace vsag {
+
+struct HGraphPiPNNStorageTestAccess {
+    static void
+    MaterializeWithCodes(HGraph& index, const DatasetPtr& data, FlattenInterfacePtr codes) {
+        auto original = index.basic_flatten_codes_;
+        index.basic_flatten_codes_ = std::move(codes);
+        Vector<InnerIdType> ids(index.allocator_);
+        Vector<int64_t> rows(index.allocator_);
+        for (int64_t row = 0; row < data->GetNumElements(); ++row) {
+            ids.push_back(static_cast<InnerIdType>(row));
+            rows.push_back(row);
+        }
+        try {
+            index.materialize_pipnn_storage(data, ids, rows);
+        } catch (...) {
+            index.basic_flatten_codes_ = std::move(original);
+            throw;
+        }
+        index.basic_flatten_codes_ = std::move(original);
+    }
+};
+
+}  // namespace vsag
+
 namespace {
+
+class FailingStorageFlatten
+    : public vsag::FlattenDataCell<vsag::FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>,
+                                   vsag::MemoryIO> {
+public:
+    void
+    InsertVector(const void* vector, vsag::InnerIdType id) override {
+        ++attempts;
+        throw std::runtime_error("injected storage encoding failure");
+    }
+
+    std::atomic<uint64_t> attempts{0};
+};
 
 using Index = vsag::IndexImpl<vsag::HGraph>;
 
@@ -266,4 +308,25 @@ TEST_CASE("PiPNN storage dedup retains per-label extra info and filtering",
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == 20);
+}
+
+TEST_CASE("PiPNN storage failure drains workers without consuming slots",
+          "[ut][hgraph][pipnn][pipnn_storage][duplicate]") {
+    SmallStorageBlocks blocks;
+    const auto threads = GENERATE(1, 4);
+    auto parameter = make_parameters();
+    parameter["build_thread_count"].SetInt(threads);
+    auto index = std::make_shared<Index>(parameter, make_common(2, threads));
+    std::vector<float> vectors{1, 0, 1, 0, 2, 0, 3, 0};
+    std::vector<int64_t> labels{10, 20, 30, 40};
+    auto data = make_data(vectors, labels, 2);
+    REQUIRE(index->Build(data).has_value());
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    auto failing_codes = std::make_shared<FailingStorageFlatten>();
+    REQUIRE_THROWS_AS(
+        vsag::HGraphPiPNNStorageTestAccess::MaterializeWithCodes(*hgraph, data, failing_codes),
+        std::runtime_error);
+    REQUIRE(failing_codes->attempts.load() == static_cast<uint64_t>(threads == 1 ? 1 : 3));
+    require_counts(index, 4, 3);
+    require_labels(index, vectors.data(), 2, {10, 20});
 }

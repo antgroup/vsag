@@ -66,6 +66,8 @@ class IteratorFilterContext;
  */
 class HGraph : public InnerIndexInterface {
 public:
+    friend struct HGraphPiPNNStorageTestAccess;
+
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
