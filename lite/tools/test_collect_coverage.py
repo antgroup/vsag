@@ -1,3 +1,5 @@
+import fnmatch
+import re
 import unittest
 from pathlib import Path
 
@@ -28,6 +30,51 @@ class CoverageTest(unittest.TestCase):
         self.assertEqual(summarize(union)['percent'], 100)
         with self.assertRaises(ValueError):
             summarize({})
+
+
+class StandaloneWorkflowTest(unittest.TestCase):
+    def test_repository_dependencies_trigger_lite_ci(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / '.github/workflows/lite.yml').read_text()
+        path_block = workflow.split('    paths:\n', 1)[1].split('\n\n', 1)[0]
+        patterns = [
+            line.strip()[2:].strip().strip('"').strip("'")
+            for line in path_block.splitlines() if line.strip().startswith('- ')
+        ]
+        cmake = (root / 'lite/CMakeLists.txt').read_text()
+        dependencies = {
+            name for name in re.findall(r'VSAG_ROOT\}/([^"]+)', cmake)
+            if (root / name).is_file()
+        }
+        dependencies.update({
+            'include/vsag/lite/index.h',
+            'cmake/VSAGThirdPartyOverride.cmake',
+            'extern/catch2/catch2.cmake',
+            '.clang-format',
+            '.clang-tidy',
+        })
+        pending = list(dependencies)
+        while pending:
+            name = pending.pop()
+            if Path(name).suffix not in {'.h', '.hpp', '.cpp'}:
+                continue
+            source = (root / name).read_text()
+            for include in re.findall(r'#include\s*[<"]([^>"]+)[>"]', source):
+                candidates = [
+                    Path(name).parent / include, Path('src') / include, Path('include') / include
+                ]
+                dependency = next(
+                    (candidate.as_posix() for candidate in candidates
+                     if (root / candidate).is_file()), None
+                )
+                if dependency is not None and dependency not in dependencies:
+                    dependencies.add(dependency)
+                    pending.append(dependency)
+        missing = sorted(
+            name for name in dependencies
+            if not any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+        )
+        self.assertFalse(missing, f'Lite dependencies missing from CI triggers: {missing}')
 
 
 if __name__ == '__main__':
