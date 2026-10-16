@@ -561,9 +561,16 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount() &&
-                   flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
-            inner_search_param.duplicate_id = min_index;
+        } else {
+            const bool has_stored_query =
+                inner_search_param.duplicate_query_id < flatten->TotalCount();
+            const bool is_duplicate =
+                has_stored_query
+                    ? flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)
+                    : flatten->CompareRawVectorWithId(query, min_index);
+            if (is_duplicate) {
+                inner_search_param.duplicate_id = min_index;
+            }
         }
     }
 
