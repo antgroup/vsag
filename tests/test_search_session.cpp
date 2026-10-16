@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -45,7 +46,7 @@ constexpr const char* kSearch =
     R"({"hgraph":{"ef_search":128,"parallelism":1,"brute_force_threshold":0.0}})";
 
 vsag::IndexPtr
-MakeSessionIndex(bool populate = true) {
+MakeSessionIndex(bool populate = true, int64_t count = kCount) {
     auto created = vsag::Factory::CreateIndex("hgraph", R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
@@ -54,15 +55,15 @@ MakeSessionIndex(bool populate = true) {
     REQUIRE(created.has_value());
     auto index = created.value();
     if (populate) {
-        std::vector<float> vectors(kCount);
-        std::vector<int64_t> ids(kCount);
-        for (int64_t i = 0; i < kCount; ++i) {
+        std::vector<float> vectors(count);
+        std::vector<int64_t> ids(count);
+        for (int64_t i = 0; i < count; ++i) {
             vectors[i] = static_cast<float>(i);
             // Exercise external labels rather than internal graph offsets.
             ids[i] = 1000 + 3 * i;
         }
         auto base = vsag::Dataset::Make();
-        base->NumElements(kCount)
+        base->NumElements(count)
             ->Dim(1)
             ->Ids(ids.data())
             ->Float32Vectors(vectors.data())
@@ -310,9 +311,12 @@ TEST_CASE("HGraph search session deeply copies query before first Next",
 TEST_CASE("HGraph search session retains index and destructor releases ownership",
           "[ut][hgraph][search_session]") {
     // Cover destruction of both an unopened search and a partially consumed one.
+    // The final approximate page may be short; exercise that case deterministically.
+    const auto count = GENERATE(kCount, 2 * kBatch + 1);
     for (bool consume : {false, true}) {
         INFO("consume=" << consume);
-        auto index = MakeSessionIndex();
+        INFO("count=" << count);
+        auto index = MakeSessionIndex(true, count);
         auto filter = std::make_shared<SessionFilter>(true);
         std::weak_ptr<SessionFilter> weak_filter = filter;
         float value = -0.25F;
@@ -329,14 +333,20 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
                 auto expected = index->KnnSearch(
                     MakeSessionQuery(value), kBatch, kSearch, filter, legacy.value, false);
                 REQUIRE(expected.has_value());
-                REQUIRE(expected.value()->GetDim() == kBatch);
+                const auto expected_count = expected.value()->GetDim();
+                REQUIRE(expected_count >= 0);
+                REQUIRE(expected_count <= kBatch);
+                if (expected_count == 0) {
+                    break;
+                }
                 // Copy into standard-library storage: legacy Dataset buffers
                 // may use the index allocator and must die before index.reset().
                 expected_ids.emplace_back(expected.value()->GetIds(),
-                                          expected.value()->GetIds() + kBatch);
+                                          expected.value()->GetIds() + expected_count);
                 expected_distances.emplace_back(expected.value()->GetDistances(),
-                                                expected.value()->GetDistances() + kBatch);
+                                                expected.value()->GetDistances() + expected_count);
             }
+            REQUIRE_FALSE(expected_ids.empty());
         }
         index.reset();
         filter.reset();
@@ -344,11 +354,11 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
         REQUIRE_FALSE(weak_filter.expired());
         vsag::DatasetPtr retained_page;
         if (consume) {
-            for (int batch = 0; batch < 3; ++batch) {
+            for (uint64_t batch = 0; batch < expected_ids.size(); ++batch) {
                 auto page = session->Next(kBatch);
                 REQUIRE(page.has_value());
-                REQUIRE(page.value()->GetDim() == kBatch);
-                for (int64_t i = 0; i < kBatch; ++i) {
+                REQUIRE(page.value()->GetDim() == expected_ids[batch].size());
+                for (int64_t i = 0; i < page.value()->GetDim(); ++i) {
                     REQUIRE(page.value()->GetIds()[i] == expected_ids[batch][i]);
                     REQUIRE(page.value()->GetDistances()[i] == expected_distances[batch][i]);
                 }
@@ -361,8 +371,8 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
         session.reset();
         REQUIRE(weak_filter.expired());
         if (retained_page) {
-            REQUIRE(retained_page->GetDim() == kBatch);
-            for (int64_t i = 0; i < kBatch; ++i) {
+            REQUIRE(retained_page->GetDim() == expected_ids.front().size());
+            for (int64_t i = 0; i < retained_page->GetDim(); ++i) {
                 REQUIRE(retained_page->GetIds()[i] == expected_ids.front()[i]);
                 REQUIRE(retained_page->GetDistances()[i] == expected_distances.front()[i]);
             }
