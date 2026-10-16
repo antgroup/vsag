@@ -224,6 +224,8 @@ HGraph::build_by_pipnn(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
+    // Build has exclusive access; reject invalid levels before allocating IDs or training.
+    this->validate_random_levels(static_cast<uint64_t>(data->GetNumElements()));
     std::vector<int64_t> failed_ids;
 
     auto pipnn_parameter = this->pipnn_param_;
@@ -687,7 +689,6 @@ HGraph::assign_batch_levels(Vector<AddRow>& rows) {
     if (rows.empty()) {
         return;
     }
-    std::scoped_lock lock(this->add_mutex_);
     for (auto& row : rows) {
         row.level = this->get_random_level() - 1;
     }
@@ -700,6 +701,10 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* source_id = data->GetSourceID();
+    // Keep the live RNG unchanged between preflight and assignment. Do not hold the label
+    // lock across resize(): insertion/search acquire global protection before label locks.
+    std::scoped_lock preparation_lock(this->add_mutex_);
+    this->validate_random_levels(static_cast<uint64_t>(total));
     for (int64_t j = 0; j < total; ++j) {
         {
             std::shared_lock label_lock(this->label_lookup_mutex_);
@@ -710,17 +715,13 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             }
         }
 
-        InnerIdType inner_id;
-        {
-            std::scoped_lock lock(this->add_mutex_);
-            inner_id = this->get_unique_inner_ids(1).at(0);
-            if (inner_id >= total_count_) {
-                this->resize(total_count_.load() + 1);
-                ++total_count_;
-                // Deliberately NOT published here: this only reserves the id. The node
-                // becomes visible when insert_one_logical_point has written both its codes
-                // and its link lists.
-            }
+        const auto inner_id = this->get_unique_inner_ids(1).at(0);
+        if (inner_id >= total_count_) {
+            this->resize(total_count_.load() + 1);
+            ++total_count_;
+            // Deliberately NOT published here: this only reserves the id. The node
+            // becomes visible when insert_one_logical_point has written both its codes
+            // and its link lists.
         }
 
         AddRow row;
@@ -832,8 +833,36 @@ HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
     std::vector<std::future<void>> futures;
     // Drain submitted workers before their stack-owned context expires if submission fails.
     HGraphBuildTaskGuard guard(futures, worker_count);
-    for (uint64_t i = 0; i < worker_count; ++i) {
-        futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
+    try {
+        for (uint64_t i = 0; i < worker_count; ++i) {
+            futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
+        }
+    } catch (...) {
+        const auto enqueue_exception = std::current_exception();
+        // Keep submission failure primary, but report secondary failures after draining.
+        const auto report_secondary = [](const std::exception_ptr& error) noexcept {
+            try {
+                try {
+                    std::rethrow_exception(error);
+                } catch (const std::exception& e) {
+                    logger::error("HGraph insertion worker failed while draining: {}", e.what());
+                } catch (...) {
+                    logger::error("HGraph insertion worker failed with an unknown exception");
+                }
+            } catch (...) {
+                // A failing logger must not replace the original submission exception.
+            }
+        };
+        try {
+            wait_all_futures(futures);
+        } catch (...) {
+            report_secondary(std::current_exception());
+        }
+        // RunRows retains row failures in the context rather than in the worker futures.
+        if (context.error != nullptr) {
+            report_secondary(context.error);
+        }
+        std::rethrow_exception(enqueue_exception);
     }
     wait_all_futures(futures);
     // Worker completion synchronizes error-record reads below; no lock is needed after the wait.
@@ -1958,6 +1987,8 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     CHECK_ARGUMENT(this->cache_ != nullptr, "build_with_cache requires an imported cache");
     CHECK_ARGUMENT(data->GetSourceID() != nullptr,
                    "build_with_cache requires Dataset::SourceID to be set");
+
+    this->validate_random_levels(static_cast<uint64_t>(data->GetNumElements()));
 
     const auto build_begin = build_cache_now_us();
     this->Train(data);

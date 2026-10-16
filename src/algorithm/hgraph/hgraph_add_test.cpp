@@ -37,6 +37,7 @@
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -55,6 +56,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/label_table/label_table.h"
+#include "impl/logger/capturing_logger_test.h"
 #include "impl/searcher/basic_searcher.h"
 #include "impl/searcher/hybrid_mci_searcher.h"
 #include "impl/searcher/mci_searcher.h"
@@ -111,6 +113,11 @@ struct HGraphMemoryEstimateTestAccess {
     static std::default_random_engine
     Generator(const HGraph& graph) {
         return graph.level_generator_;
+    }
+
+    static double
+    ExchangeLevelMultiplier(HGraph& graph, double value) {
+        return std::exchange(graph.mult_, value);
     }
 
     static uint64_t
@@ -1307,6 +1314,137 @@ struct ControlledRows {
 
 }  // namespace
 
+TEST_CASE("HGraph random level failure preserves existing data and allows retry",
+          "[ut][hgraph][random_level_failure]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const bool existing = GENERATE(false, true);
+    const bool later_draw = GENERATE(false, true);
+    const uint64_t threads = GENERATE(1, 4);
+    {
+        CAPTURE(existing, later_draw, threads);
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), MakeCommonParam(16));
+        BuildMemoryData initial(4, 16);
+        if (existing) {
+            REQUIRE(index->Build(initial.dataset).has_value());
+        }
+        auto graph = InnerHGraph(index);
+        const auto before_count = index->GetNumElements();
+        const auto before_rng = Access::Generator(*graph);
+        uint64_t rows = 7;
+        double injected = std::numeric_limits<double>::infinity();
+        if (later_draw) {
+            // Choose a finite multiplier whose first overflow occurs after a valid draw.
+            auto engine = before_rng;
+            std::uniform_real_distribution<double> distribution(0.0, 1.0);
+            const double first = -std::log(distribution(engine));
+            bool found = false;
+            for (uint64_t row = 1; row < 128; ++row) {
+                const double next = -std::log(distribution(engine));
+                if (next > first) {
+                    injected = (static_cast<double>(std::numeric_limits<int>::max()) + 1.0) /
+                               ((first + next) / 2.0);
+                    rows = row + 1;
+                    found = true;
+                    break;
+                }
+            }
+            REQUIRE(found);
+        }
+        BuildMemoryData addition(rows, 16);
+        for (auto& id : addition.ids) {
+            id += 100;
+        }
+        // Fault injection only: valid public parameters do not produce this multiplier.
+        const auto original = Access::ExchangeLevelMultiplier(*graph, injected);
+        auto failed = existing ? index->Add(addition.dataset) : index->Build(addition.dataset);
+        Access::ExchangeLevelMultiplier(*graph, original);
+        REQUIRE_FALSE(failed.has_value());
+        REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        std::cout << "RNG_FAILURE_REPRO existing=" << existing << " before=" << before_count
+                  << " after=" << index->GetNumElements()
+                  << " first_new_label=" << index->CheckIdExist(100) << std::endl;
+        CHECK(index->GetNumElements() == before_count);
+        CHECK_FALSE(index->CheckIdExist(100));
+        CHECK(Access::Generator(*graph) == before_rng);
+        auto retried = existing ? index->Add(addition.dataset) : index->Build(addition.dataset);
+        REQUIRE(retried.has_value());
+        CHECK(retried->empty());
+        CHECK(index->GetNumElements() == before_count + rows);
+        for (const auto id : addition.ids) {
+            REQUIRE(index->CheckIdExist(id));
+        }
+        if (existing) {
+            for (const auto id : initial.ids) {
+                REQUIRE(index->CheckIdExist(id));
+            }
+        }
+        auto query = vsag::Dataset::Make()->NumElements(1)->Dim(16)->Owner(false)->Float32Vectors(
+            addition.vectors.data());
+        auto result =
+            index->KnnSearch(query,
+                             before_count + rows,
+                             R"({"hgraph":{"ef_search":256,"brute_force_threshold":1.0}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == before_count + rows);
+        for (const auto id : addition.ids) {
+            REQUIRE(ResultContainsId(result.value(), id));
+        }
+        if (existing) {
+            for (const auto id : initial.ids) {
+                REQUIRE(ResultContainsId(result.value(), id));
+            }
+        }
+    }
+}
+
+TEST_CASE("HGraph batch and cache builds reject invalid levels before publishing labels",
+          "[ut][hgraph][random_level_failure]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const std::string path = GENERATE("odescent", "pipnn", "cache");
+    CAPTURE(path);
+    auto json = MakeBuildMemoryJson();
+    if (path != "cache") {
+        json["graph_type"].SetString(path);
+    }
+    auto index = MakeHGraphIndex(json, MakeCommonParam(16));
+    BuildMemoryData data(32, 16);
+    std::vector<std::string> source_ids(32);
+    for (uint64_t row = 0; row < source_ids.size(); ++row) {
+        source_ids[row] = std::to_string(row);
+    }
+    if (path == "cache") {
+        data.dataset->SourceID(source_ids.data());
+        auto source = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+        REQUIRE(source->Build(data.dataset).has_value());
+        std::stringstream cache;
+        REQUIRE(source->ExportCache(cache).has_value());
+        cache.seekg(0);
+        REQUIRE(index->ImportCache(cache).has_value());
+    }
+    auto graph = InnerHGraph(index);
+    const auto before_rng = Access::Generator(*graph);
+    const auto original =
+        Access::ExchangeLevelMultiplier(*graph, std::numeric_limits<double>::infinity());
+    auto failed = index->Build(data.dataset);
+    Access::ExchangeLevelMultiplier(*graph, original);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == 0);
+    REQUIRE(Access::Generator(*graph) == before_rng);
+    for (const auto id : data.ids) {
+        REQUIRE_FALSE(index->CheckIdExist(id));
+    }
+    auto retried = index->Build(data.dataset);
+    REQUIRE(retried.has_value());
+    REQUIRE(retried->empty());
+    REQUIRE(index->GetNumElements() == 32);
+    for (const auto id : data.ids) {
+        REQUIRE(index->CheckIdExist(id));
+    }
+}
+
 TEST_CASE("HGraph build memory validates the profile and reports modeled ownership cells",
           "[ut][hgraph][estimate_build_memory][estimate_build_memory_matrix]") {
     BlockSizeLimitGuard blocks(uint64_t{1} << 18);
@@ -1716,6 +1854,79 @@ TEST_CASE("HGraph bounded dispatch drains launched work after enqueue failure",
     REQUIRE_FALSE(result.has_value());
     REQUIRE(pool->Counts()[0] == 2);
     REQUIRE(pool->Counts()[1] == 1);
+}
+
+TEST_CASE("HGraph bounded dispatch reports row failures without replacing enqueue failures",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    class ErrorLogger : public vsag::testing::CapturingLogger {
+    public:
+        bool throw_on_error{false};
+
+        void
+        Error(const std::string& message) override {
+            vsag::testing::CapturingLogger::Error(message);
+            if (throw_on_error) {
+                throw std::runtime_error("controlled logger failure");
+            }
+        }
+    };
+    for (bool nonstandard : {false, true}) {
+        for (bool logger_throws : {false, true}) {
+            CAPTURE(nonstandard, logger_throws);
+            ErrorLogger logger;
+            logger.throw_on_error = logger_throws;
+            vsag::testing::ScopedLogger scoped_logger(&logger);
+            struct Rows {
+                std::array<std::atomic<uint64_t>, 7> attempts{};
+                bool nonstandard;
+            } rows{{}, nonstandard};
+            for (auto& attempt : rows.attempts) {
+                attempt.store(0);
+            }
+            Access::WorkContext context;
+            context.row_count = rows.attempts.size();
+            context.row_state = &rows;
+            context.row_function = [](void* opaque, uint64_t row) {
+                auto& state = *static_cast<Rows*>(opaque);
+                ++state.attempts[row];
+                if (row == 0) {
+                    if (state.nonstandard) {
+                        throw uint64_t{42};
+                    }
+                    throw std::runtime_error("controlled row failure");
+                }
+            };
+            auto pool = std::make_shared<GatedBuildPool>(1);
+            BuildPoolReleaseGuard release(pool);
+            vsag::SafeThreadPool safe_pool(pool);
+            auto dispatched =
+                std::async(std::launch::async, [&] { Access::RunWorkers(safe_pool, 4, context); });
+            const bool started = pool->AwaitStarted(1);
+            const bool rejected = pool->AwaitSubmissionFailure();
+            const bool waiting =
+                dispatched.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
+            pool->Release();
+            bool submission_rethrown = false;
+            try {
+                dispatched.get();
+            } catch (const std::runtime_error& error) {
+                REQUIRE(std::string(error.what()) == "controlled Build submission failure");
+                submission_rethrown = true;
+            }
+            pool->WaitUntilEmpty();
+            REQUIRE(started);
+            REQUIRE(rejected);
+            REQUIRE(waiting);
+            REQUIRE(submission_rethrown);
+            for (const auto& attempt : rows.attempts) {
+                REQUIRE(attempt.load() == 1);
+            }
+            REQUIRE(logger.lines.size() == 1);
+            const auto expected = nonstandard ? "unknown exception" : "controlled row failure";
+            REQUIRE(logger.lines.front().find(expected) != std::string::npos);
+        }
+    }
 }
 
 TEST_CASE("HGraph bounded dispatch also applies to unsupported-estimator Add",
