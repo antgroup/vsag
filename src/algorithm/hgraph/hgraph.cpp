@@ -217,7 +217,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
-    // Entry invalidation is conservative, including failed and count-zero tuning calls.
+    // Invalidate before acquiring add_mutex_: even failed or count-zero Tune attempts
+    // conservatively end eligibility. This does not permit concurrent capability queries.
     this->build_estimate_lifecycle_clean_.store(false, std::memory_order_release);
     this->check_fused_mutation_supported("Tune");
     std::scoped_lock lock(this->add_mutex_);
@@ -614,6 +615,8 @@ estimate_packaged_task_request() {
     return estimate_shared_request<std::packaged_task<void()>>() + callable +
            sizeof(std::__assoc_sub_state);
 #elif defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBSTDCXX)
+    // libstdc++ __create_task_state defaults to allocator<int> and rebinds it for State;
+    // retain that allocator type when modeling the task and its shared control block.
     using State = std::__future_base::_Task_state<Fn, std::allocator<int>, void()>;
     return estimate_shared_request<std::packaged_task<void()>>() +
            sizeof(std::_Sp_counted_ptr_inplace<State,
@@ -633,10 +636,13 @@ estimate_deque_request(uint64_t element_size, uint64_t occupancy) {
     CHECK_ARGUMENT(valid_size, "memory estimate element size must be positive");
 #if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP)
     const uint64_t per_block = element_size < 256 ? 4096 / element_size : 16;
+    // libc++ may retain a front spare block; ceil(Q/B) + 2 covers it and partial end blocks.
     const uint64_t blocks = estimate_checked_add(estimate_ceil_div(occupancy, per_block), 2);
     const uint64_t map_slots = std::max<uint64_t>(1, estimate_checked_mul(2, blocks));
 #else
     const uint64_t per_block = element_size < 512 ? 512 / element_size : 1;
+    // libstdc++ releases consumed front blocks. With start offset s < B, live nodes are
+    // floor((s + Q) / B) + 1 <= floor(Q / B) + 2, including the finish node.
     const uint64_t blocks = estimate_checked_add(occupancy / per_block, 2);
     const uint64_t map_slots =
         std::max<uint64_t>(8, estimate_checked_add(estimate_checked_mul(4, blocks), 2));
