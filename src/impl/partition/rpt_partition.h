@@ -67,6 +67,8 @@ private:
     emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves);
 
 private:
+    friend class RPTPartitionTestAccess;
+
     const uint64_t dim_{0};
     Allocator* const allocator_{nullptr};
 
