@@ -437,6 +437,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            HGRAPH_DEDUPLICATE_STORAGE,
+            {
+                DEDUPLICATE_STORAGE,
+            },
+        },
+        {
             HGRAPH_DUPLICATE_DISTANCE_THRESHOLD,
             {
                 DUPLICATE_DISTANCE_THRESHOLD,
@@ -523,6 +529,71 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
             {
                 HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY,
+            },
+        },
+        // Backport: PiPNN build parameters are nested under the graph params,
+        // matching main's `inner_json[GRAPH_KEY][key].SetJson(value)` routing.
+        {
+            PIPNN_PARAMETER_MAX_LEAF_SIZE,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_MAX_LEAF_SIZE,
+            },
+        },
+        {
+            PIPNN_PARAMETER_MIN_LEAF_SIZE,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_MIN_LEAF_SIZE,
+            },
+        },
+        {
+            PIPNN_PARAMETER_LEADER_SAMPLE_RATE,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_LEADER_SAMPLE_RATE,
+            },
+        },
+        {
+            PIPNN_PARAMETER_FANOUT,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_FANOUT,
+            },
+        },
+        {
+            PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT,
+            },
+        },
+        {
+            PIPNN_PARAMETER_HASH_PLANE_COUNT,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_HASH_PLANE_COUNT,
+            },
+        },
+        {
+            PIPNN_PARAMETER_RESERVOIR_SIZE,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_RESERVOIR_SIZE,
+            },
+        },
+        {
+            PIPNN_PARAMETER_ADAPTIVE_PRUNING,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_ADAPTIVE_PRUNING,
+            },
+        },
+        {
+            PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP,
+            {
+                GRAPH_KEY,
+                PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP,
             },
         }};
     const std::string hgraph_params_template =
@@ -612,6 +683,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             "{ATTR_HAS_BUCKETS_KEY}": false
         },
         "{HGRAPH_SUPPORT_DUPLICATE}": false,
+        "{HGRAPH_DEDUPLICATE_STORAGE}": false,
         "{SUPPORT_FORCE_REMOVE}": false,
         "{HGRAPH_PERSIST_SOURCE_ID_KEY}": false,
         "{EF_CONSTRUCTION_KEY}": 400

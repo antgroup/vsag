@@ -108,6 +108,18 @@ const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
 const char* const DISKANN_GRAPH_TYPE_VAMANA = "vamana";
 const char* const GRAPH_TYPE_ODESCENT = "odescent";
 const char* const GRAPH_TYPE_NSW = "nsw";
+const char* const GRAPH_TYPE_PIPNN = "pipnn";
+
+const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE = "pipnn_max_leaf_size";
+const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE = "pipnn_min_leaf_size";
+const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE = "pipnn_leader_sample_rate";
+const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
+const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
+const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
+const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
+    "pipnn_adaptive_pruning_adjust_step";
 
 const char* const HNSW_PARAMETER_EF_RUNTIME = "ef_search";
 const char* const HNSW_PARAMETER_M = "max_degree";
@@ -207,6 +219,7 @@ const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD = "hgraph_valid_ratio_
 const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP = "max_duplicates_per_group";
 const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
 const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
+const char* const HGRAPH_DEDUPLICATE_STORAGE = "deduplicate_storage";
 const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
 const char* const HGRAPH_LABEL_REMAP_TYPE = "label_remap_type";
 const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";

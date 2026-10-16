@@ -21,6 +21,7 @@
 #include "../index_search_parameter.h"
 #include "../inner_index_parameter.h"
 #include "data_type.h"
+#include "impl/pipnn/pipnn_graph_builder.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/constants.h"
@@ -83,6 +84,7 @@ public:
     SparseGraphDatacellParamPtr hierarchical_graph_param{nullptr};
 
     ODescentParameterPtr odescent_param{nullptr};
+    PiPNNGraphBuilderParameter pipnn_param{};
 
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
 
@@ -94,6 +96,7 @@ public:
     float alpha{1.0F};
 
     bool support_duplicate{false};
+    bool deduplicate_storage{false};
     float duplicate_distance_threshold{0.0F};
     bool support_force_remove{false};
 

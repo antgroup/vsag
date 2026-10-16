@@ -100,6 +100,17 @@ extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
 extern const char* const DISKANN_GRAPH_TYPE_VAMANA;
 extern const char* const GRAPH_TYPE_ODESCENT;
 extern const char* const GRAPH_TYPE_NSW;
+extern const char* const GRAPH_TYPE_PIPNN;
+
+extern const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE;
+extern const char* const PIPNN_PARAMETER_FANOUT;
+extern const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT;
+extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
+extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP;
 
 extern const char* const DISKANN_PARAMETER_BEAM_SEARCH;
 extern const char* const DISKANN_PARAMETER_IO_LIMIT;
@@ -232,6 +243,7 @@ extern const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD;
 extern const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP;
 extern const char* const HGRAPH_EXTRA_INFO_SIZE;
 extern const char* const HGRAPH_SUPPORT_DUPLICATE;
+extern const char* const HGRAPH_DEDUPLICATE_STORAGE;
 extern const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD;
 extern const char* const HGRAPH_LABEL_REMAP_TYPE;
 extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
