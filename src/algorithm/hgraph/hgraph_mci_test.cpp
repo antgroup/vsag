@@ -83,6 +83,11 @@ public:
               int64_t k,
               const std::string& parameters,
               const vsag::FilterPtr& filter) const override {
+        // Build also calls this override from MCI workers. Catch2 assertions and the
+        // query counter are only safe here once the serial analyzer checks begin.
+        if (not inspect_queries) {
+            return vsag::HGraph::KnnSearch(query, k, parameters, filter);
+        }
         REQUIRE(query->GetFloat32Vectors() == nullptr);
         REQUIRE(query->GetInt8Vectors() != nullptr);
         const auto dim = static_cast<uint64_t>(query->GetDim());
@@ -97,6 +102,7 @@ public:
         return vsag::HGraph::KnnSearch(query, k, parameters, filter);
     }
 
+    bool inspect_queries{false};
     std::vector<int8_t> expected_vectors;
     mutable uint64_t queries{0};
 };
@@ -1542,7 +1548,7 @@ TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][m
                        ->Int8Vectors(index.expected_vectors.data())
                        ->Owner(false);
     REQUIRE(index.Build(dataset).empty());
-    index.queries = 0;
+    index.inspect_queries = true;
     vsag::AnalyzerParam analyzer_params(common.allocator_.get());
     analyzer_params.base_sample_size = total;
     analyzer_params.topk = 3;
