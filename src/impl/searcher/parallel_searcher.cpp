@@ -67,11 +67,8 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             }
             if (not vl->Get(neighbors[i][j])) {
                 vl->Set(neighbors[i][j]);
-                // Removed filter->CheckValid() to eliminate duplicate filter checking.
-                // Filter is applied at result-collection stage.
-                // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
                 if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                    skip_strategy->ShouldVisit()) {
+                    skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
                 }
@@ -171,6 +168,28 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         return (is_id_allowed == nullptr or is_id_allowed->CheckValid(id)) and
                (attr_ft == nullptr or attr_ft->CheckValid(id));
     };
+    auto add_duplicate_results = [&](float duplicate_dist, InnerIdType group_member_id) {
+        if (not inner_search_param.consider_duplicate or
+            inner_search_param.max_duplicates_per_group == 0) {
+            return;
+        }
+
+        if (not is_result_distance_eligible(duplicate_dist)) {
+            return;
+        }
+
+        int64_t duplicate_count = 0;
+        for (const auto duplicate_id : graph->GetDuplicateIds(group_member_id)) {
+            if (inner_search_param.max_duplicates_per_group >= 0 and
+                duplicate_count >= inner_search_param.max_duplicates_per_group) {
+                break;
+            }
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(duplicate_dist, duplicate_id);
+                ++duplicate_count;
+            }
+        }
+    };
 
     if (inner_search_param.enable_rabitq_one_bit_search) {
         flatten->QueryWithDistanceLowerBound(&dist, nullptr, computer, &ep, 1, ctx);
@@ -181,17 +200,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         top_candidates->Push(dist, ep);
         lower_bound = top_candidates->Top().first;
     }
-    // See BasicSearcher: the entry point's duplicate labels are only expanded from this seed block.
-    if (inner_search_param.consider_duplicate and is_result_distance_eligible(dist)) {
-        for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
-            if (check_func(duplicate_id)) {
-                top_candidates->Push(dist, duplicate_id);
-            }
-        }
-        if constexpr (mode == KNN_SEARCH) {
-            while (top_candidates->Size() > ef) {
-                top_candidates->Pop();
-            }
+    if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        add_duplicate_results(dist, ep);
+        while (top_candidates->Size() > ef) {
+            top_candidates->Pop();
         }
         if (not top_candidates->Empty()) {
             lower_bound = top_candidates->Top().first;
@@ -343,17 +355,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (is_result_distance_eligible(dist) and check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
                 }
-                if (inner_search_param.consider_duplicate) {
-                    const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
-                    for (const auto& item : duplicate_ids) {
-                        if (is_result_distance_eligible(dist) and check_func(item)) {
-                            top_candidates->Push(dist, item);
-                        }
-                    }
-                }
+                add_duplicate_results(dist, cur_id);
 
                 if constexpr (mode == KNN_SEARCH) {
-                    if (top_candidates->Size() > ef) {
+                    while (top_candidates->Size() > ef) {
                         top_candidates->Pop();
                     }
                 }

@@ -84,7 +84,7 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
 | `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
-| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
+| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |
 | `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
 | `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
@@ -274,6 +274,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `max_duplicates_per_group` | int | `-1` | With `support_duplicate=true`, limits additional members per group during standard, parallel, and iterator KNN graph search. `-1` means unlimited; `0` disables expansion; positive values count members accepted by the filter, excluding the representative. Does not affect RangeSearch or brute-force fallback. |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
