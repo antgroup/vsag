@@ -159,6 +159,26 @@ TEST_CASE("IVF Parameters Test", "[ut][IVFParameter]") {
     search_param = vsag::IVFSearchParameters::FromJson(param_str);
     REQUIRE(search_param.scan_buckets_count == 20);
     REQUIRE(search_param.first_order_scan_ratio == 0.1f);
+
+    param_str = R"(
+    {
+        "ivf": {
+            "scan_buckets_count": 20,
+            "enable_gpu_search": true,
+            "gpu_min_batch": 64
+        }
+    })";
+    search_param = vsag::IVFSearchParameters::FromJson(param_str);
+    REQUIRE(search_param.enable_gpu_search);
+    REQUIRE(search_param.gpu_min_batch == 64);
+
+    REQUIRE_THROWS(vsag::IVFSearchParameters::FromJson(R"({
+        "ivf": {
+            "scan_buckets_count": 20,
+            "enable_gpu_search": true,
+            "gpu_min_batch": 0
+        }
+    })"));
 }
 
 TEST_CASE("IVF precise codes layout parameter", "[ut][IVFParameter]") {

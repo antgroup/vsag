@@ -167,8 +167,27 @@ The four settings reach the `ivf` partition strategy only. With
 `partition_strategy_type: "gno_imi"` they are accepted and ignored, as the other
 strategy-specific parameters in the table are, and that build stays on the host.
 
-**Scope.** Only the build changes. Search is untouched: queries still route through the
-graph, which is the right shape for one query at a time. The four settings are
+**Scope.** The index build settings above only change the build. Search remains on the CPU
+unless a batch request opts in with `enable_gpu_search`:
+
+```json
+{
+    "ivf": {
+        "scan_buckets_count": 32,
+        "enable_gpu_search": true,
+        "gpu_min_batch": 32
+    }
+}
+```
+
+The search path batches dense query-centroid products through cuBLAS, performs the top-nprobe
+selection on the device, and transfers only bucket ids back. Bucket-local RaBitQ FastScan and
+supplement-code reorder remain on the CPU. Single-query requests, batches smaller than
+`gpu_min_batch`, nprobe above 256, unsupported metrics, and CUDA failures use the existing CPU
+route. This is therefore a hybrid GPU-routed IVF-RaBitQ path, not a device-resident implementation
+of the complete posting-list scan.
+
+The four build settings are
 recorded in the index footer as every other build parameter is, so two otherwise
 identical builds are not byte-identical, but the compatibility check on load
 ignores them: an index built with the backend on loads into a reader configured

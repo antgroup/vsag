@@ -141,6 +141,8 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "failed to build all IVF routing centroids");
         }
+        std::lock_guard lock(this->gpu_route_centroids_mutex_);
+        this->gpu_route_centroids_.assign(data.begin(), data.end());
     } else {
         // Persist the trained centroids (normalized for cosine) so the scan routing path can
         // assign buckets without creating a routing HGraph.
@@ -182,10 +184,76 @@ IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
                                             int64_t count,
                                             const InnerSearchParam& param,
                                             QueryContext* ctx) {
-    // Search time: one query, a handful of buckets. The graph search is the right
-    // shape, and the device would prepare the whole centroid set per query. The
-    // routing statistics also come only from here.
+    if (param.enable_gpu_search) {
+        if (auto selected = classify_search_on_device(
+                datas, count, param.scan_bucket_size, param.gpu_min_batch, ctx)) {
+            return std::move(selected.value());
+        }
+    }
     return classify_datas_on_host(datas, count, param.scan_bucket_size, ctx);
+}
+
+std::optional<Vector<BucketIdType>>
+IVFNearestPartition::classify_search_on_device(const void* datas,
+                                               int64_t count,
+                                               BucketIdType buckets_per_data,
+                                               int64_t min_batch,
+                                               QueryContext* ctx) const {
+    if (datas == nullptr or count < min_batch or buckets_per_data <= 0 or
+        buckets_per_data > bucket_count_ or not is_trained_) {
+        return std::nullopt;
+    }
+    if (metric_type_ != MetricType::METRIC_TYPE_L2SQR and
+        metric_type_ != MetricType::METRIC_TYPE_COSINE) {
+        return std::nullopt;
+    }
+
+    const float* centroids = nullptr;
+    if (use_route_graph_) {
+        std::lock_guard lock(this->gpu_route_centroids_mutex_);
+        const uint64_t expected_size = static_cast<uint64_t>(bucket_count_) * dim_;
+        if (this->gpu_route_centroids_.size() != expected_size) {
+            this->gpu_route_centroids_.resize(expected_size);
+            for (BucketIdType bucket_id = 0; bucket_id < bucket_count_; ++bucket_id) {
+                route_index_ptr_->GetCodeByInnerId(
+                    bucket_id,
+                    reinterpret_cast<uint8_t*>(this->gpu_route_centroids_.data() +
+                                               static_cast<uint64_t>(bucket_id) * dim_));
+            }
+        }
+        centroids = this->gpu_route_centroids_.data();
+    } else {
+        if (centroids_.size() != static_cast<uint64_t>(bucket_count_) * dim_) {
+            return std::nullopt;
+        }
+        centroids = centroids_.data();
+    }
+
+    const gpu::CudaDeviceScope device(ivf_partition_strategy_param_->gpu_device_id);
+    if (not device.Bound()) {
+        return std::nullopt;
+    }
+    Vector<BucketIdType> result(
+        static_cast<uint64_t>(count) * buckets_per_data, INVALID_BUCKET_ID, allocator_);
+    const uint64_t budget = gpu::CudaSuggestedBudget(
+        gpu::EffectiveChunkedCap(ivf_partition_strategy_param_->gpu_memory_budget));
+    if (not gpu::CudaSelectNearestCentroids(static_cast<const float*>(datas),
+                                            static_cast<uint64_t>(count),
+                                            centroids,
+                                            static_cast<uint64_t>(bucket_count_),
+                                            static_cast<int32_t>(dim_),
+                                            static_cast<uint32_t>(buckets_per_data),
+                                            result.data(),
+                                            budget,
+                                            static_cast<uint64_t>(min_batch))) {
+        return std::nullopt;
+    }
+    if (ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->AddDistance(SearchStatistics::DistancePhase::ROUTING,
+                                DistanceEvaluationBackend::FP32,
+                                static_cast<uint64_t>(count) * bucket_count_);
+    }
+    return result;
 }
 
 /// The build-time assignment, offloaded. Nothing means use the host path: the
@@ -380,6 +448,10 @@ IVFNearestPartition::Serialize(StreamWriter& writer) {
 void
 IVFNearestPartition::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     IVFPartitionStrategy::Deserialize(reader);
+    {
+        std::lock_guard lock(this->gpu_route_centroids_mutex_);
+        this->gpu_route_centroids_.clear();
+    }
     // Peek the layout marker without consuming bytes so legacy (marker-less) route-graph
     // indices remain loadable with any reader configuration.
     const auto cursor = reader->GetCursor();
@@ -449,6 +521,10 @@ IVFNearestPartition::GetMemoryUsage() const {
     }
     memory += this->centroids_.size() * sizeof(float);
     memory += this->norms_.size() * sizeof(float);
+    {
+        std::lock_guard lock(this->gpu_route_centroids_mutex_);
+        memory += this->gpu_route_centroids_.size() * sizeof(float);
+    }
     return memory;
 }
 Vector<BucketIdType>

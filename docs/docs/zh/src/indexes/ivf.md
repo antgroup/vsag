@@ -156,8 +156,24 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 这四个设置只作用于 `ivf` 分区策略。在 `partition_strategy_type: "gno_imi"` 下
 它们会被接受但忽略，与表中其他按策略生效的参数一致，该构建全程留在主机。
 
-**范围。** 只有构建过程改变。检索不受影响：查询仍走图路由，那正是单条查询合适的
-形状。四个设置会像其他构建参数一样记入索引 footer，因此两次在其他方面相同的构建
+**范围。** 上述索引参数只改变构建。批量查询可通过搜索参数显式开启 GPU 路由：
+
+```json
+{
+    "ivf": {
+        "scan_buckets_count": 32,
+        "enable_gpu_search": true,
+        "gpu_min_batch": 32
+    }
+}
+```
+
+该路径用 cuBLAS 批量计算 query-centroid 乘积，在设备上完成 top-nprobe，只把桶 id
+传回主机；桶内 RaBitQ FastScan 和补充码精排仍在 CPU 上执行。单查询、小于
+`gpu_min_batch` 的 batch、nprobe 大于 256、不支持的度量和 CUDA 失败都会回退到原有
+CPU 路径。因此它是 GPU 路由的混合 IVF-RaBitQ，而不是完整 posting-list 扫描常驻 GPU。
+
+四个构建设置会像其他构建参数一样记入索引 footer，因此两次在其他方面相同的构建
 并非逐字节相同；但加载时的兼容性检查会忽略它们：开启后端构建出的索引可以载入任何
 其他配置的读取端，包括没有 GPU 的机器，之后按该读取端自己的配置运行。质心与主机
 构建的结果可能有细微差异：两条路径的随机选择都来自调用方的随机源，但设备用原子加

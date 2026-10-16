@@ -71,6 +71,8 @@ public:
     std::vector<int64_t> bucket_ids;
     QueryContext* query_context{nullptr};
     ReasoningContext* reasoning_ctx{nullptr};
+    bool enable_gpu_search{false};
+    int64_t gpu_min_batch{32};
 
     // deal with duplicate ids
     mutable int64_t duplicate_id{-1};
