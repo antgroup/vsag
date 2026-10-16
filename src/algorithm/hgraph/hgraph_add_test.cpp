@@ -125,7 +125,7 @@ struct HGraphMemoryEstimateTestAccess {
 
     static bool
     LifecycleClean(const HGraph& graph) {
-        return graph.build_estimate_lifecycle_clean_.load();
+        return graph.build_estimate_lifecycle_clean_.load(std::memory_order_acquire);
     }
 
     static std::array<uint64_t, 4>
