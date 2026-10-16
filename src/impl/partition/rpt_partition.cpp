@@ -83,12 +83,14 @@ RPTPartition::Run(const float* datas, uint64_t count, const RPTPartitionParams& 
         throw VsagException(ErrorType::INVALID_ARGUMENT, "count exceeds the supported range");
     }
 
-    datas_ = datas;
-    max_depth_ = params.max_depth;
     partitions_.clear();
     if (count == 0) {
+        datas_ = nullptr;
         return {};
     }
+
+    datas_ = datas;
+    max_depth_ = params.max_depth;
 
     ids_.resize(count);
     for (uint64_t i = 0; i < count; ++i) {

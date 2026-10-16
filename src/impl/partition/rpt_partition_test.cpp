@@ -20,7 +20,20 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
+#include "vsag/utils.h"
 #include "vsag_exception.h"
+
+namespace vsag {
+
+class RPTPartitionTestAccess {
+public:
+    static const float*
+    InputData(const RPTPartition& partitioner) {
+        return partitioner.datas_;
+    }
+};
+
+}  // namespace vsag
 
 namespace {
 
@@ -159,6 +172,37 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         auto partitions = partitioner.Run(datas.data(), count, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
+}
+
+TEST_CASE("RPTPartition Empty Input Does Not Retain Data", "[ut][RPTPartition]") {
+    uint64_t dim = 8;
+    uint64_t count = 25;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::RPTPartition partitioner(dim, allocator.get());
+    vsag::RPTPartitionParams params;
+    params.bucket_size = 10;
+    auto datas = fixtures::generate_vectors(count, dim);
+
+    REQUIRE(partitioner.Run(datas.data(), 0, params).empty());
+    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
+
+    auto expected = partitioner.Run(datas.data(), count, params);
+    CheckPartitions(expected, count, params.bucket_size);
+
+    {
+        auto empty_datas = fixtures::generate_vectors(1, dim);
+        REQUIRE(partitioner.Run(empty_datas.data(), 0, params).empty());
+        REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
+    }
+
+    auto invalid_params = params;
+    invalid_params.bucket_size = 0;
+    REQUIRE_THROWS_AS(partitioner.Run(datas.data(), count, invalid_params), vsag::VsagException);
+    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
+
+    auto actual = partitioner.Run(datas.data(), count, params);
+    REQUIRE(actual == expected);
+    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 }
 
 TEST_CASE("RPTPartition Reproducibility", "[ut][RPTPartition]") {
