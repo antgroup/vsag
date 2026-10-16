@@ -298,6 +298,13 @@ public:
     /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
+    /// Build the bottom graph via PiPNN and route graphs via ODescent.
+    std::vector<int64_t>
+    build_by_pipnn(const DatasetPtr& data);
+
+    /// Shared batch-build orchestration for ODescent and PiPNN.
+    std::vector<int64_t>
+    build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
     /// Insert a single point into the graph(s) at the given level.
     void
@@ -722,6 +729,7 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
@@ -744,6 +752,7 @@ private:
     // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
     // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
     mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations

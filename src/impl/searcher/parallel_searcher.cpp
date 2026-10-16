@@ -201,6 +201,10 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         lower_bound = top_candidates->Top().first;
     }
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
+        // The entry point is marked visited before its neighbours are expanded, so its
+        // own duplicate labels are never reached by the traversal loop. 1.0
+        // handles them via add_duplicate_results(), which also honours
+        // max_duplicates_per_group.
         add_duplicate_results(dist, ep);
         while (top_candidates->Size() > ef) {
             top_candidates->Pop();

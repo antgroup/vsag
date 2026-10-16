@@ -308,6 +308,23 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
                    static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                    cur_count * static_cast<uint64_t>(code_size_));
     } else {
+        bool ids_are_contiguous = count > 0;
+        for (InnerIdType i = 1; i < count and ids_are_contiguous; ++i) {
+            ids_are_contiguous = idx_vec[i] == idx_vec[0] + i;
+        }
+        if (ids_are_contiguous) {
+            ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                             allocator_);
+            quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
+            std::lock_guard lock(mutex_);
+            total_count_ = std::max(total_count_, idx_vec[0] + count);
+            // 1.0 only exposes the flat IO write path, so write the contiguous run at its
+            // starting offset instead of main's layout-aware WriteRange().
+            io_->Write(codes.data,
+                       static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
+                       static_cast<uint64_t>(idx_vec[0]) * static_cast<uint64_t>(code_size_));
+            return;
+        }
         auto dim = quantizer_->GetDim();
         for (int64_t i = 0; i < count; ++i) {
             this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx_vec[i]);

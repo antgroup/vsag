@@ -118,10 +118,25 @@ HGraphParameter::FromJson(const JsonType& json) {
 
     if (graph_json.Contains(GRAPH_TYPE_KEY)) {
         graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT) {
+        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_NSW or
+                           graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+                           graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       fmt::format("invalid graph_type: {}", graph_type));
+        if (graph_type == GRAPH_TYPE_VALUE_ODESCENT or graph_type == GRAPH_TYPE_VALUE_PIPNN) {
             odescent_param = std::make_shared<ODescentParameter>();
             odescent_param->FromJson(graph_json);
         }
+        if (graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+            pipnn_param.FromJson(graph_json);
+            pipnn_param.alpha = this->alpha;
+            pipnn_param.Validate(this->bottom_graph_param->max_degree_);
+        }
+    }
+
+    if (graph_json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING) and
+        graph_json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()) {
+        CHECK_ARGUMENT(graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       "pipnn_adaptive_pruning requires graph_type=pipnn");
     }
 
     if (json.Contains(SUPPORT_DUPLICATE)) {
@@ -262,7 +277,12 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_IGNORE_REORDER_KEY].SetBool(this->ignore_reorder);
     json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
-    json[GRAPH_KEY].SetJson(this->bottom_graph_param->ToJson());
+    auto graph_json = this->bottom_graph_param->ToJson();
+    if (this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+        graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
+        graph_json.UpdateJson(this->pipnn_param.ToJson());
+    }
+    json[GRAPH_KEY].SetJson(graph_json);
     json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     json[ALPHA_KEY].SetFloat(this->alpha);
     json[SUPPORT_DUPLICATE].SetBool(this->support_duplicate);
@@ -324,6 +344,12 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, support_duplicate);
     CHECK_FIELD_EQ(*this, *p, duplicate_distance_threshold);
     CHECK_FIELD_EQ(*this, *p, support_force_remove);
+    CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
+    if (this->pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, graph_type);
+        CHECK_FIELD_EQ(*this, *p, alpha);
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);
+    }
     CHECK_FIELD_EQ(*this, *p, mci_parameters.enabled);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.mcs);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_max);

@@ -39,6 +39,8 @@ last-reviewed: 2026-05-12
 
 VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/) and a Node.js/TypeScript binding package called `vsag`.
 
+HGraph supports experimental, opt-in adaptive alpha for PiPNN L2 builds; see the [HGraph parameter guide](docs/docs/en/src/indexes/hgraph.md).
+
 ## Performance
 The VSAG algorithm SINDI for sparse vector search achieves a breakthrough in performance, substantially outperforming previous **state-of-the-art (SOTA)** solutions. In our internal tests on a 40-core Intel(R) Xeon(R) Silver 4210R CPU, VSAG's QPS exceeds that of the previous SOTA algorithm, Zilliz, by 166% on the sparse-full(8M) at 98% recall. While the official ann-benchmarks on sparse track runs on an Azure Standard D8lds v5 VM, we plan to submit our results under the official benchmark environment soon to formally validate this performance leap.
 
@@ -328,6 +330,10 @@ VSAG referenced the following works during its implementation:
 2. Quasi-succinct Indices [_WSDM_, 2013]  
   Sebastiano Vigna  
    [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
+
+3. PiPNN: Ultra-Scalable Graph-Based Nearest Neighbor Indexing [_arXiv_, 2026] \
+  Tobias Rubel, Richard Wen, Laxman Dhulipala, Lars Gottesbüren, Rajesh Jayaram, Jakub Łącki \
+   [PDF](https://arxiv.org/pdf/2602.21247) | [CODE](https://github.com/ParAlg/PiPNN)
 
 ## Contributors
 

@@ -93,6 +93,11 @@ JsonWrapper::IsNumberUnsigned() const {
 }
 
 bool
+JsonWrapper::IsNumber() const {
+    return json_->is_number();
+}
+
+bool
 JsonWrapper::IsString() const {
     return json_->is_string();
 }
