@@ -1272,6 +1272,7 @@ TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",
     constexpr uint64_t build_threads = 4;
     auto common_param = MakeCommonParam(dim, build_threads);
     auto hgraph_json = MakeFp32HGraphJson(true, static_cast<int64_t>(build_threads));
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {
@@ -1419,6 +1420,7 @@ TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates se
     constexpr int64_t dim = 2;
     auto common_param = MakeCommonParam(dim);
     auto hgraph_json = MakeFp32HGraphJson();
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {

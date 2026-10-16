@@ -469,6 +469,12 @@ public:
     std::vector<int64_t>
     build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
+    /// Encode each PiPNN representative once, then bind all logical IDs to its slot.
+    void
+    materialize_pipnn_storage(const DatasetPtr& data,
+                              const Vector<InnerIdType>& inner_ids,
+                              const Vector<int64_t>& valid_indices);
+
     /// Write codes for inner_id into the persistent flatten storage.
     void
     insert_persistent_codes(const void* data,

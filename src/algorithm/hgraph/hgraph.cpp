@@ -96,9 +96,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                 "HGraph PiPNN only supports dense float32 indexes");
         }
     }
-    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
+        this->graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph deduplicate_storage only supports nsw graph");
+                            "HGraph deduplicate_storage only supports nsw or pipnn graph");
     }
     this->persist_source_id_ = hgraph_param->persist_source_id;
     if (this->using_dedup_storage()) {
@@ -149,7 +150,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     this->resize_increase_count_bit_ = hgraph_param->resize_increase_count_bit;
-    init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, thread_pool_, neighbors_mutex_);
@@ -170,11 +170,17 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             this->high_precise_codes_ = MakeCodeSlotFlattenAdapter(
                 this->high_precise_codes_, this->code_slot_map_, allocator_, &this->total_count_);
         }
+        if (this->raw_vector_ != nullptr and not this->create_new_raw_vector_) {
+            // Shared raw storage must keep the logical-ID adapter too.
+            this->check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param, false);
+        }
         if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
             this->raw_vector_ = MakeCodeSlotFlattenAdapter(
                 this->raw_vector_, this->code_slot_map_, allocator_, &this->total_count_);
         }
     }
+    // Reorder retains its flatten pointer, so initialize it after slot wrapping.
+    init_resize_bit_and_reorder();
     resize(bottom_graph_->max_capacity_);
 }
 
