@@ -830,6 +830,16 @@ HGraph::random_level_draw(std::default_random_engine& engine, double mult) {
     return level;
 }
 
+void
+HGraph::validate_random_levels(uint64_t count) const {
+    // No per-row storage or live RNG advance. Duplicate labels only shorten the consumed
+    // prefix, so checking all input rows is conservative under exceptional RNG conditions.
+    auto engine = this->level_generator_;
+    for (uint64_t row = 0; row < count; ++row) {
+        (void)random_level_draw(engine, this->mult_);
+    }
+}
+
 uint64_t
 HGraph::build_estimate_checked_capacity(uint64_t num_elements, uint64_t resize_bit) {
     const bool valid_bit = resize_bit >= 1 && resize_bit <= 30;
@@ -911,8 +921,9 @@ HGraph::build_memory_estimate_state_supported() const {
     return valid_capacity and pristine_cache and
            this->build_estimate_lifecycle_clean_.load(std::memory_order_acquire) and
            not this->immutable_.load(std::memory_order_acquire) and
-           this->total_count_.load() == 0 and
-           static_cast<uint64_t>(this->max_capacity_.load()) == initial_capacity;
+           this->total_count_.load(std::memory_order_acquire) == 0 and
+           static_cast<uint64_t>(this->max_capacity_.load(std::memory_order_acquire)) ==
+               initial_capacity;
 }
 
 bool

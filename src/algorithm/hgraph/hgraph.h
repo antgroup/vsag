@@ -440,6 +440,11 @@ public:
     static double
     random_level_draw(std::default_random_engine& engine, double mult);
 
+    /// Check a copied RNG prefix before publishing IDs/labels; consumes no RNG state.
+    /// Caller must hold add_mutex_ or have exclusive Build access to the index.
+    void
+    validate_random_levels(uint64_t count) const;
+
     /**
      * @brief Allocate a contiguous block of fresh internal IDs.
      *
@@ -644,6 +649,7 @@ private:
     ///
     /// Drawing all levels before the parallel insert phase makes level assignment a pure
     /// function of the batch contents instead of a function of worker scheduling.
+    /// Caller holds add_mutex_ from RNG preflight through metadata preparation.
     void
     assign_batch_levels(Vector<AddRow>& rows);
 

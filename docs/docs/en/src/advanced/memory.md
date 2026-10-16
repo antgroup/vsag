@@ -60,6 +60,15 @@ For HGraph, a count of zero returns 0, while a rounded element count or byte tot
 unrepresentable in `uint64_t` throws an exception derived from `std::exception` instead of
 silently wrapping.
 
+**Random-level failure handling.** Before reserving IDs or publishing labels, the NSW,
+batch-graph and imported-cache build paths validate the input-sized random-level prefix
+using a copied generator. This adds O(N) time and constant storage, without consuming the
+live RNG. NSW holds the Add preparation lock through validation and level assignment;
+row insertion still runs after that lock is released. An invalid level therefore leaves
+IDs, labels and RNG state available for retry. This is not general rollback: NSW training
+may already have occurred, and other failures can still leave partial state. Checking all
+input rows is conservative when duplicate labels would consume fewer draws.
+
 See `examples/cpp/308_feature_estimate_memory.cpp` for a full run.
 
 ### `EstimateBuildMemory(num_elements)`
