@@ -91,7 +91,7 @@ topology on Update; equal RaBitQ codes do not mean raw inputs are identical.
 | --- | --- | --- |
 | Reviewable standalone implementation with CRUD/persistence/config/tests | PR #2904, sources and examples above; ON/OFF regression suites | Community CI and maintainer review, not automatic merge |
 | Architecture: modules/layout/memory/API boundaries | This guide and bilingual RaBitQ design | Keep synchronized when behavior changes |
-| Reproducible multi-dataset benchmarks and raw results | [Versioned performance evidence](../../../../../lite/PERFORMANCE_EVIDENCE.md), pinned scripts/configs/raw archives for SIFT/GIST/Cohere 10k/100k | One unified latest-source CPU/peak/CRUD/quality matrix, cold I/O and hours-long interleaved changed-vector stability |
+| Reproducible multi-dataset benchmarks and raw results | Delivered separately in benchmark PR #2926 | One unified latest-source CPU/peak/CRUD/quality matrix, cold I/O and hours-long interleaved changed-vector stability |
 | At least one improvement against actual Full with stable retrieval | Historical warm load/RSS/ELF-closure results with explicit Full provenance | Quality-matched native Full comparison, complete deployment package; GIST maintenance quality remains incomplete |
 
 `.github/workflows/lite.yml` defines default-OFF, RaBitQ-ON, ASan/UBSan and

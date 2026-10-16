@@ -25,13 +25,12 @@ atomic file replacement, SQ8, mmap or same-instance concurrent access is promise
 - [Current English function/source/test/requirement mapping](../docs/docs/en/src/development/lite_first.md)
 - [当前中文功能、源码、测试及产出要求对照](../docs/docs/zh/src/development/lite_first.md)
 - [RaBitQ implementation and limits](../docs/docs/en/src/development/lite_rabitq_design.md)
-- [Versioned performance evidence and acceptance gaps](PERFORMANCE_EVIDENCE.md)
 
 `tools/check_tidy.py` checks configured Lite translation units and private/public
 headers using clang-tidy15. `tools/collect_coverage.py` unions production Lite
 source/header executable lines across instrumented tests and enforces 90%; it
 does not measure Full or branch coverage. See `.github/workflows/lite.yml` for
-default-OFF, ON, sanitizer and coverage CI matrices. Replay scripts/configs/raw
-benchmark results are pinned by the evidence report; they are not fictitious
-current-version results. Functional tests do not establish final quality,
+default-OFF, ON, sanitizer and coverage CI matrices. Benchmark reports,
+replay scripts, configurations and raw results are delivered separately in
+benchmark PR #2926. Functional tests do not establish final quality,
 performance or hours-long stability acceptance.
