@@ -282,6 +282,8 @@ private:
     Vector<GraphInterfacePtr> bucket_graphs_;
     GraphInterfaceParamPtr graph_param_{nullptr};
     int64_t graph_build_threshold_{0};
+    int32_t gpu_device_id_{0};
+    uint64_t gpu_memory_budget_{0};
     IndexCommonParam common_param_;
 
     IVFPartitionStrategyPtr partition_strategy_{nullptr};  // centroid / partition logic

@@ -410,6 +410,8 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
       common_param_(common_param) {
+    this->gpu_device_id_ = param->ivf_partition_strategy_parameter->gpu_device_id;
+    this->gpu_memory_budget_ = param->ivf_partition_strategy_parameter->gpu_memory_budget;
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
