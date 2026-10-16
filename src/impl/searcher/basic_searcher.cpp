@@ -337,7 +337,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
                 }
             }
-            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
+            if (not IsFiniteFloatBits(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(cur_id)) {
                     continue;
@@ -558,7 +558,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
                 }
             }
-            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
+            if (not IsFiniteFloatBits(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(traversal_priority(dist), cur_id);
                 //                flatten->Prefetch(candidate_set->Top().second);

@@ -349,7 +349,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             if (dist < THRESHOLD_ERROR) {
                 inner_search_param.duplicate_id = cur_id;
             }
-            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
+            if (not IsFiniteFloatBits(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(traversal_priority(dist), cur_id);
                 if (is_result_distance_eligible(dist) and check_func(cur_id)) {
