@@ -171,7 +171,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                 this->high_precise_codes_, this->code_slot_map_, allocator_, &this->total_count_);
         }
         if (this->raw_vector_ != nullptr and not this->create_new_raw_vector_) {
-            // Shared raw storage must keep the logical-ID adapter too.
+            // Rebind an existing FP32 raw alias to the wrapped base/reorder codes.
+            // false refreshes the alias/flags without allocating another raw flatten.
             this->check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param, false);
         }
         if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
@@ -799,6 +800,11 @@ void
 HGraph::init_resize_bit_and_reorder() {
     if (use_reorder_) {
         auto reorder_codes = this->get_reorder_codes();
+        if (this->using_dedup_storage() and
+            GetCodeSlotPhysicalFlatten(reorder_codes) == reorder_codes) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "storage deduplication requires wrapped reorder codes");
+        }
         auto fused_graph =
             reorder_codes.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
         reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_, fused_graph);
