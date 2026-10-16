@@ -321,9 +321,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         batch_insert_flatten_codes(temporary_sq8_build_data);
         temporary_codes_batched = true;
     }
-    // Every code page of the batch is written at this point (or by the per-row loop below when
-    // rows were skipped), so the batch can be published exactly like a sequence of Add() calls.
-    this->PublishThroughTotalCount();
+    if (not this->using_dedup_storage()) {
+        this->PublishThroughTotalCount();
+    }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     Vector<const float*> pipnn_vectors(allocator_);
     if (use_pipnn) {
@@ -341,7 +341,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
-        } else if (not persistent_codes_batched) {
+        } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
             this->insert_persistent_codes(get_data(data, i), inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
@@ -406,6 +406,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
         pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        if (this->using_dedup_storage() and not defer_persistent_codes) {
+            this->materialize_pipnn_storage(data, inner_ids, valid_indices);
+        }
         if (this->support_duplicate_) {
             entry_point_id_ = bottom_graph_->GetGroupId(entry_point_id_);
             for (auto& route_graph_id : route_graph_ids) {
@@ -458,7 +461,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (this->rabitq_fused_datacell_ == nullptr) {
             this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
-        if (all_rows_are_valid) {
+        if (this->using_dedup_storage()) {
+            this->materialize_pipnn_storage(data, inner_ids, valid_indices);
+        } else if (all_rows_are_valid) {
             batch_insert_persistent_codes();
         } else {
             for (const auto& [inner_id, local_idx] : deferred_code_ids) {
@@ -466,7 +471,90 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             }
         }
     }
+    if (this->using_dedup_storage()) {
+        // All logical IDs now have complete codes and a published slot mapping.
+        this->PublishThroughTotalCount();
+    }
     return failed_ids;
+}
+
+void
+HGraph::materialize_pipnn_storage(const DatasetPtr& data,
+                                  const Vector<InnerIdType>& inner_ids,
+                                  const Vector<int64_t>& valid_indices) {
+    struct Representative {
+        InnerIdType inner_id;
+        CodeSlotIdType slot;
+        int64_t row;
+    };
+    Vector<Representative> representatives(allocator_);
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        const auto id = inner_ids[i];
+        if (bottom_graph_->GetGroupId(id) == id) {
+            representatives.push_back({id, 0, valid_indices[i]});
+        }
+    }
+    // Build is exclusive. Encode into provisional slots so a failed task does not consume
+    // slot IDs or change logical mappings. The allocated buffers can be reused after failure.
+    const auto first_slot = code_slot_map_->PhysicalCount();
+    CHECK_ARGUMENT(
+        representatives.size() <= std::numeric_limits<CodeSlotIdType>::max() - first_slot,
+        "PiPNN storage exceeds the code slot limit");
+    for (uint64_t i = 0; i < representatives.size(); ++i) {
+        representatives[i].slot = first_slot + static_cast<CodeSlotIdType>(i);
+    }
+    this->ensure_physical_code_capacity(first_slot +
+                                        static_cast<CodeSlotIdType>(representatives.size()));
+
+    // Capacity is fixed before workers write. Wait for every scheduled task before publishing
+    // mappings or letting representative rows go out of scope, even if scheduling/encoding fails.
+    const uint64_t workers = std::min<uint64_t>(
+        representatives.size(),
+        thread_pool_ != nullptr ? std::max<uint64_t>(1, build_thread_count_) : 1);
+    std::vector<std::future<void>> futures;
+    futures.reserve(workers);
+    std::exception_ptr failure;
+    try {
+        for (uint64_t worker = 0; worker < workers; ++worker) {
+            const auto begin = representatives.size() * worker / workers;
+            const auto end = representatives.size() * (worker + 1) / workers;
+            auto encode = [this, &representatives, data, begin, end]() {
+                for (auto i = begin; i < end; ++i) {
+                    const auto& representative = representatives[i];
+                    this->insert_persistent_codes_to_slot(get_data(data, representative.row),
+                                                          representative.slot);
+                }
+            };
+            if (workers > 1) {
+                futures.emplace_back(thread_pool_->GeneralEnqueue(std::move(encode)));
+            } else {
+                encode();
+            }
+        }
+    } catch (...) {
+        failure = std::current_exception();
+    }
+    for (auto& future : futures) {
+        try {
+            future.get();
+        } catch (...) {
+            if (failure == nullptr) {
+                failure = std::current_exception();
+            }
+        }
+    }
+    if (failure != nullptr) {
+        std::rethrow_exception(failure);
+    }
+    for (const auto& representative : representatives) {
+        code_slot_map_->PublishSlot(representative.inner_id, code_slot_map_->AllocateSlot());
+    }
+    for (auto id : inner_ids) {
+        const auto group = bottom_graph_->GetGroupId(id);
+        if (group != id) {
+            code_slot_map_->PublishSlot(id, code_slot_map_->Resolve(group));
+        }
+    }
 }
 
 std::vector<int64_t>

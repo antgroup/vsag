@@ -84,7 +84,7 @@ auto result = index->KnnSearch(
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
-| `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |
 | `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
@@ -113,8 +113,8 @@ auto result = index->KnnSearch(
 [PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
 HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
-存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建和向量存储去重
-暂不支持 PiPNN。上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
+上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
 现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
 
 `build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
@@ -136,8 +136,13 @@ PiPNN，并通过查询验证每一份生成的图。
 ### 向量存储去重
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
-同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；`graph_type: "odescent"` 和 `graph_type: "pipnn"` 不支持。
+同一个物理编码槽位，但仍保留各自的标签。该选项支持使用 `graph_type: "nsw"` 或 `"pipnn"` 的
+稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
+
+PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每个代表向量只编码一次，
+各 label 的属性和 extra_info 仍独立保存，也可同时启用动态 alpha。
+`duplicate_distance_threshold` 不参与 PiPNN 批量分组；后续增量 `Add` 沿用现有的
+距离阈值或编码判重规则。量化器仍使用原有训练样本进行训练。
 
 启用存储去重后，暂不支持以下操作和配置：
 
