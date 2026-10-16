@@ -703,7 +703,7 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
     const auto* source_id = data->GetSourceID();
     // Keep the live RNG unchanged between preflight and assignment. Do not hold the label
     // lock across resize(): insertion/search acquire global protection before label locks.
-    std::scoped_lock preparation_lock(this->add_mutex_);
+    std::scoped_lock preparation_lock(this->add_prepare_mutex_);
     this->validate_random_levels(static_cast<uint64_t>(total));
     for (int64_t j = 0; j < total; ++j) {
         {
@@ -715,13 +715,17 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             }
         }
 
-        const auto inner_id = this->get_unique_inner_ids(1).at(0);
-        if (inner_id >= total_count_) {
-            this->resize(total_count_.load() + 1);
-            ++total_count_;
-            // Deliberately NOT published here: this only reserves the id. The node
-            // becomes visible when insert_one_logical_point has written both its codes
-            // and its link lists.
+        InnerIdType inner_id;
+        {
+            std::scoped_lock id_lock(this->add_mutex_);
+            inner_id = this->get_unique_inner_ids(1).at(0);
+            if (inner_id >= total_count_) {
+                this->resize(total_count_.load() + 1);
+                ++total_count_;
+                // Deliberately NOT published here: this only reserves the id. The node
+                // becomes visible when insert_one_logical_point has written both its codes
+                // and its link lists.
+            }
         }
 
         AddRow row;
@@ -825,8 +829,7 @@ void
 HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
                                      uint64_t thread_count,
                                      InsertAddBatchWorkContext& context) {
-    uint64_t worker_count =
-        std::min<uint64_t>(std::max<uint64_t>(thread_count, 1), context.row_count);
+    const uint64_t worker_count = insert_worker_count(true, thread_count, context.row_count);
     if (worker_count == 0) {
         return;
     }

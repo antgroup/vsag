@@ -509,7 +509,19 @@ constexpr bool K_BUILD_ESTIMATE_STDLIB_MODELED = true;
 constexpr bool K_BUILD_ESTIMATE_STDLIB_MODELED = false;
 #endif
 
-// The level replay keeps per-level counts in this fixed array.
+// Five helpers below (estimate_shared_request, estimate_function_target_request,
+// estimate_packaged_task_request, estimate_scheduler_task_request and
+// estimate_sampled_dataset_request) static_assert their fallback #else, so a new modeled
+// profile cannot silently return 0. estimate_deque_request has no separate fallback: its
+// #else is the libstdc++ model. A new modeled profile must add branches to all six.
+
+// The level replay keeps per-level counts in this fixed array, so replay storage does not
+// depend on N. With the 1/ln 4 replay multiplier, finite draws stayed below about 15.8 in
+// the G0 exhaustive probe, verified only for the recorded AppleClang/SDK 26.5 and
+// GCC 11.4/glibc binaries; that observed bound is not universal and the cap stays 64.
+// A draw at or beyond the cap is rejected with a typed error rather than indexing the
+// array out of range. If the multiplier, distribution or engine changes, re-derive the
+// bound before changing the cap.
 constexpr uint64_t K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS = 64;
 // Distinct-key count up to which the tsl displacement limit cannot trigger an extra rehash.
 constexpr uint64_t K_BUILD_ESTIMATE_NOMINAL_HASH_KEYS = 8193;
@@ -547,7 +559,7 @@ estimate_ceil_div(uint64_t value, uint64_t divisor) {
     return value / divisor + static_cast<uint64_t>(value % divisor != 0);
 }
 
-// Retained capacity plus the coexisting old array of a geometrically grown vector.
+// Reallocation peak of a geometrically grown vector: retained old array plus new array.
 uint64_t
 estimate_grown_vector(uint64_t count, uint64_t element_size) {
     const bool valid_size = element_size > 0;
@@ -561,6 +573,7 @@ estimate_grown_vector(uint64_t count, uint64_t element_size) {
 
 uint64_t
 estimate_string_request(const std::string& value) {
+    // +1 for the null terminator stored past capacity().
     return value.capacity() > std::string().capacity() ? estimate_checked_add(value.capacity(), 1)
                                                        : 0;
 }
@@ -574,6 +587,8 @@ estimate_shared_request() {
     return sizeof(
         std::_Sp_counted_ptr_inplace<T, std::allocator<T>, __gnu_cxx::__default_lock_policy>);
 #else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_shared_request: add the new stdlib profile");
     return 0;
 #endif
 }
@@ -598,6 +613,8 @@ estimate_function_target_request() {
                            std::_Function_base::_M_max_align % alignof(F) == 0;
     return local ? 0 : sizeof(F);
 #else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_function_target_request: add the new stdlib profile");
     return 0;
 #endif
 }
@@ -624,6 +641,8 @@ estimate_packaged_task_request() {
                                                __gnu_cxx::__default_lock_policy>) +
            sizeof(std::__future_base::_Result<void>);
 #else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_packaged_task_request: add the new stdlib profile");
     return 0;
 #endif
 }
@@ -698,6 +717,8 @@ estimate_scheduler_task_request() {
     return estimate_packaged_task_request<Bound>() + queued + 2 * wrapper +
            estimate_packaged_task_request<BackendBound>() + queued;
 #else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_scheduler_task_request: add the new stdlib profile");
     return 0;
 #endif
 }
@@ -728,6 +749,8 @@ estimate_sampled_dataset_request() {
                                   std::__cache_default<std::string, std::hash<std::string>>::value>;
     constexpr uint64_t node = sizeof(Node);
 #else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_sampled_dataset_request: add the new stdlib profile");
     constexpr uint64_t node = 0;
 #endif
     return estimate_shared_request<DatasetImpl>() + K_BUILD_ESTIMATE_DATASET_KEYS * node +
@@ -740,6 +763,9 @@ struct BuildEstimateTable {
 };
 
 // tsl prime growth policy: the first prime whose load threshold admits every key.
+// The table itself is tsl::rh::detail::PRIMES from the pinned tsl in extern/tsl/tsl.cmake;
+// a rename fails at compile time, and when that happens the prime and 0.75-threshold
+// model must be re-derived.
 BuildEstimateTable
 estimate_prime_table(uint64_t keys, float max_load) {
     if (keys == 0) {
@@ -832,7 +858,8 @@ HGraph::random_level_draw(std::default_random_engine& engine, double mult) {
 
 void
 HGraph::validate_random_levels(uint64_t count) const {
-    // No per-row storage or live RNG advance. Duplicate labels only shorten the consumed
+    // O(count) time, constant storage; advances a copy only. No per-row storage or live
+    // RNG advance. Duplicate labels only shorten the consumed
     // prefix, so checking all input rows is conservative under exceptional RNG conditions.
     auto engine = this->level_generator_;
     for (uint64_t row = 0; row < count; ++row) {
@@ -914,6 +941,9 @@ HGraph::build_memory_estimate_state_supported() const {
         this->resize_increase_count_bit_ >= 1 and this->resize_increase_count_bit_ <= 30 and
         initial_capacity > 0 and
         initial_capacity <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
+    // The model assumes a fresh cache: source_ids_ never allocated (capacity 0) and the
+    // neighbor-map bucket count equal to the fresh count recorded at construction
+    // (build_estimate_fresh_cache_buckets_). A cleared cache keeps its capacity.
     const bool pristine_cache =
         this->cache_ != nullptr and this->cache_->source_ids_.empty() and
         this->cache_->source_ids_.capacity() == 0 and this->cache_->neighbors_.empty() and
@@ -1020,10 +1050,7 @@ struct HGraph::BuildMemoryEstimateContext {
         ef = index.ef_construct_;
         nonempty = n > 0;
         has_pool = index.thread_pool_ != nullptr;
-        workers =
-            nonempty
-                ? (has_pool ? std::min(n, std::max<uint64_t>(1, index.build_thread_count_)) : 1)
-                : 0;
+        workers = insert_worker_count(has_pool, index.build_thread_count_, n);
         visited_lists = nonempty ? estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
                                                         std::max<uint64_t>(1, workers))
                                  : 1;
