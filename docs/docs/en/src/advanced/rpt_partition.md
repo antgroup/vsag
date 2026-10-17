@@ -9,6 +9,14 @@ algorithms.
 Compared with random bucketing or sorting on a single dimension, an RPT keeps nearby vectors in
 the same partition far more often while still producing partitions of almost identical size.
 
+## Distance Space
+
+The locality behavior assumes Euclidean geometry. The function computes projections using inner
+products with random directions and does not normalize the input vectors. If the partitions will
+be used for cosine similarity, L2-normalize every input vector before calling `rpt_partition`.
+For unit-normalized vectors, cosine similarity and Euclidean distance induce the same neighborhood
+ordering.
+
 ## API Overview
 
 ```cpp
