@@ -48,13 +48,16 @@ read_peak_rss_kb() {
 
 uint64_t
 ceil_div(uint64_t value, uint64_t divisor) {
-    return (value + divisor - 1) / divisor;
+    return value / divisor + (value % divisor != 0);
 }
 
 /// Cuts an ordered id list into `leaves` chunks whose sizes differ by at most one.
 Partitions
 cut_into_chunks(const std::vector<int64_t>& ids, uint64_t leaves) {
     Partitions partitions;
+    if (ids.empty() || leaves == 0) {
+        return partitions;
+    }
     partitions.reserve(leaves);
     uint64_t count = ids.size();
     uint64_t quotient = count / leaves;
