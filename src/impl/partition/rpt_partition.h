@@ -41,13 +41,18 @@ public:
     explicit RPTPartition(uint64_t dim, Allocator* allocator);
 
     /**
-     * @brief Partitions `count` vectors of `dim_` dimensions.
+     * @brief Partitions `count` vectors of `dim` dimensions.
      *
-     * @throws VsagException(INVALID_ARGUMENT) when `params.bucket_size == 0`, or when
-     *         `datas == nullptr` while `count > 0`.
+     * @param datas Pointer to at least `count * dim` contiguous float values.
+     * @param count Number of vectors to partition.
+     * @param dim Number of dimensions in each vector; must match the constructor argument.
+     * @param params Partitioning parameters.
+     *
+     * @throws VsagException(INVALID_ARGUMENT) when `dim == 0`, `dim != dim_`,
+     *         `params.bucket_size == 0`, or when `datas == nullptr` while `count > 0`.
      */
     std::vector<std::vector<int64_t>>
-    Run(const float* datas, uint64_t count, const RPTPartitionParams& params);
+    Run(const float* datas, uint64_t count, uint64_t dim, const RPTPartitionParams& params);
 
 private:
     void
