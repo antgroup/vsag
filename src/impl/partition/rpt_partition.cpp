@@ -146,9 +146,10 @@ RPTPartition::split(
 
     // Ties on the projection value are broken by id so that the cut position is always
     // reachable (e.g. for duplicated vectors) and the output is deterministic.
-    auto comparator = [this](InnerIdType a, InnerIdType b) {
-        if (projections_[a] != projections_[b]) {
-            return projections_[a] < projections_[b];
+    const float* projections = projections_.data();
+    auto comparator = [projections](InnerIdType a, InnerIdType b) {
+        if (projections[a] != projections[b]) {
+            return projections[a] < projections[b];
         }
         return a < b;
     };
