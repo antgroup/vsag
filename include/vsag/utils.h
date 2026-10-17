@@ -139,6 +139,10 @@ struct RPTPartitionParams {
  *   - when `n >= L`, every partition holds at least `floor(L / 2)` vectors, and the
  *     ratio between the largest and the smallest partition never exceeds 2.
  *
+ * The locality behavior assumes Euclidean geometry. For cosine similarity, L2-normalize
+ * the input vectors before calling this function; unit-normalized vectors have equivalent
+ * cosine and Euclidean neighborhood orderings.
+ *
  * @param d The dimensionality of the vectors, must be positive.
  * @param n The number of vectors. `n == 0` yields an empty result.
  * @param x Pointer to the input array of size `n * d`. It is owned by the caller and is
