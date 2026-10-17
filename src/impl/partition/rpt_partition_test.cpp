@@ -90,7 +90,7 @@ RunPartition(const std::vector<float>& datas,
              const vsag::RPTPartitionParams& params) {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::RPTPartition partitioner(dim, allocator.get());
-    return partitioner.Run(datas.data(), count, params);
+    return partitioner.Run(datas.data(), count, dim, params);
 }
 
 }  // namespace
@@ -121,14 +121,19 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
     params.bucket_size = 10;
 
     SECTION("empty input") {
-        auto partitions = partitioner.Run(nullptr, 0, params);
+        auto partitions = partitioner.Run(nullptr, 0, dim, params);
         REQUIRE(partitions.empty());
+    }
+
+    SECTION("dimension mismatch") {
+        auto datas = fixtures::generate_vectors(4, dim);
+        REQUIRE_THROWS_AS(partitioner.Run(datas.data(), 4, dim - 1, params), vsag::VsagException);
     }
 
     SECTION("fewer vectors than bucket size") {
         uint64_t count = 7;
         auto datas = fixtures::generate_vectors(count, dim);
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         REQUIRE(partitions.size() == 1);
         REQUIRE(partitions[0].size() == count);
     }
@@ -137,24 +142,24 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         uint64_t count = 25;
         params.bucket_size = 1;
         auto datas = fixtures::generate_vectors(count, dim);
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
 
     SECTION("bucket size of zero") {
         auto datas = fixtures::generate_vectors(4, dim);
         params.bucket_size = 0;
-        REQUIRE_THROWS_AS(partitioner.Run(datas.data(), 4, params), vsag::VsagException);
+        REQUIRE_THROWS_AS(partitioner.Run(datas.data(), 4, dim, params), vsag::VsagException);
     }
 
     SECTION("null data with positive count") {
-        REQUIRE_THROWS_AS(partitioner.Run(nullptr, 4, params), vsag::VsagException);
+        REQUIRE_THROWS_AS(partitioner.Run(nullptr, 4, dim, params), vsag::VsagException);
     }
 
     SECTION("duplicated vectors") {
         uint64_t count = 1000;
         std::vector<float> datas(count * dim, 1.5F);
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
 
@@ -164,7 +169,7 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         datas[3] = std::numeric_limits<float>::quiet_NaN();
         datas[dim * 7 + 1] = std::numeric_limits<float>::infinity();
         datas[dim * 8 + 2] = -std::numeric_limits<float>::infinity();
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
 
@@ -172,7 +177,7 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         uint64_t count = 1234;
         params.max_depth = 2;
         auto datas = fixtures::generate_vectors(count, dim);
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
 
@@ -180,7 +185,7 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         uint64_t count = 95;
         params.max_depth = 0;
         auto datas = fixtures::generate_vectors(count, dim);
-        auto partitions = partitioner.Run(datas.data(), count, params);
+        auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
     }
 }
@@ -215,24 +220,25 @@ TEST_CASE("RPTPartition Empty Input Does Not Retain Data", "[ut][RPTPartition]")
     params.bucket_size = 10;
     auto datas = fixtures::generate_vectors(count, dim);
 
-    REQUIRE(partitioner.Run(datas.data(), 0, params).empty());
+    REQUIRE(partitioner.Run(datas.data(), 0, dim, params).empty());
     REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 
-    auto expected = partitioner.Run(datas.data(), count, params);
+    auto expected = partitioner.Run(datas.data(), count, dim, params);
     CheckPartitions(expected, count, params.bucket_size);
 
     {
         auto empty_datas = fixtures::generate_vectors(1, dim);
-        REQUIRE(partitioner.Run(empty_datas.data(), 0, params).empty());
+        REQUIRE(partitioner.Run(empty_datas.data(), 0, dim, params).empty());
         REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
     }
 
     auto invalid_params = params;
     invalid_params.bucket_size = 0;
-    REQUIRE_THROWS_AS(partitioner.Run(datas.data(), count, invalid_params), vsag::VsagException);
+    REQUIRE_THROWS_AS(partitioner.Run(datas.data(), count, dim, invalid_params),
+                      vsag::VsagException);
     REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 
-    auto actual = partitioner.Run(datas.data(), count, params);
+    auto actual = partitioner.Run(datas.data(), count, dim, params);
     REQUIRE(actual == expected);
     REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 }

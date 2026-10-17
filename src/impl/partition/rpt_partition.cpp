@@ -72,7 +72,17 @@ RPTPartition::RPTPartition(uint64_t dim, Allocator* allocator)
 }
 
 std::vector<std::vector<int64_t>>
-RPTPartition::Run(const float* datas, uint64_t count, const RPTPartitionParams& params) {
+RPTPartition::Run(const float* datas,
+                  uint64_t count,
+                  uint64_t dim,
+                  const RPTPartitionParams& params) {
+    if (dim == 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "dim must be positive");
+    }
+    if (dim != dim_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "dim does not match the partitioner's configured dimension");
+    }
     if (params.bucket_size == 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "bucket_size must be positive");
     }
@@ -228,7 +238,7 @@ rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& 
     try {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         RPTPartition partitioner(d, allocator.get());
-        return partitioner.Run(x, n, params);
+        return partitioner.Run(x, n, d, params);
     } catch (const VsagException& e) {
         return tl::unexpected(e.error_);
     } catch (const std::exception& e) {
