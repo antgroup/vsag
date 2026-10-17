@@ -119,6 +119,7 @@ range_search_recall(const float* base,
  */
 struct RPTPartitionParams {
     /// Target bucket size L: every partition holds at most L vectors.
+    /// Must be positive; zero is rejected with INVALID_ARGUMENT.
     uint64_t bucket_size{1000};
 
     /// Upper bound on the tree depth. When reached, the remaining vectors are split
