@@ -34,6 +34,7 @@
 - [乘积量化（PQ）](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ（分段码字调整量化）](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [量化变换（TQ）](advanced/quantization_transform.md)
 
