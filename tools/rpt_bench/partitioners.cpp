@@ -136,20 +136,23 @@ partition_by_single_dim(const PartitionRequest& request) {
             return;
         }
         // Pick the dimension with the largest variance, then sort the ids along it.
-        std::vector<double> sums(request.dim, 0.0);
-        std::vector<double> square_sums(request.dim, 0.0);
+        std::vector<double> means(request.dim, 0.0);
+        std::vector<double> m2(request.dim, 0.0);
         for (uint64_t i = 0; i < request.count; ++i) {
             const float* vector = request.data + i * request.dim;
+            double sample_count = static_cast<double>(i + 1);
             for (uint64_t j = 0; j < request.dim; ++j) {
-                sums[j] += vector[j];
-                square_sums[j] += static_cast<double>(vector[j]) * vector[j];
+                double value = static_cast<double>(vector[j]);
+                double delta = value - means[j];
+                means[j] += delta / sample_count;
+                double delta2 = value - means[j];
+                m2[j] += delta * delta2;
             }
         }
         uint64_t best_dim = 0;
         double best_variance = -1.0;
         for (uint64_t j = 0; j < request.dim; ++j) {
-            double mean = sums[j] / static_cast<double>(request.count);
-            double variance = square_sums[j] / static_cast<double>(request.count) - mean * mean;
+            double variance = std::max(0.0, m2[j] / static_cast<double>(request.count));
             if (variance > best_variance) {
                 best_variance = variance;
                 best_dim = j;
