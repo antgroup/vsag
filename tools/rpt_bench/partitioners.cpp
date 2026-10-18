@@ -33,6 +33,8 @@ namespace {
 /// Current high-water resident set size of the process, in KiB, or 0 when unavailable.
 int64_t
 read_peak_rss_kb() {
+#ifdef __linux__
+    // Linux exposes peak RSS through /proc; other platforms report it as unavailable.
     std::ifstream status("/proc/self/status");
     std::string key;
     while (status >> key) {
@@ -43,6 +45,7 @@ read_peak_rss_kb() {
         }
         status.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     }
+#endif
     return 0;
 }
 
