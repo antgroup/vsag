@@ -107,11 +107,11 @@ compute_locality(const Partitions& partitions,
     uint64_t queries = max_queries == 0 ? num_queries : std::min(max_queries, num_queries);
     metrics.k = k;
 
-    std::vector<uint64_t> partition_of(count, 0);
+    std::vector<uint32_t> partition_of(count, 0);
     for (uint64_t p = 0; p < partitions.size(); ++p) {
         for (int64_t id : partitions[p]) {
             if (id >= 0 && static_cast<uint64_t>(id) < count) {
-                partition_of[static_cast<uint64_t>(id)] = p;
+                partition_of[static_cast<uint64_t>(id)] = static_cast<uint32_t>(p);
             }
         }
     }
