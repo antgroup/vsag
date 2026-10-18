@@ -41,6 +41,20 @@ TEST_CASE("Compiled out: no ordinal can be selected", "[ut][gpu_backend]") {
     REQUIRE_FALSE(vsag::gpu::CudaSelectDevice(99));
 }
 
+TEST_CASE("Compiled out: the device scope binds nothing", "[ut][gpu_backend]") {
+    vsag::gpu::CudaDeviceScope scope(0);
+    REQUIRE_FALSE(scope.Bound());
+}
+
+TEST_CASE("Compiled out: no budget is ever suggested", "[ut][gpu_backend]") {
+    // A zero budget is what every caller then passes on, and each entry point
+    // reads it as "do not offload" rather than sizing a plan around it. That the
+    // passes leave the caller's buffers untouched is covered in
+    // cuda_pass_test.cpp, which checks it in both configurations.
+    REQUIRE(vsag::gpu::CudaSuggestedBudget(0) == 0);
+    REQUIRE(vsag::gpu::CudaSuggestedBudget(2ULL << 30) == 0);
+}
+
 #else
 
 // Compiled in, what the backend reports must agree with the runtime. This
@@ -80,6 +94,65 @@ TEST_CASE("Compiled in: selection binds the thread to the device", "[ut][gpu_bac
     REQUIRE(current_device() == 0);
 
     REQUIRE_FALSE(vsag::gpu::CudaSelectDevice(count));
+    REQUIRE(current_device() == 0);
+}
+
+// The scope is what callers use, so that a build does not leave the caller's
+// thread on a device the caller never chose.
+TEST_CASE("Compiled in: the device scope puts the thread back", "[ut][gpu_backend]") {
+    int count = 0;
+    if (cudaGetDeviceCount(&count) != cudaSuccess or count < 2) {
+        SKIP("needs at least two CUDA devices to observe a switch and a restore");
+    }
+    const auto current_device = [] {
+        int device = -1;
+        return cudaGetDevice(&device) == cudaSuccess ? device : -1;
+    };
+
+    // From a non-zero device, which only a thread that already holds a context
+    // can report, the scope has to put the thread back.
+    REQUIRE(vsag::gpu::CudaSelectDevice(1));
+    REQUIRE(current_device() == 1);
+    {
+        vsag::gpu::CudaDeviceScope scope(0);
+        REQUIRE(scope.Bound());
+        REQUIRE(current_device() == 0);
+    }
+    REQUIRE(current_device() == 1);
+
+    // A scope that binds nothing leaves the thread alone, and says so.
+    {
+        vsag::gpu::CudaDeviceScope none(-1);
+        REQUIRE_FALSE(none.Bound());
+        REQUIRE(current_device() == 1);
+    }
+    REQUIRE(current_device() == 1);
+
+    {
+        vsag::gpu::CudaDeviceScope absent(count);
+        REQUIRE_FALSE(absent.Bound());
+        REQUIRE(current_device() == 1);
+    }
+    REQUIRE(current_device() == 1);
+
+    // From device 0 the restore is skipped, because the runtime reports 0 for a
+    // thread that has never bound one too and putting that thread "back" would
+    // create a context on device 0 that nothing asked for.
+    REQUIRE(vsag::gpu::CudaSelectDevice(0));
+    {
+        vsag::gpu::CudaDeviceScope scope(1);
+        REQUIRE(scope.Bound());
+        REQUIRE(current_device() == 1);
+    }
+    REQUIRE(current_device() == 1);
+
+    // Which is the one case that leaves the binding somewhere the runtime would
+    // not have put it, so this case puts it back. Every other case here sets the
+    // device it needs, but the passes in cuda_pass_test.cpp run on whichever one
+    // the thread already holds, and size their working set from that device's free
+    // memory. On a machine whose cards are not equally busy, inheriting device 1
+    // from here would make those cases depend on the order they ran in.
+    REQUIRE(vsag::gpu::CudaSelectDevice(0));
     REQUIRE(current_device() == 0);
 }
 

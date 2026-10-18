@@ -41,6 +41,7 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/search_session.h"
 #include "vsag/serialize_writer.h"
 
 namespace vsag {
@@ -61,8 +62,10 @@ DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 DEFINE_POINTER(SafeThreadPool);
+DEFINE_POINTER(AnalyzerBase);
 
 class IndexCommonParam;
+struct AnalyzerParam;
 
 class InnerIndexInterface {
 public:
@@ -82,10 +85,10 @@ public:
     Add(const DatasetPtr& base) = 0;
 
     virtual std::string
-    AnalyzeIndexBySearch(const SearchRequest& request) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support analyze index by search");
-    }
+    AnalyzeIndexBySearch(const SearchRequest& request);
+
+    [[nodiscard]] virtual AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const;
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
@@ -334,6 +337,13 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    /// Diagnostic: a content fingerprint of the built graph, for tests that need to tell a
+    /// changed graph apart from changed search behaviour. Zero means "not implemented".
+    [[nodiscard]] virtual uint64_t
+    GraphChecksum() const {
+        return 0;
+    }
+
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -341,10 +351,7 @@ public:
     }
 
     [[nodiscard]] virtual std::string
-    GetStats() const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetStats");
-    }
+    GetStats() const;
 
     virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
@@ -365,6 +372,17 @@ public:
 
     virtual void
     InitFeatures() = 0;
+
+    virtual std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index does not support SearchSession");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,

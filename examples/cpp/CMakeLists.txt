@@ -185,3 +185,9 @@ target_link_libraries(330_feature_timeout_search vsag)
 
 add_executable(601_utils_rpt_partition 601_utils_rpt_partition.cpp)
 target_link_libraries(601_utils_rpt_partition vsag)
+
+add_executable(332_feature_search_session 332_feature_search_session.cpp)
+target_link_libraries(332_feature_search_session vsag)
+
+add_executable(327_feature_search_reasoning 327_feature_search_reasoning.cpp)
+target_link_libraries(327_feature_search_reasoning vsag)

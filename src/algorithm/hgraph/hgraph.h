@@ -16,6 +16,8 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -65,8 +67,10 @@ class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
+class MciIncrementalAddExecutor;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
+struct RaBitQFusedCodeView;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -81,8 +85,19 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphContinueSession;
+
+    std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const override;
+
     friend class HGraphAnalyzer;
     friend class HGraphOptimizedBuildSession;
+    friend class MciIncrementalAddExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -150,9 +165,89 @@ public:
         return INDEX_TYPE_HGRAPH;
     }
 
+    /// Number of searchable elements. Ids reserved by prepare_add_batch but not published yet are
+    /// excluded, so this can under-report while a batched Add is in flight; that is intended,
+    /// because those nodes are deliberately not searchable.
     int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_) - delete_count_;
+        return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
+    }
+
+    /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
+    ///
+    /// Only the bottom graph is covered; the route-graph layers are not hashed, so two indexes
+    /// with identical bottom connectivity but different upper layers share a checksum. FNV-1a is
+    /// not collision-resistant: this compares two builds inside a test, it is not an identity
+    /// check. Every bottom-graph node is walked, so this must run after the ids were built and
+    /// published (all callers do).
+    ///
+    /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
+    /// difference", and lets two builds be compared content-wise instead of via hit lists.
+    [[nodiscard]] uint64_t
+    GraphChecksum() const override {
+        uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&hash](uint64_t value) {
+            hash ^= value;
+            hash *= 1099511628211ULL;
+        };
+        // Walk the physical bottom graph, not the HGraph publication watermark. As required
+        // above, callers must finish construction/publication before taking this checksum.
+        const auto nodes = this->bottom_graph_->TotalCount();
+        Vector<InnerIdType> neighbors(allocator_);
+        for (InnerIdType node = 0; node < nodes; ++node) {
+            neighbors.clear();
+            this->bottom_graph_->GetNeighbors(node, neighbors);
+            mix(node);
+            mix(neighbors.size());
+            for (const auto neighbor : neighbors) {
+                mix(neighbor);
+            }
+        }
+        return hash;
+    }
+
+    /// The per-node lock array, for diagnostics.
+    [[nodiscard]] MutexArrayPtr
+    GetNeighborsMutexArray() const {
+        return this->neighbors_mutex_;
+    }
+
+    /// Number of leading inner ids that concurrent readers may observe.
+    [[nodiscard]] InnerIdType
+    PublishedCount() const {
+        return this->published_count_.load(std::memory_order_acquire);
+    }
+
+    /// Mark every id below total_count_ visible. Used where a whole id range is created and
+    /// completed together (ODescent build, deserialization, merge).
+    ///
+    /// The two counters are read and written separately, so the caller must be the single writer
+    /// of the id range at that moment: this runs on the thread that just grew, shrank (remove
+    /// lowers the mark) or restored the range, never concurrently with another range transition.
+    void
+    PublishThroughTotalCount() {
+        this->published_count_.store(this->total_count_.load(std::memory_order_acquire),
+                                     std::memory_order_release);
+    }
+
+    /// Mark one node visible, once its codes and links are both written.
+    ///
+    /// prepare_add_batch hands out ids in increasing order and every worker publishes its own node
+    /// after construction. This stores the maximum completed id plus one; it does not wait for
+    /// lower ids to complete. A node already covered exits immediately. This is a visibility
+    /// and counting mark, not a completion barrier: like the
+    /// bulk Build path, which publishes the reserved range up front, it assumes no search runs
+    /// concurrently with the build.
+    void
+    PublishNode(InnerIdType inner_id) {
+        // Ids come from the range reserved by prepare_add_batch, so the mark can always reach
+        // inner_id + 1; the loop below exits immediately for an id that is already covered.
+        assert(inner_id < this->total_count_.load(std::memory_order_relaxed));
+        InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
+        while (current <= inner_id and
+               not this->published_count_.compare_exchange_strong(
+                   current, inner_id + 1, std::memory_order_release, std::memory_order_relaxed)) {
+        }
     }
 
     int64_t
@@ -163,7 +258,7 @@ public:
     [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
     GetCodeStorageCounts() const {
         if (this->code_slot_map_ == nullptr) {
-            auto count = static_cast<InnerIdType>(this->total_count_.load());
+            auto count = this->PublishedCount();
             return {count, count};
         }
         return {this->code_slot_map_->PublishedLogicalCount(),
@@ -172,6 +267,9 @@ public:
 
     std::string
     GetStats() const override;
+
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
@@ -373,11 +471,15 @@ public:
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
-    insert_persistent_codes(const void* data, InnerIdType inner_id);
+    insert_persistent_codes(const void* data,
+                            InnerIdType inner_id,
+                            const RaBitQFusedCodeView* preencoded = nullptr);
 
     /// Write codes when the caller already protects storage capacity.
     void
-    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
+    insert_persistent_codes_unlocked(const void* data,
+                                     InnerIdType inner_id,
+                                     const RaBitQFusedCodeView* preencoded = nullptr);
 
     void
     insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
@@ -501,11 +603,23 @@ private:
     void
     train_codes_with_dataset(const DatasetPtr& train_data);
 
+    // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
+    // Keep them alive until every insertion task has drained, including on failure.
+    struct FusedAddCodes {
+        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+        }
+        Vector<uint8_t> codes;
+        Vector<uint32_t> clusters;
+        uint64_t one_bit_size{0};
+        uint64_t stride{0};
+    };
+
     struct AddContext {
         bool first_empty_add{false};
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
+        std::unique_ptr<FusedAddCodes> fused_codes;
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -515,6 +629,13 @@ private:
         InnerIdType inner_id{0};
         int level{-1};
     };
+
+    /// Assign the level of every row up front, in input order.
+    ///
+    /// Drawing all levels before the parallel insert phase makes level assignment a pure
+    /// function of the batch contents instead of a function of worker scheduling.
+    void
+    assign_batch_levels(Vector<AddRow>& rows);
 
     struct AddBatch {
         explicit AddBatch(Allocator* allocator) : rows(allocator) {
@@ -560,6 +681,9 @@ private:
     void
     validate_fused_encoding_data(const float* data, uint64_t count) const;
 
+    void
+    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+
     AddContext
     prepare_add_context(const DatasetPtr& data);
 
@@ -585,7 +709,7 @@ private:
 
     void
     prepare_codes_before_probe_if_needed(const void* data,
-                                         InnerIdType inner_id,
+                                         const AddRow& row,
                                          const AddContext& context);
 
     void
@@ -696,6 +820,13 @@ private:
     uint64_t
     apply_footer_metadata(const MetadataPtr& metadata);
 
+    // Load clique-owned state only; restore labels after all parallel component tasks finish.
+    void
+    deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info);
+
+    void
+    restore_mci_label_state(const JsonType& basic_info);
+
     /// Restore a whole component whose Deserialize seeks inside its own payload
     /// (see requires_seekable_payload). The frame is buffered first, so the
     /// component gets a seekable reader and the frame stays exactly consumed
@@ -703,7 +834,8 @@ private:
     void
     deserialize_seekable_whole_component(DeserializeReader& reader,
                                          const ComponentManifestEntry& comp,
-                                         bool compressed);
+                                         bool compressed,
+                                         const JsonType& basic_info);
 
     /// dispatch a whole component of the chunked manifest to its sequential
     /// Deserialize by name.
@@ -715,18 +847,24 @@ private:
     /// a capacity field) requires either moving that state out of here or
     /// serializing the component on the calling thread.
     void
-    deserialize_whole_component(const std::string& name, StreamReader& reader);
+    deserialize_whole_component(const std::string& name,
+                                StreamReader& reader,
+                                const JsonType& basic_info);
 
     /// parallel body load driven by the manifest recorded in the footer
     void
     parallel_deserialize_manifest(DeserializeReader& reader,
                                   ThreadPool& pool,
-                                  const ChunkedManifest& chunked_manifest);
+                                  const ChunkedManifest& chunked_manifest,
+                                  const JsonType& basic_info);
 
     /// parallel load of an uncompressed body without a recorded manifest:
     /// probe the component extents sequentially, then fill io data in parallel
     void
-    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+    parallel_deserialize_probe(DeserializeReader& reader,
+                               ThreadPool& pool,
+                               uint64_t body_end,
+                               const JsonType& basic_info);
 
     /// Read label (external id) mappings from stream.
     void
@@ -761,6 +899,11 @@ private:
     /// Compact internal storage after deletions.
     void
     shrink_to_fit();
+
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
 
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -997,19 +1140,102 @@ private:
     build_mci_clique_index(const void* vectors = nullptr);
 
     void
-    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+    mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
+                          InnerIdType node_id,
+                          Vector<InnerIdType>& clique_ids) const;
 
-    [[nodiscard]] Vector<InnerIdType>
-    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+    void
+    mci_read_clique_members(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType clique_id,
+                            Vector<InnerIdType>& members) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_clique_member_count(const std::shared_lock<std::shared_mutex>* view,
+                                 InnerIdType clique_id) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_logical_clique_count(const std::shared_lock<std::shared_mutex>* view) const;
+
+    /// Contiguous FP32 rows for lock-free L2 pair distances, or nullptr when the companion codes
+    /// or the metric require the codec pair API. Both paths return the identical L2 value.
+    [[nodiscard]] const float*
+    mci_contiguous_l2_vectors(uint64_t* row_stride) const;
+
+    /// Candidate cliques worth joining for one seed, ordered by overlapping members. Shared by the
+    /// serial update (which appends to them) and the planning pass (which only records them).
+    void
+    collect_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                             const Vector<InnerIdType>& knn_ids,
+                             Vector<std::pair<uint64_t, InnerIdType>>& targets) const;
+
+    /// Walk collected JOIN targets in gain order. With apply set they are appended to the live
+    /// structure; otherwise the walk only counts the neighbors a plan would gain.
+    void
+    apply_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                           InnerIdType new_inner_id,
+                           const Vector<std::pair<uint64_t, InnerIdType>>& targets,
+                           uint64_t degree_target,
+                           UnorderedSet<InnerIdType>& neighbors,
+                           bool apply);
+
+    /// Local MCE around a seed with the full-build expansion rules. `view` selects the companion
+    /// state and `emit` receives every produced clique in global inner IDs, so the caller decides
+    /// whether it is written to the cell or recorded in a plan.
+    void
+    build_local_mci_cliques(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t visible_total,
+                            const std::function<void(const Vector<InnerIdType>&)>& emit);
+
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
+
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    void
+    maybe_compact_mci(uint64_t changed_count);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
+    /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
+    void
+    repair_mci_clique(InnerIdType node_id);
+
+    /// Recheck live coverage after earlier repairs, reusing caller-owned scratch storage.
+    /// Caller holds mutation and persistent-codes locks and supplies a current inner ID.
+    bool
+    repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships);
 
     [[nodiscard]] Vector<InnerIdType>
     search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
 
-    bool
-    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
 
     void
-    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
 
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
@@ -1046,6 +1272,7 @@ private:
 
     CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
     HGraphMCIParameters mci_parameters_{};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
     float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
@@ -1055,16 +1282,35 @@ private:
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
-    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
-    mutable std::mutex pipnn_initial_build_mutex_;      // serializes PiPNN's first Add batch
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
+    // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
+    // persistent_codes shared for repair, and finally reacquires force_remove exclusively before
+    // pinning codes exclusively to shrink. The release is required because repair enters public
+    // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
+    // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
 
-    std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
+    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+
+    /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
+    /// links are both fully written, and which concurrent readers may therefore observe.
+    ///
+    /// total_count_ (base class) means "reserved": the id range is allocated and the
+    /// underlying storage is sized for it. A reserved id can name a node whose codes or link
+    /// lists are still being written by a construction worker, so readers gate on
+    /// published_count_ rather than total_count_.
+    ///
+    /// Monotonically non-decreasing. Kept equal to total_count_ wherever nodes are created in
+    /// bulk; insert paths advance it per node once that node is complete.
+    std::atomic<InnerIdType> published_count_{0};
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
 
     uint64_t resize_increase_count_bit_{
