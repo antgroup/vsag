@@ -195,6 +195,10 @@ partition_by_kmeans(const PartitionRequest& request) {
         KMeansCluster cluster(static_cast<int32_t>(request.dim), allocator.get());
         auto labels =
             cluster.Run(static_cast<uint32_t>(clusters), request.data, request.count, /*iter=*/25);
+        if (labels.size() != request.count) {
+            result.error = "KMeansCluster returned an unexpected number of labels";
+            return;
+        }
 
         Partitions partitions(clusters);
         for (uint64_t i = 0; i < request.count; ++i) {
