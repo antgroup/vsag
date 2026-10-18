@@ -104,6 +104,34 @@ unchanged.
 The examples default to `fallback=True` so they run on a host without pyvsag.
 Drop that argument to use the HGraph backend.
 
+## Choosing a device
+
+`Embedder` defaults to `device="cpu"`, which is the safe choice everywhere. On
+Apple Silicon, `device="mps"` uses the integrated GPU and is much faster — but
+the default `dtype="bfloat16"` is a trap on arm64, because there is no bf16
+hardware path and it falls back to emulation. Measured on an M5 Pro (one image,
+warm):
+
+| Device | dtype | ms/image | vs best |
+|---|---|---|---|
+| mps | bfloat16 | **128** | 1.0× |
+| mps | float32 | 262 | 2.0× |
+| cpu | float32 | 1000 | 7.8× |
+| cpu | bfloat16 | 12144 | **95×** |
+
+So on a Mac the two settings that matter are `device="mps"` and, if you stay on
+CPU, `dtype="float32"`. The default `bfloat16` is tuned for x86 servers with
+AVX512-BF16, where it is the fast path; on arm64 it is the slow one.
+
+Accuracy is unaffected either way: against the float32 CPU reference the minimum
+cosine is 0.99994 for bf16 and 1.000000 for fp32, and a 10-image text-to-image
+check scores 10/10 on both `cpu/float32` and `mps/bfloat16`.
+
+```python
+Embedder(device="mps", dtype="bfloat16")   # fastest on Apple Silicon
+Embedder(device="cpu", dtype="float32")    # fastest on Apple Silicon CPUs
+```
+
 ## Environment notes
 
 * **CPU inference** runs on the repo's Python 3.14 environment
