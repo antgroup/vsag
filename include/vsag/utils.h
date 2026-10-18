@@ -123,7 +123,8 @@ struct RPTPartitionParams {
     uint64_t bucket_size{1000};
 
     /// Upper bound on the tree depth. When reached, the remaining vectors are split
-    /// into equal-sized chunks by id order so that the size guarantees still hold.
+    /// into chunks of nearly equal size in the current permutation order, preserving
+    /// the size guarantees.
     uint64_t max_depth{64};
 
     /// Random seed. The same input and seed always produce the same partitions.

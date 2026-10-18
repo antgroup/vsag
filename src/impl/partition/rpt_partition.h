@@ -67,7 +67,8 @@ private:
     void
     emit_leaf(uint64_t begin, uint64_t end);
 
-    // Splits [begin, end) into `leaves` chunks by id order, used when max_depth is reached.
+    // When max_depth is reached, splits [begin, end) into `leaves` chunks of nearly equal size
+    // in the current permutation order.
     void
     emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves);
 
