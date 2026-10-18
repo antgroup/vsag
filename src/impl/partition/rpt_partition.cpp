@@ -153,9 +153,10 @@ RPTPartition::split(
         }
         return a < b;
     };
-    std::nth_element(ids_.begin() + static_cast<int64_t>(begin),
-                     ids_.begin() + static_cast<int64_t>(begin + left_count),
-                     ids_.begin() + static_cast<int64_t>(end),
+    using DifferenceType = decltype(ids_)::difference_type;
+    std::nth_element(ids_.begin() + static_cast<DifferenceType>(begin),
+                     ids_.begin() + static_cast<DifferenceType>(begin + left_count),
+                     ids_.begin() + static_cast<DifferenceType>(end),
                      comparator);
 
     uint64_t mid = begin + left_count;
