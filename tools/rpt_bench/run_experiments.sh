@@ -25,7 +25,15 @@ set -euo pipefail
 DATA_DIR="${DATA_DIR:-$HOME/code/datasets}"
 OUT_DIR="${OUT_DIR:-$HOME/code/rpt-results}"
 # Resolve through symlinks so the script works when invoked via a shortcut.
-SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+    SOURCE_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    if [[ "$SOURCE" != /* ]]; then
+        SOURCE="$SOURCE_DIR/$SOURCE"
+    fi
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
 RPT_BENCH="${RPT_BENCH:-$SCRIPT_DIR/../../build/tools/rpt_bench/rpt_bench}"
 
 SIFT="$DATA_DIR/sift-128-euclidean.hdf5"
