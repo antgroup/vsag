@@ -50,6 +50,12 @@ pip install -e 'embeddinggemma2_kit[finetune]'# + PEFT, for adapter interfaces
 `pyvsag` is deliberately **not** a dependency (see
 [docs/design.md](docs/design.md#decoupling-from-pyvsag)).
 
+`pyproject.toml` is the only place requirements are declared — there is no
+`requirements.txt` or lock file in the package, and the reasoning is in
+[docs/dependencies.md](docs/dependencies.md), together with the exact versions
+the results were verified against. Note that `sentence-transformers >= 6.1.0` is
+a hard floor: older versions silently ignore multimodal input ordering.
+
 ## Provision the weights
 
 Model weights are not distributed with this repository. Link a checkpoint you
@@ -181,6 +187,7 @@ x86 server guidance and measured cross-platform comparison, are in
 | Document | Contents |
 |---|---|
 | [docs/platforms.md](docs/platforms.md) | **Device and dtype per platform** — Apple Silicon / x86, measured numbers, pitfalls |
+| [docs/dependencies.md](docs/dependencies.md) | Where requirements live, the declared floors, verified versions per host |
 | [docs/design.md](docs/design.md) | Architecture, decoupling contract, measured tuning results |
 | [docs/api.md](docs/api.md) | API reference and the query/document role rules |
 | [docs/finetune.md](docs/finetune.md) | Fine-tuning interfaces and GPU constraints |
