@@ -84,6 +84,26 @@ Unit tests:
 python -m pytest tests/ -q
 ```
 
+## Examples
+
+`examples/` runs in order, from raw encoding to end-to-end retrieval:
+
+| Example | Shows |
+|---|---|
+| `01_embed_text.py` | Query vs document roles, and why they differ |
+| `02_embed_image.py` | Image encoding, text→image agreement |
+| `03_embed_audio_video.py` | Audio and video (with audio track) encoding |
+| `04_text_to_image_e2e.py` | **Full pipeline**: images → index → text query → ranked images, then persistence |
+| `05_image_to_text.py` | Image query → captions |
+
+`04_text_to_image_e2e.py` is the one to read first: it ingests a corpus from
+disk, builds the index, searches it with text, checks each hit against the
+ground-truth image, and reloads the saved index to confirm the results are
+unchanged.
+
+The examples default to `fallback=True` so they run on a host without pyvsag.
+Drop that argument to use the HGraph backend.
+
 ## Environment notes
 
 * **CPU inference** runs on the repo's Python 3.14 environment

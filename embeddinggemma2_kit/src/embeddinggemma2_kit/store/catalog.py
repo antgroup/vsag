@@ -36,6 +36,27 @@ class Catalog:
     def __len__(self) -> int:
         return len(self.ids)
 
+    @staticmethod
+    def _metadata_for(item: CorpusItem) -> dict[str, Any]:
+        """Metadata to persist for one item.
+
+        The item's own modality fields are carried through so that a retrieved
+        hit can be resolved back to its source without the caller having to
+        duplicate the path into ``metadata`` by hand. Caller-supplied metadata
+        wins on conflict, and ``None`` fields are omitted rather than stored as
+        nulls.
+        """
+        carried = {
+            m: getattr(item, m)
+            for m in ("image", "audio", "video", "text")
+            if getattr(item, m) is not None
+        }
+        return {
+            "primary_modality": item.primary_modality,
+            **carried,
+            **item.metadata,
+        }
+
     def add(self, item: CorpusItem, vector: np.ndarray) -> None:
         vec = np.asarray(vector, dtype=np.float32).reshape(-1)
         if vec.shape[0] != self.dim:
@@ -43,9 +64,7 @@ class Catalog:
                 f"vector dim {vec.shape[0]} does not match catalog dim {self.dim}"
             )
         self.ids.append(item.id)
-        self.metadata.append(
-            {"primary_modality": item.primary_modality, **item.metadata}
-        )
+        self.metadata.append(self._metadata_for(item))
         if self.vectors is None:
             self.vectors = vec[None, :]
         else:
