@@ -124,6 +124,18 @@ public:
     void
     ProcessQueryImpl(const float* query, Computer<RaBitQuantizer>& computer) const;
 
+    [[nodiscard]] uint64_t
+    GetResidualQueryTransformSize() const {
+        return this->original_dim_;
+    }
+
+    void
+    TransformResidualQuery(const float* query, float* transformed_query) const;
+
+    void
+    ProcessTransformedResidualQuery(const float* transformed_query,
+                                    Computer<RaBitQuantizer>& computer) const;
+
     void
     TransformFusedQuery(const float* query,
                         Vector<float>& transformed_query,
@@ -185,11 +197,53 @@ public:
                               uint8_t* one_bit_code,
                               uint8_t* supplement_code) const;
 
+    // Reconstructs the stored vector. `apply_inverse_rotation == false` stops after the
+    // rotated-domain reconstruction; the result is then the inverse-rotation preimage, which
+    // is what pairwise distances need.
     bool
     DecodeFusedSplitCode(const uint8_t* one_bit_code,
                          const uint8_t* supplement_code,
                          bool legacy_hnsw_codec,
-                         float* data) const;
+                         float* data,
+                         bool apply_inverse_rotation = true) const;
+
+    // Pairwise inner product of two fused codes evaluated in the code domain. With
+    // v = centroid + residual_scale * (code - full_center),
+    //   <v1,v2> = <c1,c2> + a2*(<c1,code2> - c0*S(c1)) + a1*(<code1,c2> - c0*S(c2))
+    //             + a1*a2*(<code1,code2> - c0*(K1+K2) + c0^2*dim)
+    // so only an integer code-code inner product and two float-code inner products are needed
+    // instead of reconstructing two float vectors. The caller supplies the per-cluster constants
+    // (centroid sums and the centroid pair inner product). Returns false when the fused storage
+    // does not use the HNSW-compatible 1 + 7 codec, in which case the reconstruction path must
+    // be used.
+    bool
+    ComputeFusedPairIP(const uint8_t* one_bit_code1,
+                       const uint8_t* supplement_code1,
+                       const float* centroid1,
+                       float centroid1_sum,
+                       const uint8_t* one_bit_code2,
+                       const uint8_t* supplement_code2,
+                       const float* centroid2,
+                       float centroid2_sum,
+                       float centroid_pair_ip,
+                       float* distance) const;
+
+    // L2 pair distance in the difference form, i.e. no per-code norm is needed:
+    //   |v1-v2|^2 = |c1-c2|^2 + 2*a1*<c1-c2,w1> - 2*a2*<c1-c2,w2>
+    //               + a1^2*|w1|^2 + a2^2*|w2|^2 - 2*a1*a2*<w1,w2>
+    // with w = code - 127.5 and v = centroid + residual_scale * w. Everything but the two
+    // float-code inner products is exact integer arithmetic over the codes, so nothing has to be
+    // stored per code. When both codes belong to the same cluster c1 == c2, the centroid terms
+    // vanish and `centroid_diff` may be null.
+    bool
+    ComputeFusedPairL2Difference(const uint8_t* one_bit_code1,
+                                 const uint8_t* supplement_code1,
+                                 const uint8_t* one_bit_code2,
+                                 const uint8_t* supplement_code2,
+                                 float centroid_diff_sq,
+                                 float centroid_diff_sum,
+                                 const float* centroid_diff,
+                                 float* distance) const;
 
     bool
     ComputeFusedAffineFilter(const float* transformed_query,
@@ -374,13 +428,109 @@ public:
                    const uint8_t* supplement_code,
                    uint8_t* full_code) const;
 
+    static constexpr uint64_t FASTSCAN_BATCH_SIZE = 32;
+    static constexpr uint64_t FASTSCAN_MAX_FILTER_BITS = 3;
+
+    [[nodiscard]] bool
+    SupportFastScan32() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32BlockSize() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32LookupSize() const;
+
+    [[nodiscard]] uint64_t
+    GetFastScan32HighAccLookupSize() const;
+
+    void
+    PackageFastScan32(const uint8_t* one_bit_codes, uint64_t valid_size, uint8_t* block) const;
+    void
+    PackageFastScan32Residual(const uint8_t* one_bit_codes,
+                              const float* transformed_centroid,
+                              uint64_t valid_size,
+                              uint8_t* block) const;
+
+    void
+    SetFastScan32Code(const uint8_t* one_bit_code, uint64_t index_in_block, uint8_t* block) const;
+    void
+    SetFastScan32ResidualCode(const uint8_t* one_bit_code,
+                              const float* transformed_centroid,
+                              uint64_t index_in_block,
+                              uint8_t* block) const;
+
+    void
+    UnpackFastScan32Code(const uint8_t* block,
+                         uint64_t index_in_block,
+                         uint8_t* one_bit_code) const;
+
+    void
+    PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& computer,
+                                  uint8_t* lookup_table,
+                                  float* deltas,
+                                  float* sum_vls,
+                                  float& query_sum,
+                                  uint64_t* random_state = nullptr) const;
+
+    void
+    ComputeDistsWithFastScan32HighAccBatch(Computer<RaBitQuantizer>& computer,
+                                           const uint8_t* blocks,
+                                           uint64_t total_size,
+                                           const uint8_t* lookup_table,
+                                           const float* deltas,
+                                           const float* sum_vls,
+                                           float query_sum,
+                                           float* dists,
+                                           uint32_t* computed_masks,
+                                           float* filter_inner_products = nullptr) const;
+
+    void
+    ComputeDistsWithFastScan32SharedResidualHighAccBatch(
+        Computer<RaBitQuantizer>& computer,
+        const uint8_t* blocks,
+        uint64_t total_size,
+        const uint8_t* lookup_table,
+        const float* deltas,
+        const float* sum_vls,
+        float query_sum,
+        float query_bucket_norm_sqr,
+        float* dists,
+        uint32_t* computed_masks,
+        float* filter_inner_products = nullptr) const;
+
+    bool
+    RecoverFastScan32OriginalQueryFilterInnerProduct(Computer<RaBitQuantizer>& original_computer,
+                                                     const uint8_t* block,
+                                                     uint64_t index_in_block,
+                                                     float shared_filter_inner_product,
+                                                     float* original_filter_inner_product) const;
+
+    bool
+    ComputeResidualFullFactor(const uint8_t* filter_code,
+                              const uint8_t* supplement_code,
+                              const float* transformed_centroid,
+                              float* full_add) const;
+
+    bool
+    ComputeDistWithSplitCodeAndOriginalQueryFilterInnerProduct(
+        Computer<RaBitQuantizer>& original_computer,
+        const uint8_t* supplement_code,
+        float original_filter_inner_product,
+        float full_add,
+        float query_bucket_norm_sqr,
+        float* dist) const;
+
+    [[nodiscard]] float
+    ComputeTransformedResidualQueryNormSqr(const float* transformed_query) const;
+
     bool
     ComputeDistWithOneBitLowerBound(
         Computer<RaBitQuantizer>& computer,
         const uint8_t* one_bit_code,
         float* dists,
         float* lower_bound,
-        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN()) const;
+        float runtime_rabitq_error_rate = std::numeric_limits<float>::quiet_NaN(),
+        float* filter_inner_product = nullptr) const;
 
     // Same coarse x-bit estimate as ComputeDistWithOneBitLowerBound(). When the
     // filter-stage inner product is exact, it is returned for direct split
@@ -421,6 +571,14 @@ public:
                              const uint8_t* one_bit_code,
                              const uint8_t* supplement_code,
                              float* dists) const;
+
+    // Computes the full x+y split distance from the raw x-bit inner product emitted by
+    // ComputeDistWithOneBitLowerBound(). Only the y-bit supplement record is required.
+    bool
+    ComputeDistWithSplitCodeAndFilterInnerProduct(Computer<RaBitQuantizer>& computer,
+                                                  const uint8_t* supplement_code,
+                                                  float filter_inner_product,
+                                                  float* dists) const;
 
     // Computes the full x+y split distance while reusing the filter-stage distance.
     // `filter_dist` is the exact x-bit distance already produced by
@@ -491,9 +649,67 @@ public:
     SupplementMetaOffset() const;
 
     [[nodiscard]] uint64_t
+    SupplementErrorOffset() const;
+
+    [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
 
 private:
+    struct FastScan32Layout {
+        uint64_t packed_size{0};
+        uint64_t metadata_record_offset{0};
+        uint64_t metadata_record_size{0};
+
+        [[nodiscard]] uint64_t
+        BlockSize() const {
+            return packed_size + (metadata_record_size + 2 * sizeof(float)) * FASTSCAN_BATCH_SIZE;
+        }
+
+        [[nodiscard]] uint64_t
+        MetadataFieldOffset(uint64_t record_offset) const {
+            return ResidualScaleOffset() + sizeof(float) * FASTSCAN_BATCH_SIZE +
+                   (record_offset - metadata_record_offset) * FASTSCAN_BATCH_SIZE;
+        }
+
+        [[nodiscard]] uint64_t
+        ResidualAddOffset() const {
+            return packed_size;
+        }
+
+        [[nodiscard]] uint64_t
+        ResidualScaleOffset() const {
+            return ResidualAddOffset() + sizeof(float) * FASTSCAN_BATCH_SIZE;
+        }
+    };
+
+    [[nodiscard]] FastScan32Layout
+    GetFastScan32Layout() const;
+
+    void
+    ComputeFastScan32ResidualFactors(const uint8_t* one_bit_code,
+                                     const float* transformed_centroid,
+                                     float& f_add,
+                                     float& f_scale) const;
+
+    void
+    ComputeDistsWithFastScan32LookupSums(Computer<RaBitQuantizer>& computer,
+                                         const uint8_t* block,
+                                         const float* lookup_sums,
+                                         float query_sum,
+                                         float* dists,
+                                         bool* computed,
+                                         uint64_t valid_size,
+                                         float runtime_rabitq_error_rate,
+                                         float* lower_bounds,
+                                         float* filter_inner_products) const;
+
+    bool
+    FinalizeSplitCodeDistanceWithFilterInnerProduct(Computer<RaBitQuantizer>& computer,
+                                                    const uint8_t* supplement_code,
+                                                    float filter_inner_product,
+                                                    float supplement_inner_product,
+                                                    float* dists) const;
+
     bool
     ComputeFusedExactCenteredFilterIP(const float* transformed_query,
                                       const uint8_t* one_bit_code,

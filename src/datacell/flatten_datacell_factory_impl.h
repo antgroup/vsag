@@ -20,6 +20,7 @@
 #include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_adapter.h"
 #include "quantization/quantizer_headers.h"
+#include "quantization/scalar_quantization/sq8_local_quantizer.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "rabitq_split_datacell_factory.h"
 
@@ -99,6 +100,16 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
         actual_quantization = tq_param->GetBottomQuantizationName();
     }
 
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL) {
+        const bool supported = !is_transform_quantizer;
+        CHECK_ARGUMENT(supported, "sq8_local does not support transforms");
+        return MakeFlattenDataCellInstance<SQ8LocalQuantizer, IOTmpl>(param, common_param);
+    }
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
+        const bool supported = !is_transform_quantizer;
+        CHECK_ARGUMENT(supported, "sq4_local does not support transforms");
+        return MakeFlattenDataCellInstance<SQ4LocalQuantizer, IOTmpl>(param, common_param);
+    }
     if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ8) {
         return MakeFlattenDataCellInstanceWithTQ<SQ8Quantizer<metric>, IOTmpl, metric>(
             param, common_param, is_transform_quantizer);

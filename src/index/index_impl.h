@@ -21,7 +21,9 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "common.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/thread_pool/safe_thread_pool.h"
+#include "index/search_session_provider.h"
 #include "index_common_param.h"
 #include "query_context.h"
 #include "search_metrics_internal.h"
@@ -45,7 +47,7 @@ struct HasTypedSearchWithRequest<
 };
 
 template <class T>
-class IndexImpl : public Index {
+class IndexImpl : public Index, public SearchSessionProvider {
     static_assert(std::is_base_of<InnerIndexInterface, T>::value);
     static_assert(HasStaticCheckAndMappingExternalParam<T>::value);
 
@@ -108,6 +110,10 @@ public:
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override {
+        if (not CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support search analysis");
+        }
         return this->inner_index_->AnalyzeIndexBySearch(request);
     }
 
@@ -328,6 +334,10 @@ public:
 
     [[nodiscard]] std::string
     GetStats() const override {
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_STATS)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support static analysis");
+        }
         return this->inner_index_->GetStats();
     }
 
@@ -410,6 +420,28 @@ public:
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->KnnSearch(
             query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
+    }
+
+    using Index::OpenSearchSession;
+
+    tl::expected<std::unique_ptr<SearchSession>, Error>
+    CreateSearchSession(const DatasetPtr& query,
+                        int64_t k_per_call,
+                        const std::string& parameters,
+                        const FilterPtr& filter,
+                        Allocator* allocator) const override {
+        // InnerIndexInterface stores a raw allocator; retain common resources too.
+        // Destruction order releases the backend before its allocator/thread pool.
+        struct SessionOwner {
+            IndexCommonParam resources;
+            InnerIndexPtr backend;
+        };
+        SAFE_CALL(
+            auto lifetime = std::make_shared<SessionOwner>(
+                SessionOwner{this->common_param_, this->inner_index_});
+            std::shared_ptr<const InnerIndexInterface> owner(lifetime, this->inner_index_.get());
+            return this->inner_index_->OpenSearchSession(
+                query, k_per_call, parameters, filter, allocator, std::move(owner)));
     }
 
     tl::expected<void, Error>
@@ -618,6 +650,10 @@ public:
                      effective_request.query_->GetNumElements() <= 1 ||
                      this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
                     auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
                     if (metrics) {
                         CHECK_ARGUMENT(
                             AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
@@ -645,6 +681,10 @@ public:
                      effective_request.query_->GetNumElements() <= 1 ||
                      this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
                     auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
                     if (not want_statistics) {
                         result->Statistics("{}");
                     }

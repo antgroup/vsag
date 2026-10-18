@@ -92,6 +92,9 @@ const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
 const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
 const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
 const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
+    "pipnn_adaptive_pruning_adjust_step";
 
 const char* const INDEX_PARAM = "index_param";
 
@@ -225,6 +228,11 @@ const char* const IVF_USE_RESIDUAL = "use_residual";
 const char* const IVF_USE_REORDER = "use_reorder";
 const char* const IVF_TRAIN_TYPE = "ivf_train_type";
 const char* const IVF_USE_ROUTE_GRAPH = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT = "kmeans_iter_count";
 const char* const IVF_BUCKETS_COUNT = "buckets_count";
 const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
 const char* const IVF_BASE_IO_TYPE = "base_io_type";

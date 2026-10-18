@@ -336,6 +336,35 @@ TEST_CASE("RaBitQ FP32-BQ SIMD Compute Codes", "[ut][simd]") {
     }
 }
 
+TEST_CASE("RaBitQ FP32-BQ SIMD preserves raw and signed tail products", "[ut][simd]") {
+    // Cover every remainder of the NEON 12/8/4-element loops, including dim=70
+    // used by the residual original-query full-factor regression.
+    for (uint64_t dim = 0; dim <= 80; ++dim) {
+        for (const uint8_t pattern : {0x00, 0xFF, 0x55, 0xAA}) {
+            std::vector<uint8_t> bits((dim + 7) / 8, pattern);
+            std::vector<float> values(dim);
+            for (uint64_t d = 0; d < dim; ++d) {
+                values[d] = static_cast<float>(static_cast<int>(d % 7) - 3) * 0.25F;
+            }
+            for (const float inv_sqrt_d : {0.0F, 0.0005F, 0.125F}) {
+                CAPTURE(dim, pattern, inv_sqrt_d);
+                // Small scales select the raw 0/1 dot product; otherwise bits
+                // represent signed +/-inv_sqrt_d coordinates.
+                const float positive = inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F;
+                const float negative = inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F;
+                float gt = 0.0F;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const bool bit = ((bits[d / 8] >> (d % 8)) & 1U) != 0U;
+                    gt += values[d] * (bit ? positive : negative);
+                }
+                const auto* query = values.data();
+                const auto* base = bits.data();
+                TEST_ACCURACY_FP32(RaBitQFloatBinaryIP);
+            }
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32-BQ SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 960};
 
@@ -1149,6 +1178,7 @@ TEST_CASE("RaBitQ FP32 supplement-code SIMD Compute Codes", "[ut][simd]") {
                 auto avx2_result = avx2::RaBitQFloatSupplementCodeIP(
                     query.data(), supplement, dim, supplement_bits);
                 REQUIRE(std::abs(expected - avx2_result) < 1e-4F);
+                REQUIRE(std::abs(generic_result - avx2_result) < 1e-4F);
             }
             if (SimdStatus::SupportAVX512()) {
                 auto avx512_result = avx512::RaBitQFloatSupplementCodeIP(
@@ -1164,6 +1194,128 @@ TEST_CASE("RaBitQ FP32 supplement-code SIMD Compute Codes", "[ut][simd]") {
                 auto sve_result = sve::RaBitQFloatSupplementCodeIP(
                     query.data(), supplement, dim, supplement_bits);
                 REQUIRE(std::abs(expected - sve_result) < 1e-4F);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ packed supplement layout and SIMD parity", "[ut][simd][rabitq]") {
+    const std::vector<uint64_t> dims = {0, 1, 7, 8, 63, 64, 65, 960};
+    for (const uint64_t dim : dims) {
+        const uint64_t plane_bytes = (dim + 7U) / 8U;
+        std::vector<uint8_t> scalar_codes(dim);
+        std::vector<float> query(dim);
+        for (uint64_t d = 0; d < dim; ++d) {
+            scalar_codes[d] = static_cast<uint8_t>(37U * d + 19U);
+            query[d] = static_cast<float>(static_cast<int64_t>(d % 31U) - 15) * 0.03125F;
+        }
+
+        for (const uint32_t supplement_bits : {5U, 6U, 7U}) {
+            const uint32_t filter_bits = 8U - supplement_bits;
+            const uint8_t supplement_mask = static_cast<uint8_t>((1U << supplement_bits) - 1U);
+            const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+            REQUIRE(layout.PackedSize() == plane_bytes * supplement_bits);
+            REQUIRE(layout.PackedSize() ==
+                    layout.FullChunksSize() + layout.TailPlaneBytes() * supplement_bits);
+
+            std::vector<uint8_t> expected_filter(plane_bytes * filter_bits, 0);
+            std::vector<uint8_t> expected_supplement_planes(plane_bytes * supplement_bits, 0);
+            float expected_ip = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                const uint8_t lane_mask = static_cast<uint8_t>(1U << (d % 8U));
+                for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+                    if ((scalar_codes[d] & (1U << bit)) != 0U) {
+                        expected_supplement_planes[static_cast<uint64_t>(bit) * plane_bytes +
+                                                   d / 8U] |= lane_mask;
+                    }
+                }
+                for (uint32_t plane = 0; plane < filter_bits; ++plane) {
+                    const uint32_t logical_bit = 7U - plane;
+                    if ((scalar_codes[d] & (1U << logical_bit)) != 0U) {
+                        expected_filter[static_cast<uint64_t>(plane) * plane_bytes + d / 8U] |=
+                            lane_mask;
+                    }
+                }
+                expected_ip += query[d] * static_cast<float>(scalar_codes[d] & supplement_mask);
+            }
+
+            std::vector<uint8_t> expected_packed(layout.PackedSize(), 0);
+            generic::RaBitQPackSupplementPlanes(
+                expected_supplement_planes.data(), expected_packed.data(), dim, supplement_bits);
+            for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+                const uint64_t code_begin = chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+                const uint64_t packed_begin = chunk * layout.ChunkBytes();
+                for (uint64_t lane = 0; lane < 16U; ++lane) {
+                    if (supplement_bits == 5U) {
+                        REQUIRE(expected_packed[packed_begin + lane] ==
+                                static_cast<uint8_t>(
+                                    (scalar_codes[code_begin + lane] & 0x0FU) |
+                                    ((scalar_codes[code_begin + 16U + lane] & 0x0FU) << 4U)));
+                        REQUIRE(expected_packed[packed_begin + 16U + lane] ==
+                                static_cast<uint8_t>(
+                                    (scalar_codes[code_begin + 32U + lane] & 0x0FU) |
+                                    ((scalar_codes[code_begin + 48U + lane] & 0x0FU) << 4U)));
+                    } else {
+                        const uint8_t last = scalar_codes[code_begin + 48U + lane];
+                        REQUIRE(expected_packed[packed_begin + lane] ==
+                                static_cast<uint8_t>((scalar_codes[code_begin + lane] & 0x3FU) |
+                                                     ((last & 0x03U) << 6U)));
+                        REQUIRE(
+                            expected_packed[packed_begin + 16U + lane] ==
+                            static_cast<uint8_t>((scalar_codes[code_begin + 16U + lane] & 0x3FU) |
+                                                 (((last >> 2U) & 0x03U) << 6U)));
+                        REQUIRE(
+                            expected_packed[packed_begin + 32U + lane] ==
+                            static_cast<uint8_t>((scalar_codes[code_begin + 32U + lane] & 0x3FU) |
+                                                 (((last >> 4U) & 0x03U) << 6U)));
+                    }
+                }
+                if (supplement_bits == 5U or supplement_bits == 7U) {
+                    const uint64_t top_plane_offset = supplement_bits == 5U ? 32U : 48U;
+                    for (uint64_t lane = 0; lane < simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+                         ++lane) {
+                        const uint8_t actual =
+                            (expected_packed[packed_begin + top_plane_offset + lane / 8U] >>
+                             (lane % 8U)) &
+                            1U;
+                        REQUIRE(actual ==
+                                ((scalar_codes[code_begin + lane] >> (supplement_bits - 1U)) & 1U));
+                    }
+                }
+            }
+            std::vector<uint8_t> unpacked_planes(expected_supplement_planes.size(), 0xA5);
+            generic::RaBitQUnpackSupplementPlanes(
+                expected_packed.data(), unpacked_planes.data(), dim, supplement_bits);
+            REQUIRE(unpacked_planes == expected_supplement_planes);
+
+            auto check_pack = [&](auto pack) {
+                std::vector<uint8_t> filter(expected_filter.size(), 0xA5);
+                std::vector<uint8_t> packed(layout.PackedSize(), 0xA5);
+                pack(scalar_codes.data(), filter.data(), packed.data(), dim, 8, filter_bits);
+                REQUIRE(filter == expected_filter);
+                REQUIRE(packed == expected_packed);
+            };
+            check_pack(generic::RaBitQPackScalarToSplitCode);
+            check_pack(RaBitQPackScalarToSplitCode);
+            if (SimdStatus::SupportAVX2()) {
+                check_pack(avx2::RaBitQPackScalarToSplitCode);
+            }
+            if (SimdStatus::SupportAVX512()) {
+                check_pack(avx512::RaBitQPackScalarToSplitCode);
+            }
+
+            auto check_ip = [&](auto compute) {
+                const float actual =
+                    compute(query.data(), expected_packed.data(), dim, supplement_bits);
+                REQUIRE(std::abs(actual - expected_ip) <= 1e-4F);
+            };
+            check_ip(generic::RaBitQFloatPackedSupplementCodeIP);
+            check_ip(RaBitQFloatPackedSupplementCodeIP);
+            if (SimdStatus::SupportAVX2()) {
+                check_ip(avx2::RaBitQFloatPackedSupplementCodeIP);
+            }
+            if (SimdStatus::SupportAVX512()) {
+                check_ip(avx512::RaBitQFloatPackedSupplementCodeIP);
             }
         }
     }
@@ -1219,6 +1371,133 @@ TEST_CASE("RaBitQ HNSW 7-bit ExData SIMD", "[ut][simd]") {
         }                                                                                       \
         return;                                                                                 \
     }
+
+TEST_CASE("RaBitQ HNSW ExData reconstruction SIMD", "[ut][simd]") {
+    constexpr uint64_t dim = 960;
+    constexpr float residual_scale = 0.037F;
+    constexpr float full_center = 127.5F;
+    std::vector<float> centroid(dim);
+    std::vector<uint8_t> codes(dim);
+    std::vector<uint8_t> filter(dim / 8, 0);
+    std::vector<uint8_t> packed(dim * 7 / 8, 0);
+    for (uint64_t d = 0; d < dim; ++d) {
+        centroid[d] = static_cast<float>(static_cast<int>(d % 23) - 11) / 23.0F;
+        codes[d] = static_cast<uint8_t>((d * 73U + 19U) & 127U);
+        if (((d * 29U + 7U) & 3U) == 0U) {
+            filter[d / 8] |= static_cast<uint8_t>(1U << (d % 8));
+            codes[d] = static_cast<uint8_t>(codes[d] | 128U);
+        }
+    }
+    auto* output = packed.data();
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const auto* input = codes.data() + block;
+        for (uint64_t lane = 0; lane < 16; ++lane) {
+            output[lane] =
+                static_cast<uint8_t>((input[lane] & 0x3FU) | ((input[48 + lane] & 0x03U) << 6U));
+            output[16 + lane] = static_cast<uint8_t>((input[16 + lane] & 0x3FU) |
+                                                     ((input[48 + lane] & 0x0CU) << 4U));
+            output[32 + lane] = static_cast<uint8_t>((input[32 + lane] & 0x3FU) |
+                                                     ((input[48 + lane] & 0x30U) << 2U));
+        }
+        uint64_t top_bits = 0;
+        constexpr uint64_t k_top_mask = 0x0101010101010101ULL;
+        for (uint64_t lane = 0; lane < 64; lane += 8) {
+            uint64_t source = 0;
+            std::memcpy(&source, input + lane, sizeof(source));
+            top_bits |= ((source >> 6U) & k_top_mask) << (lane / 8U);
+        }
+        std::memcpy(output + 48, &top_bits, sizeof(top_bits));
+        output += 56;
+    }
+
+    std::vector<float> expected(dim);
+    for (uint64_t d = 0; d < dim; ++d) {
+        expected[d] = centroid[d] + residual_scale * (static_cast<float>(codes[d]) - full_center);
+    }
+
+    std::vector<float> result(dim, 0.0F);
+    REQUIRE(generic::RaBitQExCode7ToVector(filter.data(),
+                                           packed.data(),
+                                           centroid.data(),
+                                           residual_scale,
+                                           full_center,
+                                           dim,
+                                           result.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+    }
+    if (SimdStatus::SupportAVX2()) {
+        std::fill(result.begin(), result.end(), 0.0F);
+        REQUIRE(avx2::RaBitQExCode7ToVector(filter.data(),
+                                            packed.data(),
+                                            centroid.data(),
+                                            residual_scale,
+                                            full_center,
+                                            dim,
+                                            result.data()));
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+        }
+    }
+
+    std::fill(result.begin(), result.end(), 0.0F);
+    REQUIRE(RaBitQExCode7ToVector(filter.data(),
+                                  packed.data(),
+                                  centroid.data(),
+                                  residual_scale,
+                                  full_center,
+                                  dim,
+                                  result.data()));
+    for (uint64_t d = 0; d < dim; ++d) {
+        REQUIRE(std::abs(expected[d] - result[d]) < 1e-4F);
+    }
+
+    // The byte-output twin used by the code-domain pairwise inner product is bit exact.
+    for (int which = 0; which < 2; ++which) {
+        if (which == 1 and not SimdStatus::SupportAVX2()) {
+            // avx2:: only contains AVX2 instructions when the build enables them; call it only
+            // when the running CPU actually has them.
+            continue;
+        }
+        std::vector<uint8_t> bytes(dim, 0);
+        uint64_t code_sum = 0;
+        uint64_t code_sq_sum = 0;
+        const bool ok =
+            which == 0
+                ? generic::RaBitQExCode7ToBytes(
+                      filter.data(), packed.data(), dim, bytes.data(), &code_sum, &code_sq_sum)
+                : avx2::RaBitQExCode7ToBytes(
+                      filter.data(), packed.data(), dim, bytes.data(), &code_sum, &code_sq_sum);
+        REQUIRE(ok);
+        uint64_t expected_sum = 0;
+        uint64_t expected_sq_sum = 0;
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(bytes[d] == codes[d]);
+            expected_sum += codes[d];
+            expected_sq_sum += static_cast<uint64_t>(codes[d]) * codes[d];
+        }
+        REQUIRE(code_sum == expected_sum);
+        REQUIRE(code_sq_sum == expected_sq_sum);
+    }
+
+    // A malformed request is rejected rather than silently reconstructed.
+    REQUIRE_FALSE(generic::RaBitQExCode7ToVector(filter.data(),
+                                                 packed.data(),
+                                                 centroid.data(),
+                                                 residual_scale,
+                                                 full_center,
+                                                 dim - 1,
+                                                 result.data()));
+    if (SimdStatus::SupportAVX2()) {
+        REQUIRE_FALSE(avx2::RaBitQExCode7ToVector(filter.data(),
+                                                  packed.data(),
+                                                  centroid.data(),
+                                                  residual_scale,
+                                                  full_center,
+                                                  0,
+                                                  result.data()));
+    }
+}
 
 TEST_CASE("RaBitQ FP32-BQ SIMD Compute Benchmark", "[ut][simd][!benchmark]") {
     int64_t count = 100;

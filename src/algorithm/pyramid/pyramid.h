@@ -205,6 +205,9 @@ public:
     std::string
     GetStats() const override;
 
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
+
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
 
@@ -246,6 +249,7 @@ public:
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     friend class PyramidAnalyzer;
+    friend class PyramidDuplicateTestPeer;
 
 private:
     MetadataPtr
@@ -449,7 +453,7 @@ private:
                                const FlattenInterfacePtr& codes,
                                float alpha);
 
-    void
+    InnerIdType
     add_routed_point(const Hierarchy& hierarchy,
                      IndexNode& node,
                      InnerIdType inner_id,
@@ -457,6 +461,11 @@ private:
                      uint64_t ef_construction,
                      bool use_self_as_entry,
                      int sampled_level);
+
+    // Build-only barrier: restore directed reachability without changing alias ownership.
+    void
+    repair_duplicate_connectivity(IndexNode& node,
+                                  const Vector<InnerIdType>* cached_representatives = nullptr);
 
     void
     add_graph_point(const Hierarchy& hierarchy,
@@ -467,7 +476,7 @@ private:
                     bool use_self_as_entry,
                     int sampled_route_level);
 
-    void
+    InnerIdType
     add_bottom_graph_point(const Hierarchy& hierarchy,
                            IndexNode& node,
                            InnerIdType inner_id,
@@ -577,9 +586,10 @@ private:
     bool support_duplicate_{false};                      // whether to allow duplicate ids
     mutable std::shared_mutex resize_mutex_;             // guards flatten storage resize/write/read
     mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
-    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};       // graph algorithm type
-    PiPNNGraphBuilderParameter pipnn_param_{};           // PiPNN build parameters
-    bool default_rabitq_one_bit_search_{false};          // default split lower-bound search
+    mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
+    PiPNNGraphBuilderParameter pipnn_param_{};             // PiPNN build parameters
+    bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
 
     std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{
