@@ -38,7 +38,7 @@ That script provides `sift-128-euclidean.hdf5` (SIFT1M), `gist-960-euclidean.hdf
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `--dataset`, `-d` | required | Path to the hdf5 dataset |
-| `--bucket_sizes`, `-L` | `100,1000,10000` | Comma separated target bucket sizes |
+| `--bucket_sizes`, `-L` | `100,1000,10000` | Comma-separated positive decimal integers in the uint64 range; see [Benchmark Input](../../docs/docs/en/src/advanced/rpt_partition.md#benchmark-input) |
 | `--strategies`, `-s` | `rpt,random,single_dim` | Comma separated strategies |
 | `--seed` | `0` | Random seed handed to the strategies |
 | `--topk`, `-k` | `10` | Ground-truth neighbours used for the locality metrics |

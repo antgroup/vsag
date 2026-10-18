@@ -95,3 +95,9 @@ for (const auto& partition : result.value()) {
 | `params.bucket_size == 0` | `INVALID_ARGUMENT` |
 | `x == nullptr` 且 `n > 0` | `INVALID_ARGUMENT` |
 | `n` 大于 `2^32 - 1` | `INVALID_ARGUMENT` |
+
+## 基准测试输入
+
+`rpt_bench` 的 `--bucket_sizes` 参数接受逗号分隔的十进制整数列表，取值范围为 `[1, UINT64_MAX]`，
+允许每个数字前后有空白。空项或格式错误的项会在加载数据集前被拒绝，错误信息会指出 `--bucket_sizes`
+和具体的错误项。

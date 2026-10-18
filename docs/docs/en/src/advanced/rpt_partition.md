@@ -104,3 +104,9 @@ A complete program is available at
 | `params.bucket_size == 0` | `INVALID_ARGUMENT` |
 | `x == nullptr` and `n > 0` | `INVALID_ARGUMENT` |
 | `n` larger than `2^32 - 1` | `INVALID_ARGUMENT` |
+
+## Benchmark Input
+
+The `rpt_bench` option `--bucket_sizes` accepts a comma-separated list of decimal integers in
+`[1, UINT64_MAX]`, with whitespace allowed around each number. Empty or malformed entries are
+rejected before loading the dataset; the error identifies `--bucket_sizes` and the offending entry.

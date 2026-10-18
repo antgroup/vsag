@@ -25,7 +25,7 @@ namespace {
 
 uint64_t
 ceil_div(uint64_t value, uint64_t divisor) {
-    return (value + divisor - 1) / divisor;
+    return value / divisor + (value % divisor != 0);
 }
 
 /// Gini coefficient of the partition sizes: 0 means all partitions are equal.
