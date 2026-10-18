@@ -285,9 +285,11 @@ run(int argc, char** argv) {
 }  // namespace
 
 int
-main(int argc, char** argv) try {
-    return run(argc, argv);
-} catch (const std::exception& e) {
-    std::cerr << "rpt_bench failed: " << e.what() << std::endl;
-    return 1;
+main(int argc, char** argv) {
+    try {
+        return run(argc, argv);
+    } catch (const std::exception& e) {
+        std::cerr << "rpt_bench failed: " << e.what() << std::endl;
+        return 1;
+    }
 }
