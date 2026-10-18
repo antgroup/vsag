@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <fstream>
 #include <limits>
 #include <numeric>
@@ -169,7 +170,13 @@ partition_by_single_dim(const PartitionRequest& request) {
         std::sort(ids.begin(), ids.end(), [data, dim, best_dim](int64_t a, int64_t b) {
             float left = data[static_cast<uint64_t>(a) * dim + best_dim];
             float right = data[static_cast<uint64_t>(b) * dim + best_dim];
-            if (left != right) {
+            // Sort NaNs last and break ties by id, including between NaNs.
+            const bool left_is_nan = std::isnan(left);
+            const bool right_is_nan = std::isnan(right);
+            if (left_is_nan != right_is_nan) {
+                return not left_is_nan;
+            }
+            if (not left_is_nan && left != right) {
                 return left < right;
             }
             return a < b;
