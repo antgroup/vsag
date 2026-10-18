@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <numeric>
 #include <unordered_map>
 
