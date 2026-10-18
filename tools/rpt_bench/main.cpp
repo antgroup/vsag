@@ -239,7 +239,7 @@ run(int argc, char** argv) {
             if (not result.error.empty()) {
                 std::cerr << strategy << " (L=" << bucket_size << ") failed: " << result.error
                           << std::endl;
-                continue;
+                return 1;
             }
 
             auto uniformity =
