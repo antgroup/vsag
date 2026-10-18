@@ -55,7 +55,7 @@ parse_bucket_sizes(const std::string& text) {
     return sizes;
 }
 
-void
+bool
 parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     parser.add_argument<std::string>("--dataset", "-d")
         .required()
@@ -98,8 +98,9 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     } catch (const std::runtime_error& err) {
         std::cerr << err.what() << std::endl;
         std::cerr << parser;
-        std::exit(1);
+        return false;
     }
+    return true;
 }
 
 nlohmann::json
@@ -159,7 +160,9 @@ print_row(const std::string& strategy,
 int
 run(int argc, char** argv) {
     argparse::ArgumentParser parser("rpt_bench");
-    parse_args(parser, argc, argv);
+    if (not parse_args(parser, argc, argv)) {
+        return 1;
+    }
 
     auto dataset_path = parser.get<std::string>("--dataset");
     auto bucket_sizes = parse_bucket_sizes(parser.get<std::string>("--bucket_sizes"));
