@@ -75,7 +75,6 @@ private:
     friend class RPTPartitionTestAccess;
 
     const uint64_t dim_{0};
-    Allocator* const allocator_{nullptr};
 
     const float* datas_{nullptr};
     uint64_t max_depth_{0};
