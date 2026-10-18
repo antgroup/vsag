@@ -14,5 +14,5 @@
 # limitations under the License.
 
 
-add_library (partition OBJECT rpt_partition.cpp)
+add_library (partition OBJECT rpt_partition.cpp rpt_partition.h)
 target_link_libraries (partition PRIVATE vsag_src_common)
