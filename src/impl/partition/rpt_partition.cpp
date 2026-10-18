@@ -198,6 +198,7 @@ void
 RPTPartition::project(uint64_t begin, uint64_t end, const float* direction) {
     for (uint64_t i = begin; i < end; ++i) {
         InnerIdType id = ids_[i];
+        // RPT projection uses a dot product, independent of the nearest-neighbor search metric.
         float value = FP32ComputeIP(datas_ + static_cast<uint64_t>(id) * dim_, direction, dim_);
         // NaN breaks the strict weak ordering required by nth_element; rank such vectors last.
         if (std::isnan(value)) {
