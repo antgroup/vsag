@@ -191,6 +191,12 @@ partition_by_kmeans(const PartitionRequest& request) {
             result.error = "bucket_size yields more clusters than vectors";
             return;
         }
+        if (clusters > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+            result.error = "cluster count " + std::to_string(clusters) +
+                           " exceeds KMeans maximum " +
+                           std::to_string(std::numeric_limits<int32_t>::max());
+            return;
+        }
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         KMeansCluster cluster(static_cast<int32_t>(request.dim), allocator.get());
         auto labels =
