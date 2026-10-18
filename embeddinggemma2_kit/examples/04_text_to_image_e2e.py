@@ -13,13 +13,14 @@ to substitute an exact index for an approximate one silently.
 """
 
 import json
+import os
 from pathlib import Path
 
-from embeddinggemma2_kit import Embedder
+from _common import corpus_dir, make_embedder
 from embeddinggemma2_kit.search import CrossModalSearch
 from embeddinggemma2_kit.store.manifest import CorpusItem, Manifest
 
-DATA = Path("/home/zhuangye/embeddinggemma2-cpu-20261014/data")
+DATA = corpus_dir()   # EG2_DATA overrides; see docs/platforms.md
 INDEX_DIR = Path("/tmp/eg2_text_to_image_index")
 N_IMAGES = 20
 
@@ -41,7 +42,7 @@ print(f"corpus: {len(manifest)} images")
 # Images are encoded with the *document* prompt and text queries with the
 # *query* prompt. CrossModalSearch owns that asymmetry so it cannot be inverted.
 search = CrossModalSearch(
-    embedder=Embedder(dtype="bfloat16", num_threads=16),
+    embedder=make_embedder(num_threads=16),
     fallback=True,  # drop this once pyvsag is installed, to use HGraph
 )
 search.build_from_manifest(manifest, progress=False)

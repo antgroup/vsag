@@ -29,6 +29,20 @@ All methods return contiguous `float32`, shape `(N, 768)`, L2-normalised.
 | `embed(items, text_role=...)` | list of mixed dicts | mixes modalities in one call |
 | `facts` | — | checkpoint verification facts |
 
+### `device` and `dtype`
+
+`device="cpu", dtype="bfloat16"` is the default because it is right for x86 hosts
+with AVX512-BF16. It is **not** right everywhere: on Apple Silicon,
+`dtype="bfloat16"` on the CPU is emulated and roughly 12x slower than
+`float32`, while `device="mps", dtype="bfloat16"` is about 8x faster than the
+same machine's CPU. Accuracy is identical across these choices — only speed
+differs.
+
+`device` is passed through to PyTorch unvalidated, so check availability before
+asking for `"mps"`. See [platforms.md](platforms.md) for measured numbers per
+platform, a capability-detection snippet, and how to benchmark your own host
+(`examples/06_apple_silicon.py`).
+
 ### The `role` argument
 
 `role="query"` for the thing you search **with**; `role="document"` for the

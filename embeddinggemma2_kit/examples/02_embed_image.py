@@ -3,12 +3,12 @@
 import json
 from pathlib import Path
 
-from embeddinggemma2_kit import Embedder
+from _common import corpus_dir, make_embedder
 
-DATA = Path("/home/zhuangye/embeddinggemma2-cpu-20261014/data")
+DATA = corpus_dir()   # EG2_DATA overrides; see docs/platforms.md
 manifest = json.loads((DATA / "manifest.json").read_text())[:5]
 
-emb = Embedder(dtype="bfloat16", num_threads=16)
+emb = make_embedder(num_threads=16)
 paths = [m["image"] for m in manifest]
 images = emb.embed_images(paths)
 print("image vectors:", images.shape)

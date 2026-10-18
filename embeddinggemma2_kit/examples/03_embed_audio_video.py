@@ -4,11 +4,9 @@ Point DATA at a directory containing .wav/.mp4 files; the datasets used by the
 project's benchmarks (Clotho, MSR-VTT) work well.
 """
 
-from pathlib import Path
+from _common import make_embedder, media_dir
 
-from embeddinggemma2_kit import Embedder
-
-DATA = Path("/home/zhuangye/embeddinggemma2-av-cpu-20261015/data")
+DATA = media_dir()    # EG2_MEDIA overrides
 
 audio_files = sorted(DATA.rglob("*.wav"))[:2]
 video_files = sorted(DATA.rglob("*.mp4"))[:1]
@@ -17,7 +15,7 @@ if not audio_files and not video_files:
     print("no media found under", DATA)
     raise SystemExit(0)
 
-emb = Embedder(dtype="bfloat16", num_threads=16)
+emb = make_embedder(num_threads=16)
 
 if audio_files:
     vectors = emb.embed_audio(audio_files)

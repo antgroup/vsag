@@ -3,11 +3,11 @@
 import json
 from pathlib import Path
 
-from embeddinggemma2_kit import Embedder
+from _common import corpus_dir, make_embedder
 from embeddinggemma2_kit.search import CrossModalSearch
 from embeddinggemma2_kit.store.manifest import CorpusItem, Manifest
 
-DATA = Path("/home/zhuangye/embeddinggemma2-cpu-20261014/data")
+DATA = corpus_dir()   # EG2_DATA overrides; see docs/platforms.md
 raw = json.loads((DATA / "manifest.json").read_text())[:20]
 
 # Captions as corpus items, each remembering which image it belongs to.
@@ -22,7 +22,7 @@ for entry in raw:
 manifest = Manifest(items)
 
 search = CrossModalSearch(
-    embedder=Embedder(dtype="bfloat16", num_threads=16), fallback=True
+    embedder=make_embedder(num_threads=16), fallback=True
 )
 search.build_from_manifest(manifest, progress=False)
 

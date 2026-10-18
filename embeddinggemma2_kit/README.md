@@ -95,14 +95,20 @@ python -m pytest tests/ -q
 | `03_embed_audio_video.py` | Audio and video (with audio track) encoding |
 | `04_text_to_image_e2e.py` | **Full pipeline**: images → index → text query → ranked images, then persistence |
 | `05_image_to_text.py` | Image query → captions |
+| `06_apple_silicon.py` | **Apple Silicon**: benchmarks device/dtype combinations, recommends one, then checks retrieval with it |
 
 `04_text_to_image_e2e.py` is the one to read first: it ingests a corpus from
 disk, builds the index, searches it with text, checks each hit against the
 ground-truth image, and reloads the saved index to confirm the results are
 unchanged.
 
+`06_apple_silicon.py` is the one to run first on a Mac — it needs no dataset for
+its benchmark half, and prints the settings your particular machine should use
+rather than the settings in this README.
+
 The examples default to `fallback=True` so they run on a host without pyvsag.
-Drop that argument to use the HGraph backend.
+Drop that argument to use the HGraph backend. The dataset examples read the
+corpus from `EG2_DATA` when it is set; see [docs/platforms.md](docs/platforms.md).
 
 ## Choosing a device
 
@@ -132,6 +138,31 @@ Embedder(device="mps", dtype="bfloat16")   # fastest on Apple Silicon
 Embedder(device="cpu", dtype="float32")    # fastest on Apple Silicon CPUs
 ```
 
+`device` is handed straight to PyTorch, so asking for `"mps"` on a host without
+it fails inside torch. Pick it by capability instead of hard-coding:
+
+```python
+import torch
+
+def best_device() -> str:
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"          # this kit's baselines are CPU; cuda is untested
+
+def best_dtype(device: str) -> str:
+    # bf16 only pays off with AVX512-BF16; on an arm64 CPU it is emulated.
+    return "float32" if device == "cpu" and torch.backends.mps.is_available() else "bfloat16"
+
+device = best_device()
+emb = Embedder(device=device, dtype=best_dtype(device))
+```
+
+To get the numbers for *your* machine rather than this table, run
+`python examples/06_apple_silicon.py`; it benchmarks the combinations, prints a
+recommendation, and then verifies retrieval with it. Full details, including the
+x86 server guidance and measured cross-platform comparison, are in
+[docs/platforms.md](docs/platforms.md).
+
 ## Environment notes
 
 * **CPU inference** runs on the repo's Python 3.14 environment
@@ -149,6 +180,7 @@ Embedder(device="cpu", dtype="float32")    # fastest on Apple Silicon CPUs
 
 | Document | Contents |
 |---|---|
+| [docs/platforms.md](docs/platforms.md) | **Device and dtype per platform** — Apple Silicon / x86, measured numbers, pitfalls |
 | [docs/design.md](docs/design.md) | Architecture, decoupling contract, measured tuning results |
 | [docs/api.md](docs/api.md) | API reference and the query/document role rules |
 | [docs/finetune.md](docs/finetune.md) | Fine-tuning interfaces and GPU constraints |
