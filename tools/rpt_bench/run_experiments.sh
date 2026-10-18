@@ -47,7 +47,17 @@ run() {
     local name="$1"
     shift
     echo "==> $name"
-    "$RPT_BENCH" "$@" -o "$OUT_DIR/$name.json" 2>&1 | grep -vE "^cpu |====|running on|instance spec|\[info\]|\[debug\]"
+    local -a statuses
+    "$RPT_BENCH" "$@" -o "$OUT_DIR/$name.json" 2>&1 |
+        grep -vE "^cpu |====|running on|instance spec|\[info\]|\[debug\]" || {
+            statuses=("${PIPESTATUS[@]}")
+            if (( statuses[0] != 0 )); then
+                return "${statuses[0]}"
+            fi
+            if (( statuses[1] != 0 && statuses[1] != 1 )); then
+                return "${statuses[1]}"
+            fi
+        }
     echo
 }
 
