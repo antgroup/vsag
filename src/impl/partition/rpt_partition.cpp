@@ -65,11 +65,7 @@ next_uniform(uint64_t& state) {
 }  // namespace
 
 RPTPartition::RPTPartition(uint64_t dim, Allocator* allocator)
-    : dim_(dim),
-      allocator_(allocator),
-      ids_(allocator),
-      projections_(allocator),
-      direction_(allocator) {
+    : dim_(dim), ids_(allocator), projections_(allocator), direction_(allocator) {
 }
 
 std::vector<std::vector<int64_t>>
