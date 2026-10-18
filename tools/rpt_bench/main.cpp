@@ -89,22 +89,22 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
     parser.add_argument("--seed")
         .default_value(uint64_t{0})
         .help("Random seed passed to the strategies")
-        .scan<'i', uint64_t>();
+        .scan<'u', uint64_t>();
 
     parser.add_argument("--topk", "-k")
         .default_value(uint64_t{10})
         .help("Number of ground-truth neighbours used for the locality metrics")
-        .scan<'i', uint64_t>();
+        .scan<'u', uint64_t>();
 
     parser.add_argument("--max_queries")
         .default_value(uint64_t{0})
         .help("Limit the queries used for the locality metrics; 0 means all")
-        .scan<'i', uint64_t>();
+        .scan<'u', uint64_t>();
 
     parser.add_argument("--max_base")
         .default_value(uint64_t{0})
         .help("Use only the first N base vectors; 0 means all")
-        .scan<'i', uint64_t>();
+        .scan<'u', uint64_t>();
 
     parser.add_argument<std::string>("--output", "-o")
         .default_value(std::string(""))
