@@ -13,13 +13,16 @@
 // limitations under the License.
 
 #include <argparse/argparse.hpp>
+#include <charconv>
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include "eval_dataset.h"
@@ -49,9 +52,23 @@ split_list(const std::string& text) {
 std::vector<uint64_t>
 parse_bucket_sizes(const std::string& text) {
     std::vector<uint64_t> sizes;
-    for (const auto& item : split_list(text)) {
-        sizes.push_back(std::stoull(item));
-    }
+    std::stringstream stream(text);
+    std::string item;
+    do {
+        std::getline(stream, item, ',');
+        const auto first = item.find_first_not_of(" \t\n\r\f\v");
+        const auto last = item.find_last_not_of(" \t\n\r\f\v");
+        item = first == std::string::npos ? "" : item.substr(first, last - first + 1);
+
+        uint64_t value = 0;
+        const auto parsed = std::from_chars(item.data(), item.data() + item.size(), value);
+        if (parsed.ec != std::errc{} || parsed.ptr != item.data() + item.size() || value == 0) {
+            throw std::invalid_argument(
+                "invalid --bucket_sizes value '" + item +
+                "': expected an integer between 1 and 18446744073709551615");
+        }
+        sizes.push_back(value);
+    } while (stream.good());
     return sizes;
 }
 
