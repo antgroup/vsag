@@ -12,12 +12,46 @@ It is intentionally *not* used as a silent substitute for HGraph -- see
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import numpy as np
 
 from ...errors import IndexStateError
 from ..base import IndexStats, SearchHit, VectorIndex
+
+
+def _matmul(a: np.ndarray, b: np.ndarray) -> np.ndarray:
+    """``a @ b`` without BLAS's spurious floating-point warnings.
+
+    Some BLAS backends (notably Accelerate on macOS arm64) signal ``divide by
+    zero`` / ``overflow`` / ``invalid value`` from inside an optimized float32
+    matmul even when every output is finite and correct: with unit-norm rows the
+    true scores are in [-1, 1], and comparing against a float64 reference gives
+    a max difference of ~1e-7 with identical ranking.
+
+    The warning is noise from the kernel's internal blocking, not a property of
+    the input. Rather than silencing the category outright -- which would also
+    hide a real overflow -- the multiply is computed under ``errstate`` and a
+    warning is re-issued if the result is genuinely non-finite.
+    """
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=r"(divide by zero|overflow|invalid value) encountered in matmul",
+            category=RuntimeWarning,
+        )
+        with np.errstate(divide="ignore", over="ignore", invalid="ignore"):
+            result = a @ b
+
+    if not np.isfinite(result).all():
+        warnings.warn(
+            "matmul produced non-finite values; inputs may be unnormalized or "
+            "contain NaN/inf",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return result
 
 
 class NumpyFlatIndex(VectorIndex):
@@ -57,7 +91,7 @@ class NumpyFlatIndex(VectorIndex):
 
         k = min(topk, len(self._ids))
         # scores[q, n] = <query_q, doc_n>; rows are unit norm so this is cosine.
-        scores = matrix @ self._matrix.T
+        scores = _matmul(matrix, self._matrix.T)
 
         # Partial selection then a stable sort of just those k, which keeps
         # ties resolved by ascending index -- matching the reference behavior

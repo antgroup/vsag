@@ -15,6 +15,11 @@ license = { text = "Apache-2.0" }
 dependencies = [
     "numpy>=1.24",
     "torch>=2.0",
+    # torchvision is required even for text-only use: loading the checkpoint
+    # constructs the multimodal processors, and the video processor imports
+    # torchvision at construction time. Omitting it fails at the first encode,
+    # not at install.
+    "torchvision>=0.15",
     "transformers>=5.19",
     "sentence-transformers>=6.1.0",
     "pillow>=10.0",

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -122,3 +123,29 @@ def test_index_save_load_roundtrip(tmp_path):
     reloaded.load(str(tmp_path))
     after = [h.id for h in reloaded.search(query, topk=5)[0]]
     assert before == after
+
+def test_matmul_ignores_spurious_blas_warnings():
+    """Unit-norm scores must not emit BLAS warnings; real overflow still must.
+
+    Accelerate on macOS arm64 raises divide/overflow/invalid from inside a
+    float32 matmul whose outputs are all finite and correct. Those warnings are
+    suppressed, but a genuinely non-finite result has to stay visible -- hence
+    both halves of this test.
+    """
+    from embeddinggemma2_kit.index.backends.numpy_flat import _matmul
+
+    unit = np.ones((4, 768), dtype=np.float32) / np.sqrt(768)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = _matmul(unit, unit.T)
+    assert np.isfinite(result).all()
+    assert not [w for w in caught if "matmul" in str(w.message)], \
+        "unit-norm matmul must not warn; scores are finite and in range"
+
+    big = np.full((4, 8), 1e30, dtype=np.float32)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        overflowed = _matmul(big, big.T)
+    assert not np.isfinite(overflowed).all()
+    assert [w for w in caught if "non-finite" in str(w.message)], \
+        "a genuinely non-finite matmul result must still be reported"
