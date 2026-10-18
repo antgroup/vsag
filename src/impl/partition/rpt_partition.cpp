@@ -235,9 +235,6 @@ RPTPartition::emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves) {
 
 tl::expected<std::vector<std::vector<int64_t>>, Error>
 rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& params) {
-    if (d == 0) {
-        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT, "dim must be positive"));
-    }
     try {
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         RPTPartition partitioner(d, allocator.get());
