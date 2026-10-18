@@ -203,9 +203,11 @@ partition_by_kmeans(const PartitionRequest& request) {
         Partitions partitions(clusters);
         for (uint64_t i = 0; i < request.count; ++i) {
             int label = labels[i];
-            if (label >= 0 && static_cast<uint64_t>(label) < clusters) {
-                partitions[static_cast<uint64_t>(label)].push_back(static_cast<int64_t>(i));
+            if (label < 0 || static_cast<uint64_t>(label) >= clusters) {
+                result.error = "KMeans returned out-of-range label " + std::to_string(label);
+                return;
             }
+            partitions[static_cast<uint64_t>(label)].push_back(static_cast<int64_t>(i));
         }
         // KMeans may leave clusters empty; those are not partitions.
         partitions.erase(std::remove_if(partitions.begin(),
