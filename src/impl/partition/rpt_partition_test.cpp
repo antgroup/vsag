@@ -17,6 +17,7 @@
 #include <cmath>
 #include <limits>
 #include <random>
+#include <string>
 
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
@@ -154,6 +155,21 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
 
     SECTION("null data with positive count") {
         REQUIRE_THROWS_AS(partitioner.Run(nullptr, 4, dim, params), vsag::VsagException);
+    }
+
+    SECTION("count exceeds supported id range") {
+        float data = 0.0F;
+        uint64_t max_count = static_cast<uint64_t>(std::numeric_limits<vsag::InnerIdType>::max());
+        uint64_t count = max_count + 1;
+        try {
+            partitioner.Run(&data, count, dim, params);
+            FAIL("Expected count validation to throw");
+        } catch (const vsag::VsagException& error) {
+            REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(error.error_.message == "count " + std::to_string(count) +
+                                                " exceeds the maximum supported value " +
+                                                std::to_string(max_count));
+        }
     }
 
     SECTION("duplicated vectors") {
