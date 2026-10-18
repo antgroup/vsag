@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embeddinggemma2-kit"
+version = "0.1.0"
+description = "EmbeddingGemma 2 multimodal embedding, HGraph vector index, and cross-modal retrieval kit"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+
+# Core dependencies only cover CPU inference of text/image/audio/video.
+# NOTE: pyvsag is deliberately NOT a dependency -- see docs/design.md#decoupling.
+dependencies = [
+    "numpy>=1.24",
+    "torch>=2.0",
+    "transformers>=5.19",
+    "sentence-transformers>=6.1.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# Audio/video decoding. Required for embed_audio/embed_video and for
+# embedded audio tracks in video files.
+media = ["av>=12.0", "soundfile>=0.12", "soxr>=0.3"]
+# Fine-tuning interfaces. Kept optional so CPU inference users never pull PEFT.
+finetune = ["peft>=0.13"]
+dev = ["pytest>=7.0", "pytest-cov", "ruff"]
+
+[project.scripts]
+kit-embed = "embeddinggemma2_kit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+embeddinggemma2_kit = ["py.typed"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py310"
