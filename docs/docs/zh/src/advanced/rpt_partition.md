@@ -34,7 +34,7 @@ rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& 
 | `n` | 向量数量。`n == 0` 时返回空结果。 |
 | `x` | 行优先存放的 `n * d` 个浮点数。由调用方持有，函数不会修改也不会保留该指针。 |
 | `params.bucket_size` | 目标桶大小 `L`，每个分区最多包含 `L` 个向量。必须为正。 |
-| `params.max_depth` | 递归深度的安全上限。达到上限后，剩余向量按 id 顺序等分切块，尺寸保证仍然成立。 |
+| `params.max_depth` | 递归深度的安全上限。达到上限后，剩余向量按当前排列顺序切分为大小尽量均匀的块，尺寸保证仍然成立。 |
 | `params.seed` | 随机种子。相同输入与相同种子总是得到相同的分区结果。 |
 
 返回值为每个分区一个 `std::vector<int64_t>`，存放该分区中向量在 `x` 中的行下标。

@@ -39,7 +39,7 @@ Declarations live in
 | `n` | Number of vectors. `n == 0` returns an empty result. |
 | `x` | Row-major array of `n * d` floats. Owned by the caller; neither modified nor retained. |
 | `params.bucket_size` | Target bucket size `L`. Every partition holds at most `L` vectors. Must be positive. |
-| `params.max_depth` | Safety bound on recursion depth. When reached, the remaining vectors are split into equal chunks by id order so the size guarantees still hold. |
+| `params.max_depth` | Safety bound on recursion depth. When reached, the remaining vectors are split into chunks of nearly equal size in the current permutation order, preserving the size guarantees. |
 | `params.seed` | Random seed. The same input and seed always yield the same partitions. |
 
 The result is one `std::vector<int64_t>` per partition, holding the row indices into `x`.
