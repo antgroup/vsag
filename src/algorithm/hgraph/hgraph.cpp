@@ -209,6 +209,8 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     resize(bottom_graph_->max_capacity_);
     this->build_estimate_initial_capacity_ = this->max_capacity_.load();
     this->build_estimate_fresh_cache_buckets_ = this->cache_->neighbors_.bucket_count();
+    // Preserve the construction-time worker bound: pool downsizing is asynchronous.
+    // Later Options changes do not resize this pool.
     if (common_param.thread_pool_ == nullptr and this->thread_pool_ != nullptr) {
         this->build_estimate_owned_pool_threads_ = std::max<uint64_t>(
             this->build_thread_count_, Options::Instance().num_threads_building());
@@ -523,6 +525,9 @@ constexpr bool K_BUILD_ESTIMATE_STDLIB_MODELED = false;
 // array out of range. If the multiplier, distribution or engine changes, re-derive the
 // bound before changing the cap.
 constexpr uint64_t K_BUILD_ESTIMATE_MAX_ROUTE_LEVELS = 64;
+// Minimum degree accepted by the model; the route replay uses this degree's level multiplier,
+// which dominates every larger configured degree. Matches hgraph_param_mapping's lower bound.
+constexpr uint64_t K_BUILD_ESTIMATE_MIN_ROUTE_DEGREE = 4;
 // Distinct-key count up to which the tsl displacement limit cannot trigger an extra rehash.
 constexpr uint64_t K_BUILD_ESTIMATE_NOMINAL_HASH_KEYS = 8193;
 // ResourceObjectPool::kSubPoolCount and PointsMutex::kMutexesPerBlock.
@@ -900,7 +905,8 @@ HGraph::build_memory_estimate_index_supported(const HGraphParameter& param) cons
         this->conjugate_graph_ == nullptr and this->mci_cliques_ == nullptr and
         param.label_remap_type == LabelRemapType::PG and param.precise_codes_param == nullptr and
         param.raw_vector_param == nullptr and param.attr_inverted_interface_param == nullptr and
-        param.odescent_param == nullptr;
+        param.odescent_param == nullptr and this->bottom_graph_ != nullptr and
+        this->bottom_graph_->MaximumDegree() >= K_BUILD_ESTIMATE_MIN_ROUTE_DEGREE;
     return modeled_index;
 }
 
@@ -1070,7 +1076,8 @@ struct HGraph::BuildMemoryEstimateContext {
         {
             // Copying preserves index RNG state; it provides no synchronization.
             auto engine = index.level_generator_;
-            const double mult = 1 / log(1.0 * static_cast<double>(4));
+            const double mult =
+                1 / log(1.0 * static_cast<double>(K_BUILD_ESTIMATE_MIN_ROUTE_DEGREE));
             for (uint64_t i = 0; i < n; ++i) {
                 const double draw = HGraph::random_level_draw(engine, mult);
                 const bool representable =

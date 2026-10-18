@@ -1781,6 +1781,25 @@ TEST_CASE("HGraph insert worker count literal bounds", "[ut][hgraph][build_dispa
     CHECK(Access::InsertWorkerCount(true, 0, 0) == 0);
 }
 
+TEST_CASE("HGraph estimate rejects a bottom degree below the modeled minimum",
+          "[ut][hgraph][estimate_build_memory]") {
+    auto common_param = MakeCommonParam(16);
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 4, 1);
+
+    // The boundary degree itself is still governed by the modeled-profile rules.
+    RequireExpectedBuildMemoryProfile(MakeHGraphIndex(hgraph_json, common_param));
+
+    // Bypassing the public mapping (which enforces degree >= 4) leaves a degree the route
+    // model cannot cover: the flag is not advertised and the estimate is a typed error.
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
+    auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(typed != nullptr);
+    typed->bottom_graph_param->max_degree_ = 3;
+    auto low_degree = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(
+        std::make_shared<vsag::HGraph>(mapped, common_param), common_param);
+    RequireUnsupportedBuildEstimate(low_degree);
+}
+
 TEST_CASE("HGraph build memory validates the profile and reports modeled ownership cells",
           "[ut][hgraph][estimate_build_memory][estimate_build_memory_matrix]") {
     BlockSizeLimitGuard blocks(uint64_t{1} << 18);

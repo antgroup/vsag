@@ -853,7 +853,8 @@ HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
                     logger::error("HGraph insertion worker failed with an unknown exception");
                 }
             } catch (...) {
-                // A failing logger must not replace the original submission exception.
+                // Intentionally silent: if logging itself throws, drop the secondary report so the
+                // original submission exception is rethrown unchanged; no fallback output.
             }
         };
         try {
@@ -1991,6 +1992,7 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     CHECK_ARGUMENT(data->GetSourceID() != nullptr,
                    "build_with_cache requires Dataset::SourceID to be set");
 
+    // Build has exclusive access (empty index checked above); validate before allocating IDs.
     this->validate_random_levels(static_cast<uint64_t>(data->GetNumElements()));
 
     const auto build_begin = build_cache_now_us();
