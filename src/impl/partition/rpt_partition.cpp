@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 #include "impl/allocator/safe_allocator.h"
 #include "simd/fp32_simd.h"
@@ -90,7 +91,10 @@ RPTPartition::Run(const float* datas,
         throw VsagException(ErrorType::INVALID_ARGUMENT, "datas cannot be null");
     }
     if (count > static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max())) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "count exceeds the supported range");
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "count " + std::to_string(count) +
+                                " exceeds the maximum supported value " +
+                                std::to_string(std::numeric_limits<InnerIdType>::max()));
     }
 
     partitions_.clear();
