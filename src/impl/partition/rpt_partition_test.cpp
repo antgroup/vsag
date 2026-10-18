@@ -76,6 +76,10 @@ CheckPartitions(const Partitions& partitions, uint64_t count, uint64_t bucket_si
             seen[id] = 1;
         }
     }
+    for (uint64_t id = 0; id < count; ++id) {
+        CAPTURE(id);
+        REQUIRE(seen[id] == 1);
+    }
 
     REQUIRE(max_size <= bucket_size);
     if (count >= bucket_size) {
