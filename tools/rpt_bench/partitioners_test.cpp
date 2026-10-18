@@ -23,6 +23,33 @@
 
 namespace vsag::rpt_bench {
 
+TEST_CASE("Single-dimension benchmark orders NaNs last", "[rpt_bench][single_dim]") {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float infinity = std::numeric_limits<float>::infinity();
+    std::vector<float> data;
+    std::vector<int64_t> expected_ids;
+
+    SECTION("mixed values retain numeric ordering and break ties by id") {
+        data = {nan, 1.0F, -infinity, -0.0F, 0.0F, nan, infinity, 1.0F, -1.0F, nan};
+        expected_ids = {2, 8, 3, 4, 1, 7, 6, 0, 5, 9};
+    }
+
+    SECTION("all NaNs are ordered by id") {
+        data = {nan, nan, nan, nan};
+        expected_ids = {0, 1, 2, 3};
+    }
+
+    PartitionRequest request{1, data.size(), data.data(), 3, 0};
+    auto result = partition_by_single_dim(request);
+    REQUIRE(result.error.empty());
+
+    std::vector<int64_t> ids;
+    for (const auto& partition : result.partitions) {
+        ids.insert(ids.end(), partition.begin(), partition.end());
+    }
+    REQUIRE(ids == expected_ids);
+}
+
 TEST_CASE("KMeans benchmark rejects unsupported cluster counts", "[rpt_bench][kmeans]") {
     const float data = 0.0F;
     const auto max_clusters = static_cast<uint64_t>(std::numeric_limits<int32_t>::max());
