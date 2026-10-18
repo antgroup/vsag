@@ -181,6 +181,11 @@ partition_by_kmeans(const PartitionRequest& request) {
         if (not validate_request(request, result) || request.count == 0) {
             return;
         }
+        if (request.dim > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+            result.error = "dimension " + std::to_string(request.dim) + " exceeds KMeans maximum " +
+                           std::to_string(std::numeric_limits<int32_t>::max());
+            return;
+        }
         uint64_t clusters = ceil_div(request.count, request.bucket_size);
         if (clusters > request.count) {
             result.error = "bucket_size yields more clusters than vectors";
