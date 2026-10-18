@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,12 +23,12 @@ main(int argc, char** argv) {
     vsag::init();
 
     /******************* Prepare Base Dataset *****************/
-    int64_t num_vectors = 10000;
-    int64_t dim = 128;
+    uint64_t num_vectors = 10000;
+    uint64_t dim = 128;
     std::vector<float> datas(num_vectors * dim);
     std::mt19937 rng(47);
     std::uniform_real_distribution<float> distrib_real;
-    for (int64_t i = 0; i < dim * num_vectors; ++i) {
+    for (uint64_t i = 0; i < dim * num_vectors; ++i) {
         datas[i] = distrib_real(rng);
     }
 
