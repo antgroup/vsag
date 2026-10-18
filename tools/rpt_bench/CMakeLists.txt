@@ -30,3 +30,14 @@ target_link_libraries (rpt_bench PRIVATE
     ${HDF5_C_STATIC_LIBRARY}
     z dl)
 add_dependencies (rpt_bench hdf5)
+
+if (ENABLE_TESTS)
+    add_executable (rpt_bench_partitioners_test
+        partitioners_test.cpp
+        partitioners.cpp)
+    target_link_libraries (rpt_bench_partitioners_test PRIVATE
+        Catch2::Catch2WithMain
+        simd
+        vsag)
+    add_dependencies (rpt_bench_partitioners_test Catch2)
+endif ()
