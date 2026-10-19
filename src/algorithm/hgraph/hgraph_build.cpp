@@ -34,6 +34,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -381,6 +382,20 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     if (need_sq8_build_data) {
         build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
     }
+    auto materialize_storage = [this, data, &inner_ids, &valid_indices]() {
+        materialize_pipnn_storage(
+            inner_ids,
+            valid_indices,
+            bottom_graph_,
+            *code_slot_map_,
+            allocator_,
+            thread_pool_.get(),
+            build_thread_count_,
+            [this](CodeSlotIdType capacity) { this->ensure_physical_code_capacity(capacity); },
+            [this, data](int64_t row, CodeSlotIdType slot) {
+                this->insert_persistent_codes_to_slot(get_data(data, row), slot);
+            });
+    };
     if (use_pipnn) {
         PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
                                         static_cast<uint64_t>(this->dim_),
@@ -390,7 +405,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->build_thread_count_);
         pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
         if (this->using_dedup_storage() and not defer_persistent_codes) {
-            this->materialize_pipnn_storage(data, inner_ids, valid_indices);
+            materialize_storage();
         }
         if (this->support_duplicate_) {
             entry_point_id_ = bottom_graph_->GetGroupId(entry_point_id_);
@@ -451,7 +466,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         // fused RaBitQ datacell, so no extra branch is needed here.
         this->Train(data);
         if (this->using_dedup_storage()) {
-            this->materialize_pipnn_storage(data, inner_ids, valid_indices);
+            materialize_storage();
         } else if (all_rows_are_valid) {
             batch_insert_persistent_codes();
         } else {
@@ -461,85 +476,6 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
     return failed_ids;
-}
-
-void
-HGraph::materialize_pipnn_storage(const DatasetPtr& data,
-                                  const Vector<InnerIdType>& inner_ids,
-                                  const Vector<int64_t>& valid_indices) {
-    struct representative_row {
-        InnerIdType inner_id;
-        CodeSlotIdType slot;
-        int64_t row;
-    };
-    Vector<representative_row> representatives(allocator_);
-    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
-        const auto id = inner_ids[i];
-        if (bottom_graph_->GetGroupId(id) == id) {
-            representatives.push_back({id, 0, valid_indices[i]});
-        }
-    }
-    // Build is exclusive. Encode into provisional slots so a failed task does not consume
-    // slot IDs or change logical mappings. The allocated buffers can be reused after failure.
-    const auto first_slot = code_slot_map_->PhysicalCount();
-    CHECK_ARGUMENT(
-        representatives.size() <= std::numeric_limits<CodeSlotIdType>::max() - first_slot,
-        "PiPNN storage exceeds the code slot limit");
-    for (uint64_t i = 0; i < representatives.size(); ++i) {
-        representatives[i].slot = first_slot + static_cast<CodeSlotIdType>(i);
-    }
-    this->ensure_physical_code_capacity(first_slot +
-                                        static_cast<CodeSlotIdType>(representatives.size()));
-
-    // Capacity is fixed before workers write. Wait for every scheduled task before publishing
-    // mappings or letting representative rows go out of scope, even if scheduling/encoding fails.
-    const uint64_t workers = std::min<uint64_t>(
-        representatives.size(),
-        thread_pool_ != nullptr ? std::max<uint64_t>(1, build_thread_count_) : 1);
-    std::vector<std::future<void>> futures;
-    futures.reserve(workers);
-    std::exception_ptr failure;
-    try {
-        for (uint64_t worker = 0; worker < workers; ++worker) {
-            const auto begin = representatives.size() * worker / workers;
-            const auto end = representatives.size() * (worker + 1) / workers;
-            auto encode = [this, &representatives, data, begin, end]() {
-                for (auto i = begin; i < end; ++i) {
-                    const auto& representative = representatives[i];
-                    this->insert_persistent_codes_to_slot(get_data(data, representative.row),
-                                                          representative.slot);
-                }
-            };
-            if (workers > 1) {
-                futures.emplace_back(thread_pool_->GeneralEnqueue(std::move(encode)));
-            } else {
-                encode();
-            }
-        }
-    } catch (...) {
-        failure = std::current_exception();
-    }
-    for (auto& future : futures) {
-        try {
-            future.get();
-        } catch (...) {
-            if (failure == nullptr) {
-                failure = std::current_exception();
-            }
-        }
-    }
-    if (failure != nullptr) {
-        std::rethrow_exception(failure);
-    }
-    for (const auto& representative : representatives) {
-        code_slot_map_->PublishSlot(representative.inner_id, code_slot_map_->AllocateSlot());
-    }
-    for (auto id : inner_ids) {
-        const auto group = bottom_graph_->GetGroupId(id);
-        if (group != id) {
-            code_slot_map_->PublishSlot(id, code_slot_map_->Resolve(group));
-        }
-    }
 }
 
 std::vector<int64_t>
