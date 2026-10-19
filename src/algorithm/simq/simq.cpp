@@ -1306,7 +1306,6 @@ SIMQ::coarse_search(const float* query_tokens,
                     int64_t coarse_k,
                     uint64_t* coarse_dist_cmp,
                     uint64_t* coarse_probe_count) const {
-    constexpr auto hgraph_parameters = R"({"hgraph": {"ef_search": 100}})";
     const auto n_docs = static_cast<size_t>(total_count_);
     std::vector<float> score_buf(n_docs, 0.0F);
     std::vector<bool> seen_buf(n_docs, false);
@@ -1315,8 +1314,7 @@ SIMQ::coarse_search(const float* query_tokens,
     dirty_list.reserve(n_docs);
 
     // Each query token's search is independent. We do all KnnSearch calls in
-    // parallel, then sequentially propagate scores (which is fast O(k) per
-    // token).
+    // parallel, then sequentially propagate scores (which is fast O(k) per token).
     struct TokenSearchResult {
         std::vector<std::pair<float, InnerIdType>> cscores;
         int64_t actual_coarse_k{0};
@@ -1341,7 +1339,7 @@ SIMQ::coarse_search(const float* query_tokens,
                 auto query_ds = Dataset::Make();
                 query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
                 auto result_ds = rep_hgraph_->KnnSearch(
-                    query_ds, result.actual_coarse_k, hgraph_parameters, nullptr);
+                    query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
                 if (coarse_dist_cmp != nullptr) {
                     result.dist_cmp = read_dist_cmp(result_ds);
@@ -1376,7 +1374,7 @@ SIMQ::coarse_search(const float* query_tokens,
             auto query_ds = Dataset::Make();
             query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(qt)->Owner(false);
             auto result_ds = rep_hgraph_->KnnSearch(
-                query_ds, result.actual_coarse_k, hgraph_parameters, nullptr);
+                query_ds, result.actual_coarse_k, R"({"hgraph": {"ef_search": 100}})", nullptr);
 
             if (coarse_dist_cmp != nullptr) {
                 result.dist_cmp = read_dist_cmp(result_ds);
@@ -1507,12 +1505,8 @@ SIMQ::KnnSearchImpl(const DatasetPtr& query,
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
     auto t_coarse_start = std::chrono::steady_clock::now();
-    auto coarse_results =
-        coarse_search(query_mvs[0].vectors_,
-                      query_mvs[0].len_,
-                      coarse_k,
-                      &coarse_dist_cmp,
-                      &coarse_probe_count);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
@@ -1685,12 +1679,8 @@ SIMQ::RangeSearchImpl(const DatasetPtr& query,
     uint64_t coarse_dist_cmp = 0;
     uint64_t coarse_probe_count = 0;
     auto t_coarse_start = std::chrono::steady_clock::now();
-    auto coarse_results =
-        coarse_search(query_mvs[0].vectors_,
-                      query_mvs[0].len_,
-                      coarse_k,
-                      &coarse_dist_cmp,
-                      &coarse_probe_count);
+    auto coarse_results = coarse_search(
+        query_mvs[0].vectors_, query_mvs[0].len_, coarse_k, &coarse_dist_cmp, &coarse_probe_count);
     double coarse_ms =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t_coarse_start)
             .count();
