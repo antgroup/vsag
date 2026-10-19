@@ -49,6 +49,41 @@ class BenchmarkWorkflowTests(unittest.TestCase):
         self.assertIn('--fail-under 90', workflow)
 
 
+class ReproductionDocumentationTests(unittest.TestCase):
+    def test_quickstart_requires_dependencies_and_compiled_probe(self):
+        root = Path(__file__).parent
+        guide = (root / 'ACCEPTANCE.md').read_text()
+        block = guide.split('## Reproduce and verify\n\n', 1)[1].split('For a new run,', 1)[0]
+        self.assertIn('numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0', block)
+        self.assertIn('-DENABLE_BENCHMARKS=ON', block)
+        self.assertIn('-DCMAKE_EXPORT_COMPILE_COMMANDS=ON', block)
+        self.assertIn('export VSAG_MIXED_PROBE="$BENCH_BUILD/lite_acceptance_mixed_cpu_acceptance"', block)
+        for first, second in [('cmake --build', 'export VSAG_MIXED_PROBE'),
+                              ('export VSAG_MIXED_PROBE', 'test -x'),
+                              ('test -x', 'python3 -m unittest'),
+                              ('python3 -c', 'python3 -m unittest')]:
+            self.assertLess(block.index(first), block.index(second))
+
+    def test_current_and_historical_recipes_remain_distinct(self):
+        root = Path(__file__).parent
+        index = (root / 'ACCEPTANCE.md').read_text()
+        recipes = (root / 'README.md').read_text()
+        self.assertIn('a3a76a80cc5e8f1412c93b0a118f51785fdf6e75', index)
+        self.assertIn('historical measurement', index)
+        self.assertIn('## Reproduction recipes', recipes)
+        self.assertIn('### Guarded historical Full, package and quality replay', recipes)
+        for tool in ['prepare_sift.py', 'prepare_gist.cpp', 'prepare_cohere.py',
+                     'run_mixed_cpu_acceptance.py', 'verify_mixed_cpu_acceptance.py',
+                     'pack_mixed_cpu_acceptance.py', 'build_fresh_full_reference.py',
+                     'run_pinned_full_acceptance.py', 'verify_pinned_full_acceptance.py',
+                     'measure_runtime_package.py', 'verify_runtime_package.py',
+                     'run_quality_target.py', 'verify_quality_target.py']:
+            self.assertTrue((root / tool).is_file())
+            self.assertIn(tool, recipes)
+        self.assertIn('unpack(Path(sys.argv[1]), Path(sys.argv[2]))', recipes)
+        self.assertIn('not generic latest-source commands', recipes)
+
+
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')
 class BenchmarkContractTests(unittest.TestCase):
     def test_all_percentile_implementations(self):

@@ -8,9 +8,11 @@ Cohere coverage is not the latest SIFT/GIST resident rerun.
 ## Scope and source identity
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
-This evidence branch now incorporates feature commit
-`74a9420c771e75dea5e56324775d8db5d1472459` through a normal merge; its production
-`src/lite` and public Lite headers match that feature version. No rejected graph
+The current integration depends on #2904 feature commit
+`a3a76a80cc5e8f1412c93b0a118f51785fdf6e75`; its production sources and public
+headers match that feature dependency. The earlier integration
+`74a9420c771e75dea5e56324775d8db5d1472459` remains a historical measurement
+identity, not the current integration baseline. No rejected graph
 policy is enabled by this benchmark integration. `ENABLE_BENCHMARKS` defaults OFF.
 Older evidence explicitly measures `dbb2fe0` or its report-specific source, not
 automatically the latest merged implementation.
@@ -51,14 +53,46 @@ measured source SHA, input hashes, commands, configuration and raw verification.
 
 ## Reproduce and verify
 
+Run from the repository root on Linux x86_64. Required tools are a C++17
+compiler, CMake, Ninja, Python3 with pip, and the repository's Catch2 source.
+The measured CPU/RSS runners also require `/proc`, `/dev/shm`, `taskset` and
+`/usr/bin/time`. The examples use an isolated Python environment and external
+build/output directories; do not create outputs inside a clean feature checkout.
+
 ```bash
-cmake -S lite -B build-lite -G Ninja -DCMAKE_BUILD_TYPE=Release \
+BENCH_ROOT=$(pwd -P)
+BENCH_WORK=$(mktemp -d /tmp/vsag-lite-check.XXXXXX)
+printf 'Validation workspace: %s\n' "$BENCH_WORK"
+if ! python3 -m venv "$BENCH_WORK/venv"; then
+  python3 -m pip install --target "$BENCH_WORK/venv-bootstrap" virtualenv==20.26.6
+  PYTHONPATH="$BENCH_WORK/venv-bootstrap" python3 -m virtualenv --no-download \
+    --app-data "$BENCH_WORK/virtualenv-cache" "$BENCH_WORK/venv"
+fi
+. "$BENCH_WORK/venv/bin/activate"
+python3 -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
+BENCH_BUILD="$BENCH_WORK/lite-build"
+cmake -S "$BENCH_ROOT/lite" -B "$BENCH_BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
   -DENABLE_TESTS=ON -DENABLE_RABITQ_LITE_BACKEND=ON -DENABLE_BENCHMARKS=ON
-cmake --build build-lite -j2
-ctest --test-dir build-lite --output-on-failure
+cmake --build "$BENCH_BUILD" -j2
+ctest --test-dir "$BENCH_BUILD" --output-on-failure
+export VSAG_MIXED_PROBE="$BENCH_BUILD/lite_acceptance_mixed_cpu_acceptance"
+test -x "$VSAG_MIXED_PROBE"
+python3 -c 'import numpy, h5py, pyarrow'
 python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
-python3 lite/benchmark/run_mixed_cpu_acceptance.py --help
 ```
+
+If system `venv/ensurepip` is unavailable, the fallback bootstraps virtualenv
+inside the external workspace; it does not install a system package or change the
+system Python environment. With all prerequisites present, discovery executes the compiled lifecycle and
+Cohere fixtures rather than skipping them. If a dependency or executable is
+missing, fix the prerequisite; a skip is not success. For offline builds, add
+`-DFETCHCONTENT_SOURCE_DIR_CATCH2=/absolute/path/to/matching/catch2-src` to the
+configure command, using the repository-pinned source version, not a replacement.
+Keep the printed `$BENCH_WORK` path and logs; these commands do not delete results.
+
+For data inputs, complete run commands, output files and independent verification,
+follow [the reproduction recipes](README.md#reproduction-recipes).
 
 For a new run, pass a clean feature checkout and its actual SHA, a fresh build,
 prepared datasets and a new output directory. Do not silently reuse historical
