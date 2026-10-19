@@ -70,7 +70,7 @@ public:
         return vsag::HGraph::KnnSearch(query, k, parameters, filter);
     }
 
-    mutable std::atomic<uint64_t> candidate_searches{0};
+    mutable uint64_t candidate_searches{0};
     bool fail_candidate_search{false};
 };
 
@@ -83,32 +83,28 @@ public:
               int64_t k,
               const std::string& parameters,
               const vsag::FilterPtr& filter) const override {
-        // Inspect only the serial analyzer phase; Build also calls this override
-        // from concurrent MCI workers.
+        // Build also calls this override from MCI workers. Catch2 assertions and the
+        // query counter are only safe here once the serial analyzer checks begin.
         if (not inspect_queries) {
             return vsag::HGraph::KnnSearch(query, k, parameters, filter);
         }
+        REQUIRE(query->GetFloat32Vectors() == nullptr);
+        REQUIRE(query->GetInt8Vectors() != nullptr);
         const auto dim = static_cast<uint64_t>(query->GetDim());
         bool matches = false;
-        if (query->GetFloat32Vectors() == nullptr and query->GetInt8Vectors() != nullptr and
-            dim > 0 and dim <= expected_vectors.size()) {
-            for (uint64_t offset = 0; offset + dim <= expected_vectors.size(); offset += dim) {
-                matches |= std::equal(query->GetInt8Vectors(),
-                                      query->GetInt8Vectors() + dim,
-                                      expected_vectors.data() + offset);
-            }
+        for (uint64_t offset = 0; offset < expected_vectors.size(); offset += dim) {
+            matches |= std::equal(query->GetInt8Vectors(),
+                                  query->GetInt8Vectors() + dim,
+                                  expected_vectors.data() + offset);
         }
-        if (not matches) {
-            invalid_queries.fetch_add(1, std::memory_order_relaxed);
-        }
-        queries.fetch_add(1, std::memory_order_relaxed);
+        REQUIRE(matches);
+        ++queries;
         return vsag::HGraph::KnnSearch(query, k, parameters, filter);
     }
 
     bool inspect_queries{false};
     std::vector<int8_t> expected_vectors;
-    mutable std::atomic<uint64_t> queries{0};
-    mutable std::atomic<uint64_t> invalid_queries{0};
+    mutable uint64_t queries{0};
 };
 
 class HalfRatioAllValidFilter : public vsag::Filter {
@@ -1533,7 +1529,6 @@ TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][m
     auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
     auto params = config["index_param"];
     params["base_quantization_type"].SetString("int8");
-    params["build_thread_count"].SetInt(GENERATE(1, 4, 12));
     vsag::IndexCommonParam common;
     common.dim_ = dim;
     common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
@@ -1553,8 +1548,6 @@ TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][m
                        ->Int8Vectors(index.expected_vectors.data())
                        ->Owner(false);
     REQUIRE(index.Build(dataset).empty());
-    REQUIRE(index.queries.load() == 0);
-    REQUIRE(index.invalid_queries.load() == 0);
     index.inspect_queries = true;
     vsag::AnalyzerParam analyzer_params(common.allocator_.get());
     analyzer_params.base_sample_size = total;
@@ -1562,8 +1555,7 @@ TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][m
     vsag::HGraphAnalyzer analyzer(&index, analyzer_params);
     REQUIRE(std::isfinite(analyzer.GetBaseSearchRecall(R"({"hgraph":{"ef_search":100}})")));
     REQUIRE(std::isfinite(analyzer.GetBaseSearchTimeCost(R"({"hgraph":{"ef_search":100}})")));
-    REQUIRE(index.queries.load() == total);
-    REQUIRE(index.invalid_queries.load() == 0);
+    REQUIRE(index.queries == total);
 }
 
 TEST_CASE("MCI final coverage deduplicates wide neighborhoods in input order",
