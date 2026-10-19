@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
+#include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
 #include "datacell/flatten_interface.h"
@@ -472,9 +473,9 @@ HGraph::calc_native_distance_by_id(const void* native_query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -505,9 +506,9 @@ HGraph::CalcDistancesById(const float* query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -615,6 +616,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
         }
         this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
     }
     if (this->odescent_param_ == nullptr) {
         odescent_param_ = std::make_shared<ODescentParameter>();
@@ -708,14 +711,66 @@ HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
 const static uint64_t QUERY_SAMPLE_SIZE = 10;
 const static int64_t DEFAULT_TOPK = 100;
 
+AnalyzerBasePtr
+HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<HGraphAnalyzer>(this, param);
+}
+
 std::string
 HGraph::GetStats() const {
+    auto populate_mci_stats = [this](JsonType& stats) {
+        if (this->mci_cliques_ != nullptr) {
+            const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+            stats["mci_has_index"].SetBool(mci_stats.has_index);
+            stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+            stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+            stats["mci_covered_node_ratio"].SetFloat(
+                static_cast<float>(mci_stats.covered_node_ratio));
+            stats["mci_base_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_clique_count));
+            stats["mci_delta_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_count));
+            stats["mci_total_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_clique_count));
+            stats["mci_retired_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.retired_clique_count));
+            stats["mci_inactive_node_count"].SetInt(
+                static_cast<int64_t>(mci_stats.inactive_node_count));
+            stats["mci_base_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_membership_count));
+            stats["mci_delta_extra_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+            stats["mci_delta_clique_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+            stats["mci_total_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_membership_count));
+            stats["mci_avg_membership_per_node"].SetFloat(
+                static_cast<float>(mci_stats.avg_membership_per_node));
+            stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+            stats["mci_max_membership_per_node"].SetInt(
+                static_cast<int64_t>(mci_stats.max_membership_per_node));
+            stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+            stats["mci_memory_usage"].SetInt(
+                static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
+        }
+    };
+
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        populate_mci_stats(stats);
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = DEFAULT_TOPK;
     analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
     analyzer_param.search_params =
         fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
     // Build-time cache hit-rate is a transient property of the
     // build_with_cache() path (taken only after ImportCache()), so it lives on
@@ -729,36 +784,8 @@ HGraph::GetStats() const {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
     }
-    if (this->mci_cliques_ != nullptr) {
-        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
-        stats["mci_has_index"].SetBool(mci_stats.has_index);
-        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
-        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
-        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
-        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
-        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
-        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
-        stats["mci_retired_clique_count"].SetInt(
-            static_cast<int64_t>(mci_stats.retired_clique_count));
-        stats["mci_inactive_node_count"].SetInt(
-            static_cast<int64_t>(mci_stats.inactive_node_count));
-        stats["mci_base_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.base_membership_count));
-        stats["mci_delta_extra_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
-        stats["mci_delta_clique_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
-        stats["mci_total_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.total_membership_count));
-        stats["mci_avg_membership_per_node"].SetFloat(
-            static_cast<float>(mci_stats.avg_membership_per_node));
-        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
-        stats["mci_max_membership_per_node"].SetInt(
-            static_cast<int64_t>(mci_stats.max_membership_per_node));
-        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
-        stats["mci_memory_usage"].SetInt(
-            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
-    }
+    populate_mci_stats(stats);
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
 
@@ -922,10 +949,25 @@ HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
 
 std::string
 HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = request.topk_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(
+        stats, GetName(), "search", "complete", request.query_->GetNumElements(), request.topk_);
     return stats.Dump(4);
 }
 

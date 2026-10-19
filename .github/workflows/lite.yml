@@ -5,7 +5,11 @@ on:
   pull_request:
     branches: ["main", "0.*"]
     paths:
-      - "include/vsag/lite/**"
+      - "include/vsag/**"
+      - "cmake/VSAGThirdPartyOverride.cmake"
+      - "extern/catch2/catch2.cmake"
+      - ".clang-format"
+      - ".clang-tidy"
       - "src/lite/**"
       - "src/simd/**"
       - "lite/**"
@@ -74,10 +78,13 @@ jobs:
         run: python3 -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
       - name: Benchmark audit guard fixtures
         if: matrix.mode == 'rabitq-on'
+        env:
+          VSAG_MIXED_PROBE: ${{ github.workspace }}/build-lite/lite_acceptance_mixed_cpu_acceptance
         run: |
+          test -x "$VSAG_MIXED_PROBE"
           python3 -c 'import numpy, h5py, pyarrow'
           python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
-      - name: Coverage collector fixtures and 90 percent gate
+      - name: Lite CI contracts, collector fixtures and 90 percent gate
         if: matrix.mode == 'coverage'
         run: |
           python3 -m unittest discover -s lite/tools -p 'test_*.py'

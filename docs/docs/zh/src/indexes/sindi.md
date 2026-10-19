@@ -73,6 +73,8 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | 词项 ID 的上界（应 ≥ 最大词项 ID + 1，最高 50 000 000） |
 | `window_size` | int | `50000` | 每个窗口容纳的文档数（取值范围 10 000 – 60 000） |
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
+| `term_prune_ratio` | float | `0.0` | `Build` 时每个窗口内各 term 永久裁剪的低权重 postings 比例，范围 `[0, 1)`，默认关闭。 |
+| `term_retain_threshold` | integer | `0` | 构建时每个 term 的 postings 数量上限，平均分配到各窗口；`0` 表示不限制。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`fp16` 以半精度保存、以 FP32 打分；`dmq8` 使用压缩的 8-bit DMQ 编码 |
@@ -304,3 +306,9 @@ SINDI 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式）�
 - [创建索引](../guide/create_index.md)
 - [索引参数](../resources/index_parameters.md)
 - [k-近邻搜索](../guide/knn_search.md)
+
+### 构建时 term 裁剪
+
+索引创建参数也支持 `term_prune_ratio`（浮点数，范围 `[0, 1)`，默认 `0`）和 `term_retain_threshold`（非负整数，默认 `0`），默认均不开启。`Build` 时，每个窗口内各 term 的倒排列表按存储权重降序排列，永久保留 `floor(posting_count * (1 - term_prune_ratio))` 与 `floor(term_retain_threshold / window_count)` 中较小数量的 postings；阈值为 0 表示不限制数量，非空列表至少保留一条。可变、不可变构建均支持 FP32、FP16 和 SQ8。重排向量及文档标签保持完整。搜索时裁剪作用于构建后保留的 postings，无法恢复已删除的 postings。后续 `Add` 不执行构建时裁剪。
+
+例如，在索引构建参数中设置 `"term_prune_ratio": 0.2, "term_retain_threshold": 0`，可删除每个窗口内各倒排列表中权重最低的 20% postings。

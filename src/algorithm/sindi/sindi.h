@@ -77,6 +77,9 @@ public:
     std::string
     GetStats() const override;
 
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
+
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override;
 
@@ -299,6 +302,9 @@ private:
     std::atomic<int64_t> delete_count_{0};       // soft-deleted vectors
 
     bool use_reorder_{false};  // enable reranking stage
+
+    float build_term_prune_ratio_{0};
+    uint64_t build_term_retain_threshold_{0};
 
     float doc_prune_ratio_{0};  // ratio of docs pruned during build
 

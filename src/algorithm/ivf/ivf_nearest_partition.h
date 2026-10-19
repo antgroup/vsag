@@ -23,6 +23,11 @@
 #include "ivf_partition_strategy_parameter.h"
 #include "query_context.h"
 #include "vsag/index.h"
+
+#ifdef VSAG_IVF_NEAREST_PARTITION_TEST_ACCESS
+class IVFNearestPartitionTestAccess;
+#endif
+
 namespace vsag {
 
 class IVFNearestPartition : public IVFPartitionStrategy {
@@ -64,6 +69,10 @@ public:
     InnerIndexPtr route_index_ptr_{nullptr};
 
 private:
+#ifdef VSAG_IVF_NEAREST_PARTITION_TEST_ACCESS
+    friend class ::IVFNearestPartitionTestAccess;
+#endif
+
     void
     factory_router_index(const IndexCommonParam& common_param);
 
@@ -71,7 +80,8 @@ private:
     classify_datas_by_scan(const void* datas,
                            int64_t count,
                            BucketIdType buckets_per_data,
-                           QueryContext* ctx) const;
+                           QueryContext* ctx,
+                           uint64_t dots_buffer_size_bytes) const;
 
     /// The routing both public entry points share.
     Vector<BucketIdType>

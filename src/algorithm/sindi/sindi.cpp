@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "analyzer/analyzer.h"
+#include "analyzer/sindi_analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/filter/filter_callback_limiter.h"
@@ -201,6 +202,8 @@ SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
     static const std::unordered_set<std::string> supported_keys = {
         SPARSE_TERM_ID_LIMIT,
         SPARSE_DOC_PRUNE_RATIO,
+        SPARSE_TERM_PRUNE_RATIO,
+        SPARSE_TERM_RETAIN_THRESHOLD,
         USE_REORDER_KEY,
         USE_QUANTIZATION,
         SPARSE_WINDOW_SIZE,
@@ -227,6 +230,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       use_reorder_(param->use_reorder),
+      build_term_prune_ratio_(param->term_prune_ratio),
+      build_term_retain_threshold_(param->term_retain_threshold),
       doc_prune_ratio_(param->doc_prune_ratio),
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
@@ -283,27 +288,64 @@ SINDI::GetMemoryUsageDetail() const {
 
 std::string
 SINDI::GetStats() const {
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
     AnalyzerParam analyzer_param(allocator_);
     analyzer_param.topk = K_ANALYZE_DEFAULT_TOPK;
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
     analyzer_param.search_params =
         R"({"sindi": {"query_prune_ratio": 0, "term_prune_ratio": 0, "n_candidate": 500}})";
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
+}
+
+AnalyzerBasePtr
+SINDI::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<SINDIAnalyzer>(this, param);
 }
 
 std::string
 SINDI::AnalyzeIndexBySearch(const SearchRequest& request) {
+    // Preserve the legacy null-query fallback to stats analysis for SINDI callers.
+    // Query-driven analysis still validates top-k and handles empty indexes explicitly.
+    if (request.query_ != nullptr) {
+        CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+        if (GetNumElements() == 0) {
+            JsonType stats;
+            stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+            AddAnalysisMetadata(stats,
+                                GetName(),
+                                "search",
+                                "not_applicable",
+                                request.query_->GetNumElements(),
+                                request.topk_);
+            return stats.Dump(4);
+        }
+    }
     AnalyzerParam analyzer_param(allocator_);
-    analyzer_param.topk = request.topk_;
+    analyzer_param.topk = request.query_ == nullptr ? K_ANALYZE_DEFAULT_TOPK : request.topk_;
     analyzer_param.base_sample_size =
         std::min<uint64_t>(K_ANALYZE_BASE_SAMPLE_SIZE, cur_element_count_);
     analyzer_param.search_params = request.params_str_;
-    auto analyzer = CreateAnalyzer(this, analyzer_param);
+    auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats =
         request.query_ == nullptr ? analyzer->GetStats() : analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(stats,
+                        GetName(),
+                        request.query_ == nullptr ? "stats" : "search",
+                        "complete",
+                        request.query_ == nullptr ? 0 : request.query_->GetNumElements(),
+                        request.topk_);
     return stats.Dump(4);
 }
 
@@ -527,6 +569,7 @@ SINDI::Build(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
     CHECK_ARGUMENT(base->GetNumElements() > 0, "data_num is zero when add vectors");
     auto failed_ids = this->add(base, false);
+    mutable_term_datacell_->PruneTerms(build_term_prune_ratio_, build_term_retain_threshold_);
     mutable_term_datacell_->Finalize();
     this->cal_memory_usage();
     return failed_ids;
@@ -564,6 +607,9 @@ SINDI::build_immutable(const DatasetPtr& base) {
     auto mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(
         term_id_limit_, window_size_, allocator_, sparse_value_quant_type_, quantization_params_);
     auto flush_staging_window = [&]() {
+        mutable_term_datacell->PruneTerms(build_term_prune_ratio_,
+                                          build_term_retain_threshold_,
+                                          align_up(data_num, window_size_) / window_size_);
         mutable_term_datacell->SortByValue(0);
         immutable_term_datacell_->AppendWindow(mutable_term_datacell->GetWindow(0));
         mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,

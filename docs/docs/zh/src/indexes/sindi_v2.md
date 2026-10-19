@@ -77,6 +77,8 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | term ID 上界，最高为 50 000 000。 |
 | `window_size` | int | `50000` | 每个 window 的文档数，范围为 10 000 到 60 000。 |
 | `doc_prune_ratio` | float | `0.0` | 构建时丢弃最低权重文档 term 的比例，范围为 `[0.0, 1.0)`。 |
+| `term_prune_ratio` | float | `0.0` | `Build` 时每个窗口内各 term 永久裁剪的低权重 postings 比例，范围 `[0, 1)`，默认关闭。 |
+| `term_retain_threshold` | integer | `0` | 构建时每个 term 的 postings 数量上限，平均分配到各窗口；`0` 表示不限制。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16。 |
 | `use_reorder` | bool | `false` | 保存高精度向量并对粗排候选重排。 |
 | `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32`、`fp16` 或 `dmq8`。FP16 以半精度保存文档 value，并以 FP32 打分。 |
@@ -138,3 +140,9 @@ SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_pr
 
 完整稀疏索引常驻内存、且 window-first 序列化合适时选择 SINDI。需要按 term
 组织持久化 posting，或希望搜索时只从外部存储读取查询 term list 时选择 SINDI_V2。
+
+### 构建时 term 裁剪
+
+索引创建参数也支持 `term_prune_ratio`（浮点数，范围 `[0, 1)`，默认 `0`）和 `term_retain_threshold`（非负整数，默认 `0`），默认均不开启。`Build` 时，每个窗口内各 term 的倒排列表按存储权重降序排列，永久保留 `floor(posting_count * (1 - term_prune_ratio))` 与 `floor(term_retain_threshold / window_count)` 中较小数量的 postings；阈值为 0 表示不限制数量，非空列表至少保留一条。可变、不可变构建均支持 FP32、FP16 和 SQ8。重排向量及文档标签保持完整。搜索时裁剪作用于构建后保留的 postings，无法恢复已删除的 postings。后续 `Add` 不执行构建时裁剪。
+
+例如，在索引构建参数中设置 `"term_prune_ratio": 0.2, "term_retain_threshold": 0`，可删除每个窗口内各倒排列表中权重最低的 20% postings。

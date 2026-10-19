@@ -18,6 +18,37 @@ def function_body(source, marker):
     return source[start:end]
 
 
+class BenchmarkWorkflowTests(unittest.TestCase):
+    def test_preparation_dependencies_are_required_before_discovery(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / '.github/workflows/lite.yml').read_text()
+        begin = workflow.index('      - name: Install benchmark preparation dependencies')
+        end = workflow.index('      - name: Lite CI contracts, collector fixtures', begin)
+        benchmark_steps = workflow[begin:end]
+        self.assertIn("if: matrix.mode == 'rabitq-on'", benchmark_steps)
+        self.assertIn('numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0', benchmark_steps)
+        imports = "python3 -c 'import numpy, h5py, pyarrow'"
+        discovery = "python3 -m unittest discover -s lite/benchmark -p 'test_*.py'"
+        self.assertIn(imports, benchmark_steps)
+        self.assertIn(discovery, benchmark_steps)
+        self.assertLess(benchmark_steps.index('pip install'), benchmark_steps.index(imports))
+        self.assertLess(benchmark_steps.index(imports), benchmark_steps.index(discovery))
+        self.assertIn('VSAG_MIXED_PROBE: ${{ github.workspace }}/build-lite/lite_acceptance_mixed_cpu_acceptance', benchmark_steps)
+        self.assertIn('test -x "$VSAG_MIXED_PROBE"', benchmark_steps)
+        self.assertLess(benchmark_steps.index('test -x'), benchmark_steps.index(discovery))
+        self.assertNotIn('continue-on-error', benchmark_steps)
+
+    def test_benchmark_build_and_lite_ci_contracts_coexist(self):
+        root = Path(__file__).resolve().parents[2]
+        workflow = (root / '.github/workflows/lite.yml').read_text()
+        mode = workflow.index('if [[ "$MODE" == rabitq-on ]]; then')
+        block = workflow[mode:workflow.index('fi', mode)]
+        self.assertIn('flags+=(-DENABLE_BENCHMARKS=ON)', block)
+        self.assertIn('Lite CI contracts, collector fixtures and 90 percent gate', workflow)
+        self.assertIn("python3 -m unittest discover -s lite/tools -p 'test_*.py'", workflow)
+        self.assertIn('--fail-under 90', workflow)
+
+
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')
 class BenchmarkContractTests(unittest.TestCase):
     def test_all_percentile_implementations(self):

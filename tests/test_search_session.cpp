@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
@@ -45,7 +46,7 @@ constexpr const char* kSearch =
     R"({"hgraph":{"ef_search":128,"parallelism":1,"brute_force_threshold":0.0}})";
 
 vsag::IndexPtr
-MakeSessionIndex(bool populate = true) {
+make_session_index(bool populate = true, int64_t count = kCount) {
     auto created = vsag::Factory::CreateIndex("hgraph", R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
@@ -54,15 +55,15 @@ MakeSessionIndex(bool populate = true) {
     REQUIRE(created.has_value());
     auto index = created.value();
     if (populate) {
-        std::vector<float> vectors(kCount);
-        std::vector<int64_t> ids(kCount);
-        for (int64_t i = 0; i < kCount; ++i) {
+        std::vector<float> vectors(count);
+        std::vector<int64_t> ids(count);
+        for (int64_t i = 0; i < count; ++i) {
             vectors[i] = static_cast<float>(i);
             // Exercise external labels rather than internal graph offsets.
             ids[i] = 1000 + 3 * i;
         }
         auto base = vsag::Dataset::Make();
-        base->NumElements(kCount)
+        base->NumElements(count)
             ->Dim(1)
             ->Ids(ids.data())
             ->Float32Vectors(vectors.data())
@@ -132,7 +133,7 @@ struct LegacyContext {
 
 TEST_CASE("HGraph search session three batches compare legacy recall",
           "[ft][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto query = MakeSessionQuery(value);
     auto opened = index->OpenSearchSession(query, kBatch, kSearch);
@@ -171,7 +172,7 @@ TEST_CASE("HGraph search session three batches compare legacy recall",
 
 TEST_CASE("HGraph search session splits pending batch without skipping or duplicate labels",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value), kBatch, kSearch);
     REQUIRE(opened.has_value());
@@ -219,7 +220,7 @@ TEST_CASE("HGraph search session splits pending batch without skipping or duplic
 
 TEST_CASE("HGraph search session Close is idempotent and Next is empty",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value), kBatch, kSearch);
     REQUIRE(opened.has_value());
@@ -244,7 +245,7 @@ TEST_CASE("HGraph search session Close is idempotent and Next is empty",
 }
 
 TEST_CASE("HGraph search session empty index is terminal", "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex(false);
+    auto index = make_session_index(false);
     float value = -0.25F;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value), kBatch, kSearch);
     REQUIRE(opened.has_value());
@@ -259,7 +260,7 @@ TEST_CASE("HGraph search session empty index is terminal", "[ut][hgraph][search_
 
 TEST_CASE("HGraph search session reject-all filter retains undelivered candidates",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto opened = index->OpenSearchSession(
         MakeSessionQuery(value), kBatch, kSearch, std::make_shared<SessionFilter>(false));
@@ -275,7 +276,7 @@ TEST_CASE("HGraph search session reject-all filter retains undelivered candidate
 
 TEST_CASE("HGraph search session deeply copies query before first Next",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float original = -0.25F;
     auto control = index->OpenSearchSession(MakeSessionQuery(original), kBatch, kSearch);
     REQUIRE(control.has_value());
@@ -310,9 +311,12 @@ TEST_CASE("HGraph search session deeply copies query before first Next",
 TEST_CASE("HGraph search session retains index and destructor releases ownership",
           "[ut][hgraph][search_session]") {
     // Cover destruction of both an unopened search and a partially consumed one.
+    // The final approximate page may be short; exercise that case deterministically.
+    const auto count = GENERATE(kCount, 2 * kBatch + 1);
     for (bool consume : {false, true}) {
         INFO("consume=" << consume);
-        auto index = MakeSessionIndex();
+        INFO("count=" << count);
+        auto index = make_session_index(true, count);
         auto filter = std::make_shared<SessionFilter>(true);
         std::weak_ptr<SessionFilter> weak_filter = filter;
         float value = -0.25F;
@@ -329,14 +333,20 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
                 auto expected = index->KnnSearch(
                     MakeSessionQuery(value), kBatch, kSearch, filter, legacy.value, false);
                 REQUIRE(expected.has_value());
-                REQUIRE(expected.value()->GetDim() == kBatch);
+                const auto expected_count = expected.value()->GetDim();
+                REQUIRE(expected_count >= 0);
+                REQUIRE(expected_count <= kBatch);
+                if (expected_count == 0) {
+                    break;
+                }
                 // Copy into standard-library storage: legacy Dataset buffers
                 // may use the index allocator and must die before index.reset().
                 expected_ids.emplace_back(expected.value()->GetIds(),
-                                          expected.value()->GetIds() + kBatch);
+                                          expected.value()->GetIds() + expected_count);
                 expected_distances.emplace_back(expected.value()->GetDistances(),
-                                                expected.value()->GetDistances() + kBatch);
+                                                expected.value()->GetDistances() + expected_count);
             }
+            REQUIRE_FALSE(expected_ids.empty());
         }
         index.reset();
         filter.reset();
@@ -344,11 +354,11 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
         REQUIRE_FALSE(weak_filter.expired());
         vsag::DatasetPtr retained_page;
         if (consume) {
-            for (int batch = 0; batch < 3; ++batch) {
+            for (uint64_t batch = 0; batch < expected_ids.size(); ++batch) {
                 auto page = session->Next(kBatch);
                 REQUIRE(page.has_value());
-                REQUIRE(page.value()->GetDim() == kBatch);
-                for (int64_t i = 0; i < kBatch; ++i) {
+                REQUIRE(page.value()->GetDim() == expected_ids[batch].size());
+                for (int64_t i = 0; i < page.value()->GetDim(); ++i) {
                     REQUIRE(page.value()->GetIds()[i] == expected_ids[batch][i]);
                     REQUIRE(page.value()->GetDistances()[i] == expected_distances[batch][i]);
                 }
@@ -361,8 +371,8 @@ TEST_CASE("HGraph search session retains index and destructor releases ownership
         session.reset();
         REQUIRE(weak_filter.expired());
         if (retained_page) {
-            REQUIRE(retained_page->GetDim() == kBatch);
-            for (int64_t i = 0; i < kBatch; ++i) {
+            REQUIRE(retained_page->GetDim() == expected_ids.front().size());
+            for (int64_t i = 0; i < retained_page->GetDim(); ++i) {
                 REQUIRE(retained_page->GetIds()[i] == expected_ids.front()[i]);
                 REQUIRE(retained_page->GetDistances()[i] == expected_distances.front()[i]);
             }
@@ -385,7 +395,7 @@ SessionCounter(const vsag::DatasetPtr& page, const std::string& name) {
 
 TEST_CASE("HGraph dynamic session rechecks mutable filters and thresholds without traversal",
           "[ut][ft][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value));
     REQUIRE(opened.has_value());
@@ -470,7 +480,7 @@ TEST_CASE("HGraph dynamic session rechecks mutable filters and thresholds withou
 
 TEST_CASE("HGraph session retires permanent NaN candidates but traverses bridges",
           "[ut][ft][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = std::numeric_limits<float>::quiet_NaN();
     auto opened = index->OpenSearchSession(MakeSessionQuery(value));
     REQUIRE(opened.has_value());
@@ -484,7 +494,7 @@ TEST_CASE("HGraph session retires permanent NaN candidates but traverses bridges
 
 TEST_CASE("HGraph dynamic session changes ef and demand without resetting work",
           "[ut][ft][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value));
     REQUIRE(opened.has_value());
@@ -512,7 +522,7 @@ TEST_CASE("HGraph dynamic session changes ef and demand without resetting work",
 
 TEST_CASE("HGraph native session resumes expansion and reuses scores and computers",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     const auto params = R"({"hgraph":{"ef_search":8,"parallelism":1}})";
     auto opened = index->OpenSearchSession(MakeSessionQuery(value), 4, params);
@@ -565,7 +575,7 @@ TEST_CASE("HGraph native session resumes expansion and reuses scores and compute
 }
 
 TEST_CASE("HGraph native session threshold and invalid options", "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto query = MakeSessionQuery(value);
     for (const auto* params : {R"({"hgraph":{"ef_search":8,"parallelism":2}})",
@@ -981,7 +991,7 @@ TEST_CASE("HGraph native session ordinary duplicate labels preserve extra info",
 
 TEST_CASE("HGraph native session invalid demand is retryable and skip keys are parsed",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = -0.25F;
     auto query = MakeSessionQuery(value);
     REQUIRE_FALSE(
@@ -1078,7 +1088,7 @@ TEST_CASE("HGraph native session external allocator releases before results die"
     float saved_distance = 0;
     {
         SessionCountingAllocator allocator;
-        auto index = MakeSessionIndex();
+        auto index = make_session_index();
         float value = -0.25F;
         auto opened = index->OpenSearchSession(
             MakeSessionQuery(value), 4, R"({"hgraph":{"ef_search":8}})", nullptr, &allocator);
@@ -1109,7 +1119,7 @@ TEST_CASE("HGraph native session external allocator releases before results die"
 
 TEST_CASE("HGraph native reject-all empty page retains traversal statistics",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = 0;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value),
                                            4,
@@ -1199,7 +1209,7 @@ public:
 TEST_CASE("HGraph session terminal and closed pages preserve cumulative statistics",
           "[ut][hgraph][search_session]") {
     for (bool populate : {false, true}) {
-        auto index = MakeSessionIndex(populate);
+        auto index = make_session_index(populate);
         float value = 0;
         auto opened = index->OpenSearchSession(MakeSessionQuery(value), 4, kSearch);
         REQUIRE(opened.has_value());
@@ -1221,7 +1231,7 @@ TEST_CASE("HGraph session terminal and closed pages preserve cumulative statisti
         REQUIRE(SessionCounter(closed.value(), "frontier_nodes") == 0);
         REQUIRE(SessionCounter(closed.value(), "pending_nodes") == 0);
     }
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = 0;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value), 4, kSearch);
     REQUIRE(opened.has_value());
@@ -1235,7 +1245,7 @@ TEST_CASE("HGraph session terminal and closed pages preserve cumulative statisti
 
 TEST_CASE("HGraph session nonstandard traversal exception closes and retains work counts",
           "[ut][hgraph][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = 0;
     auto opened = index->OpenSearchSession(
         MakeSessionQuery(value), 4, kSearch, std::make_shared<NonstandardThrowFilter>());
@@ -1409,7 +1419,7 @@ TEST_CASE("Search session payload statistics saturate without overflow",
 
 TEST_CASE("Search session rejects invalid demand before parsing but ignores terminal options",
           "[ut][ft][search_session]") {
-    auto index = MakeSessionIndex();
+    auto index = make_session_index();
     float value = 0;
     auto opened = index->OpenSearchSession(MakeSessionQuery(value));
     REQUIRE(opened.has_value());

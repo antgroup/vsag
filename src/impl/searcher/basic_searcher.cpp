@@ -50,6 +50,11 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
                      Vector<InnerIdType>& neighbors) const {
     uint32_t count_no_visited = 0;
 
+    // The shared lock protects the storage behind GetNeighbors, not GetNeighbors itself: the
+    // graph storages rewrite (and free) their own buffers on every update and the flat layout may
+    // reallocate while growing, so a read without the lock can observe a freed or half rewritten
+    // list. The neighbour list is also written payload-before-count with a release fence, which a
+    // lock-free reader would need to pair with an acquire fence, but that path is not taken.
     if (this->mutex_array_ != nullptr) {
         SharedLock lock(this->mutex_array_, current_node_pair.second);
         graph->GetNeighbors(current_node_pair.second, neighbors);
@@ -926,12 +931,21 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         } else {
             const bool has_stored_query =
                 inner_search_param.duplicate_query_id < flatten->TotalCount();
-            const bool is_duplicate =
-                has_stored_query
-                    ? flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)
-                    : flatten->CompareRawVectorWithId(query, min_index);
-            if (is_duplicate) {
+            auto matches_query = [&](InnerIdType id) {
+                return has_stored_query
+                           ? flatten->CompareVectors(inner_search_param.duplicate_query_id, id)
+                           : flatten->CompareRawVectorWithId(query, id);
+            };
+            if (matches_query(min_index)) {
                 inner_search_param.duplicate_id = min_index;
+            } else {
+                // Quantization can rank a different code ahead of an identical one.
+                for (uint32_t i = 0; i < top_candidates->Size(); ++i) {
+                    if (data[i].second != min_index && matches_query(data[i].second)) {
+                        inner_search_param.duplicate_id = data[i].second;
+                        break;
+                    }
+                }
             }
         }
     }

@@ -3,7 +3,8 @@
 [Start here: requirements, reports, commands and limitations](ACCEPTANCE.md).
 [详细综合验收报告：三数据集、Full对照、CRUD、CPU、优化及限制](ACCEPTANCE_REPORT.md).
 
-- Functionality/architecture/regressions: PR #2904, feature baseline `74a9420`.
+- Functionality/architecture/regressions: PR #2904; this integration includes `a3a76a8`.
+  Historical measurements retain their own recorded feature/source versions.
 - Benchmark and audit tools: this directory; `ENABLE_BENCHMARKS` defaults OFF.
 - [Historical raw files and SHA256 manifest](RAW_MANIFEST.json): immutable snapshot `800a822`.
 - [Preserved full historical runner guide](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/README.md).
@@ -79,6 +80,12 @@ helpers without timing an index. It checks P0/P50/P99/P100, singleton/empty and
 invalid fractions, input preservation, and malformed records/dimensions. Native
 single-query results use one row with the neighbor count in `GetDim()`; switching
 the count check to `GetNumElements()==k` would not follow the Full API contract.
+The same test module guards the merged CI workflow: benchmark builds and required
+Cohere dependency/import checks must remain alongside the Lite CI contracts and
+the 90% scoped coverage gate.
+The RaBitQ-ON job also exports `VSAG_MIXED_PROBE` to the built acceptance executable
+and requires it to be executable before discovery, so the resident/reloaded CRUD
+lifecycle and invalid-mode integration cases execute rather than silently skip.
 
 `run_quality_target.py` intentionally replays a pinned historical protocol, not
 an automatic latest-source benchmark. It requires `--full-receipt /path/to/receipt.json`

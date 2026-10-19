@@ -75,6 +75,6 @@ maintenance recall and fixed-model drift remain open. Existing 10k/100k and real
 changed-vector studies do not replace hours-long interleaved reads/mutations,
 blind quality cohorts or quality-matched Full comparison. Increasing ef is a
 quality/cost tradeoff, not a missing-function fix or universal speedup.
-See [versioned evidence](../../../../../lite/PERFORMANCE_EVIDENCE.md). Historical
-experiments are pinned there; do not reinterpret their NONE/reverse-disabled
-configuration as current production or combine their best values.
+Historical performance reports belong to benchmark PR #2926. Do not reinterpret
+their NONE/reverse-disabled configuration as current production or combine
+best values from different measured versions.

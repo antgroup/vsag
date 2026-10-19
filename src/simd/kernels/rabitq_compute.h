@@ -599,7 +599,7 @@ RaBitQFloatSupplementCodeIPImpl(const float* vector,
     float result = T::reduce_add(sum);
     for (; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
         uint32_t code = 0;
         for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
             const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;

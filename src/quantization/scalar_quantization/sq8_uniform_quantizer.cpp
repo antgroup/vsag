@@ -124,12 +124,12 @@ SQ8UniformQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) co
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
-        *(norm_type*)(codes + offset_norm_) = norm;
+        std::memcpy(codes + offset_norm_, &norm, sizeof(norm));
     }
 
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
                   metric == MetricType::METRIC_TYPE_COSINE) {
-        *(sum_type*)(codes + offset_sum_) = sum;
+        std::memcpy(codes + offset_sum_, &sum, sizeof(sum));
     }
 
     return true;
@@ -151,8 +151,10 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
     if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
         result = SQ8UniformComputeCodesIP(codes1, codes2, this->dim_);
 
-        norm_type norm1 = *((norm_type*)(codes1 + offset_norm_));
-        norm_type norm2 = *((norm_type*)(codes2 + offset_norm_));
+        norm_type norm1 = 0;
+        norm_type norm2 = 0;
+        std::memcpy(&norm1, codes1 + offset_norm_, sizeof(norm1));
+        std::memcpy(&norm2, codes2 + offset_norm_, sizeof(norm2));
 
         result =
             (static_cast<float>(norm1) + static_cast<float>(norm2) - 2 * result) * scalar_rate_;
@@ -160,8 +162,10 @@ SQ8UniformQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* c
                          metric == MetricType::METRIC_TYPE_COSINE) {
         result = SQ8UniformComputeCodesIP(codes1, codes2, this->dim_);
 
-        sum_type sum1 = *((sum_type*)(codes1 + offset_sum_));
-        sum_type sum2 = *((sum_type*)(codes2 + offset_sum_));
+        sum_type sum1 = 0;
+        sum_type sum2 = 0;
+        std::memcpy(&sum1, codes1 + offset_sum_, sizeof(sum1));
+        std::memcpy(&sum2, codes2 + offset_sum_, sizeof(sum2));
 
         result = lower_bound_ * (sum1 + sum2) + scalar_rate_ * result + lower_bound_ * lower_bound_;
 

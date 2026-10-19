@@ -26,6 +26,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "analyzer/analyzer.h"
 #include "datacell/sparse_dmq_datacell.h"
 #include "datacell/sparse_vector_datacell_parameter.h"
 #include "impl/filter/filter_callback_limiter.h"
@@ -316,6 +317,8 @@ SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
     static const std::unordered_set<std::string> supported_keys = {
         SPARSE_TERM_ID_LIMIT,
         SPARSE_DOC_PRUNE_RATIO,
+        SPARSE_TERM_PRUNE_RATIO,
+        SPARSE_TERM_RETAIN_THRESHOLD,
         USE_REORDER_KEY,
         USE_QUANTIZATION,
         SPARSE_WINDOW_SIZE,
@@ -347,6 +350,8 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
       metadata_filter_(common_param.allocator_.get()),
+      build_term_prune_ratio_(param->term_prune_ratio),
+      build_term_retain_threshold_(param->term_retain_threshold),
       doc_prune_ratio_(param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
@@ -406,7 +411,19 @@ SINDIV2::GetMemoryUsageDetail() const {
 
 std::string
 SINDIV2::GetStats() const {
-    return "";
+    JsonType stats;
+    stats["total_count"].SetInt64(GetNumElements());
+    stats["window_size"].SetUint64(window_size_);
+    stats["term_id_limit"].SetUint64(term_id_limit_);
+    stats["doc_prune_ratio"].SetFloat(doc_prune_ratio_);
+    stats["use_reorder"].SetBool(use_reorder_);
+    stats["immutable"].SetBool(immutable_enabled_);
+    const bool is_empty = GetNumElements() == 0;
+    if (is_empty) {
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+    }
+    AddAnalysisMetadata(stats, GetName(), "stats", is_empty ? "partial" : "complete");
+    return stats.Dump(4);
 }
 
 SparseVector
@@ -662,6 +679,9 @@ SINDIV2::Build(const DatasetPtr& base) {
         return this->build_immutable(base);
     }
     auto failed_ids = this->Add(base);
+    std::scoped_lock wlock(this->global_mutex_);
+    this->get_mutable_term_datacell()->PruneTerms(build_term_prune_ratio_,
+                                                  build_term_retain_threshold_);
     this->get_mutable_term_datacell()->Finalize();
     this->cal_memory_usage();
     return failed_ids;
@@ -767,6 +787,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         metadata_build.RecordSuccess(static_cast<uint32_t>(position));
         cur_element_count_++;
         if (cur_element_count_ % window_size_ == 0) {
+            staging->PruneTerms(build_term_prune_ratio_,
+                                build_term_retain_threshold_,
+                                align_up(data_num, window_size_) / window_size_);
             staging->SortByValue(0);
             staging->Compact();
             immutable->AppendWindow(staging->GetWindow(0));
@@ -774,6 +797,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         }
     }
     if (staging != nullptr && staging->total_count_ > 0) {
+        staging->PruneTerms(build_term_prune_ratio_,
+                            build_term_retain_threshold_,
+                            align_up(data_num, window_size_) / window_size_);
         staging->SortByValue(0);
         staging->Compact();
         immutable->AppendWindow(staging->GetWindow(0));

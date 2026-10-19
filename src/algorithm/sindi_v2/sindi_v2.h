@@ -275,6 +275,9 @@ private:
     std::string rerank_type_{SPARSE_RERANK_TYPE_FP32};
     uint32_t dmq_shared_codebook_threshold_{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
     SindiMetadataFilter metadata_filter_;
+    float build_term_prune_ratio_{0};
+    uint64_t build_term_retain_threshold_{0};
+
     float doc_prune_ratio_{0};
 
     FlattenInterfacePtr rerank_flat_{nullptr};
