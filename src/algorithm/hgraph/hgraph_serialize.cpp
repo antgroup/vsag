@@ -38,6 +38,46 @@ namespace {
 
 constexpr uint64_t K_MCI_FORMAT_VERSION = 2;
 
+CodeSlotIdType
+validate_physical_code_capacity(CodeSlotIdType physical_count,
+                                const FlattenInterfacePtr& base_codes,
+                                const FlattenInterfacePtr& precise_codes,
+                                const FlattenInterfacePtr& raw_vectors) {
+    auto physical_capacity = std::numeric_limits<CodeSlotIdType>::max();
+    auto validate_physical_flatten = [physical_count, &physical_capacity](
+                                         const FlattenInterfacePtr& flatten, const char* name) {
+        auto physical_flatten = GetCodeSlotPhysicalFlatten(flatten);
+        auto actual_count = physical_flatten->TotalCount();
+        if (actual_count != physical_count) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("deduplicated HGraph {} physical count mismatch: {} != {}",
+                            name,
+                            actual_count,
+                            physical_count));
+        }
+        auto capacity = static_cast<CodeSlotIdType>(physical_flatten->max_capacity_);
+        if (capacity < physical_count) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("deduplicated HGraph {} physical capacity is smaller than "
+                            "physical count: {} < {}",
+                            name,
+                            capacity,
+                            physical_count));
+        }
+        physical_capacity = std::min(physical_capacity, capacity);
+    };
+    validate_physical_flatten(base_codes, "base codes");
+    if (precise_codes != nullptr) {
+        validate_physical_flatten(precise_codes, "precise codes");
+    }
+    if (raw_vectors != nullptr) {
+        validate_physical_flatten(raw_vectors, "raw vectors");
+    }
+    return physical_capacity;
+}
+
 std::string
 dump_basic_info_for_log(const JsonType& basic_info) {
     JsonType log_basic_info = basic_info;  // NOLINT(performance-unnecessary-copy-initialization)
@@ -849,38 +889,11 @@ HGraph::read_streaming_body(StreamReader& reader,
                             logical_count));
         }
 
-        auto physical_capacity = std::numeric_limits<CodeSlotIdType>::max();
-        auto validate_physical_flatten = [physical_count, &physical_capacity](
-                                             const FlattenInterfacePtr& flatten, const char* name) {
-            auto physical_flatten = GetCodeSlotPhysicalFlatten(flatten);
-            auto actual_count = physical_flatten->TotalCount();
-            if (actual_count != physical_count) {
-                throw VsagException(
-                    ErrorType::INVALID_BINARY,
-                    fmt::format("deduplicated HGraph {} physical count mismatch: {} != {}",
-                                name,
-                                actual_count,
-                                physical_count));
-            }
-            auto capacity = static_cast<CodeSlotIdType>(physical_flatten->max_capacity_);
-            if (capacity < physical_count) {
-                throw VsagException(
-                    ErrorType::INVALID_BINARY,
-                    fmt::format("deduplicated HGraph {} physical capacity is smaller than "
-                                "physical count: {} < {}",
-                                name,
-                                capacity,
-                                physical_count));
-            }
-            physical_capacity = std::min(physical_capacity, capacity);
-        };
-        validate_physical_flatten(this->basic_flatten_codes_, "base codes");
-        if (this->has_precise_reorder()) {
-            validate_physical_flatten(this->high_precise_codes_, "precise codes");
-        }
-        if (this->create_new_raw_vector_) {
-            validate_physical_flatten(this->raw_vector_, "raw vectors");
-        }
+        const auto physical_capacity = validate_physical_code_capacity(
+            physical_count,
+            this->basic_flatten_codes_,
+            this->has_precise_reorder() ? this->high_precise_codes_ : nullptr,
+            this->create_new_raw_vector_ ? this->raw_vector_ : nullptr);
         for (InnerIdType inner_id = 0; inner_id < logical_count; ++inner_id) {
             (void)this->code_slot_map_->Resolve(inner_id);
         }
@@ -1004,10 +1017,12 @@ HGraph::Deserialize(StreamReader& reader) {
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(buffer_reader);
         }
-        this->physical_code_capacity_.store(
-            static_cast<InnerIdType>(
-                GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->max_capacity_),
-            std::memory_order_release);
+        if (not this->using_dedup_storage()) {
+            this->physical_code_capacity_.store(
+                static_cast<InnerIdType>(
+                    GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->max_capacity_),
+                std::memory_order_release);
+        }
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(buffer_reader);
@@ -1045,28 +1060,15 @@ HGraph::Deserialize(StreamReader& reader) {
     if (this->using_dedup_storage()) {
         auto logical_count = this->code_slot_map_->PublishedLogicalCount();
         auto physical_count = this->code_slot_map_->PhysicalCount();
-        auto validate_physical_count = [physical_count](const FlattenInterfacePtr& flatten,
-                                                        const char* name) {
-            auto actual_count = GetCodeSlotPhysicalFlatten(flatten)->TotalCount();
-            if (actual_count != physical_count) {
-                throw VsagException(
-                    ErrorType::INVALID_BINARY,
-                    fmt::format("deduplicated HGraph {} physical count mismatch: {} != {}",
-                                name,
-                                actual_count,
-                                physical_count));
-            }
-        };
-        validate_physical_count(this->basic_flatten_codes_, "base codes");
-        if (this->has_precise_reorder()) {
-            validate_physical_count(this->high_precise_codes_, "precise codes");
-        }
-        if (this->create_new_raw_vector_) {
-            validate_physical_count(this->raw_vector_, "raw vectors");
-        }
+        const auto physical_capacity = validate_physical_code_capacity(
+            physical_count,
+            this->basic_flatten_codes_,
+            this->has_precise_reorder() ? this->high_precise_codes_ : nullptr,
+            this->create_new_raw_vector_ ? this->raw_vector_ : nullptr);
         for (InnerIdType inner_id = 0; inner_id < logical_count; ++inner_id) {
             (void)this->code_slot_map_->Resolve(inner_id);
         }
+        this->physical_code_capacity_.store(physical_capacity, std::memory_order_release);
     }
     this->cal_memory_usage();
     // post serialize procedure

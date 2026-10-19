@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstring>
 #include <numeric>
 #include <set>
 #include <sstream>
@@ -347,4 +348,90 @@ TEST_CASE("PiPNN storage helper commits only after every encoder succeeds",
         REQUIRE(encoded_rows == std::array<int64_t, 4>{-1, 3, 0, 2});
     }
     REQUIRE(slots.Resolve(4) == 0);
+}
+
+TEST_CASE("PiPNN footer restore grows every physical flatten before Add",
+          "[ut][hgraph][pipnn][pipnn_storage][duplicate][serialize][capacity_restore]") {
+    SmallStorageBlocks blocks;
+    constexpr int64_t dim = 64;
+    const std::string storage = GENERATE("precise", "raw");
+    const auto undersized = GENERATE(false, true);
+    CAPTURE(storage, undersized);
+    auto common = make_common(dim, 4);
+    auto parameter = make_parameters();
+    parameter["build_thread_count"].SetInt(4);
+    if (storage == "precise") {
+        parameter["base_quantization_type"].SetString("sq8");
+        parameter["use_reorder"].SetBool(true);
+        parameter["precise_quantization_type"].SetString("fp32");
+    } else {
+        parameter["base_quantization_type"].SetString("rabitq");
+        parameter["rabitq_bits_per_dim_base"].SetInt(1);
+        parameter["store_raw_vector"].SetBool(true);
+    }
+    auto index = std::make_shared<Index>(parameter, common);
+    std::vector<float> vectors(6 * dim, 0.0F);
+    std::vector<int64_t> labels{10, 20, 30, 40, 50, 60};
+    for (uint64_t row = 0; row < labels.size(); ++row) {
+        vectors[row * dim] = static_cast<float>(row % 3);
+    }
+    REQUIRE(index->Build(make_data(vectors, labels, dim)).has_value());
+    require_counts(index, 6, 3);
+    auto original = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    auto serialize_footer = [](const std::shared_ptr<vsag::HGraph>& graph) {
+        std::stringstream stream;
+        vsag::IOStreamWriter writer(stream);
+        graph->Serialize(writer);
+        return stream.str();
+    };
+    auto find_fp32_header = [](const std::string& bytes, vsag::InnerIdType count) {
+        constexpr uint32_t code_size = dim * sizeof(float);
+        constexpr uint64_t header_size = 2 * sizeof(vsag::InnerIdType) + sizeof(uint32_t);
+        std::vector<uint64_t> offsets;
+        for (uint64_t offset = 0; offset + header_size <= bytes.size(); ++offset) {
+            vsag::InnerIdType stored_count = 0;
+            uint32_t stored_code_size = 0;
+            std::memcpy(&stored_count, bytes.data() + offset, sizeof(stored_count));
+            std::memcpy(&stored_code_size,
+                        bytes.data() + offset + 2 * sizeof(vsag::InnerIdType),
+                        sizeof(stored_code_size));
+            if (stored_count == count && stored_code_size == code_size) {
+                offsets.push_back(offset);
+            }
+        }
+        REQUIRE(offsets.size() == 1);
+        return offsets.front();
+    };
+
+    auto bytes = serialize_footer(original);
+    auto header = find_fp32_header(bytes, 3);
+    const auto capacity_offset = header + sizeof(vsag::InnerIdType);
+    vsag::InnerIdType original_capacity = 0;
+    std::memcpy(&original_capacity, bytes.data() + capacity_offset, sizeof(original_capacity));
+    REQUIRE(original_capacity > 3);
+    const vsag::InnerIdType smaller_capacity = undersized ? 2 : 3;
+    std::memcpy(bytes.data() + capacity_offset, &smaller_capacity, sizeof(smaller_capacity));
+    auto restored = std::make_shared<Index>(parameter, common);
+    auto inner = std::dynamic_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+    std::stringstream stream(bytes);
+    vsag::IOStreamReader reader(stream);
+    if (undersized) {
+        REQUIRE_THROWS_AS(inner->Deserialize(reader), vsag::VsagException);
+        return;
+    }
+    REQUIRE_NOTHROW(inner->Deserialize(reader));
+    require_counts(restored, 6, 3);
+
+    std::vector<float> added(dim, 0.0F);
+    added[0] = 0.5F;
+    std::vector<int64_t> added_labels{70};
+    REQUIRE(restored->Add(make_data(added, added_labels, dim)).has_value());
+    require_counts(restored, 7, 4);
+    auto extended = serialize_footer(inner);
+    auto extended_header = find_fp32_header(extended, 4);
+    vsag::InnerIdType restored_capacity = 0;
+    std::memcpy(&restored_capacity,
+                extended.data() + extended_header + sizeof(vsag::InnerIdType),
+                sizeof(restored_capacity));
+    REQUIRE(restored_capacity >= original_capacity);
 }
