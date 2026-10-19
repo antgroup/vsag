@@ -35,6 +35,12 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
+The [new three-dataset resident cohort](results/resident-three-datasets-20261019/README.md)
+uses 1000 query rows on SIFT/GIST/Cohere, a source-bound current Lite build and
+27 fresh processes. It fills the current Lite cohort coverage, not a new Full or
+runtime-package comparison. Quality declines and the pending quality criterion
+remain separate from raw-audit success.
+
 Start with the [2026-10-14 final-version audit](results/final-version-20261014/README.md)
 for the four-output verdict, fresh resident CRUD matrix and compiler dependency
 closure/library-hash binding to historical Lite measurements. It preserves the

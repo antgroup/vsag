@@ -1,5 +1,8 @@
 """Compile actual benchmark helper bodies and verify edge cases without index timing."""
 from pathlib import Path
+import hashlib
+import json
+import tarfile
 import shutil
 import struct
 import subprocess
@@ -95,6 +98,42 @@ class ReproductionDocumentationTests(unittest.TestCase):
         self.assertIn('--prepare-build --feature-repo', recipes)
         self.assertIn('build-source-receipt.json', recipes)
         self.assertIn('not signed or tamper-proof provenance', recipes)
+
+
+class ResidentPublishedEvidenceTests(unittest.TestCase):
+    def test_report_rows_match_verified_compact_evidence(self):
+        root = Path(__file__).parent
+        result = root / 'results/resident-three-datasets-20261019'
+        archive = result / 'raw.tar.gz'
+        metadata = json.loads((result / 'archive.json').read_text())
+        self.assertEqual(archive.stat().st_size, metadata['bytes'])
+        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), metadata['sha256'])
+        with tarfile.open(archive, 'r:gz') as stream:
+            summary = json.load(stream.extractfile('summary.json'))
+            complete = json.load(stream.extractfile('completed.json'))
+            protocol = json.load(stream.extractfile('frozen-protocol.json'))
+        self.assertEqual(complete['processes'], 27)
+        self.assertEqual(complete['mutation_calls'], 405000)
+        self.assertEqual(complete['interleaved_queries'], 405000)
+        self.assertEqual(protocol['query_rows'], 1000)
+        self.assertFalse(complete['full_comparison'])
+        main_report = (root / 'ACCEPTANCE_REPORT.md').read_text()
+        report = (result / 'README.md').read_text()
+        self.assertEqual(len(summary), 9)
+        labels = {'fp32': 'FP32', 'fp16': 'FP16', 'rabitq8': 'RaBitQ8'}
+        for cell in summary.values():
+            query = cell['operations']['query']
+            for operation in cell['operations'].values():
+                for metric in operation.values():
+                    self.assertEqual(len(metric['values']), 3)
+                    self.assertEqual(metric['median'], sorted(metric['values'])[1])
+            row = (f"| {cell['dataset']} | {labels[cell['storage']]} | "
+                   f"{query['p50_us']['median']:.3f} | {query['p99_us']['median']:.3f} | "
+                   f"{query['call_only_ops_per_second']['median']:.1f} | "
+                   f"{cell['quality']['initial']['median']:.4f} → "
+                   f"{cell['quality']['final']['median']:.4f} |")
+            self.assertIn(row, report)
+            self.assertIn(row, main_report)
 
 
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')
