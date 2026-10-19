@@ -28,6 +28,31 @@
 namespace vsag {
 
 void
+MutableSindiTermDataCell::PruneTerms(float ratio, uint64_t threshold, uint64_t window_count) {
+    if (ratio == 0.0F && threshold == 0) {
+        return;
+    }
+    const auto count = std::max<uint64_t>(window_count == 0 ? windows_.size() : window_count, 1);
+    const auto limit = threshold == 0 ? std::numeric_limits<uint64_t>::max() : threshold / count;
+    for (auto& window : windows_) {
+        this->SortByValue(window);
+        for (uint32_t term = 0; term < window.term_capacity_; ++term) {
+            auto& size = window.term_sizes_[term];
+            if (size == 0) {
+                continue;
+            }
+            const auto retained = std::max<uint64_t>(
+                1,
+                std::min<uint64_t>(static_cast<uint32_t>(static_cast<float>(size) * (1.0F - ratio)),
+                                   limit));
+            size = static_cast<uint32_t>(retained);
+            window.term_ids_[term]->resize(size);
+            window.term_datas_[term]->resize(static_cast<uint64_t>(size) * GetTermValueCodeSize());
+        }
+    }
+}
+
+void
 MutableSindiTermDataCell::Finalize() {
     for (auto& window : windows_) {
         this->SortByValue(window);

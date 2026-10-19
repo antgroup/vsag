@@ -83,8 +83,11 @@ public:
               int64_t k,
               const std::string& parameters,
               const vsag::FilterPtr& filter) const override {
-        // MCI construction calls this observer from concurrent worker threads.
-        // Catch assertions belong on the test thread after the workers join.
+        // Inspect only the serial analyzer phase; Build also calls this override
+        // from concurrent MCI workers.
+        if (not inspect_queries) {
+            return vsag::HGraph::KnnSearch(query, k, parameters, filter);
+        }
         const auto dim = static_cast<uint64_t>(query->GetDim());
         bool matches = false;
         if (query->GetFloat32Vectors() == nullptr and query->GetInt8Vectors() != nullptr and
@@ -102,6 +105,7 @@ public:
         return vsag::HGraph::KnnSearch(query, k, parameters, filter);
     }
 
+    bool inspect_queries{false};
     std::vector<int8_t> expected_vectors;
     mutable std::atomic<uint64_t> queries{0};
     mutable std::atomic<uint64_t> invalid_queries{0};
@@ -1549,9 +1553,9 @@ TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][m
                        ->Int8Vectors(index.expected_vectors.data())
                        ->Owner(false);
     REQUIRE(index.Build(dataset).empty());
-    REQUIRE(index.queries.load() > 0);
+    REQUIRE(index.queries.load() == 0);
     REQUIRE(index.invalid_queries.load() == 0);
-    index.queries = 0;
+    index.inspect_queries = true;
     vsag::AnalyzerParam analyzer_params(common.allocator_.get());
     analyzer_params.base_sample_size = total;
     analyzer_params.topk = 3;

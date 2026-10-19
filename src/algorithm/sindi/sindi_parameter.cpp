@@ -79,6 +79,28 @@ SINDIParameter::FromJson(const JsonType& json) {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
 
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    if (json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
+                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
+    }
+    if (json.Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_TERM_RETAIN_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "term_retain_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            term_retain_threshold = threshold_json.GetUint64();
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+
     if (json.Contains(USE_REORDER_KEY)) {
         use_reorder = json[USE_REORDER_KEY].GetBool();
     } else {
@@ -178,6 +200,8 @@ SINDIParameter::ToJson() const {
     JsonType json;
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
+    json[SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     json[USE_REORDER_KEY].SetBool(use_reorder);
     if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
         json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
@@ -204,6 +228,8 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, term_id_limit);
     CHECK_FIELD_EQ(*this, *p, window_size);
     CHECK_FIELD_EQ(*this, *p, doc_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_retain_threshold);
     CHECK_FIELD_EQ(*this, *p, use_reorder);
     CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);

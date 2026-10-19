@@ -103,6 +103,28 @@ SINDIV2Parameter::FromJson(const JsonType& json) {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
 
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    if (json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
+                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
+    }
+    if (json.Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_TERM_RETAIN_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "term_retain_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            term_retain_threshold = threshold_json.GetUint64();
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+
     if (json.Contains(USE_REORDER_KEY)) {
         use_reorder = json[USE_REORDER_KEY].GetBool();
     } else {
@@ -253,6 +275,8 @@ SINDIV2Parameter::ToJson() const {
     JsonType json;
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
+    json[SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     json[USE_REORDER_KEY].SetBool(use_reorder);
     if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
         json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
@@ -293,6 +317,10 @@ SINDIV2Parameter::CheckCompatibility(const vsag::ParamPtr& other) const {
         return false;
     }
     if (this->doc_prune_ratio != sindi_v2_param->doc_prune_ratio) {
+        return false;
+    }
+    if (this->term_prune_ratio != sindi_v2_param->term_prune_ratio ||
+        this->term_retain_threshold != sindi_v2_param->term_retain_threshold) {
         return false;
     }
     if (this->use_reorder != sindi_v2_param->use_reorder) {

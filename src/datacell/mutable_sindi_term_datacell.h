@@ -67,6 +67,9 @@ public:
     Finalize();
 
     void
+    PruneTerms(float ratio, uint64_t threshold, uint64_t window_count = 0);
+
+    void
     SerializeWindows(StreamWriter& writer) const;
 
     void
