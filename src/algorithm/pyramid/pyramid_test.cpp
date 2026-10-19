@@ -282,6 +282,57 @@ RequirePyramidSearchStatistics(const vsag::DatasetPtr& result, uint64_t approxim
 
 }  // namespace
 
+TEST_CASE("Pyramid immutable preserves reverse label lookup", "[ut][pyramid][immutable]") {
+    const bool streaming = GENERATE(false, true);
+    const bool freeze_before_load = GENERATE(false, true);
+    auto source = MakePyramidIndex(100);
+    std::vector<float> vectors(3 * PYRAMID_TEST_DIM, 0.25F);
+    std::vector<int64_t> ids = {0, 118, 999};
+    std::vector<std::string> paths(ids.size());
+    REQUIRE(source.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), 3))
+                .empty());
+    REQUIRE(source.index->Remove({118}, vsag::RemoveMode::MARK_REMOVE) == 1);
+    const auto check = [&](const auto& index) {
+        // Correct distances alone cannot detect a fallback to linear label scans.
+        REQUIRE(index->label_table_->use_reverse_map_);
+        CHECK(index->label_table_->GetRemapSize() == ids.size());
+        CHECK(index->CheckIdExist(0));
+        CHECK(index->CheckIdExist(999));
+        CHECK_FALSE(index->CheckIdExist(42));
+        CHECK(index->CalcDistanceById(vectors.data(), 999) == 0.0F);
+        int64_t candidates[] = {999, 42};
+        const auto result = index->CalcDistancesById(vectors.data(), candidates, 2);
+        CHECK(result->GetDistances()[0] == 0.0F);
+        CHECK(result->GetDistances()[1] == -1.0F);
+    };
+    source.index->SetImmutable();
+    source.index->SetImmutable();
+    check(source.index);
+    CHECK_FALSE(source.index->CheckIdExist(118));
+    int64_t removed_id = 118;
+    CHECK(source.index->CalcDistancesById(vectors.data(), &removed_id, 1)->GetDistances()[0] ==
+          -1.0F);
+    std::stringstream stream;
+    if (streaming) {
+        source.index->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+    }
+    auto restored = MakePyramidIndex(100);
+    if (freeze_before_load) {
+        restored.index->SetImmutable();
+    }
+    if (streaming) {
+        restored.index->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored.index->Deserialize(reader);
+    }
+    restored.index->SetImmutable();
+    check(restored.index);
+}
+
 TEST_CASE("Pyramid reads legacy reserved label slots", "[ut][pyramid][reserved_labels]") {
     const bool real_zero = GENERATE(false, true);
     const bool immutable = GENERATE(false, true);
@@ -315,6 +366,8 @@ TEST_CASE("Pyramid reads legacy reserved label slots", "[ut][pyramid][reserved_l
         restored.index->Deserialize(reader);
     }
     CHECK(restored.index->label_table_->GetTotalCount() == 9);
+    CHECK(restored.index->label_table_->use_reverse_map_);
+    CHECK(restored.index->label_table_->GetRemapSize() == 9);
     CHECK(restored.index->CheckIdExist(0) == real_zero);
     if (real_zero) {
         CHECK(restored.index->label_table_->GetIdByLabel(0) == 0);

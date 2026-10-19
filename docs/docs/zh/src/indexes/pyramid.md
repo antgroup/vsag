@@ -13,6 +13,12 @@ Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量可以附带
 - 示例（单层级）：[`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
 - 示例（多层级）：[`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
 
+## 只读索引
+
+`SetImmutable()` 拒绝后续写入并释放逐向量锁，同时保留反向 ID 映射，以支持高效的
+指定 ID 算分和数据读取。相比丢弃映射，这会多占用一些内存，但避免了线性扫描 ID。
+在反序列化之前或之后冻结索引均适用，序列化格式不变。
+
 ## 工作原理
 
 1. **路径树。** 每条向量在 ID 之外还可以携带多条独立路径，分隔符为 `/`

@@ -15,6 +15,14 @@ results.
 - Example (single hierarchy): [`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
 - Example (multi-hierarchy): [`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
 
+## Read-only indexes
+
+`SetImmutable()` rejects further writes and releases per-vector locks, while retaining
+the reverse ID map for efficient ID-based distance and retrieval operations. The map
+uses additional memory compared with discarding it, but avoids linear ID scans.
+This applies whether the index is frozen before or after deserialization; the
+serialized format is unchanged.
+
 ## How it works
 
 1. **Path tree.** Each vector can carry independent paths in addition to its id.
