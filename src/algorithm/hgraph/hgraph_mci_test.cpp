@@ -724,8 +724,11 @@ TEST_CASE("HGraph rejects mismatched serialized MCI node counts", "[ut][hgraph][
 
 TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fails",
           "[ut][hgraph][mci][force_remove]") {
+    const std::string io = GENERATE("memory_io", "block_memory_io");
+    CAPTURE(io);
     auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(2));
     auto params = config["index_param"];
+    params["base_io_type"].SetString(io);
     params["support_force_remove"].SetBool(true);
     params["build_thread_count"].SetInt(1);
     params["mci_delete_clique_size_threshold"].SetInt(30);
@@ -738,11 +741,31 @@ TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fail
                                   common);
     std::vector<int64_t> ids{0, 1, 2, 3, 4, 5};
     std::vector<float> vectors{0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6};
-    REQUIRE(index.Build(make_dataset(ids, vectors, 0, 6, 2)).empty());
+    auto built = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(built.has_value());
+    const auto build_result = built.value()->Build(make_dataset(ids, vectors, 0, 6, 2));
+    REQUIRE(build_result.has_value());
+    REQUIRE(build_result.value().empty());
+    // Clique construction is heuristic: deleting a singleton has no surviving repair seed.
+    // Install a known topology so the injected search failure is always reached, including
+    // repair of old tail ID 5 after FORCE_REMOVE moves it into slot 0.
+    auto fixture = with_mci_fixture(built.value(), config.Dump(), {{0, 5}, {1}, {2}, {3}, {4}});
+    const auto fixture_snapshot = read_mci_snapshot(fixture, common.allocator_.get());
+    REQUIRE(fixture_snapshot.cliques->HasCliqueIndex(ids.size()));
+    vsag::Vector<vsag::InnerIdType> removed(1, 0, common.allocator_.get());
+    const auto snapshot = fixture_snapshot.cliques->PrepareDelete(removed, 30, 3);
+    REQUIRE(snapshot.retired_clique_ids.size() == 1);
+    REQUIRE(snapshot.repair_node_ids.size() == 1);
+    REQUIRE(snapshot.repair_node_ids[0] == 5);
+    std::stringstream stream;
+    REQUIRE(fixture->Serialize(stream).has_value());
+    vsag::IOStreamReader reader(stream);
+    index.Deserialize(reader);
+    index.candidate_searches = 0;
     index.fail_candidate_search = true;
     REQUIRE_THROWS_AS(index.Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE), std::bad_alloc);
     index.fail_candidate_search = false;
-    REQUIRE(index.candidate_searches > 0);
+    REQUIRE(index.candidate_searches == 1);
     // Physical deletion is not rolled back. Queries must fall back to the repaired HGraph,
     // never read the old CSR with moved IDs, even after a subsequent no-op removal.
     REQUIRE(index.GetNumElements() == 5);
