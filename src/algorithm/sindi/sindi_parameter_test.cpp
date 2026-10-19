@@ -105,6 +105,8 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
         "sindi": {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
+            "window_parallelism": 4,
+            "worker_n_candidate": 5,
             "term_prune_ratio": 0.1,
             "term_retain_threshold": 100,
             "filter_callback_limit": 1000
@@ -116,12 +118,30 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(search_param->term_prune_ratio == 0.1F);
     REQUIRE(search_param->term_retain_threshold == 100);
     REQUIRE(search_param->filter_callback_limit == 1000);
+    REQUIRE(search_param->window_parallelism == 4);
+    REQUIRE(search_param->worker_n_candidate == 5);
     vsag::ParameterTest::TestToJson(search_param);
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_retain_threshold"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("filter_callback_limit"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("window_parallelism"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("worker_n_candidate"));
+    REQUIRE_THROWS_AS(
+        search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"window_parallelism":17}})")),
+        vsag::VsagException);
+    REQUIRE_THROWS_AS(
+        search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"worker_n_candidate":0}})")),
+        vsag::VsagException);
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
+
+    SINDISearchParameter default_search_param;
+    default_search_param.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+    auto default_json = default_search_param.ToJson();
+    REQUIRE_FALSE(default_json[INDEX_SINDI].Contains("worker_n_candidate"));
+    SINDISearchParameter restored_default;
+    REQUIRE_NOTHROW(restored_default.FromJson(default_json));
+    REQUIRE(restored_default.worker_n_candidate == 0);
 
     auto legacy_search_param_str = R"({
         "sindi": {
