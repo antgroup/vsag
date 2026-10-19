@@ -108,6 +108,37 @@ remain linked above, so pruning review code does not hide failed candidates.
 The default production API is solely #2904's; obsolete SQ8/codec probes and graph
 candidates are neither current supported backend options nor acceptance defaults.
 
+## Current-version resident protocol
+
+This is a new Lite-only cohort, separate from the historical E1 results and from
+the tiny reproduction smoke. Freeze this protocol before measuring; retain all
+cells, not the fastest repetition. The feature baseline is the clean #2904
+dependency identified above; the measured build must have a valid source receipt.
+
+| Item | Fixed value / interpretation |
+| --- | --- |
+| Inputs | SIFT128, GIST960, normalized Cohere768; first 10000 base vectors and first 1000 query rows from the recorded real sources |
+| Query identity | 1000 supplied query rows per dataset, not 15000 independent queries; record exact input hashes and duplicate-row count |
+| Modes | FP32, FP16, RaBitQ8; degree16, construction ef128, query ef512, k10 |
+| Repeats | Three fresh processes per dataset/mode; mode order rotated by trial, fixed dataset order SIFT/GIST/Cohere |
+| Dynamic work | `--resident --trials 3 --rounds 20 --cycles 250`; each process has 5000 Update, 5000 Remove, 5000 Add and 15000 interleaved queries |
+| Mutation rule | Existing FP32 `.875 * current + .125 * original donor`; original resident index is not replaced by a loaded copy |
+| Correctness | Live IDs, count, finite/ordered/unique neighbors; 20 Save/Load checks over all 1000 queries; initial/final current-state FP64 exact truth |
+| Aggregation | Retain all three process values; median per-process P50/P99/throughput, min/max and per-trial quality; do not pool percentiles or cherry-pick trials |
+| CPU/memory | CPU0 if available, otherwise the explicitly recorded available CPU; one process/thread, OMP/OpenBLAS/MKL1; record API user/system CPU and external process resources |
+| Persistence/peak | Warm uncontrolled-cache same-process Save/Load; peak includes input/truth/loaded-copy buffers, not index-only RSS |
+| Quality verdict | Report Recall@10 and initial/final difference separately from raw audit PASS; an agreed contractual threshold is not invented; .990 remains only a diagnostic target |
+| Full comparison | Not part of this cohort; fresh current Full, equal-parameter and separately frozen same-quality protocols remain distinct follow-ups |
+
+Run the existing source-bound mixed runner once per dataset, with all three
+trials inside each command, then run its independent verifier and packer. This
+preserves mode rotation while limiting temporary snapshot occupancy. Do not run
+compilation, tests or dataset preparation concurrently with the timed cohort.
+Dataset preparation, FP64 truth, round-trip comparison searches and bookkeeping
+are outside API throughput. Duration is measured, not labeled hours-long endurance.
+Input preparation/source hashes, pre-measurement protocol hash, exact commands,
+build receipt, all raw rows and archive verification accompany the resulting report.
+
 ## Community review and remaining acceptance
 
 Review production separately in #2904; review reusable runners/oracles/verifiers,

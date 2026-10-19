@@ -64,6 +64,16 @@ class ReproductionDocumentationTests(unittest.TestCase):
                               ('python3 -c', 'python3 -m unittest')]:
             self.assertLess(block.index(first), block.index(second))
 
+    def test_resident_protocol_separates_new_cohort_and_quality_verdict(self):
+        guide = (Path(__file__).parent / 'ACCEPTANCE.md').read_text()
+        block = guide.split('## Current-version resident protocol\n', 1)[1].split(
+            '## Community review and remaining acceptance', 1)[0]
+        for token in ['SIFT128', 'GIST960', 'Cohere768', '1000 query rows',
+                      '--resident --trials 3 --rounds 20 --cycles 250',
+                      'initial/final current-state FP64 exact truth',
+                      'not invented', 'fresh current Full', 'not labeled hours-long']:
+            self.assertIn(token, block)
+
     def test_current_and_historical_recipes_remain_distinct(self):
         root = Path(__file__).parent
         index = (root / 'ACCEPTANCE.md').read_text()
