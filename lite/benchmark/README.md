@@ -179,6 +179,13 @@ above is an explicit new-run recipe, not a claim that this matrix has been run.
 
 ### Guarded historical Full, package and quality replay
 
+The three runners check required input files, pinned identities, receipts, tools
+and historical helper-source availability before creating an output directory.
+Rejected prerequisites leave no new output directory; existing outputs are never
+overwritten. Input-content validation, compilation and measurement can still fail
+later and retain diagnostics. These checks do not relax historical version guards
+or turn the scripts into current-version benchmarks.
+
 The following are **historical replays**, not generic latest-source commands.
 Replace paths with the matching recorded inputs. `BENCH_PINNED_FEATURE` must be a
 clean `dbb2fe0bec685ae7a343b1d2060d0553a98e20d2` checkout; its Lite build must match.

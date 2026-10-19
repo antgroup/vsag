@@ -205,7 +205,17 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output = args.output.resolve()
-    args.output.mkdir(parents=True, exist_ok=False)
+    if args.output.exists():
+        raise FileExistsError(args.output)
+    for path in [args.feature / 'LICENSE', *[args.dataset / name for name in
+                 ['base.fvecs', 'queries.fvecs', 'groundtruth.ivecs']]]:
+        assert path.is_file() and path.stat().st_size > 0, 'Missing or empty input: ' + str(path)
+    for install in [args.lite_install, args.full_install]:
+        assert (install / 'include').is_dir(), 'Missing SDK headers: ' + str(install)
+    for tool in ['c++', 'ldd', 'strip', 'dpkg-query']:
+        assert shutil.which(tool), 'Missing required tool: ' + tool
+    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
+    assert Path('/proc/self/maps').is_file(), 'Linux /proc is required'
     assert sha(args.source_archive) == '0c6697115a21dc210ab63cc0dfd659c53614d39ffc89115292765a1565ca9b54', 'Untrusted consumer-source archive'
     assert sha(args.lite_install / 'lib/libvsag-lite.so') == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
     assert sha(args.full_install / 'lib/libvsag.so') == '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
@@ -216,6 +226,7 @@ def main():
         excludes=['SDK headers/static archives', 'Python bindings', 'container/OS/kernel/shell', 'datasets/snapshots', 'dlopen plugins'],
         source_archive_sha256=sha(args.source_archive), redistribution='measurement prototype only; license notices copied, no legal certification',
         strip=subprocess.check_output(['strip','--version'],text=True).splitlines()[0], packages={})
+    args.output.mkdir(parents=True, exist_ok=False)
     with tempfile.TemporaryDirectory(prefix='vsag-runtime-package-',dir='/dev/shm') as directory:
         scratch = Path(directory)
         sources = scratch / 'sources'

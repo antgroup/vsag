@@ -7,6 +7,7 @@ import csv
 import json
 import math
 import os
+import shutil
 from pathlib import Path
 import statistics
 import struct
@@ -64,7 +65,17 @@ def main():
     ref = args.source_ref
     expected = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     output = args.output.resolve()
-    output.mkdir(parents=True, exist_ok=False)
+    if output.exists():
+        raise FileExistsError(output)
+    paths = [args.raw_gist / name for name in ['base-100k.fbin', 'queries.fbin']]
+    paths += [args.prior_dataset / name for name in
+              ['base.fvecs', 'queries.fvecs', 'groundtruth.ivecs']]
+    paths += [root / name for name in ['query_fixed_snapshot.cpp', 'prepare_gist.cpp']]
+    for path in paths:
+        assert path.is_file() and path.stat().st_size > 0, 'Missing or empty input: ' + str(path)
+    for tool in ['git', 'c++', 'taskset']:
+        assert shutil.which(tool), 'Missing required tool: ' + tool
+    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     receipt_path = args.full_receipt
     receipt = json.loads(receipt_path.read_text())
     validate_fresh_receipt(receipt, expected, full)
@@ -72,6 +83,10 @@ def main():
     assert sha(lite_build/'libvsag-lite.so') == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
     assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=feature,text=True).strip() == expected
     assert not subprocess.check_output(['git','status','--porcelain','-uno'],cwd=feature)
+    sources = {name: subprocess.check_output(
+        ['git', 'show', ref + ':lite/benchmark/' + name], cwd=source)
+        for name in ['graph_crud_quality.cpp', 'full_rabitq_dataset_main.cpp']}
+    output.mkdir(parents=True, exist_ok=False)
     env = {k:v for k,v in os.environ.items() if not k.startswith('VSAG_')}
     env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',VSAG_FULL_PROFILE='small')
     commands = []
@@ -95,8 +110,8 @@ def main():
         for name in ['base-100k.fbin','queries.fbin']})
     with tempfile.TemporaryDirectory(prefix='vsag-quality-target-',dir='/dev/shm') as directory:
         scratch = Path(directory)
-        for name in ['graph_crud_quality.cpp','full_rabitq_dataset_main.cpp']:
-            (scratch/name).write_bytes(subprocess.check_output(['git','show',ref+':lite/benchmark/'+name],cwd=source))
+        for name, content in sources.items():
+            (scratch/name).write_bytes(content)
             (output/('source-'+name)).write_bytes((scratch/name).read_bytes())
         (output/'source-prepare_gist.cpp').write_bytes((root/'prepare_gist.cpp').read_bytes())
         compile_flags = ['c++','-std=c++17','-O3','-DNDEBUG','-Wall','-Wextra','-Wpedantic']

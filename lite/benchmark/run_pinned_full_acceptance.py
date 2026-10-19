@@ -5,6 +5,7 @@
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tarfile
@@ -35,7 +36,20 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     args.output = args.output.resolve()
-    args.output.mkdir(parents=True, exist_ok=False)
+    if args.output.exists():
+        raise FileExistsError(args.output)
+    labels = set()
+    for value in args.dataset:
+        label, directory = value.split('=', 1)
+        assert label.isalnum() and label not in labels, 'Dataset names must be unique and alphanumeric'
+        labels.add(label)
+        for name in ['base.fvecs', 'queries.fvecs', 'groundtruth.ivecs']:
+            path = Path(directory) / name
+            assert path.is_file() and path.stat().st_size > 0, 'Missing or empty input: ' + str(path)
+    for tool in ['git', 'c++', 'python3', 'taskset', 'ldd', 'strip']:
+        assert shutil.which(tool), 'Missing required tool: ' + tool
+    assert os.access('/usr/bin/time', os.X_OK), 'Missing executable /usr/bin/time'
+    assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     expected_feature = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
     expected_full = '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
     feature_sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=args.feature, text=True).strip()
@@ -47,7 +61,6 @@ def main():
         validate_fresh_receipt(receipt, expected_feature, args.full_install)
         expected_full = receipt['library_sha256']
         old_provenance = receipt
-        (args.output / 'fresh-full-receipt.json').write_bytes(args.fresh_full_receipt.read_bytes())
     else:
         old_provenance = json.loads(subprocess.check_output(['git', 'show', args.source_ref +
             ':lite/benchmark/results/current-full-10k600-20261011/provenance.json'], cwd=args.source_repo))
@@ -68,6 +81,15 @@ def main():
     if args.fresh_full_receipt:
         meta['fresh_full_receipt_sha256'] = sha(args.fresh_full_receipt)
         meta['full_suite'] = old_provenance['full_suite']
+    # Resolve historical sources before creating any result directory.
+    names = ['graph_crud_quality.cpp', 'load_memory.cpp', 'full_rabitq_dataset_main.cpp',
+             'run_aligned_comparison.py', 'measure_elf_closure.py']
+    sources = {name: subprocess.check_output(
+        ['git', 'show', args.source_ref + ':lite/benchmark/' + name], cwd=args.source_repo)
+        for name in names}
+    args.output.mkdir(parents=True, exist_ok=False)
+    if args.fresh_full_receipt:
+        (args.output / 'fresh-full-receipt.json').write_bytes(args.fresh_full_receipt.read_bytes())
     env = {k: v for k, v in os.environ.items() if not k.startswith('VSAG_')}
     env.update(OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
     with tempfile.TemporaryDirectory(prefix='vsag-equal-full-', dir='/dev/shm') as directory:
@@ -75,11 +97,7 @@ def main():
         lite = scratch / 'lite'
         lite.mkdir()
         (lite / 'libvsag-lite.so').symlink_to((args.feature_build / 'libvsag-lite.so').resolve())
-        names = ['graph_crud_quality.cpp', 'load_memory.cpp', 'full_rabitq_dataset_main.cpp',
-                 'run_aligned_comparison.py', 'measure_elf_closure.py']
-        for name in names:
-            source = subprocess.check_output(['git', 'show', args.source_ref + ':lite/benchmark/' + name],
-                                             cwd=args.source_repo)
+        for name, source in sources.items():
             path = scratch / name
             path.write_bytes(source)
             meta['helper_source_hashes'][name] = sha(path)
