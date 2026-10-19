@@ -82,6 +82,9 @@ class ReproductionDocumentationTests(unittest.TestCase):
             self.assertIn(tool, recipes)
         self.assertIn('unpack(Path(sys.argv[1]), Path(sys.argv[2]))', recipes)
         self.assertIn('not generic latest-source commands', recipes)
+        self.assertIn('--prepare-build --feature-repo', recipes)
+        self.assertIn('build-source-receipt.json', recipes)
+        self.assertIn('not signed or tamper-proof provenance', recipes)
 
 
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')

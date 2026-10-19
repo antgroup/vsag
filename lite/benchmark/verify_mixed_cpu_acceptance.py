@@ -17,6 +17,18 @@ def verify(output):
     for name, expected in manifest.items():
         assert sha(output / name) == expected, name
     assert sha(output / 'source.cpp') == identity['benchmark_source_sha256']
+    # Historical archives predate build-source receipts; do not relabel them.
+    if 'build_source_receipt_sha256' in identity:
+        receipt_path = output / 'build-source-receipt.json'
+        assert sha(receipt_path) == identity['build_source_receipt_sha256']
+        receipt = json.loads(receipt_path.read_text())
+        assert receipt['schema'] == 1 and receipt['build'] == identity['build']
+        assert receipt['source']['feature_sha'] == identity['feature_sha']
+        assert receipt['library_sha256'] == identity['library_sha256']
+        assert receipt['metadata']['cache_sha256'] == sha(output / 'CMakeCache.txt')
+        assert receipt['metadata']['compile_commands_sha256'] == sha(output / 'compile_commands.json')
+        assert all(receipt['source']['source_sha256'][name] == digest
+                   for name, digest in identity['feature_sources'].items())
     config = identity['configuration']
     rows = json.loads((output / 'rows.json').read_text())
     modes = ['fp32', 'fp16', 'rabitq8']

@@ -138,10 +138,9 @@ feature implementation. They may differ, and both identities are recorded.
 BENCH_FEATURE=/absolute/path/to/clean-feature-checkout
 BENCH_FEATURE_SHA=$(git -C "$BENCH_FEATURE" rev-parse HEAD)
 BENCH_FEATURE_BUILD="$BENCH_WORK/feature-build"
-cmake -S "$BENCH_FEATURE/lite" -B "$BENCH_FEATURE_BUILD" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DENABLE_RABITQ_LITE_BACKEND=ON -DENABLE_TESTS=OFF
-cmake --build "$BENCH_FEATURE_BUILD" -j2
+python3 "$BENCH_ROOT/lite/benchmark/run_mixed_cpu_acceptance.py" \
+  --prepare-build --feature-repo "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
+  --build "$BENCH_FEATURE_BUILD"
 BENCH_CPU=$(python3 -c 'import os; print(min(os.sched_getaffinity(0)))')
 BENCH_RESULT="$BENCH_WORK/mixed-results"
 python3 "$BENCH_ROOT/lite/benchmark/run_mixed_cpu_acceptance.py" \
@@ -162,6 +161,21 @@ PYTHONPATH="$BENCH_ROOT/lite/benchmark" python3 -c \
   "$BENCH_RESULT/raw.tar.gz" "$BENCH_UNPACKED"
 python3 "$BENCH_ROOT/lite/benchmark/verify_mixed_cpu_acceptance.py" "$BENCH_UNPACKED"
 ```
+
+`--prepare-build` requires a nonexistent build directory and builds only the
+standalone Release Lite library with RaBitQ enabled, tests/benchmarks disabled,
+and compiler-cache launchers disabled. It preserves its log and writes
+`build-source-receipt.json` only after a successful build and unchanged clean
+source check. Existing builds are never cleaned or overwritten. A previous
+manual build without this receipt must be rebuilt in a new directory, not relabeled.
+
+The measurement checks the source revision and tracked Lite/SIMD/public-header
+hashes, CMake source/build paths, production compilation entries, configuration
+and library hash, then checks the probe's resolved Lite library. It repeats source
+and library checks after measurement and copies the receipt into the raw manifest.
+These are local accidental-mismatch guards, not signed or tamper-proof provenance;
+system headers, compiler and OS remain environment dependencies. Historical raw
+archives without receipts remain historical and are not promoted by this change.
 
 Each trial runs FP32, FP16 and RaBitQ8 in rotated order, with fixed degree 16,
 construction ef 128, query ef 512 and k=10. `--resident` keeps the original index
