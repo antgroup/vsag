@@ -91,9 +91,40 @@ pip install 'transformers==5.19.0.dev0'   # needs the pre-release index
 ## Weights are not a dependency
 
 The checkpoint (~1.5 GB) is never installed or bundled; it is governed by the
-Gemma terms of use, not this repository's license. `scripts/fetch_weights.py`
-symlinks a locally provisioned copy into `weights/`, and the package fails with
-instructions if it is absent. See `NOTICE.md`.
+Gemma terms of use, not this repository's license. It is fetched once by
+`scripts/fetch_weights.py`, which **symlinks** the result into `weights/` and
+never copies it into the tree.
+
+`EG2_WEIGHTS_SOURCE` picks the origin, so the same checkout works on a laptop, in
+CI, and behind a corporate mirror without touching the code:
+
+| Value | Origin |
+|---|---|
+| `huggingface` (default) | `google/embeddinggemma-2` via `huggingface_hub`, so each user accepts the Gemma terms themselves |
+| `local` | a checkpoint you provide (`--src` / `$EMBEDDINGGEMMA2_SRC`); no network |
+| `http(s)://…/` | any static host — an internal OSS/S3 mirror, verified against `weights.sha256` |
+
+The required file set is 11 entries, not just the obvious config and weights.
+Three are easy to leave out and each one breaks something specific:
+
+| File | If missing |
+|---|---|
+| `sentence_bert_config.json` | model silently loads **text-only**; image/audio/video raise "Modality is not supported" |
+| `chat_template.jinja` | text processor fails with "does not have a chat template" |
+| `1_Pooling/config.json` | loading fails with `Pooling.__init__() missing ... 'embedding_dimension'` |
+
+`2_Normalize/config.json`, `tokenizer.model` and `README.md` are optional — the
+first falls back to defaults and the other two are unused by the kit.
+
+To publish an internal mirror, generate the manifest where the checkpoint lives
+and upload it alongside:
+
+```bash
+python scripts/fetch_weights.py --src /path/to/checkpoint --write-manifest
+```
+
+`weights.sha256` is both the file list and the integrity check, so downloads from
+a URL source are verified by default. See `NOTICE.md`.
 
 ## Reproducing an environment
 

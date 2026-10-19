@@ -58,15 +58,44 @@ a hard floor: older versions silently ignore multimodal input ordering.
 
 ## Provision the weights
 
-Model weights are not distributed with this repository. Link a checkpoint you
-have provisioned locally:
+Model weights are not distributed with this repository, so they have to be
+obtained once. One environment variable selects where from; the default is the
+upstream Hugging Face repository.
 
 ```bash
-python scripts/fetch_weights.py --src /path/to/embeddinggemma-2
+# default: download google/embeddinggemma-2 from the Hugging Face hub
+python scripts/fetch_weights.py
+
+# use a checkpoint you already have
+EG2_WEIGHTS_SOURCE=local python scripts/fetch_weights.py --src /path/to/embeddinggemma-2
+
+# internal mirror (OSS/S3/any static host), verified against weights.sha256
+EG2_WEIGHTS_SOURCE=https://bucket.example.com/models/embeddinggemma-2/v1 \
+    python scripts/fetch_weights.py
 ```
 
-The script symlinks (never copies) and refuses to overwrite a real directory.
-`weights/` is git-ignored along with all common model file patterns.
+| `EG2_WEIGHTS_SOURCE` | Behaviour |
+|---|---|
+| `huggingface` (default) | `snapshot_download` of `google/embeddinggemma-2`; honours `HF_TOKEN` and `HF_ENDPOINT` for private repos and mirrors |
+| `local` | symlinks a checkpoint given by `--src` or `$EMBEDDINGGEMMA2_SRC`; performs no network access |
+| `http(s)://…/` | downloads the file set from that prefix, resuming partial files, and verifies each against `weights.sha256` when present |
+
+Everything is **symlinked**, never copied, and a real directory at the
+destination is never touched. `weights/` is git-ignored along with all common
+model file patterns.
+
+To host the checkpoint internally, generate the manifest on a machine that has
+it, then upload the pair:
+
+```bash
+python scripts/fetch_weights.py --src /path/to/embeddinggemma-2 --write-manifest
+# upload /path/to/embeddinggemma-2 (including weights.sha256) to your bucket
+```
+
+The manifest doubles as the file list and the integrity check, so a URL source
+is verified by default. See
+[docs/dependencies.md](docs/dependencies.md#model-weights) for the file set and
+why each file is required.
 
 ## Verify the installation
 
