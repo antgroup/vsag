@@ -90,7 +90,7 @@ pip install 'transformers==5.19.0.dev0'   # needs the pre-release index
 
 ## Weights are not a dependency
 
-The checkpoint (~2.9 GB) is never installed or bundled; it is governed by the
+The checkpoint (~1.5 GB) is never installed or bundled; it is governed by the
 Gemma terms of use, not this repository's license. `scripts/fetch_weights.py`
 symlinks a locally provisioned copy into `weights/`, and the package fails with
 instructions if it is absent. See `NOTICE.md`.

@@ -2,7 +2,7 @@
 
 This package contains **no model weights**.
 
-The EmbeddingGemma 2 checkpoint (~2.9 GB) is distributed under the **Gemma
+The EmbeddingGemma 2 checkpoint (~1.5 GB) is distributed under the **Gemma
 Terms of Use**, not under this repository's Apache-2.0 license. It must be
 obtained separately by the user.
 
@@ -15,7 +15,7 @@ Expected checkpoint contents:
 
 ```
 config.json                        text/vision/audio tower configuration
-model.safetensors                  ~2.9 GB of weights
+model.safetensors                  ~1.5 GB of weights (744M parameters, bf16)
 modules.json                       sentence-transformers pipeline
 tokenizer.json, tokenizer.model   tokenizer
 tokenizer_config.json
