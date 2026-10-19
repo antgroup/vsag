@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -197,7 +198,11 @@ private:
                 ReasoningContext* reasoning_ctx = nullptr,
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
-                const SindiMetadataSearchRoute& metadata_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {},
+                uint64_t worker_n_candidate = 0,
+                const FilterPtr& user_filter = nullptr,
+                uint64_t filter_callback_limit = 0,
+                float filter_callback_limit_weight = 1.0F) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -213,6 +218,9 @@ private:
      */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
+
+    mutable std::once_flag search_thread_pool_once_;
+    mutable SafeThreadPoolPtr search_thread_pool_{nullptr};
 
     MetadataPtr
     collect_streaming_header() const override;
