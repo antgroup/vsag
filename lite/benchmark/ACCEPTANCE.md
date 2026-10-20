@@ -39,6 +39,11 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
+The [review-fixed three-dataset cohort (E10)](results/review-fixed-resident-20261020/README.md)
+measures `cba3406` with a fresh source-bound build and the same input hashes and
+27-process protocol as E9. It is the current Lite resident matrix, not a current
+Full/package measurement, a speedup attribution or an hours-long endurance test.
+
 The [prior three-dataset resident cohort](results/resident-three-datasets-20261019/README.md)
 uses 1000 query rows on SIFT/GIST/Cohere, a source-bound `a3a76a8` Lite build and
 27 fresh processes. It documents that measured version, not a new Full or

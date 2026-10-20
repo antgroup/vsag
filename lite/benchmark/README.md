@@ -3,7 +3,7 @@
 [Start here: requirements, reports, commands and limitations](ACCEPTANCE.md).
 [详细综合验收报告：三数据集、Full对照、CRUD、CPU、优化及限制](ACCEPTANCE_REPORT.md).
 
-- Functionality/architecture/regressions: PR #2904; this integration includes `a3a76a8`.
+- Functionality/architecture/regressions: PR #2904; this integration includes `cba3406`.
   Historical measurements retain their own recorded feature/source versions.
 - Benchmark and audit tools: this directory; `ENABLE_BENCHMARKS` defaults OFF.
 - [Historical raw files and SHA256 manifest](RAW_MANIFEST.json): immutable snapshot `800a822`.
@@ -18,7 +18,7 @@ Native Full consumers are independently built via `benchmark/full`, never
 substituted by an old Lite baseline.
 
 The latest tree excludes historical bulk raw outputs from the review diff, but
-retains one compressed final-version raw archive and its receipt; project history
+retains compact, version-bound raw archives and their receipts; project history
 and original server evidence remain intact. New performance output goes to a
 fresh external directory and must record source/configuration/input identities.
 The current integration does not retrospectively rerun or relabel old experiments.

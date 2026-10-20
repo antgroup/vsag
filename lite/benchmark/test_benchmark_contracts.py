@@ -1,6 +1,7 @@
 """Compile actual benchmark helper bodies and verify edge cases without index timing."""
 from pathlib import Path
 import hashlib
+import io
 import json
 import tarfile
 import shutil
@@ -135,6 +136,107 @@ class ResidentPublishedEvidenceTests(unittest.TestCase):
                    f"{cell['quality']['final']['median']:.4f} |")
             self.assertIn(row, report)
             self.assertIn(row, main_report)
+
+
+class ReviewFixedEvidenceTests(unittest.TestCase):
+    def test_current_report_metrics_and_source_binding(self):
+        root = Path(__file__).parent
+        result = root / 'results/review-fixed-resident-20261020'
+        archive = result / 'raw.tar.gz'
+        metadata = json.loads((result / 'archive.json').read_text())
+        self.assertEqual(archive.stat().st_size, metadata['bytes'])
+        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), metadata['sha256'])
+        with tarfile.open(archive, 'r:gz') as outer:
+            manifest = json.load(outer.extractfile('manifest.json'))
+            self.assertEqual(len(outer.getmembers()), metadata['members'])
+            self.assertEqual(set(manifest) | {'manifest.json'}, set(outer.getnames()))
+            for name, digest in manifest.items():
+                self.assertEqual(hashlib.sha256(outer.extractfile(name).read()).hexdigest(), digest)
+            summary = json.load(outer.extractfile('summary.json'))
+            complete = json.load(outer.extractfile('completed.json'))
+            protocol = json.load(outer.extractfile('frozen-protocol.json'))
+            freeze = json.load(outer.extractfile('protocol-freeze-receipt.json'))
+            reuse = json.load(outer.extractfile('input-reuse-note.json'))
+            self.assertTrue(reuse['input_preparation_reused'])
+            self.assertTrue(reuse['frozen_before_new_measurement'])
+            self.assertEqual(freeze['sha256'], hashlib.sha256(
+                outer.extractfile('frozen-protocol.json').read()).hexdigest())
+            self.assertEqual(protocol['feature_sha'], 'cba340660f2ea479b316d7b73a27f34186b8a1d9')
+            for key, expected in [('trials', 3), ('rounds', 20), ('cycles', 250),
+                                  ('query_rows', 1000), ('base_count', 10000)]:
+                self.assertEqual(protocol[key], expected)
+            for dataset in ['SIFT', 'GIST', 'Cohere']:
+                inner_bytes = outer.extractfile(dataset + '/raw.tar.gz').read()
+                inner_metadata = json.load(outer.extractfile(dataset + '/archive.json'))
+                self.assertEqual(len(inner_bytes), inner_metadata['bytes'])
+                self.assertEqual(hashlib.sha256(inner_bytes).hexdigest(), inner_metadata['sha256'])
+                with tarfile.open(fileobj=io.BytesIO(inner_bytes), mode='r:gz') as inner:
+                    identity = json.load(inner.extractfile('identity.json'))
+                    receipt_bytes = inner.extractfile('build-source-receipt.json').read()
+                    receipt = json.loads(receipt_bytes)
+                    self.assertEqual(identity['feature_sha'], protocol['feature_sha'])
+                    self.assertEqual(identity['benchmark_parent'], protocol['benchmark_sha'])
+                    self.assertEqual(identity['library_sha256'], protocol['library_sha256'])
+                    self.assertEqual(receipt['library_sha256'], protocol['library_sha256'])
+                    self.assertEqual(receipt['source']['feature_sha'], protocol['feature_sha'])
+                    self.assertEqual(hashlib.sha256(receipt_bytes).hexdigest(),
+                                     protocol['build_receipt_sha256'])
+        self.assertEqual(complete['processes'], 27)
+        self.assertEqual(complete['mutation_calls'], 405000)
+        self.assertEqual(complete['interleaved_queries'], 405000)
+        self.assertFalse(complete['quality_accepted'])
+        self.assertFalse(complete['full_comparison'])
+        self.assertEqual(len(summary), 9)
+        report = (result / 'README.md').read_text()
+        main_report = (root / 'ACCEPTANCE_REPORT.md').read_text()
+        labels = {'fp32': 'FP32', 'fp16': 'FP16', 'rabitq8': 'RaBitQ8'}
+        for cell in summary.values():
+            prefix = f"| {cell['dataset']} | {labels[cell['storage']]} | "
+            for operation in cell['operations'].values():
+                for metric in operation.values():
+                    self.assertEqual(len(metric['values']), 3)
+                    self.assertEqual(metric['median'], sorted(metric['values'])[1])
+            query = cell['operations']['query']
+            row = (prefix + f"{query['p50_us']['median']:.3f} | {query['p99_us']['median']:.3f} | "
+                   f"{query['call_only_ops_per_second']['median']:.1f} | "
+                   f"{cell['quality']['initial']['median']:.4f} → "
+                   f"{cell['quality']['final']['median']:.4f} |")
+            self.assertIn(row, report)
+            self.assertIn(row, main_report)
+            for name in ['add', 'remove', 'update']:
+                operation = cell['operations'][name]
+                row = (prefix + f"{operation['p50_us']['median']:.3f} | "
+                       f"{operation['p99_us']['median']:.3f} | "
+                       f"{operation['call_only_ops_per_second']['median']:.1f} | "
+                       f"{operation['user_sum_ms']['median']:.3f} | "
+                       f"{operation['system_sum_ms']['median']:.3f} |")
+                self.assertIn(row, report)
+            for name in ['save', 'load']:
+                operation = cell['operations'][name]
+                row = (prefix + f"{operation['p50_us']['median']/1000:.3f} | "
+                       f"{operation['p99_us']['median']/1000:.3f} | "
+                       f"{operation['call_only_ops_per_second']['median']:.1f} |")
+                self.assertIn(row, report)
+            for name in ['query', 'save', 'load']:
+                operation = cell['operations'][name]
+                row = (prefix + f"{name} | {operation['count']['median']:.0f} | "
+                       f"{operation['user_sum_ms']['median']:.3f} | "
+                       f"{operation['system_sum_ms']['median']:.3f} |")
+                self.assertIn(row, report)
+            process = cell['process']
+            memory = cell['memory']
+            self.assertIn(prefix + f"{memory['snapshot_final_bytes']['median']/1048576:.3f} | "
+                          f"{cell['operations']['build']['wall_sum_ms']['median']/1000:.3f} |", report)
+            self.assertIn(prefix + f"{process['wall_seconds']['median']:.2f} | "
+                          f"{process['user_seconds']['median']:.2f} | "
+                          f"{process['system_seconds']['median']:.2f} | "
+                          f"{process['cpu_core_utilization_percent']['median']:.1f} |", report)
+            self.assertIn(prefix + f"{process['peak_kib']['median']/1024:.3f} | "
+                          f"{memory['rss_initial_kib']['median']/1024:.3f} | "
+                          f"{memory['rss_final_kib']['median']/1024:.3f} | "
+                          f"{memory['rss_change_kib']['median']:.0f} |", report)
+            self.assertIn(prefix + ' | '.join(f"{process[k]['median']:.0f}" for k in
+                          ['minor_faults', 'major_faults', 'voluntary', 'involuntary']) + ' |', report)
 
 
 @unittest.skipUnless(shutil.which('c++'), 'C++ compiler required for benchmark helper regression')
