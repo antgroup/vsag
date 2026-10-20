@@ -221,6 +221,29 @@ thread-pool/TSL source folders expected by the builder, not compiled objects.
 The checked ANTLR archive is served only on loopback. This profile retains system
 BLAS/fmt and external source prerequisites; it is not a hermetic full toolchain.
 
+For a current bounded native C++ runtime package (application, recursive ELF
+dependencies, loader, launcher and notices), install the prepared Lite build and
+pass both current receipts. The consumer-source archive keeps its historical
+trusted hash; it supplies unchanged consumers, not historical measured binaries.
+Use the SIFT 10k input from the frozen protocol. Current package smokes report
+recall without an OSPP quality threshold; historical default smokes retain their
+original diagnostic minimum. Packaging and relocation are not cold-I/O timing.
+
+```bash
+BENCH_CURRENT_LITE_INSTALL="$BENCH_WORK/current-lite-install"
+cmake --install "$BENCH_FEATURE_BUILD" --prefix "$BENCH_CURRENT_LITE_INSTALL"
+python3 "$BENCH_ROOT/lite/benchmark/measure_runtime_package.py" \
+  --feature "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
+  --lite-build "$BENCH_FEATURE_BUILD" --lite-install "$BENCH_CURRENT_LITE_INSTALL" \
+  --full-install "$BENCH_CURRENT_FULL_INSTALL" \
+  --fresh-full-receipt "$BENCH_CURRENT_FULL_BUILD_RECORD/receipt.json" \
+  --dataset /absolute/path/to/recorded-SIFT-10k-inputs \
+  --source-archive /absolute/path/to/pinned-equal-ef-consumer-source-archive.tar.gz \
+  --output "$BENCH_WORK/current-runtime-package"
+python3 "$BENCH_ROOT/lite/benchmark/verify_runtime_package.py" \
+  "$BENCH_WORK/current-runtime-package"
+```
+
 The three runners check required input files, pinned identities, receipts, tools
 and historical helper-source availability before creating an output directory.
 Rejected prerequisites leave no new output directory; existing outputs are never

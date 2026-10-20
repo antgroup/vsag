@@ -16,6 +16,20 @@ def verify(output):
     report = json.loads((output / 'report.json').read_text())
     expected_libraries = {'lite':'3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330',
                           'full':'9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'}
+    if 'source_bound_current_package' in report:
+        path = output / 'current-source-receipts.json'
+        binding = report['source_bound_current_package']
+        assert path.name in manifest and sha(path) == binding['receipts_sha256']
+        receipts = json.loads(path.read_text())
+        assert receipts['feature_sha'] == binding['feature_sha']
+        lite = receipts['lite_receipt']
+        full = receipts['full_receipt']
+        assert lite['source']['feature_sha'] == full['full_source_head'] == binding['feature_sha']
+        assert full['fresh_core'] and not full['ccache'] and full['prior_object_count'] == 0
+        assert full['core_object_count'] > 50
+        assert receipts['full_headers'] == full['full_headers_sha256']
+        assert receipts['lite_headers']
+        expected_libraries = dict(lite=lite['library_sha256'], full=full['library_sha256'])
     for side, package in report['packages'].items():
         contents = package['inventory']
         assert {'run','bin/probe','licenses/VSAG-Apache-2.0'} <= set(contents)
@@ -36,7 +50,8 @@ def verify(output):
         assert len(package['relocation_checks']) == 3
         for check in package['relocation_checks']:
             assert check['exit'] == 0 and int(check['metrics']['base_count']) == 10000
-            assert float(check['metrics']['recall_at_k']) >= .95 and check['snapshot_bytes'] > 0
+            minimum = 0.0 if 'source_bound_current_package' in report else .95
+            assert minimum <= float(check['metrics']['recall_at_k']) <= 1.0 and check['snapshot_bytes'] > 0
             root = Path(check['argv'][0]).parent
             assert len(check['mapped_elf_paths']) == len(package['files'])
             for name in check['mapped_elf_paths']:

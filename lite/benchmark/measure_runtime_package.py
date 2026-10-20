@@ -17,7 +17,25 @@ import tempfile
 import time
 
 from pack_mixed_cpu_acceptance import unpack
-from run_mixed_cpu_acceptance import sha, write_json
+from run_mixed_cpu_acceptance import sha, write_json, validate_build
+from run_pinned_full_acceptance import validate_fresh_receipt
+
+
+def validate_current_installs(feature, expected, build, lite_install, full_install, full_receipt):
+    lite = validate_build(feature.resolve(), expected, build.resolve())
+    full = json.loads(full_receipt.read_text())
+    validate_fresh_receipt(full, expected, full_install)
+    assert sha(lite_install / 'lib/libvsag-lite.so') == lite['library_sha256']
+    assert sha(full_install / 'lib/libvsag.so') == full['library_sha256']
+    full_headers = {str(path.relative_to(full_install / 'include')): sha(path)
+                    for path in (full_install / 'include').rglob('*') if path.is_file()}
+    assert full_headers == full['full_headers_sha256']
+    lite_headers = {str(path.relative_to(lite_install / 'include')): sha(path)
+                    for path in (lite_install / 'include').rglob('*') if path.is_file()}
+    assert 'vsag/lite/index.h' in lite_headers
+    assert all(sha(feature / 'include' / name) == digest for name, digest in lite_headers.items())
+    return dict(feature_sha=expected, lite_receipt=lite, full_receipt=full,
+                lite_headers=lite_headers, full_headers=full_headers)
 
 
 def resolved_dependencies(text):
@@ -161,7 +179,7 @@ def build_bundle(application, library_directory, root, feature, env, full):
     return files, licenses, loader.name
 
 
-def smoke(root, dataset, storage, snapshot, env, output):
+def smoke(root, dataset, storage, snapshot, env, output, minimum_recall=.95):
     command = [str(root / 'run'), str(dataset), str(snapshot), storage]
     process = subprocess.Popen(command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     mapped = None
@@ -190,7 +208,8 @@ def smoke(root, dataset, storage, snapshot, env, output):
     lines = stdout.splitlines()
     header = next(i for i, line in enumerate(lines) if line.startswith(('base_count,', 'mode,base_count,')))
     metrics = next(csv.DictReader(io.StringIO('\n'.join(lines[header:header+2]))))
-    assert int(metrics['base_count']) == 10000 and float(metrics['recall_at_k']) >= .95
+    assert int(metrics['base_count']) == 10000
+    assert minimum_recall <= float(metrics['recall_at_k']) <= 1.0
     return dict(argv=command, exit=process.returncode, mapped_elf_paths=mapped, metrics=metrics,
                 snapshot_bytes=snapshot.stat().st_size, snapshot_sha256=sha(snapshot))
 
@@ -198,6 +217,9 @@ def smoke(root, dataset, storage, snapshot, env, output):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--feature', type=Path, required=True)
+    parser.add_argument('--feature-sha', help='Explicit current source; requires both fresh build receipts')
+    parser.add_argument('--lite-build', type=Path, help='Source-bound build used to install the current Lite SDK')
+    parser.add_argument('--fresh-full-receipt', type=Path)
     parser.add_argument('--lite-install', type=Path, required=True)
     parser.add_argument('--full-install', type=Path, required=True)
     parser.add_argument('--dataset', type=Path, required=True)
@@ -217,8 +239,17 @@ def main():
     assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     assert Path('/proc/self/maps').is_file(), 'Linux /proc is required'
     assert sha(args.source_archive) == '0c6697115a21dc210ab63cc0dfd659c53614d39ffc89115292765a1565ca9b54', 'Untrusted consumer-source archive'
-    assert sha(args.lite_install / 'lib/libvsag-lite.so') == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
-    assert sha(args.full_install / 'lib/libvsag.so') == '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
+    current = None
+    if args.feature_sha:
+        if args.lite_build is None or args.fresh_full_receipt is None:
+            raise ValueError('Current package requires --lite-build and --fresh-full-receipt')
+        current = validate_current_installs(args.feature, args.feature_sha, args.lite_build,
+            args.lite_install, args.full_install, args.fresh_full_receipt)
+    else:
+        if args.lite_build is not None or args.fresh_full_receipt is not None:
+            raise ValueError('Use --feature-sha explicitly with current receipts')
+        assert sha(args.lite_install / 'lib/libvsag-lite.so') == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
+        assert sha(args.full_install / 'lib/libvsag.so') == '9aeaa550703f116bef2959769d4f2f03da254b07c906ba941d8186224cc70c72'
     env = {k:v for k,v in os.environ.items() if not k.startswith('VSAG_') and k not in
            ['LD_PRELOAD','LD_LIBRARY_PATH','LD_AUDIT','LD_DEBUG']}
     env.update(LC_ALL='C', OMP_NUM_THREADS='1', OPENBLAS_NUM_THREADS='1', MKL_NUM_THREADS='1')
@@ -227,6 +258,11 @@ def main():
         source_archive_sha256=sha(args.source_archive), redistribution='measurement prototype only; license notices copied, no legal certification',
         strip=subprocess.check_output(['strip','--version'],text=True).splitlines()[0], packages={})
     args.output.mkdir(parents=True, exist_ok=False)
+    if current is not None:
+        write_json(args.output / 'current-source-receipts.json', current)
+        report['source_bound_current_package'] = dict(feature_sha=args.feature_sha,
+            receipts_sha256=sha(args.output / 'current-source-receipts.json'))
+        report['quality_policy'] = 'Record measured recall only; no project acceptance threshold'
     with tempfile.TemporaryDirectory(prefix='vsag-runtime-package-',dir='/dev/shm') as directory:
         scratch = Path(directory)
         sources = scratch / 'sources'
@@ -251,12 +287,16 @@ def main():
                 str(relocated/'lib'),'--list',str(relocated/'bin/probe')],env=env,text=True)
             (args.output/(mode+'-loader-list.txt')).write_text(listing)
             checks = [smoke(relocated,args.dataset,storage,scratch/(mode+'-'+storage+'.snapshot'),env,
-                            args.output/(mode+'-'+storage)) for storage in ['fp32','fp16','rabitq8']]
+                            args.output/(mode+'-'+storage), minimum_recall=0.0 if current else .95)
+                      for storage in ['fp32','fp16','rabitq8']]
             report['packages'][mode] = dict(compile=command,consumer_source_sha256=sha(source),files=files,
                 licenses=licenses,inventory=contents,payload_bytes=sum(v.get('bytes',0) for v in contents.values()),
                 tar_gzip_bytes=archive.stat().st_size,tar_gzip_sha256=sha(archive),relocation_checks=checks,
                 source_libraries_unchanged=True)
         report['payload_reduction_percent'] = (1-report['packages']['lite']['payload_bytes']/report['packages']['full']['payload_bytes'])*100
+        if current is not None:
+            assert validate_current_installs(args.feature, args.feature_sha, args.lite_build,
+                args.lite_install, args.full_install, args.fresh_full_receipt) == current
         report['compressed_reduction_percent'] = (1-report['packages']['lite']['tar_gzip_bytes']/report['packages']['full']['tar_gzip_bytes'])*100
         write_json(args.output/'report.json',report)
     write_json(args.output/'manifest.json',{p.name:sha(p) for p in args.output.iterdir() if p.is_file()})

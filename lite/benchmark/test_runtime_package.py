@@ -173,5 +173,34 @@ class RuntimePackageTests(unittest.TestCase):
                     safe_bundle_unpack(root/'bad.gz',root/'out')
 
 
+class CurrentPackageTests(unittest.TestCase):
+    def test_current_package_cannot_relabel_legacy_installs(self):
+        helper = RuntimePackageTests()
+        original = sys.argv
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            # Reuse the real preflight fixture, adding only an explicit new SHA.
+            old_main = measure_runtime_package.main
+            def current_main():
+                with mock.patch.object(sys, 'argv', [*sys.argv, '--feature-sha', 'c' * 40]):
+                    old_main()
+            with mock.patch.object(measure_runtime_package, 'main', side_effect=current_main):
+                with self.assertRaisesRegex(ValueError, 'requires --lite-build'):
+                    helper.invoke_preflight(root)
+            self.assertFalse((root / 'new-parent').exists())
+        self.assertEqual(sys.argv, original)
+
+    def test_wrong_current_lite_library_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = RuntimePackageTests()
+            feature, build, full, dataset, raw, receipt = helper.preflight_fixture(root)
+            fake = dict(library_sha256='0' * 64)
+            with mock.patch.object(measure_runtime_package, 'validate_build', return_value=fake):
+                with self.assertRaises(AssertionError):
+                    measure_runtime_package.validate_current_installs(feature,
+                        'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2', build, build, full, receipt)
+
+
 if __name__ == '__main__':
     unittest.main()
