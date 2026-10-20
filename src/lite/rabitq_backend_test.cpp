@@ -15,6 +15,31 @@
 using vsag::lite::Index;
 using vsag::lite::VectorStorage;
 
+TEST_CASE("RaBitQ empty results precede query transformation", "[lite-rabitq]") {
+    auto created = Index::Create(17);
+    REQUIRE(created);
+    std::vector<float> row(17, 0.25F);
+    REQUIRE((*created)->Add(1, row.data(), 17));
+    REQUIRE((*created)->BuildGraph(VectorStorage::RABITQ8));
+    std::fill(row.begin(), row.end(), std::numeric_limits<float>::max());
+    const auto zero_k = (*created)->SearchWithOptions(row.data(), 17, 0, {128});
+    REQUIRE(zero_k);
+    REQUIRE(zero_k->empty());
+    REQUIRE((*created)->Remove(1));
+    for (uint64_t k : {0ULL, 1ULL}) {
+        const auto empty = (*created)->Search(row.data(), 17, k);
+        REQUIRE(empty);
+        REQUIRE(empty->empty());
+        REQUIRE_FALSE((*created)->Search(nullptr, 17, k));
+        REQUIRE_FALSE((*created)->Search(row.data(), 16, k));
+        row[0] = std::numeric_limits<float>::quiet_NaN();
+        REQUIRE_FALSE((*created)->Search(row.data(), 17, k));
+        row[0] = std::numeric_limits<float>::infinity();
+        REQUIRE_FALSE((*created)->Search(row.data(), 17, k));
+        row[0] = std::numeric_limits<float>::max();
+    }
+}
+
 namespace {
 std::unique_ptr<Index>
 make_index(uint64_t dim = 17) {
