@@ -482,6 +482,42 @@ private:
 };
 }  // namespace
 
+TEST_CASE("Lite save translates stream allocation and capacity failures", "[lite]") {
+    class FailingWriteBuffer : public std::streambuf {
+    public:
+        explicit FailingWriteBuffer(bool allocation) : allocation_(allocation) {
+        }
+
+    protected:
+        std::streamsize
+        xsputn(const char* /*unused*/, std::streamsize /*unused*/) override {
+            if (allocation_) {
+                throw std::bad_alloc();
+            }
+            throw std::length_error("stream write capacity failure");
+        }
+
+    private:
+        bool allocation_;
+    };
+    for (auto storage : {vsag::lite::VectorStorage::FP32, vsag::lite::VectorStorage::FP16}) {
+        auto created = Index::Create(2);
+        REQUIRE(created);
+        const float vector[]{1, 2};
+        REQUIRE((*created)->Add(1, vector, 2));
+        REQUIRE((*created)->BuildGraph(storage));
+        for (bool allocation : {false, true}) {
+            FailingWriteBuffer buffer(allocation);
+            std::ostream output(&buffer);
+            output.exceptions(std::ios::badbit);
+            const auto result = (*created)->Save(output);
+            REQUIRE_FALSE(result);
+            REQUIRE(result.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+            REQUIRE((*created)->Search(vector, 2, 1)->front().id == 1);
+        }
+    }
+}
+
 TEST_CASE("Lite load translates stream allocation and capacity failures", "[lite]") {
     for (const bool allocation : {false, true}) {
         FailingPositionBuffer buffer(allocation);

@@ -80,6 +80,8 @@ Save has no checksum, fsync or atomic-file replacement guarantee. A failed Save
 may leave a partial output; callers must arrange temporary-file replacement.
 
 Add/Update/Search/Save/Load use the existing `tl::expected`/Error contract.
+Save translates allocation/capacity failures to `NO_ENOUGH_MEMORY`; stream failures
+remain `READ_ERROR`. This does not make failed output complete or atomic.
 Remove returns bool: false means missing ID or failed graph allocation, so the
 cause cannot be distinguished. Failed graph transactions preserve logical state,
 not allocator capacity. Complete identical stored representations preserve graph
