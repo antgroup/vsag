@@ -80,6 +80,9 @@ Save has no checksum, fsync or atomic-file replacement guarantee. A failed Save
 may leave a partial output; callers must arrange temporary-file replacement.
 
 Add/Update/Search/Save/Load use the existing `tl::expected`/Error contract.
+For all backends, filter callback allocation/capacity exceptions return
+`NO_ENOUGH_MEMORY`; other thrown values return `INTERNAL_ERROR`, not an FP16
+query-range error. Search does not modify index contents on callback failure.
 Save translates allocation/capacity failures to `NO_ENOUGH_MEMORY`; stream failures
 remain `READ_ERROR`. This does not make failed output complete or atomic.
 Remove returns bool: false means missing ID or failed graph allocation, so the

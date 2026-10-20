@@ -4,10 +4,30 @@
 
 #include <cmath>
 #include <cstdint>
+#include <exception>
+#include <new>
+#include <stdexcept>
 
 #include "vsag/lite/index.h"
 
 namespace vsag::lite::detail {
+
+class FilterException final : public std::exception {};
+
+// Isolate caller exceptions so graph search cannot mistake invalid_argument
+// from a predicate for a query encoding/range failure. No wrapper allocation.
+inline bool
+invoke_filter(const IdFilter& filter, int64_t id) {
+    try {
+        return filter(id);
+    } catch (const std::bad_alloc&) {
+        throw;
+    } catch (const std::length_error&) {
+        throw;
+    } catch (...) {
+        throw FilterException{};
+    }
+}
 
 inline auto
 failure(ErrorType type, const char* message) {
