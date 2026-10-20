@@ -39,6 +39,12 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
+The [current-source native Full/O3 and runtime-package cohort (E11)](results/current-full-package-20261020/README.md)
+contains 54 builders, 162 fresh warm loaders, all three datasets/storage modes and
+six relocated package smokes. It uses clean cba3406 on both sides, not historical
+Full binaries. Lower Lite total RSS/latency does not erase lower GIST/Cohere recall,
+larger snapshots or incremental-RSS costs. This is not same-quality or endurance.
+
 The [review-fixed three-dataset cohort (E10)](results/review-fixed-resident-20261020/README.md)
 measures `cba3406` with a fresh source-bound build and the same input hashes and
 27-process protocol as E9. It is the current Lite resident matrix, not a current

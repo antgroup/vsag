@@ -1,6 +1,10 @@
 # Copyright 2024-present the vsag project
 # SPDX-License-Identifier: Apache-2.0
 import json
+import hashlib
+import io
+import statistics
+import tarfile
 from pathlib import Path
 import subprocess
 import sys
@@ -200,6 +204,103 @@ class FullAuditTests(unittest.TestCase):
             (root / 'manifest.json').write_text(json.dumps({'provenance.json': 'incorrect'}))
             with self.assertRaises(AssertionError):
                 verify(root)
+
+
+class CurrentPublishedFullTests(unittest.TestCase):
+    def test_complete_current_evidence_and_report_cells(self):
+        root = Path(__file__).parent
+        result = root / 'results/current-full-package-20261020'
+        archive = result / 'raw.tar.gz'
+        receipt = json.loads((result / 'archive.json').read_text())
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), receipt['sha256'])
+        with tarfile.open(archive, 'r:gz') as outer:
+            manifest = json.load(outer.extractfile('manifest.json'))
+            self.assertEqual(set(outer.getnames()), set(manifest) | {'manifest.json'})
+            self.assertEqual(len(outer.getmembers()), receipt['members'])
+            for name, digest in manifest.items():
+                self.assertEqual(hashlib.sha256(outer.extractfile(name).read()).hexdigest(), digest)
+            summary = json.load(outer.extractfile('full-comparison-summary.json'))
+            freeze = json.load(outer.extractfile('full-matrix-freeze.json'))
+            full_receipt = json.load(outer.extractfile('full-build-record/receipt.json'))
+            audits = json.load(outer.extractfile('audits.json'))
+            package = json.load(outer.extractfile('package/report.json'))
+            inner_bytes = outer.extractfile('full/raw.tar.gz').read()
+            inner_receipt = json.load(outer.extractfile('full/archive.json'))
+            self.assertEqual(len(inner_bytes), inner_receipt['bytes'])
+            self.assertEqual(hashlib.sha256(inner_bytes).hexdigest(), inner_receipt['sha256'])
+            with tarfile.open(fileobj=io.BytesIO(inner_bytes), mode='r:gz') as inner:
+                provenance = json.load(inner.extractfile('provenance.json'))
+                rows = json.load(inner.extractfile('measurements/rows.json'))
+                lite_receipt = json.load(inner.extractfile('lite-build-source-receipt.json'))
+            self.assertEqual(full_receipt['full_source_head'], freeze['feature_sha'])
+            self.assertEqual(full_receipt['compiler_profile'], 'aligned-o3-overlay')
+            self.assertTrue(full_receipt['fresh_core'])
+            self.assertFalse(full_receipt['ccache'])
+            self.assertEqual(full_receipt['prior_object_count'], 0)
+            self.assertGreater(full_receipt['core_object_count'], 50)
+            self.assertEqual(freeze['full_library'], full_receipt['library_sha256'])
+            self.assertEqual(provenance['full_library_sha256'], full_receipt['library_sha256'])
+            self.assertEqual(provenance['feature_sha'], lite_receipt['source']['feature_sha'])
+            self.assertEqual(provenance['lite_library_sha256'], lite_receipt['library_sha256'])
+            for name in ['dispatch-runtime-lite.stdout', 'dispatch-runtime-full.stdout']:
+                dispatch = outer.extractfile(name).read().decode()
+                self.assertIn('avx512', dispatch)
+                for dimension in [128, 960, 768, 129]:
+                    self.assertIn('fixture\t' + str(dimension) + '\t', dispatch)
+        self.assertEqual(len(rows), 54)
+        self.assertEqual(sum(len(row['loads']) for row in rows), 162)
+        self.assertEqual(audits['full']['query_results'], 54000)
+        self.assertEqual(audits['package']['relocated_smokes'], 6)
+        self.assertEqual(len(summary), 9)
+        text = (result / 'README.md').read_text()
+        main = (root / 'ACCEPTANCE_REPORT.md').read_text()
+        labels = dict(fp32='FP32', fp16='FP16', rabitq8='RaBitQ8')
+        for cell in summary.values():
+            for side, values in cell['sides'].items():
+                selected = [r for r in rows if (r['dataset'], r['storage'], r['name']) ==
+                            (cell['dataset'], cell['storage'], side)]
+                self.assertEqual(len(selected), 3)
+                for key, samples in values['values'].items():
+                    loader_metric = key in {'load_ms', 'loaded_rss_kib', 'process_peak_rss_kib',
+                                            'before_create_rss_kib', 'before_load_rss_kib'}
+                    actual = ([float(s[key]) for r in selected for s in r['loads']] if loader_metric
+                              else [float(r['build'][key]) for r in selected])
+                    self.assertEqual(samples, actual)
+                    self.assertEqual(values['metrics'][key], statistics.median(actual))
+                increments = [float(s['loaded_rss_kib']) - float(s['before_load_rss_kib'])
+                              for r in selected for s in r['loads']]
+                self.assertEqual(increments, values['incremental_rss_values'])
+                self.assertEqual(statistics.median(increments), values['metrics']['incremental_rss_kib'])
+            lite = cell['sides']['lite']['metrics']
+            full = cell['sides']['full']['metrics']
+            prefix = f"| {cell['dataset']} | {labels[cell['storage']]} | "
+            recall_pp = (lite['recall_at_k'] - full['recall_at_k']) * 100
+            p50_percent = (lite['search_p50_us'] / full['search_p50_us'] - 1) * 100
+            self.assertEqual(cell['recall_difference_pp'], recall_pp)
+            self.assertEqual(cell['p50_change_percent'], p50_percent)
+            query = (prefix + f"{lite['search_p50_us']:.3f} | {full['search_p50_us']:.3f} | "
+                     f"{lite['search_p99_us']:.3f} | {full['search_p99_us']:.3f} | "
+                     f"{lite['recall_at_k']:.4f} | {full['recall_at_k']:.4f} | {recall_pp:.2f} |")
+            self.assertIn(query, text)
+            self.assertIn(query, main)
+            self.assertIn(prefix + f"{p50_percent:.2f}% | {lite['build_ms']:.3f} | {full['build_ms']:.3f} |", text)
+            for keys, scale in [(['load_ms', 'save_ms'], 1),
+                                 (['snapshot_bytes'], 1048576),
+                                 (['loaded_rss_kib', 'incremental_rss_kib'], 1024)]:
+                values = []
+                for key in keys:
+                    values += [lite[key]/scale, full[key]/scale]
+                if keys == ['snapshot_bytes']:
+                    values += [lite['external_peak_rss_kib']/1024, full['external_peak_rss_kib']/1024]
+                self.assertIn(prefix + ' | '.join(f'{value:.3f}' for value in values) + ' |', text)
+        for title, field, percent in [('未压缩载荷', 'payload_bytes', 'payload_reduction_percent'),
+                                      ('gzip归档', 'tar_gzip_bytes', 'compressed_reduction_percent')]:
+            lite = package['packages']['lite'][field]
+            full = package['packages']['full'][field]
+            reduction = (1 - lite/full)*100
+            self.assertAlmostEqual(package[percent], reduction)
+            self.assertIn(f'| {title} | {lite} | {full} | {reduction:.2f}% |', text)
 
 
 class CurrentSourceTests(unittest.TestCase):
