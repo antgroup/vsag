@@ -66,6 +66,8 @@ Load 需要可定位输入流并验证长度及内容。Save 不提供校验和�
 失败可能留下部分输出；需要持久原子替换时，调用方负责临时文件和替换。
 
 Add/Update/Search/Save/Load 使用现有 `tl::expected`/Error。
+Save 将分配/容量异常转换为 `NO_ENOUGH_MEMORY`，流错误仍为 `READ_ERROR`；
+这不保证失败输出完整，也不提供原子保存。
 Remove 为 bool，false 无法区分 ID 缺失和图分配失败。失败回滚恢复逻辑状态，不恢复分配器容量。
 完整存储表示相同的 Update 不改变图；RaBitQ 编码相同不代表原始向量相同。
 
