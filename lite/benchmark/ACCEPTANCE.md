@@ -156,6 +156,28 @@ build receipt, all raw rows and archive verification accompany the resulting rep
 
 ## Community review and remaining acceptance
 
+### Current-source native Full protocol
+
+The next Full cohort pins the clean feature `cba340660f2ea479b316d7b73a27f34186b8a1d9`
+and the same three E10 input hashes, 10k base vectors and 1000 query rows.
+Use the existing fresh root-CMake builder with explicit `--source-sha`; no old
+objects or installed Full binary may be substituted. Build the isolated recorded
+O3 overlay (`--strict-fp`) for compiler-semantics alignment with Lite Release O3;
+this is native Full code, not a Lite reference, and not the default Ofast profile.
+The overlay and selected compilation records must accompany the result.
+
+Keep degree16/construction ef128/query ef512/k10, CPU0 and one query thread.
+Retain all three alternating Lite/Full pairs per dataset/storage and all three
+fresh-process warm loads per builder. Recompute hits and quantiles independently;
+retain inferior cells and all repeats. Equal parameters or O3 flags do not imply
+equal recall or identical executed ISA. Runtime-dispatch evidence is a separate
+check and must not be inferred merely from CPU capabilities or compiled ISA files.
+This static initial-index cohort is not a Full CRUD or hours-long endurance result.
+Source-bound Lite receipt and fresh Full source/library/header receipts are mandatory.
+
+Historical commands below retain their old defaults and cannot silently become
+current-source commands. A new source explicitly opts in and requires fresh receipts.
+
 Review production separately in #2904; review reusable runners/oracles/verifiers,
 their tests, this index and raw manifest in #2926. Since #2904 is not merged into
 main, this main-target PR still displays the dependency's feature files. Its

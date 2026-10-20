@@ -9,6 +9,7 @@ import unittest
 from unittest import mock
 
 import run_pinned_full_acceptance
+import build_fresh_full_reference
 
 from verify_pinned_full_acceptance import verify
 from run_pinned_full_acceptance import validate_fresh_receipt
@@ -149,6 +150,8 @@ class FullAuditTests(unittest.TestCase):
             self.assertTrue((root / 'new-parent/output').is_dir())
 
     def test_fresh_receipt_guards(self):
+        # A current source needs both fresh receipts; a historical library hash
+        # must never be relabeled by changing only the command-line commit.
         receipt = dict(full_source_head='feature', fresh_core=True, ccache=False,
             prior_object_count=0, core_object_count=100, install='/tmp/full-reference',
             library_sha256='a' * 64, full_headers_sha256={'vsag.h': 'b' * 64})
@@ -197,6 +200,60 @@ class FullAuditTests(unittest.TestCase):
             (root / 'manifest.json').write_text(json.dumps({'provenance.json': 'incorrect'}))
             with self.assertRaises(AssertionError):
                 verify(root)
+
+
+class CurrentSourceTests(unittest.TestCase):
+    def test_full_source_identity_checks_clean_tracked_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / 'src').mkdir()
+            (root / 'src/current.cpp').write_text('// source\n')
+            (root / 'CMakeLists.txt').write_text('# fixture\n')
+            subprocess.run(['git', 'init', '-q', str(root)], check=True)
+            subprocess.run(['git', 'add', '.'], cwd=root, check=True)
+            subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                            '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture'], cwd=root, check=True)
+            head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=root, text=True).strip()
+            identity = build_fresh_full_reference.validate_source_checkout(root, head)
+            self.assertEqual(set(identity), {'src/current.cpp', 'CMakeLists.txt'})
+            for invalid in ['0' * 40, 'main', head.upper()]:
+                with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                    build_fresh_full_reference.validate_source_checkout(root, invalid)
+            (root / 'untracked.h').write_text('// overlay\n')
+            with self.assertRaises(ValueError):
+                build_fresh_full_reference.validate_source_checkout(root, head)
+            (root / 'untracked.h').unlink()
+            (root / 'src/current.cpp').write_text('// changed\n')
+            with self.assertRaises(ValueError):
+                build_fresh_full_reference.validate_source_checkout(root, head)
+
+    def test_current_feature_cannot_use_unreceipted_full(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = FullAuditTests()
+            feature, build, full, dataset, raw, receipt = helper.preflight_fixture(root)
+            output = root / 'new/output'
+            args = ['runner', '--feature', str(feature), '--feature-sha', 'c' * 40,
+                    '--feature-build', str(build), '--source-repo', str(feature),
+                    '--full-install', str(full), '--dataset', 'Fixture=' + str(dataset),
+                    '--output', str(output)]
+            with mock.patch.object(sys, 'argv', args), self.assertRaisesRegex(ValueError, 'fresh Full'):
+                run_pinned_full_acceptance.main()
+            self.assertFalse(output.parent.exists())
+
+    def test_current_lite_receipt_is_checked_before_creating_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = FullAuditTests()
+            feature, build, full, dataset, raw, receipt = helper.preflight_fixture(root)
+            output = root / 'new/output'
+            args = ['runner', '--feature', str(feature), '--feature-sha', 'c' * 40,
+                    '--feature-build', str(build), '--source-repo', str(feature),
+                    '--full-install', str(full), '--dataset', 'Fixture=' + str(dataset),
+                    '--fresh-full-receipt', str(receipt), '--output', str(output)]
+            with mock.patch.object(sys, 'argv', args), self.assertRaisesRegex(ValueError, 'build-source receipt'):
+                run_pinned_full_acceptance.main()
+            self.assertFalse(output.parent.exists())
 
 
 if __name__ == '__main__':

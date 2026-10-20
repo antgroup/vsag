@@ -20,6 +20,17 @@ import time
 from run_mixed_cpu_acceptance import sha, write_json
 
 
+def validate_source_checkout(source, expected):
+    if len(expected) != 40 or any(c not in '0123456789abcdef' for c in expected):
+        raise ValueError('Use an explicit full lowercase source commit SHA')
+    head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=source, text=True).strip()
+    if head != expected or subprocess.check_output(['git', 'status', '--porcelain'], cwd=source):
+        raise ValueError('Full source must be clean and match --source-sha')
+    names = subprocess.check_output(['git', 'ls-files', '-z', '--', 'src', 'include',
+        'cmake', 'extern', 'CMakeLists.txt'], cwd=source).decode().split('\0')
+    return {name: sha(source / name) for name in names if name}
+
+
 @contextmanager
 def cached_archive_url(archive):
     # CMake 3.22 rejects file URLs mixed with the official HTTPS fallbacks.
@@ -39,18 +50,24 @@ def cached_archive_url(archive):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--source', type=Path, required=True)
+    parser.add_argument('--source-sha', default='dbb2fe0bec685ae7a343b1d2060d0553a98e20d2',
+                        help='Exact clean source commit; default preserves historical replay')
     parser.add_argument('--deps', type=Path, required=True)
     parser.add_argument('--antlr-archive', type=Path, required=True)
     parser.add_argument('--install', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--strict-fp', action='store_true', help='Build isolated native Full with -O3 instead of -Ofast')
     args = parser.parse_args()
-    expected = 'dbb2fe0bec685ae7a343b1d2060d0553a98e20d2'
-    head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=args.source,text=True).strip()
-    assert head == expected and not subprocess.check_output(['git','status','--porcelain','-uno'],cwd=args.source)
+    args.source = args.source.resolve(strict=True)
+    args.deps = args.deps.resolve(strict=True)
+    args.antlr_archive = args.antlr_archive.resolve(strict=True)
+    args.install = args.install.resolve()
+    args.output = args.output.resolve()
+    head = args.source_sha
+    source_hashes = validate_source_checkout(args.source, head)
     assert not args.install.exists() and not args.output.exists(), 'Never overwrite a reference'
-    args.output.mkdir(parents=True)
     assert hashlib.md5(args.antlr_archive.read_bytes()).hexdigest() == '3b75610fc8a827119258cba09a068be5'
+    args.output.mkdir(parents=True)
     env = dict(os.environ, TMPDIR='/dev/shm')
     records = []
     def run(tag,command):
@@ -126,6 +143,8 @@ def main():
         receipt=dict(full_source_head=head,full_build_boundary='New empty build directory; selected native Full core and bundled targets compiled from source; cached source/system libraries reused',
             fresh_core=True,ccache=False,prior_object_count=0,core_object_count=len(core_objects),
             full_headers_sha256=headers,library_sha256=sha(retained),library_bytes=retained.stat().st_size,
+            source_sha256=source_hashes,
+            compiler_profile='aligned-o3-overlay' if args.strict_fp else 'native-release-default',
             original_library=original,install=str(args.install.resolve()),
             compiler=subprocess.check_output(['c++','--version'],text=True),
             system=subprocess.check_output(['uname','-a'],text=True),
@@ -133,8 +152,7 @@ def main():
             full_suite='not run',strip_on_copy_only=True)
         (args.output/'ldd.txt').write_text(subprocess.check_output(['ldd',str(retained)],text=True))
         write_json(args.output/'receipt.json',receipt)
-        assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=args.source,text=True).strip()==head
-        assert not subprocess.check_output(['git','status','--porcelain','-uno'],cwd=args.source)
+        assert validate_source_checkout(args.source, head) == source_hashes
         print('FRESH FULL RETAINED',receipt['library_sha256'],receipt['library_bytes'],len(core_objects),flush=True)
 
 

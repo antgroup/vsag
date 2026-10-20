@@ -193,6 +193,34 @@ above is an explicit new-run recipe, not a claim that this matrix has been run.
 
 ### Guarded historical Full, package and quality replay
 
+Current-source Full comparison is an explicit opt-in, not a change to these
+historical defaults. The [current Full protocol](ACCEPTANCE.md#current-source-native-full-protocol)
+requires new build/output/install directories and clean exact source identities:
+
+```bash
+BENCH_CURRENT_FULL_INSTALL="$BENCH_WORK/current-full-install"
+BENCH_CURRENT_FULL_BUILD_RECORD="$BENCH_WORK/current-full-build-record"
+python3 "$BENCH_ROOT/lite/benchmark/build_fresh_full_reference.py" \
+  --source "$BENCH_FEATURE" --source-sha "$BENCH_FEATURE_SHA" \
+  --deps /absolute/path/to/matching-cached-dependency-sources \
+  --antlr-archive /absolute/path/to/antlr4-4.13.2.tar.gz \
+  --install "$BENCH_CURRENT_FULL_INSTALL" --output "$BENCH_CURRENT_FULL_BUILD_RECORD" --strict-fp
+python3 "$BENCH_ROOT/lite/benchmark/run_pinned_full_acceptance.py" \
+  --feature "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
+  --feature-build "$BENCH_FEATURE_BUILD" --source-repo "$BENCH_ROOT" \
+  --full-install "$BENCH_CURRENT_FULL_INSTALL" \
+  --fresh-full-receipt "$BENCH_CURRENT_FULL_BUILD_RECORD/receipt.json" \
+  --dataset SIFT=/absolute/path/to/recorded-10k-1000-query-inputs \
+  --output "$BENCH_WORK/current-full-comparison"
+python3 "$BENCH_ROOT/lite/benchmark/verify_pinned_full_acceptance.py" \
+  "$BENCH_WORK/current-full-comparison"
+```
+
+The dependency directory must contain the sentinel-checked CPUINFO/json/Roaring/
+thread-pool/TSL source folders expected by the builder, not compiled objects.
+The checked ANTLR archive is served only on loopback. This profile retains system
+BLAS/fmt and external source prerequisites; it is not a hermetic full toolchain.
+
 The three runners check required input files, pinned identities, receipts, tools
 and historical helper-source availability before creating an output directory.
 Rejected prerequisites leave no new output directory; existing outputs are never

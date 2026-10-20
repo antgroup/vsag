@@ -33,6 +33,13 @@ def verify(output, overrides=None):
         assert provenance['full_suite'] == receipt['full_suite']
     assert identity['reference_library_sha256'] == provenance['full_library_sha256']
     assert identity['lite_library_sha256'] == provenance['lite_library_sha256']
+    if provenance.get('source_bound_current_comparison'):
+        path = output / 'lite-build-source-receipt.json'
+        assert sha(path) == provenance['lite_build_source_receipt_sha256']
+        receipt = json.loads(path.read_text())
+        assert receipt['source']['feature_sha'] == provenance['feature_sha']
+        assert receipt['library_sha256'] == provenance['lite_library_sha256']
+        assert path.name in manifest
     rows = json.loads((output / 'measurements/rows.json').read_text())
     expected = {(dataset.split('=', 1)[0], mode, trial, side)
         for dataset in identity['arguments']['dataset'] for mode in ['fp32', 'fp16', 'rabitq8']
