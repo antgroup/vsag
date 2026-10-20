@@ -18,6 +18,8 @@ float
 avx2_fp32_distance(const float* query, const float* vector, uint64_t dim);
 float
 avx512_fp32_distance(const float* query, const float* vector, uint64_t dim);
+FP32Distance
+select_fp32_distance_for(bool sse, bool avx2, bool avx512, bool fma);
 #endif
 
 /** Select the fastest compiled kernel supported by the running CPU and OS. */

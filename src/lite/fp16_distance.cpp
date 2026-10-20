@@ -35,7 +35,7 @@ generic_fp16_distance(const uint16_t* query, const uint16_t* vector, uint64_t di
 #ifdef VSAG_LITE_HAS_X86_SIMD
 FP16Distance
 select_fp16_distance_for(bool avx, bool avx2, bool avx512, bool fma, bool f16c) {
-    if (avx512 and avx2 and f16c) {
+    if (avx512 and avx2 and fma and f16c) {
         return avx512_fp16_distance;
     }
     if (avx2 and fma and f16c) {
