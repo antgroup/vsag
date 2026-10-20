@@ -15,6 +15,80 @@
 using vsag::lite::Index;
 using vsag::lite::VectorStorage;
 
+TEST_CASE("RaBitQ wide scores and lower bounds never introduce NaN", "[lite-rabitq]") {
+    namespace codec = vsag::lite::detail::rabitq;
+    const float magnitude = 1e20F;
+    REQUIRE(codec::l2_distance(magnitude, magnitude, 1.0F) == 0.0F);
+    REQUIRE(codec::l2_distance(magnitude, magnitude, 0.0F) ==
+            std::numeric_limits<float>::infinity());
+    const float maximum = std::numeric_limits<float>::max();
+    REQUIRE(codec::l2_distance(maximum, maximum, 1.0F) == 0.0F);
+    REQUIRE_THROWS(codec::l2_distance(1, 1, std::numeric_limits<float>::quiet_NaN()));
+    const auto model = codec::train({-1.0F, 1.0F}, 2, 1, 47);
+    codec::EncodedRecords codes(1);
+    codes.Append(codec::encode(model, &magnitude));
+    float query_norm = 0;
+    const auto query = codec::normalize(model, &magnitude, query_norm);
+    const auto code = codes.At(0);
+    const auto single = codec::filter_estimate(query, query_norm, code);
+    REQUIRE(single.distance == 0.0F);
+    REQUIRE(std::isfinite(single.lower_bound));
+    const auto batch = codec::filter_estimate_batch4(query, query_norm, {code, code, code, code});
+    for (const auto& estimate : batch) {
+        REQUIRE(estimate.distance == single.distance);
+        REQUIRE(estimate.lower_bound == single.lower_bound);
+    }
+    REQUIRE(codec::full_distance(query, query_norm, code, single.centered_ip) == 0.0F);
+    REQUIRE(codec::narrow_score(-1e100) == -std::numeric_limits<float>::infinity());
+    REQUIRE(codec::narrow_score(1e100) == std::numeric_limits<float>::infinity());
+    REQUIRE_THROWS(codec::narrow_score(std::numeric_limits<double>::quiet_NaN()));
+    for (float base_norm : {0.0F, 1e-3F, 1.0F, 1e4F, 1e10F}) {
+        for (float query_radius : {0.0F, 1e-3F, 1.0F, 1e4F, 1e10F}) {
+            for (float inner : {-1.0F, 0.0F, 0.5F, 1.0F}) {
+                const float expected = base_norm * base_norm + query_radius * query_radius -
+                                       2.0F * base_norm * query_radius * inner;
+                REQUIRE(codec::l2_distance(base_norm, query_radius, inner) == expected);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ large finite vectors retain representable exact matches", "[lite-rabitq]") {
+    for (float magnitude : {1.0F, 1e10F, 1e19F, 1e20F}) {
+        auto created = Index::Create(1);
+        REQUIRE(created);
+        for (int64_t id : {0, 1, 2}) {
+            const float value = static_cast<float>(id - 1) * magnitude;
+            REQUIRE((*created)->Add(id, &value, 1));
+        }
+        REQUIRE((*created)->BuildGraph(VectorStorage::RABITQ8, 4, 16));
+        const auto check = [&](const Index& index) {
+            for (uint64_t k : {1ULL, 3ULL}) {
+                const auto found = index.SearchWithOptions(&magnitude, 1, k, {16});
+                REQUIRE(found);
+                REQUIRE(found->size() == k);
+                REQUIRE(found->front().id == 2);
+                REQUIRE(found->front().distance == 0.0F);
+                for (const auto& neighbor : *found) {
+                    REQUIRE_FALSE(std::isnan(neighbor.distance));
+                }
+            }
+        };
+        check(**created);
+        const float zero = 0;
+        REQUIRE((*created)->Update(2, &zero, 1));
+        REQUIRE((*created)->Update(2, &magnitude, 1));
+        REQUIRE((*created)->Remove(2));
+        REQUIRE((*created)->Add(2, &magnitude, 1));
+        check(**created);
+        std::stringstream bytes;
+        REQUIRE((*created)->Save(bytes));
+        auto loaded = Index::Load(bytes);
+        REQUIRE(loaded);
+        check(**loaded);
+    }
+}
+
 TEST_CASE("RaBitQ empty results precede query transformation", "[lite-rabitq]") {
     auto created = Index::Create(17);
     REQUIRE(created);
@@ -237,6 +311,11 @@ TEST_CASE("RaBitQ filters, budgets and expected errors preserve contents", "[lit
         query.data(), 17, 12, [](int64_t) -> bool { throw std::runtime_error("caller failure"); });
     REQUIRE_FALSE(thrown);
     REQUIRE(thrown.error().type == vsag::ErrorType::INTERNAL_ERROR);
+    auto caller_argument = index->Search(query.data(), 17, 12, [](int64_t) -> bool {
+        throw std::invalid_argument("caller argument");
+    });
+    REQUIRE_FALSE(caller_argument);
+    REQUIRE(caller_argument.error().type == vsag::ErrorType::INTERNAL_ERROR);
     REQUIRE(index->SearchWithOptions(query.data(), 17, 3, {1})->size() == 3);
     auto oom = index->Search(query.data(), 17, 12, [](int64_t) -> bool { throw std::bad_alloc(); });
     REQUIRE_FALSE(oom);

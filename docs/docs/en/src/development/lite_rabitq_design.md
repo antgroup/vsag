@@ -56,6 +56,10 @@ Distances are approximate quantized L2 estimates. A filter can yield fewer than 
 Residual radii retain their actual nonnegative norm, including zero at the centroid;
 the safe normalization divisor does not replace the geometric radius. Finite queries
 with k=0 or an empty index return before transformation, after input validation.
+Ordinary finite scoring keeps its float evaluation order. Non-finite intermediate
+distance/bound results are recomputed in double before conversion: representable
+answers such as a large-vector self-match remain valid. Estimates outside the float
+range are represented by signed infinity; NaN scoring is rejected before heap ordering.
 
 Save streams model/codes/IDs/CSR-format topology without recreating original vectors.
 Load restores identical state without training and remains mutable even after
