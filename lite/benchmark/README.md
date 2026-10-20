@@ -6,6 +6,8 @@
 - Functionality/architecture/regressions: PR #2904; this integration includes `cba3406`.
   Historical measurements retain their own recorded feature/source versions.
 - Benchmark and audit tools: this directory; `ENABLE_BENCHMARKS` defaults OFF.
+- [GIST 100-round resident validation](results/extended-resident-gist-20261020/README.md): fivefold fixed-round extension, not hours-long endurance.
+
 - [Current-source native Full/O3 and runtime-package results](results/current-full-package-20261020/README.md): all three datasets, complete positive/negative cells; not same-quality or hours-long endurance.
 - [Historical raw files and SHA256 manifest](RAW_MANIFEST.json): immutable snapshot `800a822`.
 - [Preserved full historical runner guide](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/README.md).

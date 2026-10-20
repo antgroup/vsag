@@ -39,6 +39,9 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
+The [GIST 100-round resident extension (E12)](results/extended-resident-gist-20261020/README.md)
+retains three trials/storage mode and all CPU/memory/quality data; it is not hours-long or Full.
+
 The [current-source native Full/O3 and runtime-package cohort (E11)](results/current-full-package-20261020/README.md)
 contains 54 builders, 162 fresh warm loaders, all three datasets/storage modes and
 six relocated package smokes. It uses clean cba3406 on both sides, not historical

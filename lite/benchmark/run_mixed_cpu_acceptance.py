@@ -180,6 +180,26 @@ def validate_loaded_library(text, library, expected):
         raise ValueError('Probe is not linked to the prepared Lite library')
 
 
+def release_verified_snapshots(scratch, snapshots, expected):
+    # These are exclusively tool-created RAM snapshots, normally removed when
+    # TemporaryDirectory exits. Verify the entire set before releasing a run.
+    root = scratch.resolve(strict=True)
+    if snapshots.is_symlink() or snapshots.resolve(strict=True).parent != root:
+        raise ValueError('Snapshot directory must be a direct child of scratch')
+    entries = list(snapshots.iterdir())
+    if {path.name for path in entries} != set(expected):
+        raise ValueError('Unexpected temporary snapshot set')
+    for path in entries:
+        if path.is_symlink() or not path.is_file() or path.resolve().parent != snapshots.resolve():
+            raise ValueError('Unsafe temporary snapshot')
+        record = expected[path.name]
+        if path.stat().st_size != record['bytes'] or sha(path) != record['sha256']:
+            raise ValueError('Temporary snapshot changed after verification')
+    for path in entries:
+        path.unlink()
+    snapshots.rmdir()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--feature-repo', type=Path, required=True)
@@ -308,6 +328,7 @@ def main():
                     write_json(selected / 'audit.json', result)
                     runs.append(result)
                     write_json(args.output / 'rows.json', runs)
+                    release_verified_snapshots(scratch, snapshots, result['snapshots'])
                     print(tag, 'PASS', 'recall', result['recall'], flush=True)
         assert sha(library) == identity['library_sha256'], 'Library changed during measurement'
         validate_build(args.feature_repo, args.feature_sha, args.build)

@@ -1,6 +1,7 @@
 # Copyright 2024-present the vsag project
 # SPDX-License-Identifier: Apache-2.0
 import csv
+import io
 import json
 import shutil
 import sys
@@ -8,7 +9,9 @@ import math
 import os
 from pathlib import Path
 import struct
+import statistics
 import subprocess
+import tarfile
 import tempfile
 import unittest
 
@@ -190,6 +193,60 @@ class BuildSourceTests(unittest.TestCase):
             self.assertFalse(output.parent.exists())
 
 
+class SnapshotReleaseTests(unittest.TestCase):
+    def fixture(self, root):
+        snapshots = root / 'run'
+        snapshots.mkdir()
+        for name in ['round-1', 'round-2']:
+            (snapshots / name).write_bytes(name.encode())
+        records = {p.name: dict(bytes=p.stat().st_size, sha256=sha(p))
+                   for p in snapshots.iterdir()}
+        return snapshots, records
+
+    def test_verified_temporary_snapshots_released_after_receipts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshots, records = self.fixture(root)
+            (root / 'raw.csv').write_bytes(b'original evidence')
+            runner.release_verified_snapshots(root, snapshots, records)
+            self.assertFalse(snapshots.exists())
+            self.assertEqual((root / 'raw.csv').read_bytes(), b'original evidence')
+            self.assertEqual(set(records), {'round-1', 'round-2'})
+
+    def test_full_set_checked_before_any_removal(self):
+        for failure in ['changed bytes', 'extra entry', 'missing entry', 'symlink entry']:
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                snapshots, records = self.fixture(root)
+                if failure == 'changed bytes':
+                    (snapshots / 'round-2').write_bytes(b'changed')
+                elif failure == 'extra entry':
+                    (snapshots / 'unverified').write_bytes(b'not a snapshot')
+                elif failure == 'missing entry':
+                    (snapshots / 'round-2').unlink()
+                else:
+                    (snapshots / 'round-2').unlink()
+                    (snapshots / 'round-2').symlink_to(snapshots / 'round-1')
+                before = {p.name for p in snapshots.iterdir()}
+                with self.assertRaises(ValueError):
+                    runner.release_verified_snapshots(root, snapshots, records)
+                self.assertEqual(before, {p.name for p in snapshots.iterdir()})
+                self.assertEqual((snapshots / 'round-1').read_bytes(), b'round-1')
+
+    def test_outside_or_symlink_directory_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scratch = root / 'scratch'
+            scratch.mkdir()
+            snapshots, records = self.fixture(root)
+            alias = scratch / 'alias'
+            alias.symlink_to(snapshots, target_is_directory=True)
+            for target in [snapshots, alias, scratch]:
+                with self.subTest(target=str(target)), self.assertRaises(ValueError):
+                    runner.release_verified_snapshots(scratch, target, records)
+            self.assertEqual(len(list(snapshots.iterdir())), 2)
+
+
 class AcceptanceTests(unittest.TestCase):
     def test_nearest_rank_and_invalid_values(self):
         self.assertEqual(percentile(list(range(1, 101)), .99), 99)
@@ -271,6 +328,134 @@ class AcceptanceTests(unittest.TestCase):
             'fp32', '1', '1', 'missing-snapshot', 'invalid'], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn('invalid lifecycle mode', result.stderr)
+
+
+class ExtendedPublishedTests(unittest.TestCase):
+    def test_gist_extension_raw_metrics_and_report(self):
+        root = Path(__file__).parent
+        result = root / 'results/extended-resident-gist-20261020'
+        receipt = json.loads((result / 'archive.json').read_text())
+        archive = result / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, digest in manifest.items():
+                self.assertEqual(sha(evidence / name), digest)
+            unpack(evidence / 'measurements/raw.tar.gz', evidence / 'measurements/raw')
+            raw = evidence / 'measurements/raw'
+            self.assertEqual(verify(raw), receipt['audit'])
+            rows = json.loads((raw / 'rows.json').read_text())
+            self.assertEqual(len(rows), 9)
+            self.assertEqual(receipt['audit']['mutation_calls'], 675000)
+            self.assertEqual(receipt['audit']['interleaved_queries'], 675000)
+            summary = json.loads((evidence / 'summary.json').read_text())
+            self.assertEqual(set(summary), {'fp32', 'fp16', 'rabitq8'})
+            report = (result / 'README.md').read_text()
+            main = (root / 'ACCEPTANCE_REPORT.md').read_text()
+            med = statistics.median
+            labels = dict(fp32='FP32', fp16='FP16', rabitq8='RaBitQ8')
+            for mode, cell in summary.items():
+                selected = sorted([r for r in rows if r['storage'] == mode], key=lambda r: r['trial'])
+                self.assertEqual([r['trial'] for r in selected], [0, 1, 2])
+                for op, fields in cell['operations'].items():
+                    for key, values in fields.items():
+                        self.assertEqual(values, [r[op][key] for r in selected])
+                for n, fields in cell['checkpoints'].items():
+                    for key, values in fields.items():
+                        self.assertEqual(values, [int(r['states'][int(n)][key]) for r in selected])
+                for n, values in cell['recalls'].items():
+                    self.assertEqual(values, [r['recall'][n] for r in selected])
+                changes = [int(r['states'][100]['rss_before_persistence_kib']) -
+                           int(r['states'][50]['rss_before_persistence_kib']) for r in selected]
+                self.assertEqual(changes, cell['late_rss_delta_kib'])
+                prefix = '| ' + labels[mode] + ' | '
+                query = cell['operations']['query']
+                line = prefix + ' | '.join([f"{med(query['p50_us']):.3f}", f"{med(query['p99_us']):.3f}",
+                    f"{med(query['call_only_ops_per_second']):.1f}", f"{med(cell['recalls']['0']):.4f}",
+                    f"{med(cell['recalls']['100']):.4f}"]) + ' |'
+                self.assertIn(line, report)
+                self.assertIn(line, main)
+                rss_line = prefix + ' | '.join(f"{med(cell['checkpoints'][str(n)]['rss_before_persistence_kib'])/1024:.3f}"
+                    for n in [0, 20, 50, 80, 100]) + ' | ' + str(med(changes)) + ' |'
+                self.assertIn(rss_line, report)
+                for offset, row in enumerate(selected):
+                    tag = f"GIST-{mode}-{row['trial']}"
+                    fields = {}
+                    for raw_line in (raw / (tag + '.resources.txt')).read_text().splitlines():
+                        if ': ' in raw_line:
+                            key, value = raw_line.strip().split(': ', 1)
+                            fields[key] = value
+                    elapsed = 0
+                    for part in fields['Elapsed (wall clock) time (h:mm:ss or m:ss)'].split(':'):
+                        elapsed = elapsed * 60 + float(part)
+                    process = cell['processes'][offset]
+                    self.assertEqual(process['wall_s'], elapsed)
+                    self.assertEqual(process['user_s'], float(fields['User time (seconds)']))
+                    self.assertEqual(process['system_s'], float(fields['System time (seconds)']))
+                    self.assertEqual(process['cpu_core_percent'], (process['user_s'] + process['system_s']) / elapsed * 100)
+                    operations = ['build', 'add', 'remove', 'update', 'query', 'save', 'load']
+                    api_wall = sum(row[op]['wall_sum_ms'] for op in operations) / 1000
+                    self.assertEqual(process['timed_api_wall_s'], api_wall)
+                    self.assertEqual(process['other_wall_s'], elapsed - api_wall)
+                    self.assertEqual(process['timed_api_cpu_s'], sum(row[op]['user_sum_ms'] + row[op]['system_sum_ms'] for op in operations) / 1000)
+                    early, late, ids = [], [], set()
+                    with (raw / tag / 'samples.csv').open() as samples:
+                        for sample in csv.DictReader(samples):
+                            n = int(sample['round'])
+                            if sample['operation'] == 'update':
+                                ids.add(int(sample['id']))
+                            if sample['operation'] == 'query':
+                                if 1 <= n <= 20:
+                                    early.append(float(sample['wall_us']))
+                                if 81 <= n <= 100:
+                                    late.append(float(sample['wall_us']))
+                    self.assertEqual(cell['distinct_update_ids'][offset], len(ids))
+                    self.assertEqual(cell['windows'][offset], dict(first_20_query_p50_us=percentile(early, .5), last_20_query_p50_us=percentile(late, .5)))
+                    for key, source in [('peak_kib', 'Maximum resident set size (kbytes)'),
+                            ('minor_faults', 'Minor (reclaiming a frame) page faults'),
+                            ('major_faults', 'Major (requiring I/O) page faults'),
+                            ('voluntary', 'Voluntary context switches'), ('involuntary', 'Involuntary context switches')]:
+                        self.assertEqual(process[key], int(fields[source]))
+                cpu_line = prefix + ' | '.join(f"{med([p[key] for p in cell['processes']]):.{digits}f}"
+                    for key, digits in [('wall_s', 2), ('user_s', 2), ('system_s', 2), ('cpu_core_percent', 1)])
+                cpu_line += f" | {med([p['peak_kib'] for p in cell['processes']])/1024:.3f} |"
+                self.assertIn(cpu_line, report)
+                phase_line = prefix + ' | '.join(f"{med([p[key] for p in cell['processes']]):.3f}"
+                    for key in ['timed_api_wall_s', 'other_wall_s', 'timed_api_cpu_s']) + ' |'
+                self.assertIn(phase_line, report)
+                faults_line = prefix + ' | '.join(str(med([p[key] for p in cell['processes']]))
+                    for key in ['minor_faults', 'major_faults', 'voluntary', 'involuntary']) + ' |'
+                self.assertIn(faults_line, report)
+                windows_line = prefix + ' | '.join([
+                    f"{med([p['first_20_query_p50_us'] for p in cell['windows']]):.3f}",
+                    f"{med([p['last_20_query_p50_us'] for p in cell['windows']]):.3f}",
+                    str(med(cell['distinct_update_ids']))]) + ' |'
+                self.assertIn(windows_line, report)
+                save = cell['operations']['save']
+                load = cell['operations']['load']
+                io_line = (prefix + f"{med(save['p50_us'])/1000:.3f} / {med(save['p99_us'])/1000:.3f} | "
+                    f"{med(load['p50_us'])/1000:.3f} / {med(load['p99_us'])/1000:.3f} | "
+                    f"{med(cell['checkpoints']['100']['snapshot_bytes'])/1048576:.3f} |")
+                self.assertIn(io_line, report)
+                for op in ['add', 'remove', 'update']:
+                    values = cell['operations'][op]
+                    line = prefix + ' | '.join(f'{med(values[key]):.{digits}f}' for key, digits in
+                        [('p50_us', 3), ('p99_us', 3), ('call_only_ops_per_second', 1),
+                         ('user_sum_ms', 3), ('system_sum_ms', 3)]) + ' |'
+                    self.assertIn(line, report)
+            with tarfile.open(root / 'results/review-fixed-resident-20261020/raw.tar.gz', 'r:gz') as old:
+                inner = old.extractfile('GIST/raw.tar.gz').read()
+            with tarfile.open(fileobj=io.BytesIO(inner), mode='r:gz') as old:
+                previous = json.load(old.extractfile('rows.json'))
+            for row in rows:
+                old_row = next(r for r in previous if (r['storage'], r['trial']) == (row['storage'], row['trial']))
+                for name, digest in old_row['snapshots'].items():
+                    self.assertEqual(row['snapshots'][name], digest)
 
 
 if __name__ == '__main__':
