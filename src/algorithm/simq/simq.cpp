@@ -1309,6 +1309,7 @@ SIMQ::coarse_search(const float* query_tokens,
     const auto n_docs = static_cast<size_t>(total_count_);
     std::vector<float> score_buf(n_docs, 0.0F);
     std::vector<bool> seen_buf(n_docs, false);
+    std::vector<bool> candidate_seen(n_docs, false);
     std::vector<InnerIdType> dirty_list;
     std::vector<InnerIdType> seen_dirty_list;
     dirty_list.reserve(n_docs);
@@ -1419,7 +1420,9 @@ SIMQ::coarse_search(const float* query_tokens,
                 }
                 seen_buf[doc_id] = true;
                 seen_dirty_list.push_back(doc_id);
-                if (score_buf[doc_id] == 0.0F) {
+                // Zero is a valid accumulated score, not an unseen-document marker.
+                if (not candidate_seen[doc_id]) {
+                    candidate_seen[doc_id] = true;
                     dirty_list.push_back(doc_id);
                 }
                 score_buf[doc_id] += cscore;
