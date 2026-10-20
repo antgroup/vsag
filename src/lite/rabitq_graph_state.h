@@ -1069,7 +1069,7 @@ public:
         codec_require(prepared.query.size() == model_.dim and
                           prepared.code.filter.size() == codes_.FilterBytes() and
                           prepared.code.supplement.size() == codes_.SupplementBytes() and
-                          std::isfinite(prepared.code.norm) and prepared.code.norm > 0.0F,
+                          std::isfinite(prepared.code.norm) and prepared.code.norm >= 0.0F,
                       "invalid prepared update shape or norm");
         codec_require(
             std::isfinite(prepared.code.code_norm) and prepared.code.code_norm > 0.0F and

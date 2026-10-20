@@ -387,21 +387,21 @@ normalize(const Model& model, const float* input, float& norm) {
     for (uint64_t d = 0; d < model.dim; ++d) {
         values[d] -= model.centroid[d];
         codec_require(std::isfinite(values[d]), "normalization transform overflow");
-        const float term = values[d] * values[d];
-        squared += std::isfinite(term) ? static_cast<double>(term)
-                                       : static_cast<double>(values[d]) * values[d];
+        squared += static_cast<double>(values[d]) * values[d];
     }
-    norm = squared < 1e-5 ? 1.0F : static_cast<float>(std::sqrt(squared));
-    codec_require(std::isfinite(norm) and norm > 0.0F, "normalization norm overflow");
+    norm = static_cast<float>(std::sqrt(squared));
+    codec_require(std::isfinite(norm) and norm >= 0.0F, "normalization norm overflow");
+    // Keep the geometric radius; only the division needs a nonzero denominator.
+    const float divisor = norm == 0.0F ? 1.0F : norm;
     for (float& value : values) {
-        value /= norm;
+        value /= divisor;
     }
     return values;
 }
 
 inline Encoded
 encode_normalized(const Model& model, const std::vector<float>& normalized, float norm) {
-    codec_require(normalized.size() == model.dim and std::isfinite(norm) and norm > 0.0F,
+    codec_require(normalized.size() == model.dim and std::isfinite(norm) and norm >= 0.0F,
                   "invalid normalized encoding input");
     Encoded result;
     result.norm = norm;
@@ -490,7 +490,7 @@ inline const float*
 decode(const Model& model, const EncodedView& code, std::vector<float>& scratch) {
     codec_require(model.dim > 0 and model.centroid.size() == model.dim and
                       code.filter != nullptr and code.supplement != nullptr and
-                      std::isfinite(code.metadata.norm) and code.metadata.norm > 0.0F and
+                      std::isfinite(code.metadata.norm) and code.metadata.norm >= 0.0F and
                       std::isfinite(code.metadata.code_norm) and code.metadata.code_norm > 0.0F,
                   "invalid decoding model or metadata");
     scratch.resize(model.dim);

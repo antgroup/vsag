@@ -40,6 +40,93 @@ TEST_CASE("RaBitQ empty results precede query transformation", "[lite-rabitq]") 
     }
 }
 
+TEST_CASE("RaBitQ identical vectors retain zero radius through CRUD and persistence",
+          "[lite-rabitq]") {
+    for (uint64_t dim : {1ULL, 17ULL, 128ULL}) {
+        auto created = Index::Create(dim);
+        REQUIRE(created);
+        const std::vector<float> vector(dim, 0.5F);
+        for (int64_t id : {9, 3, 7}) {
+            REQUIRE((*created)->Add(id, vector.data(), dim));
+        }
+        REQUIRE((*created)->BuildGraph(VectorStorage::RABITQ8, 4, 16));
+        REQUIRE((*created)->Update(7, vector.data(), dim));
+        REQUIRE((*created)->Remove(3));
+        REQUIRE((*created)->Add(3, vector.data(), dim));
+        std::stringstream bytes;
+        REQUIRE((*created)->Save(bytes));
+        auto loaded = Index::Load(bytes);
+        REQUIRE(loaded);
+        for (const Index* index : {created->get(), loaded->get()}) {
+            const auto found = index->Search(vector.data(), dim, 3);
+            REQUIRE(found);
+            REQUIRE(found->size() == 3);
+            REQUIRE((*found)[0].id == 3);
+            REQUIRE((*found)[1].id == 7);
+            REQUIRE((*found)[2].id == 9);
+            for (const auto& neighbor : *found) {
+                REQUIRE(neighbor.distance == 0.0F);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ preserves centroid and small residual geometry", "[lite-rabitq]") {
+    namespace codec = vsag::lite::detail::rabitq;
+    const auto model = codec::train({-1.0F, 1.0F}, 2, 1, 47);
+    for (float magnitude :
+         {0.0F, 1e-3F, 1e-12F, 1e-30F, std::numeric_limits<float>::denorm_min()}) {
+        float norm = -1.0F;
+        const auto normalized = codec::normalize(model, &magnitude, norm);
+        REQUIRE(norm == magnitude);
+        REQUIRE(std::fabs(normalized[0]) == (magnitude == 0.0F ? 0.0F : 1.0F));
+        codec::EncodedRecords codes(1);
+        codes.Append(codec::encode(model, &magnitude));
+        std::vector<float> decoded;
+        REQUIRE(std::fabs(codec::decode(model, codes.At(0), decoded)[0]) == magnitude);
+    }
+    for (uint64_t dim : {1ULL, 17ULL, 128ULL}) {
+        for (float scale : {1.0F, 1e-3F, 1e-12F}) {
+            auto created = Index::Create(dim);
+            REQUIRE(created);
+            std::vector<float> zero(dim, 0.0F);
+            std::vector<float> negative(dim, -scale);
+            std::vector<float> positive(dim, scale);
+            REQUIRE((*created)->Add(0, negative.data(), dim));
+            REQUIRE((*created)->Add(1, zero.data(), dim));
+            REQUIRE((*created)->Add(2, positive.data(), dim));
+            REQUIRE((*created)->BuildGraph(VectorStorage::RABITQ8, 4, 16));
+            const auto check = [&](const Index& index) {
+                const auto found = index.SearchWithOptions(zero.data(), dim, 3, {16});
+                REQUIRE(found);
+                REQUIRE(found->size() == 3);
+                REQUIRE(found->front().id == 1);
+                REQUIRE(found->front().distance == 0.0F);
+                const float expected = static_cast<float>(dim) * scale * scale;
+                for (uint64_t rank = 1; rank < found->size(); ++rank) {
+                    REQUIRE(std::isfinite((*found)[rank].distance));
+                    REQUIRE(std::fabs((*found)[rank].distance - expected) <= expected * 1e-4F);
+                }
+            };
+            check(**created);
+            REQUIRE((*created)->Update(1, positive.data(), dim));
+            REQUIRE((*created)->Update(1, zero.data(), dim));
+            REQUIRE((*created)->Remove(1));
+            REQUIRE((*created)->Add(1, zero.data(), dim));
+            check(**created);
+            std::stringstream bytes;
+            REQUIRE((*created)->Save(bytes));
+            auto loaded = Index::Load(bytes);
+            REQUIRE(loaded);
+            check(**loaded);
+            const auto original = bytes.str();
+            std::ostringstream saved;
+            REQUIRE((*loaded)->Save(saved));
+            REQUIRE(saved.str() == original);
+        }
+    }
+}
+
 namespace {
 std::unique_ptr<Index>
 make_index(uint64_t dim = 17) {
@@ -208,6 +295,13 @@ TEST_CASE("RaBitQ rejects malformed encoded snapshots before large allocations",
     bad = saved;
     std::memset(bad.data() + 48 + model_bytes + 4, 0, 4);
     reject(bad);
+    for (uint32_t bits : {0xbf800000U, 0x7f800000U, 0x7fc00000U}) {
+        bad = saved;
+        for (uint64_t byte = 0; byte < 4; ++byte) {
+            bad[48 + model_bytes + byte] = static_cast<char>((bits >> (8 * byte)) & 255U);
+        }
+        reject(bad);
+    }
 }
 
 TEST_CASE("RaBitQ snapshot slot map rejects duplicate external IDs", "[lite-rabitq]") {
