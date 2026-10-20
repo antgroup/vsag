@@ -108,6 +108,9 @@ public:
             return tl::unexpected(valid.error());
         }
         return guarded([&]() -> tl::expected<std::vector<Neighbor>, Error> {
+            if (k == 0 or Size() == 0) {
+                return std::vector<Neighbor>{};
+            }
             const auto found = state_.SearchWithOptions(query, k, options.ef_search, filter);
             std::vector<Neighbor> result;
             result.reserve(found.neighbors.size());
