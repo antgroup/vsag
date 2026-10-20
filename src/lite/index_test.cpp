@@ -388,7 +388,7 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
     }
     if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
         __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl") and
-        __builtin_cpu_supports("avx2")) {
+        __builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
         kernels.push_back(vsag::lite::detail::avx512_fp32_distance);
         REQUIRE(selected == vsag::lite::detail::avx512_fp32_distance);
     } else if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
@@ -402,7 +402,7 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
     REQUIRE(selected == generic);
 #endif
     for (const uint64_t dim :
-         {1ULL, 3ULL, 4ULL, 5ULL, 8ULL, 9ULL, 16ULL, 17ULL, 32ULL, 33ULL, 128ULL, 129ULL}) {
+         {1ULL, 3ULL, 4ULL, 5ULL, 8ULL, 9ULL, 16ULL, 17ULL, 24ULL, 32ULL, 33ULL, 128ULL, 129ULL}) {
         const float expected = generic(query, vector, dim);
         for (const auto kernel : kernels) {
             const float actual = kernel(query, vector, dim);
@@ -492,6 +492,22 @@ TEST_CASE("Lite load translates stream allocation and capacity failures", "[lite
 }
 
 #ifdef VSAG_LITE_HAS_X86_SIMD
+TEST_CASE("Lite FP32 dispatch requires FMA for AVX2 and AVX512 tails", "[lite]") {
+    using namespace vsag::lite::detail;
+    for (bool sse : {false, true}) {
+        for (bool avx2 : {false, true}) {
+            for (bool avx512 : {false, true}) {
+                for (bool fma : {false, true}) {
+                    const auto expected = avx2 and fma
+                                              ? (avx512 ? avx512_fp32_distance : avx2_fp32_distance)
+                                              : (sse ? sse_fp32_distance : generic_fp32_distance);
+                    REQUIRE(select_fp32_distance_for(sse, avx2, avx512, fma) == expected);
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("Lite FP16 dispatch requires complete feature combinations", "[lite]") {
     using namespace vsag::lite::detail;
     REQUIRE(select_fp16_distance_for(false, false, false, false, false) == generic_fp16_distance);
@@ -499,8 +515,25 @@ TEST_CASE("Lite FP16 dispatch requires complete feature combinations", "[lite]")
     REQUIRE(select_fp16_distance_for(false, true, false, false, true) == generic_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, false, false, false, true) == avx_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, false, false, true) == avx_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, true, false, true) == avx_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, false, true, true) == avx2_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, true, true, true) == avx512_fp16_distance);
+    for (bool avx : {false, true}) {
+        for (bool avx2 : {false, true}) {
+            for (bool avx512 : {false, true}) {
+                for (bool fma : {false, true}) {
+                    for (bool f16c : {false, true}) {
+                        const auto expected =
+                            not f16c       ? generic_fp16_distance
+                            : avx2 and fma ? (avx512 ? avx512_fp16_distance : avx2_fp16_distance)
+                            : avx          ? avx_fp16_distance
+                                           : generic_fp16_distance;
+                        REQUIRE(select_fp16_distance_for(avx, avx2, avx512, fma, f16c) == expected);
+                    }
+                }
+            }
+        }
+    }
 }
 #endif
 
