@@ -79,6 +79,10 @@ class ReproductionDocumentationTests(unittest.TestCase):
             self.assertIn(token, block)
 
     def test_current_and_historical_recipes_remain_distinct(self):
+        recipes = (Path(__file__).parent / 'README.md').read_text()
+        build = 'cmake --build "$BENCH_FEATURE_BUILD" --target vsag_lite_static -j2'
+        install = 'cmake --install "$BENCH_FEATURE_BUILD" --prefix "$BENCH_CURRENT_LITE_INSTALL"'
+        self.assertLess(recipes.index(build), recipes.index(install))
         root = Path(__file__).parent
         index = (root / 'ACCEPTANCE.md').read_text()
         recipes = (root / 'README.md').read_text()

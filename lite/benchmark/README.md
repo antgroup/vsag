@@ -231,6 +231,7 @@ original diagnostic minimum. Packaging and relocation are not cold-I/O timing.
 
 ```bash
 BENCH_CURRENT_LITE_INSTALL="$BENCH_WORK/current-lite-install"
+cmake --build "$BENCH_FEATURE_BUILD" --target vsag_lite_static -j2
 cmake --install "$BENCH_FEATURE_BUILD" --prefix "$BENCH_CURRENT_LITE_INSTALL"
 python3 "$BENCH_ROOT/lite/benchmark/measure_runtime_package.py" \
   --feature "$BENCH_FEATURE" --feature-sha "$BENCH_FEATURE_SHA" \
