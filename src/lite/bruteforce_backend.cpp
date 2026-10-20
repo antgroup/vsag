@@ -125,7 +125,7 @@ public:
             const auto distance_fn = dim < 16 ? generic_fp32_distance : select_fp32_distance();
             std::vector<float> scratch;
             for (uint64_t slot = 0; slot < Size(); ++slot) {
-                if (filter != nullptr and not(*filter)(IdAt(slot))) {
+                if (filter != nullptr and not invoke_filter(*filter, IdAt(slot))) {
                     continue;
                 }
                 const auto distance = distance_fn(query, VectorAt(slot, scratch), dim);
@@ -143,6 +143,8 @@ public:
                 heap.pop();
             }
             return result;
+        } catch (const FilterException&) {
+            return failure(ErrorType::INTERNAL_ERROR, "filter callback failed");
         } catch (const std::bad_alloc&) {
             return failure(ErrorType::NO_ENOUGH_MEMORY, "search allocation failed");
         } catch (const std::length_error&) {

@@ -18,7 +18,9 @@ struct Neighbor {
     float distance;
 };
 
-/** Return true when an external ID is allowed in search results. */
+/** Return true when an external ID is allowed in search results.
+ * Callback bad_alloc/length_error become NO_ENOUGH_MEMORY; other thrown values become INTERNAL_ERROR.
+ */
 using IdFilter = std::function<bool(int64_t)>;
 
 /** Active Lite backend. Graph search is approximate; BruteForce is the default. */

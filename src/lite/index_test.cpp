@@ -411,6 +411,52 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
     }
 }
 
+TEST_CASE("Lite filter exceptions use a backend-independent error contract", "[lite]") {
+    for (int mode : {0, 1, 2}) {
+        auto created = Index::Create(1);
+        REQUIRE(created);
+        const float vector = 1.0F;
+        REQUIRE((*created)->Add(17, &vector, 1));
+        if (mode != 0) {
+            REQUIRE((*created)->BuildGraph(
+                mode == 1 ? vsag::lite::VectorStorage::FP32 : vsag::lite::VectorStorage::FP16,
+                2,
+                8));
+        }
+        std::ostringstream before;
+        REQUIRE((*created)->Save(before));
+        for (int kind : {0, 1, 2, 3, 4}) {
+            uint64_t calls = 0;
+            const vsag::lite::IdFilter filter = [&](int64_t) -> bool {
+                ++calls;
+                switch (kind) {
+                    case 0:
+                        throw std::bad_alloc();
+                    case 1:
+                        throw std::length_error("filter capacity");
+                    case 2:
+                        throw std::invalid_argument("caller argument");
+                    case 3:
+                        throw std::runtime_error("caller failure");
+                    default:
+                        throw 17;
+                }
+            };
+            const auto result = (*created)->SearchWithOptions(&vector, 1, 1, {8}, filter);
+            REQUIRE_FALSE(result);
+            REQUIRE(result.error().type == (kind < 2 ? vsag::ErrorType::NO_ENOUGH_MEMORY
+                                                     : vsag::ErrorType::INTERNAL_ERROR));
+            REQUIRE(calls == 1);
+            std::ostringstream after;
+            REQUIRE((*created)->Save(after));
+            REQUIRE(after.str() == before.str());
+            REQUIRE((*created)->Search(&vector, 1, 1)->front().id == 17);
+            REQUIRE((*created)->Search(&vector, 1, 0, filter)->empty());
+            REQUIRE(calls == 1);
+        }
+    }
+}
+
 TEST_CASE("Lite filter allocation errors preserve the index", "[lite]") {
     for (const bool graph : {false, true}) {
         auto created = Index::Create(1);

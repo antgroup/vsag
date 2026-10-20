@@ -491,7 +491,7 @@ public:
                 Candidate next{slot, distance(query, encoded_query, slot)};
                 // Filtered results include every allowed visited node, even if
                 // its routing score does not improve the full best heap.
-                if (filter != nullptr and (*filter)(IdAt(slot))) {
+                if (filter != nullptr and invoke_filter(*filter, IdAt(slot))) {
                     accepted.push(next);
                     if (accepted.size() > k) {
                         accepted.pop();
@@ -568,6 +568,8 @@ public:
             }
             result.resize(std::min(k, static_cast<uint64_t>(result.size())));
             return result;
+        } catch (const FilterException&) {
+            return failure(ErrorType::INTERNAL_ERROR, "filter callback failed");
         } catch (const std::invalid_argument&) {
             return failure(ErrorType::INVALID_ARGUMENT, "query exceeds FP16 range");
         } catch (const std::bad_alloc&) {
