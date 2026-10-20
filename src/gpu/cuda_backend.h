@@ -35,6 +35,10 @@
 ///     the calibrated default.
 namespace vsag::gpu {
 
+enum class DistanceType : int32_t { L2Sqr = 0, InnerProduct = 1, Cosine = 2 };
+
+constexpr uint32_t MAX_SELECT_NEIGHBORS = 32;
+
 /// True when this build has the CUDA backend and the machine has at least one
 /// usable device.
 bool
@@ -148,6 +152,57 @@ CudaAccumulateCentroids(const float* datas,
                         uint32_t k,
                         float* sums,
                         int32_t* counts,
+                        uint64_t budget_bytes,
+                        uint64_t min_work);
+
+/// Selects up to MAX_SELECT_NEIGHBORS nearest rows of `rhs` for every row of `lhs`.
+///
+/// Dot products and the top-k reduction stay on the device; only rhs row
+/// indices are copied back. Norms contain squared lengths for L2, reciprocal
+/// lengths for cosine, and may be null for inner product. Equal distances are
+/// ordered by rhs_ids, matching PiPNN's deterministic leader ordering.
+bool
+CudaSelectNearest(const float* lhs,
+                  const float* lhs_norms,
+                  uint64_t lhs_count,
+                  const float* rhs,
+                  const float* rhs_norms,
+                  const uint64_t* rhs_ids,
+                  uint64_t rhs_count,
+                  int32_t dim,
+                  uint32_t fanout,
+                  DistanceType distance_type,
+                  uint32_t* labels,
+                  uint64_t budget_bytes,
+                  uint64_t min_work);
+
+/// Selects nearest neighbors independently inside a packed batch of leaves.
+///
+/// `source_rows` points to `source_count` unique rows and `row_sources` maps each
+/// packed leaf row to one of them. The backend stages those rows in bounded
+/// page-locked chunks, so the caller need not duplicate a large vector matrix.
+/// `norms` and `ids` are already in packed leaf-row order. The half-open row range for leaf i is
+/// [leaf_offsets[i], leaf_offsets[i + 1]).
+/// `neighbor_counts[i]` rows are selected for every source in that leaf, up to
+/// `max_neighbors` (which may not exceed MAX_SELECT_NEIGHBORS). Self rows are excluded. Equal
+/// distances are ordered by source-ID gap and then target ID, matching PiPNN's
+/// host Pick pass. Labels are indices in the packed input, and distances are the
+/// values used to order them; both outputs have row_count * max_neighbors slots.
+/// Slots above a leaf's neighbor count are not specified.
+bool
+CudaSelectLeafNeighbors(const float* const* source_rows,
+                        uint64_t source_count,
+                        const uint32_t* row_sources,
+                        const float* norms,
+                        const uint64_t* ids,
+                        const uint64_t* leaf_offsets,
+                        const uint32_t* neighbor_counts,
+                        uint64_t leaf_count,
+                        int32_t dim,
+                        uint32_t max_neighbors,
+                        DistanceType distance_type,
+                        uint32_t* labels,
+                        float* distances,
                         uint64_t budget_bytes,
                         uint64_t min_work);
 

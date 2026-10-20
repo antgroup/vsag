@@ -72,6 +72,10 @@ auto result = index->KnnSearch(
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
 | `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
 | `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
+| `pipnn_enable_gpu_build` | bool | `false` | CUDA 可用时将规模足够大的 PiPNN 分区分配和叶子 Pick 批次下放到 GPU |
+| `pipnn_gpu_device_id` | int | `0` | PiPNN 构建使用的非负 CUDA 设备序号 |
+| `pipnn_gpu_memory_budget` | int | `0` | CUDA 工作集最大字节数；`0` 表示根据当前空闲显存推导安全预算 |
+| `pipnn_gpu_min_work_threshold` | int | `0` | 值得下放的最小阶段工作量；`0` 使用 Partition 和 Pick 各自的 PiPNN 标定默认值 |
 | `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
 | `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
 | `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
@@ -116,6 +120,13 @@ HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Ad
 存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
 上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
 现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
+
+GPU 构建默认关闭。启用后，大规模分区分配的点积和最近 leader 选择留在设备端。Pick
+阶段会批处理重叠叶子，每批只传输一次重复源向量，并在 GPU 上计算对称叶内点积和确定性
+逐点 top-k；方向哈希插入、HashPrune 和 RobustPrune 仍在 CPU 执行。未编译 CUDA、指定
+设备不存在、阶段低于工作量阈值、显存预算不足或 CUDA 操作失败时，构建会回退到原有
+CPU 路径。显式阈值对 Partition 使用 `points * leaders * dim`，对 Pick 使用
+`sum(leaf_size^2 * dim)`；`0` 使用各阶段的标定默认值。
 
 `build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
 `OPENBLAS_NUM_THREADS=1`，避免 BLAS 线程影响构建线程扩展性。可复现配置

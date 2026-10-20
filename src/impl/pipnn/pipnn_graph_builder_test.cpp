@@ -20,6 +20,7 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <limits>
 #include <set>
 #include <stdexcept>
 #include <vector>
@@ -313,6 +314,54 @@ TEST_CASE("PiPNN graph builder runs overlapping leaves in parallel",
         second->GetNeighbors(id, second_neighbors);
         REQUIRE(serial_neighbors == first_neighbors);
         REQUIRE(first_neighbors == second_neighbors);
+    }
+}
+
+TEST_CASE("PiPNN falls back when the requested GPU is unavailable", "[ut][pipnn]") {
+    constexpr uint64_t dimensions = 16;
+    constexpr uint64_t count = 48;
+    constexpr uint64_t max_degree = 32;
+    auto common_param = MakeCommonParam(dimensions);
+    auto vectors = MakeVectors(count, dimensions);
+    vsag::Vector<vsag::InnerIdType> ids(common_param.allocator_.get());
+    for (uint64_t id = 0; id < count; ++id) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(id));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, common_param.allocator_.get());
+
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 8;
+    parameter.min_leaf_size = 2;
+    parameter.leader_sample_rate = 0.25F;
+    parameter.fanout = {2, 1};
+    parameter.hash_plane_count = 5;
+    parameter.reservoir_size = max_degree;
+
+    auto serial = MakeGraph(common_param, count, max_degree);
+    auto fallback = MakeGraph(common_param, count, max_degree);
+    vsag::PiPNNGraphBuilder(
+        parameter, dimensions, common_param.metric_, common_param.allocator_.get())
+        .Build(serial, ids, rows);
+    parameter.enable_gpu_build = true;
+    parameter.gpu_device_id = std::numeric_limits<int32_t>::max();
+    parameter.gpu_min_work_threshold = 1;
+    auto thread_pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    thread_pool->SetPoolSize(4);
+    vsag::PiPNNGraphBuilder(parameter,
+                            dimensions,
+                            common_param.metric_,
+                            common_param.allocator_.get(),
+                            thread_pool.get(),
+                            4)
+        .Build(fallback, ids, rows);
+
+    RequireGraphInvariants(fallback, ids, max_degree, common_param.allocator_.get());
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> serial_neighbors(common_param.allocator_.get());
+        vsag::Vector<vsag::InnerIdType> fallback_neighbors(common_param.allocator_.get());
+        serial->GetNeighbors(id, serial_neighbors);
+        fallback->GetNeighbors(id, fallback_neighbors);
+        REQUIRE(serial_neighbors == fallback_neighbors);
     }
 }
 

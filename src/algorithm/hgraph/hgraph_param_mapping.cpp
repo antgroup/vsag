@@ -239,7 +239,10 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                    key == PIPNN_PARAMETER_HASH_PLANE_COUNT or
                    key == PIPNN_PARAMETER_RESERVOIR_SIZE or
                    key == PIPNN_PARAMETER_ADAPTIVE_PRUNING or
-                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP) {
+                   key == PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP or
+                   key == PIPNN_ENABLE_GPU_BUILD or
+                   key == PIPNN_GPU_DEVICE_ID or key == PIPNN_GPU_MEMORY_BUDGET or
+                   key == PIPNN_GPU_MIN_WORK_THRESHOLD) {
             inner_json[GRAPH_KEY][key].SetJson(value);
         } else if (key == HGRAPH_BUILD_THREAD_COUNT) {
             inner_json[BUILD_THREAD_COUNT_KEY].SetJson(value);

@@ -74,6 +74,42 @@ CudaAccumulateCentroids(const float* /*datas*/,
     return false;
 }
 
+bool
+CudaSelectNearest(const float* /*lhs*/,
+                  const float* /*lhs_norms*/,
+                  uint64_t /*lhs_count*/,
+                  const float* /*rhs*/,
+                  const float* /*rhs_norms*/,
+                  const uint64_t* /*rhs_ids*/,
+                  uint64_t /*rhs_count*/,
+                  int32_t /*dim*/,
+                  uint32_t /*fanout*/,
+                  DistanceType /*distance_type*/,
+                  uint32_t* /*labels*/,
+                  uint64_t /*budget_bytes*/,
+                  uint64_t /*min_work*/) {
+    return false;
+}
+
+bool
+CudaSelectLeafNeighbors(const float* const* /*source_rows*/,
+                        uint64_t /*source_count*/,
+                        const uint32_t* /*row_sources*/,
+                        const float* /*norms*/,
+                        const uint64_t* /*ids*/,
+                        const uint64_t* /*leaf_offsets*/,
+                        const uint32_t* /*neighbor_counts*/,
+                        uint64_t /*leaf_count*/,
+                        int32_t /*dim*/,
+                        uint32_t /*max_neighbors*/,
+                        DistanceType /*distance_type*/,
+                        uint32_t* /*labels*/,
+                        float* /*distances*/,
+                        uint64_t /*budget_bytes*/,
+                        uint64_t /*min_work*/) {
+    return false;
+}
+
 uint64_t
 CudaSuggestedBudget(uint64_t /*cap_bytes*/) {
     return 0;

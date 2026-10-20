@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <random>
 #include <vector>
 
@@ -78,6 +79,72 @@ TEST_CASE("A pass that refuses leaves the caller's buffers alone", "[ut][gpu_pas
         data.data(), rows, dim, labels.data(), k, sums.data(), counts.data(), 1ULL << 30, 0));
     REQUIRE(std::all_of(sums.begin(), sums.end(), [](float v) { return v == -7.0F; }));
     REQUIRE(std::all_of(counts.begin(), counts.end(), [](int32_t v) { return v == -7; }));
+
+    const std::vector<float> norms(rows, 1.0F);
+    const std::vector<uint64_t> ids(k, 0);
+    std::vector<uint32_t> nearest(rows * 2, 17);
+    REQUIRE_FALSE(CudaSelectNearest(data.data(),
+                                    norms.data(),
+                                    rows,
+                                    centroids.data(),
+                                    norms.data(),
+                                    ids.data(),
+                                    k,
+                                    dim,
+                                    2,
+                                    DistanceType::L2Sqr,
+                                    nearest.data(),
+                                    1ULL << 30,
+                                    0));
+    REQUIRE(std::all_of(nearest.begin(), nearest.end(), [](uint32_t v) { return v == 17; }));
+
+    const std::vector<uint64_t> leaf_offsets = {0, rows};
+    const std::vector<uint32_t> neighbor_counts = {2};
+    std::vector<uint32_t> row_sources(rows);
+    std::vector<const float*> source_rows(rows);
+    std::iota(row_sources.begin(), row_sources.end(), 0);
+    for (uint64_t row = 0; row < rows; ++row) {
+        source_rows[row] = data.data() + row * dim;
+    }
+    std::vector<float> leaf_distances(rows * 2, -7.0F);
+    REQUIRE_FALSE(CudaSelectLeafNeighbors(source_rows.data(),
+                                          rows,
+                                          row_sources.data(),
+                                          norms.data(),
+                                          ids.data(),
+                                          leaf_offsets.data(),
+                                          neighbor_counts.data(),
+                                          1,
+                                          dim,
+                                          2,
+                                          DistanceType::L2Sqr,
+                                          nearest.data(),
+                                          leaf_distances.data(),
+                                          1ULL << 30,
+                                          0));
+    REQUIRE(std::all_of(nearest.begin(), nearest.end(), [](uint32_t v) { return v == 17; }));
+    REQUIRE(std::all_of(
+        leaf_distances.begin(), leaf_distances.end(), [](float v) { return v == -7.0F; }));
+
+    row_sources[0] = static_cast<uint32_t>(rows);
+    REQUIRE_FALSE(CudaSelectLeafNeighbors(source_rows.data(),
+                                          rows,
+                                          row_sources.data(),
+                                          norms.data(),
+                                          ids.data(),
+                                          leaf_offsets.data(),
+                                          neighbor_counts.data(),
+                                          1,
+                                          dim,
+                                          1,
+                                          DistanceType::L2Sqr,
+                                          nearest.data(),
+                                          leaf_distances.data(),
+                                          1ULL << 30,
+                                          kForceOffload));
+    REQUIRE(std::all_of(nearest.begin(), nearest.end(), [](uint32_t v) { return v == 17; }));
+    REQUIRE(std::all_of(
+        leaf_distances.begin(), leaf_distances.end(), [](float v) { return v == -7.0F; }));
 }
 
 TEST_CASE("A null or degenerate argument is refused", "[ut][gpu_pass]") {
@@ -138,6 +205,65 @@ TEST_CASE("A null or degenerate argument is refused", "[ut][gpu_pass]") {
                                           kForceOffload));
     REQUIRE_FALSE(CudaAccumulateCentroids(
         data.data(), rows, dim, labels.data(), k, out.data(), nullptr, 1ULL << 30, kForceOffload));
+
+    const std::vector<float> norms(rows, 1.0F);
+    const std::vector<uint64_t> ids(k, 0);
+    std::vector<uint32_t> nearest(rows, 17);
+    REQUIRE_FALSE(CudaSelectNearest(data.data(),
+                                    norms.data(),
+                                    rows,
+                                    data.data(),
+                                    norms.data(),
+                                    ids.data(),
+                                    k,
+                                    dim,
+                                    0,
+                                    DistanceType::L2Sqr,
+                                    nearest.data(),
+                                    1ULL << 30,
+                                    kForceOffload));
+    REQUIRE_FALSE(CudaSelectNearest(data.data(),
+                                    nullptr,
+                                    rows,
+                                    data.data(),
+                                    norms.data(),
+                                    ids.data(),
+                                    k,
+                                    dim,
+                                    1,
+                                    DistanceType::L2Sqr,
+                                    nearest.data(),
+                                    1ULL << 30,
+                                    kForceOffload));
+    REQUIRE(std::all_of(nearest.begin(), nearest.end(), [](uint32_t v) { return v == 17; }));
+
+    const std::vector<uint64_t> leaf_offsets = {0, rows};
+    const std::vector<uint32_t> neighbor_counts = {1};
+    std::vector<uint32_t> row_sources(rows);
+    std::vector<const float*> source_rows(rows);
+    std::iota(row_sources.begin(), row_sources.end(), 0);
+    for (uint64_t row = 0; row < rows; ++row) {
+        source_rows[row] = data.data() + row * dim;
+    }
+    std::vector<float> leaf_distances(rows, -7.0F);
+    REQUIRE_FALSE(CudaSelectLeafNeighbors(nullptr,
+                                          rows,
+                                          row_sources.data(),
+                                          norms.data(),
+                                          ids.data(),
+                                          leaf_offsets.data(),
+                                          neighbor_counts.data(),
+                                          1,
+                                          dim,
+                                          1,
+                                          DistanceType::L2Sqr,
+                                          nearest.data(),
+                                          leaf_distances.data(),
+                                          1ULL << 30,
+                                          kForceOffload));
+    REQUIRE(std::all_of(nearest.begin(), nearest.end(), [](uint32_t v) { return v == 17; }));
+    REQUIRE(std::all_of(
+        leaf_distances.begin(), leaf_distances.end(), [](float v) { return v == -7.0F; }));
 }
 
 #ifdef VSAG_ENABLE_CUDA
@@ -231,6 +357,110 @@ TEST_CASE("Assignment picks the centroid the host would", "[ut][gpu_pass]") {
                               CudaSuggestedBudget(kChunkedBudgetCap),
                               kForceOffload));
     REQUIRE(labels == expected);
+}
+
+TEST_CASE("Nearest-row selection keeps device top-k ordering", "[ut][gpu_pass]") {
+    if (NoDevice()) {
+        SKIP("no CUDA device on this machine");
+    }
+    constexpr int32_t dim = 2;
+    constexpr uint64_t lhs_count = 2;
+    constexpr uint64_t rhs_count = 4;
+    constexpr uint32_t fanout = 3;
+    const std::vector<float> lhs = {1.0F, 0.0F, 0.0F, -1.0F};
+    const std::vector<float> rhs = {1.0F, 0.0F, 0.0F, 1.0F, -1.0F, 0.0F, 0.0F, -1.0F};
+    const std::vector<float> lhs_norms(lhs_count, 1.0F);
+    const std::vector<float> rhs_norms(rhs_count, 1.0F);
+    const std::vector<uint64_t> rhs_ids = {40, 30, 20, 10};
+    const std::vector<uint32_t> expected = {0, 3, 1, 3, 2, 0};
+
+    for (const auto distance_type :
+         {DistanceType::L2Sqr, DistanceType::InnerProduct, DistanceType::Cosine}) {
+        CAPTURE(static_cast<int32_t>(distance_type));
+        std::vector<uint32_t> labels(lhs_count * fanout, rhs_count);
+        REQUIRE(CudaSelectNearest(lhs.data(),
+                                  lhs_norms.data(),
+                                  lhs_count,
+                                  rhs.data(),
+                                  rhs_norms.data(),
+                                  rhs_ids.data(),
+                                  rhs_count,
+                                  dim,
+                                  fanout,
+                                  distance_type,
+                                  labels.data(),
+                                  CudaSuggestedBudget(kChunkedBudgetCap),
+                                  kForceOffload));
+        REQUIRE(labels == expected);
+    }
+}
+
+TEST_CASE("Leaf selection excludes self and preserves PiPNN ordering", "[ut][gpu_pass]") {
+    if (NoDevice()) {
+        SKIP("no CUDA device on this machine");
+    }
+    constexpr int32_t dim = 1;
+    constexpr uint32_t max_neighbors = 2;
+    const std::vector<float> source_vectors = {0.0F, 1.0F, -1.0F, 3.0F, 12.0F, 9.0F};
+    const std::vector<float> norms = {0.0F, 1.0F, 1.0F, 9.0F, 0.0F, 144.0F, 81.0F};
+    const std::vector<uint64_t> ids = {100, 90, 130, 99, 100, 1005, 998};
+    const std::vector<uint64_t> leaf_offsets = {0, 4, 7};
+    const std::vector<uint32_t> neighbor_counts = {2, 1};
+    const std::vector<uint32_t> row_sources = {0, 1, 2, 3, 0, 4, 5};
+    std::vector<const float*> source_rows(source_vectors.size());
+    for (uint64_t row = 0; row < source_vectors.size(); ++row) {
+        source_rows[row] = source_vectors.data() + row * dim;
+    }
+    std::vector<uint32_t> labels(ids.size() * max_neighbors, static_cast<uint32_t>(ids.size()));
+    std::vector<float> distances(ids.size() * max_neighbors, -1.0F);
+
+    REQUIRE(CudaSelectLeafNeighbors(source_rows.data(),
+                                    source_vectors.size(),
+                                    row_sources.data(),
+                                    norms.data(),
+                                    ids.data(),
+                                    leaf_offsets.data(),
+                                    neighbor_counts.data(),
+                                    2,
+                                    dim,
+                                    max_neighbors,
+                                    DistanceType::L2Sqr,
+                                    labels.data(),
+                                    distances.data(),
+                                    CudaSuggestedBudget(kChunkedBudgetCap),
+                                    kForceOffload));
+
+    for (uint64_t leaf = 0; leaf < 2; ++leaf) {
+        for (uint64_t source = leaf_offsets[leaf]; source < leaf_offsets[leaf + 1]; ++source) {
+            std::vector<std::pair<float, uint32_t>> expected;
+            for (uint64_t target = leaf_offsets[leaf]; target < leaf_offsets[leaf + 1]; ++target) {
+                if (source == target) {
+                    continue;
+                }
+                const float difference =
+                    source_vectors[row_sources[source]] - source_vectors[row_sources[target]];
+                expected.emplace_back(difference * difference, static_cast<uint32_t>(target));
+            }
+            std::sort(expected.begin(), expected.end(), [&](const auto& lhs, const auto& rhs) {
+                if (lhs.first != rhs.first) {
+                    return lhs.first < rhs.first;
+                }
+                const uint64_t lhs_gap = ids[source] >= ids[lhs.second]
+                                             ? ids[source] - ids[lhs.second]
+                                             : ids[lhs.second] - ids[source];
+                const uint64_t rhs_gap = ids[source] >= ids[rhs.second]
+                                             ? ids[source] - ids[rhs.second]
+                                             : ids[rhs.second] - ids[source];
+                return lhs_gap < rhs_gap or
+                       (lhs_gap == rhs_gap and ids[lhs.second] < ids[rhs.second]);
+            });
+            for (uint32_t selected = 0; selected < neighbor_counts[leaf]; ++selected) {
+                const uint64_t output = source * max_neighbors + selected;
+                REQUIRE(labels[output] == expected[selected].second);
+                REQUIRE(distances[output] == expected[selected].first);
+            }
+        }
+    }
 }
 
 TEST_CASE("Every pass runs at the smallest legal shape", "[ut][gpu_pass]") {

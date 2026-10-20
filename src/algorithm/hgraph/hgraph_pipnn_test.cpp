@@ -157,6 +157,10 @@ TEST_CASE("HGraph exposes PiPNN build parameters", "[ut][pipnn][hgraph][paramete
     parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(6);
     parameter[vsag::PIPNN_PARAMETER_HASH_PLANE_COUNT].SetUint64(4);
     parameter[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(12);
+    parameter[vsag::PIPNN_ENABLE_GPU_BUILD].SetBool(true);
+    parameter[vsag::PIPNN_GPU_DEVICE_ID].SetInt(2);
+    parameter[vsag::PIPNN_GPU_MEMORY_BUDGET].SetUint64(1ULL << 30);
+    parameter[vsag::PIPNN_GPU_MIN_WORK_THRESHOLD].SetUint64(1ULL << 40);
 
     auto mapped = vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8));
     auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
@@ -168,15 +172,29 @@ TEST_CASE("HGraph exposes PiPNN build parameters", "[ut][pipnn][hgraph][paramete
     REQUIRE(typed->pipnn_param.leaf_neighbor_count == 6);
     REQUIRE(typed->pipnn_param.hash_plane_count == 4);
     REQUIRE(typed->pipnn_param.reservoir_size == 12);
+    REQUIRE(typed->pipnn_param.enable_gpu_build);
+    REQUIRE(typed->pipnn_param.gpu_device_id == 2);
+    REQUIRE(typed->pipnn_param.gpu_memory_budget == 1ULL << 30);
+    REQUIRE(typed->pipnn_param.gpu_min_work_threshold == 1ULL << 40);
 
     const auto serialized = typed->ToJson();
     const auto graph_json = serialized[vsag::GRAPH_KEY];
     REQUIRE(graph_json[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].GetUint64() == 6);
     REQUIRE(graph_json[vsag::PIPNN_PARAMETER_HASH_PLANE_COUNT].GetUint64() == 4);
+    REQUIRE(graph_json[vsag::PIPNN_ENABLE_GPU_BUILD].GetBool());
+    REQUIRE(graph_json[vsag::PIPNN_GPU_DEVICE_ID].GetInt() == 2);
+    REQUIRE(graph_json[vsag::PIPNN_GPU_MEMORY_BUDGET].GetUint64() == 1ULL << 30);
+    REQUIRE(graph_json[vsag::PIPNN_GPU_MIN_WORK_THRESHOLD].GetUint64() == 1ULL << 40);
 
     parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(0);
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
     parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetInt(-1);
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
+    parameter[vsag::PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT].SetUint64(6);
+    parameter[vsag::PIPNN_GPU_DEVICE_ID].SetInt(-1);
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
+    parameter[vsag::PIPNN_GPU_DEVICE_ID].SetInt(0);
+    parameter[vsag::PIPNN_ENABLE_GPU_BUILD].SetString("yes");
     REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(parameter, MakePiPNNCommonParam(8)));
 }
 

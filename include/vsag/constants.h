@@ -95,6 +95,10 @@ extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
 extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
 extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING;
 extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP;
+extern const char* const PIPNN_ENABLE_GPU_BUILD;
+extern const char* const PIPNN_GPU_DEVICE_ID;
+extern const char* const PIPNN_GPU_MEMORY_BUDGET;
+extern const char* const PIPNN_GPU_MIN_WORK_THRESHOLD;
 
 extern const char* const INDEX_PARAM;
 

@@ -27,6 +27,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <string>
 #include <string_view>
@@ -35,6 +36,8 @@
 
 #include "common.h"
 #include "datacell/graph_interface.h"
+#include "gpu/cuda_backend.h"
+#include "gpu/gpu_plan.h"
 #include "hash_types.h"
 #include "impl/blas/blas_function.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -54,6 +57,14 @@ constexpr uint64_t LEADER_CAP = 1000;
 constexpr uint64_t PARTITION_STRIPE_SIZE = 256;
 constexpr uint64_t PARTITION_ASSIGNMENT_CHUNK_STRIPES = 16;
 constexpr uint64_t PARTITION_SEED = 1000;
+constexpr uint64_t GPU_PARTITION_STRIPE_SIZE = 65536;
+// PiPNN has more CPU-side work than the generic CUDA passes. The 2^41 crossover
+// avoids offloading partitions that were slower on the reference RTX 2080 Ti.
+constexpr uint64_t GPU_PARTITION_MIN_WORK = 1ULL << 41;
+// Pick batches amortize one upload and one CUDA setup over many leaves. This
+// floor is intentionally lower than partition's: a leaf compares every row
+// with every other row, so a batch reaches dense-GEMM scale quickly.
+constexpr uint64_t GPU_PICK_MIN_WORK = 1ULL << 36;
 constexpr uint64_t MIN_PARALLEL_PARTITION_POINTS = 4096;
 constexpr uint64_t SMALL_LEAF_NEIGHBOR_LIMIT = 16;
 constexpr uint64_t MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT = 4;
@@ -74,6 +85,15 @@ checked_product(uint64_t lhs, uint64_t rhs, const char* name) {
                             std::string("PiPNN ") + name + " size overflows");
     }
     return lhs * rhs;
+}
+
+uint64_t
+checked_sum(uint64_t lhs, uint64_t rhs, const char* name) {
+    if (rhs > std::numeric_limits<uint64_t>::max() - lhs) {
+        throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                            std::string("PiPNN ") + name + " size overflows");
+    }
+    return lhs + rhs;
 }
 
 class UninitializedFloatBuffer {
@@ -287,6 +307,13 @@ private:
     [[nodiscard]] Vector<uint32_t>
     sample_leaders(const WorkItem& item) const;
 
+    [[nodiscard]] std::optional<Leaves>
+    assign_to_leaders_on_device(const WorkItem& item,
+                                const Vector<uint32_t>& leaders,
+                                uint64_t fanout,
+                                bool allow_parallelism,
+                                const float* leader_values) const;
+
     [[nodiscard]] Leaves
     assign_to_leaders(const WorkItem& item,
                       const Vector<uint32_t>& leaders,
@@ -295,6 +322,9 @@ private:
 
     [[nodiscard]] Leaves
     merge_undersized_leaves(Leaves leaves) const;
+
+    bool
+    build_leaves_on_device(const Leaves& leaves);
 
     void
     build_leaf(const Leaf& leaf);
@@ -360,11 +390,13 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
 
     prepare_sketches();
     const auto leaves = partition();
-    parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
-        for (uint64_t leaf = begin; leaf < end; ++leaf) {
-            build_leaf(leaves[leaf]);
-        }
-    });
+    if (not build_leaves_on_device(leaves)) {
+        parallel_for(leaves.size(), 1, [&](uint64_t begin, uint64_t end) {
+            for (uint64_t leaf = begin; leaf < end; ++leaf) {
+                build_leaf(leaves[leaf]);
+            }
+        });
+    }
     write_graph();
 }
 
@@ -674,6 +706,126 @@ PiPNNPipeline::sample_leaders(const WorkItem& item) const {
     return leaders;
 }
 
+std::optional<Leaves>
+PiPNNPipeline::assign_to_leaders_on_device(const WorkItem& item,
+                                           const Vector<uint32_t>& leaders,
+                                           uint64_t fanout,
+                                           bool allow_parallelism,
+                                           const float* leader_values) const {
+    const uint64_t min_work = parameter_.gpu_min_work_threshold == 0
+                                  ? GPU_PARTITION_MIN_WORK
+                                  : parameter_.gpu_min_work_threshold;
+    if (not parameter_.enable_gpu_build or not allow_parallelism or
+        fanout > gpu::MAX_SELECT_NEIGHBORS or
+        not gpu::WorthOffloading(
+            item.points.size(), leaders.size(), static_cast<int32_t>(dimensions_), min_work)) {
+        return std::nullopt;
+    }
+    const gpu::CudaDeviceScope device(parameter_.gpu_device_id);
+    if (not device.Bound()) {
+        return std::nullopt;
+    }
+    const uint64_t budget =
+        gpu::CudaSuggestedBudget(gpu::EffectiveChunkedCap(parameter_.gpu_memory_budget));
+    const uint64_t leader_values_count =
+        checked_product(leaders.size(), dimensions_, "GPU leader matrix");
+    uint64_t leader_bytes =
+        checked_product(leader_values_count, sizeof(float), "GPU leader values");
+    leader_bytes = checked_sum(leader_bytes,
+                               checked_product(leaders.size(), sizeof(uint64_t), "GPU leader IDs"),
+                               "GPU leader bytes");
+    if (metric_ != MetricType::METRIC_TYPE_IP) {
+        leader_bytes =
+            checked_sum(leader_bytes,
+                        checked_product(leaders.size(), sizeof(float), "GPU leader norms"),
+                        "GPU leader bytes");
+    }
+    const uint64_t values_per_point =
+        dimensions_ + leaders.size() + fanout + (metric_ != MetricType::METRIC_TYPE_IP ? 1 : 0);
+    const uint64_t bytes_per_point =
+        checked_product(values_per_point, sizeof(float), "GPU partition point bytes");
+    if (budget <= leader_bytes or bytes_per_point == 0) {
+        return std::nullopt;
+    }
+    const auto stripe_capacity = std::min<uint64_t>(
+        {item.points.size(), GPU_PARTITION_STRIPE_SIZE, (budget - leader_bytes) / bytes_per_point});
+    if (stripe_capacity == 0) {
+        return std::nullopt;
+    }
+
+    UninitializedFloatBuffer point_values(
+        checked_product(stripe_capacity, dimensions_, "GPU partition stripe"),
+        allocator_,
+        "GPU partition stripe");
+    Vector<float> point_norms(stripe_capacity, 0.0F, allocator_);
+    Vector<float> leader_norms(leaders.size(), 0.0F, allocator_);
+    Vector<uint64_t> leader_ids(leaders.size(), 0, allocator_);
+    for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
+        leader_ids[leader] = ids_[leaders[leader]];
+        if (metric_ != MetricType::METRIC_TYPE_IP) {
+            leader_norms[leader] = norms_[leaders[leader]];
+        }
+    }
+    Vector<uint32_t> assignments(
+        checked_product(item.points.size(), fanout, "GPU partition assignments"), 0, allocator_);
+
+    for (uint64_t begin = 0; begin < item.points.size(); begin += stripe_capacity) {
+        const uint64_t stripe_size =
+            std::min<uint64_t>(stripe_capacity, item.points.size() - begin);
+        parallel_for(stripe_size, 64, [&](uint64_t point_begin, uint64_t point_end) {
+            for (uint64_t point = point_begin; point < point_end; ++point) {
+                const auto* source = vector_by_local_id(item.points[begin + point]);
+                std::copy(source,
+                          source + static_cast<int64_t>(dimensions_),
+                          point_values.Data() + static_cast<int64_t>(point * dimensions_));
+                if (metric_ != MetricType::METRIC_TYPE_IP) {
+                    point_norms[point] = norms_[item.points[begin + point]];
+                }
+            }
+        });
+        // WorthOffloading was checked for the whole partition. A stripe is only a memory-bound
+        // execution unit, so do not make it independently pass the policy threshold.
+        const auto distance_type =
+            metric_ == MetricType::METRIC_TYPE_L2SQR
+                ? gpu::DistanceType::L2Sqr
+                : (metric_ == MetricType::METRIC_TYPE_IP ? gpu::DistanceType::InnerProduct
+                                                         : gpu::DistanceType::Cosine);
+        if (not gpu::CudaSelectNearest(point_values.Data(),
+                                       point_norms.data(),
+                                       stripe_size,
+                                       leader_values,
+                                       leader_norms.data(),
+                                       leader_ids.data(),
+                                       leaders.size(),
+                                       static_cast<int32_t>(dimensions_),
+                                       static_cast<uint32_t>(fanout),
+                                       distance_type,
+                                       assignments.data() + begin * fanout,
+                                       budget,
+                                       1)) {
+            return std::nullopt;
+        }
+    }
+
+    Vector<uint64_t> sizes(leaders.size(), 0, allocator_);
+    for (const auto leader : assignments) {
+        ++sizes[leader];
+    }
+    Leaves clusters(allocator_);
+    clusters.reserve(leaders.size());
+    for (const auto size : sizes) {
+        clusters.emplace_back(size, 0, allocator_);
+    }
+    std::fill(sizes.begin(), sizes.end(), 0);
+    for (uint64_t point = 0; point < item.points.size(); ++point) {
+        for (uint64_t selected = 0; selected < fanout; ++selected) {
+            const uint32_t leader = assignments[point * fanout + selected];
+            clusters[leader][sizes[leader]++] = item.points[point];
+        }
+    }
+    return clusters;
+}
+
 Leaves
 PiPNNPipeline::assign_to_leaders(const WorkItem& item,
                                  const Vector<uint32_t>& leaders,
@@ -693,6 +845,12 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         std::copy(source,
                   source + static_cast<int64_t>(dimensions_),
                   leader_values.Data() + static_cast<int64_t>(leader * dimensions_));
+    }
+
+    if (auto device_clusters = assign_to_leaders_on_device(
+            item, leaders, fanout, allow_parallelism, leader_values.Data());
+        device_clusters.has_value()) {
+        return std::move(*device_clusters);
     }
 
     if (allow_parallelism and thread_pool_ != nullptr and thread_count_ > 1 and
@@ -940,6 +1098,233 @@ PiPNNPipeline::merge_undersized_leaves(Leaves leaves) const {
         merged.emplace_back(std::move(leaf));
     }
     return merged;
+}
+
+bool
+PiPNNPipeline::build_leaves_on_device(const Leaves& leaves) {
+    if (not parameter_.enable_gpu_build or leaves.empty()) {
+        return false;
+    }
+    const uint64_t max_neighbors =
+        std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT);
+    if (max_neighbors > gpu::MAX_SELECT_NEIGHBORS) {
+        return false;
+    }
+
+    const uint64_t min_work = parameter_.gpu_min_work_threshold == 0
+                                  ? GPU_PICK_MIN_WORK
+                                  : parameter_.gpu_min_work_threshold;
+    uint64_t accumulated_work = 0;
+    Vector<uint64_t> eligible(allocator_);
+    Vector<uint64_t> host_only(allocator_);
+    eligible.reserve(leaves.size());
+    host_only.reserve(leaves.size());
+    for (uint64_t leaf_index = 0; leaf_index < leaves.size(); ++leaf_index) {
+        const uint64_t leaf_size = leaves[leaf_index].size();
+        if (leaf_size <= 1) {
+            continue;
+        }
+        const uint64_t requested_neighbors =
+            leaf_size < parameter_.min_leaf_size
+                ? std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
+                : parameter_.leaf_neighbor_count;
+        const uint64_t neighbor_count = std::min<uint64_t>(requested_neighbors, leaf_size - 1);
+        if (neighbor_count == 0 or neighbor_count > gpu::MAX_SELECT_NEIGHBORS) {
+            host_only.emplace_back(leaf_index);
+            continue;
+        }
+        eligible.emplace_back(leaf_index);
+        if (accumulated_work < min_work) {
+            const uint64_t leaf_square = checked_product(leaf_size, leaf_size, "GPU Pick work");
+            const uint64_t leaf_work = checked_product(leaf_square, dimensions_, "GPU Pick work");
+            accumulated_work =
+                leaf_work >= min_work - accumulated_work ? min_work : accumulated_work + leaf_work;
+        }
+    }
+    if (eligible.empty() or accumulated_work < min_work) {
+        return false;
+    }
+
+    const gpu::CudaDeviceScope device(parameter_.gpu_device_id);
+    if (not device.Bound()) {
+        return false;
+    }
+    // A larger leaf batch deduplicates vectors across more overlapping leaves.
+    // Unlike streamed partition assignment, Pick benefits from using the safe
+    // share of all free memory when the caller did not name a cap.
+    const uint64_t budget = gpu::CudaSuggestedBudget(parameter_.gpu_memory_budget);
+    if (budget == 0) {
+        return false;
+    }
+    const bool needs_norms = metric_ != MetricType::METRIC_TYPE_IP;
+    const auto distance_type =
+        metric_ == MetricType::METRIC_TYPE_L2SQR
+            ? gpu::DistanceType::L2Sqr
+            : (metric_ == MetricType::METRIC_TYPE_IP ? gpu::DistanceType::InnerProduct
+                                                     : gpu::DistanceType::Cosine);
+
+    auto device_bytes_for_leaf = [&](uint64_t leaf_size) {
+        const uint64_t vector_values = checked_product(leaf_size, dimensions_, "GPU Pick vectors");
+        const uint64_t dot_values = checked_product(leaf_size, leaf_size, "GPU Pick dots");
+        const uint64_t output_values = checked_product(leaf_size, max_neighbors, "GPU Pick output");
+        // Budget conservatively for every packed row being unique. In practice
+        // overlapping leaves share most rows, so the source matrix is smaller.
+        uint64_t float_values = checked_sum(vector_values, vector_values, "GPU Pick floats");
+        float_values = checked_sum(float_values, dot_values, "GPU Pick floats");
+        float_values = checked_sum(float_values, output_values, "GPU Pick floats");
+        if (needs_norms) {
+            float_values = checked_sum(float_values, leaf_size, "GPU Pick floats");
+        }
+        uint64_t bytes = checked_product(float_values, sizeof(float), "GPU Pick floats");
+        bytes = checked_sum(
+            bytes,
+            checked_product(leaf_size, sizeof(uint64_t) + 2 * sizeof(uint32_t), "GPU Pick rows"),
+            "GPU Pick bytes");
+        bytes = checked_sum(bytes,
+                            checked_product(output_values, sizeof(uint32_t), "GPU Pick labels"),
+                            "GPU Pick bytes");
+        bytes = checked_sum(
+            bytes, sizeof(uint64_t) + sizeof(uint64_t) + sizeof(uint32_t), "GPU Pick bytes");
+        return bytes;
+    };
+
+    Vector<uint32_t> source_generations(ids_.size(), 0, allocator_);
+    Vector<uint32_t> source_copy_generations(ids_.size(), 0, allocator_);
+    Vector<uint32_t> source_indices(ids_.size(), 0, allocator_);
+    uint32_t batch_generation = 1;
+    uint64_t next = 0;
+    while (next < eligible.size()) {
+        uint64_t batch_bytes = sizeof(uint64_t);
+        uint64_t end = next;
+        while (end < eligible.size()) {
+            const uint64_t leaf_bytes = device_bytes_for_leaf(leaves[eligible[end]].size());
+            if (leaf_bytes > budget - std::min(batch_bytes, budget)) {
+                break;
+            }
+            batch_bytes = checked_sum(batch_bytes, leaf_bytes, "GPU Pick batch");
+            ++end;
+        }
+        if (end == next) {
+            host_only.emplace_back(eligible[next]);
+            ++next;
+            continue;
+        }
+
+        uint64_t row_count = 0;
+        for (uint64_t slot = next; slot < end; ++slot) {
+            row_count =
+                checked_sum(row_count, leaves[eligible[slot]].size(), "GPU Pick packed rows");
+        }
+        Vector<const float*> source_rows(allocator_);
+        Vector<float> leaf_norms(allocator_);
+        Vector<uint64_t> leaf_ids(allocator_);
+        Vector<uint32_t> packed_points(allocator_);
+        Vector<uint32_t> row_sources(allocator_);
+        Vector<uint64_t> leaf_offsets(allocator_);
+        Vector<uint32_t> neighbor_counts(allocator_);
+        uint32_t source_count = 0;
+        for (uint64_t slot = next; slot < end; ++slot) {
+            for (const uint32_t point : leaves[eligible[slot]]) {
+                if (source_generations[point] != batch_generation) {
+                    source_generations[point] = batch_generation;
+                    source_indices[point] = source_count++;
+                }
+            }
+        }
+        source_rows.reserve(source_count);
+        if (needs_norms) {
+            leaf_norms.reserve(row_count);
+        }
+        leaf_ids.reserve(row_count);
+        packed_points.reserve(row_count);
+        row_sources.reserve(row_count);
+        leaf_offsets.reserve(end - next + 1);
+        neighbor_counts.reserve(end - next);
+        leaf_offsets.emplace_back(0);
+        for (uint64_t slot = next; slot < end; ++slot) {
+            const auto& leaf = leaves[eligible[slot]];
+            const uint64_t requested_neighbors =
+                leaf.size() < parameter_.min_leaf_size
+                    ? std::max(parameter_.leaf_neighbor_count, MIN_UNDERSIZED_LEAF_NEIGHBOR_COUNT)
+                    : parameter_.leaf_neighbor_count;
+            neighbor_counts.emplace_back(
+                static_cast<uint32_t>(std::min<uint64_t>(requested_neighbors, leaf.size() - 1)));
+            for (const uint32_t point : leaf) {
+                if (source_copy_generations[point] != batch_generation) {
+                    source_copy_generations[point] = batch_generation;
+                    source_rows.emplace_back(vector_by_local_id(point));
+                }
+                row_sources.emplace_back(source_indices[point]);
+                if (needs_norms) {
+                    leaf_norms.emplace_back(norms_[point]);
+                }
+                leaf_ids.emplace_back(ids_[point]);
+                packed_points.emplace_back(point);
+            }
+            leaf_offsets.emplace_back(packed_points.size());
+        }
+
+        const uint64_t output_count = checked_product(row_count, max_neighbors, "GPU Pick results");
+        Vector<uint32_t> labels(output_count, 0, allocator_);
+        Vector<float> distances(output_count, 0.0F, allocator_);
+        const bool selected = gpu::CudaSelectLeafNeighbors(source_rows.data(),
+                                                           source_count,
+                                                           row_sources.data(),
+                                                           leaf_norms.data(),
+                                                           leaf_ids.data(),
+                                                           leaf_offsets.data(),
+                                                           neighbor_counts.data(),
+                                                           end - next,
+                                                           static_cast<int32_t>(dimensions_),
+                                                           static_cast<uint32_t>(max_neighbors),
+                                                           distance_type,
+                                                           labels.data(),
+                                                           distances.data(),
+                                                           budget,
+                                                           1);
+        if (not selected) {
+            parallel_for(end - next, 1, [&](uint64_t begin, uint64_t finish) {
+                for (uint64_t slot = begin; slot < finish; ++slot) {
+                    build_leaf(leaves[eligible[next + slot]]);
+                }
+            });
+        } else {
+            parallel_for(end - next, 1, [&](uint64_t begin, uint64_t finish) {
+                for (uint64_t leaf = begin; leaf < finish; ++leaf) {
+                    const uint64_t row_begin = leaf_offsets[leaf];
+                    const uint64_t row_end = leaf_offsets[leaf + 1];
+                    for (uint64_t source = row_begin; source < row_end; ++source) {
+                        const uint64_t output = source * max_neighbors;
+                        for (uint32_t candidate = 0; candidate < neighbor_counts[leaf];
+                             ++candidate) {
+                            const uint32_t target = labels[output + candidate];
+                            insert_candidate(packed_points[source],
+                                             packed_points[target],
+                                             distances[output + candidate]);
+                            insert_candidate(packed_points[target],
+                                             packed_points[source],
+                                             distances[output + candidate]);
+                        }
+                    }
+                }
+            });
+        }
+        next = end;
+        if (batch_generation == std::numeric_limits<uint32_t>::max()) {
+            std::fill(source_generations.begin(), source_generations.end(), 0);
+            std::fill(source_copy_generations.begin(), source_copy_generations.end(), 0);
+            batch_generation = 1;
+        } else {
+            ++batch_generation;
+        }
+    }
+
+    parallel_for(host_only.size(), 1, [&](uint64_t begin, uint64_t end) {
+        for (uint64_t slot = begin; slot < end; ++slot) {
+            build_leaf(leaves[host_only[slot]]);
+        }
+    });
+    return true;
 }
 
 void
@@ -1354,14 +1739,47 @@ PiPNNGraphBuilderParameter::FromJson(const JsonType& json) {
             return;
         }
         require_argument(json[key].IsNumberUnsigned(),
-                         fmt::format("PiPNN {} must be a non-negative integer", key));
+                         fmt::format("PiPNN {} must be an unsigned integer", key));
         target = json[key].GetUint64();
+    };
+    auto read_gpu_uint = [&](const char* key, uint64_t& target) {
+        if (not json.Contains(key)) {
+            return;
+        }
+        const JsonType value = json[key];
+        if (value.IsNumberUnsigned()) {
+            target = value.GetUint64();
+            require_argument(target <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                             fmt::format("PiPNN {} exceeds the signed 64-bit limit", key));
+            return;
+        }
+        require_argument(value.IsNumber(),
+                         fmt::format("PiPNN {} must be a non-negative integer", key));
+        const int64_t signed_value = value.GetInt();
+        require_argument(signed_value >= 0,
+                         fmt::format("PiPNN {} must be a non-negative integer", key));
+        target = static_cast<uint64_t>(signed_value);
     };
     read_uint(PIPNN_PARAMETER_MAX_LEAF_SIZE, max_leaf_size);
     read_uint(PIPNN_PARAMETER_MIN_LEAF_SIZE, min_leaf_size);
     read_uint(PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT, leaf_neighbor_count);
     read_uint(PIPNN_PARAMETER_HASH_PLANE_COUNT, hash_plane_count);
     read_uint(PIPNN_PARAMETER_RESERVOIR_SIZE, reservoir_size);
+    read_gpu_uint(PIPNN_GPU_MEMORY_BUDGET, gpu_memory_budget);
+    read_gpu_uint(PIPNN_GPU_MIN_WORK_THRESHOLD, gpu_min_work_threshold);
+
+    if (json.Contains(PIPNN_ENABLE_GPU_BUILD)) {
+        require_argument(json[PIPNN_ENABLE_GPU_BUILD].IsBool(),
+                         "PiPNN pipnn_enable_gpu_build must be a boolean");
+        enable_gpu_build = json[PIPNN_ENABLE_GPU_BUILD].GetBool();
+    }
+    if (json.Contains(PIPNN_GPU_DEVICE_ID)) {
+        uint64_t device_id = 0;
+        read_gpu_uint(PIPNN_GPU_DEVICE_ID, device_id);
+        require_argument(device_id <= static_cast<uint64_t>(std::numeric_limits<int32_t>::max()),
+                         "PiPNN pipnn_gpu_device_id exceeds the 32-bit limit");
+        gpu_device_id = static_cast<int32_t>(device_id);
+    }
 
     if (json.Contains(PIPNN_PARAMETER_LEADER_SAMPLE_RATE)) {
         require_argument(json[PIPNN_PARAMETER_LEADER_SAMPLE_RATE].IsNumber(),
@@ -1397,6 +1815,10 @@ PiPNNGraphBuilderParameter::ToJson() const {
     json[PIPNN_PARAMETER_RESERVOIR_SIZE].SetUint64(reservoir_size);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].SetBool(adaptive_pruning);
     json[PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP].SetFloat(adaptive_pruning_adjust_step);
+    json[PIPNN_ENABLE_GPU_BUILD].SetBool(enable_gpu_build);
+    json[PIPNN_GPU_DEVICE_ID].SetInt(gpu_device_id);
+    json[PIPNN_GPU_MEMORY_BUDGET].SetUint64(gpu_memory_budget);
+    json[PIPNN_GPU_MIN_WORK_THRESHOLD].SetUint64(gpu_min_work_threshold);
     return json;
 }
 

@@ -107,6 +107,10 @@ auto result = index->KnnSearch(
 | `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；过小叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_enable_gpu_build` | bool | `false` | CUDA 可用时将规模足够大的 PiPNN 分区分配和叶子 Pick 批次下放到 GPU |
+| `pipnn_gpu_device_id` | int | `0` | PiPNN 构建使用的非负 CUDA 设备序号 |
+| `pipnn_gpu_memory_budget` | int | `0` | CUDA 工作集最大字节数；`0` 表示根据当前空闲显存推导安全预算 |
+| `pipnn_gpu_min_work_threshold` | int | `0` | 值得下放的最小阶段工作量；`0` 使用 Partition 和 Pick 各自的 PiPNN 标定默认值 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
@@ -131,6 +135,10 @@ PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"c
 `pipnn_*` 参数在整个 Pyramid 索引中共享；hierarchy 对象仍可分别覆盖
 `max_degree` 和 `alpha`，PiPNN 构建该 hierarchy 时会使用这些覆盖值。
 `ef_construction` 不调节 PiPNN。
+
+GPU 构建默认关闭，可加速规模足够大的分区分配和批量叶子 Pick。Pick 每批只传输一次重复
+源向量，并在 GPU 上计算对称叶内点积和确定性 top-k；方向哈希插入和最终剪枝仍在 CPU
+执行。未编译 CUDA、指定设备无效或工作量/显存预算过小时，构建会回退到 CPU 路径。
 
 ### RaBitQ split 配置
 

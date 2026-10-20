@@ -40,6 +40,10 @@ struct PiPNNGraphBuilderParameter {
     float alpha{1.0F};
     bool adaptive_pruning{false};
     float adaptive_pruning_adjust_step{0.06F};
+    bool enable_gpu_build{false};
+    int32_t gpu_device_id{0};
+    uint64_t gpu_memory_budget{0};
+    uint64_t gpu_min_work_threshold{0};
 
     void
     FromJson(const JsonType& json);
