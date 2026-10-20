@@ -53,6 +53,13 @@ supplement-code refinement and result selection remain real costs. Cached query
 sums/coarse inner products, batch4 kernels, bounded heaps, large-graph visited
 bitmap and routing-only estimates reduce selected costs without changing budgets.
 Distances are approximate quantized L2 estimates. A filter can yield fewer than k.
+Residual radii retain their actual nonnegative norm, including zero at the centroid;
+the safe normalization divisor does not replace the geometric radius. Finite queries
+with k=0 or an empty index return before transformation, after input validation.
+Ordinary finite scoring keeps its float evaluation order. Non-finite intermediate
+distance/bound results are recomputed in double before conversion: representable
+answers such as a large-vector self-match remain valid. Estimates outside the float
+range are represented by signed infinity; NaN scoring is rejected before heap ordering.
 
 Save streams model/codes/IDs/CSR-format topology without recreating original vectors.
 Load restores identical state without training and remains mutable even after
@@ -60,6 +67,11 @@ deleting all rows and re-adding. Format `VSAGLQ01` v1 is independent of floating
 `VSAGLT01` v1/v2/v3 and native Full. Integer/float bit fields are little-endian;
 header sizes, finite metadata, IDs, adjacency, short/trailing input are validated.
 Model/code profile changes require explicit format compatibility handling.
+The residual-norm correction keeps the v1 field layout and reads existing positive-norm
+snapshots without re-encoding. Corrected snapshots can contain zero residual norms and
+require the corrected reader; older readers may reject them. Loading an old snapshot
+does not repair radii previously clamped to one: rebuild from original vectors when
+that case matters.
 No checksum, fsync, atomic file replacement or same-instance concurrent calls.
 
 ## Test correspondence and completeness

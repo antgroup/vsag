@@ -306,6 +306,10 @@ Index::Save(std::ostream& output) const {
     } catch (const std::ios_base::failure&) {
         // ErrorType has no write-specific value; keep the existing stream-error contract.
         return failure(ErrorType::READ_ERROR, "snapshot write failed");
+    } catch (const std::bad_alloc&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "snapshot allocation failed");
+    } catch (const std::length_error&) {
+        return failure(ErrorType::NO_ENOUGH_MEMORY, "snapshot capacity exceeded");
     }
 }
 

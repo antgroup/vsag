@@ -230,7 +230,7 @@ load_snapshot_payload(std::istream& input, uint64_t expected_version) {
         metadata.filter_norm = read_float(input);
         metadata.filter_error = read_float(input);
         metadata.lower_bound_error = read_float(input);
-        codec_require(metadata.norm > 0.0F and metadata.code_norm > 0.0F and
+        codec_require(metadata.norm >= 0.0F and metadata.code_norm > 0.0F and
                           metadata.filter_norm > 0.0F and metadata.filter_error >= 1e-5F and
                           metadata.filter_error <= 1.0F and metadata.lower_bound_error >= 0.0F,
                       "invalid snapshot metadata");

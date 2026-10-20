@@ -388,7 +388,7 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
     }
     if (__builtin_cpu_supports("avx512f") and __builtin_cpu_supports("avx512dq") and
         __builtin_cpu_supports("avx512bw") and __builtin_cpu_supports("avx512vl") and
-        __builtin_cpu_supports("avx2")) {
+        __builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
         kernels.push_back(vsag::lite::detail::avx512_fp32_distance);
         REQUIRE(selected == vsag::lite::detail::avx512_fp32_distance);
     } else if (__builtin_cpu_supports("avx2") and __builtin_cpu_supports("fma")) {
@@ -402,11 +402,57 @@ TEST_CASE("Lite FP32 ISA kernels preserve squared-L2 across short and tail dimen
     REQUIRE(selected == generic);
 #endif
     for (const uint64_t dim :
-         {1ULL, 3ULL, 4ULL, 5ULL, 8ULL, 9ULL, 16ULL, 17ULL, 32ULL, 33ULL, 128ULL, 129ULL}) {
+         {1ULL, 3ULL, 4ULL, 5ULL, 8ULL, 9ULL, 16ULL, 17ULL, 24ULL, 32ULL, 33ULL, 128ULL, 129ULL}) {
         const float expected = generic(query, vector, dim);
         for (const auto kernel : kernels) {
             const float actual = kernel(query, vector, dim);
             REQUIRE(std::abs(actual - expected) <= 1e-4F * std::max(1.0F, expected));
+        }
+    }
+}
+
+TEST_CASE("Lite filter exceptions use a backend-independent error contract", "[lite]") {
+    for (int mode : {0, 1, 2}) {
+        auto created = Index::Create(1);
+        REQUIRE(created);
+        const float vector = 1.0F;
+        REQUIRE((*created)->Add(17, &vector, 1));
+        if (mode != 0) {
+            REQUIRE((*created)->BuildGraph(
+                mode == 1 ? vsag::lite::VectorStorage::FP32 : vsag::lite::VectorStorage::FP16,
+                2,
+                8));
+        }
+        std::ostringstream before;
+        REQUIRE((*created)->Save(before));
+        for (int kind : {0, 1, 2, 3, 4}) {
+            uint64_t calls = 0;
+            const vsag::lite::IdFilter filter = [&](int64_t) -> bool {
+                ++calls;
+                switch (kind) {
+                    case 0:
+                        throw std::bad_alloc();
+                    case 1:
+                        throw std::length_error("filter capacity");
+                    case 2:
+                        throw std::invalid_argument("caller argument");
+                    case 3:
+                        throw std::runtime_error("caller failure");
+                    default:
+                        throw 17;
+                }
+            };
+            const auto result = (*created)->SearchWithOptions(&vector, 1, 1, {8}, filter);
+            REQUIRE_FALSE(result);
+            REQUIRE(result.error().type == (kind < 2 ? vsag::ErrorType::NO_ENOUGH_MEMORY
+                                                     : vsag::ErrorType::INTERNAL_ERROR));
+            REQUIRE(calls == 1);
+            std::ostringstream after;
+            REQUIRE((*created)->Save(after));
+            REQUIRE(after.str() == before.str());
+            REQUIRE((*created)->Search(&vector, 1, 1)->front().id == 17);
+            REQUIRE((*created)->Search(&vector, 1, 0, filter)->empty());
+            REQUIRE(calls == 1);
         }
     }
 }
@@ -482,6 +528,42 @@ private:
 };
 }  // namespace
 
+TEST_CASE("Lite save translates stream allocation and capacity failures", "[lite]") {
+    class FailingWriteBuffer : public std::streambuf {
+    public:
+        explicit FailingWriteBuffer(bool allocation) : allocation_(allocation) {
+        }
+
+    protected:
+        std::streamsize
+        xsputn(const char* /*unused*/, std::streamsize /*unused*/) override {
+            if (allocation_) {
+                throw std::bad_alloc();
+            }
+            throw std::length_error("stream write capacity failure");
+        }
+
+    private:
+        bool allocation_;
+    };
+    for (auto storage : {vsag::lite::VectorStorage::FP32, vsag::lite::VectorStorage::FP16}) {
+        auto created = Index::Create(2);
+        REQUIRE(created);
+        const float vector[]{1, 2};
+        REQUIRE((*created)->Add(1, vector, 2));
+        REQUIRE((*created)->BuildGraph(storage));
+        for (bool allocation : {false, true}) {
+            FailingWriteBuffer buffer(allocation);
+            std::ostream output(&buffer);
+            output.exceptions(std::ios::badbit);
+            const auto result = (*created)->Save(output);
+            REQUIRE_FALSE(result);
+            REQUIRE(result.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+            REQUIRE((*created)->Search(vector, 2, 1)->front().id == 1);
+        }
+    }
+}
+
 TEST_CASE("Lite load translates stream allocation and capacity failures", "[lite]") {
     for (const bool allocation : {false, true}) {
         FailingPositionBuffer buffer(allocation);
@@ -492,6 +574,22 @@ TEST_CASE("Lite load translates stream allocation and capacity failures", "[lite
 }
 
 #ifdef VSAG_LITE_HAS_X86_SIMD
+TEST_CASE("Lite FP32 dispatch requires FMA for AVX2 and AVX512 tails", "[lite]") {
+    using namespace vsag::lite::detail;
+    for (bool sse : {false, true}) {
+        for (bool avx2 : {false, true}) {
+            for (bool avx512 : {false, true}) {
+                for (bool fma : {false, true}) {
+                    const auto expected = avx2 and fma
+                                              ? (avx512 ? avx512_fp32_distance : avx2_fp32_distance)
+                                              : (sse ? sse_fp32_distance : generic_fp32_distance);
+                    REQUIRE(select_fp32_distance_for(sse, avx2, avx512, fma) == expected);
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("Lite FP16 dispatch requires complete feature combinations", "[lite]") {
     using namespace vsag::lite::detail;
     REQUIRE(select_fp16_distance_for(false, false, false, false, false) == generic_fp16_distance);
@@ -499,8 +597,25 @@ TEST_CASE("Lite FP16 dispatch requires complete feature combinations", "[lite]")
     REQUIRE(select_fp16_distance_for(false, true, false, false, true) == generic_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, false, false, false, true) == avx_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, false, false, true) == avx_fp16_distance);
+    REQUIRE(select_fp16_distance_for(true, true, true, false, true) == avx_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, false, true, true) == avx2_fp16_distance);
     REQUIRE(select_fp16_distance_for(true, true, true, true, true) == avx512_fp16_distance);
+    for (bool avx : {false, true}) {
+        for (bool avx2 : {false, true}) {
+            for (bool avx512 : {false, true}) {
+                for (bool fma : {false, true}) {
+                    for (bool f16c : {false, true}) {
+                        const auto expected =
+                            not f16c       ? generic_fp16_distance
+                            : avx2 and fma ? (avx512 ? avx512_fp16_distance : avx2_fp16_distance)
+                            : avx          ? avx_fp16_distance
+                                           : generic_fp16_distance;
+                        REQUIRE(select_fp16_distance_for(avx, avx2, avx512, fma, f16c) == expected);
+                    }
+                }
+            }
+        }
+    }
 }
 #endif
 

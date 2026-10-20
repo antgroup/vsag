@@ -235,6 +235,40 @@ check_reverse_mutation_allocation(int operation, uint64_t count = 16, bool rever
 int
 main() {
     int problems = 0;
+    // A non-allocating stream isolates Save's own staging allocation.
+    struct Sink : std::streambuf {
+        std::streamsize
+        xsputn(const char* /*unused*/, std::streamsize count) override {
+            return count;
+        }
+        int_type
+        overflow(int_type value) override {
+            return traits_type::not_eof(value);
+        }
+    };
+    auto created = vsag::lite::Index::Create(2);
+    const float vector[]{1, 2};
+    if (not created or not(*created)->Add(1, vector, 2) or
+        not(*created)->BuildGraph(vsag::lite::VectorStorage::FP16)) {
+        return 1;
+    }
+    const auto before_save = save(**created);
+    Sink sink;
+    std::ostream output(&sink);
+    remaining = 0;
+    bool save_failed = false;
+    try {
+        const auto saved = (*created)->Save(output);
+        remaining = -1;
+        save_failed = not saved and saved.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY;
+    } catch (...) {
+        remaining = -1;
+        ++problems;
+    }
+    if (not save_failed or save(**created) != before_save) {
+        ++problems;
+    }
+    std::cout << "SAVE_ALLOCATION problems=" << problems << "\n";
 #if defined(VSAG_LITE_HAS_RABITQ_BACKEND)
     try {
         problems += check_reverse_mutation_allocation(0);

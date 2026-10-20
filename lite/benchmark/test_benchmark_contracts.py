@@ -81,7 +81,8 @@ class ReproductionDocumentationTests(unittest.TestCase):
         root = Path(__file__).parent
         index = (root / 'ACCEPTANCE.md').read_text()
         recipes = (root / 'README.md').read_text()
-        self.assertIn('a3a76a80cc5e8f1412c93b0a118f51785fdf6e75', index)
+        self.assertIn('cba340660f2ea479b316d7b73a27f34186b8a1d9', index)
+        self.assertIn('E9 measures `a3a76a8`', index)
         self.assertIn('historical measurement', index)
         self.assertIn('## Reproduction recipes', recipes)
         self.assertIn('### Guarded historical Full, package and quality replay', recipes)

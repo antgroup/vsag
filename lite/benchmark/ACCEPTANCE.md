@@ -2,20 +2,24 @@
 
 [详细综合报告 / comprehensive evidence report](ACCEPTANCE_REPORT.md) covers the
 four outputs, three datasets, Lite/native Full comparisons, real CRUD, CPU/memory,
-100k experiments, measured optimizations and failed quality gates. Historical
-Cohere coverage is not the latest SIFT/GIST resident rerun.
+100k experiments, measured optimizations and failed quality gates. The prior E9
+cohort includes Cohere; historical Full comparisons remain separate evidence.
 
 ## Scope and source identity
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
 The current integration depends on #2904 feature commit
-`a3a76a80cc5e8f1412c93b0a118f51785fdf6e75`; its production sources and public
+`cba340660f2ea479b316d7b73a27f34186b8a1d9`; its production sources and public
 headers match that feature dependency. The earlier integration
 `74a9420c771e75dea5e56324775d8db5d1472459` remains a historical measurement
 identity, not the current integration baseline. No rejected graph
 policy is enabled by this benchmark integration. `ENABLE_BENCHMARKS` defaults OFF.
 Older evidence explicitly measures `dbb2fe0` or its report-specific source, not
-automatically the latest merged implementation.
+automatically the latest merged implementation. E9 measures `a3a76a8`, before the
+review fixes; its original records remain unchanged. A new measurement of the
+review-fixed feature follows the same resident protocol below, with a fresh build
+receipt and the exact same input hashes. It is a version revalidation, not an
+algorithm speedup or a new Full comparison.
 
 The previous experiment snapshot remains publicly recoverable at
 [`800a82232da3a91dfc90229c3a8fdbf4fa9b428a`](https://github.com/nw9663644-eng/vsag/tree/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark).
@@ -35,9 +39,9 @@ and negative experiments are preserved. This reduces review noise, not evidence.
 
 ## Start with these reports
 
-The [new three-dataset resident cohort](results/resident-three-datasets-20261019/README.md)
-uses 1000 query rows on SIFT/GIST/Cohere, a source-bound current Lite build and
-27 fresh processes. It fills the current Lite cohort coverage, not a new Full or
+The [prior three-dataset resident cohort](results/resident-three-datasets-20261019/README.md)
+uses 1000 query rows on SIFT/GIST/Cohere, a source-bound `a3a76a8` Lite build and
+27 fresh processes. It documents that measured version, not a new Full or
 runtime-package comparison. Quality declines and the pending quality criterion
 remain separate from raw-audit success.
 

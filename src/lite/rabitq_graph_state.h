@@ -54,10 +54,45 @@ supplement_ip(const std::vector<float>& query, const uint8_t* supplement) {
     return compute(query.data(), supplement, query.size());
 }
 
+// The public score is float. Preserve infinities for out-of-range estimates,
+// but never feed NaN to candidate heaps or sorting comparators.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((cold, noinline))
+#endif
+inline float
+narrow_score(double value) {
+    codec_require(not std::isnan(value), "NaN RaBitQ score");
+    constexpr double maximum = std::numeric_limits<float>::max();
+    if (value > maximum) {
+        return std::numeric_limits<float>::infinity();
+    }
+    if (value < -maximum) {
+        return -std::numeric_limits<float>::infinity();
+    }
+    return static_cast<float>(value);
+}
+
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((cold, noinline))
+#endif
+inline double
+wide_l2_distance(float base_norm, float query_norm, float normalized_ip) {
+    codec_require(
+        std::isfinite(base_norm) and std::isfinite(query_norm) and std::isfinite(normalized_ip),
+        "non-finite RaBitQ scoring input");
+    const double base = base_norm;
+    const double query = query_norm;
+    return base * base + query * query - 2.0 * base * query * normalized_ip;
+}
+
 inline float
 l2_distance(float base_norm, float query_norm, float normalized_ip) {
-    return base_norm * base_norm + query_norm * query_norm -
-           2.0F * base_norm * query_norm * normalized_ip;
+    const float distance = base_norm * base_norm + query_norm * query_norm -
+                           2.0F * base_norm * query_norm * normalized_ip;
+    if (std::isfinite(distance)) {
+        return distance;
+    }
+    return narrow_score(wide_l2_distance(base_norm, query_norm, normalized_ip));
 }
 
 inline uint32_t
@@ -92,6 +127,28 @@ struct FilterEstimate {
     float centered_ip;
 };
 
+inline float
+filter_lower_bound(float distance,
+                   float base_norm,
+                   float query_norm,
+                   float normalized_ip,
+                   float lower_bound_error,
+                   float filter_error) {
+    const float error =
+        2.0F * base_norm * query_norm * K_ERROR_RATE * lower_bound_error / filter_error;
+    const float estimate = distance - error;
+    const float bound = estimate - 1e-5F * std::max(1.0F, std::fabs(estimate));
+    if (std::isfinite(bound)) {
+        return bound;
+    }
+    // Recompute before narrowing: distance-error must not become Inf-Inf.
+    const double wide_error =
+        2.0 * base_norm * query_norm * K_ERROR_RATE * lower_bound_error / filter_error;
+    const double wide_estimate =
+        wide_l2_distance(base_norm, query_norm, normalized_ip) - wide_error;
+    return narrow_score(wide_estimate - 1e-5 * std::max(1.0, std::fabs(wide_estimate)));
+}
+
 template <bool need_lower_bound = true>
 inline FilterEstimate
 filter_estimate(const std::vector<float>& query, float query_norm, const EncodedView& code) {
@@ -102,10 +159,12 @@ filter_estimate(const std::vector<float>& query, float query_norm, const Encoded
     if constexpr (not need_lower_bound) {
         return {distance, 0.0F, centered_ip};
     }
-    const float error = 2.0F * code.metadata.norm * query_norm * K_ERROR_RATE *
-                        code.metadata.lower_bound_error / code.metadata.filter_error;
-    const float estimate = distance - error;
-    const float lower_bound = estimate - 1e-5F * std::max(1.0F, std::fabs(estimate));
+    const float lower_bound = filter_lower_bound(distance,
+                                                 code.metadata.norm,
+                                                 query_norm,
+                                                 normalized_ip,
+                                                 code.metadata.lower_bound_error,
+                                                 code.metadata.filter_error);
     return {distance, lower_bound, centered_ip};
 }
 
@@ -126,11 +185,14 @@ filter_estimate_batch4(const std::vector<float>& query,
             results[lane] = {distance, 0.0F, centered_ips[lane]};
             continue;
         }
-        const float error = 2.0F * metadata.norm * query_norm * K_ERROR_RATE *
-                            metadata.lower_bound_error / metadata.filter_error;
-        const float estimate = distance - error;
-        results[lane] = {
-            distance, estimate - 1e-5F * std::max(1.0F, std::fabs(estimate)), centered_ips[lane]};
+        results[lane] = {distance,
+                         filter_lower_bound(distance,
+                                            metadata.norm,
+                                            query_norm,
+                                            normalized_ip,
+                                            metadata.lower_bound_error,
+                                            metadata.filter_error),
+                         centered_ips[lane]};
     }
     return results;
 }
@@ -1069,7 +1131,7 @@ public:
         codec_require(prepared.query.size() == model_.dim and
                           prepared.code.filter.size() == codes_.FilterBytes() and
                           prepared.code.supplement.size() == codes_.SupplementBytes() and
-                          std::isfinite(prepared.code.norm) and prepared.code.norm > 0.0F,
+                          std::isfinite(prepared.code.norm) and prepared.code.norm >= 0.0F,
                       "invalid prepared update shape or norm");
         codec_require(
             std::isfinite(prepared.code.code_norm) and prepared.code.code_norm > 0.0F and
