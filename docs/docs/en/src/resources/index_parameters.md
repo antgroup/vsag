@@ -99,6 +99,23 @@ traversal and runs an exact scan over the surviving ids. See the
 [HGraph index page](../indexes/hgraph.md#brute-force-fallback-under-highly-selective-filters-brute_force_threshold)
 for details.
 
+`search_no_lock` is a search-only boolean, default `false`, replacing
+`mci_seed_no_lock` (the old name is rejected). It selects empty read-lock guards
+throughout HGraph and MCI search, including routing, labels/deletions, vectors,
+cliques and result handling. The visited-list pool uses a separate atomic lease
+list; it does not access shared deques without their mutexes. Search algorithms,
+filtering and missing/deleted-ID semantics are unchanged.
+
+Use this option only with a read-only in-memory index: no concurrent build, add,
+remove, vector/label update, tuning, resize, or deserialization. Concurrent independent
+queries (including a mixture of locked and unlocked queries) are supported.
+`hgraph.parallelism` must be 1, because the intra-query worker pool requires
+its own synchronization; parallelize independent queries instead. This flag does not
+disable synchronization inside the allocator, OS, external filters or disk caches.
+The query-local policy is restored on return or exception and never changes the index's
+global mutex objects. Query statistics report `search_no_lock`. Existing serialized
+indexes can be reused without rebuilding or rewriting them.
+
 ## LazyHGraph
 
 LazyHGraph can take its build parameters in a top-level `lazy_hgraph` object

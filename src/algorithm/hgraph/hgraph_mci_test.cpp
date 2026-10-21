@@ -3752,3 +3752,84 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
         }
     }
 }
+
+namespace {
+std::vector<float>
+make_test_vectors(int64_t total, int64_t dim) {
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 8);
+        vectors[i * dim + 1] = static_cast<float>(i % 8);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 11);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 13);
+    }
+    return vectors;
+}
+
+}  // namespace
+
+TEST_CASE("HGraph no-lock routes preserve results under mixed concurrency",
+          "[ut][hgraph][mci][search_no_lock]") {
+    const auto io = GENERATE("memory_io", "block_memory_io");
+    constexpr int64_t dim = 4, total = 128;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    auto vectors = make_test_vectors(total, dim);
+    auto bp = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    bp["index_param"]["base_io_type"].SetString(io);
+    bp["index_param"]["base_quantization_type"].SetString("fp32");
+    bp["index_param"]["use_reorder"].SetBool(false);
+    auto index = vsag::Factory::CreateIndex("hgraph", bp.Dump());
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    std::vector<int64_t> valid(ids.begin(), ids.begin() + 48);
+    auto filter = std::make_shared<HalfRatioAllValidFilter>(valid);
+    auto query = make_dataset(ids, vectors, 3, 1, dim);
+    const std::vector<std::string> routes = {
+        R"("use_mci":true,"mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0)",
+        R"("use_mci":true,"mci_seed_coverage":1,"hgraph_valid_ratio_threshold":1.0)",
+        R"("use_mci":true,"hgraph_valid_ratio_threshold":0.1)",
+        R"("use_mci":false)",
+        R"("use_mci":true,"brute_force_threshold":1.0)"};
+    for (const bool removed : {false, true}) {
+        if (removed) {
+            REQUIRE(index.value()->Remove(ids[5]).has_value());
+        }
+        for (const auto& route : routes) {
+            const auto locked_params = std::string(R"({"hgraph":{"ef_search":32,)") + route + "}}";
+            const auto unlocked_params = std::string(R"({"hgraph":{"ef_search":32,)") + route +
+                                         R"(,"search_no_lock":true}})";
+            auto expected = index.value()->KnnSearch(query, 5, locked_params, filter);
+            REQUIRE(expected.has_value());
+            std::atomic<int> errors{0};
+            std::vector<std::thread> workers;
+            for (int worker = 0; worker < 16; ++worker) {
+                workers.emplace_back([&, worker] {
+                    for (int rep = 0; rep < 16; ++rep) {
+                        const auto& params = (rep + worker) % 2 ? locked_params : unlocked_params;
+                        auto result = index.value()->KnnSearch(query, 5, params, filter);
+                        if (not result.has_value() or
+                            result.value()->GetDim() != expected.value()->GetDim()) {
+                            errors.fetch_add(1);
+                            continue;
+                        }
+                        for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
+                            if (result.value()->GetIds()[j] != expected.value()->GetIds()[j] or
+                                result.value()->GetDistances()[j] !=
+                                    expected.value()->GetDistances()[j]) {
+                                errors.fetch_add(1);
+                            }
+                        }
+                        if (vsag::SearchLockScope::IsNoLock()) {
+                            errors.fetch_add(1);
+                        }
+                    }
+                });
+            }
+            for (auto& worker : workers) {
+                worker.join();
+            }
+            REQUIRE(errors.load() == 0);
+        }
+    }
+}

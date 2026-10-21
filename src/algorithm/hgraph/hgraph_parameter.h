@@ -125,6 +125,18 @@ public:
 
 public:
     int64_t ef_search{30};
+    int64_t hgraph_ef_search{0};
+    int64_t mci_ef_search{0};
+
+    // Effective per-route breadth: `ef_search` wins whenever the route value is unset.
+    int64_t
+    GetHGraphEfSearch() const {
+        return hgraph_ef_search > 0 ? hgraph_ef_search : ef_search;
+    }
+    int64_t
+    GetMciEfSearch() const {
+        return mci_ef_search > 0 ? mci_ef_search : ef_search;
+    }
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
@@ -152,6 +164,13 @@ public:
     // (32768 inner ids are 128 KiB) instead of growing a wide predicate into a scan. 0
     // means unlimited.
     int64_t mci_seed_max_count{32768};
+    // Read-only experiments only: use empty read locks throughout this query.
+    bool search_no_lock{false};
+    // Expansion early stop: N consecutive expanded candidates that discovered nothing new abort
+    // the remaining expansion (0 disables). The metric lower bound is a heuristic (a clique
+    // member can be closer to the query than the candidate that led to it), so it is opt-in.
+    int64_t mci_expansion_idle_window{32};
+    bool mci_expansion_lower_bound{false};
     float mci_hgraph_valid_ratio_threshold{0.05F};
     // If > 0 and the active filter's ValidRatio() <= brute_force_threshold,
     // the search bypasses the graph traversal and runs an exact scan over the

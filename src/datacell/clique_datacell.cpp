@@ -23,6 +23,7 @@
 #include "common.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 namespace {
@@ -776,6 +777,36 @@ CliqueDataCell::validate(uint64_t total) const {
                    "clique datacell inactive node mask size mismatch");
     CHECK_ARGUMENT(retired_cliques_.size() == total_logical_clique_count_unlocked(),
                    "clique datacell retired clique mask size mismatch");
+}
+
+bool
+CliqueDataCell::TryGetBaseView(uint64_t total, CliqueDataCellBaseView& view) const {
+    auto lock = MakeSearchReadLock(mutex_);
+    const auto has_index =
+        available_total_.load(std::memory_order_acquire) == total and
+        total_logical_clique_count_unlocked() > 0 and p_maxc_.size() == total_clique_count_ + 1 and
+        p_node_to_cid_.size() == total + 1 and delta_node_to_cids_.size() == total;
+    if (not has_index or not delta_cliques_.empty()) {
+        return false;
+    }
+    for (const auto& extra_members : delta_clique_extra_) {
+        if (not extra_members.empty()) {
+            return false;
+        }
+    }
+    for (const auto& node_cliques : delta_node_to_cids_) {
+        if (not node_cliques.empty()) {
+            return false;
+        }
+    }
+
+    view.p_maxc = p_maxc_.data();
+    view.maxcs = maxcs_.data();
+    view.p_node_to_cid = p_node_to_cid_.data();
+    view.node_to_cids = node_to_cids_.data();
+    view.total_clique_count = total_clique_count_;
+    view.guard = std::move(lock);
+    return true;
 }
 
 }  // namespace vsag

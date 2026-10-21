@@ -21,6 +21,7 @@
 #include <future>
 #include <limits>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <vector>
 
 #include "../mci/mci_builder.h"
@@ -34,15 +35,54 @@
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/odescent/odescent_graph_parameter.h"
+#include "impl/searcher/mci_depth_stats.h"
 #include "index_common_param.h"
 #include "simd/fp32_simd.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 namespace {
 
+thread_local std::vector<InnerIdType> filtered_valid_inner_ids;
+
 constexpr uint64_t K_MCI_MIN_CLIQUE_SIZE = 2;
 constexpr uint64_t K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER = 64;
 constexpr uint64_t K_MCI_MIN_BITSET_SEED_SAMPLES = 4096;
+
+bool
+collect_filtered_valid_ids(const FilterPtr& filter, const LabelTablePtr& labels, uint64_t total) {
+    filtered_valid_inner_ids.clear();
+    const int64_t* ids = nullptr;
+    int64_t count = 0;
+    filter->GetValidIds(&ids, count);
+    if (ids == nullptr or count <= 0) {
+        return false;
+    }
+    filtered_valid_inner_ids.reserve(static_cast<uint64_t>(count));
+    const bool identity = labels->IsIdentityMapping();
+    for (int64_t i = 0; i < count; ++i) {
+        if (identity) {
+            if (ids[i] < 0 or static_cast<uint64_t>(ids[i]) >= total or
+                labels->IsRemoved(static_cast<InnerIdType>(ids[i]))) {
+                return false;
+            }
+            filtered_valid_inner_ids.push_back(static_cast<InnerIdType>(ids[i]));
+        } else {
+            const auto [found, inner] = labels->TryGetIdByLabel(ids[i]);
+            if (not found) {
+                return false;
+            }
+            filtered_valid_inner_ids.push_back(inner);
+        }
+    }
+    if (not std::is_sorted(filtered_valid_inner_ids.begin(), filtered_valid_inner_ids.end())) {
+        std::sort(filtered_valid_inner_ids.begin(), filtered_valid_inner_ids.end());
+    }
+    filtered_valid_inner_ids.erase(
+        std::unique(filtered_valid_inner_ids.begin(), filtered_valid_inner_ids.end()),
+        filtered_valid_inner_ids.end());
+    return true;
+}
 
 Vector<InnerIdType>
 collect_seed_inner_ids(const FilterPtr& filter,
@@ -51,9 +91,6 @@ collect_seed_inner_ids(const FilterPtr& filter,
                        Allocator* allocator,
                        bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
-    if (enumerates_all_valid != nullptr) {
-        *enumerates_all_valid = false;
-    }
     if (filter == nullptr or label_table == nullptr or seed_count == 0) {
         return inner_ids;
     }
@@ -78,8 +115,7 @@ collect_seed_inner_ids(const FilterPtr& filter,
     inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
     if (enumerates_all_valid != nullptr) {
         // `sampled_count == valid_count` means the whole valid-label list was visited (no
-        // stride sampling) and every label resolved to a distinct inner id, so the seed
-        // list is exactly the valid set and the traversal cannot add anything to it.
+        // stride sampling) and every label resolved to a distinct inner id.
         *enumerates_all_valid = sampled_count == static_cast<uint64_t>(valid_count) and
                                 inner_ids.size() == static_cast<uint64_t>(valid_count);
     }
@@ -107,12 +143,31 @@ Vector<InnerIdType>
 collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
                               uint64_t total,
                               uint64_t seed_count,
-                              Allocator* allocator) {
+                              Allocator* allocator,
+                              bool enumerate_all = false,
+                              bool* enumerates_all_valid = nullptr) {
     Vector<InnerIdType> inner_ids(allocator);
     if (inner_filter == nullptr or total == 0 or seed_count == 0) {
         return inner_ids;
     }
     inner_ids.reserve(std::min(total, seed_count));
+    if (enumerate_all) {
+        // The budget covers the whole valid set, so build the complete list with a single sequential
+        // pass instead of striding.  `CheckValid` is a bit test for bitmap-style filters, which makes
+        // this the cheapest possible way to enumerate the valid points, and the resulting list lets
+        // the seed phase answer exactly without any clique expansion.
+        uint64_t scanned = 0;
+        for (InnerIdType id = 0; id < total and inner_ids.size() < seed_count; ++id) {
+            ++scanned;
+            if (inner_filter->CheckValid(id)) {
+                inner_ids.push_back(id);
+            }
+        }
+        if (enumerates_all_valid != nullptr) {
+            *enumerates_all_valid = (scanned == total);
+        }
+        return inner_ids;
+    }
     const auto scaled_sample_count = seed_count > total / K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER
                                          ? total
                                          : seed_count * K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER;
@@ -122,7 +177,9 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
     const auto id_remainder = total % sample_count;
     uint64_t id = 0;
     uint64_t accumulated_remainder = 0;
+    uint64_t samples_done = 0;
     for (uint64_t sample = 0; sample < sample_count and inner_ids.size() < seed_count; ++sample) {
+        ++samples_done;
         const auto inner_id = static_cast<InnerIdType>(id);
         if (inner_filter->CheckValid(inner_id)) {
             inner_ids.push_back(inner_id);
@@ -133,6 +190,14 @@ collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
             ++id;
             accumulated_remainder -= sample_count;
         }
+    }
+    if (enumerates_all_valid != nullptr) {
+        // Complete only when the scan really visited every inner id.  `id_step == 1` is not enough:
+        // the Bresenham-style advance still skips `id_remainder` positions when the remainder is
+        // non-zero, so ids would be missed.  With `sample_count == total` the advance is exactly one
+        // per iteration, hence the whole id space is covered once the loop ran to completion -- also
+        // when the budget happens to be filled by the last probed id.
+        *enumerates_all_valid = sample_count == total and samples_done == sample_count;
     }
     return inner_ids;
 }
@@ -522,7 +587,8 @@ HGraph::MCIHybridSearchResult::MCIHybridSearchResult(const HGraphSearchParameter
                                                      const FilterPtr& filter)
     : valid_ratio(filter != nullptr ? filter->ValidRatio() : 1.0F),
       threshold(params.mci_hgraph_valid_ratio_threshold),
-      seed_ratio(params.mci_seed_ratio) {
+      seed_ratio(params.mci_seed_ratio),
+      search_no_lock(params.search_no_lock) {
 }
 
 JsonType
@@ -535,6 +601,78 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     json["mci_seed_ratio"].SetFloat(this->seed_ratio);
     json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
     json["mci_bitmap_fast_path"].SetBool(this->used_bitmap_fast_path);
+    json["mci_seed_saturated"].SetBool(this->seed_saturated);
+    json["search_no_lock"].SetBool(this->search_no_lock);
+    if (this->route == "mci" and this->search_no_lock) {
+        const auto& depth = GetMCIDepthSearchStatistics();
+        json["mci_member_checks"].SetInt(static_cast<int64_t>(depth.member_checks));
+        json["mci_member_prefetch_mode"].SetInt(depth.member_prefetch_mode);
+        json["mci_member_prefetch_distance"].SetInt(depth.member_prefetch_distance);
+        json["mci_member_prefetch_block"].SetInt(depth.member_prefetch_block);
+        json["mci_member_prefetch_locality"].SetInt(depth.member_prefetch_locality);
+        json["mci_hops_limit"].SetInt(depth.hops_limit);
+        json["mci_max_hops"].SetInt(depth.max_hops);
+        json["mci_max_expanded_hops"].SetInt(depth.max_expanded_hops);
+        json["mci_expanded_nodes"].SetInt(static_cast<int64_t>(depth.expanded_nodes));
+        json["mci_expanded_cliques"].SetInt(static_cast<int64_t>(depth.expanded_cliques));
+        json["mci_depth_limit_skips"].SetInt(static_cast<int64_t>(depth.depth_limit_skips));
+        json["mci_filtered_cliques_requested"].SetBool(depth.filtered_cliques_requested);
+        json["mci_filtered_cliques_used"].SetBool(depth.filtered_cliques_used);
+        json["mci_filtered_id_prepare_ms"].SetFloat(
+            static_cast<float>(depth.filtered_id_prepare_ms));
+        json["mci_filtered_clique_build_ms"].SetFloat(
+            static_cast<float>(depth.filtered_clique_build_ms));
+        json["mci_filtered_valid_count"].SetInt(static_cast<int64_t>(depth.filtered_valid_count));
+        json["mci_filtered_incidences"].SetInt(static_cast<int64_t>(depth.filtered_incidences));
+        json["mci_filtered_nonempty_cliques"].SetInt(
+            static_cast<int64_t>(depth.filtered_nonempty_cliques));
+        json["mci_filtered_kept_cliques"].SetInt(static_cast<int64_t>(depth.filtered_kept_cliques));
+        json["mci_filtered_members"].SetInt(static_cast<int64_t>(depth.filtered_members));
+        json["mci_filtered_capacity_bytes"].SetInt(
+            static_cast<int64_t>(depth.filtered_capacity_bytes));
+        json["mci_filtered_source_member_checks"].SetInt(
+            static_cast<int64_t>(depth.filtered_source_member_checks));
+        json["mci_dynamic_clique_scan_requested"].SetBool(depth.dynamic_clique_scan_requested);
+        json["mci_dynamic_clique_scan_used"].SetBool(depth.dynamic_clique_scan_used);
+        json["mci_dynamic_selected_seeds"].SetInt(depth.dynamic_selected_seeds);
+        json["mci_dynamic_scored_points"].SetInt(depth.dynamic_scored_points);
+        json["mci_dynamic_scan_passes"].SetInt(depth.dynamic_scan_passes);
+        json["mci_dynamic_point_checks"].SetInt(depth.dynamic_point_checks);
+        json["mci_dynamic_clique_checks"].SetInt(depth.dynamic_clique_checks);
+        json["mci_dynamic_count_updates"].SetInt(depth.dynamic_count_updates);
+        json["mci_dynamic_activations"].SetInt(depth.dynamic_activations);
+        json["mci_dynamic_replacements"].SetInt(depth.dynamic_replacements);
+        json["mci_dynamic_active_cliques"].SetInt(depth.dynamic_active_cliques);
+        json["mci_dynamic_id_prepare_ms"].SetFloat(static_cast<float>(depth.dynamic_id_prepare_ms));
+        json["mci_dynamic_initial_union_ms"].SetFloat(
+            static_cast<float>(depth.dynamic_initial_union_ms));
+        json["mci_dynamic_scan_ms"].SetFloat(static_cast<float>(depth.dynamic_scan_ms));
+        json["mci_bounded_pass_limit"].SetInt(depth.bounded_scan_pass_limit);
+        json["mci_bounded_gallop"].SetBool(depth.bounded_scan_gallop);
+        json["mci_bounded_order_prepare_ms"].SetFloat(
+            static_cast<float>(depth.bounded_order_prepare_ms));
+        json["mci_bounded_order_rows"].SetInt(depth.bounded_order_rows);
+        json["mci_bounded_range_rejects"].SetInt(depth.bounded_range_rejects);
+        json["mci_bounded_gap_rejects"].SetInt(depth.bounded_gap_rejects);
+        json["mci_bounded_prefix_skips"].SetInt(depth.bounded_prefix_skips);
+        json["mci_bounded_block_skips"].SetInt(depth.bounded_block_skips);
+        json["mci_bounded_tail_skips"].SetInt(depth.bounded_tail_skips);
+        json["mci_bounded_second_start"].SetInt(depth.bounded_second_start);
+        json["mci_bounded_second_initial_end"].SetInt(depth.bounded_second_initial_end);
+        json["mci_bounded_binary_comparisons"].SetInt(depth.bounded_binary_comparisons);
+        json["mci_bounded_initial_min"].SetInt(depth.bounded_initial_min);
+        json["mci_bounded_initial_max"].SetInt(depth.bounded_initial_max);
+        json["mci_bounded_final_min"].SetInt(depth.bounded_final_min);
+        json["mci_bounded_final_max"].SetInt(depth.bounded_final_max);
+        json["mci_hub_clique_threshold"].SetInt(depth.hub_clique_threshold);
+        json["mci_hub_hgraph_hops"].SetInt(depth.hub_hgraph_hops);
+        json["mci_hub_candidates"].SetInt(depth.hub_candidates);
+        json["mci_hub_skipped_memberships"].SetInt(depth.hub_skipped_memberships);
+        json["mci_hub_expanded_nodes"].SetInt(depth.hub_expanded_nodes);
+        json["mci_hub_bridge_expansions"].SetInt(depth.hub_bridge_expansions);
+        json["mci_hub_neighbor_checks"].SetInt(depth.hub_neighbor_checks);
+        json["mci_hub_distance_evaluations"].SetInt(depth.hub_distance_evaluations);
+    }
     json["hybrid_expanded_nodes"].SetUint64(this->hybrid_stats.expanded_nodes);
     json["hybrid_expansion_skipped"].SetBool(this->hybrid_stats.expansion_skipped);
     json["hybrid_seed_budget"].SetUint64(this->hybrid_seed_budget);
@@ -555,6 +693,22 @@ HGraph::try_mci_search(const SearchRequest& request,
                        const void* query,
                        const InnerSearchParam& search_param,
                        QueryContext* ctx) const {
+    if (not params.search_no_lock) {
+        return try_live_mci_search(request, params, inner_filter, query, search_param, ctx);
+    }
+    // A lock-policy-only request retains the upstream algorithm. Experimental static
+    // traversal is selected only by its existing route-local options (also used by the wrapper).
+    const auto routing_options_root = JsonType::Parse(request.params_str_);
+    const auto routing_options = routing_options_root[INDEX_TYPE_HGRAPH];
+    const bool static_traversal = routing_options.Contains("mci_seed_ids") or
+                                  routing_options.Contains("mci_hops_limit") or
+                                  routing_options.Contains("mci_filtered_cliques") or
+                                  routing_options.Contains("mci_dynamic_clique_scan") or
+                                  routing_options.Contains("mci_expansion_idle_window") or
+                                  routing_options.Contains("mci_expansion_lower_bound");
+    if (not static_traversal) {
+        return try_live_mci_search(request, params, inner_filter, query, search_param, ctx);
+    }
     MCIHybridSearchResult result(params, inner_filter);
     const bool bitset_seed_source = has_bitset_source(request.filter_);
     const bool can_use_mci = params.use_mci and this->mci_parameters_.enabled and
@@ -572,6 +726,308 @@ HGraph::try_mci_search(const SearchRequest& request,
     }
 
     MCISearcherParam mci_param;
+    // Decode the route-local experimental option here; existing parameter-object ABI is unchanged.
+    const auto options_root = JsonType::Parse(request.params_str_);
+    const auto options = options_root[INDEX_TYPE_HGRAPH];
+    if (options.Contains("mci_filtered_cliques")) {
+        CHECK_ARGUMENT(options["mci_filtered_cliques"].IsBool(),
+                       "hgraph mci_filtered_cliques must be a boolean");
+        mci_param.filtered_cliques = options["mci_filtered_cliques"].GetBool();
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(not mci_param.filtered_cliques or params.search_no_lock,
+                       "hgraph mci_filtered_cliques requires search_no_lock=true");
+    }
+    if (options.Contains("mci_dynamic_clique_scan")) {
+        CHECK_ARGUMENT(options["mci_dynamic_clique_scan"].IsBool(),
+                       "hgraph mci_dynamic_clique_scan must be a boolean");
+        mci_param.dynamic_clique_scan = options["mci_dynamic_clique_scan"].GetBool();
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(not mci_param.dynamic_clique_scan or
+                           (params.search_no_lock and not mci_param.filtered_cliques),
+                       "hgraph mci_dynamic_clique_scan requires search_no_lock=true and "
+                       "mci_filtered_cliques=false");
+    }
+    if (options.Contains("mci_clique_scan_passes")) {
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(options["mci_clique_scan_passes"].IsNumberInteger() and
+                           options["mci_clique_scan_passes"].GetInt() >= 1 and
+                           options["mci_clique_scan_passes"].GetInt() <= 2 and
+                           mci_param.dynamic_clique_scan,
+                       "mci_clique_scan_passes must be 1 or 2 and requires dynamic clique scan");
+        mci_param.clique_scan_passes = options["mci_clique_scan_passes"].GetInt();
+    }
+    if (options.Contains("mci_clique_scan_gallop")) {
+        CHECK_ARGUMENT(options["mci_clique_scan_gallop"].IsBool(),
+                       "mci_clique_scan_gallop must be boolean");
+        mci_param.clique_scan_gallop = options["mci_clique_scan_gallop"].GetBool();
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(not mci_param.clique_scan_gallop or mci_param.clique_scan_passes != 0,
+                       "mci_clique_scan_gallop requires bounded clique scan");
+    }
+    const auto total_count = this->total_count_.load();
+    if (options.Contains("mci_hub_clique_threshold")) {
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(options["mci_hub_clique_threshold"].IsNumberInteger() and
+                           options["mci_hub_clique_threshold"].GetInt() >= 0,
+                       "mci_hub_clique_threshold must be a non-negative integer");
+        mci_param.hub_clique_threshold = options["mci_hub_clique_threshold"].GetInt();
+    }
+    if (options.Contains("mci_hub_hgraph_hops")) {
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(options["mci_hub_hgraph_hops"].IsNumberInteger() and
+                           options["mci_hub_hgraph_hops"].GetInt() >= 1 and
+                           options["mci_hub_hgraph_hops"].GetInt() <= 2,
+                       "mci_hub_hgraph_hops must be 1 or 2");
+        mci_param.hub_hgraph_hops = options["mci_hub_hgraph_hops"].GetInt();
+    }
+    if (mci_param.hub_clique_threshold != 0) {
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(mci_param.dynamic_clique_scan and params.search_no_lock and
+                           this->bottom_graph_ != nullptr and
+                           (not options.Contains("use_hybrid_traversal") or
+                            (options["use_hybrid_traversal"].IsBool() and
+                             not options["use_hybrid_traversal"].GetBool())),
+                       "hub navigation requires routed dynamic MCI, search_no_lock=true, and "
+                       "an existing base HGraph");
+        mci_param.hub_graph = this->bottom_graph_;
+    }
+    const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
+                                             static_cast<double>(params.mci_seed_ratio));
+    uint64_t seed_budget = scaled_seed_count >= static_cast<double>(total_count)
+                               ? total_count
+                               : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
+    mci_param.hops_limit = 3;
+    if (options.Contains("mci_hops_limit")) {
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(
+            options["mci_hops_limit"].IsNumberInteger() and
+                options["mci_hops_limit"].GetInt() >= 1 and
+                options["mci_hops_limit"].GetInt() <= std::numeric_limits<uint32_t>::max() and
+                not mci_param.dynamic_clique_scan,
+            "mci_hops_limit must be a positive uint32 and is only for clique traversal");
+        mci_param.hops_limit = static_cast<uint32_t>(options["mci_hops_limit"].GetInt());
+    }
+
+    Vector<InnerIdType> seed_inner_ids(ctx->alloc);
+    Vector<float> seed_distances(ctx->alloc);
+    bool enumerates_all_valid = false;
+    {
+        // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
+        // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
+        // inner ids. Label mutations take this mutex exclusively, so they have to be excluded while
+        // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
+        // lock order this function and the index already use.
+        auto label_lock = MakeSearchReadLock(this->label_lookup_mutex_);
+        // Coverage-driven budget: seeding every valid point makes the seed phase exact (the searcher
+        // then skips the whole clique expansion), which beats the expansion tail whenever
+        // `0.5 ms + per_distance * valid` does. The budget is only raised when the target fits into
+        // `mci_seed_max_count`, so a wide filter never degenerates into an exact scan.  It reads the
+        // valid-label list the collector below walks, hence the same shared lock.
+        if (params.mci_seed_coverage > 0.0F and request.filter_ != nullptr) {
+            double valid_estimate = 0.0;
+            if (bitset_seed_source) {
+                // Bitset filters derive `ValidRatio()` from their population count, so it is exact.
+                const auto ratio =
+                    static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio)));
+                valid_estimate = ratio * static_cast<double>(total_count);
+            } else {
+                const int64_t* valid_labels = nullptr;
+                int64_t valid_label_count = 0;
+                request.filter_->GetValidIds(&valid_labels, valid_label_count);
+                valid_estimate = static_cast<double>(std::max<int64_t>(0, valid_label_count));
+            }
+            if (valid_estimate > 0.0) {
+                // Compare in floating point: `mci_seed_coverage` may be arbitrarily large and
+                // casting an out-of-range double to an integer is undefined behaviour.
+                const auto target =
+                    std::ceil(static_cast<double>(params.mci_seed_coverage) * valid_estimate);
+                const auto cap = params.mci_seed_max_count > 0
+                                     ? std::min(static_cast<double>(params.mci_seed_max_count),
+                                                static_cast<double>(total_count))
+                                     : static_cast<double>(total_count);
+                if (std::isfinite(target) and target <= cap) {
+                    seed_budget = std::max(seed_budget, static_cast<uint64_t>(target));
+                }
+            }
+        }
+        mci_param.seed_count = seed_budget;
+        if (bitset_seed_source) {
+            const auto estimated_valid = static_cast<uint64_t>(std::llround(
+                static_cast<double>(std::min(1.0F, std::max(0.0F, result.valid_ratio))) *
+                static_cast<double>(total_count)));
+            seed_inner_ids = collect_bitset_seed_inner_ids(inner_filter,
+                                                           total_count,
+                                                           mci_param.seed_count,
+                                                           ctx->alloc,
+                                                           seed_budget >= estimated_valid,
+                                                           &enumerates_all_valid);
+        } else {
+            seed_inner_ids = collect_seed_inner_ids(request.filter_,
+                                                    this->label_table_,
+                                                    mci_param.seed_count,
+                                                    ctx->alloc,
+                                                    &enumerates_all_valid);
+        }
+        const bool replace_seeds =
+            options.Contains("mci_seed_replace") and options["mci_seed_replace"].GetBool();
+        if (replace_seeds) {
+            const bool has_replacement_inputs = options.Contains("mci_seed_ids") and
+                                                options.Contains("mci_seed_distances") and
+                                                not mci_param.dynamic_clique_scan;
+            CHECK_ARGUMENT(has_replacement_inputs,
+                           "seed replacement requires IDs, exact distances, and CSR traversal");
+            seed_inner_ids.clear();
+            enumerates_all_valid = false;
+        }
+        if (options.Contains("mci_seed_ids")) {
+            const auto& injected = *options["mci_seed_ids"].GetInnerJson();
+            // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+            CHECK_ARGUMENT(injected.is_array() and injected.size() <= 1024,
+                           "mci_seed_ids must be an array of at most 1024 external IDs");
+            Vector<InnerIdType> merged(ctx->alloc);
+            const auto cap = params.mci_seed_max_count > 0
+                                 ? static_cast<uint64_t>(params.mci_seed_max_count)
+                                 : total_count;
+            merged.reserve(std::min<uint64_t>(cap, seed_inner_ids.size() + injected.size()));
+            for (uint64_t i = 0; i < injected.size() and merged.size() < cap; ++i) {
+                CHECK_ARGUMENT(injected[i].is_number_integer(),
+                               "mci_seed_ids must contain integers");
+                const auto [found, inner] =
+                    label_table_->TryGetIdByLabel(injected[i].get<int64_t>());
+                if (found and inner < total_count and
+                    (inner_filter == nullptr or inner_filter->CheckValid(inner)) and
+                    std::find(merged.begin(), merged.end(), inner) == merged.end()) {
+                    merged.push_back(inner);
+                }
+            }
+            if (replace_seeds) {
+                const auto& distances = *options["mci_seed_distances"].GetInnerJson();
+                const bool aligned_replacement = distances.is_array() and
+                                                 distances.size() == injected.size() and
+                                                 merged.size() == injected.size();
+                CHECK_ARGUMENT(aligned_replacement,
+                               "replacement seeds must be unique, valid, and within the seed cap");
+                seed_distances.reserve(distances.size());
+                for (const auto& distance : distances) {
+                    CHECK_ARGUMENT(distance.is_number(), "seed distances must be numeric");
+                    const auto value = distance.get<float>();
+                    CHECK_ARGUMENT(std::isfinite(value), "seed distance must be finite");
+                    seed_distances.push_back(value);
+                }
+                int64_t valid_count = 0;
+                const int64_t* valid_labels = nullptr;
+                request.filter_->GetValidIds(&valid_labels, valid_count);
+                enumerates_all_valid =
+                    valid_count >= 0 and static_cast<uint64_t>(valid_count) == merged.size();
+            }
+            const auto injected_count = merged.size();
+            for (auto inner : seed_inner_ids) {
+                if (merged.size() == cap) {
+                    break;
+                }
+                if (std::find(merged.begin(),
+                              merged.begin() + static_cast<int64_t>(injected_count),
+                              inner) == merged.begin() + static_cast<int64_t>(injected_count)) {
+                    merged.push_back(inner);
+                }
+            }
+            if (not replace_seeds) {
+                enumerates_all_valid =
+                    enumerates_all_valid and merged.size() == seed_inner_ids.size();
+            }
+            seed_inner_ids.swap(merged);
+        }
+        // The searcher indexes the bitmap with inner ids. Providers must return an inner-id-indexed
+        // bitmap: InnerIdWrapperFilter only forwards the wrapped bitmap when the label table maps
+        // every inner id to itself, and it is the only filter shape MCI searches the bitmap with.
+        if (inner_filter != nullptr) {
+            uint64_t bitmap_size = 0;
+            const auto* bitmap = inner_filter->GetValidBitmap(&bitmap_size);
+            if (bitmap != nullptr and bitmap_size >= total_count) {
+                mci_param.valid_bitmap = bitmap;
+                mci_param.valid_bitmap_size = bitmap_size;
+                mci_param.used_bitmap_fast_path = &result.used_bitmap_fast_path;
+            }
+        }
+        if ((mci_param.filtered_cliques or mci_param.dynamic_clique_scan) and
+            not enumerates_all_valid and mci_param.hops_limit > 1) {
+            const auto begin = std::chrono::steady_clock::now();
+            const bool complete =
+                collect_filtered_valid_ids(request.filter_, this->label_table_, total_count);
+            // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+            CHECK_ARGUMENT(not mci_param.dynamic_clique_scan or complete,
+                           "mci_dynamic_clique_scan requires complete, mappable GetValidIds");
+            if (complete) {
+                mci_param.valid_inner_ids = filtered_valid_inner_ids.data();
+                mci_param.valid_inner_count = filtered_valid_inner_ids.size();
+            }
+            mci_param.filtered_id_prepare_ms =
+                std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin)
+                    .count();
+        }
+    }
+    result.seed_count = seed_inner_ids.size();
+    mci_param.seed_count = result.seed_count;
+    mci_param.seed_inner_ids = &seed_inner_ids;
+    mci_param.seed_distances = seed_distances.empty() ? nullptr : &seed_distances;
+    mci_param.enumerated_valid_count = enumerates_all_valid ? seed_inner_ids.size() : 0;
+    mci_param.skipped_expansion = &result.seed_saturated;
+    mci_param.expansion_idle_window =
+        static_cast<uint64_t>(std::max<int64_t>(0, params.mci_expansion_idle_window));
+    mci_param.expansion_lower_bound = params.mci_expansion_lower_bound;
+    if (seed_inner_ids.empty()) {
+        return result;
+    }
+
+    auto codes_lock = MakeSearchReadLock(this->persistent_codes_mutex_);
+    auto precise_flatten = this->get_precise_codes();
+    if (precise_flatten != nullptr) {
+        uint64_t precise_vector_stride = 0;
+        mci_param.precise_vectors =
+            precise_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
+        mci_param.dim = this->dim_;
+        mci_param.precise_vector_stride = precise_vector_stride;
+        mci_param.metric = this->metric_;
+        mci_param.used_precise_float_csr = &result.used_precise_float_csr;
+    }
+    // The hybrid has its own search breadth; `rerank_topk` is the user's k.
+    InnerSearchParam mci_search_param = search_param;
+    mci_search_param.ef =
+        std::max<int64_t>(params.GetMciEfSearch(), static_cast<int64_t>(search_param.rerank_topk));
+    mci_search_param.topk = mci_param.dynamic_clique_scan
+                                ? static_cast<int64_t>(search_param.rerank_topk)
+                                : static_cast<int64_t>(mci_search_param.ef);
+    result.result = this->mci_searcher_->Search(
+        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
+    result.route = "mci";
+    return result;
+}
+
+HGraph::MCIHybridSearchResult
+HGraph::try_live_mci_search(const SearchRequest& request,
+                            const HGraphSearchParameters& params,
+                            const FilterPtr& inner_filter,
+                            const void* query,
+                            const InnerSearchParam& search_param,
+                            QueryContext* ctx) const {
+    MCIHybridSearchResult result(params, inner_filter);
+    const bool bitset_seed_source = has_bitset_source(request.filter_);
+    const bool can_use_mci = params.use_mci and this->mci_parameters_.enabled and
+                             search_param.executors.empty() and
+                             (has_valid_id_source(request.filter_) or bitset_seed_source) and
+                             this->mci_cliques_ != nullptr and
+                             this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
+    if (not can_use_mci) {
+        return result;
+    }
+
+    result.route = "hgraph";
+    if (request.mode_ == SearchMode::RANGE_SEARCH or result.valid_ratio >= result.threshold) {
+        return result;
+    }
+
+    MCISearcherParam mci_param;
+    mci_param.preserve_live_traversal = true;
     const auto total_count = this->total_count_.load();
     const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
                                              static_cast<double>(params.mci_seed_ratio));

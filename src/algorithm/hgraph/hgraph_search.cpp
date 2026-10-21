@@ -26,6 +26,7 @@
 #include "impl/query_computer_pool.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
+#include "utils/search_lock.h"
 #include "utils/search_threshold.h"
 #include "utils/util_functions.h"
 
@@ -140,6 +141,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    const SearchLockScope search_lock_scope(params.search_no_lock);
     const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
@@ -151,7 +153,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
-            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+            force_remove_rlock = MakeSearchReadLock(this->force_remove_mutex_);
         }
         shared_lock = this->acquire_global_read_lock();
     }
@@ -225,7 +227,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
                 }
             }
 
-            search_param.ef = std::max(params.ef_search, k);
+            search_param.ef = std::max(params.GetHGraphEfSearch(), k);
             search_param.is_inner_id_allowed = ft;
             search_param.distance_threshold = threshold;
             search_param.topk = static_cast<int64_t>(search_param.ef);
@@ -470,7 +472,7 @@ HGraph::brute_force_search(const void* query,
                            float radius,
                            QueryContext* ctx,
                            const std::optional<float>& threshold) const {
-    std::shared_lock codes_lock(this->persistent_codes_mutex_);
+    auto codes_lock = MakeSearchReadLock(this->persistent_codes_mutex_);
     Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
 
     auto flatten = this->basic_flatten_codes_;
@@ -741,6 +743,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
+    const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
 
@@ -759,7 +762,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
-            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+            force_remove_rlock = MakeSearchReadLock(this->force_remove_mutex_);
         }
         shared_lock = this->acquire_global_read_lock();
     }
@@ -889,7 +892,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     InnerSearchParam base_search_param;
     base_search_param.is_inner_id_allowed = ft;
     base_search_param.distance_threshold = request.threshold_;
-    base_search_param.ef = std::max(params.ef_search, k);
+    base_search_param.ef = std::max(params.GetHGraphEfSearch(), k);
     if (this->use_conjugate_graph_ and params.use_conjugate_graph_search) {
         base_search_param.ef = std::max(base_search_param.ef, static_cast<uint64_t>(LOOK_AT_K));
     }
@@ -1056,48 +1059,64 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
         // Reset per-query mutable state before each query.
         search_param.duplicate_id = -1;
-        // Per-query entry point search through hierarchical graphs.
-        ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
-        ep_search_param.ep = this->entry_point_id_;
-        rabitq_candidates.Reset();
-
-        auto* split_codes = rabitq_split_codes_.get();
+        search_param.ep = this->entry_point_id_;
         search_param.rabitq_fused_computer = nullptr;
-        if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and
-            split_codes != nullptr) {
-            search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
-            for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-                ep_search_param.ep =
-                    rabitq_fused_searcher_->Route(this->route_graphs_[i],
-                                                  rabitq_fused_datacell_,
-                                                  basic_flatten_codes_,
-                                                  search_param.rabitq_fused_computer,
-                                                  ep_search_param.ep,
-                                                  ep_search_param.enable_rabitq_one_bit_search);
-            }
-        } else {
-            for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-                auto result = this->search_one_graph(raw_query,
-                                                     this->route_graphs_[i],
-                                                     this->basic_flatten_codes_,
-                                                     ep_search_param,
-                                                     vt,
-                                                     &ctx);
-                if (not result->Empty()) {
-                    ep_search_param.ep = result->Top().second;
-                }
-            }
-        }
-        search_param.ep = ep_search_param.ep;
         ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
         if (search_param.time_cost != nullptr) {
             search_param.time_cost->Reset();
+        }
+        // MCI collects its own filter-derived seeds and never reads the HGraph entry point.
+        // Try that route first; an unavailable MCI route still uses normal HGraph navigation.
+        MCIHybridSearchResult mci_result(params, ft);
+        if (params.search_no_lock and not params.use_hybrid_traversal and
+            not use_custom_distance and
+            // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+            not(params.brute_force_threshold > 0.0F and
+                mci_result.valid_ratio <= params.brute_force_threshold)) {
+            mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+        }
+        // Per-query entry point search through hierarchical graphs.
+        if (mci_result.route != "mci") {
+            ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
+            ep_search_param.ep = this->entry_point_id_;
+            rabitq_candidates.Reset();
+
+            auto* split_codes = rabitq_split_codes_.get();
+            if (not use_custom_distance and rabitq_fused_datacell_ != nullptr and
+                split_codes != nullptr) {
+                search_param.rabitq_fused_computer = split_codes->FactoryFusedComputer(raw_query);
+                for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+                    ep_search_param.ep =
+                        rabitq_fused_searcher_->Route(this->route_graphs_[i],
+                                                      rabitq_fused_datacell_,
+                                                      basic_flatten_codes_,
+                                                      search_param.rabitq_fused_computer,
+                                                      ep_search_param.ep,
+                                                      ep_search_param.enable_rabitq_one_bit_search);
+                }
+            } else {
+                for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+                    auto result = this->search_one_graph(raw_query,
+                                                         this->route_graphs_[i],
+                                                         this->basic_flatten_codes_,
+                                                         ep_search_param,
+                                                         vt,
+                                                         &ctx);
+                    if (not result->Empty()) {
+                        ep_search_param.ep = result->Top().second;
+                    }
+                }
+            }
+            search_param.ep = ep_search_param.ep;
+            ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
+            if (search_param.time_cost != nullptr) {
+                search_param.time_cost->Reset();
+            }
         }
 
         bool fused_search_finalized = false;
         DistHeapPtr search_result;
         bool brute_force_used = false;
-        MCIHybridSearchResult mci_result(params, ft);
         // Dynamic neighbor traversal: a single traversal that walks the sparse
         // Hgraph neighbours and the MCI clique members together. It reuses the
         // entry point the route graphs produced for the bottom graph, and needs an
@@ -1148,8 +1167,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 mci_result.hybrid_seed_budget = hybrid_seed_budget;
                 search_result = std::move(mci_result.result);
             } else {
-                mci_result =
-                    this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+                if (not params.search_no_lock) {
+                    mci_result =
+                        this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+                }
                 if (mci_result.route == "mci") {
                     search_result = std::move(mci_result.result);
                 } else {
@@ -1211,7 +1232,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         if (this->use_conjugate_graph_ and params.use_conjugate_graph_search and
             not search_result->Empty()) {
             std::priority_queue<std::pair<float, LabelType>> label_results;
-            std::shared_lock label_lock(this->label_lookup_mutex_);
+            auto label_lock = MakeSearchReadLock(this->label_lookup_mutex_);
             while (not search_result->Empty()) {
                 const auto record = search_result->Top();
                 search_result->Pop();
@@ -1252,7 +1273,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 return distance;
             };
             {
-                std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+                auto graph_lock = MakeSearchReadLock(this->conjugate_graph_mutex_);
                 (void)this->conjugate_graph_->EnhanceResult(label_results, distance_of_label);
             }
             while (not label_results.empty()) {
@@ -1324,7 +1345,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         // acquire label_lookup_mutex_ themselves.
         std::shared_lock<std::shared_mutex> result_label_lock;
         if (query_count > 1) {
-            result_label_lock = std::shared_lock<std::shared_mutex>(this->label_lookup_mutex_);
+            result_label_lock = MakeSearchReadLock(this->label_lookup_mutex_);
             CHECK_ARGUMENT(not this->label_table_->HasActivePaddingLabel(),
                            "batch KNN does not support an index containing external label -1");
         }

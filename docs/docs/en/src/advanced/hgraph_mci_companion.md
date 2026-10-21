@@ -116,6 +116,7 @@ Search parameters live under the `hgraph` search object:
       "ef_search": 120,
       "use_mci": true,
       "mci_seed_ratio": 0.1,
+      "search_no_lock": false,
       "hgraph_valid_ratio_threshold": 0.2
     }
 }
@@ -143,6 +144,22 @@ exact-seeding regime, at the cost of a larger seed phase. The default of `32768`
 enumeration cheap in absolute terms -- 32768 inner ids are 128 KiB and therefore stay in cache --
 so the saturated skip stays a win instead of turning a wide predicate into a scan-sized seed
 phase.
+`search_no_lock` is a search-only boolean, default `false`, replacing
+`mci_seed_no_lock` (the old name is rejected). It selects empty read-lock guards
+throughout HGraph and MCI search, including routing, labels/deletions, vectors,
+cliques and result handling. The visited-list pool uses a separate atomic lease
+list; it does not access shared deques without their mutexes. Search algorithms,
+filtering and missing/deleted-ID semantics are unchanged.
+
+Use this option only with a read-only in-memory index: no concurrent build, add,
+remove, vector/label update, tuning, resize, or deserialization. Concurrent independent
+queries (including a mixture of locked and unlocked queries) are supported.
+`hgraph.parallelism` must be 1, because the intra-query worker pool requires
+its own synchronization; parallelize independent queries instead. This flag does not
+disable synchronization inside the allocator, OS, external filters or disk caches.
+The query-local policy is restored on return or exception and never changes the index's
+global mutex objects. Query statistics report `search_no_lock`. Existing serialized
+indexes can be reused without rebuilding or rewriting them.
 
 The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
 function filters are accepted, but a custom `Filter` gives the search planner better
@@ -527,3 +544,116 @@ correctness. Review follow-up adds reverse-edge restoration and reload-mutation 
 Full lint, full tests, and >=90% coverage verification are outstanding. Large-dataset snapshot reuse,
 ABI, serialization compatibility, and broader concurrent mutation require separate validation;
 targeted passes are not proof of production readiness.
+
+### Bitmap prefetch for static MCI traversal
+
+See also the query-local filtered clique CSR option below.
+
+When an immutable inner-id validity bitmap is available, static MCI traversal reads clique members in blocks of 32 and prefetches the bitmap locations of members up to 96 positions ahead. A temporary validity mask selects members in their original order, after which the existing epoch-based node check and distance evaluation run unchanged. This avoids a dependent filter branch for every rejected member. It does not preprocess the complete valid set, change seeds, or change clique membership. Filters without a directly usable bitmap keep the original visitor.
+
+The development comparison modes are controlled by `VSAG_MCI_MEMBER_MODE` (0 original visitor, 1 rolling bitmap prefetch, 2 block prefetch, 3 block validity mask, 4 mask plus prefetch, default 4), `VSAG_MCI_MEMBER_DISTANCE` (default 96, max 256), `VSAG_MCI_MEMBER_BLOCK` (default 32, max 64), and `VSAG_MCI_MEMBER_LOCALITY` (GCC prefetch locality hint, default 1). They are read once per query; set them before concurrent searches, and do not change the process environment while queries run. These controls do not affect index serialization or require rebuilding an index.
+
+### Query-local filtered clique CSR
+
+The static MCI routing path accepts the experimental search option `hgraph.mci_filtered_cliques=true` (default false), requiring `search_no_lock=true`. With a complete valid-ID list, the query maps, sorts and deduplicates valid inner IDs, then counts their node-to-clique incidences and packs legal clique members using prefix sums and a second fill pass. Each query worker reuses a flat member pool, compact group metadata and an epoch-tagged direct map. There are no per-clique heap allocations or per-query clears of the entire clique map. Singleton filtered cliques store no members.
+
+Both ID preparation and temporary CSR construction occur inside search timing. Expansion visits valid members directly, bypassing bitmap and predicate callbacks while retaining node and clique visit markers. Members are ordered by increasing inner ID, potentially changing traversal order and results at finite search breadth. Exhaustive seeds skip construction. Missing or incompletely mapped valid-ID lists retain the original path. This is a query-private view of the existing saved index; it creates no new filtered-graph connections.
+
+Statistics include `mci_filtered_cliques_requested`, `mci_filtered_cliques_used`, `mci_filtered_id_prepare_ms`, `mci_filtered_clique_build_ms`, `mci_filtered_incidences`, `mci_filtered_nonempty_cliques`, `mci_filtered_kept_cliques`, `mci_filtered_members`, and `mci_filtered_capacity_bytes`. `mci_member_checks` counts scanned filtered member slots; `mci_filtered_source_member_checks` counts the corresponding original clique slots.
+
+### Dynamic candidate-clique scan
+
+The experimental MCI-route option `hgraph.mci_dynamic_clique_scan=true` defaults to false. It requires `search_no_lock=true`, an immutable base CSR, a complete mappable `GetValidIds` list, and `mci_filtered_cliques=false`. The saved index is reused. Missing complete IDs are rejected rather than silently running a different algorithm.
+
+All sampled seeds are scored. The closest `max(k, mci_ef_search)` seeds initialize a max-heap and their clique union X. A reusable thread-private epoch array stores the number of current candidates covering each clique. Remaining legal IDs are scanned in increasing inner-ID order. A point is scored once if any of its inverse-CSR clique IDs has a positive count, and its distance immediately updates the candidate and top-k result heaps. Replacing A with B subtracts A's memberships and adds B's. The implementation commits both updates before examining another point; it adds B first to avoid transient false activations of shared cliques. Candidate distance ties prefer the smaller inner ID.
+
+A new zero-to-one clique activation schedules another pass over unscored legal IDs, including IDs before the current scan position. Search stops after a full pass without new activations; this guarantees that no unscored legal point is covered by the final X. Results depend on scan order and finite ef; this is approximate search. Exhaustive seeds skip union construction and further scanning. There is no all-clique member materialization, clique-member scan, or per-query full state clear.
+
+Dynamic replacement may propagate through more than two graph hops. `mci_hops_limit` is rejected in this mode and the reported `mci_hops_limit=0` denotes no applicable depth limit; scan passes are not graph hops. The original traversal accepts a positive uint32 `hgraph.mci_hops_limit` (default 3) for controlled comparisons. Existing idle and lower-bound traversal stops do not apply to dynamic scanning.
+
+Diagnostics include `mci_dynamic_clique_scan_used`, `mci_dynamic_selected_seeds`, `mci_dynamic_scored_points`, `mci_dynamic_scan_passes`, `mci_dynamic_point_checks`, `mci_dynamic_clique_checks`, `mci_dynamic_count_updates`, `mci_dynamic_activations`, `mci_dynamic_replacements`, `mci_dynamic_active_cliques`, and ID-preparation/initial-union/scan timings with the `mci_dynamic_` prefix. `mci_member_checks=0` refers to original clique-member slots; inverse clique tests are counted separately. All preparation is inside native query timing.
+
+### Ordered one-pass and two-pass clique scans
+
+With `mci_dynamic_clique_scan=true`, setting `hgraph.mci_clique_scan_passes` to 1 or 2 selects a bounded ordered scan. Omitting it preserves the original fixed-point scan. The immutable node-to-clique CSR rows must contain strictly increasing clique IDs; an older saved CSR without this invariant is not supported by this experimental mode. The saved pruned Cohere10M index used for validation has been checked across all nodes and memberships. Index serialization is unchanged.
+
+Each worker reuses metadata for legal points: original inner ID, CSR start/end, minimum and maximum clique ID. Sequence 1 sorts complete clique-ID rows lexicographically, breaking equal rows by inner ID. Sequence 2 orders sequence-1 positions by maximum clique ID. Stable radix sorting handles the minimum/maximum keys; only groups with equal minima need lexicographic tail comparisons. A suffix-minimum position table on sequence 2 provides the first sequence-1 position whose maximum can reach the current lower bound. Blocks of 32 rows store their maximum endpoint.
+
+The current candidate union X retains exact per-clique reference counts plus an epoch-tagged hierarchical bitmap. This supports cached minimum/maximum IDs, fast membership tests, and successor lookup without clearing all words per query. Candidate replacement is committed before testing the next point. Points with a disjoint clique-ID range are rejected, consecutive impossible blocks are skipped, and the scan stops when sequence-1 minima exceed the current X upper bound. A successor lookup skips inactive prefixes of a point's row; increasing member IDs permit stopping above the active upper bound. Immutable CSR reads are prefetched ahead of the row scan.
+
+The second pass uses the envelope of cliques newly activated during pass 1 together with current X bounds. Sequence 2 jumps to its safe starting position. Initially it ends before the last first-pass activation position: after that position coverage could only shrink. A new activation in pass 2 widens its envelope and restores the full possible suffix. Every point is scored at most once. The pass count is capped: unlike the unbounded mode, this does not guarantee that the final X covers no unscored legal point. Neither scan passes nor sequence order denote graph hops.
+
+`hgraph.mci_clique_scan_gallop` (default false) is an experimental alternative that performs repeated successor/binary-search jumps inside a row; false uses sequential bitmap probes after its initial prefix skip. It requires a bounded scan when true. Both variants produce identical results at the same pass cap and ef. All sorting, bitmap maintenance and search work is included in native query timing. Diagnostics use `mci_bounded_` for the pass limit, intersection variant, ordering time, range/gap rejections, prefix/block/tail skips, second-pass start and initial end, binary comparisons, and initial/final X bounds. Ordering time is also included in `mci_dynamic_scan_ms`.
+
+### Navigation for the routed MCI branch
+
+The non-iterator KNN path tries MCI with its filter-derived seeds before traversing HGraph routing layers. A completed MCI route does not consume an HGraph entry point and records zero routing-layer distances. If MCI is unavailable or does not accept the request, the ordinary HGraph entry-point traversal remains active. This optimization does not change stored indexes or the MCI seed budget.
+
+### HGraph neighborhoods for high-incidence scan candidates
+
+The experimental query-only option `hgraph.mci_hub_clique_threshold` defaults to 0 (disabled). With a positive threshold, a candidate whose number of clique memberships is at least that threshold remains eligible for both heaps, but activates no outgoing cliques. Its existing base HGraph neighbors replace that candidate's dense neighborhood. Normal candidates still maintain the exact reference counts of their clique union. Complete stored memberships are retained, so another candidate can still discover the high-incidence point through a shared clique.
+
+`hgraph.mci_hub_hgraph_hops` is 1 by default and accepts only 1 or 2. One hop scores unvisited valid neighbors. Two hops also follows the adjacency lists of invalid one-hop neighbors; these bridge points are not scored and never enter either heap. A newly accepted valid high-incidence candidate is queued for the same processing. Queued candidates that have already left the heap are skipped. Query epoch markers deduplicate graph expansions and distance evaluations.
+
+This option requires the routed dynamic-clique-scan branch, `search_no_lock=true`, immutable CSR, and an existing base HGraph. It supports the fixed-point and bounded one/two-pass scan variants. It does not launch a separate global HGraph search, and `hgraph_ef_search` does not bound these local replacement neighborhoods. It is an approximate neighborhood substitution, with no promise to preserve recall. Exhaustive seeding still skips all graph/clique expansion. Stored indexes and serialization are unchanged.
+
+The `mci_hub_` statistics record the threshold, hop limit, accepted hub candidates, suppressed memberships, expanded hubs, invalid bridge expansions, neighbor checks, and newly scored neighbors. The last count is a subset of the query's total distance evaluations, not an additional count. All work is included in native query time.
+
+### Global MCI correlation router
+
+The experimental API in include/vsag/global_mci_hybrid.h reuses one existing FP32/L2 HGraph with a static global MCI companion. Call GlobalMCIHybrid::Create(index), then its KnnSearch. No partition index, centroids, or workload correlation labels are used. The index must remain immutable throughout the router's lifetime. Only search_no_lock=true and query-internal parallelism=1 are supported; independent queries may run concurrently.
+
+The outer retention router first chooses filtered HGraph when the retained fraction is at least hgraph_valid_ratio_threshold (default 0.05). Otherwise, a complete unfiltered HGraph query, including the bottom graph, retrieves approximate top-10 anchors with correlation_navigation_ef (80). Legal anchors are prepended to the MCI seeds, within mci_seed_max_count.
+
+The predictor probes the global MCI cliques incident to these anchors. It selects at most correlation_max_cliques (256) in anchor round-robin order and checks at most correlation_member_budget (8192) member slots distributed across those cliques. Repeated points count only once using thread-private epoch markers. Local legal-point density divided by the global retained fraction is a local-yield heuristic, not an unbiased estimator over the entire overlapping clique union.
+
+An enrichment at most correlation_negative_ratio (0.5), with at least correlation_min_expected (1) expected legal sample points under independence, selects an exact scan of the complete legal set. An enrichment at least correlation_positive_ratio (2) with a legal hit predicts positive correlation. All other cases keep global MCI. Empty or insufficient samples do not force a scan. Anchors and probes never use ground truth. correlation_routing=false provides the original retention router; correlation_probe_only=true retains navigation, prediction and seed injection while disabling the predicted scan.
+
+Example parameters, passed directly or wrapped in global_mci_hybrid:
+
+    {
+      "hgraph_valid_ratio_threshold": 0.05,
+      "ef_search": 40,
+      "mci_ef_search": 40,
+      "hgraph_ef_search": 80,
+      "mci_seed_ratio": 0.1,
+      "mci_seed_coverage": 0,
+      "mci_seed_max_count": 10000,
+      "mci_hops_limit": 3,
+      "search_no_lock": true,
+      "parallelism": 1,
+      "correlation_navigation_ef": 80,
+      "correlation_max_cliques": 256,
+      "correlation_member_budget": 8192
+    }
+
+Filters should expose complete GetValidIds; scan falls back to checking every index label when enumeration is unavailable. All navigation, clique probing, ID conversion, scan preparation and search work occur inside the query API and must be included in end-to-end latency. Result statistics under global_mci_hybrid include the route, prediction, sample counts, legal navigation seeds, navigation/search distance counts and phase times. The router does not rebuild, reorder, prune or serialize the index.
+
+### Distance-sample correlation prediction
+
+GlobalMCIHybrid accepts correlation_method="distance_samples" as an alternative predictor on its MCI branch. The predictor performs no HGraph navigation and does not read clique memberships. Existing retention routing still applies before prediction. It reuses the saved index without changing serialization.
+
+Uniform sampling without replacement selects correlation_global_samples (512) global inner IDs and correlation_valid_samples (256) positions in the complete GetValidIds list. A fixed correlation_sample_seed (42) determines the global sample; the valid sample additionally incorporates query-vector bits so the same query/filter is repeatable. Provider ordering must be stable, and the ID list must be complete and unique. Samples are mapped and scored inside query timing; the global sample is independent of the predicate.
+
+The correlation_radius_quantile (0.1) of global distances defines a radius. The fraction of legal samples within that radius divided by the corresponding global fraction estimates enrichment. Ties use the actual inclusive global fraction. Approximate Wilson intervals with correlation_confidence_z (1.96) form a ratio band. Its upper end at most correlation_negative_ratio (0.5) selects a scan; its lower end at least correlation_positive_ratio (2) predicts positive. Other cases remain neutral. These are uncertainty heuristics, not a formal joint confidence guarantee for an adaptive quantile or a guarantee about the much smaller true top-k neighborhood.
+
+Every legal sample becomes an MCI seed using the exact distance already computed. These seeds replace the ordinary ratio-driven seed list and must fit mci_seed_max_count (zero means unlimited). The private backend bridge uses mci_seed_replace, mci_seed_ids and aligned finite mci_seed_distances. Cached seeds enter both candidate and result queues at hops=1 without another distance calculation. The scan branch also reuses these distances. Global/legal sample overlap is scored once. Source-index vectors and graph structures remain immutable.
+
+correlation_method="sample_seeds" is an ablation: it uses the same legal samples and distance reuse, with no global sample, prediction or scan switch. The default clique_probe method retains the earlier HGraph top-10 predictor. Statistics distinguish sample_distances, reused_sample_distances, search_distances and total_distances; reused counts are excluded from new distance evaluations. All selection, mapping, serialization, prediction and search work is timed.
+
+
+### Static routing compatibility and budgets
+
+The ordinary HGraph/MCI API retains its live/delta traversal. Setting only `search_no_lock=true` does not select the experimental static algorithm. The wrapper supplies the existing static route options; `mci_hops_limit` applies to that path with seed depth 1 and child depth parent+1. A point at the depth limit can enter the result but cannot expand. Building, updating and loading indexes retain the upstream implementation; construction-only pruning and clique reordering from prior experiments are not part of this change.
+
+| Distance-sample parameter | Default | Accepted values |
+| --- | ---: | --- |
+| `correlation_global_samples` | 512 | Integer 1–65536 |
+| `correlation_valid_samples` | 256 | Integer 1–1024; determines the replacement seed budget |
+| `correlation_sample_seed` | 42 | Integer 0–1000000000 |
+| `correlation_radius_quantile` | 0.1 | Finite value in (0,1] |
+| `correlation_confidence_z` | 1.96 | Finite positive value |
+
+`mci_seed_max_count` must be zero or at least the configured `correlation_valid_samples`, even when the filter contains fewer points. The wrapper rejects an insufficient cap. The sampling modes require complete, unique, stable `GetValidIds`; unlike the legacy clique predictor, they do not fall back to enumerating the whole index. Prefer the bitmap interface for large predicates. Use `correlation_probe_only=true` to measure prediction without its scan decision, and `correlation_method="sample_seeds"` to compare the same legal seeds without global sampling. Neither mode promises exact MCI recall.
+
+To enable the new predictor, add `"correlation_method":"distance_samples"` to the wrapper example above. Its default remains `clique_probe`. Parameters passed to ordinary `Index::KnnSearch` do not instantiate a `GlobalMCIHybrid` wrapper.
