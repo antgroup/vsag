@@ -81,7 +81,34 @@ auto result = index->KnnSearch(
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add` 和检索路径接收通过 `Dataset::Float32Vectors` 提供的 FP32 向量，`dtype` 应设为 `"float32"`。`base_quantization_type` 选择的是内部编码和存储，本身不会使 API 接受 FP16、BF16 或 INT8 输入。
+Pyramid 的 `Build`、`Add` 和检索支持 `dtype: "float16"`、`dtype: "bfloat16"` 输入，也保留原有的 `"float32"` 输入支持。输入 `dtype` 与存储量化器是两个独立选项：`dtype` 使用 `"float16"` / `"bfloat16"`，量化参数则使用 `"fp16"` / `"bf16"`。
+
+两种半精度输入都通过 `Dataset::Float16Vectors` 提供连续的 `uint16_t` 缓冲区。缓冲区应包含**已经编码的 FP16 或 BF16 位模式**，而不是将浮点数直接数值转换为整数的结果；`dtype` 决定这些位模式的解释方式。Build/Add 缓冲区包含 `NumElements() * Dim()` 个元素，查询缓冲区也必须使用与索引一致的输入格式。ID 和路径的设置与上面的示例相同，将 `Float32Vectors(data)` 和 `Float32Vectors(q)` 分别替换为 `Float16Vectors(half_data)` 和 `Float16Vectors(half_query)` 即可。使用 `Owner(false)` 时，调用期间须保持借用的缓冲区（包括 ID 和路径）有效。
+
+对于半精度输入，`base_quantization_type` 以及启用 `use_reorder: true` 时的 `precise_quantization_type` 支持 `fp16`、`bf16`、`pq`、`sq8` 和 `fp32`。各量化器自身的要求仍然适用，例如 PQ 的训练和维度设置。以下是输入与存储格式匹配的最小配置：
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 32,
+    "index_param": {
+        "graph_type": "nsw",
+        "base_quantization_type": "fp16",
+        "use_reorder": false
+    }
+}
+```
+
+若使用 BF16 输入和 BF16 存储，将 `dtype` 改为 `"bfloat16"`，`base_quantization_type` 改为 `"bf16"`。也支持跨格式存储转换，例如 FP16 输入配 BF16 存储、BF16 输入配 FP32 存储；这不会改变后续查询所需的输入格式。`metric_type: "cosine"` 会在编码前归一化向量，因此即使输入和存储格式匹配，cosine 也不保证逐字节保留输入。
+
+对于 L2/IP，FP16 输入配 FP16 存储、BF16 输入配 BF16 存储会逐位保留输入编码。跨格式存储以及 `pq`/`sq8`/`fp32` 存储会先将输入转换为 float32，不提供相同的半精度位模式保留保证。
+
+在半精度输入索引上调用 `CalcDistanceById` 和 `CalcDistancesById` 时，请使用 `DatasetPtr` 重载，并提供与索引 dtype 一致的原生半精度查询缓冲区。原始 `const float*` 重载仅接受 float32 索引，对半精度输入索引会明确报错。
+
+FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 字节。这指的是**向量编码大小，而非整个索引内存**：图、ID、路径、分配开销以及可选的精排/原始向量副本还会占用空间。仅使用半精度输入并不会自动选择半精度存储，也不代表总内存减半。
+
+半精度输入可使用 `graph_type: "nsw"` 或 `"odescent"`；**PiPNN 仍仅支持 float32 输入**。以上说明仅针对 Pyramid，不代表 VSAG 的所有索引都支持这些输入类型。
 
 ## 构建参数
 
