@@ -15,6 +15,7 @@
 #include "impl/searcher/mci_neighborhood_probe.h"
 #include "index/index_impl.h"
 #include "simd/fp32_simd.h"
+#include "utils/float_utils.h"
 #include "utils/search_lock.h"
 
 namespace vsag {
@@ -27,13 +28,6 @@ require(bool value, const std::string& message) {
     if (not value) {
         throw std::invalid_argument(message);
     }
-}
-
-bool
-finite(double value) {
-    uint64_t bits = 0;
-    std::memcpy(&bits, &value, sizeof(bits));
-    return (bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL;
 }
 
 double
@@ -132,13 +126,18 @@ parse(const std::string& text) {
     p.sample_seed = integer("correlation_sample_seed", p.sample_seed, 0, 1000000000);
     p.quantile = j.value("correlation_radius_quantile", p.quantile);
     p.confidence_z = j.value("correlation_confidence_z", p.confidence_z);
-    require(finite(p.quantile) and p.quantile > 0 and p.quantile <= 1, "invalid radius quantile");
-    require(finite(p.confidence_z) and p.confidence_z > 0, "invalid confidence z");
-    require(finite(p.threshold) and p.threshold >= 0 and p.threshold <= 1, "invalid threshold");
-    require(finite(p.negative_ratio) and p.negative_ratio >= 0 and p.negative_ratio < 1,
-            "correlation_negative_ratio must be in [0,1)");
-    require(finite(p.positive_ratio) and p.positive_ratio > 1, "invalid positive ratio");
-    require(finite(p.min_expected) and p.min_expected > 0, "invalid minimum expected matches");
+    require(is_finite_double_bits(p.quantile) and p.quantile > 0 and p.quantile <= 1,
+            "invalid radius quantile");
+    require(is_finite_double_bits(p.confidence_z) and p.confidence_z > 0, "invalid confidence z");
+    require(is_finite_double_bits(p.threshold) and p.threshold >= 0 and p.threshold <= 1,
+            "invalid threshold");
+    require(
+        is_finite_double_bits(p.negative_ratio) and p.negative_ratio >= 0 and p.negative_ratio < 1,
+        "correlation_negative_ratio must be in [0,1)");
+    require(is_finite_double_bits(p.positive_ratio) and p.positive_ratio > 1,
+            "invalid positive ratio");
+    require(is_finite_double_bits(p.min_expected) and p.min_expected > 0,
+            "invalid minimum expected matches");
     p.backend = j;
     for (const auto& key : keys) {
         if (key.find("correlation_") == 0) {
@@ -154,10 +153,10 @@ parse(const std::string& text) {
     p.backend["mci_seed_ratio"] = j.value("mci_seed_ratio", 0.1);
     p.backend["mci_seed_coverage"] = j.value("mci_seed_coverage", 0.0);
     p.backend["mci_seed_max_count"] = j.value("mci_seed_max_count", 10000);
-    require(finite(p.backend["mci_seed_ratio"].get<double>()) and
+    require(is_finite_double_bits(p.backend["mci_seed_ratio"].get<double>()) and
                 p.backend["mci_seed_ratio"].get<double>() >= 0,
             "invalid mci_seed_ratio");
-    require(finite(p.backend["mci_seed_coverage"].get<double>()) and
+    require(is_finite_double_bits(p.backend["mci_seed_coverage"].get<double>()) and
                 p.backend["mci_seed_coverage"].get<double>() >= 0 and
                 p.backend["mci_seed_coverage"].get<double>() <= 1,
             "invalid mci_seed_coverage");
@@ -239,13 +238,14 @@ GlobalMCIHybrid::KnnSearch(const DatasetPtr& query,
                     query->GetFloat32Vectors() != nullptr and k > 0,
                 "expected one FP32 query and positive k");
         for (uint64_t d = 0; d < state_->dim; ++d) {
-            require(finite(query->GetFloat32Vectors()[d]), "query contains non-finite values");
+            require(IsFiniteFloatBits(query->GetFloat32Vectors()[d]),
+                    "query contains non-finite values");
         }
         require(state_->index->GetNumElements() == static_cast<int64_t>(state_->count) and
                     state_->graph->GetNumberRemoved() == 0,
                 "global index changed after router creation");
         const double global_ratio = filter == nullptr ? 1.0 : filter->ValidRatio();
-        require(finite(global_ratio) and global_ratio >= 0 and global_ratio <= 1,
+        require(is_finite_double_bits(global_ratio) and global_ratio >= 0 and global_ratio <= 1,
                 "invalid filter retention");
         const bool low = float(global_ratio) < float(p.threshold);
         Json diagnostics{{"retained_fraction", global_ratio},

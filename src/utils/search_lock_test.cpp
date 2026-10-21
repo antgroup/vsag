@@ -3,6 +3,7 @@
 
 #include "search_lock.h"
 
+#include <algorithm>
 #include <atomic>
 #include <stdexcept>
 #include <thread>
@@ -140,4 +141,44 @@ TEST_CASE("Query-private mutex guards select an empty lock", "[ut][search_no_loc
     }
     auto lock = MakeSearchMutexLock(mutex);
     REQUIRE(lock.owns_lock());
+}
+
+TEST_CASE("No-lock leases return directly across threads after pool growth",
+          "[ut][search_no_lock]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    VisitedListPool pool(0, allocator.get(), 128, allocator.get());
+    std::vector<VisitedListPtr> leases;
+    {
+        const SearchLockScope scope(true);
+        for (uint64_t i = 0; i < 128; ++i) {
+            auto list = pool.TakeOne();
+            list->Set(i);
+            leases.push_back(list);
+        }
+    }
+    const auto memory = pool.GetMemoryUsage();
+    std::thread returner([&] {
+        // The borrowing thread's no-lock scope has already ended.
+        for (auto& list : leases) {
+            pool.ReturnOne(list);
+        }
+    });
+    returner.join();
+    std::vector<VisitedListPtr> reused;
+    {
+        const SearchLockScope scope(true);
+        for (uint64_t i = 0; i < leases.size(); ++i) {
+            auto list = pool.TakeOne();
+            REQUIRE(std::find(leases.begin(), leases.end(), list) != leases.end());
+            REQUIRE(std::find(reused.begin(), reused.end(), list) == reused.end());
+            for (uint64_t id = 0; id < leases.size(); ++id) {
+                REQUIRE_FALSE(list->Get(id));
+            }
+            reused.push_back(list);
+        }
+    }
+    REQUIRE(pool.GetMemoryUsage() == memory);
+    for (auto& list : reused) {
+        pool.ReturnOne(list);
+    }
 }

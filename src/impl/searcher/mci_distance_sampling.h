@@ -42,6 +42,10 @@ struct MCIDistanceSampleResult {
 
 inline std::pair<double, double>
 mci_wilson_interval(uint64_t successes, uint64_t count, double z) {
+    // No observations constrain the probability; preserve the full possible interval.
+    if (count == 0) {
+        return {0.0, 1.0};
+    }
     const auto n = static_cast<double>(count);
     const auto p = static_cast<double>(successes) / n;
     const auto z2 = z * z;

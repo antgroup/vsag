@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 
 namespace vsag {
@@ -57,6 +58,13 @@ public:
      */
     virtual uint64_t
     GetMemoryUsage() const = 0;
+
+private:
+    template <typename, typename>
+    friend class ResourceObjectPool;
+
+    // Owned by the originating pool; stable until that pool is destroyed.
+    std::atomic<bool>* no_lock_lease_{nullptr};
 };
 
 }  // namespace vsag

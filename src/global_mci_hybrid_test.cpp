@@ -10,6 +10,7 @@
 #include <numeric>
 
 #include "impl/searcher/mci_neighborhood_probe.h"
+#include "utils/float_utils.h"
 #include "utils/search_lock.h"
 #include "vsag/vsag.h"
 
@@ -330,6 +331,22 @@ TEST_CASE("MCI distance samples reuse exact distances for seeds and scans",
     auto created = GlobalMCIHybrid::Create(index);
     REQUIRE(created);
     auto router = created.value();
+    for (const auto value : {std::numeric_limits<float>::quiet_NaN(),
+                             std::numeric_limits<float>::infinity(),
+                             -std::numeric_limits<float>::infinity()}) {
+        std::vector<float> invalid_vector(dim, 0.0F);
+        invalid_vector[dim - 1] = value;
+        auto invalid_query = Dataset::Make()
+                                 ->NumElements(1)
+                                 ->Dim(dim)
+                                 ->Float32Vectors(invalid_vector.data())
+                                 ->Owner(false);
+        auto result = router->KnnSearch(invalid_query, 3, "{}", nullptr);
+        REQUIRE_FALSE(result);
+        CHECK(result.error().type == ErrorType::INVALID_ARGUMENT);
+        CHECK(result.error().message == "query contains non-finite values");
+    }
+
     auto query =
         Dataset::Make()->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     auto far = std::make_shared<ProbeFilter>();
@@ -635,6 +652,37 @@ TEST_CASE("Global MCI defaults match explicit distance sample settings",
                 CHECK(stats[key] == expected[key]);
             }
         }
+    }
+}
+
+TEST_CASE("Empty Wilson samples carry no probability information",
+          "[ut][mci_distance_sampling][regression]") {
+    const auto empty = mci_wilson_interval(0, 0, 1.96);
+    CHECK(empty.first == 0.0);
+    CHECK(empty.second == 1.0);
+    const auto none = mci_wilson_interval(0, 10, 1.96);
+    const auto all = mci_wilson_interval(10, 10, 1.96);
+    CHECK(none.first >= 0);
+    CHECK(none.second < 1);
+    CHECK(all.first > 0);
+    CHECK(all.second <= 1);
+}
+
+TEST_CASE("Double finite-bit validation handles IEEE boundary values",
+          "[ut][mci_distance_sampling][regression]") {
+    for (const auto value : {0.0,
+                             -0.0,
+                             1.0,
+                             -1.0,
+                             std::numeric_limits<double>::max(),
+                             std::numeric_limits<double>::lowest(),
+                             std::numeric_limits<double>::denorm_min()}) {
+        CHECK(is_finite_double_bits(value));
+    }
+    for (const auto value : {std::numeric_limits<double>::quiet_NaN(),
+                             std::numeric_limits<double>::infinity(),
+                             -std::numeric_limits<double>::infinity()}) {
+        CHECK_FALSE(is_finite_double_bits(value));
     }
 }
 }  // namespace vsag

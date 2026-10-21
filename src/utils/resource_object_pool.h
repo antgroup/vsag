@@ -107,13 +107,7 @@ public:
         auto pool_id = obj->source_pool_id_;
         if (pool_id == kSubPoolCount) {
             // Use the object's origin, not the current query flag: returns can cross scopes.
-            for (auto* node = no_lock_pool_.load(std::memory_order_acquire); node != nullptr;
-                 node = node->next) {
-                if (node->object == obj) {
-                    node->in_use.store(false, std::memory_order_release);
-                    return;
-                }
-            }
+            obj->no_lock_lease_->store(false, std::memory_order_release);
             return;
         }
         std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
@@ -154,6 +148,7 @@ private:
         obj->source_pool_id_ = kSubPoolCount;
         obj->Reset();
         auto node = std::make_unique<NoLockNode>(obj);
+        obj->no_lock_lease_ = &node->in_use;
         node->next = no_lock_pool_.load(std::memory_order_relaxed);
         while (not no_lock_pool_.compare_exchange_weak(
             node->next, node.get(), std::memory_order_release, std::memory_order_relaxed)) {

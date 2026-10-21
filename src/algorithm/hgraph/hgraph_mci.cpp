@@ -727,8 +727,7 @@ HGraph::try_mci_search(const SearchRequest& request,
 
     MCISearcherParam mci_param;
     // Decode the route-local experimental option here; existing parameter-object ABI is unchanged.
-    const auto options_root = JsonType::Parse(request.params_str_);
-    const auto options = options_root[INDEX_TYPE_HGRAPH];
+    const auto& options = routing_options;
     if (options.Contains("mci_filtered_cliques")) {
         CHECK_ARGUMENT(options["mci_filtered_cliques"].IsBool(),
                        "hgraph mci_filtered_cliques must be a boolean");
