@@ -651,6 +651,7 @@ HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
         "FGIM upper construction width exceeds the search limit");
     destination.route_graphs_.clear();
     destination.entry_point_id_ = 0;
+    // Match the native HGraph seed, independent of earlier destination Build/Add calls.
     destination.level_generator_.seed(2021);
     std::vector<float> vector(destination.dim_);
     const auto codes = destination.has_precise_reorder() && !destination.build_by_base_
@@ -715,6 +716,8 @@ HGraphFGIM::Merge(HGraph& destination,
     }
     const auto k = destination.bottom_graph_->MaximumDegree();
     const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
+    // Destination may be empty and cannot use source validation. Repeat the storage
+    // checks here for it; all indexes additionally reject auxiliary metadata.
     const auto validate_metadata = [&](const HGraph& index) {
         const bool valid_condition_7 =
             index.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
