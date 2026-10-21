@@ -52,7 +52,7 @@ struct Parameters {
     uint64_t navigation_ef{80};
     uint64_t max_cliques{256};
     uint64_t member_budget{8192};
-    std::string method{"clique_probe"};
+    std::string method{"distance_samples"};
     uint64_t global_samples{512};
     uint64_t valid_samples{256};
     uint64_t sample_seed{42};

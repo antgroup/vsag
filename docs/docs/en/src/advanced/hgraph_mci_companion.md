@@ -603,15 +603,16 @@ The `mci_hub_` statistics record the threshold, hop limit, accepted hub candidat
 
 The experimental API in include/vsag/global_mci_hybrid.h reuses one existing FP32/L2 HGraph with a static global MCI companion. Call GlobalMCIHybrid::Create(index), then its KnnSearch. No partition index, centroids, or workload correlation labels are used. The index must remain immutable throughout the router's lifetime. Only search_no_lock=true and query-internal parallelism=1 are supported; independent queries may run concurrently.
 
-The outer retention router first chooses filtered HGraph when the retained fraction is at least hgraph_valid_ratio_threshold (default 0.05). Otherwise, a complete unfiltered HGraph query, including the bottom graph, retrieves approximate top-10 anchors with correlation_navigation_ef (80). Legal anchors are prepended to the MCI seeds, within mci_seed_max_count.
+The outer retention router first chooses filtered HGraph when the retained fraction is at least hgraph_valid_ratio_threshold (default 0.05). With explicit correlation_method="clique_probe", a complete unfiltered HGraph query, including the bottom graph, retrieves approximate top-10 anchors with correlation_navigation_ef (80). Legal anchors are prepended to the MCI seeds, within mci_seed_max_count.
 
 The predictor probes the global MCI cliques incident to these anchors. It selects at most correlation_max_cliques (256) in anchor round-robin order and checks at most correlation_member_budget (8192) member slots distributed across those cliques. Repeated points count only once using thread-private epoch markers. Local legal-point density divided by the global retained fraction is a local-yield heuristic, not an unbiased estimator over the entire overlapping clique union.
 
 An enrichment at most correlation_negative_ratio (0.5), with at least correlation_min_expected (1) expected legal sample points under independence, selects an exact scan of the complete legal set. An enrichment at least correlation_positive_ratio (2) with a legal hit predicts positive correlation. All other cases keep global MCI. Empty or insufficient samples do not force a scan. Anchors and probes never use ground truth. correlation_routing=false provides the original retention router; correlation_probe_only=true retains navigation, prediction and seed injection while disabling the predicted scan.
 
-Example parameters, passed directly or wrapped in global_mci_hybrid:
+Legacy clique-probe example, passed directly or wrapped in global_mci_hybrid:
 
     {
+      "correlation_method": "clique_probe",
       "hgraph_valid_ratio_threshold": 0.05,
       "ef_search": 40,
       "mci_ef_search": 40,
@@ -631,7 +632,7 @@ Filters should expose complete GetValidIds; scan falls back to checking every in
 
 ### Distance-sample correlation prediction
 
-GlobalMCIHybrid accepts correlation_method="distance_samples" as an alternative predictor on its MCI branch. The predictor performs no HGraph navigation and does not read clique memberships. Existing retention routing still applies before prediction. It reuses the saved index without changing serialization.
+GlobalMCIHybrid uses correlation_method="distance_samples" by default on its MCI branch. All correlation parameters have defaults and can be omitted during ordinary wrapper searches. The predictor performs no HGraph navigation and does not read clique memberships. Existing retention routing still applies before prediction. It reuses the saved index without changing serialization.
 
 Uniform sampling without replacement selects correlation_global_samples (512) global inner IDs and correlation_valid_samples (256) positions in the complete GetValidIds list. A fixed correlation_sample_seed (42) determines the global sample; the valid sample additionally incorporates query-vector bits so the same query/filter is repeatable. Provider ordering must be stable, and the ID list must be complete and unique. Samples are mapped and scored inside query timing; the global sample is independent of the predicate.
 
@@ -639,7 +640,7 @@ The correlation_radius_quantile (0.1) of global distances defines a radius. The 
 
 Every legal sample becomes an MCI seed using the exact distance already computed. These seeds replace the ordinary ratio-driven seed list and must fit mci_seed_max_count (zero means unlimited). The private backend bridge uses mci_seed_replace, mci_seed_ids and aligned finite mci_seed_distances. Cached seeds enter both candidate and result queues at hops=1 without another distance calculation. The scan branch also reuses these distances. Global/legal sample overlap is scored once. Source-index vectors and graph structures remain immutable.
 
-correlation_method="sample_seeds" is an ablation: it uses the same legal samples and distance reuse, with no global sample, prediction or scan switch. The default clique_probe method retains the earlier HGraph top-10 predictor. Statistics distinguish sample_distances, reused_sample_distances, search_distances and total_distances; reused counts are excluded from new distance evaluations. All selection, mapping, serialization, prediction and search work is timed.
+correlation_method="sample_seeds" is an ablation: it uses the same legal samples and distance reuse, with no global sample, prediction or scan switch. Explicit correlation_method="clique_probe" selects the earlier HGraph top-10 predictor. Statistics distinguish sample_distances, reused_sample_distances, search_distances and total_distances; reused counts are excluded from new distance evaluations. All selection, mapping, serialization, prediction and search work is timed.
 
 
 ### Static routing compatibility and budgets
@@ -648,12 +649,17 @@ The ordinary HGraph/MCI API retains its live/delta traversal. Setting only `sear
 
 | Distance-sample parameter | Default | Accepted values |
 | --- | ---: | --- |
+| `correlation_method` | `distance_samples` | `distance_samples`, `sample_seeds`, `clique_probe` |
+| `correlation_routing` | `true` | Boolean |
+| `correlation_probe_only` | `false` | Boolean |
 | `correlation_global_samples` | 512 | Integer 1–65536 |
 | `correlation_valid_samples` | 256 | Integer 1–1024; determines the replacement seed budget |
 | `correlation_sample_seed` | 42 | Integer 0–1000000000 |
 | `correlation_radius_quantile` | 0.1 | Finite value in (0,1] |
 | `correlation_confidence_z` | 1.96 | Finite positive value |
+| `correlation_negative_ratio` | 0.5 | Finite value in [0,1) |
+| `correlation_positive_ratio` | 2.0 | Finite value greater than 1 |
 
 `mci_seed_max_count` must be zero or at least the configured `correlation_valid_samples`, even when the filter contains fewer points. The wrapper rejects an insufficient cap. The sampling modes require complete, unique, stable `GetValidIds`; unlike the legacy clique predictor, they do not fall back to enumerating the whole index. Prefer the bitmap interface for large predicates. Use `correlation_probe_only=true` to measure prediction without its scan decision, and `correlation_method="sample_seeds"` to compare the same legal seeds without global sampling. Neither mode promises exact MCI recall.
 
-To enable the new predictor, add `"correlation_method":"distance_samples"` to the wrapper example above. Its default remains `clique_probe`. Parameters passed to ordinary `Index::KnnSearch` do not instantiate a `GlobalMCIHybrid` wrapper.
+The distance-sample predictor is enabled by default. For example, pass `{"ef_search":40}` (or `{}` to accept all wrapper defaults); none of the correlation fields above are required. Explicit values still override their defaults. Parameters passed to ordinary `Index::KnnSearch` do not instantiate a `GlobalMCIHybrid` wrapper.

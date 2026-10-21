@@ -151,7 +151,8 @@ TEST_CASE("Global MCI correlation router reuses one index and searches without l
     auto far = std::make_shared<ProbeFilter>();
     far->ids.assign(ids.end() - 8, ids.end());
     far->ratio = .0625F;
-    Json p{{"hgraph_valid_ratio_threshold", .5},
+    Json p{{"correlation_method", "clique_probe"},
+           {"hgraph_valid_ratio_threshold", .5},
            {"ef_search", 32},
            {"mci_seed_ratio", .1},
            {"mci_seed_coverage", 0},
@@ -551,5 +552,89 @@ TEST_CASE("Distance classification includes radius ties and threshold equality",
     CHECK(all.global_inside == 512);
     CHECK(all.valid_inside == 512);
     CHECK(std::string(all.prediction) == "neutral");
+}
+
+TEST_CASE("Global MCI defaults match explicit distance sample settings",
+          "[ut][mci_distance_sampling][regression]") {
+    constexpr int64_t n = 4096, dim = 8;
+    std::vector<float> vectors(n * dim);
+    std::vector<int64_t> labels(n);
+    for (int64_t i = 0; i < n; ++i) {
+        labels[i] = i * 3 - 17;
+        for (int64_t d = 0; d < dim; ++d) vectors[i * dim + d] = static_cast<float>(i * 10 + d);
+    }
+    const Json config{{"dim", dim},
+                      {"dtype", "float32"},
+                      {"metric_type", "l2"},
+                      {"index_param",
+                       {{"base_quantization_type", "fp32"},
+                        {"max_degree", 12},
+                        {"ef_construction", 64},
+                        {"graph_type", "nsw"},
+                        {"use_mci", true},
+                        {"mci_mcs", 12},
+                        {"mci_clique_max", 4},
+                        {"mci_alpha", 1.2},
+                        {"mci_knng_source", "hgraph"},
+                        {"build_thread_count", 1}}}};
+    auto made = Factory::CreateIndex("hgraph", config.dump());
+    REQUIRE(made);
+    auto index = made.value();
+    REQUIRE(index->Build(Dataset::Make()
+                             ->NumElements(n)
+                             ->Dim(dim)
+                             ->Ids(labels.data())
+                             ->Float32Vectors(vectors.data())
+                             ->Owner(false)));
+    auto created = GlobalMCIHybrid::Create(index);
+    REQUIRE(created);
+    auto router = created.value();
+    auto query =
+        Dataset::Make()->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
+    const Json explicit_defaults{{"correlation_method", "distance_samples"},
+                                 {"correlation_routing", true},
+                                 {"correlation_probe_only", false},
+                                 {"correlation_global_samples", 512},
+                                 {"correlation_valid_samples", 256},
+                                 {"correlation_sample_seed", 42},
+                                 {"correlation_radius_quantile", 0.1},
+                                 {"correlation_confidence_z", 1.96},
+                                 {"correlation_negative_ratio", 0.5},
+                                 {"correlation_positive_ratio", 2.0}};
+    for (const bool negative : {false, true}) {
+        auto filter = std::make_shared<ProbeFilter>();
+        if (negative) {
+            filter->ids.assign(labels.end() - 128, labels.end());
+        } else {
+            filter->ids.assign(labels.begin(), labels.begin() + 128);
+        }
+        filter->ratio = 128.0F / n;
+        auto explicit_result = router->KnnSearch(query, 3, explicit_defaults.dump(), filter);
+        REQUIRE(explicit_result);
+        const auto expected =
+            Json::parse(explicit_result.value()->GetStatistics())["global_mci_hybrid"];
+        for (const std::string parameters : {"", "{}", R"({"global_mci_hybrid":{}})"}) {
+            auto implicit_result = router->KnnSearch(query, 3, parameters, filter);
+            REQUIRE(implicit_result);
+            same(implicit_result.value(), explicit_result.value());
+            auto stats = Json::parse(implicit_result.value()->GetStatistics())["global_mci_hybrid"];
+            CHECK(stats["correlation_method"] == "distance_samples");
+            CHECK(stats["prediction"] == (negative ? "negative" : "positive"));
+            CHECK(stats["route"] == (negative ? "scan" : "mci"));
+            CHECK(stats["global_sample_count"] == 512);
+            CHECK(stats["valid_sample_count"] == 128);
+            CHECK(stats["reused_sample_distances"] == 128);
+            CHECK(stats["navigation_distances"] == 0);
+            CHECK(stats["search_distances"] == 0);
+            for (const auto* key : {"radius",
+                                    "enrichment",
+                                    "enrichment_lower",
+                                    "enrichment_upper",
+                                    "sample_distances",
+                                    "total_distances"}) {
+                CHECK(stats[key] == expected[key]);
+            }
+        }
+    }
 }
 }  // namespace vsag

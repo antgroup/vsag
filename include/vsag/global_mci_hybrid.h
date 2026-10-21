@@ -15,7 +15,8 @@ public:
     Create(IndexPtr index);
 
     /// Retention selects HGraph first. Otherwise, the configured predictor selects MCI or a scan.
-    /// clique_probe uses HGraph top-10; distance_samples uses global and legal distance samples.
+    /// Defaults to distance_samples: 512 global samples and 256 legal samples, seed 42.
+    /// Explicit clique_probe uses HGraph top-10 instead of distance sampling.
     /// Legal distance samples become MCI seeds without repeating their distance calculations.
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,

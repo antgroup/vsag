@@ -553,7 +553,7 @@ MCI 分流路径新增实验参数 `hgraph.mci_dynamic_clique_scan=true`，默�
 
 实验 API 位于 include/vsag/global_mci_hybrid.h，复用一个现有 FP32/L2 HGraph 及其静态全局 MCI。先调用 GlobalMCIHybrid::Create(index)，再调用其 KnnSearch。不使用分区索引、聚类中心或负载的相关性标签。router 存活期间索引必须不可变。仅支持 search_no_lock=true、查询内部 parallelism=1；可并发执行独立查询。
 
-先按保留率分流：保留比例大于等于 hgraph_valid_ratio_threshold（默认 0.05）时直接执行过滤 HGraph。其余查询先执行完整未过滤 HGraph 搜索，包括底图，使用 correlation_navigation_ef（默认 80）得到近似 top-10 锚点。满足过滤条件的锚点优先加入 MCI 种子，仍受 mci_seed_max_count 约束。
+先按保留率分流：保留比例大于等于 hgraph_valid_ratio_threshold（默认 0.05）时直接执行过滤 HGraph。显式设置 correlation_method="clique_probe" 的其余查询先执行完整未过滤 HGraph 搜索，包括底图，使用 correlation_navigation_ef（默认 80）得到近似 top-10 锚点。满足过滤条件的锚点优先加入 MCI 种子，仍受 mci_seed_max_count 约束。
 
 预测只检查这些锚点覆盖的全局 MCI 团。按锚点轮流取至多 correlation_max_cliques（256）个不同团，再在这些团内分散检查至多 correlation_member_budget（8192）个成员槽。线程私有 epoch 标记对重复向量去重。局部合法点密度除以全局保留比例得到富集度。它是局部产出的启发式指标，并非整个重叠团并集的无偏估计。
 
@@ -562,6 +562,7 @@ MCI 分流路径新增实验参数 `hgraph.mci_dynamic_clique_scan=true`，默�
 查询参数示例（直接传入，或包在 global_mci_hybrid 下）：
 
     {
+      "correlation_method": "clique_probe",
       "hgraph_valid_ratio_threshold": 0.05,
       "ef_search": 40,
       "mci_ef_search": 40,
@@ -581,7 +582,7 @@ MCI 分流路径新增实验参数 `hgraph.mci_dynamic_clique_scan=true`，默�
 
 ### 两组距离采样的相关性预测
 
-GlobalMCIHybrid 的 MCI 分支可设置 correlation_method="distance_samples"，替代原来的预测方式。此预测不执行 HGraph 导航，也不读取团成员关系；外层保留率分流仍先执行。复用保存好的索引，不改变序列化。
+GlobalMCIHybrid 的 MCI 分支默认使用 correlation_method="distance_samples"。全部相关性参数均有默认值，平时通过 wrapper 检索时可以省略。此预测不执行 HGraph 导航，也不读取团成员关系；外层保留率分流仍先执行。复用保存好的索引，不改变序列化。
 
 从全集不放回均匀采样 correlation_global_samples（512）个内部 ID，从完整 GetValidIds 列表不放回均匀采样 correlation_valid_samples（256）个位置。correlation_sample_seed（42）固定全集样本；合法样本另外混合 query 向量的位模式，保证相同 query/filter 可复现。提供方的 ID 顺序必须稳定，列表必须完整且无重复。采样、映射和距离计算全部计入查询时间；全集采样与谓词无关。
 
@@ -589,7 +590,7 @@ GlobalMCIHybrid 的 MCI 分支可设置 correlation_method="distance_samples"，
 
 全部合法样本使用已经算好的准确距离作为 MCI 种子，替换普通 seed_ratio 采样列表；数量必须满足 mci_seed_max_count，0 表示不限。内部桥接使用 mci_seed_replace、mci_seed_ids 及对齐且有限的 mci_seed_distances。缓存种子以 hops=1 进入候选队列和结果队列，不再计算距离；转扫描时也复用这些距离。全集样本与合法样本重叠的点仅计算一次。索引向量和图结构保持不可变。
 
-correlation_method="sample_seeds" 是对照：使用相同合法样本和距离复用，不采样全集、不预测、不切换扫描。默认 clique_probe 保留原 HGraph top-10 预测。统计区分 sample_distances、reused_sample_distances、search_distances、total_distances，复用次数不计作新的距离计算。采样、映射、参数序列化、预测和正式检索全部计时。
+correlation_method="sample_seeds" 是对照：使用相同合法样本和距离复用，不采样全集、不预测、不切换扫描。显式设置 correlation_method="clique_probe" 可使用原 HGraph top-10 预测。统计区分 sample_distances、reused_sample_distances、search_distances、total_distances，复用次数不计作新的距离计算。采样、映射、参数序列化、预测和正式检索全部计时。
 
 
 ### 静态路由的兼容性和采样预算
@@ -598,12 +599,17 @@ correlation_method="sample_seeds" 是对照：使用相同合法样本和距离�
 
 | 两组距离采样参数 | 默认值 | 允许值 |
 | --- | ---: | --- |
+| `correlation_method` | `distance_samples` | `distance_samples`、`sample_seeds`、`clique_probe` |
+| `correlation_routing` | `true` | 布尔值 |
+| `correlation_probe_only` | `false` | 布尔值 |
 | `correlation_global_samples` | 512 | 整数 1–65536 |
 | `correlation_valid_samples` | 256 | 整数 1–1024，决定替换后的种子预算 |
 | `correlation_sample_seed` | 42 | 整数 0–1000000000 |
 | `correlation_radius_quantile` | 0.1 | (0,1] 内的有限值 |
 | `correlation_confidence_z` | 1.96 | 有限正数 |
+| `correlation_negative_ratio` | 0.5 | [0,1) 内的有限值 |
+| `correlation_positive_ratio` | 2.0 | 大于 1 的有限值 |
 
 `mci_seed_max_count` 必须为 0，或至少等于配置的 `correlation_valid_samples`，即使合法点总数更小也是如此；wrapper 会拒绝不足的上限。两种采样模式要求完整、唯一、顺序稳定的 `GetValidIds`，不会像旧团探测方式那样在缺失时退回全库枚举。大规模谓词优先提供 bitmap 接口。`correlation_probe_only=true` 保留预测并禁用预测触发的扫描；`correlation_method="sample_seeds"` 用相同合法种子对照，不做全集采样。MCI 分支不保证精确召回。
 
-在上面的 wrapper 示例中加入 `"correlation_method":"distance_samples"` 即可启用新预测器，默认仍为 `clique_probe`。普通 `Index::KnnSearch` 不会因为传入这些参数而自动创建 `GlobalMCIHybrid`。
+两组距离采样预测默认启用。例如只传 `{"ef_search":40}`，或传 `{}` 接受 wrapper 的全部默认配置，即可检索，无需填写上述相关性字段。仍可显式传参覆盖默认值。普通 `Index::KnnSearch` 不会因为传入这些参数而自动创建 `GlobalMCIHybrid`。
