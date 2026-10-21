@@ -150,9 +150,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
     for (const auto& [key, ignored] : hgraph_json.GetInnerJson()->items()) {
         (void)ignored;
         auto value = hgraph_json[key];
-        if (key == "merge_strategy" || key == "fgim_refinement_iterations") {
-            inner_json[key].SetJson(value);
-        } else if (key == HGRAPH_USE_REORDER) {
+        if (key == HGRAPH_USE_REORDER) {
             inner_json[USE_REORDER_KEY].SetJson(value);
         } else if (key == HGRAPH_REORDER_SOURCE) {
             inner_json[REORDER_SOURCE_KEY].SetJson(value);
@@ -298,7 +296,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[PARAMETER_USE_CONJUGATE_GRAPH].SetJson(value);
         } else if (key == HGRAPH_LABEL_REMAP_TYPE) {
             inner_json[LABEL_REMAP_TYPE_KEY].SetJson(value);
-        } else if (key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
+        } else if (key == "merge_strategy" || key == "fgim_refinement_iterations" ||
+                   key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
                    key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
                    key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
                    key == HGRAPH_MCI_INCREMENTAL_ADDED_MCT_KEY ||

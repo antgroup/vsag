@@ -247,9 +247,12 @@ fgim_insert(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edg
 
 bool
 fgim_update(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edge, uint64_t k) {
+    // Paper Section 4.2.1 requires a strictly shorter distance for replacement.
+    // ID tie-breaking orders stored neighbors; it does not admit equal-distance updates.
     if (row.size() == k && edge.distance >= row.back().distance) {
         return false;
     }
+    // Rows are distance-sorted, so ID-only binary search is not valid.
     for (const auto& current : row) {
         if (current.id == edge.id) {
             return false;
@@ -269,7 +272,8 @@ fgim_unique(std::vector<InnerIdType>& ids) {
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
 }
 
-// Algorithm 4. Replacement preserves degree and never removes a sole incoming edge.
+// Algorithm 4. Best-effort repair preserves degree and the last incoming edge.
+// A zero-indegree node can remain if no unprotected edge has a removable target.
 uint64_t
 fgim_repair_indegree(FGIMKnnGraph& graph, std::vector<std::vector<uint8_t>>& flags) {
     std::vector<uint64_t> indegree(graph.size(), 0);
@@ -300,6 +304,7 @@ fgim_repair_indegree(FGIMKnnGraph& graph, std::vector<std::vector<uint8_t>>& fla
                 ++indegree[u];
                 target.erase(target.begin() + static_cast<int64_t>(i - 1));
                 target_flags.erase(target_flags.begin() + static_cast<int64_t>(i - 1));
+                // L2 is symmetric: the reverse edge has the same distance.
                 fgim_insert(target, target_flags, {u, edge.distance});
                 protected_ids.push_back(u);
                 ++repairs;
@@ -592,6 +597,7 @@ HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
         "FGIM upper construction width exceeds the search limit");
     destination.route_graphs_.clear();
     destination.entry_point_id_ = 0;
+    // Match the native HGraph seed, independent of earlier destination Build/Add calls.
     destination.level_generator_.seed(2021);
     std::vector<float> vector(destination.dim_);
     const auto codes = destination.has_precise_reorder() && !destination.build_by_base_
@@ -656,6 +662,8 @@ HGraphFGIM::Merge(HGraph& destination,
     }
     const auto k = destination.bottom_graph_->MaximumDegree();
     const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
+    // Destination may be empty and cannot use source validation. Repeat the storage
+    // checks here for it; all indexes additionally reject auxiliary metadata.
     const auto validate_metadata = [&](const HGraph& index) {
         const bool valid_condition_7 =
             index.data_type_ == DataTypes::DATA_TYPE_FLOAT &&

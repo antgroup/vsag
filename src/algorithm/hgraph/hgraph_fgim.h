@@ -82,6 +82,7 @@ public:
                  uint64_t* distance_evaluations = nullptr);
 
     // Destination vectors and labels must already occupy the merged internal ID space.
+    // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
     static void
     WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
@@ -106,7 +107,8 @@ private:
 
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
-    // CrossQuery does not repeat full source validation.
+    // CrossQuery does not repeat full source validation. NaNs are omitted;
+    // callers must reject non-finite returned distances, including infinity.
     // Optional statistics are for diagnostics; normal FGIM runs do not collect them.
     static FGIMNeighborList
     CrossQuery(const HGraph& target,

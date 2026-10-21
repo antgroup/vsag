@@ -542,6 +542,7 @@ HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
 void
 HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    CHECK_ARGUMENT(parameters != nullptr, "HGraph Merge requires HGraph parameters");
     if (parameters->merge_strategy == "fgim") {
         HGraphFGIM::Merge(*this, merge_units, parameters->fgim_refinement_iterations);
         return;
