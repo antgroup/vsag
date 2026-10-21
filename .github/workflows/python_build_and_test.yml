@@ -100,6 +100,7 @@ jobs:
             pip3 uninstall pyvsag -y
             pip3 install ./wheelhouse/*.whl
             pip3 install numpy pyjson pytest
+            pip3 install "langchain-core>=1,<2" "langchain-tests==1.1.9"
       
       - name: Run Python Test
         run: |
@@ -126,7 +127,7 @@ jobs:
               cat test-output.log
               exit 1
             fi
-      
+
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5
