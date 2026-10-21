@@ -146,10 +146,11 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |
 | `store_paths` | bool | `false` | 顶层开关；保留传给 `Build` 和 `Add` 的原始路径，使 `GetDataByIdsWithFlag` 在选择 `DATA_FLAG_PATH` 时可以返回它们。该开关对所有已配置的 hierarchy 生效，不支持按 hierarchy 覆盖 |
 | `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
+| `route_min_size` | int | `0` | 每个节点（包括子节点）的自动路由阈值。`0` 禁用自动升级；正数表示底图物理行数达到该值后启用稀疏路由层。支持 NSW 和 PiPNN，要求 `max_degree > 1`。 |
 | `root_graph_type` | string | `"single_layer"` | 根图结构：`single_layer` 保留原有稀疏底图；`multi_layer` 使用预分配的 Flat 或 Compressed 底图、类似 HGraph 的稀疏路由层以及联合构图流程。`multi_layer` 支持 `graph_type: "nsw"` 和 `"pipnn"`。`no_build_levels` 禁用第 0 层时不要显式指定此选项。 |
 | `support_duplicate` | bool | `false` | 根据构建编码的 `CompareVectors` 语义对编码等价、外部标签不同的向量分组；外部标签仍须唯一。 |
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
-| `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
+| `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`route_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
 PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的 Pyramid
 构建。它批量构建每棵 hierarchy 中所有实际构建的图；设置
@@ -256,7 +257,7 @@ auto result = index->KnnSearch(
   `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
 
 可按层级覆盖的参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、
-`index_min_size`、`root_graph_type`。
+`index_min_size`、`route_min_size`、`root_graph_type`。
 
 `root_graph_type: "multi_layer"` 只改变所选层级的根节点。底图使用顶层
 `graph_storage_type`：默认使用 Flat，也可使用 Compressed，以构建和检索速度换取更低的图
@@ -288,6 +289,14 @@ storage 时，底图和路由图的边统一使用 precise codes 构建，否则
     }
 }
 ```
+
+### 按规模启用路由层
+
+可在顶层配置 `route_min_size`，或按 hierarchy 覆盖，为大型子分区启用路由。节点先按照 `index_min_size` 从扫描列表转为图，再启用路由；`no_build_levels` 排除的层级既不建图，也不建路由层。初始化路由时会纳入已有底图成员，后续插入继续维护路由层。因此，跨越阈值时会产生一次性的路由构建开销。重复向量别名不作为额外物理行计入自动升级阈值。
+
+默认值 `0` 保持原有子节点行为。`root_graph_type: "multi_layer"` 仍独立于此阈值立即启用根节点路由；自动升级不会将稀疏底图切换为 Flat 或 Compressed 存储。启用自动路由配置时，版本化序列化格式显式保存路由状态，包括子节点路由层；新版本仍可读取旧索引，旧版本不能读取新的节点格式。所有路由阈值均为零的配置保留旧写入格式。
+
+`child_routing` 按 hierarchy 汇总子节点的 `routed_node_count`、`route_graph_count`、`route_node_count`（各路由层成员数之和）和 `route_graph_size`；`total_route_graph_size` 同时包含根节点和子节点的路由存储。
 
 ### 命名层级的 Dataset API
 

@@ -24,7 +24,7 @@
 
 namespace vsag {
 
-static constexpr uint64_t MAX_ROOT_ROUTE_GRAPH_COUNT = 1024;
+static constexpr uint64_t MAX_ROUTE_GRAPH_COUNT = 1024;
 
 static inline uint64_t
 get_suitable_max_degree(int64_t data_num) {
@@ -41,18 +41,23 @@ IndexNode::IndexNode(Allocator* allocator,
                      GraphInterfaceParamPtr graph_param,
                      uint32_t index_min_size,
                      const IndexCommonParam& common_param,
-                     GraphInterfaceParamPtr child_graph_param)
+                     GraphInterfaceParamPtr child_graph_param,
+                     uint32_t route_min_size,
+                     GraphInterfaceParamPtr route_graph_param)
     : ids_(allocator),
       index_min_size_(index_min_size),
       children_(allocator),
       allocator_(allocator),
       common_param_(common_param),
       graph_param_(std::move(graph_param)),
-      child_graph_param_(std::move(child_graph_param)) {
+      child_graph_param_(std::move(child_graph_param)),
+      route_min_size_(route_min_size),
+      route_graph_param_(std::move(route_graph_param)) {
 }
 
 void
 IndexNode::enable_routing(GraphInterfaceParamPtr graph_param) {
+    route_graph_param_ = graph_param;
     routing_ = std::make_unique<RoutingOverlay>(allocator_, std::move(graph_param));
 }
 
@@ -100,8 +105,13 @@ IndexNode::Build(const GraphBuildFunc& build_graph) {
 void
 IndexNode::AddChild(const std::string& key) {
     // AddChild is not thread-safe; ensure thread safety in calls to it.
-    children_[key] = std::make_unique<IndexNode>(
-        allocator_, child_graph_param_, index_min_size_, common_param_, child_graph_param_);
+    children_[key] = std::make_unique<IndexNode>(allocator_,
+                                                 child_graph_param_,
+                                                 index_min_size_,
+                                                 common_param_,
+                                                 child_graph_param_,
+                                                 route_min_size_,
+                                                 route_graph_param_);
     children_[key]->level_ = level_ + 1;
 }
 
@@ -128,7 +138,7 @@ IndexNode::GetChild(const std::string& key, bool need_init) {
 }
 
 void
-IndexNode::Deserialize(StreamReader& reader) {
+IndexNode::Deserialize(StreamReader& reader, uint32_t route_format_version) {
     // deserialize `entry_point_`
     StreamReader::ReadObj(reader, entry_point_);
     // deserialize `level_`
@@ -152,13 +162,24 @@ IndexNode::Deserialize(StreamReader& reader) {
     for (uint64_t i = 0; i < children_size; ++i) {
         std::string key = StreamReader::ReadString(reader);
         AddChild(key);
-        children_[key]->Deserialize(reader);
+        children_[key]->Deserialize(reader, route_format_version);
+    }
+    if (route_format_version != 0) {
+        CHECK_ARGUMENT(route_format_version == 1, "unsupported Pyramid node route format");
+        uint8_t present = 0;
+        StreamReader::ReadObj(reader, present);
+        CHECK_ARGUMENT(present <= 1, "invalid Pyramid node route presence");
+        routing_.reset();
+        if (present != 0) {
+            CHECK_ARGUMENT(route_graph_param_ != nullptr, "missing Pyramid route graph parameter");
+            enable_routing(route_graph_param_);
+        }
     }
     deserialize_routing_unlocked(reader);
 }
 
 void
-IndexNode::Serialize(StreamWriter& writer) const {
+IndexNode::Serialize(StreamWriter& writer, uint32_t route_format_version) const {
     std::unique_lock lock(mutex_);
     // serialize `entry_point_`
     StreamWriter::WriteObj(writer, entry_point_);
@@ -178,7 +199,11 @@ IndexNode::Serialize(StreamWriter& writer) const {
         // calculate size of `key`
         StreamWriter::WriteString(writer, item.first);
         // calculate size of `content`
-        item.second->Serialize(writer);
+        item.second->Serialize(writer, route_format_version);
+    }
+    if (route_format_version != 0) {
+        CHECK_ARGUMENT(route_format_version == 1, "unsupported Pyramid node route format");
+        StreamWriter::WriteObj(writer, static_cast<uint8_t>(has_routing()));
     }
     serialize_routing_unlocked(writer);
 }
@@ -201,8 +226,8 @@ IndexNode::deserialize_routing_unlocked(StreamReader& reader) {
     }
     uint64_t route_count = 0;
     StreamReader::ReadObj(reader, route_count);
-    CHECK_ARGUMENT(route_count <= MAX_ROOT_ROUTE_GRAPH_COUNT,
-                   fmt::format("invalid root route graph count: {}", route_count));
+    CHECK_ARGUMENT(route_count <= MAX_ROUTE_GRAPH_COUNT,
+                   fmt::format("invalid route graph count: {}", route_count));
     routing_->graphs.clear();
     routing_->graphs.reserve(route_count);
     for (uint64_t i = 0; i < route_count; ++i) {

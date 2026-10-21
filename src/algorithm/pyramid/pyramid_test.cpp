@@ -24,6 +24,7 @@
 #include <condition_variable>
 #include <functional>
 #include <future>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <random>
@@ -419,6 +420,61 @@ public:
     Root(Pyramid& index) {
         return *index.hierarchies_.begin()->second->root;
     }
+    static IndexNode&
+    Node(Pyramid& index, const std::string& path, const std::string& hierarchy = "") {
+        auto* node = index.hierarchies_.at(hierarchy)->root.get();
+        if (not path.empty()) {
+            for (const auto& segment : split(path, '/')) {
+                REQUIRE(node->children_.count(segment) == 1);
+                node = node->children_.at(segment).get();
+            }
+        }
+        return *node;
+    }
+
+    static MetadataPtr
+    StreamingHeader(const Pyramid& index) {
+        return index.collect_streaming_header();
+    }
+
+    static void
+    ReadStreamingBody(Pyramid& index, StreamReader& reader, const MetadataPtr& metadata) {
+        index.read_streaming_body(reader, metadata);
+    }
+
+    static void
+    WriteFooter(StreamWriter& writer, const JsonType& basic_info) {
+        Pyramid::write_index_footer(writer, basic_info);
+    }
+
+    static bool
+    HasRouting(const IndexNode& node) {
+        return node.has_routing();
+    }
+
+    static void
+    RequireRoutingInvariant(const IndexNode& node, uint64_t physical_count) {
+        REQUIRE(node.status_ == IndexNode::Status::GRAPH);
+        REQUIRE(node.graph_ != nullptr);
+        REQUIRE(node.graph_->TotalCount() == physical_count);
+        REQUIRE(node.has_routing());
+        REQUIRE(node.graph_->CheckIdExists(node.entry_point_));
+        // Promotion may legitimately sample no upper rows. Presence, not a random
+        // nonzero layer count, is the threshold contract.
+        auto lower = node.graph_;
+        for (const auto& route : node.routing_->graphs) {
+            REQUIRE(route != nullptr);
+            for (const auto id : route->GetIds()) {
+                REQUIRE(lower->CheckIdExists(id));
+                REQUIRE(node.graph_->CheckIdExists(id));
+            }
+            lower = route;
+        }
+        if (not node.routing_->graphs.empty()) {
+            REQUIRE(node.routing_->graphs.back()->CheckIdExists(node.entry_point_));
+        }
+    }
+
     static void
     CheckPromotedAdmissions(Pyramid& index, bool enabled) {
         auto& root = Root(index);
@@ -605,6 +661,539 @@ TEST_CASE("Pyramid multipath flat candidates promote after streaming restore",
 }
 
 }  // namespace vsag
+
+namespace {
+
+PyramidTestIndex
+MakeRoutingPyramidIndex(int64_t route_min_size,
+                        uint32_t index_min_size = 1,
+                        bool skip_root = false,
+                        bool multi_layer_root = false,
+                        const std::string& graph_type = "nsw",
+                        uint64_t threads = 1,
+                        bool named_hierarchies = false,
+                        bool support_duplicate = false) {
+    PyramidTestIndex result;
+    vsag::IndexCommonParam common;
+    common.dim_ = PYRAMID_TEST_DIM;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    result.allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    common.allocator_ = result.allocator;
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "base_io_type":"memory_io",
+        "max_degree":8, "ef_construction":64, "alpha":1.2,
+        "no_build_levels":[], "use_reorder":false
+    })");
+    // A negative sentinel intentionally omits the new parameter to test defaults.
+    if (route_min_size >= 0) {
+        external["route_min_size"].SetUint64(static_cast<uint64_t>(route_min_size));
+    }
+    external["index_min_size"].SetUint64(index_min_size);
+    external["graph_type"].SetString(graph_type);
+    external["build_thread_count"].SetUint64(threads);
+    external["support_duplicate"].SetBool(support_duplicate);
+    if (skip_root) {
+        external["no_build_levels"].SetVector(std::vector<int32_t>{0});
+    } else if (multi_layer_root) {
+        external["root_graph_type"].SetString("multi_layer");
+    }
+    if (named_hierarchies) {
+        external["hierarchies"].SetJson(vsag::JsonType::Parse(R"([
+            "inherited", {"name":"disabled","route_min_size":0},
+            {"name":"later","route_min_size":16}
+        ])"));
+    }
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+    result.index = std::make_shared<vsag::Pyramid>(param, common);
+    return result;
+}
+
+struct RoutingTestData {
+    explicit RoutingTestData(int64_t count, const std::string& path = "tenant/branch/leaf")
+        : vectors(count * PYRAMID_TEST_DIM), ids(count), paths(count, path) {
+        FillRootVectors(vectors, count);
+        for (int64_t i = 0; i < count; ++i) {
+            ids[i] = 10001 + 37 * i;
+        }
+    }
+
+    vsag::DatasetPtr
+    Slice(int64_t offset, int64_t count) {
+        return MakePyramidDataset(vectors.data() + offset * PYRAMID_TEST_DIM,
+                                  ids.data() + offset,
+                                  paths.data() + offset,
+                                  count);
+    }
+
+    void
+    RequireSelfSearch(vsag::Pyramid& index, int64_t offset) {
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(PYRAMID_TEST_DIM)
+                         ->Float32Vectors(vectors.data() + offset * PYRAMID_TEST_DIM)
+                         ->Paths(paths.data() + offset)
+                         ->Owner(false);
+        auto result = index.KnnSearch(
+            query, 1, R"({"pyramid":{"ef_search":256,"subindex_ef_search":256}})", nullptr);
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == ids[offset]);
+        REQUIRE(std::abs(result->GetDistances()[0]) < 1e-6F);
+    }
+
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    std::vector<std::string> paths;
+};
+
+}  // namespace
+
+TEST_CASE("Pyramid route threshold crosses at physical graph size",
+          "[ut][pyramid][route_min_size]") {
+    const bool build_first = GENERATE(false, true);
+    const bool skip_root = GENERATE(false, true);
+    auto fixture = MakeRoutingPyramidIndex(8, 1, skip_root);
+    RoutingTestData data(9);
+    auto first = data.Slice(0, 7);
+    REQUIRE((build_first ? fixture.index->Build(first) : fixture.index->Add(first)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+        auto& node = Peer::Node(*fixture.index, path);
+        REQUIRE(node.status_ == vsag::IndexNode::Status::GRAPH);
+        REQUIRE(node.graph_->TotalCount() == 7);
+        REQUIRE_FALSE(Peer::HasRouting(node));
+    }
+    for (int64_t count : {8, 9}) {
+        REQUIRE(fixture.index->Add(data.Slice(count - 1, 1)).empty());
+        for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+            Peer::RequireRoutingInvariant(Peer::Node(*fixture.index, path), count);
+        }
+        auto& root = Peer::Root(*fixture.index);
+        if (skip_root) {
+            REQUIRE(root.status_ == vsag::IndexNode::Status::NO_INDEX);
+            REQUIRE_FALSE(Peer::HasRouting(root));
+        } else {
+            Peer::RequireRoutingInvariant(root, count);
+        }
+        data.RequireSelfSearch(*fixture.index, count - 1);
+    }
+}
+
+TEST_CASE("Pyramid route threshold waits for FLAT promotion", "[ut][pyramid][route_min_size]") {
+    auto fixture = MakeRoutingPyramidIndex(3, 8, true);
+    RoutingTestData data(9);
+    REQUIRE(fixture.index->Build(data.Slice(0, 7)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    auto& leaf = Peer::Node(*fixture.index, "tenant/branch/leaf");
+    REQUIRE(leaf.status_ == vsag::IndexNode::Status::FLAT);
+    REQUIRE_FALSE(Peer::HasRouting(leaf));
+    REQUIRE(fixture.index->Add(data.Slice(7, 1)).empty());
+    Peer::RequireRoutingInvariant(leaf, 8);
+    REQUIRE(fixture.index->Add(data.Slice(8, 1)).empty());
+    Peer::RequireRoutingInvariant(leaf, 9);
+    data.RequireSelfSearch(*fixture.index, 8);
+}
+
+TEST_CASE("Pyramid split codes without raw vectors promote and backfill child routes",
+          "[ut][pyramid][route_min_size][split_storage][serialize]") {
+    const bool streaming = GENERATE(false, true);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 66;
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "rabitq_bits_per_dim_base":3, "rabitq_bits_per_dim_precise":5,
+        "rabitq_bits_per_dim_query":32, "use_reorder":true,
+        "store_raw_vector":false, "fast_encode_rabitq":false,
+        "base_io_type":"block_memory_io", "graph_type":"nsw",
+        "max_degree":16, "ef_construction":64, "build_thread_count":1,
+        "no_build_levels":[0], "index_min_size":16, "route_min_size":64
+    })");
+    auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+    auto source = std::make_shared<vsag::Pyramid>(param, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 10001);
+    std::vector<std::string> paths(count, "tenant/branch/leaf");
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (int64_t i = 0; i < count; ++i) {
+        float norm = 0.0F;
+        for (int64_t d = 0; d < dim; ++d) {
+            auto& value = vectors[i * dim + d];
+            value = distribution(generator);
+            norm += value * value;
+        }
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] /= std::sqrt(norm);
+        }
+    }
+    const auto slice = [&](int64_t offset, int64_t size) {
+        return vsag::Dataset::Make()
+            ->NumElements(size)
+            ->Dim(dim)
+            ->Ids(ids.data() + offset)
+            ->Float32Vectors(vectors.data() + offset * dim)
+            ->Paths(paths.data() + offset)
+            ->Owner(false);
+    };
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    const auto check = [&](const auto& index, int64_t size) {
+        REQUIRE(index->GetMemoryUsageDetail().count("raw_vector") == 0);
+        for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+            Peer::RequireRoutingInvariant(Peer::Node(*index, path), size);
+        }
+        // Quantized distances need not be zero; old and newly inserted labels must
+        // still be searchable after code-only promotion/backfill and serialization.
+        for (const int64_t offset : {int64_t{0}, int64_t{37}, size - 1}) {
+            auto result =
+                index->KnnSearch(slice(offset, 1),
+                                 1,
+                                 R"({"pyramid":{"ef_search":128,"subindex_ef_search":128}})",
+                                 nullptr);
+            REQUIRE(result->GetDim() == 1);
+            REQUIRE(result->GetIds()[0] == ids[offset]);
+            REQUIRE(std::isfinite(result->GetDistances()[0]));
+        }
+    };
+    REQUIRE(source->Build(slice(0, 15)).empty());
+    auto& leaf = Peer::Node(*source, paths[0]);
+    REQUIRE(leaf.status_ == vsag::IndexNode::Status::FLAT);
+    REQUIRE_FALSE(Peer::HasRouting(leaf));
+    // FLAT -> GRAPH promotion and later overlay backfill both have no raw vectors.
+    REQUIRE(source->Add(slice(15, 48)).empty());
+    REQUIRE(leaf.status_ == vsag::IndexNode::Status::GRAPH);
+    REQUIRE(leaf.graph_->TotalCount() == 63);
+    REQUIRE_FALSE(Peer::HasRouting(leaf));
+    REQUIRE(source->Add(slice(63, 1)).empty());
+    check(source, 64);
+    REQUIRE(source->Add(slice(64, 1)).empty());
+    check(source, 65);
+    std::stringstream stream;
+    if (streaming) {
+        source->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source->Serialize(writer);
+    }
+    auto restored = std::make_shared<vsag::Pyramid>(param, common);
+    if (streaming) {
+        restored->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored->Deserialize(reader);
+    }
+    check(restored, 65);
+    REQUIRE(restored->Add(slice(65, 1)).empty());
+    check(restored, 66);
+}
+
+TEST_CASE("Pyramid warm cache rebuilds child routes at the configured threshold",
+          "[ut][pyramid][route_min_size][pyramid_build_cache]") {
+    const auto threshold = GENERATE(int64_t{0}, int64_t{64}, int64_t{65});
+    RoutingTestData data(65);
+    std::vector<std::string> source_ids(65);
+    for (int64_t i = 0; i < 65; ++i) {
+        source_ids[i] = "route-source-" + std::to_string(i);
+    }
+    const auto slice = [&](int64_t offset, int64_t size) {
+        return data.Slice(offset, size)->SourceID(source_ids.data() + offset);
+    };
+    // Export only bottom graphs, without any routing overlay in the source.
+    auto cold = MakeRoutingPyramidIndex(0, 1, true);
+    REQUIRE(cold.index->Build(slice(0, 64)).empty());
+    std::stringstream cache;
+    cold.index->ExportCache(cache);
+    auto warm = MakeRoutingPyramidIndex(threshold, 1, true);
+    warm.index->ImportCache(cache);
+    REQUIRE(warm.index->Build(slice(0, 64)).empty());
+    const auto stats = vsag::JsonType::Parse(warm.index->GetStats());
+    REQUIRE(stats["build_cache_hit_nodes"].GetUint64() > 0);
+    REQUIRE(stats["build_cache_restored_edges"].GetUint64() > 0);
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    const auto check = [&](int64_t size) {
+        REQUIRE_FALSE(Peer::HasRouting(Peer::Root(*warm.index)));
+        for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+            auto& node = Peer::Node(*warm.index, path);
+            REQUIRE(node.status_ == vsag::IndexNode::Status::GRAPH);
+            REQUIRE(node.graph_->TotalCount() == size);
+            if (threshold > 0 && size >= threshold) {
+                Peer::RequireRoutingInvariant(node, size);
+            } else {
+                REQUIRE_FALSE(Peer::HasRouting(node));
+            }
+        }
+        data.RequireSelfSearch(*warm.index, 0);
+        data.RequireSelfSearch(*warm.index, size - 1);
+    };
+    check(64);
+    REQUIRE(warm.index->Add(slice(64, 1)).empty());
+    check(65);
+}
+
+TEST_CASE("Pyramid default disables child routes but static root stays eager",
+          "[ut][pyramid][route_min_size]") {
+    const auto threshold = GENERATE(int64_t{-1}, int64_t{0}, int64_t{1000});
+    const bool multi_layer_root = GENERATE(false, true);
+    auto fixture = MakeRoutingPyramidIndex(threshold, 1, false, multi_layer_root);
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    REQUIRE(Peer::HasRouting(Peer::Root(*fixture.index)) == multi_layer_root);
+    RoutingTestData data(16);
+    REQUIRE(fixture.index->Build(data.Slice(0, 15)).empty());
+    REQUIRE(fixture.index->Add(data.Slice(15, 1)).empty());
+    REQUIRE(Peer::HasRouting(Peer::Root(*fixture.index)) == multi_layer_root);
+    for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+        auto& node = Peer::Node(*fixture.index, path);
+        REQUIRE(node.status_ == vsag::IndexNode::Status::GRAPH);
+        REQUIRE(node.graph_->TotalCount() == 16);
+        REQUIRE_FALSE(Peer::HasRouting(node));
+    }
+    data.RequireSelfSearch(*fixture.index, 15);
+}
+
+TEST_CASE("Pyramid routed children roundtrip then cross and extend routes",
+          "[ut][pyramid][route_min_size][serialize]") {
+    const bool streaming = GENERATE(false, true);
+    const auto initial_count = GENERATE(int64_t{7}, int64_t{8}, int64_t{48});
+    auto source = MakeRoutingPyramidIndex(8, 1, true);
+    RoutingTestData data(64);
+    REQUIRE(source.index->Build(data.Slice(0, initial_count)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    REQUIRE(Peer::HasRouting(Peer::Node(*source.index, "tenant/branch/leaf")) ==
+            (initial_count >= 8));
+    std::stringstream stream;
+    if (streaming) {
+        source.index->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+    }
+    auto restored = MakeRoutingPyramidIndex(8, 1, true);
+    if (streaming) {
+        restored.index->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored.index->Deserialize(reader);
+    }
+    REQUIRE(restored.index->GetNumElements() == initial_count);
+    REQUIRE(Peer::HasRouting(Peer::Node(*restored.index, "tenant/branch/leaf")) ==
+            (initial_count >= 8));
+    data.RequireSelfSearch(*restored.index, initial_count - 1);
+    REQUIRE(restored.index->Add(data.Slice(initial_count, 64 - initial_count)).empty());
+    for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+        Peer::RequireRoutingInvariant(Peer::Node(*restored.index, path), 64);
+    }
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Root(*restored.index)));
+    data.RequireSelfSearch(*restored.index, 63);
+}
+
+TEST_CASE("Pyramid rejects explicit unsupported node route metadata before reading the body",
+          "[ut][pyramid][route_min_size][serialize]") {
+    const bool streaming = GENERATE(false, true);
+    const auto route_min_size = GENERATE(int64_t{0}, int64_t{8});
+    const auto version = GENERATE(
+        uint64_t{0}, uint64_t{2}, std::numeric_limits<uint64_t>::max(), (uint64_t{1} << 32) + 1);
+    CAPTURE(streaming, route_min_size, version);
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    auto fixture = MakeRoutingPyramidIndex(route_min_size);
+    auto metadata = Peer::StreamingHeader(*fixture.index);
+    auto basic_info = metadata->Get("basic_info");
+    REQUIRE(basic_info.Contains("pyramid_node_route_version") == (route_min_size > 0));
+    if (route_min_size > 0) {
+        REQUIRE(basic_info["pyramid_node_route_version"].GetUint64() == 1);
+    }
+    basic_info["pyramid_node_route_version"].SetUint64(version);
+    metadata->Set("basic_info", basic_info);
+
+    // No body is needed: an explicit unknown version must fail before any body read.
+    // The large value ending in 1 also catches accidental narrowing to uint32_t.
+    std::stringstream stream;
+    if (not streaming) {
+        vsag::IOStreamWriter writer(stream);
+        Peer::WriteFooter(writer, basic_info);
+    }
+    vsag::IOStreamReader reader(stream);
+    try {
+        if (streaming) {
+            Peer::ReadStreamingBody(*fixture.index, reader, metadata);
+        } else {
+            fixture.index->Deserialize(reader);
+        }
+        FAIL("explicit unsupported node route version must be rejected");
+    } catch (const vsag::VsagException& error) {
+        REQUIRE(std::string(error.what()).find("unsupported Pyramid node route format") !=
+                std::string::npos);
+    }
+    if (streaming) {
+        REQUIRE(reader.GetCursor() == 0);
+    }
+}
+
+TEST_CASE("Pyramid IndexNode rejects malformed route presence and count",
+          "[ut][pyramid][route_min_size][serialize][index_node]") {
+    const auto present = GENERATE(uint8_t{1}, uint8_t{2}, uint8_t{255});
+    CAPTURE(present);
+    vsag::IndexCommonParam common;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    common.allocator_ = allocator;
+    auto graph_param = std::make_shared<vsag::SparseGraphDatacellParameter>();
+    vsag::IndexNode source(allocator.get(), graph_param, 1, common, graph_param);
+    vsag::IndexNode restored(allocator.get(), graph_param, 1, common, graph_param, 8, graph_param);
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    // An unrouted, childless legacy node is exactly the v1 prefix before presence.
+    // Append typed fields rather than relying on offsets in a complete index image.
+    source.Serialize(writer, 0);
+    vsag::StreamWriter::WriteObj(writer, present);
+    if (present == 1) {
+        vsag::StreamWriter::WriteObj(writer, std::numeric_limits<uint64_t>::max());
+    }
+    vsag::IOStreamReader reader(stream);
+    try {
+        restored.Deserialize(reader, 1);
+        FAIL("malformed node routing must be rejected");
+    } catch (const vsag::VsagException& error) {
+        const auto expected =
+            present == 1 ? "invalid route graph count" : "invalid Pyramid node route presence";
+        REQUIRE(std::string(error.what()).find(expected) != std::string::npos);
+    }
+}
+
+TEST_CASE("Pyramid batch routing preserves sparse child membership",
+          "[ut][pyramid][route_min_size][pipnn]") {
+    const auto graph_type = GENERATE(std::string("nsw"), std::string("pipnn"));
+    auto fixture = MakeRoutingPyramidIndex(16, 1, true, false, graph_type, 4);
+    RoutingTestData data(128);
+    for (int64_t i = 0; i < 128; ++i) {
+        data.paths[i] = (i % 2 == 0) ? "even/deep/leaf" : "odd/deep/leaf";
+    }
+    REQUIRE(fixture.index->Build(data.Slice(0, 96)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    for (const auto& path : {"even/deep/leaf", "odd/deep/leaf"}) {
+        auto& node = Peer::Node(*fixture.index, path);
+        Peer::RequireRoutingInvariant(node, 48);
+        // Rows are global internal IDs, not local [0, child_size) positions.
+        for (int64_t i = 0; i < 96; ++i) {
+            auto inner = fixture.index->label_table_->GetIdByLabel(data.ids[i]);
+            REQUIRE(node.graph_->CheckIdExists(inner) == (data.paths[i] == path));
+        }
+    }
+    REQUIRE(fixture.index->Add(data.Slice(96, 32)).empty());
+    for (const auto& path : {"even/deep/leaf", "odd/deep/leaf"}) {
+        Peer::RequireRoutingInvariant(Peer::Node(*fixture.index, path), 64);
+    }
+    data.RequireSelfSearch(*fixture.index, 126);
+    data.RequireSelfSearch(*fixture.index, 127);
+}
+
+TEST_CASE("Pyramid parallel insertion publishes one complete child overlay",
+          "[ut][pyramid][route_min_size][parallel]") {
+    auto fixture = MakeRoutingPyramidIndex(32, 1, true, false, "nsw", 4);
+    RoutingTestData data(128);
+    REQUIRE(fixture.index->Build(data.Slice(0, 31)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*fixture.index, "tenant/branch/leaf")));
+    // One Add fans out through the supported build pool, racing the threshold
+    // without requiring concurrent calls to the public Add API.
+    REQUIRE(fixture.index->Add(data.Slice(31, 97)).empty());
+    for (const auto& path : {"tenant", "tenant/branch", "tenant/branch/leaf"}) {
+        auto& node = Peer::Node(*fixture.index, path);
+        Peer::RequireRoutingInvariant(node, 128);
+        for (const auto id : data.ids) {
+            REQUIRE(node.graph_->CheckIdExists(fixture.index->label_table_->GetIdByLabel(id)));
+        }
+    }
+    data.RequireSelfSearch(*fixture.index, 127);
+}
+
+TEST_CASE("Pyramid named trees independently inherit and cross route thresholds",
+          "[ut][pyramid][route_min_size][hierarchy]") {
+    auto fixture = MakeRoutingPyramidIndex(8, 1, true, false, "nsw", 1, true);
+    RoutingTestData data(16);
+    const auto dataset = [&](int64_t offset, int64_t count) {
+        return data.Slice(offset, count)
+            ->Paths("inherited", data.paths.data() + offset)
+            ->Paths("disabled", data.paths.data() + offset)
+            ->Paths("later", data.paths.data() + offset);
+    };
+    REQUIRE(fixture.index->Build(dataset(0, 8)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    Peer::RequireRoutingInvariant(Peer::Node(*fixture.index, "tenant/branch/leaf", "inherited"), 8);
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*fixture.index, "tenant", "disabled")));
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*fixture.index, "tenant", "later")));
+    REQUIRE(fixture.index->Add(dataset(8, 8)).empty());
+    for (const auto& hierarchy : {"inherited", "later"}) {
+        Peer::RequireRoutingInvariant(Peer::Node(*fixture.index, "tenant/branch/leaf", hierarchy),
+                                      16);
+        REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*fixture.index, "", hierarchy)));
+    }
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*fixture.index, "tenant", "disabled")));
+}
+
+TEST_CASE("Pyramid legacy no-presence routing payload remains readable and addable",
+          "[ut][pyramid][route_min_size][serialize]") {
+    const bool streaming = GENERATE(false, true);
+    const bool multi_layer_root = GENERATE(false, true);
+    // Disabled automatic routing retains legacy node encoding without presence
+    // bytes; only a configured static root has an implicit routing payload.
+    auto source = MakeRoutingPyramidIndex(0, 1, false, multi_layer_root);
+    RoutingTestData data(64);
+    REQUIRE(source.index->Build(data.Slice(0, 48)).empty());
+    std::stringstream stream;
+    if (streaming) {
+        source.index->SerializeStreaming(stream);
+    } else {
+        vsag::IOStreamWriter writer(stream);
+        source.index->Serialize(writer);
+    }
+    auto restored = MakeRoutingPyramidIndex(0, 1, false, multi_layer_root);
+    if (streaming) {
+        restored.index->DeserializeStreaming(stream);
+    } else {
+        vsag::IOStreamReader reader(stream);
+        restored.index->Deserialize(reader);
+    }
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    REQUIRE(Peer::HasRouting(Peer::Root(*restored.index)) == multi_layer_root);
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*restored.index, "tenant/branch/leaf")));
+    data.RequireSelfSearch(*restored.index, 47);
+    REQUIRE(restored.index->Add(data.Slice(48, 16)).empty());
+    REQUIRE(restored.index->GetNumElements() == 64);
+    if (multi_layer_root) {
+        Peer::RequireRoutingInvariant(Peer::Root(*restored.index), 64);
+    }
+    REQUIRE_FALSE(Peer::HasRouting(Peer::Node(*restored.index, "tenant/branch/leaf")));
+    data.RequireSelfSearch(*restored.index, 63);
+}
+
+TEST_CASE("Pyramid routing threshold counts physical rows rather than duplicate labels",
+          "[ut][pyramid][route_min_size][duplicate]") {
+    auto fixture = MakeRoutingPyramidIndex(8, 1, true, false, "nsw", 1, false, true);
+    RoutingTestData data(23);
+    // Sixteen labels share one construction code; seven subsequent unique codes
+    // bring the child to exactly eight physical rows, not twenty-three.
+    for (int64_t i = 1; i < 16; ++i) {
+        std::copy_n(
+            data.vectors.data(), PYRAMID_TEST_DIM, data.vectors.data() + i * PYRAMID_TEST_DIM);
+    }
+    REQUIRE(fixture.index->Build(data.Slice(0, 16)).empty());
+    using Peer = vsag::PyramidDuplicateTestPeer;
+    auto& leaf = Peer::Node(*fixture.index, "tenant/branch/leaf");
+    REQUIRE(fixture.index->GetNumElements() == 16);
+    REQUIRE(leaf.graph_->TotalCount() == 1);
+    REQUIRE_FALSE(Peer::HasRouting(leaf));
+    REQUIRE(fixture.index->Add(data.Slice(16, 6)).empty());
+    REQUIRE(leaf.graph_->TotalCount() == 7);
+    REQUIRE_FALSE(Peer::HasRouting(leaf));
+    REQUIRE(fixture.index->Add(data.Slice(22, 1)).empty());
+    Peer::RequireRoutingInvariant(leaf, 8);
+    REQUIRE(fixture.index->GetNumElements() == 23);
+    data.RequireSelfSearch(*fixture.index, 22);
+}
 
 TEST_CASE("Split function tests", "[ut][pyramid]") {
     SECTION("Empty input string") {

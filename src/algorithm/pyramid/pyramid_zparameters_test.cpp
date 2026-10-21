@@ -1014,3 +1014,188 @@ TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
     }
     REQUIRE_THROWS(make_index());
 }
+
+TEST_CASE("Pyramid route threshold defaults inheritance and roundtrip",
+          "[ut][PyramidParameters][route_min_size]") {
+    PyramidDefaultParam defaults;
+    defaults.graph_type = "nsw";
+    auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+    auto params = std::make_shared<vsag::PyramidParameters>();
+    params->FromJson(json);
+    REQUIRE(params->route_min_size == 0);
+    REQUIRE(vsag::PyramidHierarchyParameters{}.route_min_size == 0);
+    REQUIRE(params->ToJson()[vsag::PYRAMID_ROUTE_MIN_SIZE].GetUint64() == 0);
+
+    json[vsag::PYRAMID_ROUTE_MIN_SIZE].SetUint64(100);
+    *json[vsag::PYRAMID_HIERARCHIES].GetInnerJson() =
+        nlohmann::json::array({"inherited",
+                               {{"name", "object"}},
+                               {{"name", "disabled"}, {"route_min_size", 0}},
+                               {{"name", "override"}, {"route_min_size", 200}}});
+    params->FromJson(json);
+    REQUIRE(params->route_min_size == 100);
+    REQUIRE(params->hierarchies[0].route_min_size == 100);
+    REQUIRE(params->hierarchies[1].route_min_size == 100);
+    REQUIRE(params->hierarchies[2].route_min_size == 0);
+    REQUIRE(params->hierarchies[3].route_min_size == 200);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(params->ToJson());
+    REQUIRE(restored->route_min_size == 100);
+    REQUIRE(restored->hierarchies[3].route_min_size == 200);
+    REQUIRE(params->CheckCompatibility(restored));
+    restored->hierarchies[3].route_min_size = 201;
+    REQUIRE_FALSE(params->CheckCompatibility(restored));
+    REQUIRE_FALSE(restored->CheckCompatibility(params));
+    restored->FromJson(params->ToJson());
+    restored->route_min_size = 101;
+    REQUIRE_FALSE(params->CheckCompatibility(restored));
+    REQUIRE_FALSE(restored->CheckCompatibility(params));
+}
+
+TEST_CASE("Pyramid route threshold requires a uint32 integer",
+          "[ut][PyramidParameters][route_min_size]") {
+    PyramidDefaultParam defaults;
+    defaults.graph_type = "nsw";
+    const auto invalid = nlohmann::json::array({-1,
+                                                1.5,
+                                                1.0,
+                                                true,
+                                                "100",
+                                                nullptr,
+                                                nlohmann::json::array(),
+                                                nlohmann::json::object(),
+                                                uint64_t{4294967296},
+                                                std::numeric_limits<uint64_t>::max()});
+    for (const auto& value : invalid) {
+        INFO(value.dump());
+        auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+        *json[vsag::PYRAMID_ROUTE_MIN_SIZE].GetInnerJson() = value;
+        vsag::PyramidParameters params;
+        REQUIRE_THROWS_AS(params.FromJson(json), vsag::VsagException);
+        auto hierarchy_json = vsag::JsonType::Parse(R"({"name":"site"})");
+        *hierarchy_json[vsag::PYRAMID_ROUTE_MIN_SIZE].GetInnerJson() = value;
+        vsag::PyramidHierarchyParameters hierarchy;
+        REQUIRE_THROWS_AS(hierarchy.FromJson(hierarchy_json), vsag::VsagException);
+    }
+    for (uint64_t value : {uint64_t{0}, uint64_t{1}, uint64_t{4294967295}}) {
+        auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+        json[vsag::PYRAMID_ROUTE_MIN_SIZE].SetUint64(value);
+        *json[vsag::PYRAMID_HIERARCHIES].GetInnerJson() =
+            nlohmann::json::array({{{"name", "site"}, {"route_min_size", value}}});
+        vsag::PyramidParameters params;
+        REQUIRE_NOTHROW(params.FromJson(json));
+        REQUIRE(params.route_min_size == value);
+        REQUIRE(params.hierarchies[0].route_min_size == value);
+    }
+}
+
+TEST_CASE("Pyramid route threshold preserves static root restrictions",
+          "[ut][PyramidParameters][route_min_size]") {
+    PyramidDefaultParam defaults;
+    defaults.graph_type = "nsw";
+    for (uint64_t threshold : {uint64_t{0}, uint64_t{10}}) {
+        auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+        json[vsag::PYRAMID_ROUTE_MIN_SIZE].SetUint64(threshold);
+        vsag::PyramidParameters params;
+        REQUIRE_NOTHROW(params.FromJson(json));
+        REQUIRE(params.no_build_levels == std::vector<int32_t>{0, 1, 2});
+        REQUIRE_NOTHROW(vsag::validate_pyramid_external_root_graph_config(json, params));
+        json[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+        REQUIRE_THROWS(params.FromJson(json));
+        json[vsag::NO_BUILD_LEVELS].SetVector(std::vector<int32_t>{});
+        REQUIRE_NOTHROW(params.FromJson(json));
+        REQUIRE(params.root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+        REQUIRE(params.route_min_size == threshold);
+        json[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("pipnn");
+        REQUIRE_NOTHROW(params.FromJson(json));
+        json[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("nsw");
+        json[vsag::GRAPH_KEY][vsag::GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(1);
+        REQUIRE_THROWS(params.FromJson(json));
+        json[vsag::GRAPH_KEY][vsag::GRAPH_PARAM_MAX_DEGREE_KEY].SetInt(32);
+        json[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("odescent");
+        REQUIRE_THROWS(params.FromJson(json));
+        json[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+        if (threshold > 0) {
+            REQUIRE_THROWS(params.FromJson(json));
+        } else {
+            REQUIRE_NOTHROW(params.FromJson(json));
+        }
+    }
+
+    auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+    *json[vsag::PYRAMID_HIERARCHIES].GetInnerJson() =
+        nlohmann::json::array({{{"name", "site"}, {"route_min_size", 10}}});
+    vsag::PyramidParameters params;
+    REQUIRE_NOTHROW(params.FromJson(json));
+    REQUIRE_NOTHROW(vsag::validate_pyramid_external_root_graph_config(json, params));
+    (*json[vsag::PYRAMID_HIERARCHIES].GetInnerJson())[0]["max_degree"] = 1;
+    REQUIRE_THROWS(params.FromJson(json));
+    (*json[vsag::PYRAMID_HIERARCHIES].GetInnerJson())[0]["max_degree"] = 32;
+    json[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("odescent");
+    REQUIRE_THROWS(params.FromJson(json));
+}
+
+TEST_CASE("Pyramid route threshold never bypasses explicit external root checks",
+          "[ut][PyramidParameters][route_min_size]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    for (uint64_t threshold : {uint64_t{0}, uint64_t{10}}) {
+        for (bool named : {false, true}) {
+            auto external = vsag::JsonType::Parse(R"({
+                "base_quantization_type": "fp32", "no_build_levels": [0]
+            })");
+            external[vsag::PYRAMID_ROUTE_MIN_SIZE].SetUint64(threshold);
+            if (named) {
+                *external[vsag::PYRAMID_HIERARCHIES].GetInnerJson() =
+                    nlohmann::json::array({{{"name", "site"}}});
+            }
+            REQUIRE_NOTHROW(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+            for (const auto* root_type : {vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER,
+                                          vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER}) {
+                auto explicit_root = vsag::JsonType::Parse(external.GetInnerJson()->dump());
+                explicit_root[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(root_type);
+                REQUIRE_THROWS(
+                    vsag::Pyramid::CheckAndMappingExternalParam(explicit_root, common_param));
+                if (named) {
+                    auto hierarchy_root = vsag::JsonType::Parse(external.GetInnerJson()->dump());
+                    (*hierarchy_root[vsag::PYRAMID_HIERARCHIES]
+                          .GetInnerJson())[0]["root_graph_type"] = root_type;
+                    REQUIRE_THROWS(
+                        vsag::Pyramid::CheckAndMappingExternalParam(hierarchy_root, common_param));
+                }
+            }
+        }
+    }
+}
+
+TEST_CASE("Pyramid route threshold preserves multi-layer root storage compatibility",
+          "[ut][PyramidParameters][route_min_size]") {
+    PyramidDefaultParam defaults;
+    defaults.graph_type = "nsw";
+    for (uint64_t threshold : {uint64_t{0}, uint64_t{10}}) {
+        for (bool named : {false, true}) {
+            for (bool multi_layer : {false, true}) {
+                auto json = vsag::JsonType::Parse(generate_pyramid(defaults));
+                json[vsag::PYRAMID_ROUTE_MIN_SIZE].SetUint64(threshold);
+                json[vsag::NO_BUILD_LEVELS].SetVector(std::vector<int32_t>{});
+                const auto* root_type = multi_layer ? vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER
+                                                    : vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER;
+                if (named) {
+                    *json[vsag::PYRAMID_HIERARCHIES].GetInnerJson() =
+                        nlohmann::json::array({{{"name", "site"}, {"root_graph_type", root_type}}});
+                } else {
+                    json[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(root_type);
+                }
+                auto flat = std::make_shared<vsag::PyramidParameters>();
+                auto compressed = std::make_shared<vsag::PyramidParameters>();
+                json[vsag::GRAPH_KEY][vsag::GRAPH_STORAGE_TYPE_KEY].SetString("flat");
+                flat->FromJson(json);
+                json[vsag::GRAPH_KEY][vsag::GRAPH_STORAGE_TYPE_KEY].SetString("compressed");
+                compressed->FromJson(json);
+                REQUIRE(flat->CheckCompatibility(compressed) == not multi_layer);
+                REQUIRE(compressed->CheckCompatibility(flat) == not multi_layer);
+            }
+        }
+    }
+}

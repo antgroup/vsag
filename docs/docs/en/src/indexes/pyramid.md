@@ -154,10 +154,11 @@ Build-time parameters live under `index_param`.
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
 | `store_paths` | bool | `false` | Top-level switch that preserves the original paths supplied to `Build` and `Add` so `GetDataByIdsWithFlag` can return them when `DATA_FLAG_PATH` is selected. It applies to every configured hierarchy and cannot be overridden per hierarchy. |
 | `index_min_size` | int | `0` | Minimum sub-index size; smaller groups fall back to scan. |
+| `route_min_size` | int | `0` | Automatic routing threshold for each node, including children. `0` disables automatic promotion; a positive value enables sparse routing layers once its physical bottom-graph row count reaches this size. Supports NSW and PiPNN; requires `max_degree > 1`. |
 | `root_graph_type` | string | `"single_layer"` | Root graph layout: `single_layer` preserves the original sparse bottom graph; `multi_layer` uses a preallocated Flat or Compressed bottom graph with HGraph-style sparse routing layers and joint construction. `multi_layer` supports `graph_type: "nsw"` and `"pipnn"`. Do not specify this option when `no_build_levels` disables level 0. |
 | `support_duplicate` | bool | `false` | Group code-equivalent vectors with distinct external labels, using construction-code `CompareVectors` semantics. External labels must remain unique. |
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
-| `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
+| `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `route_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
 PiPNN supports Pyramid builds with `dtype: "float32"` and `metric_type` set to `"l2"`, `"ip"`, or
 `"cosine"`. It batch-builds every constructed graph in each hierarchy; with
@@ -269,7 +270,7 @@ Add a `hierarchies` array inside `index_param`. Each element is either:
   `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
 
 Overridable per-hierarchy parameters: `max_degree`, `ef_construction`, `alpha`,
-`no_build_levels`, `index_min_size`, `root_graph_type`.
+`no_build_levels`, `index_min_size`, `route_min_size`, `root_graph_type`.
 
 `root_graph_type: "multi_layer"` changes only the selected hierarchy's root. Its bottom graph uses
 the top-level `graph_storage_type`: Flat by default, or Compressed to trade construction and search
@@ -303,6 +304,12 @@ final reordering uses the configured reorder source.
     }
 }
 ```
+
+### Size-triggered routing
+
+Set `route_min_size` at the top level or override it per hierarchy to enable routing in large child partitions. Nodes first become graphs according to `index_min_size`; routing can only be enabled after that transition. Levels excluded by `no_build_levels` do not build graphs or routing layers. Existing bottom-graph members are included when routing is initialized, and subsequent insertions maintain the routing overlay. Promotion can therefore add a one-time construction cost at the threshold. Duplicate aliases do not count as additional physical rows for automatic promotion.
+
+The default `0` preserves the previous child-node behavior. `root_graph_type: "multi_layer"` still enables root routing eagerly, independently of this threshold; automatic promotion does not change a sparse bottom graph into Flat or Compressed storage. When automatic routing is configured, routing state is explicitly persisted in a versioned serialization format, including child overlays. New readers retain support for legacy indexes; older readers cannot read the new node format. Configurations with every route threshold set to zero retain the legacy writer layout.
 
 ### Dataset API for named hierarchies
 
@@ -472,7 +479,7 @@ Use [Index Analysis](../resources/analyze_index.md) to inspect Pyramid tree stru
 per-subindex quality, sampled base recall, and duplicate ratios reported by `GetStats()`.
 For each hierarchy, `root_graphs` reports `root_graph_type`, `bottom_graph_storage_type`,
 `bottom_graph_node_count`, `bottom_graph_size`, `route_graph_count`, `route_node_counts`, and
-`route_graph_size`.
+`route_graph_size`. `child_routing` reports each hierarchy’s descendant `routed_node_count`, `route_graph_count`, `route_node_count` (summed memberships across routing layers), and `route_graph_size`. `total_route_graph_size` includes root and child routing storage.
 `AnalyzeIndexBySearch` also reports path-scoped query recall, distance, latency, and, when reorder
 is enabled, quantization metrics. Its query dataset must carry the same default or named-hierarchy
 paths required by `KnnSearch`. For a batched dataset, the outer path collection has one row per
