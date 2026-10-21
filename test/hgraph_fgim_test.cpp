@@ -538,6 +538,26 @@ TEST_CASE_METHOD(HGraphFGIMTest,
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement keeps full rows on equal-distance smaller IDs",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources(common.allocator_.get());
+    sources.push_back(lhs.get());
+    sources.push_back(rhs.get());
+    // All vectors coincide. Visiting 3 pairs reverse neighbor 0 with neighbor 2.
+    // Candidate 0->2 has a smaller ID than 0->3 but no distance improvement.
+    FGIMKnnGraph graph{{{3, 0}}, {{2, 0}}, {{3, 0}}, {{2, 0}}};
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 1, 1);
+    REQUIRE(stats.distance_evaluations > 0);
+    REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(graph[0].size() == 1);
+    REQUIRE(graph[0][0].id == 3);
+    REQUIRE(graph[1].size() == 1);
+    REQUIRE(graph[1][0].id == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM refinement pairs cross-source neighbors and replaces farthest",
                  "[ut][hgraph][fgim]") {
     auto lhs = MakeSource(2, 0);
@@ -744,6 +764,7 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(after_indegree[4] == 1);
     REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
 }
+
 TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM reconstruction prunes redundant edges and preserves a connected chain",
                  "[ut][hgraph][fgim]") {
