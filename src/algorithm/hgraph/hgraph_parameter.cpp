@@ -128,6 +128,11 @@ HGraphParameter::FromJson(const JsonType& json) {
         }
         if (graph_type == GRAPH_TYPE_VALUE_PIPNN) {
             pipnn_param.FromJson(graph_json);
+            // HGraph keeps `alpha` at the top level of the JSON (ALPHA_KEY), outside the
+            // "graph" sub-object that FromJson() above parses, so mirror it here to keep the
+            // in-memory PiPNN copy consistent. This is not the value used to build: the PiPNN
+            // parameter ToJson() does not serialize alpha, and build_by_batch_graph()
+            // re-derives the pruning alpha it actually uses from HGraph::alpha_.
             pipnn_param.alpha = this->alpha;
             pipnn_param.Validate(this->bottom_graph_param->max_degree_);
         }

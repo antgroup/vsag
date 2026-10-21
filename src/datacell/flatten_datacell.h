@@ -315,7 +315,14 @@ FlattenDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
         if (ids_are_contiguous) {
             ByteBuffer codes(static_cast<uint64_t>(count) * static_cast<uint64_t>(code_size_),
                              allocator_);
-            quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
+            // EncodeBatch reports failure through its return value instead of throwing, so
+            // check it before publishing the codes: otherwise a failed encode would write
+            // `count` invalid codes into the IO in a single shot.
+            if (not quantizer_->EncodeBatch(
+                    static_cast<const float*>(vectors), codes.data, count)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "BatchInsertVector failed to encode vectors");
+            }
             std::lock_guard lock(mutex_);
             total_count_ = std::max(total_count_, idx_vec[0] + count);
             // 1.0 only exposes the flat IO write path, so write the contiguous run at its
