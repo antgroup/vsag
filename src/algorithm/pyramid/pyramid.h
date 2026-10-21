@@ -117,7 +117,8 @@ public:
                 auto root = create_root_node(graph_param,
                                              h_param.index_min_size,
                                              h_param.root_graph_type,
-                                             pyramid_param->root_graph_storage_type);
+                                             pyramid_param->root_graph_storage_type,
+                                             h_param.route_min_size);
                 auto h = std::make_unique<Hierarchy>(h_param.name, std::move(root), allocator_);
                 h->no_build_levels.assign(h_param.no_build_levels.begin(),
                                           h_param.no_build_levels.end());
@@ -132,7 +133,8 @@ public:
             auto root = create_root_node(pyramid_param->graph_param,
                                          index_min_size_,
                                          pyramid_param->root_graph_type,
-                                         pyramid_param->root_graph_storage_type);
+                                         pyramid_param->root_graph_storage_type,
+                                         pyramid_param->route_min_size);
             auto h = std::make_unique<Hierarchy>("", std::move(root), allocator_);
             h->no_build_levels.assign(pyramid_param->no_build_levels.begin(),
                                       pyramid_param->no_build_levels.end());
@@ -292,6 +294,9 @@ private:
     calc_native_distance_by_id(const void* query,
                                int64_t id,
                                bool calculate_precise_distance) const;
+
+    uint32_t
+    node_route_format_version() const;
 
     MetadataPtr
     collect_streaming_header() const override;
@@ -504,7 +509,8 @@ private:
     create_root_node(const GraphInterfaceParamPtr& child_graph_param,
                      uint32_t index_min_size,
                      const std::string& root_graph_type,
-                     GraphStorageTypes root_graph_storage_type);
+                     GraphStorageTypes root_graph_storage_type,
+                     uint32_t route_min_size);
 
     int
     draw_route_level(uint64_t max_degree);
@@ -518,14 +524,17 @@ private:
                              const FlattenInterfacePtr& codes,
                              InnerIdType& entry_point,
                              InnerIdType inner_id,
-                             const void* vector);
+                             const void* vector,
+                             const MutexArrayPtr& point_locks = nullptr,
+                             BasicSearcher* private_searcher = nullptr);
 
     DistHeapPtr
     search_graph_for_add(const GraphInterfacePtr& graph,
                          const FlattenInterfacePtr& codes,
                          InnerIdType inner_id,
                          const void* vector,
-                         InnerSearchParam& search_param);
+                         InnerSearchParam& search_param,
+                         BasicSearcher* private_searcher = nullptr);
 
     void
     connect_cached_graph_point(InnerIdType inner_id,
@@ -592,6 +601,18 @@ private:
                   uint64_t ef_construction = 0,
                   bool use_self_as_entry = false,
                   int sampled_route_level = std::numeric_limits<int>::min());
+
+    void
+    add_one_point_impl(const Hierarchy& hierarchy,
+                       IndexNode* node,
+                       InnerIdType inner_id,
+                       const void* vector,
+                       uint64_t ef_construction,
+                       bool use_self_as_entry,
+                       int sampled_route_level);
+
+    void
+    maybe_enable_routing(const Hierarchy& hierarchy, IndexNode& node);
 
     /// Split one atomic path string into its hierarchical segments.
     static std::vector<std::string>

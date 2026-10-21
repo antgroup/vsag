@@ -54,6 +54,7 @@ public:
     uint64_t ef_construction{400};
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    uint32_t route_min_size{0};
     std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
 };
 
@@ -82,6 +83,7 @@ public:
     AdaptivePruningParameter adaptive_pruning;
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    uint32_t route_min_size{0};
     std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
     GraphStorageTypes root_graph_storage_type{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
 

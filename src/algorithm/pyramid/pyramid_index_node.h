@@ -58,7 +58,9 @@ public:
               GraphInterfaceParamPtr graph_param,
               uint32_t index_min_size,
               const IndexCommonParam& common_param,
-              GraphInterfaceParamPtr child_graph_param);
+              GraphInterfaceParamPtr child_graph_param,
+              uint32_t route_min_size = 0,
+              GraphInterfaceParamPtr route_graph_param = nullptr);
 
     /// Build the internal graph using ODescent over the stored ids.
     void
@@ -95,10 +97,10 @@ public:
     GetChild(const std::string& key, bool need_init = false);
 
     void
-    Serialize(StreamWriter& writer) const;
+    Serialize(StreamWriter& writer, uint32_t route_format_version = 0) const;
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader, uint32_t route_format_version = 0);
 
     friend class Pyramid;
     friend class PyramidAnalyzer;
@@ -202,6 +204,11 @@ private:
     GraphInterfaceParamPtr child_graph_param_{nullptr};
     InnerIdType graph_capacity_{0};
     std::unique_ptr<RoutingOverlay> routing_{nullptr};
+    uint32_t route_min_size_{0};
+    GraphInterfaceParamPtr route_graph_param_{nullptr};
+    // Feature-only gate: acquired before admission and topology locks. Bottom insertions
+    // drop topology during search, so topology alone cannot quiesce a route transition.
+    mutable std::shared_mutex route_transition_mutex_;
 };
 
 }  // namespace vsag

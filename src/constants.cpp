@@ -282,6 +282,7 @@ const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
 // so either can evolve independently without coupling the other context
 const char* const PYRAMID_HIERARCHIES = "hierarchies";
 const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
+const char* const PYRAMID_ROUTE_MIN_SIZE = "route_min_size";
 const char* const PYRAMID_STORE_PATHS = "store_paths";
 const char* const PYRAMID_ROOT_GRAPH_TYPE = "root_graph_type";
 const char* const PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER = "single_layer";
