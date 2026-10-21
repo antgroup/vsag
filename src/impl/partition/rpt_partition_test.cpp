@@ -67,8 +67,9 @@ CheckPartitions(const Partitions& partitions, uint64_t count, uint64_t bucket_si
     uint64_t min_size = std::numeric_limits<uint64_t>::max();
     for (const auto& partition : partitions) {
         REQUIRE_FALSE(partition.empty());
-        max_size = std::max(max_size, partition.size());
-        min_size = std::min(min_size, partition.size());
+        const uint64_t partition_size = static_cast<uint64_t>(partition.size());
+        max_size = std::max(max_size, partition_size);
+        min_size = std::min(min_size, partition_size);
         for (int64_t id : partition) {
             REQUIRE(id >= 0);
             REQUIRE(static_cast<uint64_t>(id) < count);

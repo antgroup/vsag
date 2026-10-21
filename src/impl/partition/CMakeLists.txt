@@ -15,4 +15,4 @@
 
 
 add_library (partition OBJECT rpt_partition.cpp rpt_partition.h)
-target_link_libraries (partition PRIVATE vsag_src_common)
+target_link_libraries (partition PRIVATE coverage_config vsag_src_common)

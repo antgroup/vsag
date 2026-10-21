@@ -59,7 +59,7 @@ private:
     split(uint64_t begin, uint64_t end, uint64_t leaves, uint64_t depth, uint64_t node_seed);
 
     void
-    generate_direction(uint64_t node_seed, float* direction);
+    generate_direction(uint64_t node_seed, float* direction) const;
 
     void
     project(uint64_t begin, uint64_t end, const float* direction);

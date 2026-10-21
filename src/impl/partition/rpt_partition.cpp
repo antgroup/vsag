@@ -165,7 +165,7 @@ RPTPartition::split(
 }
 
 void
-RPTPartition::generate_direction(uint64_t node_seed, float* direction) {
+RPTPartition::generate_direction(uint64_t node_seed, float* direction) const {
     // Box-Muller turns each pair of uniforms into two standard normal values, which makes
     // the resulting direction uniform over the unit sphere.
     uint64_t state = node_seed;
