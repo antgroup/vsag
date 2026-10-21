@@ -18,14 +18,20 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <catch2/catch_approx.hpp>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
+#include <functional>
 #include <future>
+#include <mutex>
 #include <numeric>
 #include <random>
 #include <set>
 #include <sstream>
+#include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
@@ -202,7 +208,8 @@ MakeRootPyramidIndex(const std::string& root_graph_type,
                      bool use_rabitq_with_sq8 = false,
                      const std::string& graph_storage_type = vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT,
                      bool adaptive = false,
-                     bool reverse = false) {
+                     bool reverse = false,
+                     std::shared_ptr<vsag::SafeThreadPool> thread_pool = nullptr) {
     PyramidTestIndex result;
     vsag::IndexCommonParam common_param;
     common_param.dim_ = PYRAMID_TEST_DIM;
@@ -210,6 +217,7 @@ MakeRootPyramidIndex(const std::string& root_graph_type,
     common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
     result.allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     common_param.allocator_ = result.allocator;
+    common_param.thread_pool_ = std::move(thread_pool);
     auto external = vsag::JsonType::Parse(R"({
         "base_quantization_type": "fp32",
         "precise_quantization_type": "fp32",
@@ -2223,4 +2231,313 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
             REQUIRE(pooled->GetIds()[i] == serial->GetIds()[i]);
         }
     }
+}
+
+namespace {
+class PyramidSearchPool final : public vsag::ThreadPool {
+public:
+    explicit PyramidSearchPool(uint64_t threads) : pool_(threads) {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        const auto ordinal = ++submitted;
+        if (reject_after != 0 && ordinal > reject_after) {
+            throw std::runtime_error("injected Pyramid enqueue failure");
+        }
+        return pool_.Enqueue([this, ordinal, task = std::move(task)] {
+            const auto current = ++running;
+            auto previous = peak.load();
+            while (current > previous && !peak.compare_exchange_weak(previous, current)) {
+            }
+            struct Finish {
+                std::atomic<uint64_t>& running;
+                ~Finish() {
+                    --running;
+                }
+            } finish{running};
+            if (before_task) {
+                before_task(ordinal);
+            }
+            task();
+        });
+    }
+
+    void
+    WaitUntilEmpty() override {
+        pool_.WaitUntilEmpty();
+    }
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        pool_.SetQueueSizeLimit(limit);
+    }
+    void
+    SetPoolSize(uint64_t limit) override {
+        pool_.SetPoolSize(limit);
+    }
+
+    std::atomic<uint64_t> submitted{0}, running{0}, peak{0};
+    uint64_t reject_after{0};
+    std::function<void(uint64_t)> before_task;
+
+private:
+    vsag::DefaultThreadPool pool_;
+};
+
+class PyramidTestFilter final : public vsag::Filter {
+public:
+    explicit PyramidTestFilter(std::function<bool(int64_t)> check) : check_(std::move(check)) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return check_(id);
+    }
+
+private:
+    std::function<bool(int64_t)> check_;
+};
+}  // namespace
+
+TEST_CASE("Pyramid limits node tasks to request parallelism", "[ut][pyramid][parallel][bounded]") {
+    const auto threads = GENERATE(1, 2, 4, 8, 32);
+    const auto parallelism = GENERATE(1, 2, 4, 8);
+    const auto path_mode = GENERATE(0, 1, 2, 3, 4);
+    const auto range_search = GENERATE(false, true);
+    const auto use_filter = GENERATE(false, true);
+    CAPTURE(threads, parallelism, path_mode, range_search, use_filter);
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count);
+    std::string query_path;
+    for (int64_t i = 0; i < count; ++i) {
+        paths[i] = "branch" + std::to_string(i % 64);
+        if (i < 64) {
+            if (!query_path.empty())
+                query_path += "|";
+            query_path += paths[i];
+        }
+    }
+    if (path_mode == 1) {
+        query_path = "/";  // Expand the NO_INDEX root to all leaves.
+    } else if (path_mode == 2) {
+        query_path = "/|branch0|branch0|missing";  // Expansion and explicit paths overlap.
+    } else if (path_mode == 3) {
+        query_path = "missing";
+    } else if (path_mode == 4) {
+        query_path = "branch0";
+    }
+    const auto node_count = path_mode == 3 ? 0 : (path_mode == 4 ? 1 : 64);
+    // Keep all leaves flat so every returned distance has an exact independent oracle.
+    auto pool = std::make_shared<PyramidSearchPool>(threads);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto fixture =
+        MakePyramidIndex(count + 1, 1, false, false, false, false, false, false, false, safe_pool);
+    REQUIRE(
+        fixture.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    pool->WaitUntilEmpty();
+    pool->submitted = 0;
+    pool->peak = 0;
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 37 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+    const auto params =
+        R"({"pyramid":{"ef_search":512,"parallelism":)" + std::to_string(parallelism) + "}}";
+    std::mutex mutex;
+    std::condition_variable ready;
+    uint64_t arrivals = 0;
+    vsag::FilterPtr filter;
+    if (use_filter) {
+        filter = std::make_shared<PyramidTestFilter>([&](int64_t id) {
+            if (std::min({threads, parallelism, node_count}) > 1) {
+                std::unique_lock lock(mutex);
+                if (arrivals < 2) {
+                    ++arrivals;
+                    ready.notify_all();
+                    if (!ready.wait_for(
+                            lock, std::chrono::seconds(5), [&] { return arrivals == 2; })) {
+                        throw std::runtime_error("Pyramid node searches did not overlap");
+                    }
+                }
+            }
+            return id % 3 == 0;
+        });
+    }
+    auto result = range_search ? fixture.index->RangeSearch(query, 1e9F, params, filter)
+                               : fixture.index->KnnSearch(query, count, params, filter);
+    const auto expected_id = [&](int64_t id) {
+        return path_mode != 3 && (path_mode != 4 || id % 64 == 0) && (!use_filter || id % 3 == 0);
+    };
+    REQUIRE(result->GetDim() == std::count_if(ids.begin(), ids.end(), expected_id));
+    std::set<int64_t> seen;
+    for (int64_t position = 0; position < result->GetDim(); ++position) {
+        const auto id = result->GetIds()[position];
+        REQUIRE(id >= 0);
+        REQUIRE(id < count);
+        CHECK(expected_id(id));
+        REQUIRE(seen.insert(id).second);
+        float distance = 0;
+        for (int64_t dim = 0; dim < PYRAMID_TEST_DIM; ++dim) {
+            const auto difference =
+                vectors[id * PYRAMID_TEST_DIM + dim] - vectors[37 * PYRAMID_TEST_DIM + dim];
+            distance += difference * difference;
+        }
+        CHECK(result->GetDistances()[position] == Catch::Approx(distance).margin(1e-5));
+        if (position > 0) {
+            CHECK(result->GetDistances()[position - 1] <= result->GetDistances()[position]);
+        }
+    }
+    CHECK(pool->peak <= static_cast<uint64_t>(std::min({threads, parallelism, node_count})));
+    CHECK(pool->submitted ==
+          static_cast<uint64_t>(parallelism == 1 ? 0 : std::min(parallelism, node_count)));
+    if (use_filter && std::min({threads, parallelism, node_count}) > 1) {
+        CHECK(pool->peak >= 2);
+    }
+    pool->WaitUntilEmpty();
+    CHECK(pool->running == 0);
+}
+
+TEST_CASE("Pyramid parallel routing preserves results and distance phases",
+          "[ut][pyramid][parallel][bounded]") {
+    constexpr int64_t count = 512;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count);
+    for (int64_t i = 0; i < count; ++i) {
+        paths[i] = "branch" + std::to_string(i % 4);
+    }
+    auto pool = std::make_shared<PyramidSearchPool>(4);
+    auto fixture = MakeRootPyramidIndex(vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER,
+                                        false,
+                                        vsag::GRAPH_TYPE_VALUE_NSW,
+                                        false,
+                                        1,
+                                        false,
+                                        vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT,
+                                        false,
+                                        false,
+                                        std::make_shared<vsag::SafeThreadPool>(pool));
+    REQUIRE(
+        fixture.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    std::string query_path = "/|branch0|branch1|branch1|missing";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data() + 37 * PYRAMID_TEST_DIM)
+                     ->Paths(&query_path)
+                     ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 10;
+    request.expected_labels_ = {37};
+    request.params_str_ = R"({"pyramid":{"ef_search":512,"subindex_ef_search":512}})";
+    const auto serial = fixture.index->SearchWithRequest(request);
+    REQUIRE(serial->GetDim() == 10);
+    const auto serial_stats = vsag::JsonType::Parse(serial->GetStatistics());
+    REQUIRE(serial_stats["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
+    for (const auto parallelism : {2, 4}) {
+        request.params_str_ =
+            R"({"pyramid":{"ef_search":512,"subindex_ef_search":512,"parallelism":)" +
+            std::to_string(parallelism) + "}}";
+        for (uint64_t repeat = 0; repeat < 8; ++repeat) {
+            CAPTURE(parallelism, repeat);
+            pool->submitted = 0;
+            const auto result = fixture.index->SearchWithRequest(request);
+            REQUIRE(result->GetDim() == serial->GetDim());
+            for (int64_t i = 0; i < result->GetDim(); ++i) {
+                CHECK(result->GetIds()[i] == serial->GetIds()[i]);
+                CHECK(result->GetDistances()[i] == Catch::Approx(serial->GetDistances()[i]));
+            }
+            const auto stats = vsag::JsonType::Parse(result->GetStatistics());
+            for (const auto* phase : {"routing", "approximate"}) {
+                CHECK(stats["distance_evaluations_by_phase"][phase].GetUint64() ==
+                      serial_stats["distance_evaluations_by_phase"][phase].GetUint64());
+            }
+            CHECK(pool->submitted == static_cast<uint64_t>(std::min(parallelism, 3)));
+        }
+    }
+}
+
+TEST_CASE("Pyramid joins accepted node tasks before reporting failures",
+          "[ut][pyramid][parallel][bounded]") {
+    const auto worker_failure = GENERATE(false, true);
+    CAPTURE(worker_failure);
+    constexpr int64_t count = 16;
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count);
+    for (int64_t i = 0; i < count; ++i) paths[i] = "branch" + std::to_string(i % 4);
+    auto pool = std::make_shared<PyramidSearchPool>(8);
+    auto fixture = MakePyramidIndex(100,
+                                    1,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    false,
+                                    std::make_shared<vsag::SafeThreadPool>(pool));
+    REQUIRE(
+        fixture.index->Build(MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count))
+            .empty());
+    pool->WaitUntilEmpty();
+    pool->submitted = 0;
+    pool->reject_after = worker_failure ? 0 : 1;
+    std::promise<void> entered, release;
+    auto entered_future = entered.get_future().share();
+    auto release_future = release.get_future().share();
+    pool->before_task = [&](uint64_t ordinal) {
+        if (ordinal == (worker_failure ? 2 : 1)) {
+            entered.set_value();
+            release_future.wait();
+        }
+    };
+    vsag::FilterPtr filter;
+    if (worker_failure) {
+        filter = std::make_shared<PyramidTestFilter>([&](int64_t) -> bool {
+            if (entered_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+                throw std::runtime_error("Pyramid blocking worker did not start");
+            }
+            throw std::runtime_error("injected Pyramid search failure");
+        });
+    }
+    std::string path = "branch0|branch1|branch2|branch3";
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(PYRAMID_TEST_DIM)
+                     ->Float32Vectors(vectors.data())
+                     ->Paths(&path)
+                     ->Owner(false);
+    auto search = std::async(std::launch::async, [&] {
+        try {
+            fixture.index->KnnSearch(
+                query, count, R"({"pyramid":{"ef_search":32,"parallelism":2}})", filter);
+            return false;
+        } catch (const std::runtime_error&) {
+            return true;
+        }
+    });
+    const auto started = entered_future.wait_for(std::chrono::seconds(5));
+    const auto before_release = search.wait_for(std::chrono::milliseconds(50));
+    release.set_value();
+    CHECK(started == std::future_status::ready);
+    CHECK(before_release == std::future_status::timeout);
+    REQUIRE(search.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+    CHECK(search.get());
+    pool->WaitUntilEmpty();
+    pool->before_task = {};
+    CHECK(pool->running == 0);
 }

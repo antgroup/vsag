@@ -3171,32 +3171,52 @@ Pyramid::search_hierarchy(const Hierarchy& h,
         }
     }
 
-    std::vector<std::future<void>> futures;
     Vector<DistHeapPtr> search_result_lists(search_nodes.size(), allocator_);
-    for (uint32_t i = 0; i < search_nodes.size(); ++i) {
-        search_result_lists[i] = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
-        auto* node = search_nodes[i];
-        if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
-            futures.push_back(thread_pool_->GeneralEnqueue([&, node, i]() -> void {
-                VisitedListGuard vl_guard(pool_.get());
-                const VisitedListPtr& local_vl = vl_guard.get();
-                node->Search(
-                    search_func, local_vl, search_result_lists[i], search_param.ef, reasoning_ctx);
-            }));
-        } else if (search_nodes.size() > 1) {
-            VisitedListGuard vl_guard(pool_.get());
-            node->Search(search_func,
-                         vl_guard.get(),
-                         search_result_lists[i],
-                         search_param.ef,
-                         reasoning_ctx);
-        } else {
-            node->Search(search_func, vl, search_result_lists[i], search_param.ef, reasoning_ctx);
-        }
+    for (auto& result : search_result_lists) {
+        result = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
     }
-
-    for (auto& future : futures) {
-        future.get();
+    if (thread_pool_ != nullptr && search_param.parallel_search_thread_count > 1) {
+        const auto worker_count =
+            std::min<uint64_t>(search_param.parallel_search_thread_count, search_nodes.size());
+        std::atomic<uint64_t> next_node{0};
+        Vector<std::future<void>> futures(allocator_);
+        futures.reserve(worker_count);
+        std::exception_ptr submit_exception = nullptr;
+        try {
+            for (uint64_t worker = 0; worker < worker_count; ++worker) {
+                futures.push_back(thread_pool_->GeneralEnqueue([&] {
+                    for (;;) {
+                        const auto i = next_node.fetch_add(1, std::memory_order_relaxed);
+                        if (i >= search_nodes.size()) {
+                            break;
+                        }
+                        VisitedListGuard vl_guard(pool_.get());
+                        search_nodes[i]->Search(search_func,
+                                                vl_guard.get(),
+                                                search_result_lists[i],
+                                                search_param.ef,
+                                                reasoning_ctx);
+                    }
+                }));
+            }
+        } catch (...) {
+            submit_exception = std::current_exception();
+        }
+        drain_futures(futures, submit_exception);
+    } else {
+        for (uint64_t i = 0; i < search_nodes.size(); ++i) {
+            if (search_nodes.size() > 1) {
+                VisitedListGuard vl_guard(pool_.get());
+                search_nodes[i]->Search(search_func,
+                                        vl_guard.get(),
+                                        search_result_lists[i],
+                                        search_param.ef,
+                                        reasoning_ctx);
+            } else {
+                search_nodes[i]->Search(
+                    search_func, vl, search_result_lists[i], search_param.ef, reasoning_ctx);
+            }
+        }
     }
 
     if (search_result_lists.size() == 1) {
@@ -3247,9 +3267,11 @@ Pyramid::search_node(const IndexNode* node,
                      const InnerSearchParam& search_param,
                      const DatasetPtr& query,
                      const FlattenInterfacePtr& codes,
-                     QueryContext& ctx,
+                     QueryContext& shared_ctx,
                      uint64_t subindex_ef_search,
                      DistanceRecordVector* rabitq_lower_bound_candidates) const {
+    // Routing temporarily changes distance_phase, so each sub-graph needs its own context.
+    auto ctx = shared_ctx;
     std::shared_lock lock(node->mutex_);
     DistHeapPtr results = nullptr;
     const auto* query_vector = query->GetFloat32Vectors();
