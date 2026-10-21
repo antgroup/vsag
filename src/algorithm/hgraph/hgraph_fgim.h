@@ -60,6 +60,7 @@ public:
                  uint64_t* distance_evaluations = nullptr);
 
     // Destination vectors and labels must already occupy the merged internal ID space.
+    // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
     static void
     WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.

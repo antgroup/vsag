@@ -812,6 +812,7 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(after_indegree[4] == 1);
     REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
 }
+
 TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM reconstruction prunes redundant edges and preserves a connected chain",
                  "[ut][hgraph][fgim]") {
