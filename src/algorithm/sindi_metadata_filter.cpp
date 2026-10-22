@@ -749,7 +749,8 @@ SindiTimeFilter::SindiTimeFilter(Allocator* allocator)
     : allocator_(allocator),
       host_dictionary_(allocator),
       document_days_(allocator),
-      partitions_(allocator) {
+      partitions_(allocator),
+      segments_(allocator) {
 }
 
 SindiTimeBuildPlan
@@ -854,20 +855,27 @@ SindiTimeFilter::PrepareBuild(const DatasetPtr& base, uint32_t window_size) cons
 }
 
 void
-SindiTimeFilter::CommitBuild(SindiTimeBuildPlan&& plan, uint64_t element_count) {
-    this->Clear();
-    if (not plan.Enabled()) {
+SindiTimeFilter::CommitBuild(SindiTimeBuildPlan&& plan,
+                             uint32_t first_inner_id,
+                             uint32_t end_inner_id) {
+    if (not plan.Enabled() or first_inner_id == end_inner_id) {
         return;
     }
-    CHECK_ARGUMENT(plan.successful_days_.size() == element_count,
+    CHECK_ARGUMENT(plan.successful_days_.size() == end_inner_id - first_inner_id,
                    "SINDI successful epoch day count does not match element count");
+    CHECK_ARGUMENT(document_days_.size() == first_inner_id,
+                   "SINDI time metadata does not cover existing documents");
 
-    has_host_metadata_ = plan.has_host_metadata_;
+    if (segments_.empty()) {
+        has_host_metadata_ = plan.has_host_metadata_;
+    }
     if (has_host_metadata_) {
         host_dictionary_.Commit(plan.new_hosts_);
     }
-    document_days_ = std::move(plan.successful_days_);
-    uint32_t inner_cursor = 0;
+    document_days_.insert(
+        document_days_.end(), plan.successful_days_.begin(), plan.successful_days_.end());
+    const auto first_partition = static_cast<uint32_t>(partitions_.size());
+    uint32_t inner_cursor = first_inner_id;
     for (uint64_t group_begin = 0; group_begin < plan.group_partitions_.size();) {
         uint64_t group_end = group_begin + 1;
         while (group_end < plan.group_partitions_.size() and
@@ -907,8 +915,9 @@ SindiTimeFilter::CommitBuild(SindiTimeBuildPlan&& plan, uint64_t element_count) 
         }
         group_begin = group_end;
     }
-    CHECK_ARGUMENT(inner_cursor == element_count,
+    CHECK_ARGUMENT(inner_cursor == end_inner_id,
                    "SINDI time partitions do not cover every indexed document");
+    segments_.push_back({first_partition, static_cast<uint32_t>(partitions_.size())});
 }
 
 void
@@ -916,6 +925,7 @@ SindiTimeFilter::Clear() {
     host_dictionary_.Clear();
     Vector<int32_t>(allocator_).swap(document_days_);
     Vector<Partition>(allocator_).swap(partitions_);
+    Vector<Segment>(allocator_).swap(segments_);
     has_host_metadata_ = false;
 }
 
@@ -924,6 +934,7 @@ SindiTimeFilter::GetMemoryUsage() const {
     uint64_t memory = host_dictionary_.GetMemoryUsage();
     memory += document_days_.size() * sizeof(int32_t);
     memory += partitions_.size() * sizeof(Partition);
+    memory += segments_.size() * sizeof(Segment);
     for (const auto& partition : partitions_) {
         memory += (partition.host_ids.size() + partition.host_offsets.size()) * sizeof(uint32_t);
     }
@@ -980,38 +991,40 @@ SindiTimeFilter::Classify(const DatasetPtr& query, uint32_t window_size) const {
         return route;
     }
 
-    auto partition_begin = partitions_.begin();
-    auto partition_end = partitions_.end();
-    if (route.has_time) {
-        partition_end =
-            std::find_if(partition_begin, partition_end, [](const Partition& partition) {
-                return partition.min_day == SINDI_MISSING_EPOCH_DAY;
-            });
-        partition_begin = std::lower_bound(
-            partition_begin,
-            partition_end,
-            route.query_begin,
-            [](const Partition& partition, int32_t day) { return partition.max_day < day; });
-    }
-    route.inner_ranges.reserve(static_cast<uint64_t>(partition_end - partition_begin));
-    for (auto partition_iter = partition_begin; partition_iter != partition_end; ++partition_iter) {
-        const auto& partition = *partition_iter;
-        if (route.has_time and partition.min_day > route.query_end) {
-            break;
-        }
-        uint32_t begin = partition.begin;
-        uint32_t end = partition.end;
-        if (use_host) {
-            const auto host = std::lower_bound(
-                partition.host_ids.begin(), partition.host_ids.end(), query_host_id);
-            if (host == partition.host_ids.end() or *host != query_host_id) {
-                continue;
+    route.inner_ranges.reserve(route.has_time ? segments_.size() : partitions_.size());
+    for (const auto& segment : segments_) {
+        auto partition_begin = partitions_.begin() + segment.first_partition;
+        auto partition_end = partitions_.begin() + segment.end_partition;
+        if (route.has_time) {
+            if (std::prev(partition_end)->min_day == SINDI_MISSING_EPOCH_DAY) {
+                --partition_end;
             }
-            const auto host_index = static_cast<uint64_t>(host - partition.host_ids.begin());
-            begin += partition.host_offsets[host_index];
-            end = partition.begin + partition.host_offsets[host_index + 1];
+            partition_begin = std::lower_bound(
+                partition_begin,
+                partition_end,
+                route.query_begin,
+                [](const Partition& partition, int32_t day) { return partition.max_day < day; });
         }
-        append_merged_range(route.inner_ranges, begin, end);
+        for (auto partition_iter = partition_begin; partition_iter != partition_end;
+             ++partition_iter) {
+            const auto& partition = *partition_iter;
+            if (route.has_time and partition.min_day > route.query_end) {
+                break;
+            }
+            uint32_t begin = partition.begin;
+            uint32_t end = partition.end;
+            if (use_host) {
+                const auto host = std::lower_bound(
+                    partition.host_ids.begin(), partition.host_ids.end(), query_host_id);
+                if (host == partition.host_ids.end() or *host != query_host_id) {
+                    continue;
+                }
+                const auto host_index = static_cast<uint64_t>(host - partition.host_ids.begin());
+                begin += partition.host_offsets[host_index];
+                end = partition.begin + partition.host_offsets[host_index + 1];
+            }
+            append_merged_range(route.inner_ranges, begin, end);
+        }
     }
 
     if (route.inner_ranges.empty()) {
@@ -1117,6 +1130,11 @@ SindiTimeFilter::Serialize(StreamWriter& writer) const {
         StreamWriter::WriteVector(writer, partition.host_ids);
         StreamWriter::WriteVector(writer, partition.host_offsets);
     }
+    StreamWriter::WriteObj(writer, static_cast<uint64_t>(segments_.size()));
+    for (const auto& segment : segments_) {
+        StreamWriter::WriteObj(writer, segment.first_partition);
+        StreamWriter::WriteObj(writer, segment.end_partition);
+    }
 }
 
 void
@@ -1152,8 +1170,6 @@ SindiTimeFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
 
     Vector<Partition> partitions(allocator_);
     partitions.reserve(partition_count);
-    int32_t previous_max_day = SINDI_MISSING_EPOCH_DAY;
-    bool seen_dated_partition = false;
     uint32_t inner_cursor = 0;
     for (uint64_t i = 0; i < partition_count; ++i) {
         partitions.emplace_back(allocator_);
@@ -1167,18 +1183,12 @@ SindiTimeFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
         if (missing_partition) {
             CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
                 partition.min_day == SINDI_MISSING_EPOCH_DAY and
-                    partition.max_day == SINDI_MISSING_EPOCH_DAY and i + 1 == partition_count,
-                "serialized SINDI missing-time partition must be last with range [-1, -1]");
+                    partition.max_day == SINDI_MISSING_EPOCH_DAY,
+                "serialized SINDI missing-time partition must have range [-1, -1]");
         } else {
             CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
                 partition.min_day >= 0 and partition.min_day <= partition.max_day,
                 "serialized SINDI time partition day range is invalid");
-            if (seen_dated_partition) {
-                CHECK_ARGUMENT(previous_max_day <= partition.min_day,
-                               "serialized SINDI time partition ranges must be ordered");
-            }
-            previous_max_day = partition.max_day;
-            seen_dated_partition = true;
         }
         CHECK_ARGUMENT(partition.begin == inner_cursor,
                        "serialized SINDI time partitions must be contiguous");
@@ -1227,10 +1237,57 @@ SindiTimeFilter::Deserialize(StreamReader& reader, uint64_t element_count) {
     CHECK_ARGUMENT(inner_cursor == element_count,
                    "serialized SINDI time partitions do not cover every indexed document");
 
+    Vector<Segment> segments(allocator_);
+    if (version == 1) {
+        segments.push_back({0, static_cast<uint32_t>(partition_count)});
+    } else {
+        uint64_t segment_count = 0;
+        StreamReader::ReadObj(reader, segment_count);
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            segment_count > 0 and segment_count <= partition_count,
+            "serialized SINDI time segment count is invalid");
+        segments.reserve(segment_count);
+        for (uint64_t i = 0; i < segment_count; ++i) {
+            Segment segment;
+            StreamReader::ReadObj(reader, segment.first_partition);
+            StreamReader::ReadObj(reader, segment.end_partition);
+            segments.push_back(segment);
+        }
+    }
+    uint32_t partition_cursor = 0;
+    for (const auto& segment : segments) {
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            segment.first_partition == partition_cursor and
+                segment.end_partition > segment.first_partition and
+                segment.end_partition <= partition_count,
+            "serialized SINDI time segments must cover contiguous partitions");
+        int32_t previous_max_day = SINDI_MISSING_EPOCH_DAY;
+        bool seen_dated_partition = false;
+        for (uint32_t i = segment.first_partition; i < segment.end_partition; ++i) {
+            const auto& partition = partitions[i];
+            if (partition.min_day == SINDI_MISSING_EPOCH_DAY) {
+                CHECK_ARGUMENT(
+                    i + 1 == segment.end_partition,
+                    "serialized SINDI missing-time partition must be last in its segment");
+            } else {
+                if (seen_dated_partition) {
+                    CHECK_ARGUMENT(previous_max_day <= partition.min_day,
+                                   "serialized SINDI time partition ranges must be ordered");
+                }
+                previous_max_day = partition.max_day;
+                seen_dated_partition = true;
+            }
+        }
+        partition_cursor = segment.end_partition;
+    }
+    CHECK_ARGUMENT(partition_cursor == partition_count,
+                   "serialized SINDI time segments do not cover every partition");
+
     has_host_metadata_ = has_host != 0;
     host_dictionary_ = std::move(host_dictionary);
     document_days_ = std::move(document_days);
     partitions_ = std::move(partitions);
+    segments_ = std::move(segments);
 }
 
 SindiMetadataFilter::SindiMetadataFilter(Allocator* allocator)
@@ -1242,15 +1299,18 @@ SindiMetadataFilter::PrepareBuild(const DatasetPtr& base,
                                   uint64_t current_element_count,
                                   uint32_t window_size) const {
     SindiMetadataBuildPlan plan(allocator_);
-    if (current_element_count != 0) {
-        CHECK_ARGUMENT(not time_filter_.HasMetadata(),
-                       "SINDI time-aware index does not support incremental Add");
-    }
     plan.time_plan_ = time_filter_.PrepareBuild(base, window_size);
     if (plan.time_plan_.Enabled()) {
-        CHECK_ARGUMENT(current_element_count == 0,
-                       "SINDI cannot add time metadata after existing documents");
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            current_element_count == 0 or time_filter_.HasMetadata(),
+            "SINDI cannot add time metadata after existing documents");
+        CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+            current_element_count == 0 or
+                plan.time_plan_.HasHostMetadata() == time_filter_.HasHostMetadata(),
+            "SINDI incremental Add must preserve host metadata mode");
     } else {
+        CHECK_ARGUMENT(not time_filter_.HasMetadata(),
+                       "SINDI time-aware Add requires publish_time_stamp metadata");
         plan.host_plan_ = host_filter_.PrepareBuild(base, current_element_count);
     }
     return plan;
@@ -1262,7 +1322,7 @@ SindiMetadataFilter::CommitBuild(SindiMetadataBuildPlan&& plan,
                                  uint32_t end_inner_id) {
     if (plan.time_plan_.Enabled()) {
         host_filter_.Clear();
-        time_filter_.CommitBuild(std::move(plan.time_plan_), end_inner_id);
+        time_filter_.CommitBuild(std::move(plan.time_plan_), first_inner_id, end_inner_id);
         return;
     }
     host_filter_.CommitBuild(std::move(plan.host_plan_), first_inner_id, end_inner_id);

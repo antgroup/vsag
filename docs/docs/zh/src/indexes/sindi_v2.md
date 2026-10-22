@@ -113,8 +113,8 @@ SINDI_V2 同样支持 [SINDI 的 Unix 秒输入、UTC 日匹配与闭区间时�
 两个索引共用一个 metadata 过滤组件，统一处理仅时间、仅 host 以及时间与 host 组合的 KNN 路由；
 SINDI_V2 仍保留 term-first posting 布局。发布时间过滤支持 mutable、immutable 以及
 `use_reorder` 的任意设置，并由普通与 streaming 序列化共同保存；范围搜索仍不参与过滤。mutable
-时间 SINDI_V2 同样是 build-once：只允许通过初次 `Build()` 或空索引上的第一次 `Add()` 写入
-`publish_time_stamp`，之后拒绝 `Add()`。base 时间戳 `0` 沿用 SINDI 的无时间语义：无时间条件和
+时间 SINDI_V2 与 SINDI 一样支持 mutable 增量 `Add()`：每批必须提供 `publish_time_stamp`，
+并保持 host metadata 模式一致，允许补录旧日期。base 时间戳 `0` 沿用 SINDI 的无时间语义：无时间条件和
 仅 host 查询会包含这些文档，时间查询会排除它们。为了执行精确 day 过滤，每个选中 window 都会
 关闭 term 级 posting 剪枝，因此时间查询可能比仅 host 查询扫描更多 posting。在启用时间的索引上，
 仅 host 查询也遵循 SINDI 所述的边界 window 行为。
