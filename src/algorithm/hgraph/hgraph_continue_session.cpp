@@ -91,10 +91,11 @@ HGraphContinueSession::ValidateParameters(const std::string& parameters) const {
     const bool ordinary_search = params.parallel_search_thread_count == 1 and
                                  not params.enable_time_record and params.topk_factor == 0 and
                                  params.brute_force_threshold == 0 and
-                                 params.hops_limit == std::numeric_limits<uint32_t>::max();
-    CHECK_ARGUMENT(
-        ordinary_search,
-        "session does not support parallel, timed, factored, brute-force or hop-limited search");
+                                 params.hops_limit == std::numeric_limits<uint32_t>::max() and
+                                 params.early_stop_alpha == 0.0F;
+    CHECK_ARGUMENT(ordinary_search,
+                   "session does not support parallel, timed, factored, brute-force, hop-limited "
+                   "or early-stopped search");
     const bool ordinary_quantization = not params.rabitq_one_bit_search and
                                        is_nan_distance(params.rabitq_error_rate) and
                                        hgraph.rabitq_fused_datacell_ == nullptr;

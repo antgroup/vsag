@@ -827,6 +827,33 @@ TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphP
     REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
 }
 
+TEST_CASE("HGraphSearchParameters parses distance early stop",
+          "[ut][HGraphSearchParameters][distance_early_stop]") {
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(defaults.early_stop_alpha == 0.0F);
+    auto enabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance","alpha":1.25}}})");
+    REQUIRE(enabled.early_stop_alpha == 1.25F);
+    auto defaulted = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance"}}})");
+    REQUIRE(defaulted.early_stop_alpha ==
+            vsag::HGraphSearchParameters::DEFAULT_DISTANCE_EARLY_STOP_ALPHA);
+    for (const auto& value : {"null",
+                              "[]",
+                              "true",
+                              "{}",
+                              R"({"type":"other","alpha":1.1})",
+                              R"({"type":"distance","alpha":0.9})",
+                              R"({"type":"distance","alpha":-1})",
+                              R"({"type":"distance","alpha":"1.1"})",
+                              R"({"type":"distance","alpha":1e100})",
+                              R"({"type":"distance","alfa":1.1})",
+                              R"({"type":"distance","alpha":1.1,"extra":true})"}) {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            std::string(R"({"hgraph":{"ef_search":64,"early_stop":)") + value + "}}"));
+    }
+}
+
 TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
           "[ut][HGraphSearchParameters][brute_force_threshold]") {
     SECTION("default is 0") {

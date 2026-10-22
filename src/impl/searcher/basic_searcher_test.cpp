@@ -147,6 +147,146 @@ TEST_CASE("BasicSearcher supports KNN, range, filters, and empty data cells",
     pool->ReturnOne(vl);
 }
 
+TEST_CASE("Distance early stop tracks requested eligible top-k within the fixed search",
+          "[ut][BasicSearcher][distance_early_stop]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
+    std::vector<float> vectors{0, 1, 2, 3, 4, 5, 6, 7};
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    std::vector<InnerIdType> ids{0, 1, 2, 3, 4, 5, 6, 7};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph = std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{
+        {1}, {0, 2}, {1, 3}, {2, 4}, {3, 5}, {4, 6}, {5, 7}, {6}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    BasicSearcher searcher(common);
+    float query = 0;
+    struct Result {
+        std::set<InnerIdType> ids;
+        uint32_t distances;
+        uint32_t hops;
+        uint32_t early_stops;
+    };
+    auto search = [&](int64_t k, float alpha, const FilterPtr& filter = nullptr) {
+        InnerSearchParam params;
+        params.ef = ids.size();
+        params.topk = k;
+        params.rerank_topk = k;
+        params.is_inner_id_allowed = filter;
+        SearchStatistics stats;
+        QueryContext context{.alloc = allocator.get(), .stats = &stats};
+        context.distance_early_stop_alpha = alpha;
+        auto visited = pool->TakeOne();
+        auto found = alpha > 0.0F
+                         ? searcher.SearchWithDistanceEarlyStop(
+                               graph, flatten, visited, &query, params, LabelTablePtr{}, &context)
+                         : searcher.Search(
+                               graph, flatten, visited, &query, params, LabelTablePtr{}, &context);
+        pool->ReturnOne(visited);
+        Result result{{}, stats.dist_cmp.load(), stats.hops.load(), stats.early_stop_count.load()};
+        while (not found->Empty()) {
+            result.ids.insert(found->Top().second);
+            found->Pop();
+        }
+        REQUIRE(stats.ToJson().Contains("early_stop_count") == (alpha > 0.0F));
+        return result;
+    };
+
+    for (int64_t k : {2, 4}) {
+        auto fixed = search(k, 0);
+        auto early = search(k, 1);
+        auto loose = search(k, 1000000);
+        REQUIRE(early.ids == fixed.ids);
+        REQUIRE(early.early_stops == 1);
+        REQUIRE(early.distances < fixed.distances);
+        REQUIRE(early.hops < fixed.hops);
+        REQUIRE(loose.ids == fixed.ids);
+        REQUIRE(loose.distances == fixed.distances);
+        REQUIRE(loose.hops == fixed.hops);
+        REQUIRE(loose.early_stops == 0);
+        auto disabled_again = search(k, 0);
+        REQUIRE(disabled_again.ids == fixed.ids);
+        REQUIRE(disabled_again.distances == fixed.distances);
+        REQUIRE(disabled_again.early_stops == 0);
+    }
+    auto odd_only = std::make_shared<BlackListFilter>([](LabelType id) { return id % 2 == 0; });
+    auto filtered = search(2, 1, odd_only);
+    REQUIRE(filtered.ids == std::set<InnerIdType>{1, 3});
+    REQUIRE(filtered.early_stops == 1);
+    auto insufficient = search(5, 1, odd_only);
+    REQUIRE(insufficient.ids == std::set<InnerIdType>{1, 3, 5, 7});
+    REQUIRE(insufficient.early_stops == 0);
+    auto zero_distance = search(1, 1);
+    REQUIRE(zero_distance.ids == std::set<InnerIdType>{0});
+    REQUIRE(zero_distance.early_stops == 1);
+}
+
+TEST_CASE("Distance early stop counts eligible duplicates of the entry point",
+          "[ut][BasicSearcher][distance_early_stop]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
+    flatten->SetQuantizer(
+        std::make_shared<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>>(1, allocator.get()));
+    flatten->SetIO(std::make_unique<MemoryIO>(allocator.get()));
+    std::vector<float> vectors{0.0F, 0.0F, 2.0F};
+    std::vector<InnerIdType> ids{0, 1, 2};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{2}, {}, {0}});
+    auto duplicates = std::make_shared<DenseDuplicateTracker>(allocator.get());
+    duplicates->Resize(ids.size());
+    graph->SetDuplicateTracker(duplicates);
+    graph->SetDuplicateId(0, 1);
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    const bool exclude_entry = GENERATE(false, true);
+    InnerSearchParam params;
+    params.ef = ids.size();
+    params.topk = exclude_entry ? 1 : 2;
+    params.rerank_topk = params.topk;
+    params.consider_duplicate = true;
+    if (exclude_entry) {
+        params.is_inner_id_allowed =
+            std::make_shared<BlackListFilter>([](LabelType id) { return id == 0; });
+    }
+    SearchStatistics stats;
+    QueryContext context{.alloc = allocator.get(), .stats = &stats};
+    context.distance_early_stop_alpha = std::numeric_limits<float>::max();
+    float query = 0.0F;
+    auto visited = pool->TakeOne();
+    auto found = BasicSearcher(common).SearchWithDistanceEarlyStop(
+        graph, flatten, visited, &query, params, LabelTablePtr{}, &context);
+    pool->ReturnOne(visited);
+    std::set<InnerIdType> result_ids;
+    while (not found->Empty()) {
+        result_ids.insert(found->Top().second);
+        found->Pop();
+    }
+    REQUIRE(result_ids == (exclude_entry ? std::set<InnerIdType>{1} : std::set<InnerIdType>{0, 1}));
+    REQUIRE(stats.early_stop_count.load() == 1);
+    REQUIRE(stats.dist_cmp.load() == 1);
+}
+
 TEST_CASE("Search with stored vector ID", "[ut][BasicSearcher][DistanceProvider]") {
     constexpr uint64_t dim = 8;
     constexpr InnerIdType count = 4;
@@ -460,7 +600,7 @@ TEST_CASE("BasicSearcher iterator drain path handles sign and lower_bound correc
 }
 
 TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
-          "[ut][BasicSearcher][nonfinite]") {
+          "[ut][BasicSearcher][nonfinite][distance_early_stop]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.dim_ = 1;
@@ -493,11 +633,17 @@ TEST_CASE("BasicSearcher traverses through a non-finite-distance bridge",
     param.ep = 0;
     param.ef = 2;
     param.topk = 2;
+    param.rerank_topk = 2;
+    const bool early_stop = GENERATE(false, true);
     float query = 0.0F;
     auto vl = pool->TakeOne();
-    QueryContext* ctx = nullptr;
-    auto result =
-        BasicSearcher(common).Search(graph, flatten, vl, &query, param, LabelTablePtr{}, ctx);
+    QueryContext early_stop_ctx;
+    early_stop_ctx.distance_early_stop_alpha = 1.0F;
+    auto result = early_stop
+                      ? BasicSearcher(common).SearchWithDistanceEarlyStop(
+                            graph, flatten, vl, &query, param, LabelTablePtr{}, &early_stop_ctx)
+                      : BasicSearcher(common).Search(
+                            graph, flatten, vl, &query, param, LabelTablePtr{}, nullptr);
     pool->ReturnOne(vl);
 
     REQUIRE(result->Size() <= param.ef);

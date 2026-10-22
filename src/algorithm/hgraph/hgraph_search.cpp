@@ -134,12 +134,13 @@ HGraph::KnnSearch(const DatasetPtr& query,
         ctx.alloc = allocator;
     }
 
+    auto params = HGraphSearchParameters::FromJson(parameters);
+    CHECK_ARGUMENT(params.early_stop_alpha == 0.0F,
+                   "distance early stop does not support iterator search");
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
     this->validate_knn_args(query, k);
-
-    auto params = HGraphSearchParameters::FromJson(parameters);
     const auto threshold = ParseSearchThreshold(parameters);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
@@ -375,29 +376,36 @@ HGraph::search_one_graph(const void* query,
     const bool parallel_search_requested = inner_search_param.parallel_search_thread_count > 1;
     const bool has_parallel_search_executor =
         this->thread_pool_ != nullptr and this->parallel_searcher_ != nullptr;
+    // SearchWithRequest sets the alpha only for the bottom-graph traversal.
+    const bool early_stop = ctx != nullptr and ctx->distance_early_stop_alpha > 0.0F;
+    auto* generic_candidates = rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic;
+    auto graph_search = [&](const auto& searcher) {
+        if (early_stop) {
+            return searcher->SearchWithDistanceEarlyStop(graph,
+                                                         flatten,
+                                                         visited_list,
+                                                         query,
+                                                         inner_search_param,
+                                                         this->label_table_,
+                                                         ctx,
+                                                         generic_candidates);
+        }
+        return searcher->Search(graph,
+                                flatten,
+                                visited_list,
+                                query,
+                                inner_search_param,
+                                this->label_table_,
+                                ctx,
+                                generic_candidates);
+    };
     if (result == nullptr and parallel_search_requested and has_parallel_search_executor) {
-        result = this->parallel_searcher_->Search(
-            graph,
-            flatten,
-            visited_list,
-            query,
-            inner_search_param,
-            this->label_table_,
-            ctx,
-            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic);
+        result = graph_search(this->parallel_searcher_);
     } else if (result == nullptr) {
         if (parallel_search_requested and ctx != nullptr and ctx->stats != nullptr) {
             ctx->stats->parallel_search_fallback_count.fetch_add(1, std::memory_order_relaxed);
         }
-        result = this->searcher_->Search(
-            graph,
-            flatten,
-            visited_list,
-            query,
-            inner_search_param,
-            this->label_table_,
-            ctx,
-            rabitq_candidates == nullptr ? nullptr : &rabitq_candidates->generic);
+        result = graph_search(this->searcher_);
     }
     if (new_visited_list) {
         this->pool_->ReturnOne(visited_list);
@@ -744,6 +752,18 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
 
+    if (params.early_stop_alpha > 0.0F) {
+        const bool supported_mode = not is_range and not use_custom_distance;
+        CHECK_ARGUMENT(supported_mode, "distance early stop requires built-in KNN distance");
+        // The rule compares distances by ratio, which needs non-negative distances; inner-product
+        // distances of unnormalized vectors can be negative.
+        const bool supported_metric =
+            metric_ == MetricType::METRIC_TYPE_L2SQR or metric_ == MetricType::METRIC_TYPE_COSINE;
+        CHECK_ARGUMENT(supported_metric, "distance early stop requires l2 or cosine");
+        CHECK_ARGUMENT(rabitq_fused_datacell_ == nullptr,
+                       "distance early stop does not support fused RaBitQ split storage");
+    }
+
     if (use_custom_distance) {
         CHECK_ARGUMENT(params.parallel_search_thread_count == 1,
                        "HGraph custom query distance does not support parallel search");
@@ -1056,8 +1076,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
         // Reset per-query mutable state before each query.
         search_param.duplicate_id = -1;
-        // Per-query entry point search through hierarchical graphs.
+        // Per-query entry point search through hierarchical graphs; the distance early stop
+        // applies to the bottom graph only.
         ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
+        ctx.distance_early_stop_alpha = 0.0F;
         ep_search_param.ep = this->entry_point_id_;
         rabitq_candidates.Reset();
 
@@ -1090,6 +1112,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_param.ep = ep_search_param.ep;
         ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
+        ctx.distance_early_stop_alpha = params.early_stop_alpha;
         if (search_param.time_cost != nullptr) {
             search_param.time_cost->Reset();
         }

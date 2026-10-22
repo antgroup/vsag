@@ -124,8 +124,13 @@ public:
     FromParsedJson(const JsonType& params);
 
 public:
+    // Used when early_stop omits alpha. A larger alpha only stops later along the same
+    // traversal; with FP32 base codes and no reordering it never returns worse results.
+    static constexpr float DEFAULT_DISTANCE_EARLY_STOP_ALPHA = 1.5F;
+
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
+    float early_stop_alpha{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};

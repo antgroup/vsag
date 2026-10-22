@@ -14,8 +14,9 @@
 
 #pragma once
 
-// Definition of ParallelSearcher::search_impl. It lives in a header so that more than one
-// translation unit can instantiate it.
+// Definition of ParallelSearcher::search_impl. parallel_searcher.cpp instantiates the traversals
+// without the distance early stop and parallel_searcher_early_stop.cpp the one with it, so the
+// early-stop instance does not change how the default traversal is compiled.
 
 #include <atomic>
 #include <cmath>
@@ -28,6 +29,7 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
+#include "impl/searcher/distance_early_stop.h"
 #include "impl/searcher/searcher_utils.h"
 #include "parallel_searcher.h"
 #include "utils/filter_search_skip_strategy.h"
@@ -36,7 +38,7 @@
 
 namespace vsag {
 
-template <InnerSearchMode mode>
+template <InnerSearchMode mode, bool early_stop>
 DistHeapPtr
 ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                               const FlattenInterfacePtr& flatten,
@@ -63,6 +65,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             "parallel search requires a non-null thread pool");
     }
+
+    DistanceEarlyStop<early_stop> early_stopper(alloc, inner_search_param, ctx);
 
     auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
     const auto& computer = computer_lease.computer;
@@ -114,6 +118,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     }
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
+        early_stopper.Record(dist);
     }
     // See BasicSearcher: the entry point's duplicate labels are only expanded from this seed block.
     if (inner_search_param.consider_duplicate and
@@ -121,6 +126,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
                 top_candidates->Push(dist, duplicate_id);
+                early_stopper.Record(dist);
             }
         }
         if constexpr (mode == KNN_SEARCH) {
@@ -186,6 +192,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
             if ((-current_first_node_pair.first) > lower_bound && top_candidates->Size() == ef) {
+                break;
+            }
+        }
+        if constexpr (early_stop) {
+            // Same rule as BasicSearcher, checked against the first node of each popped beam;
+            // only the distance computations run on worker threads.
+            if (early_stopper.ShouldStop(-current_first_node_pair.first)) {
+                if (ctx != nullptr and ctx->stats != nullptr) {
+                    ctx->stats->early_stop_count.fetch_add(1, std::memory_order_relaxed);
+                }
                 break;
             }
         }
@@ -305,12 +321,14 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 candidate_set->Push(-dist, cur_id);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                    early_stopper.Record(dist);
                 }
                 if (inner_search_param.consider_duplicate) {
                     const auto duplicate_ids = graph->GetDuplicateIds(cur_id);
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            early_stopper.Record(dist);
                         }
                     }
                 }
