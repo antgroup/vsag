@@ -51,7 +51,7 @@ make_datacell(const std::shared_ptr<Allocator>& allocator,
     auto param_json = JsonType::Parse(
         std::string(R"({"codes_type":"sq_local_split","io_params":{"type":")") + io_type +
         R"("},"quantization_params":{"type":"sq_local_split",)"
-        R"("sq_local_bits_per_dim_filter":3,"sq_local_bits_per_dim_base":8}})");
+        R"("sq_local_bits_per_dim_base":3,"sq_local_bits_per_dim_precise":5}})");
     auto param = std::make_shared<FlattenDataCellParameter>();
     param->FromJson(param_json);
     common_param.allocator_ = allocator;

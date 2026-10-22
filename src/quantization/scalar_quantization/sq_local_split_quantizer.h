@@ -83,20 +83,21 @@ public:
 
     SQLocalSplitQuantizer(int64_t dim,
                           uint64_t filter_bits,
-                          uint64_t base_bits,
+                          uint64_t supplement_bits,
                           uint64_t query_bits,
                           Allocator* allocator)
         : dim_(dim),
           filter_bits_(filter_bits),
-          base_bits_(base_bits),
-          supplement_bits_(base_bits - filter_bits),
-          query_bits_(query_bits),
+          base_bits_(filter_bits + supplement_bits),
+          supplement_bits_(supplement_bits),
+          // internal representation: 0 means a float query, 8 means an SQ8 query
+          query_bits_(query_bits == 32 ? 0 : query_bits),
           allocator_(allocator) {
         CHECK_ARGUMENT(dim_ > 0, "sq_local_split requires a positive dimension");
-        CHECK_ARGUMENT(filter_bits_ >= 1 and base_bits_ <= 8 and filter_bits_ < base_bits_,
-                       "sq_local_split requires 1 <= x < x + y <= 8");
-        CHECK_ARGUMENT(query_bits_ == 0 or query_bits_ == 8,
-                       "sq_local_split query bits must be 0 (float) or 8 (SQ8)");
+        CHECK_ARGUMENT(filter_bits_ >= 1 and supplement_bits_ >= 1 and base_bits_ <= 8,
+                       "sq_local_split requires 1 <= x, 1 <= y and x + y <= 8");
+        CHECK_ARGUMENT(query_bits == 32 or query_bits == 8,
+                       "sq_local_split query bits must be 32 (float) or 8 (SQ8)");
         this->filter_code_size_ = META_SIZE + (dim_ * filter_bits_ + 7) / 8 + 1;
         this->supplement_code_size_ = (dim_ * supplement_bits_ + 7) / 8 + 1;
         this->full_code_size_ = (dim_ * base_bits_ + 7) / 8;
@@ -114,11 +115,11 @@ public:
                   ? std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param)->FilterBits()
                   : 3,
               std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param) != nullptr
-                  ? std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param)->BaseBits()
-                  : 8,
+                  ? std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param)->PreciseBits()
+                  : 5,
               std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param) != nullptr
                   ? std::dynamic_pointer_cast<SQLocalSplitQuantizerParameter>(param)->QueryBits()
-                  : 0,
+                  : 32,
               common_param.allocator_.get()) {
         CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
                        "sq_local_split supports only float32");

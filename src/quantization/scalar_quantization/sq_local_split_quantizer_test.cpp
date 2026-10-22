@@ -81,7 +81,7 @@ decode_codes(const QuantizerT& quantizer,
 TEST_CASE("sq_local_split code sizes and parameter validation", "[ut][SQLocalSplit]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 17;
-    Quantizer quantizer(dim, 3, 8, 0, allocator.get());
+    Quantizer quantizer(dim, 3, 5, 32, allocator.get());
 
     REQUIRE(quantizer.GetDim() == dim);
     REQUIRE(quantizer.FilterBits() == 3);
@@ -91,33 +91,33 @@ TEST_CASE("sq_local_split code sizes and parameter validation", "[ut][SQLocalSpl
     REQUIRE(quantizer.GetSupplementCodeSize() == (dim * 5 + 7) / 8 + 1);
     REQUIRE(quantizer.GetScalarCodeSize() == Quantizer::META_SIZE + dim);
 
-    REQUIRE_THROWS(Quantizer(0, 3, 8, 0, allocator.get()));
-    REQUIRE_THROWS(Quantizer(dim, 8, 8, 0, allocator.get()));  // x must be smaller than x + y
-    REQUIRE_THROWS(Quantizer(dim, 0, 8, 0, allocator.get()));  // x >= 1
-    REQUIRE_THROWS(Quantizer(dim, 3, 9, 0, allocator.get()));  // x + y <= 8
-    REQUIRE_THROWS(Quantizer(dim, 3, 8, 4, allocator.get()));  // query bits are 0 or 8
+    REQUIRE_THROWS(Quantizer(0, 3, 5, 32, allocator.get()));
+    REQUIRE_THROWS(Quantizer(dim, 8, 5, 32, allocator.get()));  // x <= 7
+    REQUIRE_THROWS(Quantizer(dim, 0, 5, 32, allocator.get()));  // x >= 1
+    REQUIRE_THROWS(Quantizer(dim, 3, 9, 32, allocator.get()));  // x + y <= 8
+    REQUIRE_THROWS(Quantizer(dim, 3, 5, 4, allocator.get()));   // query bits are 32 or 8
 
     auto parameter = std::make_shared<SQLocalSplitQuantizerParameter>();
     parameter->FromJson(JsonType::Parse(R"({"type":"sq_local_split",
-                                            "sq_local_bits_per_dim_filter":3,
-                                            "sq_local_bits_per_dim_base":8,
+                                            "sq_local_bits_per_dim_base":3,"sq_local_bits_per_dim_precise":5,
                                             "sq_local_bits_per_dim_query":8})"));
     REQUIRE(parameter->FilterBits() == 3);
+    REQUIRE(parameter->PreciseBits() == 5);
     REQUIRE(parameter->BaseBits() == 8);
     REQUIRE(parameter->QueryBits() == 8);
-    REQUIRE(parameter->ToJson().Contains(SQ_LOCAL_BITS_PER_DIM_FILTER));
+    REQUIRE(parameter->ToJson().Contains(SQ_LOCAL_BITS_PER_DIM_PRECISE));
 
     auto invalid = std::make_shared<SQLocalSplitQuantizerParameter>();
     REQUIRE_THROWS(invalid->FromJson(JsonType::Parse(
-        R"({"type":"sq_local_split","sq_local_bits_per_dim_filter":6,
-            "sq_local_bits_per_dim_base":5})")));
+        R"({"type":"sq_local_split","sq_local_bits_per_dim_base":6,
+            "sq_local_bits_per_dim_precise":4})")));
 }
 
 TEST_CASE("sq_local_split encode and decode stay inside the quantization cell",
           "[ut][SQLocalSplit]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     for (int64_t dim : {1, 3, 7, 8, 17, 64, 960}) {
-        Quantizer quantizer(dim, 3, 8, 0, allocator.get());
+        Quantizer quantizer(dim, 3, 5, 32, allocator.get());
         const auto vectors = random_vectors(6, dim, 37 + static_cast<uint32_t>(dim));
         std::vector<uint8_t> filter_code(quantizer.GetFilterCodeSize());
         std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
@@ -168,7 +168,7 @@ TEST_CASE("sq_local_split scalar codes pack into the split records bit for bit",
     for (auto [x, y] : std::vector<std::pair<uint64_t, uint64_t>>{
              {1, 7}, {2, 6}, {3, 5}, {4, 4}, {5, 3}, {6, 2}, {7, 1}}) {
         constexpr int64_t dim = 65;
-        Quantizer quantizer(dim, x, x + y, 0, allocator.get());
+        Quantizer quantizer(dim, x, y, 32, allocator.get());
         const auto vectors = random_vectors(4, dim, 91);
         std::vector<uint8_t> filter_code(quantizer.GetFilterCodeSize());
         std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
@@ -192,7 +192,7 @@ TEST_CASE("sq_local_split scalar codes pack into the split records bit for bit",
 TEST_CASE("sq_local_split distances match the reconstructed codes", "[ut][SQLocalSplit]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 96;
-    Quantizer quantizer(dim, 3, 8, 0, allocator.get());
+    Quantizer quantizer(dim, 3, 5, 32, allocator.get());
     const auto vectors = random_vectors(2, dim, 13);
     std::vector<uint8_t> filter1(quantizer.GetFilterCodeSize());
     std::vector<uint8_t> supplement1(quantizer.GetSupplementCodeSize());
@@ -246,7 +246,7 @@ TEST_CASE("sq_local_split distances match the reconstructed codes", "[ut][SQLoca
 TEST_CASE("sq_local_split quantized query keeps the sum-of-codes term", "[ut][SQLocalSplit]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 64;
-    IPQuantizer quantizer(dim, 3, 8, 8, allocator.get());
+    IPQuantizer quantizer(dim, 3, 5, 8, allocator.get());
     const auto vectors = random_vectors(1, dim, 5);
     std::vector<uint8_t> filter_code(quantizer.GetFilterCodeSize());
     std::vector<uint8_t> supplement_code(quantizer.GetSupplementCodeSize());
@@ -282,7 +282,7 @@ TEST_CASE("sq_local_split SIMD kernels agree with the generic implementation",
     for (int64_t dim : {1, 7, 8, 17, 65, 960}) {
         for (auto [x, y] :
              std::vector<std::pair<uint64_t, uint64_t>>{{1, 7}, {3, 5}, {4, 4}, {7, 1}}) {
-            Quantizer quantizer(dim, x, x + y, 0, allocator.get());
+            Quantizer quantizer(dim, x, y, 32, allocator.get());
             const auto vectors = random_vectors(2, dim, 3 + static_cast<uint32_t>(dim));
             std::vector<uint8_t> filter1(quantizer.GetFilterCodeSize());
             std::vector<uint8_t> supplement1(quantizer.GetSupplementCodeSize());

@@ -220,7 +220,7 @@ const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
 const char* const BASIC_INFO = "basic_info";
 
-const char* const SQ_LOCAL_BITS_PER_DIM_FILTER = "sq_local_bits_per_dim_filter";
+const char* const SQ_LOCAL_BITS_PER_DIM_PRECISE = "sq_local_bits_per_dim_precise";
 const char* const SQ_LOCAL_BITS_PER_DIM_BASE = "sq_local_bits_per_dim_base";
 const char* const SQ_LOCAL_BITS_PER_DIM_QUERY = "sq_local_bits_per_dim_query";
 const char* const CODES_TYPE_KEY = "codes_type";

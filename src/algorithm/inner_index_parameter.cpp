@@ -168,7 +168,7 @@ ApplySQLocalSplitConfig(const JsonType& external_json, JsonType& inner_json) {
     }
     inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SQ_LOCAL_SPLIT_CODES);
     for (const auto* key :
-         {SQ_LOCAL_BITS_PER_DIM_FILTER, SQ_LOCAL_BITS_PER_DIM_BASE, SQ_LOCAL_BITS_PER_DIM_QUERY}) {
+         {SQ_LOCAL_BITS_PER_DIM_BASE, SQ_LOCAL_BITS_PER_DIM_PRECISE, SQ_LOCAL_BITS_PER_DIM_QUERY}) {
         if (external_json.Contains(key)) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][key].SetJson(external_json[key]);
         }

@@ -161,9 +161,9 @@ as the RaBitQ `x + y` split.
 
 | parameter | meaning | range |
 | --- | --- | --- |
-| `sq_local_bits_per_dim_filter` | `x`, high bits used as the filter | `1 <= x < x + y` |
-| `sq_local_bits_per_dim_base` | `x + y`, total bits per component | `2 <= x + y <= 8` |
-| `sq_local_bits_per_dim_query` | `0` = FP32 query (default), `8` = SQ8 query | `0` or `8` |
+| `sq_local_bits_per_dim_base` | `x`, high bits used as the filter | `1 <= x <= 7` |
+| `sq_local_bits_per_dim_precise` | `y`, low bits used as the supplement | `1 <= y <= 7`, `x + y <= 8` |
+| `sq_local_bits_per_dim_query` | `32` = FP32 query (default), `8` = SQ8 query | `32` or `8` |
 
 Only dense `float32` with `l2`, `ip` or `cosine` is supported. HGraph and Pyramid select the split
 storage automatically: the index keeps `reorder_source = base` and reads the base records, so no
@@ -186,8 +186,8 @@ drops the low bits and yields a valid lower bound on the inner product, used for
     "dim": 960,
     "index_param": {
         "base_quantization_type": "sq_local_split",
-        "sq_local_bits_per_dim_filter": 3,
-        "sq_local_bits_per_dim_base": 8,
+        "sq_local_bits_per_dim_base": 3,
+        "sq_local_bits_per_dim_precise": 5,
         "max_degree": 32,
         "ef_construction": 200
     }

@@ -263,7 +263,7 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]
                       [RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
                           .SetJson(value);
-        } else if (key == SQ_LOCAL_BITS_PER_DIM_FILTER || key == SQ_LOCAL_BITS_PER_DIM_BASE ||
+        } else if (key == SQ_LOCAL_BITS_PER_DIM_BASE || key == SQ_LOCAL_BITS_PER_DIM_PRECISE ||
                    key == SQ_LOCAL_BITS_PER_DIM_QUERY) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][key].SetJson(value);
         } else if (key == RABITQ_BITS_PER_DIM_PRECISE) {

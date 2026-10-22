@@ -2242,7 +2242,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
-        } else if (key == SQ_LOCAL_BITS_PER_DIM_FILTER || key == SQ_LOCAL_BITS_PER_DIM_BASE ||
+        } else if (key == SQ_LOCAL_BITS_PER_DIM_BASE || key == SQ_LOCAL_BITS_PER_DIM_PRECISE ||
                    key == SQ_LOCAL_BITS_PER_DIM_QUERY) {
             inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][key].SetJson(value);
         } else if (key == PYRAMID_PRECISE_QUANTIZATION_TYPE) {

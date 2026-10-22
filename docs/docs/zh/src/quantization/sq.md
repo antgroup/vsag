@@ -155,9 +155,9 @@ RaBitQ 的 `x + y` 分片是同一种部署方式。
 
 | 参数 | 含义 | 取值范围 |
 | --- | --- | --- |
-| `sq_local_bits_per_dim_filter` | `x`，作为过滤用的高位 bit 数 | `1 <= x < x + y` |
-| `sq_local_bits_per_dim_base` | `x + y`，每分量总 bit 数 | `2 <= x + y <= 8` |
-| `sq_local_bits_per_dim_query` | `0` = FP32 查询（默认），`8` = SQ8 查询 | `0` 或 `8` |
+| `sq_local_bits_per_dim_base` | `x`，作为过滤用的高位 bit 数 | `1 <= x <= 7` |
+| `sq_local_bits_per_dim_precise` | `y`，作为精排用的低位 bit 数 | `1 <= y <= 7`，`x + y <= 8` |
+| `sq_local_bits_per_dim_query` | `32` = FP32 查询（默认），`8` = SQ8 查询 | `32` 或 `8` |
 
 仅支持稠密 `float32` 与 `l2`、`ip`、`cosine`。HGraph 与 Pyramid 会自动选择分片存储：索引保持
 `reorder_source = base` 并直接读取 base 记录，不再创建独立的精排存储。
@@ -179,8 +179,8 @@ RaBitQ 的 `x + y` 分片是同一种部署方式。
     "dim": 960,
     "index_param": {
         "base_quantization_type": "sq_local_split",
-        "sq_local_bits_per_dim_filter": 3,
-        "sq_local_bits_per_dim_base": 8,
+        "sq_local_bits_per_dim_base": 3,
+        "sq_local_bits_per_dim_precise": 5,
         "max_degree": 32,
         "ef_construction": 200
     }

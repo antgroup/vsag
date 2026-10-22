@@ -32,11 +32,14 @@ namespace vsag {
  *
  * The code c is stored as two records: the high x bits ("filter") next to the
  * per-vector metadata, and the low y bits ("supplement") in a second storage.
+ * The parameter names follow the RaBitQ x+y split configuration: `base` is x, the
+ * filter bits used during traversal, and `precise` is y, the supplement bits read
+ * for the full distance.
  *
  * Parameters (JSON index parameters):
- *   sq_local_bits_per_dim_filter  x, in [1, 8)
- *   sq_local_bits_per_dim_base    x + y, in (x, 8]
- *   sq_local_bits_per_dim_query   0 => float query (default), 8 => SQ8 quantized query
+ *   sq_local_bits_per_dim_base     x, filter bits, in [1, 7]
+ *   sq_local_bits_per_dim_precise  y, supplement bits, in [1, 7]; x + y <= 8
+ *   sq_local_bits_per_dim_query    32 => float query (default), 8 => SQ8 quantized query
  */
 class SQLocalSplitQuantizerParameter : public QuantizerParameter {
 public:
@@ -50,12 +53,12 @@ public:
         if (json.Contains(SQ_LOCAL_BITS_PER_DIM_BASE)) {
             CHECK_ARGUMENT(json[SQ_LOCAL_BITS_PER_DIM_BASE].IsNumberInteger(),
                            fmt::format("{} must be an integer", SQ_LOCAL_BITS_PER_DIM_BASE));
-            base_bits_ = json[SQ_LOCAL_BITS_PER_DIM_BASE].GetInt();
+            filter_bits_ = json[SQ_LOCAL_BITS_PER_DIM_BASE].GetInt();
         }
-        if (json.Contains(SQ_LOCAL_BITS_PER_DIM_FILTER)) {
-            CHECK_ARGUMENT(json[SQ_LOCAL_BITS_PER_DIM_FILTER].IsNumberInteger(),
-                           fmt::format("{} must be an integer", SQ_LOCAL_BITS_PER_DIM_FILTER));
-            filter_bits_ = json[SQ_LOCAL_BITS_PER_DIM_FILTER].GetInt();
+        if (json.Contains(SQ_LOCAL_BITS_PER_DIM_PRECISE)) {
+            CHECK_ARGUMENT(json[SQ_LOCAL_BITS_PER_DIM_PRECISE].IsNumberInteger(),
+                           fmt::format("{} must be an integer", SQ_LOCAL_BITS_PER_DIM_PRECISE));
+            supplement_bits_ = json[SQ_LOCAL_BITS_PER_DIM_PRECISE].GetInt();
         }
         if (json.Contains(SQ_LOCAL_BITS_PER_DIM_QUERY)) {
             CHECK_ARGUMENT(json[SQ_LOCAL_BITS_PER_DIM_QUERY].IsNumberInteger(),
@@ -69,8 +72,8 @@ public:
     ToJson() const override {
         JsonType json;
         json[TYPE_KEY].SetString(this->GetTypeName());
-        json[SQ_LOCAL_BITS_PER_DIM_FILTER].SetInt(filter_bits_);
-        json[SQ_LOCAL_BITS_PER_DIM_BASE].SetInt(base_bits_);
+        json[SQ_LOCAL_BITS_PER_DIM_BASE].SetInt(filter_bits_);
+        json[SQ_LOCAL_BITS_PER_DIM_PRECISE].SetInt(supplement_bits_);
         json[SQ_LOCAL_BITS_PER_DIM_QUERY].SetInt(query_bits_);
         return json;
     }
@@ -80,38 +83,46 @@ public:
         CHECK_ARGUMENT(
             filter_bits_ >= 1 and filter_bits_ <= 7,
             fmt::format(
-                "{} must be in [1, 7], but got {}", SQ_LOCAL_BITS_PER_DIM_FILTER, filter_bits_));
-        CHECK_ARGUMENT(
-            base_bits_ >= 2 and base_bits_ <= 8,
-            fmt::format(
-                "{} must be in [2, 8], but got {}", SQ_LOCAL_BITS_PER_DIM_BASE, base_bits_));
-        CHECK_ARGUMENT(filter_bits_ < base_bits_,
-                       fmt::format("{} ({}) must be smaller than {} ({})",
-                                   SQ_LOCAL_BITS_PER_DIM_FILTER,
-                                   filter_bits_,
+                "{} must be in [1, 7], but got {}", SQ_LOCAL_BITS_PER_DIM_BASE, filter_bits_));
+        CHECK_ARGUMENT(supplement_bits_ >= 1 and supplement_bits_ <= 7,
+                       fmt::format("{} must be in [1, 7], but got {}",
+                                   SQ_LOCAL_BITS_PER_DIM_PRECISE,
+                                   supplement_bits_));
+        CHECK_ARGUMENT(filter_bits_ + supplement_bits_ <= 8,
+                       fmt::format("{} ({}) + {} ({}) must not exceed 8",
                                    SQ_LOCAL_BITS_PER_DIM_BASE,
-                                   base_bits_));
-        CHECK_ARGUMENT(query_bits_ == 0 or query_bits_ == 8,
-                       fmt::format("{} must be 0 (float query) or 8 (SQ8 query), but got {}",
+                                   filter_bits_,
+                                   SQ_LOCAL_BITS_PER_DIM_PRECISE,
+                                   supplement_bits_));
+        CHECK_ARGUMENT(query_bits_ == 32 or query_bits_ == 8,
+                       fmt::format("{} must be 32 (float query) or 8 (SQ8 query), but got {}",
                                    SQ_LOCAL_BITS_PER_DIM_QUERY,
                                    query_bits_));
     }
 
+    /** x: filter bits, stored with the per-vector metadata. */
     [[nodiscard]] uint64_t
     FilterBits() const {
         return filter_bits_;
     }
 
+    /** y: supplement bits, stored in the second record. */
     [[nodiscard]] uint64_t
-    BaseBits() const {
-        return base_bits_;
+    PreciseBits() const {
+        return supplement_bits_;
     }
 
     [[nodiscard]] uint64_t
     SupplementBits() const {
-        return base_bits_ - filter_bits_;
+        return supplement_bits_;
     }
 
+    [[nodiscard]] uint64_t
+    BaseBits() const {
+        return filter_bits_ + supplement_bits_;
+    }
+
+    /** 32 = float query, 8 = SQ8 quantized query. */
     [[nodiscard]] uint64_t
     QueryBits() const {
         return query_bits_;
@@ -119,8 +130,8 @@ public:
 
 public:
     uint64_t filter_bits_{3};
-    uint64_t base_bits_{8};
-    uint64_t query_bits_{0};
+    uint64_t supplement_bits_{5};
+    uint64_t query_bits_{32};
 };
 
 using SQLocalSplitQuantizerParamPtr = std::shared_ptr<SQLocalSplitQuantizerParameter>;
