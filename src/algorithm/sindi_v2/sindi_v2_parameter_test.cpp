@@ -441,3 +441,44 @@ TEST_CASE("SINDIV2 FP16 rerank parameter validation", "[ut][SINDIV2Parameter]") 
         restored->FromJson(no_reorder),
         Catch::Matchers::ContainsSubstring("rerank_type=fp16 requires use_reorder=true"));
 }
+
+TEST_CASE("SINDIV2 build term prune parameters", "[ut][SINDIV2Parameter]") {
+    IndexCommonParam common;
+    auto defaults = std::dynamic_pointer_cast<SINDIV2Parameter>(
+        SINDIV2::CheckAndMappingExternalParam(JsonType::Parse("{}"), common));
+    REQUIRE(defaults->term_prune_ratio == 0.0F);
+    REQUIRE(defaults->term_retain_threshold == 0);
+    auto configured =
+        std::dynamic_pointer_cast<SINDIV2Parameter>(SINDIV2::CheckAndMappingExternalParam(
+            JsonType::Parse(R"({"term_prune_ratio":0.5,"term_retain_threshold":2})"), common));
+    SINDIV2Parameter restored;
+    restored.FromJson(configured->ToJson());
+    REQUIRE(restored.term_prune_ratio == 0.5F);
+    REQUIRE(restored.term_retain_threshold == 2);
+    REQUIRE(configured->CheckCompatibility(std::make_shared<SINDIV2Parameter>(restored)));
+    REQUIRE_FALSE(defaults->CheckCompatibility(configured));
+    for (const auto* invalid : {R"({"term_prune_ratio":-0.1})",
+                                R"({"term_prune_ratio":1})",
+                                R"({"term_retain_threshold":-1})",
+                                R"({"term_retain_threshold":1.5})"}) {
+        REQUIRE_THROWS(SINDIV2::CheckAndMappingExternalParam(JsonType::Parse(invalid), common));
+    }
+}
+
+TEST_CASE("SINDIV2 posting cache capacity", "[ut][SINDIV2Parameter]") {
+    SINDIV2Parameter parameter;
+    parameter.FromJson(JsonType::Parse("{}"));
+    REQUIRE(parameter.posting_cache_capacity_bytes == 0);
+    for (const auto capacity : {0ULL, 1048576ULL, 4294967296ULL}) {
+        auto json = JsonType::Parse("{}");
+        json["posting_cache_capacity_bytes"].SetUint64(capacity);
+        REQUIRE_NOTHROW(SINDIV2::CheckAndMappingExternalParam(json, IndexCommonParam{}));
+        parameter.FromJson(json);
+        REQUIRE(parameter.posting_cache_capacity_bytes == capacity);
+        REQUIRE(parameter.ToJson()["posting_cache_capacity_bytes"].GetUint64() == capacity);
+    }
+    for (const auto* invalid : {"-1", "1.5", "true", "\"100\""}) {
+        REQUIRE_THROWS(parameter.FromJson(
+            JsonType::Parse(std::string("{\"posting_cache_capacity_bytes\":") + invalid + "}")));
+    }
+}

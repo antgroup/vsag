@@ -16,12 +16,16 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstring>
 #include <filesystem>
 #include <limits>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #include "allocator/memory_record_allocator.h"
 #include "functest.h"
@@ -30,6 +34,7 @@
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
+#include "vsag/engine.h"
 namespace fixtures {
 
 class IVFTestResource {
@@ -2351,7 +2356,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     auto index = TestIndex::TestFactory(IVFTestIndex::name, param, true);
     TestIndex::TestBuildIndex(index, dataset, true);
 
-    uint64_t largest_batch = 0;
+    std::atomic<uint64_t> largest_batch{0};
     auto query = vsag::Dataset::Make();
     query->NumElements(1)
         ->Dim(dim)
@@ -2364,7 +2369,9 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     request.distance_batch_size_ = batch_size;
     request.distance_batch_func_ = [&largest_batch](
                                        const int64_t* ids, uint64_t size, float* distances) {
-        largest_batch = std::max(largest_batch, size);
+        auto previous = largest_batch.load();
+        while (previous < size and not largest_batch.compare_exchange_weak(previous, size)) {
+        }
         for (uint64_t i = 0; i < size; ++i) {
             distances[i] = static_cast<float>(ids[i]);
         }
@@ -2374,8 +2381,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetNumElements() == 1);
     REQUIRE(result.value()->GetDim() == request.topk_);
-    REQUIRE(largest_batch > 0);
-    REQUIRE(largest_batch <= batch_size);
+    REQUIRE(largest_batch.load() > 0);
+    REQUIRE(largest_batch.load() <= batch_size);
     auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
     REQUIRE(statistics["distance_evaluations_by_phase"]["routing"].GetUint64() > 0);
     REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() > 0);
@@ -2411,8 +2418,12 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     request.params_str_ = R"({"ivf":{"scan_buckets_count":4,"parallelism":2}})";
     auto parallel_result = index->SearchWithRequest(request);
-    REQUIRE_FALSE(parallel_result.has_value());
-    REQUIRE(parallel_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(parallel_result.has_value());
+    REQUIRE(parallel_result.value()->GetDim() == result.value()->GetDim());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(parallel_result.value()->GetIds()[i] == result.value()->GetIds()[i]);
+        REQUIRE(parallel_result.value()->GetDistances()[i] == result.value()->GetDistances()[i]);
+    }
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
@@ -2594,6 +2605,339 @@ TEST_CASE("IVF custom distance applies general filtering after attribute callbac
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] == labels[i * 4]);
         REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(labels[i * 4]));
+    }
+}
+
+namespace {
+class CountingCustomDistanceFilter : public vsag::Filter {
+public:
+    bool
+    CheckValid(int64_t label) const override {
+        calls.fetch_add(1);
+        return (label >> 16) % 4 == 0;
+    }
+    mutable std::atomic<uint64_t> calls{0};
+};
+}  // namespace
+
+TEST_CASE("IVF custom distance parallel attribute and post filtering",
+          "[ft][search][ivf][attribute][custom_parallel][pr]") {
+    const auto buckets_per_data = GENERATE(1, 2);
+    constexpr int64_t count = 256;
+    constexpr int64_t dim = 4;
+    auto base = vsag::Dataset::Make();
+    auto* vectors = new float[count * dim];
+    auto* labels = new int64_t[count];
+    auto* attrs = new vsag::AttributeSet[count];
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i << 16;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>((i * (j + 1)) % 37);
+        }
+        auto* attr = new vsag::AttributeValue<std::string>();
+        attr->name_ = "group";
+        attr->GetValue() = {i % 2 == 0 ? "callback" : "excluded"};
+        attrs[i].attrs_.push_back(attr);
+    }
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Float32Vectors(vectors)
+        ->Ids(labels)
+        ->AttributeSets(attrs)
+        ->Owner(true);
+    auto params = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", 8, "random", false, buckets_per_data, true, 4);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    REQUIRE(index->Build(base).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(vectors)->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 3;
+    request.distance_batch_size_ = 7;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(group, "callback", "|"))";
+    auto filter = std::make_shared<CountingCustomDistanceFilter>();
+    request.filter_ = filter;
+    request.enable_filter_ = true;
+    for (const auto parallelism : {1, 4}) {
+        CAPTURE(buckets_per_data, parallelism);
+        std::mutex mutex;
+        std::condition_variable cv;
+        uint64_t entered = 0;
+        bool overlapped = false;
+        std::vector<int64_t> seen;
+        filter->calls.store(0);
+        request.params_str_ =
+            fmt::format(R"({{"ivf":{{"scan_buckets_count":8,"parallelism":{}}}}})", parallelism);
+        request.distance_batch_func_ = [&](const int64_t* ids, uint64_t size, float* scores) {
+            std::unique_lock<std::mutex> lock(mutex);
+            ++entered;
+            cv.notify_all();
+            if (parallelism > 1 and entered == 1) {
+                overlapped =
+                    cv.wait_for(lock, std::chrono::seconds(5), [&] { return entered > 1; });
+            }
+            seen.insert(seen.end(), ids, ids + size);
+            for (uint64_t i = 0; i < size; ++i) {
+                scores[i] = static_cast<float>(ids[i] >> 16);
+            }
+        };
+        auto result = index->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 3);
+        for (int64_t i = 0; i < 3; ++i) {
+            REQUIRE(result.value()->GetIds()[i] == labels[i * 4]);
+            REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(i * 4));
+        }
+        REQUIRE(seen.size() == count / 2 * buckets_per_data);
+        for (auto label : seen) {
+            REQUIRE((label >> 16) % 2 == 0);
+        }
+        REQUIRE(filter->calls.load() < seen.size());
+        if (parallelism > 1) {
+            REQUIRE(overlapped);
+        }
+    }
+}
+
+TEST_CASE("IVF custom distance prunes before expensive filter and records visits",
+          "[ft][search][ivf][custom_parallel][pr]") {
+    auto params =
+        fixtures::IVFTestIndex::GenerateIVFBuildParametersString("l2", 1, "fp32", 1, "random");
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    std::vector<float> vectors(12, 0.0F);
+    std::vector<int64_t> labels;
+    for (int64_t i = 0; i < 12; ++i) {
+        labels.push_back(i << 16);
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(12)->Dim(1)->Float32Vectors(vectors.data())->Ids(labels.data())->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":1}})";
+    request.distance_batch_size_ = 5;
+    auto filter = std::make_shared<CountingCustomDistanceFilter>();
+    request.filter_ = filter;
+    request.enable_filter_ = true;
+    request.expected_labels_ = {labels.back()};
+    uint64_t scored = 0;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t size, float* scores) {
+        scored += size;
+        for (uint64_t i = 0; i < size; ++i) {
+            scores[i] = static_cast<float>(ids[i] >> 16);
+        }
+    };
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == labels[0]);
+    REQUIRE(scored == 12);
+    REQUIRE(filter->calls.load() == 1);
+    const auto report = nlohmann::json::parse(result.value()->GetReasoning());
+    const auto& missed = report["expected_analysis"]["missed_targets"];
+    REQUIRE(missed.size() == 1);
+    REQUIRE(missed[0]["was_visited"].get<bool>());
+    REQUIRE_FALSE(missed[0]["filter_rejected"].get<bool>());
+
+    // Rejected excellent scores must not tighten the gate or fill the heap.
+    filter->calls.store(0);
+    request.expected_labels_.clear();
+    request.topk_ = 3;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t size, float* scores) {
+        for (uint64_t i = 0; i < size; ++i) {
+            const auto id = ids[i] >> 16;
+            scores[i] = id % 4 == 0 ? static_cast<float>(id) : -1000.0F;
+        }
+    };
+    result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 3);
+    for (int64_t i = 0; i < 3; ++i) {
+        REQUIRE(result.value()->GetIds()[i] == labels[i * 4]);
+    }
+    REQUIRE(filter->calls.load() == 12);
+
+    // Even a score that would fail a full heap's gate must satisfy the contract.
+    request.topk_ = 1;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t size, float* scores) {
+        for (uint64_t i = 0; i < size; ++i) {
+            scores[i] = ids[i] == labels[0] ? 0.0F : std::numeric_limits<float>::infinity();
+        }
+    };
+    result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
+TEST_CASE("IVF custom distance drains workers on callback errors",
+          "[ft][search][ivf][custom_parallel][pr]") {
+    const auto error_kind = GENERATE(0, 1, 2);
+    auto params = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 4, "fp32", 8, "random", false, 1, false, 4);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(4, 256, "l2");
+    REQUIRE(index->Build(dataset->base_).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(4)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":8,"parallelism":4}})";
+    request.distance_batch_size_ = 1;
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::atomic<uint64_t> entered{0};
+    std::atomic<uint64_t> active{0};
+    std::atomic<bool> slow_finished{false};
+    std::atomic<bool> overlapped{false};
+    request.distance_batch_func_ = [&](const int64_t*, uint64_t size, float* scores) {
+        active.fetch_add(1);
+        struct ActiveGuard {
+            std::atomic<uint64_t>& value;
+            ~ActiveGuard() {
+                value.fetch_sub(1);
+            }
+        } guard{active};
+        const auto call = entered.fetch_add(1);
+        cv.notify_all();
+        if (call == 0) {
+            std::unique_lock<std::mutex> lock(mutex);
+            overlapped.store(
+                cv.wait_for(lock, std::chrono::seconds(5), [&] { return entered.load() > 1; }));
+            if (error_kind == 0) {
+                throw std::runtime_error("custom distance regression error");
+            }
+            scores[0] = error_kind == 1 ? std::numeric_limits<float>::quiet_NaN()
+                                        : std::numeric_limits<float>::infinity();
+            return;
+        }
+        if (call == 1) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            slow_finished.store(true);
+        }
+        std::fill(scores, scores + size, 1.0F);
+    };
+    auto result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(overlapped.load());
+    REQUIRE(slow_finished.load());
+    REQUIRE(active.load() == 0);
+    if (error_kind != 0) {
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+}
+
+namespace {
+class RejectSecondSearchSubmissionPool : public vsag::ThreadPool {
+public:
+    explicit RejectSecondSearchSubmissionPool(std::shared_ptr<vsag::ThreadPool> pool)
+        : pool_(std::move(pool)) {
+    }
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        if (armed and submissions.fetch_add(1) == 1) {
+            throw std::runtime_error("injected search submission failure");
+        }
+        return pool_->Enqueue(std::move(task));
+    }
+    void
+    WaitUntilEmpty() override {
+        pool_->WaitUntilEmpty();
+    }
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        pool_->SetQueueSizeLimit(limit);
+    }
+    void
+    SetPoolSize(uint64_t limit) override {
+        pool_->SetPoolSize(limit);
+    }
+    bool armed{false};
+    std::atomic<uint64_t> submissions{0};
+
+private:
+    std::shared_ptr<vsag::ThreadPool> pool_;
+};
+}  // namespace
+
+TEST_CASE("IVF custom distance submission failure drains accepted worker",
+          "[ft][search][ivf][custom_parallel][pr]") {
+    auto default_pool = vsag::Engine::CreateThreadPool(2);
+    REQUIRE(default_pool.has_value());
+    auto pool = std::make_shared<RejectSecondSearchSubmissionPool>(default_pool.value());
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool);
+    vsag::Engine engine(&resource);
+    auto params = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 4, "fp32", 4, "random", false, 1, false, 2);
+    auto created = engine.CreateIndex(fixtures::IVFTestIndex::name, params);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(4, 64, "l2");
+    REQUIRE(index->Build(dataset->base_).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(4)
+        ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+        ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 1;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":4,"parallelism":2}})";
+    std::atomic<uint64_t> scored{0};
+    request.distance_batch_func_ = [&](const int64_t*, uint64_t size, float* scores) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        std::fill(scores, scores + size, 1.0F);
+        scored.fetch_add(size);
+    };
+    pool->armed = true;
+    auto result = index->SearchWithRequest(request);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(pool->submissions.load() == 2);
+    REQUIRE(scored.load() == 64);
+}
+
+TEST_CASE("IVF custom distance parallel request without pool falls back",
+          "[ft][search][ivf][custom_parallel][pr]") {
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(),
+                            std::shared_ptr<vsag::ThreadPool>{});
+    vsag::Engine engine(&resource);
+    auto params =
+        fixtures::IVFTestIndex::GenerateIVFBuildParametersString("l2", 1, "fp32", 1, "random");
+    auto created = engine.CreateIndex(fixtures::IVFTestIndex::name, params);
+    REQUIRE(created.has_value());
+    std::vector<float> vectors(3, 0.0F);
+    std::vector<int64_t> labels{10, 20, 30};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(1)->Float32Vectors(vectors.data())->Ids(labels.data())->Owner(false);
+    REQUIRE(created.value()->Build(base).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(1)->Float32Vectors(vectors.data())->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 10;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":1,"parallelism":4}})";
+    request.distance_batch_size_ = 2;
+    const auto caller = std::this_thread::get_id();
+    bool on_caller = true;
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t size, float* scores) {
+        on_caller = on_caller and std::this_thread::get_id() == caller;
+        for (uint64_t i = 0; i < size; ++i) {
+            scores[i] = static_cast<float>(ids[i]);
+        }
+    };
+    auto result = created.value()->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(on_caller);
+    REQUIRE(result.value()->GetDim() == 3);
+    for (int64_t i = 0; i < 3; ++i) {
+        REQUIRE(result.value()->GetIds()[i] == labels[i]);
     }
 }
 

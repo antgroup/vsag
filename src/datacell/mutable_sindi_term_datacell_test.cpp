@@ -698,3 +698,37 @@ TEST_CASE("MutableSindiTermDataCell Last Term Test", "[ut][MutableSindiTermDataC
         REQUIRE(std::abs(dists[1] - (-0.1f)) < 1e-2f);
     }
 }
+
+TEST_CASE("MutableSindiTermDataCell build pruning spans windows and persists",
+          "[ut][MutableSindiTermDataCell]") {
+    const auto threshold = GENERATE(0, 1, 4);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto quantization = std::make_shared<QuantizationParams>();
+    MutableSindiTermDataCell cell(
+        16, 4, allocator.get(), SparseValueQuantizationType::FP32, quantization);
+    uint32_t term = 3;
+    for (uint32_t document = 0; document < 8; ++document) {
+        float value = static_cast<float>(document);
+        SparseVector vector{1, &term, &value};
+        cell.InsertVector(vector, document);
+    }
+    cell.PruneTerms(0.5F, threshold);
+    cell.Finalize();
+    const uint32_t retained = threshold == 1 ? 1 : 2;
+    REQUIRE(cell.total_count_ == 8);
+    for (uint32_t window = 0; window < 2; ++window) {
+        REQUIRE(cell.GetWindow(window).term_sizes_[term] == retained);
+        REQUIRE(cell.GetWindow(window).term_ids_[term]->at(0) == 3);
+    }
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    cell.SerializeWindows(writer);
+    MutableSindiTermDataCell restored(
+        16, 4, allocator.get(), SparseValueQuantizationType::FP32, quantization);
+    IOStreamReader reader(stream);
+    restored.DeserializeWindows(reader, 2, true);
+    for (uint32_t window = 0; window < 2; ++window) {
+        REQUIRE(restored.GetWindow(window).term_sizes_[term] == retained);
+        REQUIRE(restored.GetWindow(window).term_ids_[term]->at(0) == 3);
+    }
+}

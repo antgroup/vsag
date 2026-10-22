@@ -268,6 +268,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+    Supports opt-in [adaptive neighbor pruning](docs/docs/en/src/indexes/adaptive_pruning.md) for NSW/L2 construction.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
@@ -483,6 +484,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/dasurax">
+                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
+                    <br />
+                    <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/pkusunjy">
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
@@ -494,13 +502,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
                     <br />
                     <sub><b>Danbaiwq</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/dasurax">
-                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
-                    <br />
-                    <sub><b>dasurax</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -615,6 +616,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/shenguoquan">
+                    <img src="https://avatars.githubusercontent.com/u/6701903?v=4" width="100" alt="shenguoquan"/>
+                    <br />
+                    <sub><b>guoquan</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/skylhd">
                     <img src="https://avatars.githubusercontent.com/u/13144296?v=4" width="100" alt="skylhd"/>
                     <br />
@@ -626,6 +634,20 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
                     <br />
                     <sub><b>stuBirdFly</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/thlurte">
+                    <img src="https://avatars.githubusercontent.com/u/86393801?v=4" width="100" alt="thlurte"/>
+                    <br />
+                    <sub><b>Adheeb Ahmed</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/wellkilo">
+                    <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
+                    <br />
+                    <sub><b>He Dong</b></sub>
                 </a>
             </td>
         </tr>

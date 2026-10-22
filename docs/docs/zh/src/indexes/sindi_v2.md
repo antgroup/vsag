@@ -77,6 +77,8 @@ auto result = index->KnnSearch(
 | `term_id_limit` | int | `1000000` | term ID 上界，最高为 50 000 000。 |
 | `window_size` | int | `50000` | 每个 window 的文档数，范围为 10 000 到 60 000。 |
 | `doc_prune_ratio` | float | `0.0` | 构建时丢弃最低权重文档 term 的比例，范围为 `[0.0, 1.0)`。 |
+| `term_prune_ratio` | float | `0.0` | `Build` 时每个窗口内各 term 永久裁剪的低权重 postings 比例，范围 `[0, 1)`，默认关闭。 |
+| `term_retain_threshold` | integer | `0` | 构建时每个 term 的 postings 数量上限，平均分配到各窗口；`0` 表示不限制。 |
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16。 |
 | `use_reorder` | bool | `false` | 保存高精度向量并对粗排候选重排。 |
 | `rerank_type` | string | `"fp32"` | 重排存储类型：`fp32`、`fp16` 或 `dmq8`。FP16 以半精度保存文档 value，并以 FP32 打分。 |
@@ -84,6 +86,7 @@ auto result = index->KnnSearch(
 | `remap_term_ids` | bool | `false` | 压缩稀疏或间隔很大的外部 term ID。 |
 | `avg_doc_term_length` | int | `100` | 仅用于内存估算。 |
 | `immutable` | bool | `false` | 选择紧凑的只读内存 term DataCell。 |
+| `posting_cache_capacity_bytes` | uint64 | `0` | 磁盘读取后端的倒排 term LRU 缓存容量，单位为字节；`0` 关闭。内存和 mmap 后端不填充此缓存。 |
 | `term_io` | object | `{"type": "reader_io"}` | 加载后保存 term-first posting 的后端。 |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | 保存重排向量的后端。 |
 | `rerank_layout` | uint32 | `0` | top-terms-signature 布局使用的前导 term 数量；`0` 表示关闭。 |
@@ -138,3 +141,11 @@ SINDI V2 会根据构建阶段的 `doc_prune_ratio` 与检索阶段的 `query_pr
 
 完整稀疏索引常驻内存、且 window-first 序列化合适时选择 SINDI。需要按 term
 组织持久化 posting，或希望搜索时只从外部存储读取查询 term list 时选择 SINDI_V2。
+
+### 构建时 term 裁剪
+
+索引创建参数也支持 `term_prune_ratio`（浮点数，范围 `[0, 1)`，默认 `0`）和 `term_retain_threshold`（非负整数，默认 `0`），默认均不开启。`Build` 时，每个窗口内各 term 的倒排列表按存储权重降序排列，永久保留 `floor(posting_count * (1 - term_prune_ratio))` 与 `floor(term_retain_threshold / window_count)` 中较小数量的 postings；阈值为 0 表示不限制数量，非空列表至少保留一条。可变、不可变构建均支持 FP32、FP16 和 SQ8。重排向量及文档标签保持完整。搜索时裁剪作用于构建后保留的 postings，无法恢复已删除的 postings。后续 `Add` 不执行构建时裁剪。
+
+例如，在索引构建参数中设置 `"term_prune_ratio": 0.2, "term_retain_threshold": 0`，可删除每个窗口内各倒排列表中权重最低的 20% postings。
+
+倒排缓存仅存在于运行时，重新加载或绑定 IO 时清空。容量统计包括驻留的解析后 buffer 和估算的条目开销。查询持有的 buffer 可在淘汰后继续存活，因此进程内存可能暂时超过该预算。此缓存不缓存重排向量。

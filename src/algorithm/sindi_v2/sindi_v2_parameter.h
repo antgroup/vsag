@@ -49,6 +49,10 @@ public:
 
     float doc_prune_ratio{0};
 
+    float term_prune_ratio{0};
+
+    uint64_t term_retain_threshold{0};
+
     bool use_reorder{false};
 
     bool use_quantization{false};
@@ -66,6 +70,8 @@ public:
     uint32_t rerank_layout{0};
 
     uint32_t avg_doc_term_length{100};
+
+    uint64_t posting_cache_capacity_bytes{0};
 
     IOParamPtr term_io_parameter{nullptr};
     IOParamPtr rerank_io_parameter{nullptr};

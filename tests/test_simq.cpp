@@ -583,6 +583,61 @@ TEST_CASE("SIMQ: range search", "[simq][range_search]") {
     }
 }
 
+TEST_CASE("SIMQ rejects multi-query batch search", "[simq][batch]") {
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    auto build_param = make_build_param(tmp.path);
+    auto search_param = make_search_param();
+
+    auto r = vsag::Factory::CreateIndex("simq", build_param);
+    REQUIRE(r.has_value());
+    auto index = r.value();
+    auto build_result = index->Build(ds.base_dataset);
+    REQUIRE(build_result.has_value());
+
+    // A batch dataset carrying two distinct queries. SIMQ only evaluates the first
+    // multi-vector, so accepting this silently would drop the remaining queries and
+    // return a single-query sized result.
+    vsag::MultiVector two_mvs[2] = {ds.query_mvs[0], ds.query_mvs[1]};
+    vsag::DatasetPtr batch_query = vsag::Dataset::Make();
+    batch_query->NumElements(2)
+        ->Dim(SIMQ_DIM)
+        ->MultiVectors(two_mvs)
+        ->MultiVectorDim(SIMQ_DIM)
+        ->Owner(false);
+
+    SECTION("knn search rejects a batch query") {
+        auto result = index->KnnSearch(batch_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("range search rejects a batch query") {
+        auto result = index->RangeSearch(batch_query, 1.0f, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+
+    SECTION("single query still works") {
+        vsag::DatasetPtr one_query = vsag::Dataset::Make();
+        one_query->NumElements(1)
+            ->Dim(SIMQ_DIM)
+            ->MultiVectors(&ds.query_mvs[0])
+            ->MultiVectorDim(SIMQ_DIM)
+            ->Owner(false);
+
+        auto knn_result =
+            index->KnnSearch(one_query, TOP_K, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(knn_result.has_value());
+        REQUIRE(knn_result.value()->GetDim() == TOP_K);
+
+        auto range_result =
+            index->RangeSearch(one_query, 1.0f, search_param, vsag::FilterPtr(nullptr));
+        REQUIRE(range_result.has_value());
+    }
+}
+
 TEST_CASE("SIMQ: parameter sweep on coarse_k and rerank_k", "[simq][sweep]") {
     auto ds = generate_dataset();
     TempFile tmp;

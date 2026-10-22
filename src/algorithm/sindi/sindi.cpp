@@ -202,6 +202,8 @@ SINDI::CheckAndMappingExternalParam(const JsonType& external_param,
     static const std::unordered_set<std::string> supported_keys = {
         SPARSE_TERM_ID_LIMIT,
         SPARSE_DOC_PRUNE_RATIO,
+        SPARSE_TERM_PRUNE_RATIO,
+        SPARSE_TERM_RETAIN_THRESHOLD,
         USE_REORDER_KEY,
         USE_QUANTIZATION,
         SPARSE_WINDOW_SIZE,
@@ -228,6 +230,8 @@ SINDI::SINDI(const SINDIParameterPtr& param, const IndexCommonParam& common_para
       term_id_limit_(param->term_id_limit),
       window_size_(param->window_size),
       use_reorder_(param->use_reorder),
+      build_term_prune_ratio_(param->term_prune_ratio),
+      build_term_retain_threshold_(param->term_retain_threshold),
       doc_prune_ratio_(param->doc_prune_ratio),
       sparse_value_quant_type_(param->sparse_value_quant_type),
       rerank_type_(param->rerank_type),
@@ -565,6 +569,7 @@ SINDI::Build(const DatasetPtr& base) {
     std::scoped_lock wlock(this->global_mutex_);
     CHECK_ARGUMENT(base->GetNumElements() > 0, "data_num is zero when add vectors");
     auto failed_ids = this->add(base, false);
+    mutable_term_datacell_->PruneTerms(build_term_prune_ratio_, build_term_retain_threshold_);
     mutable_term_datacell_->Finalize();
     this->cal_memory_usage();
     return failed_ids;
@@ -602,6 +607,9 @@ SINDI::build_immutable(const DatasetPtr& base) {
     auto mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(
         term_id_limit_, window_size_, allocator_, sparse_value_quant_type_, quantization_params_);
     auto flush_staging_window = [&]() {
+        mutable_term_datacell->PruneTerms(build_term_prune_ratio_,
+                                          build_term_retain_threshold_,
+                                          align_up(data_num, window_size_) / window_size_);
         mutable_term_datacell->SortByValue(0);
         immutable_term_datacell_->AppendWindow(mutable_term_datacell->GetWindow(0));
         mutable_term_datacell = std::make_shared<MutableSindiTermDataCell>(term_id_limit_,
