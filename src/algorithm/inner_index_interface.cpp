@@ -1326,4 +1326,32 @@ InnerIndexInterface::validate_range_args(const DatasetPtr& query,
                    fmt::format("limited_size({}) must not be equal to 0", limited_size));
 }
 
+const void*
+InnerIndexInterface::get_data(const DatasetPtr& dataset, int64_t index) const {
+    CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+    const bool is_sparse = data_type_ == DataTypes::DATA_TYPE_SPARSE;
+    // Guard the `index * dim_` offset before doing any pointer arithmetic.
+    const bool offset_in_range =
+        is_sparse || dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_);
+    CHECK_ARGUMENT(offset_in_range, "query offset exceeds int64_t range");
+
+    if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        const auto* ptr = dataset->GetFloat32Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+        const auto* ptr = dataset->GetInt8Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        const auto* ptr = dataset->GetFloat16Vectors();
+        return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        const auto* ptr = dataset->GetSparseVectors();
+        return ptr != nullptr ? ptr + index : nullptr;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in get_data");
+}
+
 }  // namespace vsag

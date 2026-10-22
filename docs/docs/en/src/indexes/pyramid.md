@@ -89,7 +89,34 @@ auto result = index->KnnSearch(
 
 ## Input data type
 
-The public `Build`, `Add`, and search paths currently accept FP32 vectors supplied with `Dataset::Float32Vectors`; set `dtype` to `"float32"`. `base_quantization_type` selects internal encoding and storage and does not by itself enable FP16, BF16, or INT8 input.
+Pyramid accepts `dtype: "float16"` and `dtype: "bfloat16"` input for `Build`, `Add`, and search, as well as the existing `"float32"` input. The input `dtype` is distinct from the storage quantizer: use `"float16"` / `"bfloat16"` for `dtype`, but `"fp16"` / `"bf16"` for quantization parameters.
+
+For either half input type, supply `Dataset::Float16Vectors` with a contiguous `uint16_t` buffer containing the **encoded FP16 or BF16 bit patterns**, not integers obtained by numerically casting floats. `dtype` determines how these bits are interpreted. Build/Add buffers contain `NumElements() * Dim()` entries; query buffers must use the same input format as the index. Supply IDs and paths as in the example above, replacing `Float32Vectors(data)` and `Float32Vectors(q)` with `Float16Vectors(half_data)` and `Float16Vectors(half_query)`. With `Owner(false)`, keep the borrowed buffers (including IDs and paths) alive for the operation.
+
+For half input, supported `base_quantization_type` and, when `use_reorder` is `true`, `precise_quantization_type` values are `fp16`, `bf16`, `pq`, `sq8`, and `fp32`. Quantizer-specific requirements still apply (for example, PQ training and dimension settings). A minimal matching-format configuration is:
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 32,
+    "index_param": {
+        "graph_type": "nsw",
+        "base_quantization_type": "fp16",
+        "use_reorder": false
+    }
+}
+```
+
+For BF16 input with BF16 storage, change `dtype` to `"bfloat16"` and `base_quantization_type` to `"bf16"`. Cross-format storage conversion is also supported, such as FP16 input with BF16 storage or BF16 input with FP32 storage; this does not change the required input format of subsequent queries. `metric_type: "cosine"` normalizes vectors before encoding, so matching-format input does not imply byte-for-byte preservation for cosine.
+
+For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and `pq`/`sq8`/`fp32` storage convert the input through float32; they do not provide the same half-bit preservation guarantee.
+
+For `CalcDistanceById` and `CalcDistancesById` on half-input indexes, use the `DatasetPtr` overload with a native half query buffer matching the index dtype. The raw `const float*` overloads accept only float32 indexes and reject half-input indexes.
+
+An FP16 or BF16 stored vector code occupies `2 * dim` bytes, compared with `4 * dim` for FP32. This is **vector-code size, not total index memory**: graphs, IDs, paths, allocation overhead, and any reorder/raw-vector copies also consume space. Half input alone does not select half storage or halve total memory.
+
+Use `graph_type: "nsw"` or `"odescent"` with half input. **PiPNN remains float32-only.** These guarantees describe Pyramid, not every VSAG index.
 
 ## Build parameters
 

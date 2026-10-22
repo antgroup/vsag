@@ -53,6 +53,18 @@ public:
     bool
     EncodeOneImpl(const float* data, uint8_t* codes) const;
 
+    // These entry points require input bits in this quantizer's Format.
+    // L2/IP preserve bits; cosine uses the same float32 normalization as EncodeOneImpl.
+    bool
+    EncodeOneHalf(const uint16_t* data, uint8_t* codes) const;
+
+    bool
+    EncodeBatchHalf(const uint16_t* data, uint8_t* codes, uint64_t count) const;
+
+    void
+    ProcessQueryHalf(const uint16_t* query,
+                     Computer<HalfPrecisionQuantizer<Format, metric>>& computer) const;
+
     bool
     DecodeOneImpl(const uint8_t* codes, float* data);
 

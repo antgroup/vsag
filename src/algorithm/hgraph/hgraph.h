@@ -391,37 +391,6 @@ public:
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
 
-    /**
-     * @brief Extract a pointer to the data vector at the given index.
-     *
-     * Dispatches on data_type_ to the correct typed getter on the dataset
-     * and offsets by `index * dim_`. Returns nullptr if the underlying
-     * pointer is absent.
-     */
-    const void*
-    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
-        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
-        CHECK_ARGUMENT(
-            data_type_ == DataTypes::DATA_TYPE_SPARSE ||
-                (dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_)),
-            "query offset exceeds int64_t range");
-        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
-                   data_type_ == DataTypes::DATA_TYPE_BF16) {
-            auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            auto* ptr = dataset->GetSparseVectors();
-            return ptr ? ptr + index : nullptr;
-        }
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
-    }
-
     /// Sample a random level from the exponential distribution for a new node.
     int
     get_random_level() {

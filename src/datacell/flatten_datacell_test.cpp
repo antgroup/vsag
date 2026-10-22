@@ -210,6 +210,53 @@ TEST_CASE("FlattenDataCell Basic Test", "[ut][FlattenDataCell] ") {
     }
 }
 
+TEST_CASE("FlattenDataCell scattered half input preserves stored rows",
+          "[ut][FlattenDataCell][half_input][scattered_ids]") {
+    const auto dtype = GENERATE(DataTypes::DATA_TYPE_FP16, DataTypes::DATA_TYPE_BF16);
+    constexpr uint64_t dim = 5;
+    constexpr InnerIdType count = 3;
+    const bool is_fp16 = dtype == DataTypes::DATA_TYPE_FP16;
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(fmt::format(R"({{
+        "io_params": {{"type": "memory_io"}},
+        "quantization_params": {{"type": "{}"}}
+    }})",
+                                                is_fp16 ? "fp16" : "bf16")));
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = dim;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common.data_type_ = dtype;
+    auto cell = FlattenInterface::MakeInstance(param, common);
+    REQUIRE(cell->GetQuantizerCodeSize() == dim * sizeof(uint16_t));
+
+    // Exact encodings of 1, 2, and 4. Padding makes the old float-stride bug
+    // fail deterministically on row contents rather than reading out of bounds.
+    const std::array<uint16_t, count> values =
+        is_fp16 ? std::array<uint16_t, count>{0x3C00, 0x4000, 0x4400}
+                : std::array<uint16_t, count>{0x3F80, 0x4000, 0x4080};
+    std::array<uint16_t, 2 * count * dim> input{};
+    input.fill(is_fp16 ? 0x4800 : 0x4100);  // 8 in the selected format
+    for (InnerIdType row = 0; row < count; ++row) {
+        std::fill_n(input.data() + row * dim, dim, values[row]);
+    }
+    InnerIdType ids[count] = {7, 1, 4};
+    cell->Train(input.data(), count);
+    cell->BatchInsertVector(input.data(), count, ids);
+    REQUIRE(cell->TotalCount() == 8);
+    for (InnerIdType row = 0; row < count; ++row) {
+        std::array<uint8_t, dim * sizeof(uint16_t)> codes{};
+        REQUIRE(cell->GetCodesById(ids[row], codes.data()));
+        CHECK(std::memcmp(codes.data(), input.data() + row * dim, codes.size()) == 0);
+        // Decode follows the adapter input dtype despite its float* interface.
+        alignas(float) std::array<uint16_t, dim> decoded{};
+        REQUIRE(cell->Decode(codes.data(), reinterpret_cast<float*>(decoded.data())));
+        for (const auto value : decoded) {
+            CHECK(value == values[row]);
+        }
+    }
+}
+
 TEST_CASE("FlattenDataCell supports concurrent contiguous batch insertion",
           "[ut][FlattenDataCell][pipnn]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
