@@ -88,6 +88,7 @@ Build parameters live under `index_param`.
 | `remap_term_ids` | bool | `false` | Compact sparse or widely separated external term IDs. |
 | `avg_doc_term_length` | int | `100` | Memory-estimation hint only. |
 | `immutable` | bool | `false` | Select the compact read-only in-memory term DataCell. |
+| `posting_cache_capacity_bytes` | uint64 | `0` | LRU budget in bytes for parsed term postings on disk read backends. `0` disables caching; memory and mmap backends do not populate this cache. |
 | `term_io` | object | `{"type": "reader_io"}` | Backend used for term-first postings after load. |
 | `rerank_io` | object | `{"type": "block_memory_io"}` | Backend used for rerank vectors. |
 | `rerank_layout` | uint32 | `0` | Number of leading terms in the top-terms-signature layout; `0` disables it. |
@@ -155,3 +156,5 @@ from external storage.
 The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`, default `0`) and `term_retain_threshold` (non-negative integer, default `0`). Both default to disabled. During `Build`, each term's postings in each window are sorted by stored weight and permanently trimmed to the smaller of `floor(posting_count * (1 - term_prune_ratio))` and `floor(term_retain_threshold / window_count)`; a zero threshold imposes no cap, and non-empty lists retain at least one posting. Mutable and immutable builds support FP32, FP16 and SQ8. Rerank vectors and document labels are preserved. Search-time pruning operates on the retained postings; it cannot restore removed postings. Subsequent `Add` calls do not apply build-time pruning.
 
 For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.
+
+The posting cache is runtime-only and is cleared on reload or IO rebinding. Its budget covers resident parsed buffers and estimated entry overhead. Query-held buffers can outlive eviction, so process memory can temporarily exceed this budget. It does not cache rerank vectors.
