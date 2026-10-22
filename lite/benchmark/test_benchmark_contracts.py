@@ -56,8 +56,8 @@ class BenchmarkWorkflowTests(unittest.TestCase):
 class ReproductionDocumentationTests(unittest.TestCase):
     def test_quickstart_requires_dependencies_and_compiled_probe(self):
         root = Path(__file__).parent
-        guide = (root / 'ACCEPTANCE.md').read_text()
-        block = guide.split('## Reproduce and verify\n\n', 1)[1].split('For a new run,', 1)[0]
+        guide = (root.parents[1] / 'docs/docs/en/src/development/lite_benchmarks.md').read_text()
+        block = guide.split('## Build and test quick start\n\n', 1)[1].split('## Reproduction recipes', 1)[0]
         self.assertIn('numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0', block)
         self.assertIn('-DENABLE_BENCHMARKS=ON', block)
         self.assertIn('-DCMAKE_EXPORT_COMPILE_COMMANDS=ON', block)
@@ -79,13 +79,13 @@ class ReproductionDocumentationTests(unittest.TestCase):
             self.assertIn(token, block)
 
     def test_current_and_historical_recipes_remain_distinct(self):
-        recipes = (Path(__file__).parent / 'README.md').read_text()
+        recipes = (Path(__file__).resolve().parents[2] / 'docs/docs/en/src/development/lite_benchmarks.md').read_text()
         build = 'cmake --build "$BENCH_FEATURE_BUILD" --target vsag_lite_static -j2'
         install = 'cmake --install "$BENCH_FEATURE_BUILD" --prefix "$BENCH_CURRENT_LITE_INSTALL"'
         self.assertLess(recipes.index(build), recipes.index(install))
         root = Path(__file__).parent
         index = (root / 'ACCEPTANCE.md').read_text()
-        recipes = (root / 'README.md').read_text()
+        recipes = (root.parents[1] / 'docs/docs/en/src/development/lite_benchmarks.md').read_text()
         self.assertIn('cba340660f2ea479b316d7b73a27f34186b8a1d9', index)
         self.assertIn('E9 measures `a3a76a8`', index)
         self.assertIn('historical measurement', index)
@@ -106,40 +106,43 @@ class ReproductionDocumentationTests(unittest.TestCase):
         self.assertIn('not signed or tamper-proof provenance', recipes)
 
 
-class ResidentPublishedEvidenceTests(unittest.TestCase):
-    def test_report_rows_match_verified_compact_evidence(self):
+class ArchiveNavigationTests(unittest.TestCase):
+    def test_archived_cohorts_have_complete_immutable_receipts(self):
         root = Path(__file__).parent
-        result = root / 'results/resident-three-datasets-20261019'
-        archive = result / 'raw.tar.gz'
-        metadata = json.loads((result / 'archive.json').read_text())
-        self.assertEqual(archive.stat().st_size, metadata['bytes'])
-        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), metadata['sha256'])
-        with tarfile.open(archive, 'r:gz') as stream:
-            summary = json.load(stream.extractfile('summary.json'))
-            complete = json.load(stream.extractfile('completed.json'))
-            protocol = json.load(stream.extractfile('frozen-protocol.json'))
-        self.assertEqual(complete['processes'], 27)
-        self.assertEqual(complete['mutation_calls'], 405000)
-        self.assertEqual(complete['interleaved_queries'], 405000)
-        self.assertEqual(protocol['query_rows'], 1000)
-        self.assertFalse(complete['full_comparison'])
-        main_report = (root / 'ACCEPTANCE_REPORT.md').read_text()
-        report = (result / 'README.md').read_text()
-        self.assertEqual(len(summary), 9)
-        labels = {'fp32': 'FP32', 'fp16': 'FP16', 'rabitq8': 'RaBitQ8'}
-        for cell in summary.values():
-            query = cell['operations']['query']
-            for operation in cell['operations'].values():
-                for metric in operation.values():
-                    self.assertEqual(len(metric['values']), 3)
-                    self.assertEqual(metric['median'], sorted(metric['values'])[1])
-            row = (f"| {cell['dataset']} | {labels[cell['storage']]} | "
-                   f"{query['p50_us']['median']:.3f} | {query['p99_us']['median']:.3f} | "
-                   f"{query['call_only_ops_per_second']['median']:.1f} | "
-                   f"{cell['quality']['initial']['median']:.4f} → "
-                   f"{cell['quality']['final']['median']:.4f} |")
-            self.assertIn(row, report)
-            self.assertIn(row, main_report)
+        history = (root / 'HISTORY.md').read_text()
+        cohort = json.loads((root / 'RAW_MANIFEST.json').read_text())['archived_cohorts']
+        self.assertEqual(len(cohort['files']), 14)
+        self.assertEqual(len({row['path'] for row in cohort['files']}), 14)
+        for row in cohort['files']:
+            self.assertGreater(row['bytes'], 0)
+            self.assertRegex(row['sha256'], r'^[0-9a-f]{64}$')
+            self.assertEqual(row['url'], 'https://github.com/nw9663644-eng/vsag/blob/' +
+                             cohort['immutable_source'] + '/' + row['path'])
+            self.assertIn(row['url'], history)
+            self.assertFalse((root.parents[1] / row['path']).exists())
+
+    def test_readme_points_to_bilingual_canonical_guides(self):
+        root = Path(__file__).parent
+        readme = (root / 'README.md').read_text()
+        self.assertLess(len(readme.splitlines()), 45)
+        for lang in ['en', 'zh']:
+            guide = root.parents[1] / f'docs/docs/{lang}/src/development/lite_benchmarks.md'
+            self.assertTrue(guide.is_file())
+            self.assertIn(f'../../docs/docs/{lang}/src/development/lite_benchmarks.md', readme)
+            self.assertIn('development/lite_benchmarks.md',
+                          (guide.parent.parent / 'SUMMARY.md').read_text())
+        self.assertIn('ResidentPublishedEvidenceTests', (root / 'HISTORY.md').read_text())
+
+    def test_current_raw_evidence_and_all_tool_sources_remain_present(self):
+        root = Path(__file__).parent
+        for cohort in ['review-fixed-resident-20261020', 'current-full-package-20261020',
+                       'extended-resident-gist-20261020']:
+            for name in ['README.md', 'archive.json', 'raw.tar.gz']:
+                self.assertTrue((root / 'results' / cohort / name).is_file())
+        for name in ['main.cpp', 'dataset_main.cpp', 'mixed_cpu_acceptance.cpp',
+                     'query_fixed_snapshot.cpp', 'quality_target_fp64.cpp',
+                     'check_quality_target_oracle.py', 'test_quality_target.py']:
+            self.assertTrue((root / name).is_file())
 
 
 class ReviewFixedEvidenceTests(unittest.TestCase):

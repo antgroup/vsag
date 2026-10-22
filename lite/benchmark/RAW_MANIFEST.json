@@ -2308,5 +2308,96 @@
       "sha256": "a1bde2737e6bb2442a836e43dc152156f4618ca2b31ab16cb55badef036ec44d",
       "url": "https://github.com/nw9663644-eng/vsag/blob/c072a42dbfeb29da0b6965750750bf73e1b50d21/lite/benchmark/verify_reciprocal_budget.py"
     }
-  ]
+  ],
+  "archived_cohorts": {
+    "immutable_source": "2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b",
+    "archive_branch": "archive/lite-ospp-acceptance-20261022",
+    "policy": "Complete historical cohorts preserved byte-for-byte; no original measurement deleted",
+    "files": [
+      {
+        "path": "lite/benchmark/results/final-version-20261014/README.md",
+        "bytes": 6694,
+        "sha256": "c5c7e6ae8b6b9a7d65ed4e108504f13f5c95a11991bb9a36f0e5bac5ae971ccc",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/README.md"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/archive.json",
+        "bytes": 136,
+        "sha256": "8aed9e3c636e57c3b0c6ebf305d947ecb9d1660dfc6bc2d0633240da6417f936",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/archive.json"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/benchmark-tests.log",
+        "bytes": 138,
+        "sha256": "ee94fa3adaea2f3cb35725920fdc9d564cf92043bceba64ab12fdc207e2229b5",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/benchmark-tests.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/merge-base-tests.log",
+        "bytes": 102,
+        "sha256": "f956005d0fffd32ac4a36ab5c68098cf29abcd859b0dd83722c4ea73d78658fd",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/merge-base-tests.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/raw-verification.log",
+        "bytes": 179,
+        "sha256": "9ef819e27ab0128eb45300a3463095513129e82c08c8c7b5531e729a0287ac94",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/raw-verification.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/raw.tar.gz",
+        "bytes": 4483066,
+        "sha256": "6dd27f9d041df80d619602f1a494de39f4c8d4f778fc4719a6d025fc21e67391",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/raw.tar.gz"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/release-off.log",
+        "bytes": 590,
+        "sha256": "c134ffeedb439848500d448cef1b0ddde726ef1229cf3b8fb96433d92e10cf11",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/release-off.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/release-on.log",
+        "bytes": 688,
+        "sha256": "cba6589ece415dfc572600986116890a883aeb5a125a2f6a3978732e3796923f",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/release-on.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/simd-coverage-tests.log",
+        "bytes": 124,
+        "sha256": "b09013559aef9b66fe37440595ce0c46d2a718b3782d679c2edb98d4e7ba3ea7",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/simd-coverage-tests.log"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/source-closure.json",
+        "bytes": 9405,
+        "sha256": "1eaf4dd678191f27d693ee6f8094310400ff719e8910a1db43998cee72454607",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/source-closure.json"
+      },
+      {
+        "path": "lite/benchmark/results/final-version-20261014/summary.json",
+        "bytes": 12593,
+        "sha256": "a576abdb12f97d12addd6d3daab97b27af10fc5b67f7fdf29b2d7e507be38d07",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/summary.json"
+      },
+      {
+        "path": "lite/benchmark/results/resident-three-datasets-20261019/README.md",
+        "bytes": 12512,
+        "sha256": "aecf1bb97b7b72ec048e6e791cae9e146e569c8f8b0a7eefce5ae4b83fe55662",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/resident-three-datasets-20261019/README.md"
+      },
+      {
+        "path": "lite/benchmark/results/resident-three-datasets-20261019/archive.json",
+        "bytes": 209,
+        "sha256": "e345b9f7624ada291d9df7b3454b3c964c06a749e357319a1e744b8fd79e2fd2",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/resident-three-datasets-20261019/archive.json"
+      },
+      {
+        "path": "lite/benchmark/results/resident-three-datasets-20261019/raw.tar.gz",
+        "bytes": 7420407,
+        "sha256": "5d45d837f1647ae75535065fe5cb95a54d7702bcf47c68356f10f451696626c1",
+        "url": "https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/resident-three-datasets-20261019/raw.tar.gz"
+      }
+    ]
+  }
 }

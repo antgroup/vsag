@@ -53,13 +53,13 @@ measures `cba3406` with a fresh source-bound build and the same input hashes and
 27-process protocol as E9. It is the current Lite resident matrix, not a current
 Full/package measurement, a speedup attribution or an hours-long endurance test.
 
-The [prior three-dataset resident cohort](results/resident-three-datasets-20261019/README.md)
+The [prior three-dataset resident cohort](https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/resident-three-datasets-20261019/README.md)
 uses 1000 query rows on SIFT/GIST/Cohere, a source-bound `a3a76a8` Lite build and
 27 fresh processes. It documents that measured version, not a new Full or
 runtime-package comparison. Quality declines and the pending quality criterion
 remain separate from raw-audit success.
 
-Start with the [2026-10-14 final-version audit](results/final-version-20261014/README.md)
+For historical source closure and the earlier verdict, use the [2026-10-14 final-version audit](https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/README.md)
 for the four-output verdict, fresh resident CRUD matrix and compiler dependency
 closure/library-hash binding to historical Lite measurements. It preserves the
 GIST/RaBitQ quality limits and outstanding community gates; it does not relabel
@@ -77,46 +77,9 @@ measured source SHA, input hashes, commands, configuration and raw verification.
 
 ## Reproduce and verify
 
-Run from the repository root on Linux x86_64. Required tools are a C++17
-compiler, CMake, Ninja, Python3 with pip, and the repository's Catch2 source.
-The measured CPU/RSS runners also require `/proc`, `/dev/shm`, `taskset` and
-`/usr/bin/time`. The examples use an isolated Python environment and external
-build/output directories; do not create outputs inside a clean feature checkout.
-
-```bash
-BENCH_ROOT=$(pwd -P)
-BENCH_WORK=$(mktemp -d /tmp/vsag-lite-check.XXXXXX)
-printf 'Validation workspace: %s\n' "$BENCH_WORK"
-if ! python3 -m venv "$BENCH_WORK/venv"; then
-  python3 -m pip install --target "$BENCH_WORK/venv-bootstrap" virtualenv==20.26.6
-  PYTHONPATH="$BENCH_WORK/venv-bootstrap" python3 -m virtualenv --no-download \
-    --app-data "$BENCH_WORK/virtualenv-cache" "$BENCH_WORK/venv"
-fi
-. "$BENCH_WORK/venv/bin/activate"
-python3 -m pip install numpy==1.26.4 h5py==3.11.0 pyarrow==17.0.0
-BENCH_BUILD="$BENCH_WORK/lite-build"
-cmake -S "$BENCH_ROOT/lite" -B "$BENCH_BUILD" -G Ninja \
-  -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
-  -DENABLE_TESTS=ON -DENABLE_RABITQ_LITE_BACKEND=ON -DENABLE_BENCHMARKS=ON
-cmake --build "$BENCH_BUILD" -j2
-ctest --test-dir "$BENCH_BUILD" --output-on-failure
-export VSAG_MIXED_PROBE="$BENCH_BUILD/lite_acceptance_mixed_cpu_acceptance"
-test -x "$VSAG_MIXED_PROBE"
-python3 -c 'import numpy, h5py, pyarrow'
-python3 -m unittest discover -s lite/benchmark -p 'test_*.py'
-```
-
-If system `venv/ensurepip` is unavailable, the fallback bootstraps virtualenv
-inside the external workspace; it does not install a system package or change the
-system Python environment. With all prerequisites present, discovery executes the compiled lifecycle and
-Cohere fixtures rather than skipping them. If a dependency or executable is
-missing, fix the prerequisite; a skip is not success. For offline builds, add
-`-DFETCHCONTENT_SOURCE_DIR_CATCH2=/absolute/path/to/matching/catch2-src` to the
-configure command, using the repository-pinned source version, not a replacement.
-Keep the printed `$BENCH_WORK` path and logs; these commands do not delete results.
-
-For data inputs, complete run commands, output files and independent verification,
-follow [the reproduction recipes](README.md#reproduction-recipes).
+Follow the [English build/test quick start](../../docs/docs/en/src/development/lite_benchmarks.md#build-and-test-quick-start)
+or [中文复现指南](../../docs/docs/zh/src/development/lite_benchmarks.md).
+Both require a compiled probe and all Python preparation dependencies; a skip is not success.
 
 For a new run, pass a clean feature checkout and its actual SHA, a fresh build,
 prepared datasets and a new output directory. Do not silently reuse historical
@@ -201,3 +164,5 @@ Current replay/build validation is not a new full performance study.
 中文：社区首先评审 #2904 功能代码，#2926 评审可复用复现工具、真值/审计、测试及验收索引。
 原始数据保留在不可变800a822提交，manifest可逐项验证，不要求维护者逐行检查几万行CSV。
 当前代码已对齐最新功能，历史实验仍按各自被测SHA解释，不伪称重跑，不宣称整个项目验收完成。
+
+Historical E1/E9 files are preserved byte-for-byte; see [the archive inventory and recovery procedure](HISTORY.md). Current E10/E11/E12 raw archives and all measurement tools stay local.

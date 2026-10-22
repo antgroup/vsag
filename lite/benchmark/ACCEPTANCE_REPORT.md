@@ -94,7 +94,7 @@ SIFT/GIST/Cohere各10k向量、1000查询行，三存储各3个新进程，共27
 | Cohere | RaBitQ8 | 411.492 | 457.279 | 2428.3 | 0.9831 → 0.9792 |
 
 各项Add/Remove/Update、保存加载、索引体积、CPU时间/使用率、RSS/峰值和全部三次结果见
-[完整E9报告与原始归档](results/resident-three-datasets-20261019/README.md)。
+[完整E9报告与原始归档](https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/resident-three-datasets-20261019/README.md)。
 质量下降按原值保留；审计通过不等于最低Recall或允许退化阈值已经验收。
 Cohere改值后质量按当前平方L2计算，不混作重新归一化的cosine质量。
 这补齐的是a3a76a8版本的三数据集矩阵，不能代替评审修复后cba3406的新测量。
@@ -811,7 +811,7 @@ Cohere完整保留；E10/E11已补齐当前版本三数据集10k同协议矩阵�
 - [E11：当前原生Full/O3、包体、加载保存与内存](results/current-full-package-20261020/README.md)。
 - [E10：当前Lite三数据集真实交错CRUD及CPU](results/review-fixed-resident-20261020/README.md)。
 
-- [E1：重复真实混合 CRUD 报告](results/final-version-20261014/README.md)与[全部操作性能数据](results/final-version-20261014/summary.json)。
+- [E1：重复真实混合 CRUD 报告](https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/README.md)与[全部操作性能数据](https://github.com/nw9663644-eng/vsag/blob/2ce4cb3445fb49f131a5f6b1dd43b4a2221d764b/lite/benchmark/results/final-version-20261014/summary.json)。
 - [E2：指定基线新构建原生 Full 对照](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/full-fresh-equal-r1-20261012/README.md)。
 - [E3：可运行应用包体比较](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/runtime-package-r1-20261012/README.md)。
 - [E8：原索引持续保留的混合测试与内存轨迹](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/results/resident-mixed-cpu-pr2904-20261012/README.md)。
