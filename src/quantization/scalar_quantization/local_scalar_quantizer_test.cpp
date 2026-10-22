@@ -23,8 +23,10 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "simd/kernels/local_sq_compute.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
+#include "simd/sq4_local_shared_simd.h"
 #include "simd/sq4_local_simd.h"
 #include "simd/sq8_local_simd.h"
 #include "sq8_local_quantizer.h"
@@ -144,6 +146,46 @@ TEMPLATE_TEST_CASE("Local SQ decoded reference and SIMD",
     }
 }
 
+TEST_CASE("Local SQ4 SIMD unpacks every nibble level", "[ut][LocalSQ][simd]") {
+    const auto status = LocalSQTestSIMDStatus();
+    for (int dim : {8, 16, 31, 32, 33, 960}) {
+        const auto code_size = 8 + (dim + 1) / 2;
+        std::vector<uint8_t> storage(2 * code_size + 1, 0);
+        auto* first = storage.data() + 1;
+        auto* second = first + code_size;
+        const float first_minimum = -7.0F;
+        const float second_minimum = 3.0F;
+        const float first_step = 0.25F;
+        const float second_step = 0.75F;
+        memcpy(first, &first_minimum, sizeof(float));
+        memcpy(first + sizeof(float), &first_step, sizeof(float));
+        memcpy(second, &second_minimum, sizeof(float));
+        memcpy(second + sizeof(float), &second_step, sizeof(float));
+        std::vector<float> query(dim);
+        for (int coordinate = 0; coordinate < dim; ++coordinate) {
+            first[8 + coordinate / 2] |=
+                static_cast<uint8_t>(((coordinate * 7 + 3) % 16) << (coordinate % 2 * 4));
+            second[8 + coordinate / 2] |=
+                static_cast<uint8_t>(((coordinate * 11 + 5) % 16) << (coordinate % 2 * 4));
+            query[coordinate] = static_cast<float>(coordinate % 13) - 3.0F;
+        }
+        const float query_reference = generic::SQ4LocalComputeL2Sqr(query.data(), second, dim);
+        const float pair_reference = generic::SQ4LocalComputeCodesL2Sqr(first, second, dim);
+        if (status.dist_support_avx2 && status.runtime_has_avx2) {
+            REQUIRE(avx2::SQ4LocalComputeL2Sqr(query.data(), second, dim) ==
+                    Catch::Approx(query_reference).epsilon(2e-5));
+            REQUIRE(avx2::SQ4LocalComputeCodesL2Sqr(first, second, dim) ==
+                    Catch::Approx(pair_reference).epsilon(2e-5));
+        }
+        if (status.dist_support_avx512f && status.runtime_has_avx512f) {
+            REQUIRE(avx512::SQ4LocalComputeL2Sqr(query.data(), second, dim) ==
+                    Catch::Approx(query_reference).epsilon(2e-5));
+            REQUIRE(avx512::SQ4LocalComputeCodesL2Sqr(first, second, dim) ==
+                    Catch::Approx(pair_reference).epsilon(2e-5));
+        }
+    }
+}
+
 TEMPLATE_TEST_CASE("Local SQ HGraph and metric validation",
                    "[ut][LocalSQ]",
                    SQ8LocalQuantizer,
@@ -190,6 +232,176 @@ TEMPLATE_TEST_CASE("Local SQ HGraph and metric validation",
     REQUIRE(QuantizerParameter::IsValidQuantizationType(param->GetTypeName()));
     REQUIRE(QuantizerParameter::GetQuantizerParameterByJson(param->ToJson())->GetTypeName() ==
             TestType::NameImpl());
+}
+
+TEST_CASE("Shared local SQ4 and SQ8 use one byte stream", "[ut][LocalSQ][shared]") {
+    const std::string config = R"({"dtype":"float32","metric_type":"l2","dim":17,
+        "index_param":{"base_quantization_type":"sq4_local_shared",
+        "precise_quantization_type":"sq8_local","use_reorder":true,
+        "max_degree":16,"ef_construction":100,"build_thread_count":1}})";
+    auto created = Factory::CreateIndex("hgraph", config);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    std::vector<float> vectors(40 * 17);
+    for (int64_t row = 0; row < 40; ++row) {
+        for (int64_t coordinate = 0; coordinate < 17; ++coordinate) {
+            vectors[row * 17 + coordinate] = row * 2.0F + coordinate * 15.0F / 16.0F;
+        }
+    }
+    vectors[2] = 7.3F;
+    std::vector<int64_t> ids(40);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto base = Dataset::Make()
+                    ->NumElements(40)
+                    ->Dim(17)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    const auto memory = index->GetMemoryUsageDetail();
+    REQUIRE(memory.at("basic_flatten_codes") == 0);
+    REQUIRE(memory.at("high_precise_codes") > 0);
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SQ8LocalQuantizer quantizer(17, allocator.get());
+    std::vector<uint8_t> code(quantizer.GetCodeSize());
+    REQUIRE(quantizer.EncodeOne(vectors.data(), code.data()));
+    REQUIRE(code[8 + 2] == 124);
+    const float* query = vectors.data();
+    double coarse_reference = 0.0;
+    double fine_reference = 0.0;
+    float minimum;
+    float step;
+    memcpy(&minimum, code.data(), sizeof(float));
+    memcpy(&step, code.data() + sizeof(float), sizeof(float));
+    for (int64_t coordinate = 0; coordinate < 17; ++coordinate) {
+        const auto fine = simd::LocalSQDecode(code[8 + coordinate], step, minimum);
+        const auto coarse =
+            simd::LocalSQDecode((code[8 + coordinate] + 8) / 17, step * 17.0F, minimum);
+        coarse_reference += std::pow(static_cast<double>(query[coordinate]) - coarse, 2);
+        fine_reference += std::pow(static_cast<double>(query[coordinate]) - fine, 2);
+    }
+    auto coarse_distance = index->CalcDistanceById(query, 0, false);
+    auto fine_distance = index->CalcDistanceById(query, 0, true);
+    REQUIRE(coarse_distance.has_value());
+    REQUIRE(fine_distance.has_value());
+    REQUIRE(coarse_distance.value() == Catch::Approx(coarse_reference).epsilon(1e-5));
+    REQUIRE(fine_distance.value() == Catch::Approx(fine_reference).epsilon(1e-5));
+
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = Factory::CreateIndex("hgraph", config).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    auto restored_coarse = restored->CalcDistanceById(query, 0, false);
+    auto restored_fine = restored->CalcDistanceById(query, 0, true);
+    REQUIRE(restored_coarse.has_value());
+    REQUIRE(restored_fine.has_value());
+    REQUIRE(restored_coarse.value() == coarse_distance.value());
+    REQUIRE(restored_fine.value() == fine_distance.value());
+    auto query_dataset =
+        Dataset::Make()->NumElements(1)->Dim(17)->Float32Vectors(vectors.data())->Owner(false);
+    const std::string search = R"({"hgraph":{"ef_search":40}})";
+    auto before = index->KnnSearch(query_dataset, 10, search);
+    auto after = restored->KnnSearch(query_dataset, 10, search);
+    REQUIRE(before.has_value());
+    REQUIRE(after.has_value());
+    for (int64_t rank = 0; rank < 10; ++rank) {
+        REQUIRE(before.value()->GetIds()[rank] == after.value()->GetIds()[rank]);
+        REQUIRE(before.value()->GetDistances()[rank] == after.value()->GetDistances()[rank]);
+    }
+}
+
+TEST_CASE("Shared local SQ4 SIMD matches coarse levels", "[ut][LocalSQ][shared][simd]") {
+    const auto status = LocalSQTestSIMDStatus();
+    std::vector<SQ4LocalSharedComputeType> implementations;
+    if (status.dist_support_avx2 && status.runtime_has_avx2) {
+        implementations.push_back(avx2::SQ4LocalSharedCompute);
+    }
+    if (status.dist_support_avx512f && status.runtime_has_avx512f) {
+        implementations.push_back(avx512::SQ4LocalSharedCompute);
+    }
+    if (auto dispatched = GetSQ4LocalSharedCompute()) {
+        implementations.push_back(dispatched);
+    }
+    for (int dim : {1, 7, 8, 15, 16, 17, 31, 32, 33, 256, 960}) {
+        std::vector<uint8_t> storage(2 * (dim + 8) + 1);
+        auto* first = storage.data() + 1;
+        auto* second = first + dim + 8;
+        const float first_minimum = -3.0F;
+        const float second_minimum = 5.0F;
+        const float first_step = 0.25F;
+        const float second_step = 0.5F;
+        memcpy(first, &first_minimum, sizeof(float));
+        memcpy(first + sizeof(float), &first_step, sizeof(float));
+        memcpy(second, &second_minimum, sizeof(float));
+        memcpy(second + sizeof(float), &second_step, sizeof(float));
+        std::vector<float> query(dim);
+        double query_l2 = 0.0;
+        double pair_l2 = 0.0;
+        double query_ip = 0.0;
+        double pair_ip = 0.0;
+        for (int coordinate = 0; coordinate < dim; ++coordinate) {
+            first[8 + coordinate] = static_cast<uint8_t>((coordinate * 73 + 19) % 256);
+            second[8 + coordinate] = static_cast<uint8_t>((coordinate * 61 + 5) % 256);
+            query[coordinate] = std::sin(coordinate * 0.3F) * 4.0F;
+            const float first_value = simd::LocalSQDecode(
+                (first[8 + coordinate] + 8) / 17, first_step * 17.0F, first_minimum);
+            const float second_value = simd::LocalSQDecode(
+                (second[8 + coordinate] + 8) / 17, second_step * 17.0F, second_minimum);
+            query_l2 += std::pow(static_cast<double>(query[coordinate]) - second_value, 2);
+            pair_l2 += std::pow(static_cast<double>(first_value) - second_value, 2);
+            query_ip += static_cast<double>(query[coordinate]) * second_value;
+            pair_ip += static_cast<double>(first_value) * second_value;
+        }
+        for (auto implementation : implementations) {
+            REQUIRE(implementation(query.data(), nullptr, second, dim, true) ==
+                    Catch::Approx(query_l2).epsilon(2e-5));
+            REQUIRE(implementation(nullptr, first, second, dim, true) ==
+                    Catch::Approx(pair_l2).epsilon(2e-5));
+            REQUIRE(implementation(query.data(), nullptr, second, dim, false) ==
+                    Catch::Approx(1.0 - query_ip).epsilon(2e-5).margin(1e-3));
+            REQUIRE(implementation(nullptr, first, second, dim, false) ==
+                    Catch::Approx(1.0 - pair_ip).epsilon(2e-5).margin(1e-3));
+        }
+    }
+}
+
+TEST_CASE("Shared local SQ4 batch SIMD matches single-code distances",
+          "[ut][LocalSQ][shared][simd]") {
+    const auto batch_compute = GetSQ4LocalSharedComputeBatch4();
+    const auto single_compute = GetSQ4LocalSharedCompute();
+    if (batch_compute == nullptr || single_compute == nullptr) {
+        return;
+    }
+    for (int dim : {1, 7, 16, 17, 31, 32, 33, 960}) {
+        std::vector<uint8_t> storage(4 * (dim + 8));
+        const uint8_t* codes[4];
+        std::vector<float> query(dim);
+        for (int coordinate = 0; coordinate < dim; ++coordinate) {
+            query[coordinate] = std::sin(coordinate * 0.3F) * 4.0F;
+        }
+        for (uint64_t candidate = 0; candidate < 4; ++candidate) {
+            auto* code = storage.data() + candidate * (dim + 8);
+            const float minimum = -3.0F + candidate;
+            const float step = 0.25F + candidate * 0.125F;
+            memcpy(code, &minimum, sizeof(float));
+            memcpy(code + sizeof(float), &step, sizeof(float));
+            for (int coordinate = 0; coordinate < dim; ++coordinate) {
+                code[8 + coordinate] =
+                    static_cast<uint8_t>((coordinate * 61 + candidate * 37) % 256);
+            }
+            codes[candidate] = code;
+        }
+        for (bool l2 : {true, false}) {
+            float distances[4];
+            batch_compute(query.data(), codes, dim, l2, distances);
+            for (uint64_t candidate = 0; candidate < 4; ++candidate) {
+                const float expected =
+                    single_compute(query.data(), nullptr, codes[candidate], dim, l2);
+                REQUIRE(distances[candidate] == Catch::Approx(expected).epsilon(2e-5));
+            }
+        }
+    }
 }
 
 TEMPLATE_TEST_CASE("Local SQ finite boundaries and training",

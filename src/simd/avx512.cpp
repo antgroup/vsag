@@ -30,6 +30,7 @@
 
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_shared_simd.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
 
@@ -1872,4 +1873,29 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
 #endif
 }
+
+#if defined(ENABLE_AVX512)
+float
+SQ4LocalSharedCompute(
+    const float* query, const uint8_t* first, const uint8_t* second, uint64_t dim, bool l2) {
+    using Traits = simd::SQ8Traits<simd::Avx512SQ8Tag>;
+    if (query != nullptr) {
+        return l2 ? simd::LocalSQ8CoarseCompute<Traits, true, false>(query, nullptr, second, dim)
+                  : simd::LocalSQ8CoarseCompute<Traits, true, true>(query, nullptr, second, dim);
+    }
+    return l2 ? simd::LocalSQ8CoarseCompute<Traits, false, false>(nullptr, first, second, dim)
+              : simd::LocalSQ8CoarseCompute<Traits, false, true>(nullptr, first, second, dim);
+}
+
+void
+SQ4LocalSharedComputeBatch4(
+    const float* query, const uint8_t* const* codes, uint64_t dim, bool l2, float* distances) {
+    using Traits = simd::SQ8Traits<simd::Avx512SQ8Tag>;
+    if (l2) {
+        simd::LocalSQ8CoarseComputeBatch4<Traits, false>(query, codes, dim, distances);
+    } else {
+        simd::LocalSQ8CoarseComputeBatch4<Traits, true>(query, codes, dim, distances);
+    }
+}
+#endif
 }  // namespace vsag::avx512
