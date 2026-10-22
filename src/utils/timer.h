@@ -14,7 +14,9 @@
 // limitations under the License.
 
 #pragma once
+
 #include <chrono>
+#include <limits>
 
 namespace vsag {
 class Timer {
@@ -32,6 +34,9 @@ public:
 
     void
     SetThreshold(double threshold);
+
+    void
+    Reset();
 
     bool
     CheckOvertime();

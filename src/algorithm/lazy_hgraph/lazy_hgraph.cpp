@@ -21,7 +21,9 @@
 #include <mutex>
 #include <vector>
 
+#include "analyzer/analyzer.h"
 #include "dataset_impl.h"
+#include "impl/graph_build_helper.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "storage/stream_reader.h"
@@ -29,6 +31,15 @@
 #include "vsag/constants.h"
 
 namespace vsag {
+
+namespace {
+
+const char*
+phase_to_string(LazyHGraph::Phase phase) {
+    return phase == LazyHGraph::Phase::FLAT ? "flat" : "graph";
+}
+
+}  // namespace
 
 namespace {
 
@@ -220,10 +231,10 @@ LazyHGraph::TransitionToGraph() {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }
 
-    auto new_graph = std::make_shared<HGraph>(graph_param_, this->common_param_);
-    new_graph->InitFeatures();
-    auto failed_ids = new_graph->Build(build_data);
-    CHECK_ARGUMENT(failed_ids.empty(), "lazy_hgraph transition failed to build all ids");
+    auto new_graph = GraphBuildHelper::BuildIndexCandidate(
+        [&] { return std::make_shared<HGraph>(graph_param_, this->common_param_); },
+        build_data,
+        "lazy_hgraph transition failed to build all ids");
     graph_index_ = new_graph;
     flat_index_.reset();
     phase_.store(Phase::GRAPH, std::memory_order_release);
@@ -257,23 +268,23 @@ LazyHGraph::CalcDistanceById(const float* query,
 }
 
 DatasetPtr
-LazyHGraph::CalDistanceById(const float* query,
-                            const int64_t* ids,
-                            int64_t count,
-                            bool calculate_precise_distance,
-                            int64_t topk) const {
+LazyHGraph::CalcDistancesById(const float* query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
     std::shared_lock lock(this->phase_mutex_);
-    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
 }
 
 DatasetPtr
-LazyHGraph::CalDistanceById(const DatasetPtr& query,
-                            const int64_t* ids,
-                            int64_t count,
-                            bool calculate_precise_distance,
-                            int64_t topk) const {
+LazyHGraph::CalcDistancesById(const DatasetPtr& query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
     std::shared_lock lock(this->phase_mutex_);
-    return ActiveIndex()->CalDistanceById(query, ids, count, calculate_precise_distance, topk);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
 }
 
 bool
@@ -349,6 +360,29 @@ uint64_t
 LazyHGraph::GetMemoryUsage() const {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->GetMemoryUsage();
+}
+
+std::string
+LazyHGraph::GetStats() const {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->GetStats());
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(stats, GetName(), "stats", status);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
+}
+
+std::string
+LazyHGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->AnalyzeIndexBySearch(request));
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(
+        stats, GetName(), "search", status, request.query_->GetNumElements(), request.topk_);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
 }
 
 DatasetPtr

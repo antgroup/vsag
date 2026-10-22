@@ -17,10 +17,10 @@ default.
 1. **Graph construction.** Vectors are organised in a layered proximity graph; upper
    layers act as navigation aids, the bottom layer connects every data point to its
    nearest neighbours within a `max_degree` budget. The construction algorithm can be
-   either NSW-style insertion (`graph_type: "nsw"`, the default) or ODescent
-   (`graph_type: "odescent"`).
+   NSW-style insertion (`graph_type: "nsw"`, the default), ODescent
+   (`graph_type: "odescent"`), or PiPNN (`graph_type: "pipnn"`).
 2. **Quantization.** The base storage is compressed with a configurable quantizer
-   (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`,
+   (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`,
    `pq`, `pqfs`, `rabitq`, `tq`). Optionally, a second high-precision copy is kept
    (`use_reorder: true` with `precise_quantization_type`) and used to re-rank the
    candidates returned by the coarse search.
@@ -64,10 +64,20 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `max_degree` | int | `64` | Maximum out-degree per graph node |
 | `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
-| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw` or `odescent` |
+| `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
+| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
+| `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
+| `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
+| `pipnn_fanout` | int[] | `[10, 2]` | Number of nearest leader partitions joined at each listed partition level; deeper levels use `1`. |
+| `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point in each leaf. This is the primary PiPNN quality/build-work knob; leaves smaller than `pipnn_min_leaf_size` use at least `4`. |
+| `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
 | `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
 | `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
 | `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
@@ -80,9 +90,9 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
 | `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
-| `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
+| `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
 | `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
-| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, fall back to the current code `memcmp` check |
+| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |
 | `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
 | `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
 | `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
@@ -95,6 +105,8 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
 | `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
+`sq8_local` and `sq4_local` support float32 L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
+
 `use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
 analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining
 the reverse adjacency approximately doubles edge storage.
@@ -103,12 +115,45 @@ the reverse adjacency approximately doubles edge storage.
 `"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
 before changing it.
 
+### PiPNN build boundary
+
+Set `graph_type: "pipnn"` to use [PiPNN](https://arxiv.org/abs/2602.21247) for the initial,
+full `Build`. The PiPNN builder accepts dense `float32` input with `metric_type` set to `"l2"`,
+`"ip"`, or `"cosine"`. It builds the bottom graph from the original build vectors, then reuses
+HGraph's route layers, storage, search, filtering, reordering, incremental `Add`, removal, and
+serialization paths. The persistent base storage may use a supported quantizer such as `sq8`,
+including RaBitQ with SQ8 reorder. Cache-assisted build is not supported with PiPNN.
+The `pipnn_*` parameters in the table above tune this builder;
+`ef_construction` does not. The existing `alpha` parameter controls PiPNN's final robust pruning.
+
+`build_thread_count` parallelizes vector preparation, partitioning, candidate generation, and
+final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads do not obscure
+builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
+ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
+
+
+### Experimental PiPNN adaptive alpha
+
+Set `pipnn_adaptive_pruning: true` under `index_param` to apply [PR #2933](https://github.com/antgroup/vsag/pull/2933)'s per-node count-based schedule to the final PiPNN reservoir pruning. This opt-in experiment supports L2 and affects the initial batch `Build` only. It leaves partitioning, leaf neighbors, relative hashes, reservoir contents, incremental `Add`, and ODescent route-layer construction unchanged.
+
+For target degree K, scan the existing ordered reservoir at the configured `alpha`, yielding accepted A and scanned rejects B. Unscanned tail candidates do not count toward B. With a nonzero step, if `0 < |A| < K`, keep A and retry B with alpha increased by 1, 2, or 3 steps for `K/|A| <= 1.5`, `(1.5, 3]`, or `> 3`. If `|A| = K`, clear A and rescan the complete original reservoir, including the tail, with alpha decreased by 2, 1, or 0 steps for `|B|/K < 2.5`, `[2.5, 5)`, or `>= 5`. If the tightened pass is short, keep its accepted neighbors and retry its new rejects at the original alpha. Rejected neighbors are never appended unconditionally.
+
+The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
+
+The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
 ### Deduplicating vector storage
 
 Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
 vectors share one physical code slot while retaining their individual labels. This option
-currently supports only dense-vector HGraph indexes using `graph_type: "nsw"`; it is not
-available for `graph_type: "odescent"`.
+supports dense-vector HGraph indexes using `graph_type: "nsw"` or `"pipnn"`;
+`graph_type: "odescent"` is not supported.
+
+For PiPNN, initial `Build` groups byte-identical FP32 input rows and encodes each
+representative once. All labels, attributes, and extra information remain independent.
+This also works with adaptive alpha. `duplicate_distance_threshold` does not affect
+PiPNN batch grouping; later incremental `Add` retains its existing threshold/code-based
+duplicate detection. Quantizer training still uses the original training sample.
 
 The following operations and configurations are not supported while storage deduplication
 is enabled:
@@ -235,6 +280,70 @@ A runnable FP16 example is
 The chosen `dtype` only constrains the **input** representation. The on-disk / in-memory storage is
 still controlled by `base_quantization_type` (and optionally `precise_quantization_type` when
 `use_reorder: true`), so e.g. `dtype: "float16"` + `base_quantization_type: "sq8"` is valid.
+
+## Experimental adaptive pruning
+
+See [algorithm details, examples and related work](adaptive_pruning.md).
+
+Parameters are flat fields under `index_param` and `adaptive_pruning` is a boolean; the former
+experimental nested object and the removed `fill_rejected` option are rejected. Indexes created
+with that experimental schema must be rebuilt.
+
+`index_param.adaptive_pruning` enables a multi-pass L2 neighbor selector for NSW bottom-layer
+**new-node forward edges**. It is disabled by default. Ordinary `Build`, parallel insertion,
+`Add`, and the NSW optimized build path (including RaBitQ split/fused) use this selector.
+Set `adaptive_pruning_apply_to_reverse: true` to also prune full bottom-layer reverse neighbor lists adaptively.
+A reverse list with free slots still appends the new edge directly. When full, the existing
+neighbor is the selection center and its old neighbors plus the new node form the candidates;
+the same alpha/step policy applies under the existing neighbor lock. Upper layers and
+update/refinement operations retain their fixed-alpha policy. Enabled ODescent, imported-cache
+builds, inner product/cosine, and `adaptive_pruning_apply_to_upper: true` remain unsupported.
+
+The following fields belong inside `index_param`. This is a GIST reference experiment,
+not a dimension-dependent default or a claim of improved performance:
+
+```json
+{
+    "alpha": 1.06,
+    "graph_type": "nsw",
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": false,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | Enable the adaptive selector |
+| `adaptive_pruning_adjust_step` | `0.06` | Alpha adjustment step, delta |
+| `adaptive_pruning_apply_to_reverse` | `false` | Also use adaptive pruning for full bottom-layer reverse lists; requires `adaptive_pruning: true` |
+| `adaptive_pruning_apply_to_upper` | `false` | Reserved; `true` is unsupported when enabled |
+
+The existing `alpha` is the baseline. Enabled mode requires finite alpha and delta,
+nonnegative delta, positive `alpha - 2*delta`, and finite `alpha + 3*delta`.
+Distances must be finite nonnegative L2 values from the existing build distance provider;
+this setting does not change the build quantizer.
+
+Candidates are sorted by `(distance, internal ID)`, deduplicated, and stripped of self edges.
+A candidate c is rejected if any selected s satisfies `alpha * d(s,c) < d(center,c)`.
+The first pass stops at the graph's actual maximum degree K, retaining the unscanned tail.
+
+- If accepted A is below K, keep A and rescan rejects with `alpha + k*delta`.
+  Choose k=3 for `K/|A| > 3`, k=2 for `1.5 < K/|A| <= 3`, otherwise k=1.
+  Remaining rejected candidates are not appended.
+- If A reaches K, clear it and rescan the full sorted candidate list with `alpha - k*delta`.
+  Choose k=0 for `|B|/K >= 5`, k=1 for `2.5 <= |B|/K < 5`, otherwise k=2,
+  where B contains first-pass rejects. If still below K, rescan the new rejects at baseline
+  alpha. This branch never fills unconditionally.
+- With zero delta, use one baseline pass without filling. This differs from disabled
+  mode, whose original shortcut for fewer than K candidates is preserved.
+
+The selector holds only per-call scratch data and exposes optional per-call statistics for
+tests and profiling; it does not collect global counters or change graph locking.
+Serialized indexes retain the configuration. Reload using the same enabled state and, when
+enabled, the same alpha, delta and scope settings; mismatches fail compatibility checks.
+Indexes written before this option existed default to disabled mode.
 
 ## Search parameters
 

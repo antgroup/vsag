@@ -764,6 +764,8 @@ HGraphFGIM::Merge(HGraph& destination,
         }
     }
     destination.total_count_.store(offsets.back());
+    // Queries remain excluded by global_lock while the rebuilt links are installed.
+    destination.PublishThroughTotalCount();
     if (statistics != nullptr) {
         statistics->storage_seconds = lap();
     }

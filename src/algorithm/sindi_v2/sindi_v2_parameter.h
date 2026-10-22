@@ -17,6 +17,7 @@
 
 #include <string>
 
+#include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "index_common_param.h"
@@ -48,6 +49,10 @@ public:
 
     float doc_prune_ratio{0};
 
+    float term_prune_ratio{0};
+
+    uint64_t term_retain_threshold{0};
+
     bool use_reorder{false};
 
     bool use_quantization{false};
@@ -70,7 +75,7 @@ public:
     IOParamPtr rerank_io_parameter{nullptr};
 };
 
-class SINDIV2SearchParameter : public Parameter {
+class SINDIV2SearchParameter : public Parameter, public IndexSearchParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -83,6 +88,7 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
+    uint64_t filter_callback_limit{0};
 
     // data cell
     float query_prune_ratio{0};

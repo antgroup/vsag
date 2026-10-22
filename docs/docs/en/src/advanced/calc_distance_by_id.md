@@ -18,6 +18,14 @@ a `DatasetPtr` (works for both dense and sparse vectors).
 > `CalcDistancesById`. The two names have identical semantics. See
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068).
 
+HGraph also supports configured sparse and non-FP32 data types. In those configurations, use a Dataset containing the native query field (`SparseVectors`, `Int8Vectors`, or `Float16Vectors` for FP16/BF16); a raw `float*` distance query is only valid for a float32 index. The Dataset representation must match the index configuration, not merely its vector dimension.
+
+### C++ implementation migration
+
+`CalcDistancesById` is the canonical virtual batch interface, including its `topk` parameter. Public wrappers and internal index implementations dispatch through this name directly. The deprecated public `CalDistanceById` aliases forward to the canonical interface, never the reverse.
+
+Custom index implementations must override the appropriate `CalcDistancesById` overloads instead of relying on an override of the historical spelling. Existing ordinary calls to the deprecated alias remain source-compatible, but overriding only that alias is not sufficient to implement the canonical interface. The virtual interface layout changes: binary compatibility with previously compiled `Index` subclasses is not preserved. Recompile custom subclasses and dependent C++ components against the matching headers and library.
+
 ## API Overview
 
 ```cpp
@@ -61,11 +69,27 @@ Declarations live in
 
 ### `calculate_precise_distance`
 
-- `true` (default): the implementation tries to use the **high-precision** representation
-  of the stored vector (e.g. full-precision float32). When the index only retains quantized
-  codes, obtaining the precise value can be more expensive.
-- `false`: the implementation may use the **quantized / approximate** representation that
-  the index already keeps in memory. Faster, but the returned distance is approximate.
+- `true` (default) prefers an available higher-precision/reorder representation. It does **not** reconstruct discarded original vectors. When no separate precise representation exists, it uses the stored representation, which can still be quantized or pruned.
+- `false` uses the base representation. Both modes compute the configured distance; they do not run approximate candidate retrieval. A disk-backed representation can incur I/O in either mode.
+- BruteForce/WARP and SIMQ use their stored distance backend for both modes. HGraph/Pyramid prefer raw vectors when retained, otherwise reorder codes; IVF uses its configured reorder codes/buckets. SINDI/SINDI_V2 use rerank vectors when configured.
+
+### Native query representations
+
+| Index | Single-ID query | Multi-query batch query |
+|---|---|---|
+| BruteForce, HGraph, IVF, Pyramid, LazyHGraph | `float*` or one-row `DatasetPtr` with `Float32Vectors` | `DatasetPtr` with `Float32Vectors` |
+| SINDI, SINDI_V2 | one-row `DatasetPtr` with `SparseVectors` | `DatasetPtr` with `SparseVectors` |
+| WARP, SIMQ | one-row `DatasetPtr` with `MultiVectors` and `MultiVectorDim` | `DatasetPtr` with `MultiVectors` and `MultiVectorDim` |
+
+SINDI immutable storage supports single-ID and batch distances, including after deserialization. WARP/SIMQ calculate the same multi-vector aggregation as their search distance backend, without coarse candidate selection. Raw float pointers cannot represent these native sparse/multi-vector queries.
+
+For N query rows and `count` candidates per row, provide N × count candidate IDs in row-major order (`ids[q * count + j]`); a single candidate list is **not** implicitly broadcast. `CalcDistancesById` is the preferred batch name; `CalDistanceById` remains the compatibility alias.
+
+Missing labels produce `-1`, but a valid inner-product distance can also be negative (including `-1`). Top-k uses label validity, not the sign or value of the distance, to place missing labels last.
+
+IVF PQFS supports point and batch distances using the same packed-code lookup as bucket scanning. A point lookup reads its 32-vector package and selects one lane; this may perform more work than a scalar quantizer lookup, particularly for disk-backed storage.
+
+PQFS is supported as IVF base bucket encoding, not as flat reorder encoding: flat reorder storage does not maintain PQFS packages. Invalid PQFS reorder configurations are rejected at index creation; choose a supported precise quantizer such as FP32 instead.
 
 ### Return Semantics
 
@@ -74,8 +98,8 @@ Declarations live in
   `DatasetPtr` overload returns `NumElements()` rows with `count` distances each. Both preserve
   input order and do not return IDs.
 - With `topk > 0`, the batch overload returns the smallest `min(topk, count)` distances per
-  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Invalid IDs (`-1`
-  distances) are ordered after valid distances and only appear if there are not enough valid IDs.
+  query, sorted ascending, and `GetIds()` contains the corresponding IDs. Missing IDs (represented by `-1`
+  distances) are ordered after valid distances regardless of their sign and only appear if there are not enough valid IDs.
 - The distance metric (IP / L2 / cosine) follows the `metric_type` chosen at index
   construction; see [Metric Semantics](../resources/metric_semantics.md).
 
@@ -129,7 +153,7 @@ std::vector<int64_t> candidate_ids = {
 };
 
 if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
-    auto result = index->CalDistanceById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    auto result = index->CalcDistancesById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
     if (result.has_value()) {
         auto batch = result.value();
         // batch has NumElements() == 2 and Dim() == 2.

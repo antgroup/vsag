@@ -39,6 +39,8 @@ last-reviewed: 2026-05-12
 
 VSAG is a vector indexing library used for similarity search. The indexing algorithm allows users to search through various sizes of vector sets, especially those that cannot fit in memory. The library also provides methods for generating parameters based on vector dimensions and data scale, allowing developers to use it without understanding the algorithm’s principles. VSAG is written in C++ and provides a Python wrapper package called [pyvsag](https://pypi.org/project/pyvsag/) and a Node.js/TypeScript binding package called `vsag`.
 
+HGraph supports experimental, opt-in adaptive alpha for PiPNN L2 builds; see the [HGraph parameter guide](docs/docs/en/src/indexes/hgraph.md).
+
 ## Performance
 The VSAG algorithm SINDI for sparse vector search achieves a breakthrough in performance, substantially outperforming previous **state-of-the-art (SOTA)** solutions. In our internal tests on a 40-core Intel(R) Xeon(R) Silver 4210R CPU, VSAG's QPS exceeds that of the previous SOTA algorithm, Zilliz, by 166% on the sparse-full(8M) at 98% recall. While the official ann-benchmarks on sparse track runs on an Azure Standard D8lds v5 VM, we plan to submit our results under the official benchmark environment soon to formally validate this performance leap.
 
@@ -266,6 +268,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+    Supports opt-in [adaptive neighbor pruning](docs/docs/en/src/indexes/adaptive_pruning.md) for NSW/L2 construction.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
@@ -314,9 +317,9 @@ Thrive together in VSAG community with users and developers from all around the 
    **Mingyu Yang**, Wentao Li, **Jiabao Jin, Xiaoyao Zhong, Xiangyu Wang, Zhitao Shen**, **Wei Jia,** Wei Wang \
    [PDF](https://arxiv.org/pdf/2404.16322) | [DOI](https://doi.org/10.1109/ICDE65448.2025.00087)  
 
-7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_arxiv_, 2025]  
+7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_TKDE_] \
    **Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, **Mingyu Yang**, Lei Chen, Haoyang Li, **Zhitao Shen**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
-   [PDF](https://arxiv.org/pdf/2506.13144)
+   [PDF](https://ieeexplore.ieee.org/document/11663430)
 
 ## Reference
 VSAG referenced the following works during its implementation:
@@ -328,6 +331,10 @@ VSAG referenced the following works during its implementation:
 2. Quasi-succinct Indices [_WSDM_, 2013]  
   Sebastiano Vigna  
    [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
+
+3. PiPNN: Ultra-Scalable Graph-Based Nearest Neighbor Indexing [_arXiv_, 2026] \
+  Tobias Rubel, Richard Wen, Laxman Dhulipala, Lars Gottesbüren, Rajesh Jayaram, Jakub Łącki \
+   [PDF](https://arxiv.org/pdf/2602.21247) | [CODE](https://github.com/ParAlg/PiPNN)
 
 ## Contributors
 
@@ -389,17 +396,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/Coien-rr">
-                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100" alt="Coien-rr"/>
-                    <br />
-                    <sub><b>Cooper</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/vsag-bot">
                     <img src="https://avatars.githubusercontent.com/u/276218163?v=4" width="100" alt="vsag-bot"/>
                     <br />
                     <sub><b>vsag-bot</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/Coien-rr">
+                    <img src="https://avatars.githubusercontent.com/u/83146518?v=4" width="100" alt="Coien-rr"/>
+                    <br />
+                    <sub><b>Cooper</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -477,6 +484,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/dasurax">
+                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
+                    <br />
+                    <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/pkusunjy">
                     <img src="https://avatars.githubusercontent.com/u/11880269?v=4" width="100" alt="pkusunjy"/>
                     <br />
@@ -488,13 +502,6 @@ VSAG referenced the following works during its implementation:
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
                     <br />
                     <sub><b>Danbaiwq</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/dasurax">
-                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
-                    <br />
-                    <sub><b>dasurax</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -542,12 +549,21 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/seuclkzsd">
+                    <img src="https://avatars.githubusercontent.com/u/110705158?v=4" width="100" alt="seuclkzsd"/>
+                    <br />
+                    <sub><b>seuclkzsd</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/CharlesXu-HQ">
                     <img src="https://avatars.githubusercontent.com/u/109326548?v=4" width="100" alt="CharlesXu-HQ"/>
                     <br />
                     <sub><b>Charles xu</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
@@ -555,8 +571,13 @@ VSAG referenced the following works during its implementation:
                     <sub><b>cubicc</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
+            <td align="center">
+                <a href="https://github.com/geerniman">
+                    <img src="https://avatars.githubusercontent.com/u/111114031?v=4" width="100" alt="geerniman"/>
+                    <br />
+                    <sub><b>Geerniman</b></sub>
+                </a>
+            </td>
             <td align="center">
                 <a href="https://github.com/hhy3">
                     <img src="https://avatars.githubusercontent.com/u/44047980?v=4" width="100" alt="hhy3"/>
@@ -585,11 +606,20 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mukejane">
                     <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
                     <br />
                     <sub><b>mukejane</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/shenguoquan">
+                    <img src="https://avatars.githubusercontent.com/u/6701903?v=4" width="100" alt="shenguoquan"/>
+                    <br />
+                    <sub><b>guoquan</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -599,13 +629,25 @@ VSAG referenced the following works during its implementation:
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
                     <br />
                     <sub><b>stuBirdFly</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/thlurte">
+                    <img src="https://avatars.githubusercontent.com/u/86393801?v=4" width="100" alt="thlurte"/>
+                    <br />
+                    <sub><b>Adheeb Ahmed</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/wellkilo">
+                    <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
+                    <br />
+                    <sub><b>He Dong</b></sub>
                 </a>
             </td>
         </tr>

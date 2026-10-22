@@ -976,6 +976,7 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     const auto merged = public_destination->Merge(units);
     REQUIRE(merged.has_value());
     REQUIRE(destination->GetNumElements() == expected.labels.size());
+    REQUIRE(destination->PublishedCount() == expected.labels.size());
     const auto after = Capture(*destination);
     REQUIRE(after.labels == expected.labels);
     REQUIRE(after.vectors == expected.vectors);
