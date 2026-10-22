@@ -470,7 +470,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         sparse_odescent_builder.SaveGraph(graph);
         this->route_graphs_.emplace_back(graph);
     }
-    if (use_pipnn and entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
+    // The level walk above is the only place that selects an entry point, and a fixed-seed
+    // sampler can draw level zero for every node (the standard library maps the draws to
+    // uniforms). Fall back to the first inserted id, a node of the bottom graph just saved.
+    // The guard preserves a higher-level entry point and keeps front() safe for an empty batch.
+    if (entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
         entry_point_id_ = inner_ids.front();
     }
 
