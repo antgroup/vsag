@@ -364,6 +364,57 @@ auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
+### Distance-based early termination
+
+An optional `early_stop` object can reduce work within the normal fixed-`ef_search`
+traversal:
+
+```json
+{"hgraph":{"ef_search":652,"early_stop":{"type":"distance","alpha":1.10}}}
+```
+
+The search keeps track of the best `k` eligible results already found. Once all `k`
+are available, it may stop when the nearest pending candidate has a distance at
+least `alpha` times the current kth distance. The existing candidate admission and
+fixed-ef termination remain in effect. The comparison uses VSAG distance scores:
+squared distance for `l2`, and `1 - cosine` for `cosine`. A negative kth score caused
+by cosine roundoff is treated as zero for this comparison.
+As in ordinary KNN search, a requested distance threshold filters the selected
+results afterwards and may reduce the returned count below `k`.
+
+`alpha` must be finite and at least 1, and defaults to `1.5` when omitted. Larger values
+delay early termination: for the same `ef_search` the traversal is identical and only stops
+later. With FP32 base codes and no reordering, a larger value therefore never returns worse
+results. With quantized base codes the rule compares the traversal's approximate distances,
+and with reordering the reorder stage rescans fewer candidates, so recall against exact
+neighbours need not be monotone in `alpha`; calibrate it for each quantization and reorder
+setting. The default is conservative: on the calibration queries of the FP32 evaluation
+tracked in #2941 (three datasets, k=10/100, three recall targets) it met the recall and
+query-coverage targets wherever the fixed baseline did, while smaller values saved more work. When the kth score is zero, a finite alpha of any magnitude can still allow
+early termination. To go below the default, choose `alpha` on calibration queries under the
+required recall and query coverage, then measure quality and end-to-end performance on
+separate queries. When `ef_search` is close to `k` (for example within 1.25 times `k`), the rule rarely ends a
+search early but still maintains its own top-k state, which can lower QPS by a few percent;
+leave it off in that case, and check end-to-end time, not only distance computations, when
+calibrating. Omitting `early_stop` disables the policy.
+
+This option supports ordinary KNN search with `l2` or `cosine` on any base quantization,
+with or without reordering, with conjugate graph search, and with several distance
+threads per query (`parallel_search_thread_count`), including filters, batched queries,
+and concurrent independent queries. With reordering, the rule acts on the traversal's
+base-code distances and the reorder stage then rescores the candidates the traversal kept.
+The inner-product metric (its distances can be negative, so the ratio is not meaningful),
+custom distance callbacks, range search, iterator search, search sessions and fused RaBitQ
+split storage are unsupported and rejected. Existing MCI, hybrid-traversal, or brute-force
+routes complete normally when selected; the new rule acts on the ordinary HGraph graph
+traversal. A search stopped by the rule reports
+`early_stop_count: 1` in its statistics. For a batched request, the count is the
+number of individual traversals stopped by the rule; a zero count is omitted.
+
+The criterion is adapted from [Distance Adaptive Beam Search, Algorithm 2](https://arxiv.org/html/2505.15636v1#A2).
+This implementation retains VSAG's fixed-width traversal and operates in its score
+units; the paper's metric/navigability guarantee does not apply to this extension.
+
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 
 Graph traversal is the right strategy when most candidates pass the filter — the
