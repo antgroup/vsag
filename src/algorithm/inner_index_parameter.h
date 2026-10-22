@@ -43,6 +43,24 @@ ParseRaBitQSplitConfig(const JsonType& external_json);
 void
 ApplyRaBitQSplitConfig(const RaBitQSplitConfig& config, JsonType& inner_json);
 
+/**
+ * Switches the base codes to the split storage when the external parameters select the
+ * rotated local scalar quantizer: sq_local_bits_per_dim_filter (x) and
+ * sq_local_bits_per_dim_base (x + y). The filter (high x bits) and the supplement (low y bits)
+ * then live in two IO storages, and reorder reads the same base storage.
+ */
+void
+ApplySQLocalSplitConfig(const JsonType& external_json, JsonType& inner_json);
+
+/**
+ * Switches the base codes to the split storage when the external parameters select the
+ * rotated local scalar quantizer: sq_local_bits_per_dim_filter (x) and
+ * sq_local_bits_per_dim_base (x + y). The filter (high x bits) and the supplement (low y bits)
+ * then live in two IO storages, and reorder reads the same base storage.
+ */
+void
+ApplySQLocalSplitConfig(const JsonType& external_json, JsonType& inner_json);
+
 JsonType
 ApplyHoldMoldsToQuantizer(const JsonType& source_json, bool hold_molds);
 

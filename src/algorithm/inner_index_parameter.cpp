@@ -22,6 +22,7 @@
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "quantization/scalar_quantization/sq_local_split_quantizer_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
@@ -149,6 +150,33 @@ ApplyRaBitQSplitConfig(const RaBitQSplitConfig& config, JsonType& inner_json) {
         .SetInt(config.filter_bits);
     inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
         .SetInt(config.TotalBits());
+}
+
+void
+ApplySQLocalSplitConfig(const JsonType& external_json, JsonType& inner_json) {
+    if (not inner_json.Contains(BASE_CODES_KEY)) {
+        return;
+    }
+    auto base_codes = inner_json[BASE_CODES_KEY];
+    if (not base_codes.Contains(QUANTIZATION_PARAMS_KEY)) {
+        return;
+    }
+    auto quantizer_json = base_codes[QUANTIZATION_PARAMS_KEY];
+    if (not quantizer_json.Contains(TYPE_KEY) or
+        quantizer_json[TYPE_KEY].GetString() != QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT) {
+        return;
+    }
+    inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SQ_LOCAL_SPLIT_CODES);
+    for (const auto* key :
+         {SQ_LOCAL_BITS_PER_DIM_FILTER, SQ_LOCAL_BITS_PER_DIM_BASE, SQ_LOCAL_BITS_PER_DIM_QUERY}) {
+        if (external_json.Contains(key)) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][key].SetJson(external_json[key]);
+        }
+    }
+    auto split_parameter = std::make_shared<SQLocalSplitQuantizerParameter>();
+    split_parameter->FromJson(inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY]);
+    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+    inner_json[USE_REORDER_KEY].SetBool(true);
 }
 
 JsonType

@@ -25,6 +25,7 @@
 #include "product_quantization/product_quantizer_parameter.h"
 #include "quantization/int8_quantizer_parameter.h"
 #include "rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "scalar_quantization/sq_local_split_quantizer_parameter.h"
 #include "scalar_quantization/sq_parameter_headers.h"
 #include "sparse_quantization/sparse_quantizer_parameter.h"
 #include "transform_quantization/transform_quantizer_parameter.h"
@@ -53,6 +54,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL) {
         quantizer_param = std::make_shared<SQ8LocalQuantizerParameter>();
+        quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT) {
+        quantizer_param = std::make_shared<SQLocalSplitQuantizerParameter>();
         quantizer_param->FromJson(json);
     } else if (type_name == QUANTIZATION_TYPE_VALUE_SQ8) {
         quantizer_param = std::make_shared<ScalarQuantizerParameter<8>>();
@@ -100,21 +104,23 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
 
 bool
 QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
-    static const std::unordered_set<std::string> valid_types = {QUANTIZATION_TYPE_VALUE_FP32,
-                                                                QUANTIZATION_TYPE_VALUE_SQ8_LOCAL,
-                                                                QUANTIZATION_TYPE_VALUE_SQ4_LOCAL,
-                                                                QUANTIZATION_TYPE_VALUE_SQ8,
-                                                                QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM,
-                                                                QUANTIZATION_TYPE_VALUE_PQ,
-                                                                QUANTIZATION_TYPE_VALUE_SQ4,
-                                                                QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
-                                                                QUANTIZATION_TYPE_VALUE_BF16,
-                                                                QUANTIZATION_TYPE_VALUE_FP16,
-                                                                QUANTIZATION_TYPE_VALUE_RABITQ,
-                                                                QUANTIZATION_TYPE_VALUE_SPARSE,
-                                                                QUANTIZATION_TYPE_VALUE_PQFS,
-                                                                QUANTIZATION_TYPE_VALUE_TQ,
-                                                                QUANTIZATION_TYPE_VALUE_INT8};
+    static const std::unordered_set<std::string> valid_types = {
+        QUANTIZATION_TYPE_VALUE_FP32,
+        QUANTIZATION_TYPE_VALUE_SQ8_LOCAL,
+        QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT,
+        QUANTIZATION_TYPE_VALUE_SQ4_LOCAL,
+        QUANTIZATION_TYPE_VALUE_SQ8,
+        QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM,
+        QUANTIZATION_TYPE_VALUE_PQ,
+        QUANTIZATION_TYPE_VALUE_SQ4,
+        QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM,
+        QUANTIZATION_TYPE_VALUE_BF16,
+        QUANTIZATION_TYPE_VALUE_FP16,
+        QUANTIZATION_TYPE_VALUE_RABITQ,
+        QUANTIZATION_TYPE_VALUE_SPARSE,
+        QUANTIZATION_TYPE_VALUE_PQFS,
+        QUANTIZATION_TYPE_VALUE_TQ,
+        QUANTIZATION_TYPE_VALUE_INT8};
 
     return valid_types.find(type_name) != valid_types.end();
 }
