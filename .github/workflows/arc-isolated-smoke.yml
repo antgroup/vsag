@@ -1,0 +1,102 @@
+name: ARC isolated build smoke
+
+on:
+  push:
+    branches: [codex/arc-isolated-smoke-20261022]
+    paths: [.github/workflows/arc-isolated-smoke.yml]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arc-isolated-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: Checkout, build, and artifact round trip
+    if: github.repository == 'antgroup/vsag' && github.ref == 'refs/heads/codex/arc-isolated-smoke-20261022' && github.actor == 'wxyucs'
+    runs-on: vsag-linux-x64
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/antgroup/vsag@sha256:19166ccf64cdc5d9e982d6d7c968dca469174f599ebd215e73d14dc78ed72e32
+    defaults:
+      run:
+        shell: bash
+    env:
+      CMAKE_GENERATOR: Ninja
+      COMPILE_JOBS: '6'
+      OMP_NUM_THREADS: '2'
+      OPENBLAS_NUM_THREADS: '2'
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+      EXTRA_DEFINED: '-DVSAG_USE_SYSTEM_OPENBLAS=ON'
+    steps:
+      - name: Checkout fixed main commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: antgroup/vsag
+          ref: 7ea909b3d364296b14be1cf46e72cf4bd98b3613
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Verify source and isolated execution
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = 7ea909b3d364296b14be1cf46e72cf4bd98b3613
+          test "$(id -u)" != 0
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          mkdir -p smoke-results
+          {
+            printf 'commit=%s\n' "$(git rev-parse HEAD)"
+            printf 'run_id=%s\nrun_attempt=%s\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+            printf 'compile_jobs=%s\n' "$COMPILE_JOBS"
+            g++ --version
+            cmake --version
+            ninja --version
+          } > smoke-results/toolchain.txt
+      - name: Prepare pinned dependency sources
+        uses: ./.github/actions/prepare-fetchcontent
+      - name: Build VSAG and examples
+        run: |
+          set -euo pipefail
+          make release COMPILE_JOBS=6 VSAG_ENABLE_EXAMPLES=ON 2>&1 | tee smoke-results/build.log
+      - name: Run vector index example
+        run: |
+          set -euo pipefail
+          timeout 180 ./build-release/examples/cpp/103_index_hgraph 2>&1 | tee smoke-results/example.log
+      - name: Package build evidence
+        run: |
+          set -euo pipefail
+          test -s build-release/src/libvsag.so
+          cp -L build-release/src/libvsag.so smoke-results/libvsag.so
+          (cd smoke-results && sha256sum libvsag.so toolchain.txt build.log example.log > SHA256SUMS)
+          printf 'Built fixed main commit and ran the HGraph example.\n' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload build artifact
+        id: upload
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: arc-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-results/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 1
+      - name: Download artifact for verification
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: arc-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-downloaded
+      - name: Verify uploaded contents
+        run: |
+          set -euo pipefail
+          (cd smoke-downloaded && sha256sum -c SHA256SUMS)
+          cmp smoke-results/libvsag.so smoke-downloaded/libvsag.so
+          echo 'Artifact upload/download and checksums verified.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: arc-smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: smoke-results/
+          if-no-files-found: warn
+          retention-days: 3
