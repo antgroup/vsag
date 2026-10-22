@@ -440,3 +440,11 @@ do not reuse an old count of passing tests as a current CI result. Historical
 environment diagnostics and validation logs stay with their pinned cohorts in
 [the archive index](../../../../../lite/benchmark/HISTORY.md). Local checks do not
 replace maintainer approval or hosted CI on the submitted commit.
+
+## Optional CRUD degradation diagnosis
+
+Pass `--resident --checkpoint-every 10` to the mixed runner to record initial, every tenth round and final quality/rebuild checkpoints. Existing invocations and their initial/final quality schema remain unchanged. Each checkpoint recomputes FP64 truth against the current FP32 input vectors and compares the maintained index with a fresh graph built from exactly those vectors and IDs, using the same storage, degree 16, construction budget 128 and search budget 512. `checkpoint-*-neighbors.csv` preserves ordered IDs, distances and truth IDs; query files retain hits and diagnostic latency; state files identify cumulative mutation calls and rebuild time. The raw verifier and pack/unpack tools cover these files.
+
+The Linux tool forks a single-threaded child for fresh-build/oracle allocations and waits before continuing CRUD. The resident parent is not replaced and its allocator/RSS does not include the child's rebuild buffers. Forking, scheduling and cache warming still perturb timing; do not combine this cohort's latency or memory measurements with the original protocol or treat checkpoint timing as a formal maintained/fresh performance comparison. Record each repetition separately. A fresh RaBitQ build also retrains its model, so its recall gap alone cannot isolate graph maintenance from quantizer effects. No minimum recall threshold is implied.
+
+The existing per-round Save/Load check verifies explicit snapshot result consistency, not per-operation disk durability, atomic replacement, fsync or crash recovery. Shrink/allocator reclamation and graph-quality repair are separate concerns; a stable RSS does not prove either zero fragmentation or stable recall.

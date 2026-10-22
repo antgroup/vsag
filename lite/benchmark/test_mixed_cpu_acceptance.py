@@ -330,6 +330,116 @@ class AcceptanceTests(unittest.TestCase):
         self.assertIn('invalid lifecycle mode', result.stderr)
 
 
+
+class CheckpointTests(unittest.TestCase):
+    def test_checkpoint_round_schedule(self):
+        self.assertEqual(runner.checkpoint_rounds(5, 2), [0, 2, 4, 5])
+        self.assertEqual(runner.checkpoint_rounds(5, 8), [0, 5])
+        self.assertEqual(runner.checkpoint_rounds(5, 0), [])
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_checkpoint_parity_rebuild_and_corrupt_evidence(self):
+        binary = os.environ['VSAG_MIXED_PROBE']
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            dataset = root / 'input'
+            dataset.mkdir()
+            for name, count in [('base.fvecs', 96), ('queries.fvecs', 5)]:
+                with (dataset / name).open('wb') as stream:
+                    for row in range(count):
+                        stream.write(struct.pack('<i17f', 17,
+                            *[math.sin((row + 1) * (d + 3) * .17) for d in range(17)]))
+            for storage in ['fp32', 'fp16', 'rabitq8']:
+                receipts = []
+                quality = []
+                for every in [0, 2]:
+                    output = root / f'{storage}-{every}'
+                    snapshots = root / f'{storage}-{every}-snapshots'
+                    snapshots.mkdir()
+                    command = [binary, str(dataset), str(output), storage, '3', '7',
+                               str(snapshots), 'resident']
+                    if every:
+                        command.append(str(every))
+                    subprocess.run(command, capture_output=True, text=True, check=True)
+                    raw = verify_run(output, 3, 7, 5)
+                    quality.append((output / 'quality.csv').read_bytes())
+                    receipts.append([(p.name, sha(p)) for p in sorted(snapshots.iterdir())])
+                    if every:
+                        curve = runner.verify_checkpoints(output, 3, 7, 5, every)
+                        self.assertEqual(set(curve), {'0', '2', '3'})
+                        for n in ['0', '3']:
+                            self.assertEqual(curve[n]['maintained_recall'], raw['recall'][n])
+                        self.assertEqual(curve['0']['fresh_recall'], curve['0']['maintained_recall'])
+                        target = output / 'checkpoint-2-queries.csv'
+                        saved = target.read_text()
+                        lines = saved.splitlines()
+                        values = lines[1].split(',')
+                        values[2] = str((int(values[2]) + 1) % 11)
+                        lines[1] = ','.join(values)
+                        target.write_text('\n'.join(lines) + '\n')
+                        with self.assertRaises(AssertionError):
+                            runner.verify_checkpoints(output, 3, 7, 5, every)
+                        target.write_text(saved)
+                        with self.assertRaises((AssertionError, FileNotFoundError)):
+                            runner.verify_checkpoints(output, 3, 7, 5, 1)
+                        runner.verify_checkpoints(output, 3, 7, 5, every)
+                self.assertEqual(quality[0], quality[1])
+                self.assertEqual(receipts[0], receipts[1])
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_invalid_checkpoint_interval_rejected_before_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'must-not-exist'
+            for every in ['0', '1000001']:
+                result = subprocess.run([os.environ['VSAG_MIXED_PROBE'], 'missing', str(target),
+                    'fp32', '1', '1', 'missing-snapshot', 'resident', every], capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('invalid checkpoint interval', result.stderr)
+                self.assertFalse(target.exists())
+
+
+
+class CurvePublishedTests(unittest.TestCase):
+    def test_curve_archive_raw_and_all_report_cells(self):
+        root = Path(__file__).parent / 'results/crud-degradation-curve-20261022'
+        receipt = json.loads((root / 'archive.json').read_text())
+        self.assertEqual(sha(root / 'raw.tar.gz'), receipt['sha256'])
+        self.assertEqual((root / 'raw.tar.gz').stat().st_size, receipt['bytes'])
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(root / 'raw.tar.gz', evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest)+1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual((evidence / name).stat().st_size, item['bytes'])
+                self.assertEqual(sha(evidence / name), item['sha256'])
+            unpack(evidence / 'measurements/raw.tar.gz', evidence / 'raw')
+            raw = evidence / 'raw'
+            self.assertEqual(verify(raw), receipt['audit'])
+            self.assertEqual(receipt['audit']['mutation_calls'], 225000)
+            self.assertEqual(receipt['audit']['interleaved_queries'], 225000)
+            identity = json.loads((raw / 'identity.json').read_text())
+            self.assertEqual(identity['configuration']['checkpoint_every'], 10)
+            self.assertTrue(identity['configuration']['resident'])
+            audit = json.loads((evidence / 'independent-audit.json').read_text())
+            self.assertTrue(audit['all_300_snapshot_hashes_and_sizes_match_E12'])
+            self.assertEqual(audit['independent_numpy_FP64_query_states'], 110)
+            report = (root / 'README.md').read_text()
+            rows = json.loads((raw / 'rows.json').read_text())
+            self.assertEqual(len(rows), 3)
+            for row in rows:
+                self.assertEqual(row['trial'], 0)
+                self.assertEqual(set(row['checkpoints']), {str(n) for n in range(0, 101, 10)})
+                for n in range(0, 101, 10):
+                    cell = row['checkpoints'][str(n)]
+                    expected = f"| {n} | {n*750} | {cell['maintained_recall']:.4f} | {cell['fresh_recall']:.4f} |"
+                    self.assertIn(expected, report)
+            self.assertIn('不是新算法优化', report)
+            self.assertIn('5.59个百分点', report)
+            self.assertIn('不是加载旧快照导致', report)
+
+
 class ExtendedPublishedTests(unittest.TestCase):
     def test_gist_extension_raw_metrics_and_report(self):
         root = Path(__file__).parent

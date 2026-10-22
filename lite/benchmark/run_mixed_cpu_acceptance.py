@@ -74,6 +74,61 @@ def verify_run(output, rounds, cycles, queries):
 
 
 
+
+def checkpoint_rounds(rounds, every):
+    if every <= 0:
+        return []
+    return sorted({0, rounds, *range(every, rounds + 1, every)})
+
+
+def verify_checkpoints(output, rounds, cycles, queries, every):
+    result = {}
+    for number in checkpoint_rounds(rounds, every):
+        prefix = output / f'checkpoint-{number}'
+        with Path(str(prefix) + '-state.csv').open() as stream:
+            states = list(csv.DictReader(stream))
+        assert len(states) == 1
+        state = states[0]
+        assert int(state['round']) == number
+        assert int(state['mutation_calls']) == int(state['query_calls']) == number * cycles * 3
+        count = int(state['count'])
+        assert count > 10 and math.isfinite(float(state['rebuild_ms'])) and float(state['rebuild_ms']) >= 0
+        with Path(str(prefix) + '-queries.csv').open() as stream:
+            samples = list(csv.DictReader(stream))
+        with Path(str(prefix) + '-neighbors.csv').open() as stream:
+            neighbors = list(csv.DictReader(stream))
+        assert len(samples) == queries and len(neighbors) == queries * 10
+        for q, sample in enumerate(samples):
+            assert int(sample['round']) == number and int(sample['query']) == q and int(sample['k']) == 10
+            selected = neighbors[q * 10:(q + 1) * 10]
+            assert [int(row['rank']) for row in selected] == list(range(10))
+            assert all(int(row['round']) == number and int(row['query']) == q for row in selected)
+            truth = {int(row['truth_id']) for row in selected}
+            assert len(truth) == 10 and all(0 <= value < count for value in truth)
+            for side in ['maintained', 'fresh']:
+                values = [(float(row[side + '_distance']), int(row[side + '_id'])) for row in selected]
+                assert len({value[1] for value in values}) == 10 and values == sorted(values)
+                assert all(math.isfinite(distance) and 0 <= identifier < count for distance, identifier in values)
+                assert int(sample[side + '_hits']) == len(truth & {v[1] for v in values})
+                assert math.isfinite(float(sample[side + '_us'])) and float(sample[side + '_us']) >= 0
+        result[str(number)] = dict(mutation_calls=number * cycles * 3, count=count,
+            maintained_recall=sum(int(row['maintained_hits']) for row in samples) / (queries * 10),
+            fresh_recall=sum(int(row['fresh_hits']) for row in samples) / (queries * 10),
+            maintained_p50_us=percentile([float(row['maintained_us']) for row in samples], .5),
+            fresh_p50_us=percentile([float(row['fresh_us']) for row in samples], .5),
+            rebuild_ms=float(state['rebuild_ms']))
+    expected = {f'checkpoint-{n}-{suffix}.csv' for n in checkpoint_rounds(rounds, every)
+                for suffix in ['neighbors', 'queries', 'state']}
+    assert {p.name for p in output.glob('checkpoint-*.csv')} == expected
+    with (output / 'quality.csv').open() as stream:
+        endpoints = list(csv.DictReader(stream))
+    for number in [0, rounds]:
+        selected = [row for row in endpoints if int(row['round']) == number]
+        assert len(selected) == queries
+        assert result[str(number)]['maintained_recall'] == sum(int(row['hits']) for row in selected) / (queries * 10)
+    return result
+
+
 BUILD_RECEIPT = 'build-source-receipt.json'
 
 
@@ -215,6 +270,8 @@ def main():
     parser.add_argument('--cpu', type=int, default=0)
     parser.add_argument('--resident', action='store_true',
                         help='Keep the original index between rounds; reload only checks persistence')
+    parser.add_argument('--checkpoint-every', type=int, default=0,
+                        help='Opt-in resident quality/rebuild diagnosis every N rounds; not production tuning')
     args = parser.parse_args()
     args.feature_repo = args.feature_repo.resolve(strict=True)
     args.build = args.build.resolve()
@@ -231,6 +288,8 @@ def main():
         raise FileExistsError(args.output)
     if min(args.trials, args.rounds, args.cycles) <= 0 or args.cpu not in os.sched_getaffinity(0):
         parser.error('Positive trial/round/cycle counts and an available --cpu are required')
+    if args.checkpoint_every < 0 or args.checkpoint_every > 1000000 or (args.checkpoint_every and not args.resident):
+        parser.error('--checkpoint-every requires --resident and an interval in [1,1000000]')
     receipt = validate_build(args.feature_repo, args.feature_sha, args.build)
     for tool in ['c++', 'ldd', 'taskset']:
         if not shutil.which(tool):
@@ -265,6 +324,14 @@ def main():
             'Process peak includes input/oracle buffers, old+loaded index and truth computation',
             'Save/load are same-process uncontrolled-cache, not fresh or cold I/O',
             'Not a Full comparison or a complete package measurement'])
+    if args.checkpoint_every:
+        identity['configuration']['checkpoint_every'] = args.checkpoint_every
+        identity['limits'] += [
+            'Checkpoint FP64 and fresh rebuild run in a forked single-threaded child; no parent allocator mutations',
+            'Fork/wait and cache warming perturb timing; checkpoint latencies are diagnostic, not a formal speed comparison',
+            'Fresh rebuild changes graph/insertion history; RaBitQ additionally retrains its model',
+            'Parent RSS/peak excludes child allocations; process time/resources may include children',
+            'Save/Load equality is explicit snapshot consistency, not per-operation durability']
     identity['inputs'] = {}
     datasets = []
     for value in args.dataset:
@@ -311,6 +378,8 @@ def main():
                         mode, str(args.rounds), str(args.cycles), str(snapshots)]
                     if args.resident:
                         command.append('resident')
+                    if args.checkpoint_every:
+                        command.append(str(args.checkpoint_every))
                     write_json(args.output / (tag + '.command.json'), dict(argv=command,
                         environment={key: env[key] for key in ['OMP_NUM_THREADS',
                             'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'LD_LIBRARY_PATH']}))
@@ -322,6 +391,9 @@ def main():
                         dim = int.from_bytes(stream.read(4), 'little', signed=True)
                     queries = query_file.stat().st_size // (4 + 4 * dim)
                     result = verify_run(selected, args.rounds, args.cycles, queries)
+                    if args.checkpoint_every:
+                        result['checkpoints'] = verify_checkpoints(selected, args.rounds, args.cycles,
+                                                                  queries, args.checkpoint_every)
                     result.update(dataset=name, storage=mode, trial=trial,
                         snapshots={p.name: dict(bytes=p.stat().st_size, sha256=sha(p))
                                    for p in sorted(snapshots.iterdir())})

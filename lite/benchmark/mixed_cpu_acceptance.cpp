@@ -1,9 +1,12 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 #include <sys/resource.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include <vsag/lite/index.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -42,7 +45,8 @@ read_rows(const std::string& path) {
         }
         require(dim == first_dim, "dimension mismatch");
         std::vector<float> row(dim);
-        input.read(reinterpret_cast<char*>(row.data()), dim * sizeof(float));
+        input.read(reinterpret_cast<char*>(row.data()),
+                   static_cast<std::streamsize>(dim * sizeof(float)));
         require(static_cast<bool>(input), "truncated row");
         for (float value : row) {
             require(std::isfinite(value), "nonfinite input");
@@ -62,7 +66,7 @@ usage() {
 
 double
 milliseconds(const timeval& value) {
-    return value.tv_sec * 1000.0 + value.tv_usec / 1000.0;
+    return static_cast<double>(value.tv_sec) * 1000.0 + static_cast<double>(value.tv_usec) / 1000.0;
 }
 
 struct Sample {
@@ -129,7 +133,8 @@ truth(const Rows& base, const std::vector<float>& query, uint64_t k) {
         }
         distances.emplace_back(distance, static_cast<int64_t>(id));
     }
-    std::partial_sort(distances.begin(), distances.begin() + k, distances.end());
+    std::partial_sort(
+        distances.begin(), distances.begin() + static_cast<int64_t>(k), distances.end());
     std::vector<int64_t> result;
     for (uint64_t rank = 0; rank < k; ++rank) {
         result.push_back(distances[rank].second);
@@ -160,13 +165,112 @@ validate(const std::vector<vsag::lite::Neighbor>& neighbors,
             "unordered results");
 }
 
+// Isolate fresh-build/oracle allocations from the resident parent's allocator and RSS.
+// This is a Linux single-threaded diagnostic, not a crash-durability or concurrency test.
+void
+checkpoint(const std::filesystem::path& output,
+           uint64_t round,
+           uint64_t cycles,
+           const Rows& base,
+           const Rows& queries,
+           const vsag::lite::Index& maintained,
+           vsag::lite::VectorStorage format) {
+    require(status_number("Threads:") == 1, "checkpoint requires one thread");
+    const auto child = fork();
+    require(child >= 0, "checkpoint fork failed");
+    if (child == 0) {
+        int status = 0;
+        try {
+            const auto begin = Clock::now();
+            auto created = vsag::lite::Index::Create(base.front().size());
+            require(static_cast<bool>(created), "checkpoint create failed");
+            auto fresh = std::move(*created);
+            for (uint64_t id = 0; id < base.size(); ++id) {
+                require(static_cast<bool>(
+                            fresh->Add(static_cast<int64_t>(id), base[id].data(), base[id].size())),
+                        "checkpoint add failed");
+            }
+            require(static_cast<bool>(fresh->BuildGraph(format, 16, 128)),
+                    "checkpoint rebuild failed");
+            const auto rebuilt = Clock::now();
+            const auto prefix = output / ("checkpoint-" + std::to_string(round));
+            std::ofstream neighbors(prefix.string() + "-neighbors.csv");
+            std::ofstream timings(prefix.string() + "-queries.csv");
+            std::ofstream state(prefix.string() + "-state.csv");
+            neighbors << "round,query,rank,truth_id,maintained_id,maintained_distance,fresh_id,"
+                         "fresh_distance\n"
+                      << std::setprecision(17);
+            timings << "round,query,maintained_hits,fresh_hits,k,maintained_us,fresh_us\n"
+                    << std::setprecision(17);
+            state << "round,mutation_calls,query_calls,count,rebuild_ms\n"
+                  << std::setprecision(17) << round << ',' << round * cycles * 3 << ','
+                  << round * cycles * 3 << ',' << base.size() << ','
+                  << std::chrono::duration<double, std::milli>(rebuilt - begin).count() << '\n';
+            const std::vector<bool> live(base.size(), true);
+            const vsag::lite::SearchOptions options{512};
+            for (uint64_t q = 0; q < queries.size(); ++q) {
+                const auto expected = truth(base, queries[q], 10);
+                std::vector<vsag::lite::Neighbor> results[2];
+                double elapsed[2]{};
+                // Rotate the first search to avoid always warming the same side first.
+                for (uint64_t step = 0; step < 2; ++step) {
+                    const uint64_t side = (q + step) % 2;
+                    const auto& selected = side == 0 ? maintained : *fresh;
+                    const auto start = Clock::now();
+                    auto found = selected.SearchWithOptions(
+                        queries[q].data(), queries[q].size(), 10, options);
+                    elapsed[side] =
+                        std::chrono::duration<double, std::micro>(Clock::now() - start).count();
+                    require(static_cast<bool>(found), "checkpoint query failed");
+                    results[side] = std::move(*found);
+                    validate(results[side], live, 10);
+                }
+                uint64_t hits[2]{};
+                for (uint64_t rank = 0; rank < 10; ++rank) {
+                    for (uint64_t side = 0; side < 2; ++side) {
+                        hits[side] += static_cast<uint64_t>(
+                            std::find(expected.begin(), expected.end(), results[side][rank].id) !=
+                            expected.end());
+                    }
+                    neighbors << round << ',' << q << ',' << rank << ',' << expected[rank] << ','
+                              << results[0][rank].id << ',' << results[0][rank].distance << ','
+                              << results[1][rank].id << ',' << results[1][rank].distance << '\n';
+                }
+                timings << round << ',' << q << ',' << hits[0] << ',' << hits[1] << ",10,"
+                        << elapsed[0] << ',' << elapsed[1] << '\n';
+            }
+            neighbors.close();
+            timings.close();
+            state.close();
+            require(static_cast<bool>(neighbors) and static_cast<bool>(timings) and
+                        static_cast<bool>(state),
+                    "checkpoint evidence write failed");
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            status = 1;
+        }
+        // Do not run inherited parent stream destructors or flush their copied buffers.
+        _exit(status);
+    }
+    int status = 0;
+    pid_t waited;
+    do {
+        waited = waitpid(child, &status, 0);
+    } while (waited < 0 and errno == EINTR);
+    require(waited == child and WIFEXITED(status) and WEXITSTATUS(status) == 0,
+            "checkpoint child failed");
+}
+
 void
 run(int argc, char** argv) {
-    require(argc == 7 or argc == 8,
+    require(argc == 7 or argc == 8 or argc == 9,
             "usage: mixed_cpu_acceptance DATASET OUTPUT STORAGE "
-            "ROUNDS CYCLES SNAPDIR [resident]");
-    const bool resident = argc == 8;
+            "ROUNDS CYCLES SNAPDIR [resident [checkpoint_every]]");
+    const bool resident = argc >= 8;
     require(not resident or std::string(argv[7]) == "resident", "invalid lifecycle mode");
+    const uint64_t checkpoint_every = argc == 9 ? std::stoull(argv[8]) : 0;
+    require(argc != 9 or (checkpoint_every > 0 and checkpoint_every <= 1000000),
+            "invalid checkpoint interval");
     const std::filesystem::path output(argv[2]);
     require(not std::filesystem::exists(output), "output already exists");
     std::filesystem::create_directory(output);
@@ -197,7 +301,8 @@ run(int argc, char** argv) {
     const vsag::lite::SearchOptions options{512};
     measure(samples, 0, -1, "build", [&] {
         for (uint64_t id = 0; id < base.size(); ++id) {
-            require(static_cast<bool>(index->Add(id, base[id].data(), dim)), "initial add failed");
+            require(static_cast<bool>(index->Add(static_cast<int64_t>(id), base[id].data(), dim)),
+                    "initial add failed");
         }
         require(static_cast<bool>(index->BuildGraph(format, 16, 128)), "build failed");
     });
@@ -211,12 +316,16 @@ run(int argc, char** argv) {
             validate(*result, live, k);
             uint64_t hits = 0;
             for (const auto& neighbor : *result) {
-                hits += std::find(expected.begin(), expected.end(), neighbor.id) != expected.end();
+                hits += static_cast<uint64_t>(
+                    std::find(expected.begin(), expected.end(), neighbor.id) != expected.end());
             }
             quality << round << ',' << q << ',' << hits << ',' << k << '\n';
         }
     };
     quality_check(0);
+    if (checkpoint_every > 0) {
+        checkpoint(output, 0, cycles, base, queries, *index, format);
+    }
     std::ofstream states(output / "states.csv");
     states << "round,count,rss_kib,peak_kib,snapshot_bytes,rss_before_persistence_kib,threads\n";
     states << "0," << index->Size() << ',' << rss_kib() << ',' << usage().ru_maxrss << ",0,"
@@ -225,7 +334,7 @@ run(int argc, char** argv) {
     const auto mixed_query = [&](uint64_t round) {
         const auto q = query_number++ % queries.size();
         std::vector<vsag::lite::Neighbor> neighbors;
-        measure(samples, round, q, "query", [&] {
+        measure(samples, round, static_cast<int64_t>(q), "query", [&] {
             auto result = index->SearchWithOptions(queries[q].data(), dim, k, options);
             require(static_cast<bool>(result), "mixed query failed");
             neighbors = std::move(*result);
@@ -241,23 +350,30 @@ run(int argc, char** argv) {
                 replacement[d] = 0.875F * base[id][d] + 0.125F * original[donor][d];
             }
             require(replacement != base[id], "replacement did not change vector");
-            measure(samples, round, id, "update", [&] {
-                require(static_cast<bool>(index->Update(id, replacement.data(), dim)),
+            measure(samples, round, static_cast<int64_t>(id), "update", [&] {
+                require(static_cast<bool>(
+                            index->Update(static_cast<int64_t>(id), replacement.data(), dim)),
                         "update failed");
             });
             base[id] = replacement;
             mixed_query(round);
-            measure(
-                samples, round, id, "remove", [&] { require(index->Remove(id), "remove failed"); });
+            measure(samples, round, static_cast<int64_t>(id), "remove", [&] {
+                require(index->Remove(static_cast<int64_t>(id)), "remove failed");
+            });
             live[id] = false;
             require(index->Size() + 1 == base.size(), "remove count mismatch");
             mixed_query(round);
-            measure(samples, round, id, "add", [&] {
-                require(static_cast<bool>(index->Add(id, replacement.data(), dim)), "readd failed");
+            measure(samples, round, static_cast<int64_t>(id), "add", [&] {
+                require(static_cast<bool>(
+                            index->Add(static_cast<int64_t>(id), replacement.data(), dim)),
+                        "readd failed");
             });
             live[id] = true;
             require(index->Size() == base.size(), "readd count mismatch");
             mixed_query(round);
+        }
+        if (checkpoint_every > 0 and (round % checkpoint_every == 0 or round == rounds)) {
+            checkpoint(output, round, cycles, base, queries, *index, format);
         }
         const auto before_persistence_rss = rss_kib();
         const auto actual_threads = status_number("Threads:");

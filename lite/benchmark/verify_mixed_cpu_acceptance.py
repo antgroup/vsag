@@ -7,7 +7,7 @@ import csv
 import json
 from pathlib import Path
 
-from run_mixed_cpu_acceptance import sha, verify_run
+from run_mixed_cpu_acceptance import sha, verify_run, verify_checkpoints
 
 
 def verify(output):
@@ -44,9 +44,13 @@ def verify(output):
             query_rows = list(csv.DictReader(stream))
         queries = len(query_rows) // 2
         raw = verify_run(folder, config['rounds'], config['cycles'], queries)
+        every = config.get('checkpoint_every', 0)
+        if every:
+            assert config.get('resident', False)
+            raw['checkpoints'] = verify_checkpoints(folder, config['rounds'], config['cycles'], queries, every)
         command = json.loads((output / (folder.name + '.command.json')).read_text())['argv']
         if config.get('resident', False):
-            assert command[-1] == 'resident', ('wrong resident invocation', key)
+            assert command[-2:] == ['resident', str(every)] if every else command[-1] == 'resident', ('wrong resident invocation', key)
             assert all(int(state['threads']) == 1 for state in raw['states']), key
             assert all(int(state['rss_before_persistence_kib']) > 0 for state in raw['states']), key
         expected = {k: v for k, v in row.items()

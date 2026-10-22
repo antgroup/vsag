@@ -5,6 +5,12 @@ four outputs, three datasets, Lite/native Full comparisons, real CRUD, CPU/memor
 100k experiments, measured optimizations and failed quality gates. The prior E9
 cohort includes Cohere; historical Full comparisons remain separate evidence.
 
+## Current CRUD diagnosis (E13)
+
+[GIST quality curve and same-data rebuild control](results/crud-degradation-curve-20261022/README.md)
+adds 33 checkpoints without changing #2904 or the earlier results. One trial/storage;
+not an algorithm optimization, a durability guarantee or a completed stability verdict.
+
 ## Scope and source identity
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
