@@ -20,6 +20,7 @@ formulae=(
     libomp
     openblas
     gcc
+    uv
 )
 
 for formula in "${formulae[@]}"; do
@@ -36,3 +37,4 @@ echo "clang-format: $(brew --prefix llvm@15)/bin/clang-format"
 echo "clang-tidy: $(brew --prefix llvm@15)/bin/clang-tidy"
 echo "libomp: $(brew --prefix libomp)"
 echo "openblas: $(brew --prefix openblas)"
+echo "uv: $(brew --prefix uv)"

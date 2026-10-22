@@ -15,7 +15,7 @@
 
 
 add_executable (analyze_index analyze_index.cpp)
+vsag_enable_openmp_private (analyze_index)
 target_link_libraries (analyze_index PRIVATE
     argparse::argparse
     vsag)
-

@@ -35,8 +35,14 @@ pybind11_add_module (_pyvsag
     python_bindings/module.cpp
     python_bindings/index_binding.cpp
     python_bindings/logging_binding.cpp)
-target_compile_options (_pyvsag PRIVATE -fopenmp)
+vsag_enable_openmp_private (_pyvsag)
 target_link_libraries (_pyvsag PRIVATE pybind11::module vsag)
+if (APPLE)
+    set_target_properties (_pyvsag PROPERTIES
+        BUILD_RPATH "@loader_path"
+        INSTALL_RPATH "@loader_path"
+        BUILD_WITH_INSTALL_RPATH TRUE)
+endif ()
 if (NOT APPLE)
     target_link_options (_pyvsag PRIVATE -static-libgcc)
 endif ()

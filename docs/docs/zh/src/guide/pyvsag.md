@@ -10,7 +10,9 @@
 pip install pyvsag
 ```
 
-需要在 Linux 环境下使用（`manylinux2014` wheel）。如果希望构建本地 wheel，可以运行：
+预编译 wheel 支持 Linux（`manylinux2014`）和 macOS。macOS wheel 支持 macOS 11.0
+及以上的 Apple Silicon（`arm64`）和 Intel（`x86_64`）机器，覆盖 CPython 3.10-3.14。
+如果希望构建本地 wheel，可以运行：
 
 ```bash
 # 构建特定 Python 版本的 wheel
