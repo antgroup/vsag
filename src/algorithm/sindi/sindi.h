@@ -303,6 +303,9 @@ private:
 
     bool use_reorder_{false};  // enable reranking stage
 
+    float build_term_prune_ratio_{0};
+    uint64_t build_term_retain_threshold_{0};
+
     float doc_prune_ratio_{0};  // ratio of docs pruned during build
 
     FlattenInterfacePtr rerank_flat_{nullptr};  // re-rank datacell

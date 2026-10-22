@@ -24,6 +24,7 @@
 #include "graph_datacell_parameter.h"
 #include "graph_interface.h"
 #include "index_common_param.h"
+#include "layout/aligned_block_layout.h"
 #include "rabitq_fused_code_storage.h"
 
 namespace vsag {
@@ -146,7 +147,7 @@ public:
 
     [[nodiscard]] const uint8_t*
     GetNodeRecord(InnerIdType id) const {
-        return storage_.data() + aligned_offset_ + static_cast<uint64_t>(id) * record_size_;
+        return storage_->GetRecord(id);
     }
 
     [[nodiscard]] const InnerIdType*
@@ -172,8 +173,7 @@ public:
 
     [[nodiscard]] NodeView
     GetNodeView(InnerIdType id) const {
-        const auto* record =
-            storage_.data() + aligned_offset_ + static_cast<uint64_t>(id) * record_size_;
+        const auto* record = GetNodeRecord(id);
         uint32_t neighbor_count = 0;
         uint32_t cluster_id = 0;
         std::memcpy(&neighbor_count, record, sizeof(neighbor_count));
@@ -188,8 +188,7 @@ public:
 
     [[nodiscard]] CodeView
     GetCodeView(InnerIdType id) const {
-        const auto* record =
-            storage_.data() + aligned_offset_ + static_cast<uint64_t>(id) * record_size_;
+        const auto* record = GetNodeRecord(id);
         uint32_t cluster_id = 0;
         std::memcpy(&cluster_id, record + cluster_id_offset_, sizeof(cluster_id));
         return {record + one_bit_offset_, record + supplement_offset_, cluster_id};
@@ -261,8 +260,7 @@ private:
     Reallocate(InnerIdType new_capacity);
 
 private:
-    Vector<uint8_t> storage_;
-    uint64_t aligned_offset_{0};
+    std::unique_ptr<AlignedBlockLayout> storage_;
     uint64_t record_size_{0};
     uint64_t neighbors_offset_{0};
     uint64_t cluster_id_offset_{0};
@@ -273,9 +271,9 @@ private:
     uint64_t supplement_code_size_{0};
     int64_t dim_{0};
     std::string codec_model_;
-    // Guards build-time slab resize/reallocation. Mutable HGraph searches hold the owning
+    // Guards build-time block allocation and directory growth. Mutable HGraph searches hold the owning
     // HGraph's global read lock while resize takes its global write lock; after SetImmutable,
-    // the slab cannot be resized and read-path access is lock-free.
+    // the block directory cannot be resized and read-path access is lock-free.
     mutable std::shared_mutex storage_mutex_;
 };
 

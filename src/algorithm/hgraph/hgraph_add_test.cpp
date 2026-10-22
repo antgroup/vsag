@@ -15,8 +15,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <initializer_list>
+#include <new>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -35,6 +37,38 @@
 #include "vsag/options.h"
 
 namespace {
+
+class ArmableRejectingThreadPool final : public vsag::ThreadPool {
+public:
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        if (reject_submissions_.load(std::memory_order_acquire)) {
+            throw std::bad_alloc();
+        }
+        task();
+        return {};
+    }
+
+    void
+    SetRejectSubmissions(bool reject) {
+        reject_submissions_.store(reject, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool> reject_submissions_{false};
+};
 
 vsag::DatasetPtr
 MakeFloatDataset(std::vector<float>& vectors,
@@ -189,6 +223,62 @@ TEST_CASE("HGraph non-fused SetImmutable does not require a fused searcher",
     auto result = index->KnnSearch(query, 1, kBruteForceSearchParams);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetIds()[0] == ids[0]);
+}
+
+TEST_CASE("HGraph Tune accepts an incomplete source after Add failure",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base_count = 2;
+
+    auto rejecting_pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common_param = MakeCommonParam(dim);
+    common_param.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(rejecting_pool);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "store_raw_vector": true
+    })");
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> base_vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+    };
+    std::vector<int64_t> base_ids = {10, 20};
+    auto base = MakeFloatDataset(base_vectors, base_ids, dim, base_count);
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    std::vector<float> add_vectors = {2.0F, 2.0F, 2.0F, 2.0F};
+    std::vector<int64_t> add_ids = {30};
+    auto add = MakeFloatDataset(add_vectors, add_ids, dim, 1);
+
+    rejecting_pool->SetRejectSubmissions(true);
+    auto add_result = index->Add(add);
+    rejecting_pool->SetRejectSubmissions(false);
+
+    REQUIRE_FALSE(add_result.has_value());
+    REQUIRE(add_result.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(index->GetNumElements() == base_count + 1);
+    REQUIRE(index->CheckIdExist(add_ids[0]));
+
+    auto tune_result = index->Tune(R"({
+        "index_param": {
+            "base_quantization_type": "bf16",
+            "max_degree": 8,
+            "ef_construction": 32
+        }
+    })");
+    REQUIRE(tune_result.has_value());
+    CHECK(tune_result.value());
 }
 
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
@@ -1272,6 +1362,7 @@ TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",
     constexpr uint64_t build_threads = 4;
     auto common_param = MakeCommonParam(dim, build_threads);
     auto hgraph_json = MakeFp32HGraphJson(true, static_cast<int64_t>(build_threads));
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {
@@ -1419,6 +1510,7 @@ TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates se
     constexpr int64_t dim = 2;
     auto common_param = MakeCommonParam(dim);
     auto hgraph_json = MakeFp32HGraphJson();
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {
@@ -1538,4 +1630,233 @@ TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector stor
 
     vsag::HGraphOptimizedBuildSession session(*hgraph);
     REQUIRE(session.Active());
+}
+
+TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive_pruning]") {
+    const int64_t threads = GENERATE(1, 4);
+    auto common = MakeCommonParam(2, threads);
+    auto json = MakeFp32HGraphJson(false, threads);
+    json["alpha"].SetFloat(1.06F);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    const bool reverse = GENERATE(false, true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    for (int64_t i = 0; i < 128; ++i) {
+        vectors.push_back(static_cast<float>(i % 16));
+        vectors.push_back(static_cast<float>(i / 16));
+        ids.push_back(i);
+    }
+    auto build = index->Build(MakeFloatDataset(vectors, ids, 2, ids.size()));
+    REQUIRE(build.has_value());
+    REQUIRE(build.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> query = {3.0F, 3.0F};
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(query, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 51);
+    std::vector<float> added = {3.25F, 3.25F};
+    std::vector<int64_t> added_ids = {128};
+    auto add = restored->Add(MakeFloatDataset(added, added_ids, 2, 1));
+    REQUIRE(add.has_value());
+    REQUIRE(add.value().empty());
+    found = restored->KnnSearch(MakeFloatQuery(added, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 128);
+    auto incompatible_json = MakeFp32HGraphJson(false, threads);
+    auto incompatible = MakeHGraphIndex(incompatible_json, common);
+    CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());
+    auto changed = vsag::JsonType::Parse(json.Dump());
+    changed["adaptive_pruning_adjust_step"].SetFloat(0.03F);
+    CHECK_FALSE(MakeHGraphIndex(changed, common)->Deserialize(binary.value()).has_value());
+    auto wrong_scope = vsag::JsonType::Parse(json.Dump());
+    wrong_scope["adaptive_pruning_apply_to_reverse"].SetBool(not reverse);
+    CHECK_FALSE(MakeHGraphIndex(wrong_scope, common)->Deserialize(binary.value()).has_value());
+    json["alpha"].SetFloat(1.12F);
+    CHECK_FALSE(MakeHGraphIndex(json, common)->Deserialize(binary.value()).has_value());
+}
+
+TEST_CASE("HGraph adaptive pruning unsupported contexts", "[ut][hgraph][adaptive_pruning]") {
+    auto common = MakeCommonParam(2);
+    auto json = MakeFp32HGraphJson(false);
+    json["adaptive_pruning"].SetBool(true);
+    SECTION("ODescent") {
+        json["graph_type"].SetString("odescent");
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Inner product") {
+        common.metric_ = vsag::MetricType::METRIC_TYPE_IP;
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Unsupported scope") {
+        json["adaptive_pruning_apply_to_upper"].SetBool(true);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Invalid threshold") {
+        json["adaptive_pruning_adjust_step"].SetFloat(1.0F);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+}
+
+TEST_CASE("HGraph adaptive pruning rejects imported build caches",
+          "[ut][hgraph][adaptive_pruning][cache]") {
+    auto common = MakeCommonParam(2);
+    std::vector<float> vectors = {0, 0, 1, 0, 0, 1, 1, 1};
+    std::vector<int64_t> ids = {10, 20, 30, 40};
+    std::vector<std::string> source_ids = {"a", "b", "c", "d"};
+    auto data = MakeFloatDatasetWithSourceIds(vectors, ids, source_ids, 2, 4);
+    auto json = MakeFp32HGraphJson(false);
+    auto source = MakeHGraphIndex(json, common);
+    REQUIRE(source->Build(data).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+    cache.seekg(0);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto target = MakeHGraphIndex(json, common);
+    REQUIRE(target->ImportCache(cache).has_value());
+    const auto result = target->Build(data);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    CHECK(result.error().message.find("adaptive_pruning") != std::string::npos);
+}
+
+TEST_CASE("HGraph adaptive pruning RaBitQ split and fused lifecycle",
+          "[ut][hgraph][adaptive_pruning][fused]") {
+    const bool fused = GENERATE(false, true);
+    const int64_t threads = GENERATE(1, 4);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    auto common = MakeCommonParam(dim, threads);
+    auto json = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "max_degree":8, "ef_construction":32, "use_reorder":true, "reorder_source":"base",
+        "alpha":1.06, "adaptive_pruning":true
+    })");
+    json["rabitq_fused_datacell"].SetBool(fused);
+    // Split incremental Add already requires raw vectors for its temporary SQ8 build store.
+    json["store_raw_vector"].SetBool(not fused);
+    json["build_thread_count"].SetInt(threads);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto built = index->Build(MakeFloatDataset(vectors, ids, dim, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> added(dim, 2.0F);
+    std::vector<int64_t> added_ids = {count};
+    auto result = restored->Add(MakeFloatDataset(added, added_ids, dim, 1));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(added, dim), 1, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == count);
+}
+
+TEST_CASE("HGraph fused Add preencoding preserves row mapping and rejects failed batches",
+          "[ut][hgraph][fused][preencode]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    const auto threads = GENERATE(0U, 4U);
+    const auto bits = GENERATE(1, 3);
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    auto common = MakeCommonParam(dim, threads);
+    common.metric_ = metric;
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "rabitq_use_fht":true, "rabitq_fused_datacell":true,
+        "use_reorder":true, "reorder_source":"base", "store_raw_vector":false,
+        "use_mci":false, "max_degree":8, "ef_construction":32
+    })");
+    param["build_thread_count"].SetInt(threads == 0 ? 1 : threads);
+    param["rabitq_bits_per_dim_base"].SetInt(bits);
+    param["rabitq_bits_per_dim_precise"].SetInt(8 - bits);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = 0.01F * static_cast<float>((i * 17 + d * 13) % 97 - 48);
+        }
+    }
+    auto dataset = MakeFloatDataset(vectors, ids, dim, count);
+    auto index = MakeHGraphIndex(param, common);
+    auto seed = MakeFloatDataset(vectors, ids, dim, 16);
+    REQUIRE(index->Add(seed).has_value());
+    auto original = index->CalcDistanceById(vectors.data(), ids.front());
+    REQUIRE(original.has_value());
+
+    // A finite input can still overflow encoding. Other worker ranges contain valid rows.
+    auto invalid = vectors;
+    std::fill_n(invalid.data() + 53 * dim, dim, std::numeric_limits<float>::max());
+    auto failed = index->Add(MakeFloatDataset(invalid, ids, dim, count));
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == 16);
+    for (int64_t i = 16; i < count; ++i) {
+        REQUIRE_FALSE(index->CheckIdExist(ids[i]));
+    }
+    REQUIRE(index->CalcDistanceById(vectors.data(), ids.front()).value() == original.value());
+
+    // Retrying the same labels must work; skipped input row 0 must not shift cached codes.
+    auto added = index->Add(dataset);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value() == std::vector<int64_t>(ids.begin(), ids.begin() + 16));
+    REQUIRE(index->GetNumElements() == count);
+    auto serial_common = MakeCommonParam(dim);
+    serial_common.metric_ = metric;
+    param["build_thread_count"].SetInt(1);
+    auto serial = MakeHGraphIndex(param, serial_common);
+    REQUIRE(serial->Add(seed).has_value());
+    for (int64_t i = 16; i < count; ++i) {
+        auto one = vsag::Dataset::Make()
+                       ->NumElements(1)
+                       ->Dim(dim)
+                       ->Ids(ids.data() + i)
+                       ->Float32Vectors(vectors.data() + i * dim)
+                       ->Owner(false);
+        REQUIRE(serial->Add(one).has_value());
+    }
+    auto decoded = index->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    auto expected = serial->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    REQUIRE(decoded->GetNumElements() == count);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        REQUIRE(decoded->GetFloat32Vectors()[i] == expected->GetFloat32Vectors()[i]);
+    }
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakeHGraphIndex(param, serial_common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    REQUIRE(restored->GetNumElements() == count);
+    auto restored_vectors = restored->GetInnerIndex()->GetVectorByIds(ids.data(), count, nullptr);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        REQUIRE(restored_vectors->GetFloat32Vectors()[i] == expected->GetFloat32Vectors()[i]);
+    }
 }

@@ -260,6 +260,9 @@ PyramidHierarchyParameters::CheckCompatibility(const PyramidHierarchyParameters&
 void
 PyramidParameters::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
+    // FromJson replaces the whole sub-struct; keep this ahead of any later field parsing on
+    // AdaptivePruningParameter. Pyramid alpha is validated per hierarchy after construction.
+    adaptive_pruning.FromJson(json);
     // init graph param
     const auto& graph_json = json[GRAPH_KEY];
 
@@ -374,6 +377,7 @@ JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
+    json.UpdateJson(adaptive_pruning.ToJson());
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
 
     auto graph_json = graph_param->ToJson();
@@ -414,6 +418,14 @@ PyramidParameters::ToJson() const {
 bool
 PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(PyramidParameters, p, other);
+    CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
+    if (adaptive_pruning.enabled) {
+        CHECK_FIELD_NEAR(*this, *p, alpha, 1e-6F);
+        CHECK_FIELD_NEAR(*this, *p, adaptive_pruning.adjust_step, 1e-6F);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
+    }
+
     CHECK_SUB_PARAM(*this, *p, graph_param);
     CHECK_SUB_PARAM(*this, *p, base_codes_param);
     if (this->has_hierarchies != p->has_hierarchies) {

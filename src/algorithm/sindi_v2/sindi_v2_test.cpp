@@ -955,6 +955,7 @@ TEST_CASE("SINDIV2 Heap Insert Strategy Test", "[ut][SINDIV2]") {
 }
 
 TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SINDIV2]") {
+    const auto build_prune = GENERATE(0, 1, 2, 3);
     const auto immutable = GENERATE(false, true);
     const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
                                        SparseValueQuantizationType::FP16,
@@ -971,6 +972,8 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SI
         parameter->term_id_limit = 8;
         parameter->window_size = 10000;
         parameter->doc_prune_ratio = 0.0F;
+        parameter->term_prune_ratio = build_prune == 1 || build_prune == 3 ? 0.5F : 0.0F;
+        parameter->term_retain_threshold = build_prune >= 2 ? 2 : 0;
         parameter->use_reorder = false;
         parameter->sparse_value_quant_type = quantization;
         parameter->use_quantization = quantization != SparseValueQuantizationType::FP32;
@@ -998,7 +1001,7 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SI
         SparseVector sparse_query{1, &term, &query_value};
         auto query = Dataset::Make();
         query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
-        const std::string search_parameters = R"({
+        std::string search_parameters = R"({
             "sindi_v2": {
                 "query_prune_ratio": 0.0,
                 "term_prune_ratio": 0.0,
@@ -1006,11 +1009,26 @@ TEST_CASE("SINDIV2 term prune keeps highest stored values after build", "[ut][SI
                 "n_candidate": 4
             }
         })";
+        if (build_prune != 0) {
+            search_parameters = R"({"sindi_v2": {"query_prune_ratio": 0,
+                "term_prune_ratio": 0, "term_retain_threshold": 0, "n_candidate": 4}})";
+        }
         const auto result = index.KnnSearch(query, 4, search_parameters, nullptr);
         REQUIRE(result->GetDim() == 2);
         std::set<int64_t> result_labels(result->GetIds(),
                                         result->GetIds() + static_cast<uint64_t>(result->GetDim()));
         REQUIRE(result_labels == std::set<int64_t>{11, 13});
+        std::stringstream restored_stream;
+        IOStreamWriter restored_writer(restored_stream);
+        index.Serialize(restored_writer);
+        SINDIV2 restored(parameter, common_param);
+        IOStreamReader restored_reader(restored_stream);
+        restored.Deserialize(restored_reader);
+        const auto restored_result = restored.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(restored_result->GetDim() == 2);
+        REQUIRE(std::set<int64_t>(restored_result->GetIds(), restored_result->GetIds() + 2) ==
+                result_labels);
+
         for (int64_t position = 0; position < result->GetDim(); ++position) {
             if (quantization == SparseValueQuantizationType::SQ8) {
                 REQUIRE(result->GetDistances()[position] < -250.0F);

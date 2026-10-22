@@ -317,6 +317,8 @@ SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
     static const std::unordered_set<std::string> supported_keys = {
         SPARSE_TERM_ID_LIMIT,
         SPARSE_DOC_PRUNE_RATIO,
+        SPARSE_TERM_PRUNE_RATIO,
+        SPARSE_TERM_RETAIN_THRESHOLD,
         USE_REORDER_KEY,
         USE_QUANTIZATION,
         SPARSE_WINDOW_SIZE,
@@ -325,6 +327,7 @@ SINDIV2::CheckAndMappingExternalParam(const JsonType& external_param,
         SPARSE_RERANK_TYPE,
         SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD,
         SPARSE_IMMUTABLE,
+        "posting_cache_capacity_bytes",
         "rerank_layout",
         "term_io",
         "rerank_io",
@@ -348,6 +351,8 @@ SINDIV2::SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& commo
       rerank_type_(param->rerank_type),
       dmq_shared_codebook_threshold_(param->dmq_shared_codebook_threshold),
       metadata_filter_(common_param.allocator_.get()),
+      build_term_prune_ratio_(param->term_prune_ratio),
+      build_term_retain_threshold_(param->term_retain_threshold),
       doc_prune_ratio_(param->doc_prune_ratio),
       quantization_params_(std::make_shared<QuantizationParams>()),
       avg_doc_term_length_(param->avg_doc_term_length),
@@ -675,6 +680,9 @@ SINDIV2::Build(const DatasetPtr& base) {
         return this->build_immutable(base);
     }
     auto failed_ids = this->Add(base);
+    std::scoped_lock wlock(this->global_mutex_);
+    this->get_mutable_term_datacell()->PruneTerms(build_term_prune_ratio_,
+                                                  build_term_retain_threshold_);
     this->get_mutable_term_datacell()->Finalize();
     this->cal_memory_usage();
     return failed_ids;
@@ -780,6 +788,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         metadata_build.RecordSuccess(static_cast<uint32_t>(position));
         cur_element_count_++;
         if (cur_element_count_ % window_size_ == 0) {
+            staging->PruneTerms(build_term_prune_ratio_,
+                                build_term_retain_threshold_,
+                                align_up(data_num, window_size_) / window_size_);
             staging->SortByValue(0);
             staging->Compact();
             immutable->AppendWindow(staging->GetWindow(0));
@@ -787,6 +798,9 @@ SINDIV2::build_immutable(const DatasetPtr& base) {
         }
     }
     if (staging != nullptr && staging->total_count_ > 0) {
+        staging->PruneTerms(build_term_prune_ratio_,
+                            build_term_retain_threshold_,
+                            align_up(data_num, window_size_) / window_size_);
         staging->SortByValue(0);
         staging->Compact();
         immutable->AppendWindow(staging->GetWindow(0));
@@ -2080,6 +2094,7 @@ SINDIV2::Deserialize(StreamReader& reader) {
                                                                           window_size_,
                                                                           param_->term_io_parameter,
                                                                           common_param_);
+        disk_datacell->SetCacheCapacity(param_->posting_cache_capacity_bytes);
         disk_datacell->DeserializeTermLayout(reader, window_count, cur_element_count_);
         term_datacell_ = std::move(disk_datacell);
     }

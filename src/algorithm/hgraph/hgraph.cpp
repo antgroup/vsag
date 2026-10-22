@@ -68,6 +68,7 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       build_by_base_(hgraph_param->build_by_base),
       reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
       ef_construct_(hgraph_param->ef_construction),
+      adaptive_pruning_(hgraph_param->adaptive_pruning),
       alpha_(hgraph_param->alpha),
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
@@ -78,6 +79,14 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_),
       use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
+    // No-op unless adaptive pruning is enabled.
+    adaptive_pruning_.Validate(alpha_);
+    if (adaptive_pruning_.enabled) {
+        CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                       "adaptive_pruning currently supports only nsw graph construction");
+        CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "adaptive_pruning currently supports only L2 distance");
+    }
     this->support_duplicate_ = hgraph_param->support_duplicate;
     this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
     const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&
@@ -96,9 +105,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                 "HGraph PiPNN only supports dense float32 indexes");
         }
     }
-    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
+        this->graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph deduplicate_storage only supports nsw graph");
+                            "HGraph deduplicate_storage only supports nsw or pipnn graph");
     }
     this->persist_source_id_ = hgraph_param->persist_source_id;
     if (this->using_dedup_storage()) {
@@ -149,7 +159,6 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
     mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
 
     this->resize_increase_count_bit_ = hgraph_param->resize_increase_count_bit;
-    init_resize_bit_and_reorder();
 
     this->parallel_searcher_ =
         std::make_shared<ParallelSearcher>(common_param, thread_pool_, neighbors_mutex_);
@@ -170,11 +179,18 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
             this->high_precise_codes_ = MakeCodeSlotFlattenAdapter(
                 this->high_precise_codes_, this->code_slot_map_, allocator_, &this->total_count_);
         }
+        if (this->raw_vector_ != nullptr and not this->create_new_raw_vector_) {
+            // Rebind an existing FP32 raw alias to the wrapped base/reorder codes.
+            // false refreshes the alias/flags without allocating another raw flatten.
+            this->check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param, false);
+        }
         if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
             this->raw_vector_ = MakeCodeSlotFlattenAdapter(
                 this->raw_vector_, this->code_slot_map_, allocator_, &this->total_count_);
         }
     }
+    // Reorder retains its flatten pointer, so initialize it after slot wrapping.
+    init_resize_bit_and_reorder();
     resize(bottom_graph_->max_capacity_);
 }
 
@@ -246,15 +262,18 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     FlattenInterfacePtr tune_source;
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
-        if (covers_active_ids(raw_vector_)) {
-            tune_source = raw_vector_;
-        } else if (covers_active_ids(high_precise_codes_) and
-                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        tune_source = raw_vector_;
+        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
+            high_precise_codes_ != nullptr and
+            high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = high_precise_codes_;
-        } else if (covers_active_ids(basic_flatten_codes_) and
-                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        }
+        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
+            basic_flatten_codes_ != nullptr and
+            basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = basic_flatten_codes_;
-        } else {
+        }
+        if (tune_source == nullptr) {
             return false;
         }
     }
@@ -299,7 +318,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code->Train(train_data.data(), train_count);
 
             Vector<float> insert_buffer(dim_, 0, allocator_);
-            for (int64_t i = 0; i < total_count_; ++i) {
+            for (int64_t i = 0; i < current_count; ++i) {
                 decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
             }
@@ -473,9 +492,9 @@ HGraph::calc_native_distance_by_id(const void* native_query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -506,9 +525,9 @@ HGraph::CalcDistancesById(const float* query,
     }
     const bool reads_fused_codes =
         this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
-    // FusedComputer dereferences the fused node slab through a raw RaBitQFusedCodeView. Keep the
-    // graph-wide read lock until distance evaluation completes so a concurrent Reallocate, which
-    // may move the slab, cannot invalidate the view.
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
     if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
         lock.unlock();
     }
@@ -616,6 +635,8 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
             route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
         }
         this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
     }
     if (this->odescent_param_ == nullptr) {
         odescent_param_ = std::make_shared<ODescentParameter>();
@@ -716,12 +737,50 @@ HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
 
 std::string
 HGraph::GetStats() const {
+    auto populate_mci_stats = [this](JsonType& stats) {
+        if (this->mci_cliques_ != nullptr) {
+            const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+            stats["mci_has_index"].SetBool(mci_stats.has_index);
+            stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+            stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+            stats["mci_covered_node_ratio"].SetFloat(
+                static_cast<float>(mci_stats.covered_node_ratio));
+            stats["mci_base_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_clique_count));
+            stats["mci_delta_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_count));
+            stats["mci_total_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_clique_count));
+            stats["mci_retired_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.retired_clique_count));
+            stats["mci_inactive_node_count"].SetInt(
+                static_cast<int64_t>(mci_stats.inactive_node_count));
+            stats["mci_base_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_membership_count));
+            stats["mci_delta_extra_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+            stats["mci_delta_clique_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+            stats["mci_total_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_membership_count));
+            stats["mci_avg_membership_per_node"].SetFloat(
+                static_cast<float>(mci_stats.avg_membership_per_node));
+            stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+            stats["mci_max_membership_per_node"].SetInt(
+                static_cast<int64_t>(mci_stats.max_membership_per_node));
+            stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+            stats["mci_memory_usage"].SetInt(
+                static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
+        }
+    };
+
     if (GetNumElements() == 0) {
         JsonType stats;
         stats["total_count"].SetInt64(0);
         stats["live_count"].SetInt64(0);
         stats["deleted_count"].SetInt64(GetNumberRemoved());
         stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        populate_mci_stats(stats);
         AddAnalysisMetadata(stats, GetName(), "stats", "partial");
         return stats.Dump(4);
     }
@@ -744,36 +803,7 @@ HGraph::GetStats() const {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
     }
-    if (this->mci_cliques_ != nullptr) {
-        const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
-        stats["mci_has_index"].SetBool(mci_stats.has_index);
-        stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
-        stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
-        stats["mci_covered_node_ratio"].SetFloat(static_cast<float>(mci_stats.covered_node_ratio));
-        stats["mci_base_clique_count"].SetInt(static_cast<int64_t>(mci_stats.base_clique_count));
-        stats["mci_delta_clique_count"].SetInt(static_cast<int64_t>(mci_stats.delta_clique_count));
-        stats["mci_total_clique_count"].SetInt(static_cast<int64_t>(mci_stats.total_clique_count));
-        stats["mci_retired_clique_count"].SetInt(
-            static_cast<int64_t>(mci_stats.retired_clique_count));
-        stats["mci_inactive_node_count"].SetInt(
-            static_cast<int64_t>(mci_stats.inactive_node_count));
-        stats["mci_base_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.base_membership_count));
-        stats["mci_delta_extra_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_extra_membership_count));
-        stats["mci_delta_clique_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.delta_clique_membership_count));
-        stats["mci_total_membership_count"].SetInt(
-            static_cast<int64_t>(mci_stats.total_membership_count));
-        stats["mci_avg_membership_per_node"].SetFloat(
-            static_cast<float>(mci_stats.avg_membership_per_node));
-        stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
-        stats["mci_max_membership_per_node"].SetInt(
-            static_cast<int64_t>(mci_stats.max_membership_per_node));
-        stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
-        stats["mci_memory_usage"].SetInt(
-            static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
-    }
+    populate_mci_stats(stats);
     AddAnalysisMetadata(stats, GetName(), "stats", "complete");
     return stats.Dump(4);
 }
@@ -782,6 +812,11 @@ void
 HGraph::init_resize_bit_and_reorder() {
     if (use_reorder_) {
         auto reorder_codes = this->get_reorder_codes();
+        if (this->using_dedup_storage() and
+            GetCodeSlotPhysicalFlatten(reorder_codes) == reorder_codes) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "storage deduplication requires wrapped reorder codes");
+        }
         auto fused_graph =
             reorder_codes.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
         reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_, fused_graph);
