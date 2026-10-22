@@ -394,19 +394,10 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         topk *= buckets_per_data_;
     }
 
-    auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
     const auto& filter = param.is_inner_id_allowed;
-    Filter* attr_filter = nullptr;
-
-    Vector<InnerIdType> candidate_ids(this->allocator_);
-    Vector<int64_t> candidate_labels(this->allocator_);
-    Vector<float> scores(this->allocator_);
+    const auto topk_u = static_cast<uint64_t>(topk);
     const uint64_t batch_capacity = std::min<uint64_t>(
         request.distance_batch_size_, std::max<uint64_t>(1, this->GetNumElements()));
-    candidate_ids.reserve(batch_capacity);
-    candidate_labels.reserve(batch_capacity);
-    scores.resize(batch_capacity);
-
     auto is_timed_out = [&]() {
         if (param.time_cost == nullptr or not param.time_cost->CheckOvertime()) {
             return false;
@@ -416,88 +407,157 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
         }
         return true;
     };
-
-    auto submit_batch = [&]() {
-        if (candidate_ids.empty()) {
-            return true;
-        }
-        if (is_timed_out()) {
-            return false;
-        }
-        request.distance_batch_func_(
-            candidate_labels.data(), candidate_labels.size(), scores.data());
-        if (ctx.stats != nullptr) {
-            ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
-                                   DistanceEvaluationBackend::UNKNOWN,
-                                   candidate_ids.size());
-        }
-        for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
-            CHECK_ARGUMENT(std::isfinite(scores[i]),
-                           "custom query distance callback must return finite scores");
-            const auto origin_id = candidate_ids[i] / buckets_per_data_;
-            if (filter != nullptr and not filter->CheckValid(origin_id)) {
+    const auto search_thread_count =
+        this->thread_pool_ == nullptr ? 1 : param.parallel_search_thread_count;
+    std::vector<DistHeapPtr> heaps(search_thread_count);
+    std::atomic<uint64_t> cur_bucket_num{0};
+    auto search_func = [&](int64_t thread_id) {
+        auto& search_result = heaps[thread_id];
+        search_result = DistanceHeap::MakeInstanceBySize<true, false>(this->allocator_, topk);
+        auto cur_heap_top = std::numeric_limits<float>::max();
+        Filter* attr_filter = nullptr;
+        Vector<InnerIdType> candidate_ids(this->allocator_);
+        Vector<int64_t> candidate_labels(this->allocator_);
+        Vector<float> scores(this->allocator_);
+        candidate_ids.reserve(batch_capacity);
+        candidate_labels.reserve(batch_capacity);
+        scores.resize(batch_capacity);
+        auto submit_batch = [&]() {
+            if (candidate_ids.empty()) {
+                return true;
+            }
+            if (is_timed_out()) {
+                return false;
+            }
+            request.distance_batch_func_(
+                candidate_labels.data(), candidate_labels.size(), scores.data());
+            if (ctx.stats != nullptr) {
+                ctx.stats->AddDistance(SearchStatistics::DistancePhase::APPROXIMATE,
+                                       DistanceEvaluationBackend::UNKNOWN,
+                                       candidate_ids.size());
+            }
+            for (uint64_t i = 0; i < candidate_ids.size(); ++i) {
+                CHECK_ARGUMENT(std::isfinite(scores[i]),
+                               "custom query distance callback must return finite scores");
+                const auto origin_id = candidate_ids[i] / buckets_per_data_;
+                // Scored candidates were visited even when the heap gate skips the filter.
                 if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
+                    reasoning_ctx->RecordVisit(origin_id, scores[i], 0);
                 }
+                if (search_result->Size() == topk_u and scores[i] >= cur_heap_top) {
+                    continue;
+                }
+                if (filter != nullptr and not filter->CheckValid(origin_id)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
+                    }
+                    continue;
+                }
+                search_result->Push(scores[i], candidate_ids[i]);
+                while (search_result->Size() > static_cast<uint64_t>(topk)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordEviction(
+                            search_result->Top().second / buckets_per_data_, 0);
+                    }
+                    search_result->Pop();
+                }
+                if (search_result->Size() == topk_u) {
+                    cur_heap_top = search_result->Top().first;
+                }
+            }
+            candidate_ids.clear();
+            candidate_labels.clear();
+            return true;
+        };
+
+        bool timed_out = false;
+        for (auto cursor = cur_bucket_num.fetch_add(1); cursor < candidate_buckets.size();
+             cursor = cur_bucket_num.fetch_add(1)) {
+            const auto bucket_id = candidate_buckets[cursor];
+            if (is_timed_out()) {
+                timed_out = true;
+                break;
+            }
+            if (bucket_id == INVALID_BUCKET_ID) {
                 continue;
             }
-            if (reasoning_ctx != nullptr) {
-                reasoning_ctx->RecordVisit(origin_id, scores[i], 0);  // [reasoning]
+            if (not param.executors.empty()) {
+                param.executors[thread_id]->Clear();
+                attr_filter = param.executors[thread_id]->Run(bucket_id);
             }
-            search_result->Push(scores[i], candidate_ids[i]);
-            while (search_result->Size() > static_cast<uint64_t>(topk)) {
+            const auto bucket_size = bucket_->GetBucketSize(bucket_id);
+            const auto* ids = bucket_->GetInnerIds(bucket_id);
+            for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+                const auto inner_id = ids[offset];
+                if (inner_id == std::numeric_limits<InnerIdType>::max()) {
+                    continue;
+                }
+                const auto origin_id = inner_id / buckets_per_data_;
+                if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
+                    if (reasoning_ctx != nullptr) {
+                        reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
+                    }
+                    continue;
+                }
+                candidate_ids.push_back(inner_id);
+                candidate_labels.push_back(label_table_->GetLabelById(origin_id));
+                if (candidate_ids.size() == batch_capacity and not submit_batch()) {
+                    timed_out = true;
+                    break;
+                }
+            }
+            if (timed_out) {
+                break;
+            }
+        }
+        if (not timed_out) {
+            submit_batch();
+        }
+    };
+
+    if (search_thread_count == 1) {
+        search_func(0);
+    } else {
+        std::vector<std::future<void>> futures;
+        // Reserve before submitting: no allocation may lose a live task's future.
+        futures.reserve(search_thread_count);
+        std::exception_ptr error;
+        try {
+            for (int64_t thread_id = 0; thread_id < search_thread_count; ++thread_id) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(search_func, thread_id));
+            }
+        } catch (...) {
+            error = std::current_exception();
+        }
+        // Every submitted task captures this scope. Drain all of them before unwinding,
+        // including when submission or another worker has already failed.
+        for (auto& future : futures) {
+            try {
+                future.get();
+            } catch (...) {
+                if (error == nullptr) {
+                    error = std::current_exception();
+                }
+            }
+        }
+        if (error != nullptr) {
+            std::rethrow_exception(error);
+        }
+    }
+    auto search_result = heaps[0];
+    for (int64_t thread_id = 1; thread_id < search_thread_count; ++thread_id) {
+        const auto& heap = heaps[thread_id];
+        const auto* data = heap->GetData();
+        for (uint64_t i = 0; i < heap->Size(); ++i) {
+            search_result->Push(data[i]);
+            if (search_result->Size() > topk_u) {
                 if (reasoning_ctx != nullptr) {
                     reasoning_ctx->RecordEviction(search_result->Top().second / buckets_per_data_,
-                                                  0);
+                                                  1);
                 }
                 search_result->Pop();
             }
         }
-        candidate_ids.clear();
-        candidate_labels.clear();
-        return true;
-    };
-
-    bool timed_out = false;
-    for (const auto bucket_id : candidate_buckets) {
-        if (is_timed_out()) {
-            timed_out = true;
-            break;
-        }
-        if (bucket_id == INVALID_BUCKET_ID) {
-            continue;
-        }
-        if (not param.executors.empty()) {
-            param.executors[0]->Clear();
-            attr_filter = param.executors[0]->Run(bucket_id);
-        }
-        const auto bucket_size = bucket_->GetBucketSize(bucket_id);
-        const auto* ids = bucket_->GetInnerIds(bucket_id);
-        for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
-            const auto inner_id = ids[offset];
-            if (inner_id == std::numeric_limits<InnerIdType>::max()) {
-                continue;
-            }
-            const auto origin_id = inner_id / buckets_per_data_;
-            if (attr_filter != nullptr and not attr_filter->CheckValid(offset)) {
-                if (reasoning_ctx != nullptr) {
-                    reasoning_ctx->RecordFilterReject(origin_id);  // [reasoning]
-                }
-                continue;
-            }
-            candidate_ids.push_back(inner_id);
-            candidate_labels.push_back(label_table_->GetLabelById(origin_id));
-            if (candidate_ids.size() == batch_capacity and not submit_batch()) {
-                timed_out = true;
-                break;
-            }
-        }
-        if (timed_out) {
-            break;
-        }
-    }
-    if (not timed_out) {
-        submit_batch();
     }
 
     if (buckets_per_data_ == 1) {
@@ -542,8 +602,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not param.disable_bucket_scan,
                        "IVF custom query distance does not support disable_bucket_scan");
         CHECK_ARGUMENT(request.topk_ > 0, "topk must be greater than 0");
-        CHECK_ARGUMENT(param.parallel_search_thread_count == 1,
-                       "IVF custom query distance does not support parallel search");
         param.enable_reorder = false;
     }
     param.query_context = &ctx;
