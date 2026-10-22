@@ -29,6 +29,7 @@ jobs:
       COMPILE_JOBS: '6'
       OMP_NUM_THREADS: '2'
       OPENBLAS_NUM_THREADS: '2'
+      ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: '1'
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       EXTRA_DEFINED: '-DVSAG_USE_SYSTEM_OPENBLAS=ON'
     steps:
@@ -85,7 +86,10 @@ jobs:
           set -euo pipefail
           test -s build-release/src/libvsag.so
           cp -L build-release/src/libvsag.so smoke-results/libvsag.so
-          (cd smoke-results && sha256sum libvsag.so toolchain.txt build.log example.log > SHA256SUMS)
+          strip --strip-debug smoke-results/libvsag.so
+          LD_LIBRARY_PATH="$PWD/smoke-results${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+            timeout 180 ./build-release/examples/cpp/103_index_hgraph > smoke-results/packaged-example.log 2>&1
+          (cd smoke-results && sha256sum libvsag.so toolchain.txt build.log example.log packaged-example.log > SHA256SUMS)
           printf 'Built fixed main commit and ran the HGraph example.\n' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload build artifact
         id: upload
@@ -95,7 +99,7 @@ jobs:
           path: smoke-results/
           if-no-files-found: error
           retention-days: 3
-          compression-level: 1
+          compression-level: 6
       - name: Download artifact for verification
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
         with:
