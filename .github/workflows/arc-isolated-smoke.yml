@@ -29,7 +29,6 @@ jobs:
       COMPILE_JOBS: '6'
       OMP_NUM_THREADS: '2'
       OPENBLAS_NUM_THREADS: '2'
-      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       EXTRA_DEFINED: '-DVSAG_USE_SYSTEM_OPENBLAS=ON'
     steps:
@@ -55,18 +54,24 @@ jobs:
             cmake --version
             ninja --version
           } > smoke-results/toolchain.txt
-      - name: Prepare pinned dependency sources
-        uses: ./.github/actions/prepare-fetchcontent
-      - name: Download and verify ANTLR archive
+      - name: Verify dependency environment injection
         run: |
           set -euo pipefail
-          mkdir -p .ci-downloads
-          curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
-            --connect-timeout 15 --max-time 300 \
-            --output .ci-downloads/antlr4_4.13.2.tar.gz \
-            https://codeload.github.com/antlr/antlr4/tar.gz/refs/tags/4.13.2
-          echo '3b75610fc8a827119258cba09a068be5  .ci-downloads/antlr4_4.13.2.tar.gz' | md5sum -c -
-          sha256sum .ci-downloads/antlr4_4.13.2.tar.gz > smoke-results/dependency-sha256.txt
+          python3 - <<'PY'
+          import os
+          required = [
+              "VSAG_THIRDPARTY_JSON_3_11_3",
+              "VSAG_THIRDPARTY_CPUINFO_COMMIT_CA678952A9A8",
+              "VSAG_THIRDPARTY_FMT_10_2_1",
+              "VSAG_THIRDPARTY_THREAD_POOL_COMMIT_3507796E172D",
+              "VSAG_THIRDPARTY_TSL_1_4_0",
+              "VSAG_THIRDPARTY_ROARINGBITMAP_3_0_1",
+              "VSAG_THIRDPARTY_ANTLR4_4_13_2",
+          ]
+          for name in required:
+              assert os.environ.get(name), "Missing dependency variable: " + name
+          print("Required dependency overrides are present; URLs omitted.")
+          PY
       - name: Build VSAG and examples
         run: |
           set -euo pipefail
