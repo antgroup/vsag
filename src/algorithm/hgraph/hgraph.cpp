@@ -220,7 +220,9 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
 bool
 HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // Invalidate before acquiring add_mutex_: even failed or count-zero Tune attempts
-    // conservatively end eligibility. This does not permit concurrent capability queries.
+    // conservatively end eligibility. The release-store pairs with the acquire-load in
+    // build_memory_estimate_state_supported() only for lifecycle invalidation; capability
+    // queries still require the absence of concurrent mutation.
     this->build_estimate_lifecycle_clean_.store(false, std::memory_order_release);
     this->check_fused_mutation_supported("Tune");
     std::scoped_lock lock(this->add_mutex_);
@@ -1057,6 +1059,8 @@ struct HGraph::BuildMemoryEstimateContext {
         nonempty = n > 0;
         has_pool = index.thread_pool_ != nullptr;
         workers = insert_worker_count(has_pool, index.build_thread_count_, n);
+        // Construction calls resize(), which eagerly creates a pool with one visited list.
+        // A zero-element Build retains that list even though it dispatches no workers.
         visited_lists = nonempty ? estimate_checked_mul(K_BUILD_ESTIMATE_SUB_POOLS,
                                                         std::max<uint64_t>(1, workers))
                                  : 1;
@@ -1075,6 +1079,7 @@ struct HGraph::BuildMemoryEstimateContext {
         route_levels = 0;
         {
             // Copying preserves index RNG state; it provides no synchronization.
+            // The caller must ensure no concurrent mutation of level_generator_.
             auto engine = index.level_generator_;
             const double mult =
                 1 / log(1.0 * static_cast<double>(K_BUILD_ESTIMATE_MIN_ROUTE_DEGREE));
