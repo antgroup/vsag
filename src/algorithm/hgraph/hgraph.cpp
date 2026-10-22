@@ -62,6 +62,7 @@ HGraph::check_fused_mutation_supported(std::string_view operation) const {
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
       route_graphs_(common_param.allocator_.get()),
+      pending_code_writes_(common_param.allocator_.get()),
       cache_(std::make_unique<BuildCache>(common_param.allocator_.get())),
       use_elp_optimizer_(hgraph_param->use_elp_optimizer),
       ignore_reorder_(hgraph_param->ignore_reorder),
@@ -237,8 +238,21 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
     }
     const auto current_count = total_count_.load(std::memory_order_acquire);
-    auto covers_active_ids = [current_count](const FlattenInterfacePtr& codes) {
-        return codes != nullptr and codes->TotalCount() >= current_count;
+    auto covers_active_ids = [this, current_count](const FlattenInterfacePtr& codes) {
+        if (codes == nullptr or codes->TotalCount() < current_count) {
+            return false;
+        }
+        if (this->using_dedup_storage()) {
+            // Each logical ID is bound exactly once, after all its physical codes are written.
+            return this->code_slot_map_->PublishedLogicalCount() == current_count;
+        }
+        const auto code = codes == basic_flatten_codes_  ? BASE_CODE
+                          : codes == high_precise_codes_ ? PRECISE_CODE
+                                                         : RAW_CODE;
+        std::shared_lock codes_lock(this->persistent_codes_mutex_);
+        return std::all_of(this->pending_code_writes_.begin(),
+                           this->pending_code_writes_.end(),
+                           [code](const auto& entry) { return (entry.second & code) == 0; });
     };
 
     // Check which codes need to be rebuilt.
@@ -262,18 +276,17 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     FlattenInterfacePtr tune_source;
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
-        tune_source = raw_vector_;
-        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
-            high_precise_codes_ != nullptr and
-            high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        // Add can reserve IDs before an enqueue failure leaves their vectors unwritten.
+        // Every ID rebuilt below must be covered; allocated capacity is not valid data.
+        if (covers_active_ids(raw_vector_)) {
+            tune_source = raw_vector_;
+        } else if (covers_active_ids(high_precise_codes_) and
+                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = high_precise_codes_;
-        }
-        if ((tune_source == nullptr or tune_source->TotalCount() == 0) and
-            basic_flatten_codes_ != nullptr and
-            basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        } else if (covers_active_ids(basic_flatten_codes_) and
+                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
             tune_source = basic_flatten_codes_;
-        }
-        if (tune_source == nullptr) {
+        } else {
             return false;
         }
     }
@@ -330,10 +343,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
     auto new_raw = tune_and_rebuild(is_tune_raw_code, raw_vector_, new_raw_code);
 
+    const auto old_raw_code = raw_vector_ == basic_flatten_codes_  ? BASE_CODE
+                              : raw_vector_ == high_precise_codes_ ? PRECISE_CODE
+                                                                   : RAW_CODE;
+
     // Acquire exclusive global lock to atomically swap flatten codes,
     // preventing concurrent searches from accessing partially updated state.
     {
-        std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+        std::scoped_lock locks(this->global_mutex_, this->persistent_codes_mutex_);
         auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
         basic_flatten_codes_ = new_basic;
         if (drop_precise_codes) {
@@ -362,6 +379,30 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         } else {
             check_and_init_raw_vector(param->raw_vector_param, common_param, false);
         }
+        {
+            const uint8_t rebuilt = (is_tune_base_code ? BASE_CODE : 0) |
+                                    (is_tune_precise_code or drop_precise_codes ? PRECISE_CODE : 0);
+            // Raw may now alias rebuilt codes, or retain the old FP32 storage. Derive its
+            // coverage from that actual storage, before clearing the old base/precise bits.
+            const uint8_t raw_pending_code =
+                raw_vector_ == basic_flatten_codes_  ? (is_tune_base_code ? 0 : BASE_CODE)
+                : raw_vector_ == high_precise_codes_ ? (is_tune_precise_code ? 0 : PRECISE_CODE)
+                : is_tune_raw_code                   ? 0
+                                                     : old_raw_code;
+            for (auto it = pending_code_writes_.begin(); it != pending_code_writes_.end();) {
+                const bool raw_pending = (it->second & raw_pending_code) != 0;
+                it.value() &= ~(rebuilt | RAW_CODE);
+                if (raw_pending) {
+                    it.value() |= RAW_CODE;
+                }
+                if (it->second == 0) {
+                    it = pending_code_writes_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
         init_resize_bit_and_reorder();
 
         // set status
@@ -602,6 +643,21 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     this->check_fused_mutation_supported("Merge");
     CHECK_ARGUMENT(not this->using_dedup_storage(),
                    "HGraph deduplicate_storage does not support Merge");
+    // Validate every participant before resizing or copying any unit. Copying an unwritten
+    // slot is unsafe even if another code store could serve as a complete Tune source.
+    CHECK_ARGUMENT(this->pending_code_writes_.empty(),
+                   "HGraph Merge requires complete code writes in the destination");
+    for (const auto& unit : merge_units) {
+        const auto implementation = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+        CHECK_ARGUMENT(implementation != nullptr, "HGraph Merge requires HGraph inputs");
+        const auto other = std::dynamic_pointer_cast<HGraph>(implementation->GetInnerIndex());
+        CHECK_ARGUMENT(other->pending_code_writes_.empty(),
+                       "HGraph Merge requires complete code writes in every input");
+        CHECK_ARGUMENT(this->support_duplicate_ == other->support_duplicate_,
+                       "cannot merge HGraph with different support_duplicate settings");
+        CHECK_ARGUMENT(not other->using_dedup_storage(),
+                       "HGraph deduplicate_storage does not support Merge");
+    }
     int64_t total_count = this->GetNumElements();
     for (const auto& unit : merge_units) {
         total_count += unit.index->GetNumElements();
@@ -612,11 +668,6 @@ HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
     for (const auto& merge_unit : merge_units) {
         const auto other_index = std::dynamic_pointer_cast<HGraph>(
             std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
-        CHECK_ARGUMENT(this->support_duplicate_ == other_index->support_duplicate_,
-                       "cannot merge HGraph with different support_duplicate settings");
-        CHECK_ARGUMENT(not other_index->using_dedup_storage(),
-                       "HGraph deduplicate_storage does not support Merge");
-
         auto logical_bias = this->total_count_.load(std::memory_order_acquire);
         if (total_count_ == 0) {
             this->entry_point_id_ = other_index->entry_point_id_;

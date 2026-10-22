@@ -96,6 +96,7 @@ public:
                       std::shared_ptr<const InnerIndexInterface> owner) const override;
 
     friend class HGraphAnalyzer;
+    friend class HGraphCodeWriteTestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
 
@@ -1252,7 +1253,14 @@ private:
 
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
-    mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
+    // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
+    enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
+    UnorderedMap<InnerIdType, uint8_t> pending_code_writes_;
+
+    void
+    finish_code_write(InnerIdType inner_id, uint8_t code);
+
+    mutable std::mutex mci_build_mutex_;  // serializes full MCI reconstruction
     // MCI writers take mutation before force_remove; label scopes end before repair/search.
     // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
     // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
