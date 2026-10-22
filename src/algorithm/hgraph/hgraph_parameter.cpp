@@ -506,6 +506,11 @@ HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(int64_t k) {
     return static_cast<float>(std::clamp(alpha, at_k100, at_k1));
 }
 
+bool
+HGraphSearchParameters::DistanceEarlyStopApplies(uint64_t ef, int64_t k) {
+    return static_cast<double>(ef) > DISTANCE_EARLY_STOP_MIN_EF_TO_K * static_cast<double>(k);
+}
+
 HGraphSearchParameters
 HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     HGraphSearchParameters obj;
