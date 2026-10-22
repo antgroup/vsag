@@ -14,9 +14,10 @@
 
 #pragma once
 
-// Definitions of BasicSearcher::visit and the graph traversal BasicSearcher::search_impl. They live
-// in a header so that more than one translation unit can instantiate the traversal with visit
-// inlined into it.
+// Definitions of BasicSearcher::visit and the graph traversal BasicSearcher::search_impl.
+// basic_searcher.cpp instantiates the traversals without the distance early stop and
+// basic_searcher_early_stop.cpp the one with it, so the early-stop instance does not change how the
+// default traversal is compiled. Both translation units see visit's definition and inline it.
 
 #include <atomic>
 #include <cmath>
@@ -28,6 +29,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/searcher/distance_early_stop_disabled.h"
 #include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
@@ -91,7 +93,7 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     return count_no_visited;
 }
 
-template <InnerSearchMode mode>
+template <InnerSearchMode mode, bool early_stop>
 DistHeapPtr
 BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                            const FlattenInterfacePtr& flatten,
@@ -108,6 +110,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     auto top_candidates = std::make_shared<StandardHeap<true, false>>(alloc, -1);
     StandardHeap<true, false> candidate_set_storage(alloc, -1);
     auto* candidate_set = &candidate_set_storage;
+
+    DistanceEarlyStop<early_stop> early_stopper(alloc, inner_search_param, ctx);
 
     const bool use_custom_distance = inner_search_param.distance_batch_func != nullptr;
     if (not graph or (not flatten and not use_custom_distance)) {
@@ -248,6 +252,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     ++dist_cmp;
     if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
+        early_stopper.Record(dist);
     }
     // The entry point is marked visited before its neighbours are expanded, so its own duplicate
     // labels are never reached by the traversal loop. Expand them here whether the seed distance is
@@ -257,6 +262,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
             if (check_func(duplicate_id)) {
                 top_candidates->Push(dist, duplicate_id);
+                early_stopper.Record(dist);
             }
         }
         if constexpr (mode == KNN_SEARCH) {
@@ -339,6 +345,20 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (reasoning != nullptr) {
                     reasoning->SetTermination(
                         ReasoningTermination::kLowerBoundReached);  // [reasoning]
+                }
+                break;
+            }
+        }
+        if constexpr (early_stop) {
+            // Distance termination on the existing fixed-ef traversal. Candidate
+            // admission and the normal termination condition remain unchanged.
+            if (early_stopper.ShouldStop(-current_node_pair.first)) {
+                if (ctx != nullptr and ctx->stats != nullptr) {
+                    ctx->stats->early_stop_count.fetch_add(1, std::memory_order_relaxed);
+                }
+                if (reasoning != nullptr) {
+                    reasoning->SetTermination(
+                        ReasoningTermination::kDistanceEarlyStop);  // [reasoning]
                 }
                 break;
             }
@@ -437,6 +457,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 //                flatten->Prefetch(candidate_set->Top().second);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                    early_stopper.Record(dist);
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(cur_id);  // [reasoning]
                 }
@@ -445,6 +466,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            early_stopper.Record(dist);
                         }
                     }
                 }
