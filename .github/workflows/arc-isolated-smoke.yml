@@ -87,7 +87,11 @@ jobs:
           test -s build-release/src/libvsag.so
           cp -L build-release/src/libvsag.so smoke-results/libvsag.so
           strip --strip-debug smoke-results/libvsag.so
-          LD_LIBRARY_PATH="$PWD/smoke-results${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+          mkdir -p /tmp/vsag-packaged-verify
+          ln -sf "$PWD/smoke-results/libvsag.so" /tmp/vsag-packaged-verify/libvsag.so.0.0
+          LD_LIBRARY_PATH=/tmp/vsag-packaged-verify ldd build-release/examples/cpp/103_index_hgraph \
+            | grep -F /tmp/vsag-packaged-verify/libvsag.so.0.0
+          LD_LIBRARY_PATH=/tmp/vsag-packaged-verify \
             timeout 180 ./build-release/examples/cpp/103_index_hgraph > smoke-results/packaged-example.log 2>&1
           (cd smoke-results && sha256sum libvsag.so toolchain.txt build.log example.log packaged-example.log > SHA256SUMS)
           printf 'Built fixed main commit and ran the HGraph example.\n' >> "$GITHUB_STEP_SUMMARY"
