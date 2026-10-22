@@ -57,6 +57,16 @@ jobs:
           } > smoke-results/toolchain.txt
       - name: Prepare pinned dependency sources
         uses: ./.github/actions/prepare-fetchcontent
+      - name: Download and verify ANTLR archive
+        run: |
+          set -euo pipefail
+          mkdir -p .ci-downloads
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 15 --max-time 300 \
+            --output .ci-downloads/antlr4_4.13.2.tar.gz \
+            https://codeload.github.com/antlr/antlr4/tar.gz/refs/tags/4.13.2
+          echo '3b75610fc8a827119258cba09a068be5  .ci-downloads/antlr4_4.13.2.tar.gz' | md5sum -c -
+          sha256sum .ci-downloads/antlr4_4.13.2.tar.gz > smoke-results/dependency-sha256.txt
       - name: Build VSAG and examples
         run: |
           set -euo pipefail
