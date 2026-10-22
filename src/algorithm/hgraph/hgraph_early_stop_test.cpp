@@ -22,6 +22,7 @@
 #include <future>
 
 #include "hgraph_parameter.h"
+#include "impl/logger/capturing_logger_test.h"
 #include "inner_string_params.h"
 #include "json_wrapper.h"
 #include "unittest.h"
@@ -331,4 +332,77 @@ TEST_CASE("HGraph distance early stop picks alpha from k when alpha is omitted",
         stopped += std::stoull(omitted.value()->GetStatistics({"early_stop_count"})[0]);
     }
     REQUIRE(stopped > 0);
+}
+
+TEST_CASE("HGraph distance early stop is skipped when ef_search is close to k",
+          "[ut][HGraph][distance_early_stop]") {
+    using namespace vsag;
+    constexpr int64_t count = 64;
+    std::vector<float> vectors(count);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i] = static_cast<float>(i + 1);
+        ids[i] = 100 + i;
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(1)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto make_index = [&]() {
+        auto built =
+            Factory::CreateIndex("hgraph", R"({"dim":1,"dtype":"float32","metric_type":"l2",
+            "index_param":{"max_degree":8,"ef_construction":64,"build_thread_count":1,
+            "base_quantization_type":"fp32","use_reorder":false}})");
+        REQUIRE(built.has_value());
+        REQUIRE(built.value()->Build(base).has_value());
+        return built.value();
+    };
+    auto index = make_index();
+
+    float query_value = 0;
+    auto query =
+        Dataset::Make()->NumElements(1)->Dim(1)->Float32Vectors(&query_value)->Owner(false);
+    auto params = [](int64_t ef_search, bool early_stop) {
+        auto parsed = JsonType::Parse(R"({"hgraph":{}})");
+        parsed["hgraph"]["ef_search"].SetInt(ef_search);
+        if (early_stop) {
+            parsed["hgraph"]["early_stop"].SetJson(
+                JsonType::Parse(R"({"type":"distance","alpha":1.0})"));
+        }
+        return parsed.Dump();
+    };
+    testing::CapturingLogger capture;
+    const testing::ScopedLogger installed(&capture);
+    auto skip_warnings = [&capture]() {
+        return std::count_if(
+            capture.lines.begin(), capture.lines.end(), [](const std::string& line) {
+                return line.find("early_stop is skipped") != std::string::npos;
+            });
+    };
+    constexpr int64_t k = 8;
+    const std::vector<std::string> keys{"dist_cmp", "hops", "early_stop_count"};
+    // 10 <= 1.25 * 8: the search runs as if early_stop were absent, even with the tightest alpha.
+    for (const int64_t ef_search : {4, 8, 10}) {
+        CAPTURE(ef_search);
+        auto fixed = index->KnnSearch(query, k, params(ef_search, false));
+        auto skipped = index->KnnSearch(query, k, params(ef_search, true));
+        REQUIRE(fixed.has_value());
+        REQUIRE(skipped.has_value());
+        REQUIRE(skipped.value()->GetStatistics(keys) == fixed.value()->GetStatistics(keys));
+        REQUIRE(skipped.value()->GetStatistics({"early_stop_count"})[0].empty());
+        REQUIRE(skipped.value()->GetDim() == fixed.value()->GetDim());
+        for (int64_t i = 0; i < fixed.value()->GetDim(); ++i) {
+            REQUIRE(skipped.value()->GetIds()[i] == fixed.value()->GetIds()[i]);
+        }
+    }
+    // The skip is reported once per index.
+    REQUIRE(skip_warnings() == 1);
+    auto applied = index->KnnSearch(query, k, params(11, true));
+    REQUIRE(applied.has_value());
+    REQUIRE(applied.value()->GetStatistics({"early_stop_count"})[0] == "1");
+    REQUIRE(skip_warnings() == 1);
+    REQUIRE(make_index()->KnnSearch(query, k, params(10, true)).has_value());
+    REQUIRE(skip_warnings() == 2);
 }

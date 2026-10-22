@@ -256,6 +256,9 @@ TEST_CASE("HGraph reports early_stop_count when the distance early stop is armed
             "0");
     REQUIRE(count(R"({"hgraph":{"ef_search":32,"early_stop":{"type":"distance","alpha":1.1}}})") ==
             "1");
+    // Skipped because the search width (2) is within 1.25 * k: not reported either.
+    REQUIRE(count(R"({"hgraph":{"ef_search":2,"early_stop":{"type":"distance","alpha":1.1}}})")
+                .empty());
 
     vsag::SearchRequest disabled;
     disabled.query_ =

@@ -880,6 +880,17 @@ TEST_CASE("HGraphSearchParameters picks the default early-stop alpha from k",
     }
 }
 
+TEST_CASE("HGraphSearchParameters skips the early stop when ef is close to k",
+          "[ut][HGraphSearchParameters][distance_early_stop]") {
+    using vsag::HGraphSearchParameters;
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(125, 100));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(126, 100));
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(10, 8));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(11, 8));
+    REQUIRE_FALSE(HGraphSearchParameters::DistanceEarlyStopApplies(1, 1));
+    REQUIRE(HGraphSearchParameters::DistanceEarlyStopApplies(2, 1));
+}
+
 TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
           "[ut][HGraphSearchParameters][brute_force_threshold]") {
     SECTION("default is 0") {

@@ -81,6 +81,33 @@ make_empty_dataset_with_stats(const SearchStatistics& stats) {
     return dataset_result;
 }
 
+// Alpha of the distance early stop for the bottom-graph traversal, or 0 when it is off or the
+// search width is too close to k for it to pay off.
+static float
+resolve_early_stop_alpha(const HGraphSearchParameters& params, uint64_t ef, int64_t k) {
+    if (not params.early_stop or not HGraphSearchParameters::DistanceEarlyStopApplies(ef, k)) {
+        return 0.0F;
+    }
+    return params.early_stop_alpha > 0.0F
+               ? params.early_stop_alpha
+               : HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k);
+}
+
+static void
+warn_early_stop_skipped(std::once_flag& skip_warned,
+                        const HGraphSearchParameters& params,
+                        int64_t k) {
+    std::call_once(skip_warned, [&]() {
+        logger::warn(fmt::format(
+            "hgraph: early_stop is skipped when the search width (ef_search raised to at least k) "
+            "is not greater than {} * k (first seen: ef_search {}, k {}); there it seldom ends a "
+            "search early but still costs time. This warning is logged once per index",
+            HGraphSearchParameters::DISTANCE_EARLY_STOP_MIN_EF_TO_K,
+            params.ef_search,
+            k));
+    });
+}
+
 static void
 apply_hops_limit(InnerSearchParam& search_param, const HGraphSearchParameters& params) {
     if (static_cast<uint64_t>(params.hops_limit) <= static_cast<uint64_t>(params.ef_search)) {
@@ -914,13 +941,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
     base_search_param.rerank_topk = k;
-    // Alpha of the distance early stop for the bottom-graph traversal; 0 turns it off.
-    float early_stop_alpha = 0.0F;
-    if (params.early_stop) {
-        early_stop_alpha = params.early_stop_alpha > 0.0F
-                               ? params.early_stop_alpha
-                               : HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k);
-    }
+    const float early_stop_alpha = resolve_early_stop_alpha(params, base_search_param.ef, k);
+    // Warned only when the bottom graph is actually traversed.
+    const bool early_stop_skipped = params.early_stop and early_stop_alpha == 0.0F;
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,
@@ -1182,6 +1205,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                 if (mci_result.route == "mci") {
                     search_result = std::move(mci_result.result);
                 } else {
+                    if (early_stop_skipped) {
+                        warn_early_stop_skipped(this->early_stop_skip_warned_, params, k);
+                    }
                     search_result = this->search_one_graph(raw_query,
                                                            this->bottom_graph_,
                                                            this->basic_flatten_codes_,

@@ -137,6 +137,15 @@ public:
     static float
     DefaultDistanceEarlyStopAlpha(int64_t k);
 
+    // The distance early stop needs a search width well above k. With ef at most this multiple
+    // of k it seldom ends a search early while its own top-k state still costs time (held-out
+    // measurements: under 2% fewer distance computations, up to 7.4% lower single-thread QPS),
+    // so such searches run without it.
+    static constexpr double DISTANCE_EARLY_STOP_MIN_EF_TO_K = 1.25;
+
+    static bool
+    DistanceEarlyStopApplies(uint64_t ef, int64_t k);
+
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     // early_stop requests the distance early stop; early_stop_alpha is its explicit alpha, or 0

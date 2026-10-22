@@ -399,10 +399,12 @@ FP32 evaluation tracked in #2941 (three datasets, three recall targets) they met
 and query-coverage targets at `k = 10` and `k = 100` wherever the fixed baseline did, while
 smaller values saved more work. Other values of `k` were not measured. To go below the default, choose `alpha` on calibration queries under the
 required recall and query coverage, then measure quality and end-to-end performance on
-separate queries. When `ef_search` is close to `k` (for example within 1.25 times `k`), the rule rarely ends a
-search early but still maintains its own top-k state, which can lower QPS by a few percent;
-leave it off in that case, and check end-to-end time, not only distance computations, when
-calibrating. Omitting `early_stop` disables the policy.
+separate queries. When the search width is at most 1.25 times `k` (normally when `ef_search` ≤ 1.25 `k`), the
+rule is skipped: the search runs as if `early_stop` were absent, and the index logs a warning the
+first time this happens. Close to `k` the rule rarely ends a search early while its own top-k
+state still costs time; in our measurements it saved under 2% of distance computations and
+lowered single-thread QPS by up to 7.4%. When calibrating, check end-to-end time, not only
+distance computations. Omitting `early_stop` disables the policy.
 
 This option supports ordinary KNN search with `l2` or `cosine` on any base quantization,
 with or without reordering, with conjugate graph search, and with several distance
