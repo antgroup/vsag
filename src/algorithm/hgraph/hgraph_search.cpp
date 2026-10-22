@@ -135,8 +135,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
 
     auto params = HGraphSearchParameters::FromJson(parameters);
-    CHECK_ARGUMENT(params.early_stop_alpha == 0.0F,
-                   "distance early stop does not support iterator search");
+    CHECK_ARGUMENT(not params.early_stop, "distance early stop does not support iterator search");
     if (GetNumElements() == 0) {
         return DatasetImpl::MakeEmptyDataset();
     }
@@ -752,7 +751,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
 
-    if (params.early_stop_alpha > 0.0F) {
+    if (params.early_stop) {
         const bool supported_mode = not is_range and not use_custom_distance;
         CHECK_ARGUMENT(supported_mode, "distance early stop requires built-in KNN distance");
         // The rule compares distances by ratio, which needs non-negative distances; inner-product
@@ -915,6 +914,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     base_search_param.topk = static_cast<int64_t>(base_search_param.ef);
     base_search_param.rerank_topk = k;
+    // Alpha of the distance early stop for the bottom-graph traversal; 0 turns it off.
+    float early_stop_alpha = 0.0F;
+    if (params.early_stop) {
+        early_stop_alpha = params.early_stop_alpha > 0.0F
+                               ? params.early_stop_alpha
+                               : HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k);
+    }
     if (params.topk_factor > 1.0F) {
         base_search_param.topk =
             std::min(base_search_param.topk,
@@ -1112,7 +1118,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
         search_param.ep = ep_search_param.ep;
         ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
-        ctx.distance_early_stop_alpha = params.early_stop_alpha;
+        ctx.distance_early_stop_alpha = early_stop_alpha;
         if (search_param.time_cost != nullptr) {
             search_param.time_cost->Reset();
         }

@@ -21,6 +21,7 @@
 #include <array>
 #include <future>
 
+#include "hgraph_parameter.h"
 #include "inner_string_params.h"
 #include "json_wrapper.h"
 #include "unittest.h"
@@ -274,4 +275,60 @@ TEST_CASE(
         // The parallel traversal does not report its bottom-layer counters; check that it ran.
         REQUIRE(early.value()->GetStatistics({"parallel_search_fallback_count"})[0] == "0");
     }
+}
+
+TEST_CASE("HGraph distance early stop picks alpha from k when alpha is omitted",
+          "[ut][HGraph][distance_early_stop]") {
+    using namespace vsag;
+    constexpr int64_t count = 64;
+    std::vector<float> vectors(count);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i] = static_cast<float>(i + 1);
+        ids[i] = 100 + i;
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(1)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto built = Factory::CreateIndex("hgraph", R"({"dim":1,"dtype":"float32","metric_type":"l2",
+        "index_param":{"max_degree":8,"ef_construction":64,"build_thread_count":1,
+        "base_quantization_type":"fp32","use_reorder":false}})");
+    REQUIRE(built.has_value());
+    auto index = built.value();
+    REQUIRE(index->Build(base).has_value());
+
+    float query_value = 0;
+    auto query =
+        Dataset::Make()->NumElements(1)->Dim(1)->Float32Vectors(&query_value)->Owner(false);
+    auto params = [](float alpha) {
+        auto parsed =
+            JsonType::Parse(R"({"hgraph":{"ef_search":64,"early_stop":{"type":"distance"}}})");
+        if (alpha > 0.0F) {
+            parsed["hgraph"]["early_stop"]["alpha"].SetFloat(alpha);
+        }
+        return parsed.Dump();
+    };
+    uint64_t stopped = 0;
+    for (const int64_t k : {2, 10, 40}) {
+        CAPTURE(k);
+        auto omitted = index->KnnSearch(query, k, params(0.0F));
+        auto explicit_default = index->KnnSearch(
+            query, k, params(HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(k)));
+        REQUIRE(omitted.has_value());
+        REQUIRE(explicit_default.has_value());
+        const std::vector<std::string> keys{"dist_cmp", "hops", "early_stop_count"};
+        REQUIRE(omitted.value()->GetStatistics(keys) ==
+                explicit_default.value()->GetStatistics(keys));
+        REQUIRE(omitted.value()->GetDim() == explicit_default.value()->GetDim());
+        for (int64_t i = 0; i < omitted.value()->GetDim(); ++i) {
+            REQUIRE(omitted.value()->GetIds()[i] == explicit_default.value()->GetIds()[i]);
+            REQUIRE(omitted.value()->GetDistances()[i] ==
+                    explicit_default.value()->GetDistances()[i]);
+        }
+        stopped += std::stoull(omitted.value()->GetStatistics({"early_stop_count"})[0]);
+    }
+    REQUIRE(stopped > 0);
 }

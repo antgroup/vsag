@@ -15,6 +15,7 @@
 
 #include "hgraph_parameter.h"
 
+#include <algorithm>
 #include <cmath>
 #include <nlohmann/json.hpp>
 
@@ -469,6 +470,17 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     return FromParsedJson(JsonType::Parse(json_string));
 }
 
+float
+HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(int64_t k) {
+    constexpr double at_k10 = DISTANCE_EARLY_STOP_ALPHA_AT_K10;
+    constexpr double at_k100 = DISTANCE_EARLY_STOP_ALPHA_AT_K100;
+    // Linear in log10(k): at_k10 at k = 10, at_k100 at k = 100, at_k10 + (at_k10 - at_k100) at
+    // k = 1, and never below at_k100.
+    const double decades = std::log10(static_cast<double>(std::max<int64_t>(k, 1)) / 10.0);
+    const double alpha = at_k10 - (at_k10 - at_k100) * decades;
+    return static_cast<float>(std::clamp(alpha, at_k100, 2.0 * at_k10 - at_k100));
+}
+
 HGraphSearchParameters
 HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     HGraphSearchParameters obj;
@@ -507,15 +519,15 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
                            early_stop[HGRAPH_PARAMETER_EARLY_STOP_TYPE].GetString() ==
                                HGRAPH_PARAMETER_EARLY_STOP_TYPE_DISTANCE,
                        "hgraph early_stop type must be distance");
-        obj.early_stop_alpha = HGraphSearchParameters::DEFAULT_DISTANCE_EARLY_STOP_ALPHA;
+        obj.early_stop = true;
         if (early_stop.Contains(HGRAPH_PARAMETER_EARLY_STOP_ALPHA)) {
             CHECK_ARGUMENT(early_stop[HGRAPH_PARAMETER_EARLY_STOP_ALPHA].IsNumber(),
                            "hgraph early_stop alpha must be numeric");
             obj.early_stop_alpha = early_stop[HGRAPH_PARAMETER_EARLY_STOP_ALPHA].GetFloat();
+            const bool valid_alpha =
+                IsFiniteFloatBits(obj.early_stop_alpha) and obj.early_stop_alpha >= 1.0F;
+            CHECK_ARGUMENT(valid_alpha, "hgraph early_stop alpha must be finite and at least 1");
         }
-        const bool valid_alpha =
-            IsFiniteFloatBits(obj.early_stop_alpha) and obj.early_stop_alpha >= 1.0F;
-        CHECK_ARGUMENT(valid_alpha, "hgraph early_stop alpha must be finite and at least 1");
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();

@@ -88,11 +88,10 @@ HGraphContinueSession::ValidateParameters(const std::string& parameters) const {
     const auto parsed = JsonType::Parse(parameters);
     auto params = HGraphSearchParameters::FromParsedJson(parsed);
     CHECK_ARGUMENT(params.ef_search >= 1, "ef_search must be positive");
-    const bool ordinary_search = params.parallel_search_thread_count == 1 and
-                                 not params.enable_time_record and params.topk_factor == 0 and
-                                 params.brute_force_threshold == 0 and
-                                 params.hops_limit == std::numeric_limits<uint32_t>::max() and
-                                 params.early_stop_alpha == 0.0F;
+    const bool ordinary_search =
+        params.parallel_search_thread_count == 1 and not params.enable_time_record and
+        params.topk_factor == 0 and params.brute_force_threshold == 0 and
+        params.hops_limit == std::numeric_limits<uint32_t>::max() and not params.early_stop;
     CHECK_ARGUMENT(ordinary_search,
                    "session does not support parallel, timed, factored, brute-force, hop-limited "
                    "or early-stopped search");

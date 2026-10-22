@@ -382,16 +382,22 @@ by cosine roundoff is treated as zero for this comparison.
 As in ordinary KNN search, a requested distance threshold filters the selected
 results afterwards and may reduce the returned count below `k`.
 
-`alpha` must be finite and at least 1, and defaults to `1.5` when omitted. Larger values
+`alpha` must be finite and at least 1. Larger values
 delay early termination: for the same `ef_search` the traversal is identical and only stops
 later. With FP32 base codes and no reordering, a larger value therefore never returns worse
 results. With quantized base codes the rule compares the traversal's approximate distances,
 and with reordering the reorder stage rescans fewer candidates, so recall against exact
 neighbours need not be monotone in `alpha`; calibrate it for each quantization and reorder
-setting. The default is conservative: on the calibration queries of the FP32 evaluation
-tracked in #2941 (three datasets, k=10/100, three recall targets) it met the recall and
-query-coverage targets wherever the fixed baseline did, while smaller values saved more work. When the kth score is zero, a finite alpha of any magnitude can still allow
-early termination. To go below the default, choose `alpha` on calibration queries under the
+setting. When the kth score is zero, a finite alpha of any magnitude can still allow
+early termination.
+
+When `alpha` is omitted, the default depends on `k`: `1.5` at `k = 10` and `1.15` from
+`k = 100` on, linear in `log10(k)` in between and rising to `1.85` at `k = 1`. A larger `k`
+puts the kth distance farther out, so the same ratio stops later and a smaller `alpha` is
+needed for the same effect. The defaults are conservative: on the calibration queries of the
+FP32 evaluation tracked in #2941 (three datasets, three recall targets) they met the recall
+and query-coverage targets at `k = 10` and `k = 100` wherever the fixed baseline did, while
+smaller values saved more work. Other values of `k` were not measured. To go below the default, choose `alpha` on calibration queries under the
 required recall and query coverage, then measure quality and end-to-end performance on
 separate queries. When `ef_search` is close to `k` (for example within 1.25 times `k`), the rule rarely ends a
 search early but still maintains its own top-k state, which can lower QPS by a few percent;
