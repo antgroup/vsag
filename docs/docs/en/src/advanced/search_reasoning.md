@@ -78,7 +78,7 @@ The following metadata fields belong to full reports and are absent from
 | `topk` | int | Requested top k |
 | `use_reorder` | bool | Whether reorder was active |
 | `filter_active` | bool | Whether a filter was active |
-| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout |
+| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout, distance_early_stop |
 | `total_hops` | int | Total search hops |
 | `total_distance_computations` | int | Total distance evaluations |
 | `available_diagnoses` | [string] | All diagnoses the engine can emit |

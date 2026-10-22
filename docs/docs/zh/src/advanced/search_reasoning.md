@@ -75,7 +75,7 @@ if (!results.has_value()) {
 | `topk` | int | 请求的 top k |
 | `use_reorder` | bool | 是否启用了重排序 |
 | `filter_active` | bool | 是否启用了过滤器 |
-| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout |
+| `termination_reason` | string | none, lower_bound_reached, hops_limit_reached, timeout, distance_early_stop |
 | `total_hops` | int | 总搜索跳数 |
 | `total_distance_computations` | int | 总距离计算次数 |
 | `available_diagnoses` | [string] | 引擎可产生的所有诊断类型 |
