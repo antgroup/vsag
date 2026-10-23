@@ -745,6 +745,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             inner_id = this->get_unique_inner_ids(1).at(0);
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
+            }
+            // Fused storage rejects Tune and its optimized writer bypasses normal insertion.
+            if (not this->using_dedup_storage() and this->rabitq_fused_datacell_ == nullptr) {
+                std::unique_lock codes_lock(this->persistent_codes_mutex_);
+                this->pending_code_writes_[inner_id] = BASE_CODE |
+                                                       (has_precise_reorder() ? PRECISE_CODE : 0) |
+                                                       (raw_vector_ != nullptr ? RAW_CODE : 0);
+            }
+            if (inner_id >= total_count_) {
                 ++total_count_;
                 // Deliberately NOT published here: this only reserves the id. The node
                 // becomes visible when insert_one_logical_point has written both its codes
@@ -887,10 +896,23 @@ HGraph::insert_persistent_codes(const void* data,
 }
 
 void
+HGraph::finish_code_write(InnerIdType inner_id, uint8_t code) {
+    auto it = this->pending_code_writes_.find(inner_id);
+    if (it != this->pending_code_writes_.end()) {
+        it.value() &= ~code;
+        if (it->second == 0) {
+            this->pending_code_writes_.erase(it);
+        }
+    }
+}
+
+void
 HGraph::insert_persistent_codes_unlocked(const void* data,
                                          InnerIdType inner_id,
                                          const RaBitQFusedCodeView* preencoded) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->finish_code_write(inner_id,
+                            BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (preencoded != nullptr) {
         // InsertVector above advances the flatten count; fused storage owns the actual bytes.
         this->rabitq_fused_datacell_->SetNodeCodes(inner_id,
@@ -903,9 +925,12 @@ HGraph::insert_persistent_codes_unlocked(const void* data,
     }
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id,
+                                PRECISE_CODE | (raw_vector_ == high_precise_codes_ ? RAW_CODE : 0));
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id, RAW_CODE);
     }
 }
 void
