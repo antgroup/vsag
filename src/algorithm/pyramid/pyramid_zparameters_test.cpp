@@ -20,6 +20,7 @@
 #include <cmath>
 #include <nlohmann/json.hpp>
 
+#include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "parameter_test.h"
 #include "pyramid.h"
@@ -134,6 +135,52 @@ TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
     auto param = std::make_shared<vsag::PyramidParameters>();
     param->FromJson(param_json);
     vsag::ParameterTest::TestToJson(param);
+}
+
+TEST_CASE("Pyramid accepts PiPNN as a batch graph builder", "[ut][PyramidParameters][pipnn]") {
+    PyramidDefaultParam index_param;
+    index_param.graph_type = vsag::GRAPH_TYPE_VALUE_PIPNN;
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    REQUIRE_NOTHROW(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+    REQUIRE(param->graph_type == vsag::GRAPH_TYPE_VALUE_PIPNN);
+    REQUIRE(param->odescent_param != nullptr);
+
+    index_param.graph_type = "unknown";
+    REQUIRE_THROWS(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+}
+
+TEST_CASE("Pyramid exposes PiPNN build parameters", "[ut][PyramidParameters][pipnn]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "pipnn_max_leaf_size": 256,
+        "pipnn_min_leaf_size": 32,
+        "pipnn_leader_sample_rate": 0.02,
+        "pipnn_fanout": [5, 3, 1],
+        "pipnn_leaf_neighbor_count": 6,
+        "pipnn_hash_plane_count": 6,
+        "pipnn_reservoir_size": 80
+    })");
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+    auto param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+    REQUIRE(param != nullptr);
+    REQUIRE(param->pipnn_param.max_leaf_size == 256);
+    REQUIRE(param->pipnn_param.min_leaf_size == 32);
+    REQUIRE(param->pipnn_param.leader_sample_rate == 0.02F);
+    REQUIRE(param->pipnn_param.fanout == std::vector<uint64_t>{5, 3, 1});
+    REQUIRE(param->pipnn_param.leaf_neighbor_count == 6);
+    REQUIRE(param->pipnn_param.hash_plane_count == 6);
+    REQUIRE(param->pipnn_param.reservoir_size == 80);
+
+    const auto serialized = param->ToJson();
+    const auto restored_graph_json = serialized[vsag::GRAPH_KEY];
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].GetUint64() == 256);
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].GetUint64() == 80);
 }
 
 std::shared_ptr<vsag::PyramidParameters>
@@ -847,6 +894,23 @@ TEST_CASE("Pyramid validates root graph type and hierarchy overrides", "[ut][Pyr
         vsag::Pyramid::CheckAndMappingExternalParam(invalid_hierarchy_degree, common_param));
 }
 
+TEST_CASE("Pyramid PiPNN rejects non-dense input representations", "[ut][pipnn][pyramid]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.repr_ = vsag::RecordRepr::MULTI_VECTOR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "ef_construction": 64
+    })");
+    const auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+
+    REQUIRE_THROWS(std::make_shared<vsag::Pyramid>(mapped, common_param));
+}
+
 TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
     auto absent = vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20}})");
     REQUIRE(absent.topk_factor == 0.0F);
@@ -860,4 +924,93 @@ TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
         vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":-1}})"));
     REQUIRE_THROWS(
         vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1e100}})"));
+}
+
+TEST_CASE("Pyramid adaptive pruning legacy parameters and compatibility",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    auto legacy = vsag::JsonType::Parse(generate_pyramid(PyramidDefaultParam{}));
+    auto source = std::make_shared<vsag::PyramidParameters>();
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(source->ToJson());
+    CHECK(source->CheckCompatibility(restored));
+    restored->alpha = 1.5F;
+    restored->adaptive_pruning.adjust_step = 0.03F;
+    CHECK(source->CheckCompatibility(restored));
+    restored->adaptive_pruning.enabled = true;
+    CHECK_FALSE(source->CheckCompatibility(restored));
+
+    legacy["adaptive_pruning"].SetBool(true);
+    legacy["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    legacy["adaptive_pruning_apply_to_reverse"].SetBool(true);
+    source->FromJson(legacy);
+    vsag::ParameterTest::TestToJson(source);
+    CHECK(source->ToJson()["adaptive_pruning"].GetBool());
+    CHECK(source->ToJson()["adaptive_pruning_apply_to_reverse"].GetBool());
+    CHECK_FALSE(source->ToJson().Contains("fill_rejected"));
+    restored->FromJson(source->ToJson());
+    REQUIRE(source->CheckCompatibility(restored));
+    const auto field = GENERATE(std::string("alpha"),
+                                std::string("adjust_step"),
+                                std::string("apply_to_reverse"),
+                                std::string("apply_to_upper"));
+    CAPTURE(field);
+    if (field == "alpha") {
+        restored->alpha += 0.06F;
+    } else if (field == "adjust_step") {
+        restored->adaptive_pruning.adjust_step = 0.03F;
+    } else if (field == "apply_to_reverse") {
+        restored->adaptive_pruning.apply_to_reverse = false;
+    } else {
+        restored->adaptive_pruning.apply_to_upper = true;
+    }
+    CHECK_FALSE(source->CheckCompatibility(restored));
+    CHECK_FALSE(restored->CheckCompatibility(source));
+    legacy.Erase("adaptive_pruning");
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+}
+
+TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 4;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"nsw", "alpha":1.06,
+        "adaptive_pruning":true,"adaptive_pruning_adjust_step":0.06,
+        "hierarchies":[{"name":"a","alpha":1.2},{"name":"b","alpha":1.06}]
+    })");
+    auto make_index = [&]() {
+        auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+        return std::make_shared<vsag::Pyramid>(param, common);
+    };
+    REQUIRE_NOTHROW(make_index());
+    SECTION("obsolete nested policy") {
+        external["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    }
+    SECTION("removed fill option") {
+        const auto* key = GENERATE("fill_rejected", "adaptive_pruning_fill_rejected");
+        external[key].SetBool(false);
+    }
+    SECTION("unsupported graph") {
+        external["graph_type"].SetString("odescent");
+    }
+    SECTION("unsupported metric") {
+        common.metric_ =
+            GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
+    }
+    SECTION("unsupported routing scope") {
+        external["adaptive_pruning_apply_to_upper"].SetBool(true);
+    }
+    SECTION("invalid step") {
+        external["adaptive_pruning_adjust_step"].SetFloat(0.6F);
+    }
+    SECTION("invalid hierarchy alpha") {
+        (*external["hierarchies"].GetInnerJson())[1]["alpha"] = 0.1F;
+    }
+    REQUIRE_THROWS(make_index());
 }

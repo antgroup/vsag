@@ -19,12 +19,38 @@
 #include <cstring>
 
 #include "datacell/sindi_datacell_utils.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "simd/fp16_simd.h"
 #include "utils/sparse_vector_transform.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
 #include "vsag_exception.h"
 namespace vsag {
+
+void
+MutableSindiTermDataCell::PruneTerms(float ratio, uint64_t threshold, uint64_t window_count) {
+    if (ratio == 0.0F && threshold == 0) {
+        return;
+    }
+    const auto count = std::max<uint64_t>(window_count == 0 ? windows_.size() : window_count, 1);
+    const auto limit = threshold == 0 ? std::numeric_limits<uint64_t>::max() : threshold / count;
+    for (auto& window : windows_) {
+        this->SortByValue(window);
+        for (uint32_t term = 0; term < window.term_capacity_; ++term) {
+            auto& size = window.term_sizes_[term];
+            if (size == 0) {
+                continue;
+            }
+            const auto retained = std::max<uint64_t>(
+                1,
+                std::min<uint64_t>(static_cast<uint32_t>(static_cast<float>(size) * (1.0F - ratio)),
+                                   limit));
+            size = static_cast<uint32_t>(retained);
+            window.term_ids_[term]->resize(size);
+            window.term_datas_[term]->resize(static_cast<uint64_t>(size) * GetTermValueCodeSize());
+        }
+    }
+}
 
 void
 MutableSindiTermDataCell::Finalize() {
@@ -370,7 +396,20 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
                                                      float radius,
                                                      const FilterPtr& filter,
                                                      const std::optional<float>& threshold,
-                                                     bool enable_reorder) const {
+                                                     bool enable_reorder,
+                                                     ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id,
+                                   1.0F + dist,
+                                   reasoning_ctx->CurrentHop());  // [reasoning]
+    }
+    const auto rejected_by_filter = [&]() {
+        const bool rejected = not filter->CheckValid(id + offset_id);
+        if (rejected && reasoning_ctx != nullptr) {
+            reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+        }
+        return rejected;
+    };
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (threshold.has_value() and
             (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
@@ -385,9 +424,9 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
     }
     if constexpr (type != InnerSearchType::PURE) {
 #if __cplusplus >= 202002L
-        if (dist > cur_heap_top or not filter->CheckValid(id + offset_id)) [[likely]] {
+        if (dist > cur_heap_top or rejected_by_filter()) [[likely]] {
 #else
-        if (__builtin_expect(dist > cur_heap_top or not filter->CheckValid(id + offset_id), 1)) {
+        if (__builtin_expect(dist > cur_heap_top or rejected_by_filter(), 1)) {
 #endif
             dist = 0;
             return;
@@ -405,6 +444,10 @@ MutableSindiTermDataCell::insert_candidate_into_heap(uint32_t id,
     heap.emplace(dist, id + offset_id);
     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
         if (heap.size() > n_candidate) {
+            if (reasoning_ctx != nullptr) {
+                reasoning_ctx->RecordEviction(heap.top().second,
+                                              reasoning_ctx->CurrentHop());  // [reasoning]
+            }
             heap.pop();
         }
         cur_heap_top =
@@ -426,7 +469,13 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
                                             uint32_t n_candidate,
                                             const FilterPtr& filter,
                                             const std::optional<float>& threshold,
-                                            bool enable_reorder) const {
+                                            bool enable_reorder,
+                                            ReasoningContext* reasoning_ctx) const {
+    if (reasoning_ctx != nullptr) {
+        reasoning_ctx->RecordVisit(id + offset_id,
+                                   1.0F + dist,
+                                   reasoning_ctx->CurrentHop());  // [reasoning]
+    }
     if (threshold.has_value() and
         (not std::isfinite(dist) or (not enable_reorder and 1.0F + dist > threshold.value()))) {
         dist = 0.0F;
@@ -435,6 +484,9 @@ MutableSindiTermDataCell::fill_heap_initial(uint32_t id,
     if (dist < 0) {
         if constexpr (type != InnerSearchType::PURE) {
             if (not filter->CheckValid(id + offset_id)) {
+                if (reasoning_ctx != nullptr) {
+                    reasoning_ctx->RecordFilterReject(id + offset_id);  // [reasoning]
+                }
                 dist = 0;
                 return false;
             }
@@ -515,7 +567,8 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
                                                                      n_candidate,
                                                                      filter,
                                                                      param.distance_threshold,
-                                                                     param.enable_reorder);
+                                                                     param.enable_reorder,
+                                                                     param.reasoning_ctx);
                     if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                         if (filter_callback_remaining != nullptr and
                             *filter_callback_remaining == 0) {
@@ -547,7 +600,8 @@ MutableSindiTermDataCell::InsertHeapByTermLists(const MutableSINDIWindow& window
                                                    radius,
                                                    filter,
                                                    param.distance_threshold,
-                                                   param.enable_reorder);
+                                                   param.enable_reorder,
+                                                   param.reasoning_ctx);
             if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                 if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                     computer->ResetTerm();
@@ -593,7 +647,8 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                                                  n_candidate,
                                                                  filter,
                                                                  param.distance_threshold,
-                                                                 param.enable_reorder);
+                                                                 param.enable_reorder,
+                                                                 param.reasoning_ctx);
                 if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                     if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                         return true;
@@ -617,7 +672,8 @@ MutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                                radius,
                                                filter,
                                                param.distance_threshold,
-                                               param.enable_reorder);
+                                               param.enable_reorder,
+                                               param.reasoning_ctx);
         if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
             if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                 return true;

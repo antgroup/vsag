@@ -134,9 +134,10 @@ The recommended entry point is [`SearchWithRequest`](#searchwithrequest), which 
 [`SearchRequest`](search.md#searchrequest) carrying the query, mode, top-k / radius, and any filters.
 The older per-argument `KnnSearch` / `RangeSearch` overloads remain for compatibility.
 
-Every search returns a `DatasetPtr`: for KNN, `num_elements == 1` and `ids` / `distances` have
-length `k`; for range search, the result length is the number of matches. See [Dataset](dataset.md)
-for how to read results.
+Every search returns a `DatasetPtr`: single-query KNN has `num_elements == 1`; HGraph and IVF also
+support batched KNN with a row-major `num_elements x dim` result. HGraph pads missing neighbors with
+`id == -1` and infinite distance. For range search, the result length is the number of matches. See
+[Dataset](dataset.md) for how to read results.
 
 ### `SearchWithRequest`
 
@@ -220,10 +221,10 @@ error). See [Range Search](../advanced/range_search.md) and `examples/cpp/302_fe
 | Method | Signature | Notes |
 |--------|-----------|-------|
 | `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const float* vector, int64_t id, bool calculate_precise_distance = true) const` | Distance from a dense query to the stored vector `id`. |
-| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting a `DatasetPtr` (works for sparse indexes such as SINDI). |
-| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and invalid `-1` distances are ordered last. |
+| `CalcDistanceById` | `tl::expected<float, Error> CalcDistanceById(const DatasetPtr& vector, int64_t id, bool calculate_precise_distance = true) const` | Same, accepting one native query: dense Float32Vectors, sparse SparseVectors, or WARP/SIMQ MultiVectors with MultiVectorDim. |
+| `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const float* query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical batch variant; `topk > 0` returns sorted smallest distances with IDs, and missing IDs are ordered last (valid distances may also be negative). |
 | `CalcDistancesById` | `tl::expected<DatasetPtr, Error> CalcDistancesById(const DatasetPtr& query, const int64_t* ids, int64_t count, bool calculate_precise_distance = true, int64_t topk = -1) const` | Canonical DatasetPtr batch variant. For `query->GetNumElements() > 1`, indexes must advertise `SUPPORT_BATCH_CALC_DISTANCE_BY_ID`; `ids` contains `NumElements * count` row-major entries. With `topk > 0`, each query returns `min(topk, count)` sorted distances with matching IDs. |
-| `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated compatibility alias; use `CalcDistancesById` for new code. |
+| `CalDistanceById` | Same signatures as `CalcDistancesById` | Deprecated public forwarding alias to the canonical virtual `CalcDistancesById`; new implementations override the canonical name. See [C++ implementation migration](../advanced/calc_distance_by_id.md#c-implementation-migration). |
 
 `calculate_precise_distance = true` may load full-precision vectors (possibly from disk) instead of
 quantized codes. See [Calculate Distance by ID](../advanced/calc_distance_by_id.md) and

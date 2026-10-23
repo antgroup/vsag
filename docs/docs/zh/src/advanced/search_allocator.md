@@ -34,11 +34,9 @@ auto result = index->SearchWithRequest(req).value();
 `SearchRequest`（`include/vsag/search_request.h`）是当前未废弃、推荐用来驱动单次搜索的入口。
 `search_allocator_` 字段是可选的，留空时索引会回退到它所属 `Resource` 上的 allocator。
 
-> **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前只有 HGraph、
-> IVF、BruteForce、WARP、SINDI 和 Pyramid 实现了它。Pyramid 支持 KNN 请求搜索，并可通过
-> `expected_labels_` 生成 reasoning 报告；携带 expected labels 的 Range 请求暂不支持。对于
-> 尚未 override 的索引（SINDI_V2），请使用下文的旧版
-> `SearchParam` 路径。
+> **可用性。** `Index::SearchWithRequest` 默认实现会返回 *不支持* 错误。目前 HGraph、
+> IVF、BruteForce、WARP、SINDI、SINDI_V2 和 Pyramid 已实现它。Pyramid 支持 KNN 请求搜索，
+> 并可通过 `expected_labels_` 生成 reasoning 报告；携带 expected labels 的 Range 请求暂不支持。
 
 ## 旧版 API —— `SearchParam::allocator`（已弃用）
 
@@ -110,6 +108,9 @@ arena.reset();              // 一次性回收本批所有 per-query 缓冲
 | `KnnSearch(query, k, parameters_str)` | 没有 per-search allocator 入口，使用索引 allocator。 |
 | 专用 `RangeSearch(...)` 重载 | 没有 allocator 参数，使用索引 allocator。 |
 | Range 模式的 `SearchWithRequest` | 与 KNN 模式遵循相同的索引特定规则。 |
+
+SINDI 和 IVF 的归因容器也使用选中的搜索 allocator：`search_allocator_` 非空时使用它，
+否则使用索引 allocator。这不代表所有标准库分配（例如 JSON 或字符串存储）都使用该 allocator。
 
 设置 per-search Allocator 不会影响索引的永久数据结构。它只是收窄了某一次搜索调用所触碰内存的
 生命周期 —— 且仅限于索引/入口实际消费它的那部分（详见各行说明）。

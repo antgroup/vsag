@@ -90,6 +90,31 @@ BlasFunction::Sgemm(int32_t order,
                 ldc);
 }
 
+void
+BlasFunction::Ssyrk(int32_t order,
+                    int32_t uplo,
+                    int32_t trans,
+                    int32_t n,
+                    int32_t k,
+                    float alpha,
+                    const float* a,
+                    int32_t lda,
+                    float beta,
+                    float* c,
+                    int32_t ldc) {
+    cblas_ssyrk(static_cast<CBLAS_ORDER>(order),
+                static_cast<CBLAS_UPLO>(uplo),
+                static_cast<CBLAS_TRANSPOSE>(trans),
+                n,
+                k,
+                alpha,
+                a,
+                lda,
+                beta,
+                c,
+                ldc);
+}
+
 int32_t
 BlasFunction::Sgeqrf(int32_t order, int32_t m, int32_t n, float* a, int32_t lda, float* tau) {
     return LAPACKE_sgeqrf(static_cast<lapack_int>(order),
