@@ -81,6 +81,9 @@ and `metric_type` **must** be `"ip"`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of lowest-weight postings permanently removed per term per window during `Build`; `[0, 1)`, disabled by default. |
 | `term_retain_threshold` | integer | `0` | Build-time posting cap per term, divided across windows; `0` disables the cap. |
+
+Execution settings are parsed and serialized with `SINDISearchParameter`, so analysis searches retain the requested scheduler, rerank and statistics options.
+
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
@@ -257,8 +260,6 @@ Search-time parameters live under the `sindi` sub-object:
 | `rerank_batch` | bool | `false` | Batch FP32/FP16 sparse KNN reranking. A single batch reduces per-candidate calls and read-lock acquisition. Reasoning queries and DMQ8 retain scalar reranking. |
 | `rerank_parallelism` | int | `1` | FP32/FP16 sparse KNN rerank workers, from `1` to `256`. Values above `1` enable parallel reranking and reuse the query thread pool; the caller also computes. Private computers write distances at the original candidate positions. Global top-k selection follows the original order after joining. Window candidate capacities are unaffected. |
 | `rerank_scheduler` | string | `count_static` | Parallel rerank scheduling: `nnz_atomic` reads candidate NNZ and computes block-local prefix sums in parallel using the same thread pool (the caller also computes). After joining, the caller combines only p block totals and finds p-1 boundaries with binary searches, without another serial scan over candidates. It partitions contiguous candidates by cumulative vector nonzeros (as close to equal as indivisible candidates permit); `count_atomic` partitions by candidate count. Both claim one candidate per relaxed atomic fetch-add, drain the local range, then steal cyclically. `count_static` retains the previous count-based batch slices without stealing. One worker uses a single batch. `stage_profile` records estimation/partition overhead, per-worker elapsed time, nonzeros and stolen candidates via the internal rerank profile accessor. Profiling count modes also reads nonzeros for load diagnostics; ordinary count-mode searches do not. |
-
-Execution settings are parsed and serialized with `SINDISearchParameter`, so analysis searches retain the requested scheduler, rerank and statistics options.
 | `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search request. A value of `0` disables the limit. Internal checks such as the deleted-ID filter do not count. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the already filtered candidates, so the result may be partial. The limit applies to KNN and range search through both the regular APIs and `SearchWithRequest`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
