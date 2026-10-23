@@ -158,34 +158,6 @@ SindiSearchOptions::Parse(const JsonType& json) {
             options.scheduler = SindiWindowScheduler::COST_ATOMIC;
         }
     }
-    if (param.Contains("window_scheduler_profile")) {
-        options.profile = param["window_scheduler_profile"].GetBool();
-    }
-    if (param.Contains("collect_statistics")) {
-        options.collect_statistics = param["collect_statistics"].GetBool();
-    }
-    if (param.Contains("stage_profile")) {
-        options.stage_profile = param["stage_profile"].GetBool();
-    }
-    if (param.Contains("rerank_batch")) {
-        options.rerank_batch = param["rerank_batch"].GetBool();
-    }
-    if (param.Contains("rerank_parallelism")) {
-        const auto workers = param["rerank_parallelism"].GetInt();
-        CHECK_ARGUMENT(workers > 0 and workers <= 256, "rerank_parallelism must be in [1, 256]");
-        options.rerank_parallelism = static_cast<uint32_t>(workers);
-    }
-    if (param.Contains("rerank_scheduler")) {
-        const auto name = param["rerank_scheduler"].GetString();
-        if (name == "count_static") {
-            options.rerank_scheduler = SindiRerankScheduler::COUNT_STATIC;
-        } else if (name == "count_atomic") {
-            options.rerank_scheduler = SindiRerankScheduler::COUNT_ATOMIC;
-        } else {
-            CHECK_ARGUMENT(name == "nnz_atomic", "unknown SINDI rerank_scheduler: " + name);
-            options.rerank_scheduler = SindiRerankScheduler::NNZ_ATOMIC;
-        }
-    }
     return options;
 }
 
@@ -193,25 +165,6 @@ void
 SindiSearchOptions::WriteTo(JsonType& json) const {
     if (scheduler != SindiWindowScheduler::COUNT_DEQUE) {
         json[INDEX_SINDI]["window_scheduler"].SetString(SindiSearcher::SchedulerName(scheduler));
-    }
-    if (profile) {
-        json[INDEX_SINDI]["window_scheduler_profile"].SetBool(true);
-    }
-    if (not collect_statistics) {
-        json[INDEX_SINDI]["collect_statistics"].SetBool(false);
-    }
-    if (stage_profile) {
-        json[INDEX_SINDI]["stage_profile"].SetBool(true);
-    }
-    if (rerank_batch) {
-        json[INDEX_SINDI]["rerank_batch"].SetBool(true);
-    }
-    if (rerank_parallelism != 1) {
-        json[INDEX_SINDI]["rerank_parallelism"].SetInt(rerank_parallelism);
-    }
-    if (rerank_scheduler != SindiRerankScheduler::COUNT_STATIC) {
-        json[INDEX_SINDI]["rerank_scheduler"].SetString(
-            rerank_scheduler == SindiRerankScheduler::COUNT_ATOMIC ? "count_atomic" : "nnz_atomic");
     }
 }
 
