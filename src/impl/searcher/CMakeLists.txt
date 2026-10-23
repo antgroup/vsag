@@ -23,6 +23,9 @@ set (SEARCHER_SRC
     hybrid_mci_searcher.h
     mci_searcher.cpp
     mci_searcher.h
+    sindi_searcher.cpp
+    sindi_searcher.h
+    sindi_query_profile.h
     parallel_searcher.cpp
     parallel_searcher.h
 )

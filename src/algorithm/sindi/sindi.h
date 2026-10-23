@@ -25,6 +25,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
+#include "impl/searcher/sindi_searcher.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -199,7 +200,9 @@ private:
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
                 const SindiMetadataSearchRoute& metadata_route = {},
-                uint64_t worker_n_candidate = 0) const;
+                uint64_t worker_n_candidate = 0,
+                const SindiWindowSearchOptions& window_options = {},
+                SindiWindowSearchProfile* window_profile = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
