@@ -48,6 +48,7 @@ Optimizer". Its implementation key is `use_elp_optimizer`, which now lives behin
 
 ## Notes
 
+- When rebuilding HGraph vector codes, `Tune` needs a raw or FP32 source covering the full internal ID range. If a failed `Add` leaves that source incomplete and no complete fallback exists, `Tune` returns `false` without changing the index. Later successful Adds do not fill earlier unwritten IDs. Deduplicated storage must have a published mapping for every ID; ordinary storage retains unfinished-write information and reserved IDs across serialization, so an Add after restore cannot reuse a missing vector’s ID. This uses existing count metadata without changing the binary format; older snapshots without unfinished-write metadata cannot recover that information. `Merge` rejects a destination or any input with unfinished code writes with `INVALID_ARGUMENT`, before copying any input; rebuild incomplete indexes from original data before merging. Restores reject reservation counts above the serialized capacity or internal ID limit with `INVALID_BINARY`; legacy metadata without a reservation count still falls back to the written-code count. It does not recover vectors from the failed `Add`; rebuild the index from the original data before tuning again.
 - Tuning is sensitive to the query distribution — use samples that reflect real traffic.
 - Tuned parameters are persisted together with the index metadata via `Serialize`/`Deserialize`
   and remain in effect after deployment.

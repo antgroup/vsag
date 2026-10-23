@@ -83,6 +83,14 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
             return MakeFlattenDataCellInstance<QuantizerAdapter<ProductQuantizer<metric>, uint16_t>,
                                                IOTmpl>(param, common_param);
         }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
+            return MakeFlattenDataCellInstance<QuantizerAdapter<SQ8Quantizer<metric>, uint16_t>,
+                                               IOTmpl>(param, common_param);
+        }
+        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
+            return MakeFlattenDataCellInstance<QuantizerAdapter<FP32Quantizer<metric>, uint16_t>,
+                                               IOTmpl>(param, common_param);
+        }
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("FP16/BF16 data type does not support {} quantization",
                                         quantization_string));
