@@ -86,6 +86,7 @@ public:
     static void
     WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
+    // Each stage validates its inputs so it can also be called independently.
     // A zero iteration budget validates the graph but leaves it unchanged.
     static FGIMRefinementStatistics
     RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
@@ -102,6 +103,10 @@ public:
                          uint64_t* distance_evaluations = nullptr);
 
 private:
+    // Shared checks also apply to an empty destination.
+    static void
+    ValidateStorage(const HGraph& index);
+
     static void
     ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count);
 

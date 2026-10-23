@@ -485,7 +485,9 @@ strongly I/O-bound on a SSD, compare against [IVF](ivf.md) before committing to 
 Set `merge_strategy: "fgim"` in the destination HGraph parameters to use FGIM
 through the existing `Index::Merge(vector<MergeUnit>)` API. The default remains
 `"odescent"`. `fgim_refinement_iterations` is a non-negative integer (default 4);
-zero disables refinement. The persistent k-NNG degree bound is the destination
+zero disables refinement. Setting this option alone keeps the default `odescent`
+strategy; VSAG reports a warning when the option is supplied for another strategy.
+The persistent k-NNG degree bound is the destination
 `max_degree`; CrossQuery uses `ceil(k / (number_of_sources - 1))` for both top-k
 and search width.
 

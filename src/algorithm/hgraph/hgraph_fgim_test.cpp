@@ -130,6 +130,12 @@ public:
             graph.bottom_graph_->SetTotalCount(0);
         } else if (condition == "missing label table") {
             graph.label_table_ = nullptr;
+        } else if (condition == "incomplete code writes") {
+            graph.pending_code_writes_[0] = HGraph::BASE_CODE;
+        } else if (condition == "auxiliary metadata") {
+            graph.persist_source_id_ = true;
+        } else if (condition == "missing merge parameters") {
+            graph.create_param_ptr_ = nullptr;
         }
     }
 
@@ -370,6 +376,10 @@ TEST_CASE_METHOD(HGraphFGIMTest, "FGIM rejects unsupported inputs", "[ut][hgraph
         sources.push_back(a.get());
         ExpectInvalid(sources, 3, "at least two");
     }
+    SECTION("incomplete code writes") {
+        SetUnsupported(*b, "incomplete code writes");
+        ExpectInvalid(sources, 3, "complete code writes");
+    }
     SECTION("null source") {
         sources[1] = nullptr;
         ExpectInvalid(sources, 3, "null");
@@ -587,6 +597,10 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 1, 1);
     REQUIRE(stats.distance_evaluations > 0);
     REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(stats.indegree_repairs == 2);
+    REQUIRE(stats.iterations == 1);
+    REQUIRE(graph[2][0].id == 1);
+    REQUIRE(graph[3][0].id == 0);
     REQUIRE(graph[0].size() == 1);
     REQUIRE(graph[0][0].id == 3);
     REQUIRE(graph[1].size() == 1);
@@ -678,7 +692,8 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(stats.distance_evaluations == 0);
     REQUIRE(stats.neighbor_updates == 0);
     REQUIRE(stats.indegree_repairs == 0);
-    REQUIRE(stats.iterations < 8);
+    // A second visit drains reverse-new; leftover reverse-old alone is converged.
+    REQUIRE(stats.iterations == 2);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
@@ -1155,6 +1170,97 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     HGraphFGIM::Merge(*diagnosed, {}, 4, &stats);
     REQUIRE(stats.initial_distance_evaluations == 0);
     REQUIRE(stats.initial_seconds == 0);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction prunes redundant ties and protects sole incoming edges",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // Node 2 has two incoming edges; 0->2 is redundant with the equally close 0->1.
+    // After pruning 0->2, 3->2 is the sole incoming edge and must remain.
+    const FGIMKnnGraph input{{{1, 0}, {2, 0}}, {{0, 0}}, {{3, 0}}, {{2, 0}}};
+    const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+    REQUIRE(result[0].size() == 1);
+    REQUIRE(result[0][0].id == 1);
+    REQUIRE(result[3].size() == 1);
+    REQUIRE(result[3][0].id == 2);
+    REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects a missing destination label table",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(2, 0, true);
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    SetUnsupported(*destination, "missing label table");
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM validates destination storage and source auxiliary metadata",
+                 "[ut][hgraph][fgim]") {
+    auto destination = std::shared_ptr<HGraph>(MakeSource(0, 3, false, "fp32", false, false, true));
+    auto lhs = std::shared_ptr<HGraph>(MakeSource(3, 0));
+    auto rhs = std::shared_ptr<HGraph>(MakeSource(3, 1));
+    auto wrap = [&](const std::shared_ptr<HGraph>& graph) {
+        return std::make_shared<IndexImpl<HGraph>>(graph, common);
+    };
+    auto output = wrap(destination);
+    const std::vector<MergeUnit> units{{wrap(lhs), nullptr}, {wrap(rhs), nullptr}};
+    SECTION("missing destination base storage") {
+        SetUnsupported(*destination, "base storage");
+    }
+    SECTION("incomplete destination code writes") {
+        SetUnsupported(*destination, "incomplete code writes");
+    }
+    SECTION("source auxiliary metadata") {
+        SetUnsupported(*lhs, "auxiliary metadata");
+    }
+    SECTION("missing merge parameters") {
+        SetUnsupported(*destination, "missing merge parameters");
+    }
+    const auto result = output->Merge(units);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
+    REQUIRE(destination->GetNumElements() == 0);
+    REQUIRE(lhs->GetNumElements() == 3);
+    REQUIRE(rhs->GetNumElements() == 3);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM iteration settings preserve the selected merge strategy",
+                 "[ut][hgraph][fgim]") {
+    JsonType external;
+    external["base_quantization_type"].SetString("fp32");
+    external["max_degree"].SetUint64(8);
+    external["ef_construction"].SetUint64(40);
+    external["fgim_refinement_iterations"].SetUint64(3);
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(
+        HGraph::CheckAndMappingExternalParam(external, common));
+    REQUIRE(parameters->merge_strategy == "odescent");
+    REQUIRE(parameters->fgim_refinement_iterations == 3);
+    const HGraphParameter restored(parameters->ToJson());
+    REQUIRE(restored.merge_strategy == "odescent");
+    REQUIRE(restored.fgim_refinement_iterations == 3);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement rejects duplicate IDs independently of stored distances",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // ID uniqueness must hold even when supplied distances differ from recomputation.
+    // A lower_bound for (0,3) would stop at ID 2 and miss the existing ID 3.
+    const float epsilon = std::numeric_limits<float>::epsilon();
+    FGIMKnnGraph graph{{{2, epsilon}, {3, 2 * epsilon}}, {{2, 0}}, {{0, 0}, {3, 0}}, {{0, 0}}};
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 3, 1);
+    REQUIRE(stats.distance_evaluations > 0);
+    REQUIRE(graph[0].size() == 2);
+    REQUIRE(graph[0][0].id == 2);
+    REQUIRE(graph[0][1].id == 3);
 }
 
 }  // namespace vsag

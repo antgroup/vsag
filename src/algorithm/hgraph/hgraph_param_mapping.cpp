@@ -20,6 +20,7 @@
 #include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"  // IWYU pragma: keep
 #include "hgraph_parameter.h"
+#include "impl/logger/logger.h"
 #include "io/common/io_parameter.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 
@@ -385,6 +386,11 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                max_degree,
                                construction_threshold));
 
+    // Warn only for explicit external settings, not internal ToJson/FromJson roundtrips.
+    if (external_param.Contains("fgim_refinement_iterations") &&
+        hgraph_parameter->merge_strategy != "fgim") {
+        logger::warn("fgim_refinement_iterations takes effect only with merge_strategy=fgim");
+    }
     return hgraph_parameter;
 }
 

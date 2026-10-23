@@ -389,6 +389,7 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 在目标 HGraph 参数中设置 `merge_strategy: "fgim"`，即可通过现有
 `Index::Merge(vector<MergeUnit>)` 接口使用 FGIM。默认策略仍为 `"odescent"`。
 `fgim_refinement_iterations` 为非负整数，默认 4；设置为 0 时不执行 refinement。
+单独设置此参数仍使用默认的 `odescent` 策略；为其他策略提供此参数时，VSAG 会输出警告。
 持久 k-NNG 的度数上限 k 使用目标索引的 `max_degree`；CrossQuery 的 top-k
 和搜索宽度均为 `ceil(k / (源图数量 - 1))`。
 
