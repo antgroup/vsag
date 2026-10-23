@@ -1,0 +1,274 @@
+name: Team Isolation Worker
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  TEAM_ARTIFACTS: /__ci/artifacts
+  TEAM_IMAGE: ghcr.io/antgroup/vsag@sha256:ccfe5a122031782debf8c24d41e648029f79a98d0bc5a0a7217bcb1a05ca4e17
+  TEAM_REPOSITORY_ID: ${{ github.repository_id }}
+  TEAM_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  TEAM_TEST_SHA: ${{ github.sha }}
+
+jobs:
+  build:
+    name: Probe producer
+    if: github.event.pull_request.head.repo.full_name == 'wxyucs/vsag' && (github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe' || github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe-b' || github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe-c')
+    runs-on: vsag-linux-validate
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/antgroup/vsag@sha256:ccfe5a122031782debf8c24d41e648029f79a98d0bc5a0a7217bcb1a05ca4e17
+    env:
+      HOME: /tmp/ci-home
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare home
+        run: mkdir -p "$HOME"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Configure Git workspace trust
+        run: ./scripts/ci/configure-git-safe-directory.sh
+      - name: Prepare source handoff identity
+        run: |
+          set -euo pipefail
+          test "$(id -u)" != 0
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          python3 -I - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          assert root.is_absolute() and root.resolve() == root, 'Artifact path must be canonical'
+          assert os.path.ismount(root), 'Shared artifact volume is not mounted'
+          mount = next((line.split() for line in pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
+                        if line.split()[4] == str(root)), None)
+          assert mount and 'rw' in mount[5].split(','), 'Producer artifact volume must be writable'
+          context = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          assert all(context.values()), 'Missing execution identity'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == context['test_sha']
+          (root / 'meta').mkdir()
+          (root / 'build').mkdir()
+          inventory = {'schema': 1, 'kind': 'source-handoff-probe', 'context': context,
+                       'scope': 'Micro source and artifact transfer only; no C++ test coverage', 'tests': []}
+          plan = {'schema': 1, 'kind': 'source-handoff-probe', 'inventory': inventory}
+          for name, value in (('context.json', context), ('inventory.json', inventory), ('plan.json', plan)):
+              (root / 'meta' / name).write_text(json.dumps(value, sort_keys=True) + '\n')
+          PY
+      - name: Publish exact-commit source
+        run: |
+          python3 scripts/ci/team_source.py \
+            --repository "$GITHUB_WORKSPACE" --destination "$TEAM_ARTIFACTS/source" \
+            --context "$TEAM_ARTIFACTS/meta/context.json" --manifest "$TEAM_ARTIFACTS/meta/source.json"
+      - name: Seal small run artifact
+        run: |
+          python3 -I - <<'PY'
+          import hashlib, json, os, pathlib
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          meta = root / 'meta'
+          context = json.loads((meta / 'context.json').read_text())
+          payload = {'kind': 'source-handoff-probe', 'context': context,
+                     'source_manifest_sha256': hashlib.sha256((meta / 'source.json').read_bytes()).hexdigest()}
+          path = root / 'probe.json'
+          with path.open('x') as stream:
+              json.dump(payload, stream, sort_keys=True)
+              stream.write('\n')
+          names = ('context.json', 'inventory.json', 'plan.json', 'source.json')
+          complete = {name: hashlib.sha256((meta / name).read_bytes()).hexdigest() for name in names}
+          with (meta / 'complete.pending').open('x') as stream:
+              json.dump(complete, stream, sort_keys=True)
+              stream.write('\n')
+          (meta / 'complete.pending').rename(meta / 'complete.json')
+          pathlib.Path('probe-digest.txt').write_text(hashlib.sha256(path.read_bytes()).hexdigest() + '\n')
+          print(json.dumps(payload))
+          PY
+      - uses: actions/upload-artifact@v5
+        with:
+          name: producer-digest
+          path: probe-digest.txt
+          retention-days: 3
+  consumer_gate:
+    name: Allow producer cleanup
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - run: sleep 120
+  test:
+    name: Probe consumer ${{ matrix.shard }}
+    needs: consumer_gate
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: vsag-linux-validate
+    timeout-minutes: 10
+    container:
+      image: ghcr.io/antgroup/vsag@sha256:ccfe5a122031782debf8c24d41e648029f79a98d0bc5a0a7217bcb1a05ca4e17
+    env:
+      HOME: /tmp/ci-home
+      PROBE_SHARD: ${{ matrix.shard }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Prepare home
+        run: mkdir -p "$HOME"
+      - name: Verify read-only artifacts and execution identity
+        id: artifacts
+        run: |
+          test "$(id -u)" != 0
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          python3 -I - <<'PY'
+          import hashlib, json, os, pathlib, re, stat
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          assert root.is_absolute() and root.resolve() == root, 'Artifact path must be canonical'
+          assert os.path.ismount(root), 'Shared artifact volume is not mounted'
+          mount = next((line.split() for line in pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
+                        if line.split()[4] == str(root)), None)
+          assert mount and 'ro' in mount[5].split(','), 'Test artifact volume must be read-only'
+          meta, source = root / 'meta', root / 'source'
+          assert stat.S_ISDIR(meta.lstat().st_mode) and stat.S_ISDIR(source.lstat().st_mode), 'Invalid artifact directories'
+          def read_regular(path, maximum):
+              with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+                  info = os.fstat(stream.fileno())
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= maximum, 'Invalid artifact file'
+                  content = stream.read(maximum + 1)
+                  assert len(content) == info.st_size, 'Artifact size changed'
+                  return content
+          assert (meta / 'complete.json').is_file(), 'No complete artifacts; use Re-run all jobs'
+          complete = json.loads(read_regular(meta / 'complete.json', 16384))
+          assert set(complete) == {'context.json', 'inventory.json', 'plan.json', 'source.json'}, 'Invalid completion manifest'
+          metadata = {}
+          for name, checksum in complete.items():
+              content = read_regular(meta / name, 16 * 1024 * 1024)
+              assert hashlib.sha256(content).hexdigest() == checksum, 'Metadata checksum mismatch'
+              metadata[name] = json.loads(content)
+          context = metadata['context.json']
+          expected = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          assert all(expected.values()) and context == expected, 'Artifact run/attempt/SHA mismatch; use Re-run all jobs'
+          inventory, plan, manifest = metadata['inventory.json'], metadata['plan.json'], metadata['source.json']
+          assert inventory['context'] == context and plan['inventory'] == inventory, 'Plan identity mismatch'
+          assert set(manifest) == {'schema', 'context', 'files'} and manifest['schema'] == 1, 'Invalid source manifest'
+          assert manifest['context'] == expected, 'Source run/attempt/SHA mismatch'
+          files = manifest['files']
+          assert isinstance(files, dict) and 0 < len(files) <= 100000, 'Invalid source inventory'
+          expected_dirs, total = {''}, 0
+          for name, entry in files.items():
+              parts = pathlib.PurePosixPath(name).parts
+              assert parts and name == '/'.join(parts) and not name.startswith('/') and '\\' not in name, 'Unsafe source path'
+              assert not any(ord(char) < 32 or ord(char) == 127 for char in name), 'Unsafe source path'
+              assert not any(part in ('.', '..') or part.lower() == '.git' for part in parts), 'Unsafe source path'
+              assert parts[0] not in {'build', 'ci-logs', '.ci-downloads'}, 'Reserved source path'
+              assert set(entry) == {'mode', 'size', 'sha256'}, 'Invalid source file entry'
+              assert type(entry['mode']) is int and entry['mode'] in (0o644, 0o755), 'Invalid source file mode'
+              assert type(entry['size']) is int and 0 <= entry['size'] <= 256 * 1024 * 1024, 'Invalid source file size'
+              assert isinstance(entry['sha256'], str) and re.fullmatch('[0-9a-f]{64}', entry['sha256']), 'Invalid source digest'
+              total += entry['size']
+              expected_dirs.update('/'.join(parts[:index]) for index in range(1, len(parts)))
+          assert total <= 2 * 1024 * 1024 * 1024, 'Source inventory exceeds size bound'
+          actual_files, actual_dirs = set(), {''}
+          for directory, dirs, names in os.walk(source, followlinks=False):
+              for name in dirs:
+                  path = pathlib.Path(directory) / name
+                  assert stat.S_ISDIR(path.lstat().st_mode), 'Source directory must not be a symlink'
+                  actual_dirs.add(path.relative_to(source).as_posix())
+              for name in names:
+                  path = pathlib.Path(directory) / name
+                  relative = path.relative_to(source).as_posix()
+                  assert relative in files, 'Unexpected source file'
+                  info = path.lstat()
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1, 'Source must contain only private regular files'
+                  entry = files[relative]
+                  assert stat.S_IMODE(info.st_mode) == entry['mode'], 'Source permission mismatch'
+                  assert info.st_size == entry['size'], 'Source size mismatch'
+                  content = read_regular(path, entry['size'])
+                  assert hashlib.sha256(content).hexdigest() == entry['sha256'], 'Source checksum mismatch'
+                  actual_files.add(relative)
+          assert actual_files == set(files) and actual_dirs == expected_dirs, 'Source inventory mismatch'
+          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          assert workspace.is_absolute() and workspace.resolve() == workspace and workspace == pathlib.Path.cwd(), 'Invalid private workspace'
+          assert root != workspace and root not in workspace.parents and workspace not in root.parents, 'Workspace overlaps artifacts'
+          assert not any(workspace.iterdir()), 'Private workspace must be empty'
+          # This inline bootstrap is approved with the workflow, before any exported script
+          # executes. The controller authenticates the run/PVC and stops all writers;
+          # self-reported manifests only detect inconsistent or stale artifact contents.
+          for name, entry in files.items():
+              destination = workspace / name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              content = read_regular(source / name, entry['size'])
+              assert len(content) == entry['size'] and hashlib.sha256(content).hexdigest() == entry['sha256'], 'Source changed during copy'
+              with destination.open('xb') as output:
+                  output.write(content)
+              destination.chmod(entry['mode'])
+              assert hashlib.sha256(read_regular(destination, entry['size'])).hexdigest() == entry['sha256'], 'Private source copy mismatch'
+          pathlib.Path('build').symlink_to(root / 'build', target_is_directory=True)
+          PY
+      - name: Validate read-only shared artifact
+        run: |
+          set -euo pipefail
+          python3 -I - <<'PY'
+          import errno, hashlib, json, os, pathlib, stat
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          path = root / 'probe.json'
+          with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+              info = os.fstat(stream.fileno())
+              assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= 16384
+              content = stream.read(16385)
+              assert len(content) == info.st_size
+          payload = json.loads(content)
+          context = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          expected = {'kind': 'source-handoff-probe', 'context': context,
+                      'source_manifest_sha256': hashlib.sha256((root / 'meta/source.json').read_bytes()).hexdigest()}
+          assert payload == expected, 'Probe identity/source manifest mismatch'
+          assert not pathlib.Path('.git').exists(), 'Git credentials or metadata must not be copied'
+          try:
+              (root / ('forbidden-' + os.environ['PROBE_SHARD'])).write_text('no')
+          except OSError as exc:
+              assert exc.errno == errno.EROFS, exc
+          else:
+              raise AssertionError('Shared artifact is writable')
+          assert not pathlib.Path('/var/run/secrets/kubernetes.io/serviceaccount/token').exists()
+          marker = 'probe-private-' + os.environ['PROBE_SHARD']
+          pathlib.Path(marker).write_text('private consumer workspace\n')
+          assert not (root / 'source' / marker).exists(), 'Private workspace overlaps shared source'
+          pathlib.Path('consumer-digest.txt').write_text(hashlib.sha256(content).hexdigest() + '\n')
+          print(json.dumps(payload))
+          PY
+          sleep 30
+      - uses: actions/upload-artifact@v5
+        with:
+          name: consumer-${{ matrix.shard }}
+          path: consumer-digest.txt
+          retention-days: 3
+  summary:
+    name: Probe summary
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: probe-results
+      - name: Validate artifact roundtrip
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          root=Path('probe-results')
+          expected=(root/'producer-digest/probe-digest.txt').read_text()
+          for shard in range(4):
+              assert (root/f'consumer-{shard}/consumer-digest.txt').read_text()==expected
+          print('All four consumers and the downloaded producer artifact match.')
+          PY
