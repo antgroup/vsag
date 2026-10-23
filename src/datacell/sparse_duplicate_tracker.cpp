@@ -78,8 +78,11 @@ write_group(StreamWriter& writer,
 
 auto
 to_ordered_members(const std::vector<InnerIdType>& members) -> std::vector<InnerIdType> {
-    if (members.size() < 2) {
-        return members;
+    if (members.empty()) {
+        return {};
+    }
+    if (members.size() == 1) {
+        return {members.front()};
     }
 
     auto group_id = canonical_group_id(members);
