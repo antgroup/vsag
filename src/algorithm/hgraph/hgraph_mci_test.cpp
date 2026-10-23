@@ -63,6 +63,16 @@ struct HGraphMCITestAccess {
         }
     }
 
+    static void
+    DisableUpperLevels(HGraph& index) {
+        index.mult_ = 0.0;
+    }
+
+    static bool
+    HasUpperLevels(const HGraph& index) {
+        return not index.route_graphs_.empty();
+    }
+
     static CliqueDataCellPtr
     GetCliques(const HGraph& index) {
         return index.mci_cliques_;
@@ -797,7 +807,10 @@ TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fail
                                   common);
     std::vector<int64_t> ids{0, 1, 2, 3, 4, 5};
     std::vector<float> vectors{0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6};
+    // Exercise the missing-entry-point regression on both libc++ and libstdc++.
+    vsag::HGraphMCITestAccess::DisableUpperLevels(index);
     REQUIRE(index.Build(make_dataset(ids, vectors, 0, 6, 2)).empty());
+    REQUIRE_FALSE(vsag::HGraphMCITestAccess::HasUpperLevels(index));
     // Clique construction is heuristic: deleting a singleton has no surviving repair seed.
     // Install a known topology so the injected search failure is always reached, including
     // repair of old tail ID 5 after FORCE_REMOVE moves it into slot 0.
