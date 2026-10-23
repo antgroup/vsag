@@ -15,7 +15,10 @@
 
 #include "hgraph_parameter.h"
 
+#include <algorithm>
+#include <array>
 #include <cmath>
+#include <string_view>
 
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -46,7 +49,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(json["merge_strategy"].IsString(), "merge_strategy must be a string");
         merge_strategy = json["merge_strategy"].GetString();
     }
-    CHECK_ARGUMENT(merge_strategy == "odescent" || merge_strategy == "fgim",
+    static constexpr std::array<std::string_view, 2> merge_strategies{"odescent", "fgim"};
+    CHECK_ARGUMENT(std::find(merge_strategies.begin(), merge_strategies.end(), merge_strategy) !=
+                       merge_strategies.end(),
                    "merge_strategy must be odescent or fgim");
     if (json.Contains("fgim_refinement_iterations")) {
         CHECK_ARGUMENT(json["fgim_refinement_iterations"].IsNumberUnsigned(),

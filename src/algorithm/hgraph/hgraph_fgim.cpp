@@ -653,7 +653,7 @@ HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
     destination.entry_point_id_ = 0;
     // Match the native HGraph seed, independent of earlier destination Build/Add calls.
     destination.level_generator_.seed(2021);
-    std::vector<float> vector(destination.dim_);
+    Vector<float> vector(destination.dim_, destination.allocator_);
     const auto codes = destination.has_precise_reorder() && !destination.build_by_base_
                            ? destination.high_precise_codes_
                            : destination.basic_flatten_codes_;
@@ -716,26 +716,14 @@ HGraphFGIM::Merge(HGraph& destination,
     }
     const auto k = destination.bottom_graph_->MaximumDegree();
     const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
-    // Destination may be empty and cannot use source validation. Repeat the storage
-    // checks here for it; all indexes additionally reject auxiliary metadata.
-    const auto validate_metadata = [&](const HGraph& index) {
-        const bool valid_condition_7 =
-            index.data_type_ == DataTypes::DATA_TYPE_FLOAT &&
-            index.metric_ == MetricType::METRIC_TYPE_L2SQR && index.dim_ == sources.front()->dim_ &&
-            index.basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 &&
-            (!index.has_precise_reorder() ||
-             index.high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) &&
-            (!index.create_new_raw_vector_ ||
-             index.raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
-        CHECK_ARGUMENT(valid_condition_7,
-                       "FGIM destination and sources require homogeneous float32/L2/fp32 storage");
-        const bool valid_condition_8 = !index.deduplicate_storage_ && !index.support_duplicate_ &&
-                                       index.GetNumberRemoved() == 0 &&
-                                       !index.use_conjugate_graph_ &&
-                                       !index.mci_parameters_.enabled && !index.has_attribute_ &&
+    // Source storage was checked above. The empty destination shares the same constraints.
+    ValidateStorage(destination);
+    CHECK_ARGUMENT(destination.dim_ == sources.front()->dim_,
+                   "FGIM destination and sources require matching dimensions");
+    const auto validate_metadata = [](const HGraph& index) {
+        const bool valid_condition_8 = !index.mci_parameters_.enabled && !index.has_attribute_ &&
                                        index.extra_info_size_ == 0 && !index.persist_source_id_;
-        CHECK_ARGUMENT(valid_condition_8,
-                       "FGIM does not support deletion, duplicate tracking or auxiliary metadata");
+        CHECK_ARGUMENT(valid_condition_8, "FGIM does not support auxiliary metadata");
     };
     validate_metadata(destination);
     for (const auto* source : sources) {
@@ -804,7 +792,7 @@ HGraphFGIM::Merge(HGraph& destination,
     global_lock.unlock();
     destination.resize(offsets.back());
     global_lock.lock();
-    std::vector<float> vector(destination.dim_);
+    Vector<float> vector(destination.dim_, destination.allocator_);
     for (uint64_t i = 0; i < sources.size(); ++i) {
         const auto& source = *sources[i];
         if (&source == &destination) {

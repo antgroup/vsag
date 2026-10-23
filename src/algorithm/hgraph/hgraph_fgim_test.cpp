@@ -138,6 +138,10 @@ public:
             graph.label_table_ = nullptr;
         } else if (condition == "incomplete code writes") {
             graph.pending_code_writes_[0] = HGraph::BASE_CODE;
+        } else if (condition == "auxiliary metadata") {
+            graph.persist_source_id_ = true;
+        } else if (condition == "missing merge parameters") {
+            graph.create_param_ptr_ = nullptr;
         }
     }
 
@@ -1322,6 +1326,54 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
     SetUnsupported(*destination, "missing label table");
     REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM validates destination storage and source auxiliary metadata",
+                 "[ut][hgraph][fgim]") {
+    auto destination = std::shared_ptr<HGraph>(MakeSource(0, 3, false, "fp32", false, false, true));
+    auto lhs = std::shared_ptr<HGraph>(MakeSource(3, 0));
+    auto rhs = std::shared_ptr<HGraph>(MakeSource(3, 1));
+    auto wrap = [&](const std::shared_ptr<HGraph>& graph) {
+        return std::make_shared<IndexImpl<HGraph>>(graph, common);
+    };
+    auto output = wrap(destination);
+    const std::vector<MergeUnit> units{{wrap(lhs), nullptr}, {wrap(rhs), nullptr}};
+    SECTION("missing destination base storage") {
+        SetUnsupported(*destination, "base storage");
+    }
+    SECTION("incomplete destination code writes") {
+        SetUnsupported(*destination, "incomplete code writes");
+    }
+    SECTION("source auxiliary metadata") {
+        SetUnsupported(*lhs, "auxiliary metadata");
+    }
+    SECTION("missing merge parameters") {
+        SetUnsupported(*destination, "missing merge parameters");
+    }
+    const auto result = output->Merge(units);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == ErrorType::INVALID_ARGUMENT);
+    REQUIRE(destination->GetNumElements() == 0);
+    REQUIRE(lhs->GetNumElements() == 3);
+    REQUIRE(rhs->GetNumElements() == 3);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM iteration settings preserve the selected merge strategy",
+                 "[ut][hgraph][fgim]") {
+    JsonType external;
+    external["base_quantization_type"].SetString("fp32");
+    external["max_degree"].SetUint64(8);
+    external["ef_construction"].SetUint64(40);
+    external["fgim_refinement_iterations"].SetUint64(3);
+    const auto parameters = std::dynamic_pointer_cast<HGraphParameter>(
+        HGraph::CheckAndMappingExternalParam(external, common));
+    REQUIRE(parameters->merge_strategy == "odescent");
+    REQUIRE(parameters->fgim_refinement_iterations == 3);
+    const HGraphParameter restored(parameters->ToJson());
+    REQUIRE(restored.merge_strategy == "odescent");
+    REQUIRE(restored.fgim_refinement_iterations == 3);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
