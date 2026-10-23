@@ -1,0 +1,644 @@
+name: Team CI
+
+on:
+  workflow_call:
+    inputs:
+      image:
+        type: string
+        required: true
+      runner:
+        type: string
+        default: vsag-linux-x64
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  TEAM_ARTIFACTS: /__ci/artifacts
+  TEAM_IMAGE: ${{ inputs.image }}
+  TEAM_REPOSITORY_ID: ${{ github.repository_id }}
+  TEAM_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+  TEAM_TEST_SHA: ${{ github.sha }}
+  OMP_NUM_THREADS: '2'
+  OPENBLAS_NUM_THREADS: '2'
+  ACTIONS_ARTIFACT_UPLOAD_CONCURRENCY: '1'
+
+jobs:
+  changes:
+    name: Detect Team Linux Changes
+    runs-on: ubuntu-22.04
+    outputs:
+      cpp: ${{ steps.changes.outputs.cpp }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            cpp:
+              - 'src/**'
+              - 'include/**'
+              - 'tests/**'
+              - 'tools/**'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'extern/**'
+              - 'cmake/**'
+              - 'examples/cpp/**'
+              - '.github/actions/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+              - '.clang-tidy'
+              - '.clang-format'
+
+  checks:
+    name: Team Format and Helper Checks
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /tmp/ci-home
+    steps:
+      - name: Prepare writable check home
+        run: mkdir -p "$HOME"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check hosted prerequisites
+        run: |
+          ./scripts/ci/configure-git-safe-directory.sh
+          test "$(git rev-parse HEAD)" = "$TEAM_TEST_SHA"
+          test "$(clang-format-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
+      - name: Format and helper checks
+        run: |
+          ./scripts/format/check_format.sh
+          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
+          python3 -m unittest tests/scripts/test_collect_build_metrics.py
+          python3 -m unittest tests/scripts/test_dependency_workflows.py
+          python3 -m unittest tests/scripts/test_team_test_shards.py
+          python3 -m unittest tests/scripts/test_team_mixed.py
+          python3 -m unittest tests/scripts/test_team_workflow.py
+          python3 -m unittest tests/scripts/test_team_cache.py
+          python3 -m unittest tests/scripts/test_team_source.py
+          python3 -m unittest tests/scripts/test_compatibility_inputs.py
+          python3 -m unittest tests/scripts/test_compatibility_cache.py
+
+  build:
+    name: Team ASan Build
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /tmp/ci-home
+      COMPILE_JOBS: '24'
+      CC: gcc
+      CXX: g++
+      CMAKE_GENERATOR: Ninja
+      CMAKE_EXPORT_COMPILE_COMMANDS: 'ON'
+      EXTRA_DEFINED: '-DVSAG_USE_SYSTEM_OPENBLAS=ON -DCMAKE_DISABLE_PRECOMPILE_HEADERS=ON'
+      VSAG_ENABLE_EXAMPLES: 'ON'
+      VSAG_ENABLE_TOOLS: 'ON'
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+    steps:
+      - name: Prepare writable job home
+        run: mkdir -p "$HOME"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check non-root runner prerequisites
+        run: |
+          set -euo pipefail
+          test "$(id -u)" != 0
+          # Deployment enforces credentials, mount ownership and authorization.
+          # This checks consistency, not the complete isolation boundary.
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          test "$(clang-tidy-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
+          test "$(clang-format-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
+          test "$(gh --version | head -1 | awk '{print $3}')" = 2.75.0
+          test -x /usr/bin/time
+          command -v ccache
+          ./scripts/ci/configure-git-safe-directory.sh
+      - name: Prepare shared build and execution identity
+        run: |
+          mkdir -p ci-logs
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          assert os.path.ismount(root), 'Shared artifact volume is not mounted'
+          mount = next((line.split() for line in pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
+                        if line.split()[4] == str(root)), None)
+          assert mount and 'rw' in mount[5].split(','), 'Build artifact volume must be writable'
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == os.environ['TEAM_TEST_SHA']
+          context = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          assert all(context.values()), 'Missing execution identity'
+          # A reused or partially published directory must not be overwritten.
+          (root / 'meta').mkdir()
+          (root / 'build').mkdir()
+          (root / 'meta/context.json').write_text(json.dumps(context, sort_keys=True) + '\n')
+          pathlib.Path('build').symlink_to(root / 'build', target_is_directory=True)
+          PY
+      - name: Publish exact-commit source for this run
+        run: |
+          python3 scripts/ci/team_source.py \
+            --repository "$GITHUB_WORKSPACE" --destination "$TEAM_ARTIFACTS/source" \
+            --context "$TEAM_ARTIFACTS/meta/context.json" --manifest "$TEAM_ARTIFACTS/meta/source.json"
+      - name: Restore a private compiler cache
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib, platform, subprocess
+          namespace = {
+              'image': os.environ['TEAM_IMAGE'],
+              'compiler': subprocess.check_output(['g++', '--version'], text=True).splitlines()[0],
+              'arch': platform.machine(), 'sanitizer': 'asan',
+              'build_options': 'Sanitize;ASAN=ON;TSAN=OFF;OPENBLAS=ON;TESTS=ON;TOOLS=ON;EXAMPLES=ON;CMAKE_DISABLE_PRECOMPILE_HEADERS=ON;Ninja',
+              'path_scheme': 'workspace-relative-shared-build-v1'}
+          pathlib.Path('ci-logs/cache-namespace.json').write_text(json.dumps(namespace, sort_keys=True) + '\n')
+          PY
+          cache="$RUNNER_TEMP/team-ccache"
+          test ! -e "$cache"
+          # Hooks authenticate the publisher and mount this snapshot read-only.
+          # The helper only verifies namespace, inventory and copy consistency.
+          if [ -d /__ci/cache/snapshot ] && [ -f /__ci/cache/manifest.json ]; then
+            if ! python3 scripts/ci/team_cache.py restore \
+              --source /__ci/cache/snapshot --manifest /__ci/cache/manifest.json \
+              --namespace-file ci-logs/cache-namespace.json --destination "$cache" \
+              > ci-logs/cache-restore.json; then
+              echo 'Compiler cache rejected; using a fresh cold cache.'
+              test ! -e "$cache"
+              mkdir "$cache"
+            fi
+          else
+            mkdir "$cache"
+            printf '{"ok":false,"state":"absent"}\n' > ci-logs/cache-restore.json
+          fi
+          {
+            echo "CCACHE_DIR=$cache"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+            echo 'CCACHE_COMPILERCHECK=content'
+          } >> "$GITHUB_ENV"
+      - name: Build ASan with 24 compile jobs
+        id: build
+        run: |
+          set -euo pipefail
+          ccache --zero-stats
+          /usr/bin/time -p make asan DEBUG_BUILD_DIR="$TEAM_ARTIFACTS/build" COMPILE_JOBS="$COMPILE_JOBS" 2>&1 | tee ci-logs/build.log
+      - name: Record compiler cache statistics
+        if: ${{ always() && steps.build.outcome != 'skipped' }}
+        run: |
+          ccache --show-stats --verbose > ci-logs/ccache.txt
+          ccache --print-stats > ci-logs/ccache-stats.tsv
+      - name: Find changed source files
+        id: changed-srcs
+        env:
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch origin "$BASE_BRANCH" --depth=1
+          pattern=$(python3 scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH")
+          echo "pattern=$pattern" >> "$GITHUB_OUTPUT"
+      - name: Lint changed sources
+        if: steps.changed-srcs.outputs.pattern != ''
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
+        run: |
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color \
+            -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 "$LINT_PATTERN"
+      - name: Prepare inventory runtime
+        run: |
+          printf 'leak:libomp.so\nleak:libgomp.so\n' > "$RUNNER_TEMP/omp.supp"
+          echo "LSAN_OPTIONS=suppressions=$RUNNER_TEMP/omp.supp" >> "$GITHUB_ENV"
+      - name: Publish test inventory and shard plan
+        env:
+          LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune
+        run: |
+          python3 - <<'PY'
+          import importlib.util, pathlib, threading
+          spec = importlib.util.spec_from_file_location('shards', 'scripts/testing/team_test_shards.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          # These tools previously ran without a daily filter. Verify equivalence
+          # before placing them in the shared non-daily Catch2 inventory.
+          for relative in ('tools/eval/eval_dataset_test', 'tools/autotune/autotune_test', 'tests/eval_monitor_test'):
+              binary = (pathlib.Path('build') / relative).resolve()
+              root = (pathlib.Path('ci-logs/tool-inventory') / relative).resolve()
+              default = module.listing(binary, '', 424242, root / 'default', 60, threading.Event())
+              filtered = module.listing(binary, '~[daily]', 424242, root / 'filtered', 60, threading.Event())
+              assert default == filtered, f'Tool filter changes test scope: {relative}'
+          PY
+          python3 scripts/testing/team_test_shards.py inventory \
+            --build-root "$TEAM_ARTIFACTS/build" \
+            --binary tests/unittests --binary tests/functests \
+            --binary tools/eval/eval_dataset_test --binary tools/autotune/autotune_test \
+            --binary tests/eval_monitor_test --seed 424242 \
+            --examples-directory examples/cpp \
+            --context "$TEAM_ARTIFACTS/meta/context.json" \
+            --diagnostics-dir "$PWD/ci-logs/inventory" \
+            --output "$TEAM_ARTIFACTS/meta/inventory.json"
+          # History is a scheduling hint: only IDs from this freshly generated
+          # inventory match. Old source-path identities are never normalized here.
+          duration_args=()
+          if [ -f /__ci/cache/history.json ] && [ -f /__ci/cache/manifest.json ]; then
+            if python3 scripts/ci/team_cache.py verify-history \
+              --history /__ci/cache/history.json --manifest /__ci/cache/manifest.json \
+              --namespace-file ci-logs/cache-namespace.json > ci-logs/history-verify.json; then
+              duration_args=(--durations /__ci/cache/history.json)
+            else
+              echo 'Duration hints rejected; scheduling the complete inventory without hints.'
+            fi
+          else
+            echo 'Duration hints unavailable; scheduling the complete inventory without hints.'
+          fi
+          python3 scripts/testing/team_test_shards.py plan \
+            --inventory "$TEAM_ARTIFACTS/meta/inventory.json" --shards 4 \
+            "${duration_args[@]}" --output "$TEAM_ARTIFACTS/meta/plan.json"
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib
+          meta = pathlib.Path(os.environ['TEAM_ARTIFACTS']) / 'meta'
+          names = ('context.json', 'inventory.json', 'plan.json', 'source.json')
+          complete = {name: hashlib.sha256((meta / name).read_bytes()).hexdigest() for name in names}
+          pending = meta / 'complete.pending'
+          pending.write_text(json.dumps(complete, sort_keys=True) + '\n')
+          pending.rename(meta / 'complete.json')
+          PY
+      - name: Upload small test plan
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /__ci/artifacts/meta/context.json
+            /__ci/artifacts/meta/inventory.json
+            /__ci/artifacts/meta/plan.json
+            /__ci/artifacts/meta/source.json
+            /__ci/artifacts/meta/complete.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload build diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 6
+
+  tests:
+    name: Team Test shard ${{ matrix.shard }}
+    needs: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        shard: [0, 1, 2, 3]
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /tmp/ci-home
+      LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune
+    steps:
+      - name: Prepare writable job home
+        run: mkdir -p "$HOME"
+      - name: Verify read-only artifacts and execution identity
+        id: artifacts
+        # Reused below as approved workflow text, before any exported script runs.
+        run: &team_consumer_bootstrap |
+          test "$(id -u)" != 0
+          test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
+          python3 -I - <<'PY'
+          import hashlib, json, os, pathlib, re, stat
+          root = pathlib.Path(os.environ['TEAM_ARTIFACTS'])
+          assert root.is_absolute() and root.resolve() == root, 'Artifact path must be canonical'
+          assert os.path.ismount(root), 'Shared artifact volume is not mounted'
+          mount = next((line.split() for line in pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
+                        if line.split()[4] == str(root)), None)
+          assert mount and 'ro' in mount[5].split(','), 'Consumer artifact volume must be read-only'
+          meta, source = root / 'meta', root / 'source'
+          assert stat.S_ISDIR(meta.lstat().st_mode) and stat.S_ISDIR(source.lstat().st_mode), 'Invalid artifact directories'
+          def read_regular(path, maximum):
+              with os.fdopen(os.open(path, os.O_RDONLY | os.O_NOFOLLOW), 'rb') as stream:
+                  info = os.fstat(stream.fileno())
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and info.st_size <= maximum, 'Invalid artifact file'
+                  content = stream.read(maximum + 1)
+                  assert len(content) == info.st_size, 'Artifact size changed'
+                  return content
+          assert (meta / 'complete.json').is_file(), 'No complete artifacts; use Re-run all jobs'
+          complete = json.loads(read_regular(meta / 'complete.json', 16384))
+          assert set(complete) == {'context.json', 'inventory.json', 'plan.json', 'source.json'}, 'Invalid completion manifest'
+          metadata = {}
+          for name, checksum in complete.items():
+              content = read_regular(meta / name, 16 * 1024 * 1024)
+              assert hashlib.sha256(content).hexdigest() == checksum, 'Metadata checksum mismatch'
+              metadata[name] = json.loads(content)
+          context = metadata['context.json']
+          expected = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          assert all(expected.values()) and context == expected, 'Artifact run/attempt/SHA mismatch; use Re-run all jobs'
+          inventory, plan, manifest = metadata['inventory.json'], metadata['plan.json'], metadata['source.json']
+          assert inventory['context'] == context and plan['inventory'] == inventory, 'Plan identity mismatch'
+          assert set(manifest) == {'schema', 'context', 'files'} and manifest['schema'] == 1, 'Invalid source manifest'
+          assert manifest['context'] == expected, 'Source run/attempt/SHA mismatch'
+          files = manifest['files']
+          assert isinstance(files, dict) and 0 < len(files) <= 100000, 'Invalid source inventory'
+          expected_dirs, total = {''}, 0
+          for name, entry in files.items():
+              parts = pathlib.PurePosixPath(name).parts
+              assert parts and name == '/'.join(parts) and not name.startswith('/') and '\\' not in name, 'Unsafe source path'
+              assert not any(ord(char) < 32 or ord(char) == 127 for char in name), 'Unsafe source path'
+              assert not any(part in ('.', '..') or part.lower() == '.git' for part in parts), 'Unsafe source path'
+              assert parts[0] not in {'build', 'ci-logs', '.ci-downloads'}, 'Reserved source path'
+              assert set(entry) == {'mode', 'size', 'sha256'}, 'Invalid source file entry'
+              assert type(entry['mode']) is int and entry['mode'] in (0o644, 0o755), 'Invalid source file mode'
+              assert type(entry['size']) is int and 0 <= entry['size'] <= 256 * 1024 * 1024, 'Invalid source file size'
+              assert isinstance(entry['sha256'], str) and re.fullmatch('[0-9a-f]{64}', entry['sha256']), 'Invalid source digest'
+              total += entry['size']
+              expected_dirs.update('/'.join(parts[:index]) for index in range(1, len(parts)))
+          assert total <= 2 * 1024 * 1024 * 1024, 'Source inventory exceeds size bound'
+          actual_files, actual_dirs = set(), {''}
+          for directory, dirs, names in os.walk(source, followlinks=False):
+              for name in dirs:
+                  path = pathlib.Path(directory) / name
+                  assert stat.S_ISDIR(path.lstat().st_mode), 'Source directory must not be a symlink'
+                  actual_dirs.add(path.relative_to(source).as_posix())
+              for name in names:
+                  path = pathlib.Path(directory) / name
+                  relative = path.relative_to(source).as_posix()
+                  assert relative in files, 'Unexpected source file'
+                  info = path.lstat()
+                  assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1, 'Source must contain only private regular files'
+                  entry = files[relative]
+                  assert stat.S_IMODE(info.st_mode) == entry['mode'], 'Source permission mismatch'
+                  assert info.st_size == entry['size'], 'Source size mismatch'
+                  content = read_regular(path, entry['size'])
+                  assert hashlib.sha256(content).hexdigest() == entry['sha256'], 'Source checksum mismatch'
+                  actual_files.add(relative)
+          assert actual_files == set(files) and actual_dirs == expected_dirs, 'Source inventory mismatch'
+          workspace = pathlib.Path(os.environ['GITHUB_WORKSPACE'])
+          assert workspace.is_absolute() and workspace.resolve() == workspace and workspace == pathlib.Path.cwd(), 'Invalid private workspace'
+          assert root != workspace and root not in workspace.parents and workspace not in root.parents, 'Workspace overlaps artifacts'
+          assert not any(workspace.iterdir()), 'Private workspace must be empty'
+          # This inline bootstrap is approved with the workflow, before any exported script
+          # executes. The controller authenticates the run/PVC and stops all writers;
+          # self-reported manifests only detect inconsistent or stale artifact contents.
+          for name, entry in files.items():
+              destination = workspace / name
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              content = read_regular(source / name, entry['size'])
+              assert len(content) == entry['size'] and hashlib.sha256(content).hexdigest() == entry['sha256'], 'Source changed during copy'
+              with destination.open('xb') as output:
+                  output.write(content)
+              destination.chmod(entry['mode'])
+              assert hashlib.sha256(read_regular(destination, entry['size'])).hexdigest() == entry['sha256'], 'Private source copy mismatch'
+          pathlib.Path('build').symlink_to(root / 'build', target_is_directory=True)
+          PY
+      - name: Prepare runtime environment
+        if: ${{ !cancelled() && steps.artifacts.outcome == 'success' }}
+        run: &team_consumer_runtime |
+          mkdir -p ci-logs
+          printf 'leak:libomp.so\nleak:libgomp.so\n' > "$RUNNER_TEMP/omp.supp"
+          echo "LSAN_OPTIONS=suppressions=$RUNNER_TEMP/omp.supp" >> "$GITHUB_ENV"
+      - name: Run Catch2 shard and assigned examples
+        id: catch2
+        if: ${{ !cancelled() && steps.artifacts.outcome == 'success' }}
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+        run: |
+          python3 scripts/testing/team_test_shards.py run \
+            --plan "$TEAM_ARTIFACTS/meta/plan.json" --build-root "$TEAM_ARTIFACTS/build" \
+            --shard "$SHARD_INDEX" --workers 4 --batch-size 32 --batch-target-seconds 25 --timeout 3600 --example-timeout 1800 \
+            --output-dir "$PWD/ci-logs/shard-$SHARD_INDEX"
+      - name: Record additional check outcomes
+        if: always()
+        env:
+          SHARD_INDEX: ${{ matrix.shard }}
+          CATCH2_OUTCOME: ${{ steps.catch2.outcome }}
+          EXAMPLES_OUTCOME: ${{ steps.catch2.outcome }}
+        run: |
+          mkdir -p ci-logs
+          python3 - <<'PY'
+          import json, os, pathlib
+          result = {'shard': int(os.environ['SHARD_INDEX']), 'run_id': os.environ['GITHUB_RUN_ID'],
+                    'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'test_sha': os.environ['TEAM_TEST_SHA'],
+                    'catch2': os.environ['CATCH2_OUTCOME'],
+                    'examples': os.environ['EXAMPLES_OUTCOME']}
+          pathlib.Path('ci-logs/extras.json').write_text(json.dumps(result, sort_keys=True) + '\n')
+          PY
+      - name: Upload small test results
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-results-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-logs/shard-${{ matrix.shard }}/result.json
+            ci-logs/extras.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-test-diagnostics-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ci-logs/
+            !ci-logs/shard-*/example-*/cwd/**
+            !ci-logs/shard-*/example-*/tmp/**
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 6
+
+  compatibility:
+    name: Team Index Compatibility
+    needs: build
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 120
+    container:
+      image: ${{ inputs.image }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      HOME: /tmp/ci-home
+      LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune
+    steps:
+      - name: Prepare writable job home
+        run: mkdir -p "$HOME"
+      - name: Verify compatibility artifacts and execution identity
+        id: artifacts
+        run: *team_consumer_bootstrap
+      - name: Prepare compatibility runtime environment
+        if: ${{ !cancelled() && steps.artifacts.outcome == 'success' }}
+        run: *team_consumer_runtime
+      - name: Check index compatibility
+        id: compatibility
+        if: ${{ !cancelled() && steps.artifacts.outcome == 'success' }}
+        run: |
+          # A missing verifier or incomplete cache is a hard failure.
+          python3 scripts/ci/verify_compatibility_cache.py \
+            --directory /__ci/compatibility --manifest /__ci/compatibility/manifest.json
+          COMPATIBILITY_INDEX_DIR=/__ci/compatibility BUILD_DIR="$TEAM_ARTIFACTS/build" \
+            bash ./scripts/check_compatibility.sh 2>&1 | tee ci-logs/compatibility.log
+      - name: Record compatibility outcome
+        if: always()
+        env:
+          ARTIFACTS_OUTCOME: ${{ steps.artifacts.outcome }}
+          COMPATIBILITY_OUTCOME: ${{ steps.compatibility.outcome }}
+        run: |
+          mkdir -p ci-logs
+          python3 - <<'PY'
+          import json, os, pathlib
+          context = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          result = {'schema': 1, 'kind': 'compatibility-result', 'context': context,
+                    'artifacts': os.environ['ARTIFACTS_OUTCOME'],
+                    'compatibility': os.environ['COMPATIBILITY_OUTCOME']}
+          pathlib.Path('ci-logs/compatibility-result.json').write_text(json.dumps(result, sort_keys=True) + '\n')
+          PY
+      - name: Upload small compatibility result
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-logs/compatibility-result.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Upload compatibility diagnostics
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-compatibility-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-logs/
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 6
+
+  summary:
+    name: Team Summary
+    if: always()
+    needs: [changes, checks, build, tests, compatibility]
+    runs-on: ubuntu-22.04
+    env:
+      CHANGE_RESULT: ${{ needs.changes.result }}
+      CPP_CHANGED: ${{ needs.changes.outputs.cpp }}
+      CHECK_RESULT: ${{ needs.checks.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+      TEST_RESULT: ${{ needs.tests.result }}
+      COMPATIBILITY_RESULT: ${{ needs.compatibility.result }}
+    steps:
+      - name: Report skipped Team checks
+        if: needs.changes.result == 'success' && needs.changes.outputs.cpp == 'false'
+        run: echo 'Team Linux checks skipped because no relevant files changed.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/checkout@v4
+        if: needs.changes.outputs.cpp == 'true'
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download small test plan
+        if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
+        uses: actions/download-artifact@v5
+        with:
+          name: team-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/plan
+      - name: Download small test results
+        if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
+        uses: actions/download-artifact@v5
+        with:
+          pattern: team-results-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/results
+      - name: Download small compatibility result
+        if: needs.changes.outputs.cpp == 'true' && needs.build.result == 'success'
+        uses: actions/download-artifact@v5
+        with:
+          name: team-compatibility-result-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/compatibility
+      - name: Verify complete test results
+        if: ${{ !cancelled() && needs.changes.outputs.cpp == 'true' && needs.build.result == 'success' }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, pathlib
+          spec = importlib.util.spec_from_file_location('shards', 'scripts/testing/team_test_shards.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          plan = json.loads(pathlib.Path('ci-summary/plan/plan.json').read_text())
+          expected_context = {key: os.environ[env] for key, env in (
+              ('repository_id', 'TEAM_REPOSITORY_ID'), ('run_id', 'GITHUB_RUN_ID'),
+              ('run_attempt', 'GITHUB_RUN_ATTEMPT'), ('head_sha', 'TEAM_HEAD_SHA'),
+              ('test_sha', 'TEAM_TEST_SHA'), ('image', 'TEAM_IMAGE'))}
+          assert plan['inventory']['context'] == expected_context, 'Downloaded plan identity mismatch'
+          compatibility = json.loads(pathlib.Path('ci-summary/compatibility/compatibility-result.json').read_text())
+          expected_compatibility = {'schema': 1, 'kind': 'compatibility-result', 'context': expected_context,
+                                    'artifacts': 'success', 'compatibility': 'success'}
+          assert type(compatibility.get('schema')) is int and compatibility == expected_compatibility, 'Compatibility failed or has stale identity'
+          module.validate_plan(plan)
+          assert plan['inventory'].get('examples'), 'Missing examples inventory'
+          results = []
+          for index in range(4):
+              directory = pathlib.Path('ci-summary/results') / f'team-results-{index}-{os.environ["GITHUB_RUN_ID"]}-{os.environ["GITHUB_RUN_ATTEMPT"]}'
+              results.append(json.loads((directory / f'shard-{index}/result.json').read_text()))
+              extras = json.loads((directory / 'extras.json').read_text())
+              expected = {'shard': index, 'run_id': os.environ['GITHUB_RUN_ID'],
+                          'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'test_sha': os.environ['TEAM_TEST_SHA'],
+                          'catch2': 'success',
+                          'examples': 'success'}
+              assert extras == expected, f'Additional checks failed or have stale identity: shard {index}'
+          summary = module.merge_results(plan, results)
+          module.write_json('ci-summary/summary.json', summary)
+          assert summary['success'], '; '.join(summary['errors'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write(f'Team test inventory: {summary["observed_count"]}/{summary["expected_count"]} cases completed.\n')
+              output.write(f'Examples: {summary["observed_example_count"]}/{summary["expected_example_count"]} completed.\n')
+              output.write('Independent index compatibility: passed for the same run and tested commit.\n')
+          PY
+      - name: Upload merged test summary
+        if: ${{ !cancelled() && hashFiles('ci-summary/summary.json') != '' }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: team-summary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/summary.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Require all Team jobs to pass or be intentionally skipped
+        if: always()
+        run: |
+          test "$CHANGE_RESULT" = success
+          if [ "$CPP_CHANGED" = false ]; then
+            test "$CHECK_RESULT" = skipped
+            test "$BUILD_RESULT" = skipped
+            test "$TEST_RESULT" = skipped
+            test "$COMPATIBILITY_RESULT" = skipped
+          else
+            test "$CPP_CHANGED" = true
+            test "$CHECK_RESULT" = success
+            test "$BUILD_RESULT" = success
+            test "$TEST_RESULT" = success
+            test "$COMPATIBILITY_RESULT" = success
+          fi

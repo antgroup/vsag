@@ -17,7 +17,7 @@ COVERAGE_CHECKER = ROOT / "scripts/coverage/check_cov.sh"
 COVERAGE_VERIFIER = ROOT / "scripts/coverage/verify_cpp_coverage.py"
 CODECOV_CONFIG = ROOT / ".github/codecov.yml"
 PARALLEL_TEST_RUNNER = ROOT / "scripts/testing/test_parallel_bg.sh"
-PR_CI_WORKFLOW = ROOT / ".github/workflows/pr-ci.yml"
+PR_CI_WORKFLOW = ROOT / ".github/workflows/pr-ci-community.yml"
 COVERAGE_WORKFLOW = ROOT / ".github/workflows/coverage.yml"
 
 
