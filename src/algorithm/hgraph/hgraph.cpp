@@ -61,11 +61,24 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
       duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
       support_force_remove_(hgraph_param->support_force_remove),
       odescent_param_(hgraph_param->odescent_param),
+      pipnn_param_(hgraph_param->pipnn_param),
       graph_type_(hgraph_param->graph_type),
       hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
       mci_parameters_(hgraph_param->mci_parameters),
       use_old_serial_format_(common_param.use_old_serial_format_) {
     this->support_duplicate_ = hgraph_param->support_duplicate;
+    // Backport note: 1.0 has no deduplicate_storage feature, so only the PiPNN
+    // graph_type guard from the upstream PiPNN commit is kept here.
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
+    }
     this->persist_source_id_ = hgraph_param->persist_source_id;
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
     this->basic_flatten_codes_ =

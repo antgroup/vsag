@@ -110,6 +110,24 @@ public:
           int32_t ldc);
 
     /**
+     * @brief Perform the symmetric rank-k operation C := alpha * A * A^T + beta * C.
+     *
+     * Only the triangle selected by uplo is written.
+     */
+    static void
+    Ssyrk(int32_t order,
+          int32_t uplo,
+          int32_t trans,
+          int32_t n,
+          int32_t k,
+          float alpha,
+          const float* a,
+          int32_t lda,
+          float beta,
+          float* c,
+          int32_t ldc);
+
+    /**
      * @brief Compute the QR factorization of a matrix A using the Gram-Schmidt process.
      * 
      * @param order Specifies the matrix storage layout (RowMajor or ColMajor).
@@ -173,6 +191,8 @@ public:
     static constexpr int32_t NoTrans = 111;    // No transpose
     static constexpr int32_t Trans = 112;      // Transpose
     static constexpr int32_t ConjTrans = 113;  // Conjugate transpose
+    static constexpr int32_t CblasUpper = 121;
+    static constexpr int32_t CblasLower = 122;
 
     // LAPACK specific constants
     static constexpr char JobV = 'V';   // Compute eigenvectors
