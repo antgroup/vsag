@@ -232,6 +232,13 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
 | `window_parallelism` | int | `1` | window 搜索线程数，取值为 `1` 至 `16`。worker 复用线程池，并在本地任务完成后窃取其他 worker 尚未处理的 window。合并后的堆在重排前最多保留 `n_candidate` 个候选。此值大于 `1` 时，KNN 搜索忽略 `timeout_ms`；带过滤器、生效的回调次数限制或推理追踪的查询仍使用单线程。 |
 | `worker_n_candidate` | int | `n_candidate` | 每线程候选堆容量；省略时继承最终有效候选数。显式设置时须为正数，并满足 `worker_n_candidate × window_parallelism ≥` 最终候选数。例如 `n_candidate=500`、`window_parallelism=2`、`worker_n_candidate=300` 合法。减少此值时，如果高分候选集中在部分 worker，召回率可能下降；总容量满足约束也不保证保留全局排名靠前的所有候选。 |
+| `window_scheduler` | string | `"count_deque"` | 并行 KNN 的 window 调度方式：`count_deque` 保留按数量分区的 deque/try-lock 实现；`count_atomic` 使用按数量划分的连续区间和共享原子游标；`cost_atomic` 按查询剪枝、词项剪枝后实际扫描的 posting 数之和均衡连续区间，再使用原子游标。原子方案中，每个 worker 先处理自己的区间，再按循环顺序领取其他区间的剩余任务。 |
+| `window_scheduler_profile` | bool | `false` | 在结果统计中附加 `sindi_scheduler`：记录代价预估、分区及初始化、任务提交及等待、候选合并的微秒耗时，以及每个 worker 的启动延迟、执行耗时、处理 window 数、窃取成功数和窃取尝试数。测速时关闭详细统计。`elapsed_us` 为包含临时状态初始化和调度的墙钟时间，不是 CPU 时间；仅 `cost_atomic` 预估代价，其余模式的代价字段为零表示未测量。 |
+| `collect_statistics` | bool | `true` | 是否记录距离计算次数并序列化查询统计。KNN 性能对照可关闭；返回统计保持默认的 `{}`。 |
+| `stage_profile` | bool | `false` | 分别测量准备、window 搜索、合堆、重排、全局统计更新与序列化、结果构造。调用线程可通过内部接口 `SindiLastQueryProfile()` 读取，关闭统计时也可用。应单独运行 profile。 |
+| `rerank_batch` | bool | `false` | 对 FP32/FP16 稀疏 KNN 候选进行批量重排，减少逐候选调用和读锁获取。推理查询和 DMQ8 保持逐候选重排。 |
+| `rerank_parallelism` | int | `1` | FP32/FP16 稀疏 KNN 重排 worker 数，范围为 `1` 至 `256`。大于 `1` 时启用并行重排并复用查询线程池，调用线程也参与计算。各 worker 使用独立 computer，距离写回原候选位置；等待完成后按原顺序选择全局 top-k，不改变 window 候选容量。 |
+| `rerank_scheduler` | string | `count_static` | 并行重排调度：`nnz_atomic` 复用线程池并行读取候选 NNZ、计算块内前缀和，调用线程也参与；等待完成后，调用线程只汇总 p 个块总量并二分查找 p-1 个边界，不再串行扫描全部候选。按向量累计非零项数划分连续区间，候选不拆分，因此尽量均分；`count_atomic` 按候选数量分区。二者均用 relaxed 原子 fetch-add 每次领取一个候选，完成本区间后依次循环窃取其他区间。`count_static` 保留原来的按数量批量分区，无窃取。单 worker 使用一次批量调用。`stage_profile` 通过内部重排 profile 接口记录估价/分区开销、各 worker 耗时、非零项数和窃取候选数；数量模式开启 profiling 时也读取非零项数用于负载诊断，普通查询不读取。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
