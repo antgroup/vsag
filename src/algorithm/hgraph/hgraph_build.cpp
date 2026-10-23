@@ -96,6 +96,7 @@ need_temporary_sq8_build_data(const FlattenInterfacePtr& basic_flatten_codes,
 
 static void
 wait_all_futures(std::vector<std::future<void>>& futures) {
+    // Drain every accepted worker before propagating the first failure to the caller.
     std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
         if (not future.valid()) {

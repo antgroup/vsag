@@ -394,6 +394,7 @@ HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_
     if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
+    // Shared physical storage needs the read lock through the distance query to exclude resize.
     if (lock.owns_lock() && not this->using_dedup_storage()) {
         lock.unlock();
     }
@@ -417,6 +418,7 @@ HGraph::CalDistanceById(const float* query,
     if (create_new_raw_vector_ && calculate_precise_distance) {
         flat = this->raw_vector_;
     }
+    // Shared physical storage needs the read lock through the distance query to exclude resize.
     if (lock.owns_lock() && not this->using_dedup_storage()) {
         lock.unlock();
     }
