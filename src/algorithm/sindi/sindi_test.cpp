@@ -814,6 +814,56 @@ TEST_CASE("SINDI Immutable Sparse Window Serialization Size", "[ut][SINDI]") {
     constexpr uint64_t vector_payload_bytes =
         sizeof(uint32_t) + sizeof(uint32_t) * 2 + sizeof(uint16_t) + sizeof(float);
     REQUIRE(writer.GetCursor() == vector_header_bytes + vector_payload_bytes);
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow restored(allocator.get());
+    SINDITestAccess::DeserializeImmutableWindow(index, reader, restored);
+    REQUIRE(restored.sorted_global_terms == window.sorted_global_terms);
+    REQUIRE(restored.offsets == window.offsets);
+    REQUIRE(restored.id_payloads == window.id_payloads);
+    REQUIRE(restored.value_payloads == window.value_payloads);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Term Ordering", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+    ImmutableSINDIWindow window(allocator.get());
+    window.sorted_global_terms = {1, 99};
+    window.offsets = {0, 0, 0};
+    bool valid = true;
+    SECTION("strictly increasing terms") {
+    }
+    SECTION("duplicate terms") {
+        window.sorted_global_terms = {1, 1};
+        valid = false;
+    }
+    SECTION("descending terms") {
+        window.sorted_global_terms = {99, 1};
+        valid = false;
+    }
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    SINDITestAccess::SerializeImmutableWindow(index, writer, window);
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow restored(allocator.get());
+    if (valid) {
+        REQUIRE_NOTHROW(SINDITestAccess::DeserializeImmutableWindow(index, reader, restored));
+        REQUIRE(restored.sorted_global_terms == window.sorted_global_terms);
+        REQUIRE(restored.offsets == window.offsets);
+    } else {
+        REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, restored),
+                          vsag::VsagException);
+    }
 }
 
 TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Term Count", "[ut][SINDI]") {

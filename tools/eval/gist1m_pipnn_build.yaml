@@ -1,0 +1,104 @@
+# Build-performance validation of the PiPNN backport on GIST1M.
+#
+# Dataset: GIST1M (1,000,000 base vectors x 960 dims, L2), the standard
+# benchmarks/gist1m workload already present on this host.
+#
+# Goal: measure *build* time and peak memory for graph_type psw / odescent /
+# pipnn at several build_thread_count values, to show the parallel PiPNN graph
+# construction scales with threads where the incremental builders do not.
+#
+# Keep OPENBLAS_NUM_THREADS=1 so BLAS parallelism does not contaminate
+# build_thread_count (PiPNN drives Sgemm/Ssyrk itself).
+global:
+    num_threads_searching: 1
+    exporters:
+      print-directly:
+        format: "table"
+        to: "stdout"
+      save-to-file:
+        format: "json"
+        to: "file:///tmp/vsag_gist1m_pipnn.json"
+
+# ---------- 8 threads ----------
+build_nsw_t8:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_gist1m_bench/nsw_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+build_odescent_t8:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_gist1m_bench/odescent_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+build_pipnn_t8:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":8}}'
+    index_path: "/tmp/vsag_gist1m_bench/pipnn_t8.index"
+    num_threads_building: 8
+    disable_memory: true
+
+# ---------- 32 threads ----------
+build_nsw_t32:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_gist1m_bench/nsw_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+build_odescent_t32:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_gist1m_bench/odescent_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+build_pipnn_t32:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":32}}'
+    index_path: "/tmp/vsag_gist1m_bench/pipnn_t32.index"
+    num_threads_building: 32
+    disable_memory: true
+
+# ---------- 96 threads ----------
+build_nsw_t96:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"nsw","max_degree":32,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_gist1m_bench/nsw_t96.index"
+    num_threads_building: 96
+    disable_memory: true
+
+build_odescent_t96:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"odescent","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_gist1m_bench/odescent_t96.index"
+    num_threads_building: 96
+    disable_memory: true
+
+build_pipnn_t96:
+    datapath: "/root/data/gist1M/gist-960-euclidean.hdf5"
+    type: "build"
+    index_name: "hgraph"
+    create_params: '{"dim":960,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","graph_type":"pipnn","max_degree":32,"alpha":1.2,"ef_construction":300,"build_thread_count":96}}'
+    index_path: "/tmp/vsag_gist1m_bench/pipnn_t96.index"
+    num_threads_building: 96
+    disable_memory: true
