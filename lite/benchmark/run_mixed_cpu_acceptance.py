@@ -32,17 +32,31 @@ def percentile(values, fraction):
     return sorted(values)[max(1, math.ceil(len(values) * fraction)) - 1]
 
 
-def verify_run(output, rounds, cycles, queries):
+def mutation_factor(mode):
+    if mode not in ['all', 'update', 'replace', 'reinsert']:
+        raise ValueError('Invalid mutation mode')
+    return 3 if mode == 'all' else 1 if mode == 'update' else 2
+
+
+def verify_run(output, rounds, cycles, queries, mutation_mode='all'):
     with (output / 'samples.csv').open() as stream:
         samples = list(csv.DictReader(stream))
     result = {}
     expected = dict(build=1, add=rounds * cycles, remove=rounds * cycles,
                     update=rounds * cycles, query=rounds * cycles * 3,
                     save=rounds, load=rounds)
+    factor = mutation_factor(mutation_mode)
+    expected['query'] = rounds * cycles * factor
+    if mutation_mode == 'update':
+        expected.update(add=0, remove=0)
+    elif mutation_mode in ['replace', 'reinsert']:
+        expected['update'] = 0
     assert len(samples) == sum(expected.values())
     for operation, count in expected.items():
         selected = [row for row in samples if row['operation'] == operation]
         assert len(selected) == count, operation
+        if count == 0:
+            continue
         walls = [float(row['wall_us']) for row in selected]
         total = sum(walls)
         result[operation] = dict(count=count, p50_us=percentile(walls, .5),
@@ -70,6 +84,27 @@ def verify_run(output, rounds, cycles, queries):
     assert all(int(row['count']) == count for row in states)
     assert [int(row['round']) for row in states] == list(range(rounds + 1))
     result['states'] = states
+    if mutation_mode != 'all':
+        # Verify stage purity and the exact deterministic ID/query schedule, not only totals.
+        position = 0
+        query = 0
+        def consume(number, identifier, operation):
+            nonlocal position
+            row = samples[position]
+            assert (int(row['round']), int(row['id']), row['operation']) == (number, identifier, operation)
+            position += 1
+        consume(0, -1, 'build')
+        stages = ['update'] if mutation_mode == 'update' else ['remove', 'add']
+        for number in range(1, rounds + 1):
+            for cycle in range(cycles):
+                identifier = ((number - 1) * 65537 + cycle * 8191) % count
+                for operation in stages:
+                    consume(number, identifier, operation)
+                    consume(number, query % queries, 'query')
+                    query += 1
+            consume(number, -1, 'save')
+            consume(number, -1, 'load')
+        assert position == len(samples)
     return result
 
 
@@ -81,7 +116,7 @@ def checkpoint_rounds(rounds, every):
     return sorted({0, rounds, *range(every, rounds + 1, every)})
 
 
-def verify_checkpoints(output, rounds, cycles, queries, every):
+def verify_checkpoints(output, rounds, cycles, queries, every, mutation_mode='all'):
     result = {}
     for number in checkpoint_rounds(rounds, every):
         prefix = output / f'checkpoint-{number}'
@@ -90,7 +125,7 @@ def verify_checkpoints(output, rounds, cycles, queries, every):
         assert len(states) == 1
         state = states[0]
         assert int(state['round']) == number
-        assert int(state['mutation_calls']) == int(state['query_calls']) == number * cycles * 3
+        assert int(state['mutation_calls']) == int(state['query_calls']) == number * cycles * mutation_factor(mutation_mode)
         count = int(state['count'])
         assert count > 10 and math.isfinite(float(state['rebuild_ms'])) and float(state['rebuild_ms']) >= 0
         with Path(str(prefix) + '-queries.csv').open() as stream:
@@ -111,7 +146,7 @@ def verify_checkpoints(output, rounds, cycles, queries, every):
                 assert all(math.isfinite(distance) and 0 <= identifier < count for distance, identifier in values)
                 assert int(sample[side + '_hits']) == len(truth & {v[1] for v in values})
                 assert math.isfinite(float(sample[side + '_us'])) and float(sample[side + '_us']) >= 0
-        result[str(number)] = dict(mutation_calls=number * cycles * 3, count=count,
+        result[str(number)] = dict(mutation_calls=number * cycles * mutation_factor(mutation_mode), count=count,
             maintained_recall=sum(int(row['maintained_hits']) for row in samples) / (queries * 10),
             fresh_recall=sum(int(row['fresh_hits']) for row in samples) / (queries * 10),
             maintained_p50_us=percentile([float(row['maintained_us']) for row in samples], .5),
@@ -127,6 +162,31 @@ def verify_checkpoints(output, rounds, cycles, queries, every):
         assert len(selected) == queries
         assert result[str(number)]['maintained_recall'] == sum(int(row['hits']) for row in selected) / (queries * 10)
     return result
+
+
+def verify_ceiling(output, rounds, queries):
+    with (output / 'ceiling.csv').open() as stream:
+        rows = list(csv.DictReader(stream))
+    with (output / f'checkpoint-{rounds}-neighbors.csv').open() as stream:
+        formal = list(csv.DictReader(stream))
+    with (output / f'checkpoint-{rounds}-state.csv').open() as stream:
+        count = int(next(csv.DictReader(stream))['count'])
+    assert len(rows) == len(formal) == queries * 10
+    hits = dict(maintained=0, fresh=0)
+    for q in range(queries):
+        group = rows[q * 10:(q + 1) * 10]
+        original = formal[q * 10:(q + 1) * 10]
+        assert [int(r['rank']) for r in group] == list(range(10))
+        assert all(int(r['round']) == rounds and int(r['query']) == q and
+                   int(r['ef_search']) == count for r in group)
+        assert [r['truth_id'] for r in group] == [r['truth_id'] for r in original]
+        truth = {int(r['truth_id']) for r in group}
+        for side in hits:
+            values = [(float(r[side + '_distance']), int(r[side + '_id'])) for r in group]
+            assert values == sorted(values) and len({i for _, i in values}) == 10
+            assert all(math.isfinite(d) and 0 <= i < count for d, i in values)
+            hits[side] += len(truth & {i for _, i in values})
+    return dict(ef_search=count, **{side + '_recall': hits[side] / (queries * 10) for side in hits})
 
 
 BUILD_RECEIPT = 'build-source-receipt.json'
@@ -272,6 +332,8 @@ def main():
                         help='Keep the original index between rounds; reload only checks persistence')
     parser.add_argument('--checkpoint-every', type=int, default=0,
                         help='Opt-in resident quality/rebuild diagnosis every N rounds; not production tuning')
+    parser.add_argument('--mutation-mode', choices=['all', 'update', 'replace', 'reinsert'],
+                        default='all', help='Opt-in isolated mutation workload; requires resident checkpoints')
     args = parser.parse_args()
     args.feature_repo = args.feature_repo.resolve(strict=True)
     args.build = args.build.resolve()
@@ -290,6 +352,8 @@ def main():
         parser.error('Positive trial/round/cycle counts and an available --cpu are required')
     if args.checkpoint_every < 0 or args.checkpoint_every > 1000000 or (args.checkpoint_every and not args.resident):
         parser.error('--checkpoint-every requires --resident and an interval in [1,1000000]')
+    if args.mutation_mode != 'all' and not (args.resident and args.checkpoint_every):
+        parser.error('Isolated mutation modes require --resident and --checkpoint-every')
     receipt = validate_build(args.feature_repo, args.feature_sha, args.build)
     for tool in ['c++', 'ldd', 'taskset']:
         if not shutil.which(tool):
@@ -332,6 +396,15 @@ def main():
             'Fresh rebuild changes graph/insertion history; RaBitQ additionally retrains its model',
             'Parent RSS/peak excludes child allocations; process time/resources may include children',
             'Save/Load equality is explicit snapshot consistency, not per-operation durability']
+    if args.mutation_mode != 'all':
+        identity['limits'][0] = 'Fixed-round isolated mutation diagnostic, not hours-long endurance'
+        identity['configuration']['mutation_mode'] = args.mutation_mode
+        identity['configuration']['calls_per_cycle'] = mutation_factor(args.mutation_mode)
+        identity['configuration']['final_diagnostic_ef'] = 'N'
+        identity['limits'] += [
+            'Isolated workloads have unequal API counts per cycle; compare quality at the same data-change cycles',
+            'Reinsert keeps vector values unchanged; update/replace use the same changed-value recurrence',
+            'Final ef=N is a separate routing/encoding diagnosis, not the formal query budget or speed result']
     identity['inputs'] = {}
     datasets = []
     for value in args.dataset:
@@ -380,6 +453,8 @@ def main():
                         command.append('resident')
                     if args.checkpoint_every:
                         command.append(str(args.checkpoint_every))
+                    if args.mutation_mode != 'all':
+                        command.append(args.mutation_mode)
                     write_json(args.output / (tag + '.command.json'), dict(argv=command,
                         environment={key: env[key] for key in ['OMP_NUM_THREADS',
                             'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS', 'LD_LIBRARY_PATH']}))
@@ -390,10 +465,12 @@ def main():
                     with query_file.open('rb') as stream:
                         dim = int.from_bytes(stream.read(4), 'little', signed=True)
                     queries = query_file.stat().st_size // (4 + 4 * dim)
-                    result = verify_run(selected, args.rounds, args.cycles, queries)
+                    result = verify_run(selected, args.rounds, args.cycles, queries, args.mutation_mode)
                     if args.checkpoint_every:
                         result['checkpoints'] = verify_checkpoints(selected, args.rounds, args.cycles,
-                                                                  queries, args.checkpoint_every)
+                                                                  queries, args.checkpoint_every, args.mutation_mode)
+                    if args.mutation_mode != 'all':
+                        result['ceiling'] = verify_ceiling(selected, args.rounds, queries)
                     result.update(dataset=name, storage=mode, trial=trial,
                         snapshots={p.name: dict(bytes=p.stat().st_size, sha256=sha(p))
                                    for p in sorted(snapshots.iterdir())})

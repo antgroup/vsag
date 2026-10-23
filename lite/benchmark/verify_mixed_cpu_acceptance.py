@@ -7,7 +7,7 @@ import csv
 import json
 from pathlib import Path
 
-from run_mixed_cpu_acceptance import sha, verify_run, verify_checkpoints
+from run_mixed_cpu_acceptance import sha, verify_run, verify_checkpoints, verify_ceiling, mutation_factor
 
 
 def verify(output):
@@ -30,6 +30,8 @@ def verify(output):
         assert all(receipt['source']['source_sha256'][name] == digest
                    for name, digest in identity['feature_sources'].items())
     config = identity['configuration']
+    mutation_mode = config.get('mutation_mode', 'all')
+    factor = mutation_factor(mutation_mode)
     rows = json.loads((output / 'rows.json').read_text())
     modes = ['fp32', 'fp16', 'rabitq8']
     expected_keys = {(dataset, mode, trial) for dataset in identity['inputs']
@@ -43,14 +45,21 @@ def verify(output):
         with (folder / 'quality.csv').open() as stream:
             query_rows = list(csv.DictReader(stream))
         queries = len(query_rows) // 2
-        raw = verify_run(folder, config['rounds'], config['cycles'], queries)
+        raw = verify_run(folder, config['rounds'], config['cycles'], queries, mutation_mode)
         every = config.get('checkpoint_every', 0)
         if every:
             assert config.get('resident', False)
-            raw['checkpoints'] = verify_checkpoints(folder, config['rounds'], config['cycles'], queries, every)
+            raw['checkpoints'] = verify_checkpoints(folder, config['rounds'], config['cycles'], queries, every, mutation_mode)
+        if mutation_mode != 'all':
+            assert every and config.get('calls_per_cycle') == factor
+            assert config.get('final_diagnostic_ef') == 'N'
+            raw['ceiling'] = verify_ceiling(folder, config['rounds'], queries)
         command = json.loads((output / (folder.name + '.command.json')).read_text())['argv']
         if config.get('resident', False):
-            assert command[-2:] == ['resident', str(every)] if every else command[-1] == 'resident', ('wrong resident invocation', key)
+            suffix = ['resident'] + ([str(every)] if every else [])
+            if mutation_mode != 'all':
+                suffix.append(mutation_mode)
+            assert command[-len(suffix):] == suffix, ('wrong resident invocation', key)
             assert all(int(state['threads']) == 1 for state in raw['states']), key
             assert all(int(state['rss_before_persistence_kib']) > 0 for state in raw['states']), key
         expected = {k: v for k, v in row.items()
@@ -66,8 +75,8 @@ def verify(output):
             assert fingerprint == fingerprints[pair], ('nondeterministic quality/snapshot', pair)
         fingerprints[pair] = fingerprint
     return dict(audit='PASS', processes=len(rows), datasets=len(identity['inputs']),
-                mutation_calls=len(rows) * config['rounds'] * config['cycles'] * 3,
-                interleaved_queries=len(rows) * config['rounds'] * config['cycles'] * 3,
+                mutation_calls=len(rows) * config['rounds'] * config['cycles'] * factor,
+                interleaved_queries=len(rows) * config['rounds'] * config['cycles'] * factor,
                 source_sha=identity['feature_sha'])
 
 

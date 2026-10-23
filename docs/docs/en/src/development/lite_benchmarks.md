@@ -448,3 +448,15 @@ Pass `--resident --checkpoint-every 10` to the mixed runner to record initial, e
 The Linux tool forks a single-threaded child for fresh-build/oracle allocations and waits before continuing CRUD. The resident parent is not replaced and its allocator/RSS does not include the child's rebuild buffers. Forking, scheduling and cache warming still perturb timing; do not combine this cohort's latency or memory measurements with the original protocol or treat checkpoint timing as a formal maintained/fresh performance comparison. Record each repetition separately. A fresh RaBitQ build also retrains its model, so its recall gap alone cannot isolate graph maintenance from quantizer effects. No minimum recall threshold is implied.
 
 The existing per-round Save/Load check verifies explicit snapshot result consistency, not per-operation disk durability, atomic replacement, fsync or crash recovery. Shrink/allocator reclamation and graph-quality repair are separate concerns; a stable RSS does not prove either zero fragmentation or stable recall.
+
+## Isolate Update from Remove/Add
+
+Use `--mutation-mode update`, `replace` or `reinsert` with `--resident --checkpoint-every N`.
+`update` changes values only via Update; `replace` uses Remove/Add with the identical changed-value recurrence;
+`reinsert` removes/adds identical values, leaving the logical dataset unchanged. The default `all` protocol stays compatible.
+One cycle has 1/2/2 mutation calls, respectively; do not compare unequal counts as a speedup.
+All use the same pre-touched sample capacity and public APIs. Every checkpoint compares the resident index
+with a same-data fresh rebuild at formal ef512; final `ceiling.csv` additionally records ef=N, diagnostic only.
+The verifier checks stage order/counts/IDs, truth intersections, fresh/maintained results and final budget.
+See [all nine GIST cells and raw archives](../../../../../lite/benchmark/results/crud-isolation-20261022/)
+for frozen commands, independent oracle replay and source/build/input identities. No production repair or durability claim.

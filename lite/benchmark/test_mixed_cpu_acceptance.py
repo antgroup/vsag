@@ -568,5 +568,179 @@ class ExtendedPublishedTests(unittest.TestCase):
                     self.assertEqual(row['snapshots'][name], digest)
 
 
+
+
+class IsolationTests(unittest.TestCase):
+    def test_mutation_mode_validation(self):
+        self.assertEqual([runner.mutation_factor(m) for m in ['all', 'update', 'replace', 'reinsert']], [3, 1, 2, 2])
+        with self.assertRaises(ValueError):
+            runner.mutation_factor('invalid')
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_bad_mutation_mode_before_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / 'must-not-exist'
+            result = subprocess.run([os.environ['VSAG_MIXED_PROBE'], 'missing', str(target),
+                'fp32', '1', '1', 'missing-snapshot', 'resident', '1', 'invalid'], capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('invalid mutation mode', result.stderr)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_isolated_geometry_stages_truth_and_ceiling(self):
+        binary = os.environ['VSAG_MIXED_PROBE']
+        f32 = lambda v: struct.unpack('<f', struct.pack('<f', v))[0]
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            dataset = root / 'input'
+            dataset.mkdir()
+            vectors = {}
+            for name, count in [('base.fvecs', 96), ('queries.fvecs', 5)]:
+                vectors[name] = [[f32(math.sin((row + 1) * (d + 3) * .17)) for d in range(17)] for row in range(count)]
+                with (dataset / name).open('wb') as stream:
+                    for row in vectors[name]:
+                        stream.write(struct.pack('<i17f', 17, *row))
+            truth_by_workload = {}
+            for storage in ['fp32', 'fp16', 'rabitq8']:
+                for mode in ['update', 'replace', 'reinsert']:
+                    output = root / (storage + '-' + mode)
+                    snapshots = root / (storage + '-' + mode + '-snapshots')
+                    snapshots.mkdir()
+                    subprocess.run([binary, str(dataset), str(output), storage, '3', '7', str(snapshots),
+                                    'resident', '2', mode], capture_output=True, text=True, check=True)
+                    raw = verify_run(output, 3, 7, 5, mode)
+                    curve = runner.verify_checkpoints(output, 3, 7, 5, 2, mode)
+                    ceiling = runner.verify_ceiling(output, 3, 5)
+                    self.assertEqual(ceiling['ef_search'], 96)
+                    self.assertEqual(curve['3']['mutation_calls'], 21 * runner.mutation_factor(mode))
+                    self.assertEqual(raw['query']['count'], 21 * runner.mutation_factor(mode))
+                    self.assertEqual('update' in raw, mode == 'update')
+                    self.assertEqual('remove' in raw, mode != 'update')
+                    self.assertEqual('add' in raw, mode != 'update')
+                    if storage == 'fp32':
+                        self.assertEqual(ceiling['maintained_recall'], 1)
+                        self.assertEqual(ceiling['fresh_recall'], 1)
+                    base = [row[:] for row in vectors['base.fvecs']]
+                    truth_by_workload[storage, mode] = []
+                    for number in range(4):
+                        if number and mode != 'reinsert':
+                            for cycle in range(7):
+                                identifier = ((number - 1) * 65537 + cycle * 8191) % 96
+                                donor = (identifier + number * 97 + cycle + 1) % 96
+                                base[identifier] = [f32(f32(.875 * a) + f32(.125 * b)) for a, b in
+                                                    zip(base[identifier], vectors['base.fvecs'][donor])]
+                        if number not in [0, 2, 3]:
+                            continue
+                        with (output / f'checkpoint-{number}-neighbors.csv').open() as stream:
+                            rows = list(csv.DictReader(stream))
+                        truths = []
+                        for q, query in enumerate(vectors['queries.fvecs']):
+                            expected = sorted(range(96), key=lambda i:
+                                (sum((float(a) - b) ** 2 for a, b in zip(base[i], query)), i))[:10]
+                            actual = [int(r['truth_id']) for r in rows[q * 10:(q + 1) * 10]]
+                            self.assertEqual(actual, expected)
+                            truths.append(actual)
+                        truth_by_workload[storage, mode].append(truths)
+                    if mode == 'reinsert':
+                        self.assertTrue(all(t == truth_by_workload[storage, mode][0] for t in truth_by_workload[storage, mode]))
+                    target = output / 'ceiling.csv'
+                    original = target.read_text()
+                    target.write_text(original.replace('3,0,0,96,', '3,0,0,95,', 1))
+                    with self.assertRaises(AssertionError):
+                        runner.verify_ceiling(output, 3, 5)
+                    target.write_text(original)
+                self.assertEqual(truth_by_workload[storage, 'update'], truth_by_workload[storage, 'replace'])
+            self.assertEqual(truth_by_workload['fp32', 'update'], truth_by_workload['fp16', 'update'])
+            self.assertEqual(truth_by_workload['fp32', 'update'], truth_by_workload['rabitq8', 'update'])
+
+
+class IsolationPublishedTests(unittest.TestCase):
+    def test_all_isolation_archives_and_report_cells(self):
+        root = Path(__file__).parent / 'results/crud-isolation-20261022'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        self.assertEqual(receipt['mutation_calls'], 375000)
+        self.assertEqual(receipt['interleaved_queries'], 375000)
+        self.assertEqual(receipt['processes'], 9)
+        self.assertEqual(receipt['checkpoint_states'], 45)
+        report = (root / 'README.md').read_text()
+        from pack_mixed_cpu_acceptance import unpack
+        counts = 0
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual((evidence / name).stat().st_size, item['bytes'])
+                self.assertEqual(sha(evidence / name), item['sha256'])
+            independent = json.loads((evidence / 'analysis/independent-audit.json').read_text())
+            self.assertEqual(independent['status'], 'PASS')
+            self.assertEqual(independent['independent_numpy_FP64_query_states'], 100)
+            self.assertTrue(independent['same_data_fresh_rebuild_results_exact'])
+            self.assertTrue(independent['reinsert_fresh_results_and_truth_constant'])
+            slot_audit = json.loads((evidence / 'slot-controls/audit.json').read_text())
+            self.assertEqual(slot_audit['status'], 'PASS')
+            self.assertEqual(len(slot_audit['cells']), 2)
+            self.assertEqual(sha(evidence / 'slot-controls/slot-control.cpp'), slot_audit['source_sha256'])
+            curve = json.loads((evidence / 'analysis/curve.json').read_text())
+            self.assertEqual(len(curve), 45)
+            for mode in ['update', 'replace', 'reinsert']:
+                raw = evidence / ('raw-' + mode)
+                nested = evidence / ('measurements/' + mode + '.tar.gz')
+                nested_receipt = json.loads((evidence / ('measurements/' + mode + '.json')).read_text())
+                self.assertEqual(sha(nested), nested_receipt['sha256'])
+                self.assertEqual(nested.stat().st_size, nested_receipt['bytes'])
+                unpack(nested, raw)
+                audit = verify(raw)
+                self.assertEqual(audit, nested_receipt['unpacked_audit'])
+                self.assertEqual(audit['processes'], 3)
+                self.assertEqual(audit['mutation_calls'], 75000 if mode == 'update' else 150000)
+                counts += audit['mutation_calls']
+                identity = json.loads((raw / 'identity.json').read_text())
+                self.assertEqual(identity['configuration']['mutation_mode'], mode)
+                self.assertEqual(identity['configuration']['checkpoint_every'], 25)
+                self.assertEqual(sha(raw / 'source.cpp'), sha(evidence / 'tooling/mixed_cpu_acceptance.cpp'))
+                self.assertEqual(sha(raw / 'source.cpp'), sha(Path(__file__).with_name('mixed_cpu_acceptance.cpp')))
+                rows = json.loads((raw / 'rows.json').read_text())
+                if mode in ['replace', 'reinsert']:
+                    cell = next(c for c in slot_audit['cells'] if c['mode'] == mode)
+                    self.assertTrue(cell['replay_snapshot_matches_timed'])
+                    self.assertTrue(cell['actual_snapshot_ids_match_simulated_order'])
+                    self.assertTrue(cell['all_stored_fp32_vectors_match_independent_replay'])
+                    fp32 = next(r for r in rows if r['storage'] == 'fp32')
+                    self.assertEqual(cell['snapshots']['maintained.snapshot'], fp32['snapshots']['round-100'])
+                    with (evidence / ('slot-controls/' + mode + '/neighbors.csv')).open() as stream:
+                        control_rows = list(csv.DictReader(stream))
+                    self.assertEqual(len(control_rows), 20000)
+                    for ef in [512, 10000]:
+                        selected = [r for r in control_rows if int(r['ef']) == ef]
+                        self.assertEqual(len(selected), 10000)
+                        for side in ['maintained', 'canonical', 'same_order']:
+                            hits = 0
+                            for q in range(1000):
+                                group = selected[q * 10:(q + 1) * 10]
+                                self.assertEqual([int(r['rank']) for r in group], list(range(10)))
+                                self.assertTrue(all(int(r['query']) == q for r in group))
+                                truth = {int(r['truth_id']) for r in group}
+                                values = [(float(r[side + '_distance']), int(r[side + '_id'])) for r in group]
+                                self.assertEqual(values, sorted(values))
+                                self.assertEqual(len({i for _, i in values}), 10)
+                                self.assertTrue(all(math.isfinite(d) and 0 <= i < 10000 for d, i in values))
+                                hits += len(truth & {i for _, i in values})
+                            self.assertEqual(hits / 10000, cell['quality'][str(ef)][side])
+                for number in [0, 25, 50, 75, 100]:
+                    values = [next(r for r in rows if r['storage'] == storage)['checkpoints'][str(number)]['maintained_recall']
+                              for storage in ['fp32', 'fp16', 'rabitq8']]
+                    self.assertIn('| ' + str(number) + ' | ' + ' | '.join(f'{v:.4f}' for v in values) + ' |', report)
+                for row in rows:
+                    cell = row['checkpoints']['100']
+                    values = [cell['maintained_recall'], cell['fresh_recall'], row['ceiling']['maintained_recall'], row['ceiling']['fresh_recall']]
+                    self.assertIn(' | ' + ' | '.join(f'{v:.4f}' for v in values) + ' |', report)
+            self.assertEqual(counts, 375000)
+
+
 if __name__ == '__main__':
     unittest.main()

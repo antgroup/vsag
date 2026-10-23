@@ -5,7 +5,12 @@ four outputs, three datasets, Lite/native Full comparisons, real CRUD, CPU/memor
 100k experiments, measured optimizations and failed quality gates. The prior E9
 cohort includes Cohere; historical Full comparisons remain separate evidence.
 
-## Current CRUD diagnosis (E13)
+## Current CRUD isolation (E14)
+
+[Update-only and Remove/Add controls](results/crud-isolation-20261022/README.md) preserve all nine processes, fixed-budget curves and separate final ef=N diagnostics.
+No production optimization or #2904 change is claimed.
+
+## Prior CRUD diagnosis (E13)
 
 [GIST quality curve and same-data rebuild control](results/crud-degradation-curve-20261022/README.md)
 adds 33 checkpoints without changing #2904 or the earlier results. One trial/storage;

@@ -123,3 +123,13 @@ python3 "$BENCH_ROOT/lite/benchmark/verify_mixed_cpu_acceptance.py" "$BENCH_UNPA
 Linux 工具在单线程子进程中进行重建和真值分配，父进程等待完成再继续 CRUD；不替换原对象，子进程重建缓冲不计入父对象分配器／RSS。fork、调度和缓存预热仍会扰动时间，不能把本组时延和内存与旧协议拼成一次结果，也不能把检查点计时当作严格的维护图／重建图性能比较。每次重复独立保留。RaBitQ 新建还会重新训练模型，单看差距不能区分图维护与量化模型因素。不据此设置最低召回门槛。
 
 既有逐轮 Save/Load 检查验证显式快照查询结果一致，不代表逐操作落盘、原子替换、fsync 或崩溃恢复。容量回收与图质量修复是不同问题；RSS 平稳既不能证明零碎片，也不能证明召回稳定。
+
+## 隔离 Update 与 Remove/Add
+
+`--mutation-mode update|replace|reinsert` 必须配合 `--resident --checkpoint-every N`。
+三者分别为只Update改值、Remove/Add改值、Remove/Add原值；前两组变值序列相同，第三组逻辑数据始终不变。
+默认 `all` 旧协议兼容。每cycle分别1/2/2次修改，不能把调用数差异当作性能收益。
+三组保持相同预触达样本缓冲；正式检查点固定ef512，末轮另存ef=N诊断 `ceiling.csv`，不冒称调参优化。
+校验器检查操作纯度、顺序、ID、次数、真值交集、重建对照及全预算结果。
+全部曲线、来源、独立真值复算和原始归档见
+[GIST九组隔离实验](../../../../../lite/benchmark/results/crud-isolation-20261022/)。不改生产修复或承诺逐操作落盘。

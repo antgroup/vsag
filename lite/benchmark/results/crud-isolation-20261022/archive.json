@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "bytes": 19412570,
+  "sha256": "7b476883f6a9c4026fa7d8d384e220c2d83861191a34032224512b4d86f44fb0",
+  "members": 54,
+  "processes": 9,
+  "mutation_calls": 375000,
+  "interleaved_queries": 375000,
+  "checkpoint_states": 45,
+  "audit": "PASS",
+  "originals_preserved": true,
+  "production_unchanged": true
+}
