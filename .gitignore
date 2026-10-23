@@ -205,3 +205,5 @@ wheelhouse/
 
 # claude-code
 .claude/
+build-main/
+build-merge/

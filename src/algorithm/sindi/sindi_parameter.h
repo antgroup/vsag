@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <string>
 
+#include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
@@ -34,6 +35,7 @@ enum class SparseValueQuantizationType {
 
 static constexpr const char* SPARSE_RERANK_TYPE = "rerank_type";
 static constexpr const char* SPARSE_RERANK_TYPE_FP32 = "fp32";
+static constexpr const char* SPARSE_RERANK_TYPE_FP16 = "fp16";
 static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
 
 static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
@@ -63,6 +65,10 @@ public:
 
     float doc_prune_ratio{0};
 
+    float term_prune_ratio{0};
+
+    uint64_t term_retain_threshold{0};
+
     bool use_reorder{false};
 
     SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
@@ -81,7 +87,7 @@ public:
     uint32_t avg_doc_term_length{100};
 };
 
-class SINDISearchParameter : public Parameter {
+class SINDISearchParameter : public Parameter, public IndexSearchParameter {
 public:
     void
     FromJson(const JsonType& json) override;

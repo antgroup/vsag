@@ -53,7 +53,7 @@ public:
     /** 
      * @brief Query dataset containing the vector or vectors to search for
      * @details This DatasetPtr holds the query vector used for similarity search. 
-     *          IVF KNN requests and supported AnalyzeIndexBySearch implementations accept
+     *          HGraph and IVF KNN requests, plus supported AnalyzeIndexBySearch implementations, accept
      *          multiple query vectors; other requests allow one.
      */
     DatasetPtr query_{nullptr};
@@ -108,6 +108,13 @@ public:
      * result ordering instead of their built-in vector metric. Graph traversal can
      * score filtered IDs to keep the graph connected, but filtered IDs are never
      * returned as results.
+     * IVF parallel search may invoke this callback and the request filter concurrently.
+     * Both must support concurrent calls, including any captured/shared state. Filter
+     * decisions must be stable within a request and independent of call order. Scores
+     * must be stable within a request and independent of batch composition or call order.
+     * IVF applies attribute filtering before scoring, then checks the local top-k score
+     * threshold before invoking the request filter. Rejected candidates never enter
+     * the result heap; candidates that cannot improve a full heap skip the filter.
      */
     SearchDistanceBatchFunc distance_batch_func_{nullptr};
 

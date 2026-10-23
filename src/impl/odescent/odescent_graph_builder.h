@@ -82,7 +82,7 @@ public:
              Allocator* allocator,
              SafeThreadPool* thread_pool,
              bool pruning = true,
-             const float* build_vectors = nullptr,
+             const void* build_vectors = nullptr,
              int64_t build_vector_count = 0,
              FlattenInterfacePtr build_flatten_interface = nullptr)
         : odescent_param_(std::move(odescent_parameter)),
@@ -99,7 +99,7 @@ public:
 
     static FlattenInterfacePtr
     CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
-                       const float* build_vectors,
+                       const void* build_vectors,
                        int64_t build_vector_count);
 
     bool
@@ -160,6 +160,9 @@ private:
     void
     repair_no_in_edge();
 
+    Vector<int>
+    count_in_edges();
+
     void
     prune_graph();
 
@@ -187,7 +190,7 @@ private:
     // waits on all futures before continuing, so get_distance() only performs concurrent reads.
     FlattenInterfacePtr build_flatten_interface_{nullptr};
     FlattenInterface* distance_flatten_interface_{nullptr};
-    const float* build_vectors_{nullptr};
+    const void* build_vectors_{nullptr};
     int64_t build_vector_count_{0};
 };
 

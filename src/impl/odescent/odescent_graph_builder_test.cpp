@@ -15,13 +15,20 @@
 
 #include "odescent_graph_builder.h"
 
+#include <array>
+#include <atomic>
+#include <chrono>
 #include <filesystem>
+#include <future>
 #include <set>
 
+#include "datacell/flatten_datacell.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "impl/allocator/safe_allocator.h"
+#include "io/memory_io/memory_io.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "quantization/fp32_quantizer.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "unittest.h"
 uint64_t
@@ -174,4 +181,59 @@ TEST_CASE("ODescent Build Test", "[ut][ODescent]") {
     }
     REQUIRE(hit_edge_count / (num_vectors * indeed_max_degree) > 0.95);
     REQUIRE(hit_edge_count_merge >= hit_edge_count);
+}
+
+TEST_CASE("ODescent drains workers before propagating a build failure", "[ut][ODescent]") {
+    using Cell = vsag::FlattenDataCell<vsag::FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>,
+                                       vsag::FixedLayout<vsag::MemoryIO>>;
+    class FailingCell : public Cell {
+    public:
+        using Cell::Cell;
+        std::promise<void> other_started;
+        std::promise<void> first_failed;
+        std::promise<void> release;
+        std::shared_future<void> started{other_started.get_future()};
+        std::shared_future<void> released{release.get_future()};
+        std::atomic<bool> notified{false};
+
+        float
+        ComputePairVectors(vsag::InnerIdType id1, vsag::InnerIdType) override {
+            if (id1 == 0) {
+                started.wait();
+                first_failed.set_value();
+                throw std::runtime_error("first worker failed");
+            }
+            if (not notified.exchange(true)) {
+                other_started.set_value();
+            }
+            released.wait();
+            throw std::runtime_error("remaining worker failed");
+        }
+    };
+    vsag::IndexCommonParam common;
+    common.dim_ = 4;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto cell = std::make_shared<FailingCell>(std::make_shared<vsag::FP32QuantizerParameter>(),
+                                              std::make_shared<vsag::MemoryIOParameter>(),
+                                              common);
+    std::array<float, 16> vectors{};
+    cell->BatchInsertVector(vectors.data(), 4, nullptr);
+    vsag::FlattenInterfacePtr flatten = cell;
+    auto pool = vsag::Engine::CreateThreadPool(2);
+    auto safe_pool = std::make_shared<vsag::SafeThreadPool>(pool->get(), false);
+    auto param = std::make_shared<vsag::ODescentParameter>();
+    param->max_degree = 2;
+    param->block_size = 1;
+    vsag::ODescent builder(param, flatten, common.allocator_.get(), safe_pool.get());
+    auto failed = cell->first_failed.get_future();
+    auto build = std::async(std::launch::async, [&]() {
+        builder.Build(vsag::Vector<vsag::InnerIdType>(common.allocator_.get()));
+    });
+    const auto worker_status = failed.wait_for(std::chrono::seconds(5));
+    const auto build_status = build.wait_for(std::chrono::milliseconds(30));
+    cell->release.set_value();
+    REQUIRE_THROWS_AS(build.get(), std::runtime_error);
+    REQUIRE(worker_status == std::future_status::ready);
+    REQUIRE(build_status == std::future_status::timeout);
 }

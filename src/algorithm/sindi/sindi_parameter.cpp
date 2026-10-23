@@ -79,6 +79,28 @@ SINDIParameter::FromJson(const JsonType& json) {
         doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
     }
 
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    if (json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
+                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
+    }
+    if (json.Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_TERM_RETAIN_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "term_retain_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            term_retain_threshold = threshold_json.GetUint64();
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+
     if (json.Contains(USE_REORDER_KEY)) {
         use_reorder = json[USE_REORDER_KEY].GetBool();
     } else {
@@ -134,10 +156,12 @@ SINDIParameter::FromJson(const JsonType& json) {
     } else {
         rerank_type = SPARSE_RERANK_TYPE_FP32;
     }
-    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 || rerank_type == SPARSE_RERANK_TYPE_DMQ8,
-                   fmt::format("rerank_type must be fp32 or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 ||
+                       rerank_type == SPARSE_RERANK_TYPE_FP16 ||
+                       rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32, fp16, or dmq8, got {}", rerank_type));
     CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
-                   "rerank_type=dmq8 requires use_reorder=true");
+                   fmt::format("rerank_type={} requires use_reorder=true", rerank_type));
 
     if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
         const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
@@ -176,6 +200,8 @@ SINDIParameter::ToJson() const {
     JsonType json;
     json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
     json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
+    json[SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
     json[USE_REORDER_KEY].SetBool(use_reorder);
     if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
         json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
@@ -202,6 +228,8 @@ SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
     CHECK_FIELD_EQ(*this, *p, term_id_limit);
     CHECK_FIELD_EQ(*this, *p, window_size);
     CHECK_FIELD_EQ(*this, *p, doc_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_retain_threshold);
     CHECK_FIELD_EQ(*this, *p, use_reorder);
     CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
     CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
@@ -219,6 +247,9 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     CHECK_ARGUMENT(json.Contains(INDEX_SINDI),
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     const auto search_json = json[INDEX_SINDI];
+
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
 
     term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
     term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;

@@ -385,6 +385,47 @@ TEST_CASE("HGraph RaBitQ Split validates dimension before optimized training",
     REQUIRE(index->GetNumElements() == base_count);
 }
 
+TEST_CASE("HGraph PiPNN publishes fused RaBitQ codes during batch build",
+          "[ft][rabitq_split][hgraph][fused][pipnn]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 128;
+    constexpr uint64_t base_count = 64;
+
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 3, 5, true);
+    auto param_json = vsag::JsonType::Parse(param);
+    param_json["index_param"]["graph_io_type"].SetString("memory_io");
+    param_json["index_param"]["graph_storage_type"].SetString("flat");
+    param_json["index_param"]["graph_type"].SetString("pipnn");
+    param_json["index_param"]["reorder_source"].SetString("base");
+    param_json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param_json["index_param"]["rabitq_use_fht"].SetBool(true);
+    param_json["index_param"]["store_raw_vector"].SetBool(false);
+    param_json["index_param"]["use_mci"].SetBool(false);
+    param_json["index_param"]["build_thread_count"].SetInt(4);
+
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto index = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, param_json.Dump(), true);
+    REQUIRE(index->Build(dataset->base_).has_value());
+
+    const auto* vectors = dataset->base_->GetFloat32Vectors();
+    const auto* labels = dataset->base_->GetIds();
+    const auto self_distance = index->CalcDistanceById(vectors, labels[0]);
+    const auto other_distance = index->CalcDistanceById(vectors, labels[1]);
+    REQUIRE(self_distance.has_value());
+    REQUIRE(other_distance.has_value());
+    REQUIRE(self_distance.value() < other_distance.value());
+
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Float32Vectors(vectors)->Owner(false);
+    const auto result = index->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":32,"rabitq_one_bit_search":true,"enable_reorder":false}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] == labels[0]);
+}
+
 TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
           "[ft][rabitq_split][hgraph][fused][export_model]") {
     using namespace fixtures;
@@ -1479,5 +1520,60 @@ TEST_CASE("HGraph fused RaBitQ split expands a sole representative and its alias
         REQUIRE(filtered_page.has_value());
         require_result(filtered_page.value(), {labels.back()});
         delete iterator_context;
+    }
+}
+
+TEST_CASE("HGraph fused Add drains preencoding tasks before rejecting an enqueue",
+          "[ft][rabitq_split][hgraph][preencode]") {
+    using namespace fixtures;
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 32;
+    auto param =
+        HGraphRaBitQSplitTestIndex::GenerateBuildParam("l2", dim, "memory_io", "", 1, 7, true);
+    auto json = vsag::JsonType::Parse(param);
+    json["index_param"]["build_thread_count"].SetInt(2);
+    json["index_param"]["graph_io_type"].SetString("memory_io");
+    json["index_param"]["graph_storage_type"].SetString("flat");
+    json["index_param"]["graph_type"].SetString("nsw");
+    json["index_param"]["reorder_source"].SetString("base");
+    json["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    json["index_param"]["rabitq_use_fht"].SetBool(true);
+    json["index_param"]["use_mci"].SetBool(false);
+    auto dataset = HGraphRaBitQSplitTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+    auto source = TestIndex::TestFactory(HGraphRaBitQSplitTestIndex::name, json.Dump(), true);
+    REQUIRE(source->Build(dataset->base_).has_value());
+    auto binary = source->Serialize();
+    REQUIRE(binary.has_value());
+    auto rejecting_pool = std::make_shared<RejectSecondBuildThreadPool>();
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), rejecting_pool);
+    vsag::Engine engine(&resource);
+    auto result = engine.CreateIndex(HGraphRaBitQSplitTestIndex::name, json.Dump());
+    REQUIRE(result.has_value());
+    auto index = result.value();
+    REQUIRE(index->Deserialize(binary.value()).has_value());
+    std::vector<int64_t> labels(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = 1000000 + i;
+    }
+    const bool fail_worker = GENERATE(false, true);
+    std::vector<float> vectors(dataset->base_->GetFloat32Vectors(),
+                               dataset->base_->GetFloat32Vectors() + count * dim);
+    if (fail_worker) {
+        // The first accepted range fails encoding while the second enqueue also fails.
+        std::fill_n(vectors.data(), dim, std::numeric_limits<float>::max());
+    }
+    auto batch = vsag::Dataset::Make()
+                     ->NumElements(count)
+                     ->Dim(dim)
+                     ->Ids(labels.data())
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    auto added = index->Add(batch);
+    REQUIRE_FALSE(added.has_value());
+    REQUIRE(added.error().message.find("injected enqueue failure") != std::string::npos);
+    REQUIRE(rejecting_pool->TaskFinished());
+    REQUIRE(index->GetNumElements() == count);
+    for (uint64_t i = 0; i < count; ++i) {
+        REQUIRE_FALSE(index->CheckIdExist(labels[i]));
     }
 }

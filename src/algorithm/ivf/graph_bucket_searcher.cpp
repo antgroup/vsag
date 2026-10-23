@@ -18,7 +18,7 @@
 #include <limits>
 
 #include "attr/executor/executor.h"
-#include "impl/reasoning/search_reasoning.h"
+#include "impl/reasoning/reasoning_context.h"
 #include "impl/searcher/basic_searcher.h"
 #include "vsag_exception.h"
 
@@ -43,6 +43,7 @@ GraphBucketSearcher::Search(BucketIdType bucket_id,
                             BucketIdType buckets_per_data,
                             DistHeapPtr& heap,
                             Vector<float>& dist,
+                            Vector<InnerIdType>& scanned_inner_ids,
                             ReasoningContext* reasoning_ctx) const {
     auto bucket_size = bucket->GetBucketSize(bucket_id);
     bool has_graph = (bucket_id < static_cast<BucketIdType>(bucket_graphs_.size()) &&
@@ -70,6 +71,7 @@ GraphBucketSearcher::Search(BucketIdType bucket_id,
                                buckets_per_data,
                                heap,
                                dist,
+                               scanned_inner_ids,
                                reasoning_ctx);
     }
 }
