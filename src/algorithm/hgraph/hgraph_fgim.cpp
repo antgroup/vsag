@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <unordered_set>
 
 #include "hgraph.h"
 #include "impl/query_computer_pool.h"
