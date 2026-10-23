@@ -23,23 +23,11 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "query_context.h"
 #include "sindi_query_profile.h"
+#include "sindi_search_options.h"
 
 namespace vsag {
 
 class FlattenInterface;
-
-enum class SindiWindowScheduler { COUNT_DEQUE, COUNT_ATOMIC, COST_ATOMIC };
-enum class SindiRerankScheduler { COUNT_STATIC, COUNT_ATOMIC, NNZ_ATOMIC };
-
-struct SindiWindowSearchOptions {
-    SindiWindowScheduler scheduler{SindiWindowScheduler::COUNT_DEQUE};
-    bool profile{false};
-    bool collect_statistics{true};
-    bool stage_profile{false};
-    bool rerank_batch{false};
-    uint32_t rerank_parallelism{1};
-    SindiRerankScheduler rerank_scheduler{SindiRerankScheduler::COUNT_STATIC};
-};
 
 struct alignas(64) SindiWindowWorkerProfile {
     uint64_t windows{0};
@@ -92,9 +80,6 @@ public:
 /** Query-local window scheduling, candidate merging and FP32/FP16 sparse reranking. */
 class SindiSearcher {
 public:
-    static SindiWindowSearchOptions
-    ParseOptions(const JsonType& json);
-
     static const char*
     SchedulerName(SindiWindowScheduler scheduler);
 
@@ -131,13 +116,13 @@ public:
 
     static void
     SearchWindows(const SindiWindowSearchRequest& request,
-                  const SindiWindowSearchOptions& options,
+                  const SindiSearchOptions& options,
                   SindiWindowSearchProfile& profile,
                   MaxHeap& heap);
 
     static std::string
     DumpStatistics(const SearchStatistics& statistics,
-                   const SindiWindowSearchOptions& options,
+                   const SindiSearchOptions& options,
                    const SindiWindowSearchProfile& profile);
 };
 

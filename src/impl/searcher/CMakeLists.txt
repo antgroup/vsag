@@ -25,6 +25,7 @@ set (SEARCHER_SRC
     mci_searcher.h
     sindi_searcher.cpp
     sindi_searcher.h
+    sindi_search_options.h
     sindi_query_profile.h
     parallel_searcher.cpp
     parallel_searcher.h
