@@ -323,7 +323,7 @@ TEST_CASE("HGraph validates PiPNN graph type and data boundary", "[ut][pipnn][hg
         auto parameter = MakePiPNNHGraphParam();
         parameter["support_duplicate"].SetBool(true);
         parameter["deduplicate_storage"].SetBool(true);
-        REQUIRE_THROWS(MakePiPNNIndex(parameter, common_param));
+        REQUIRE_NOTHROW(MakePiPNNIndex(parameter, common_param));
     }
     SECTION("non-fp32 base codes") {
         auto parameter = MakePiPNNHGraphParam();

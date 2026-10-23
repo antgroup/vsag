@@ -96,6 +96,7 @@ public:
                       std::shared_ptr<const InnerIndexInterface> owner) const override;
 
     friend class HGraphAnalyzer;
+    friend class HGraphCodeWriteTestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
 
@@ -390,37 +391,6 @@ public:
     /// Map hgraph JSON parameters (legacy helper for external param mapping).
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
-
-    /**
-     * @brief Extract a pointer to the data vector at the given index.
-     *
-     * Dispatches on data_type_ to the correct typed getter on the dataset
-     * and offsets by `index * dim_`. Returns nullptr if the underlying
-     * pointer is absent.
-     */
-    const void*
-    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
-        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
-        CHECK_ARGUMENT(
-            data_type_ == DataTypes::DATA_TYPE_SPARSE ||
-                (dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_)),
-            "query offset exceeds int64_t range");
-        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
-                   data_type_ == DataTypes::DATA_TYPE_BF16) {
-            auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + index * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            auto* ptr = dataset->GetSparseVectors();
-            return ptr ? ptr + index : nullptr;
-        }
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
-    }
 
     /// Sample a random level from the exponential distribution for a new node.
     int
@@ -1275,13 +1245,22 @@ private:
     uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
 
     uint64_t ef_construct_{400};  // expansion factor during graph construction
-    float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
+    AdaptivePruningParameter adaptive_pruning_;
+
+    float alpha_{1.0};  // Relative Neighborhood Graph pruning coefficient
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
     mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
-    mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
+    // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
+    enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
+    UnorderedMap<InnerIdType, uint8_t> pending_code_writes_;
+
+    void
+    finish_code_write(InnerIdType inner_id, uint8_t code);
+
+    mutable std::mutex mci_build_mutex_;  // serializes full MCI reconstruction
     // MCI writers take mutation before force_remove; label scopes end before repair/search.
     // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
     // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
