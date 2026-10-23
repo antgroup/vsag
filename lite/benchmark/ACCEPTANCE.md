@@ -5,6 +5,10 @@ four outputs, three datasets, Lite/native Full comparisons, real CRUD, CPU/memor
 100k experiments, measured optimizations and failed quality gates. The prior E9
 cohort includes Cohere; historical Full comparisons remain separate evidence.
 
+## Experimental repair pilot
+
+[Neighbor reselection with degree-preserving refill](results/repair-reselection-pilot-20261023/README.md) preserves the rejected first candidate, all follow-up quality and maintenance costs. Experimental overlay only, not a production fix.
+
 ## Current CRUD isolation (E14)
 
 [Update-only and Remove/Add controls](results/crud-isolation-20261022/README.md) preserve all nine processes, fixed-budget curves and separate final ef=N diagnostics.

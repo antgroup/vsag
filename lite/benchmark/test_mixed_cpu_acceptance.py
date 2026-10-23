@@ -742,5 +742,77 @@ class IsolationPublishedTests(unittest.TestCase):
             self.assertEqual(counts, 375000)
 
 
+class RepairPilotPublishedTests(unittest.TestCase):
+    def test_all_repair_pilot_cells_and_rejected_candidate_preserved(self):
+        root = Path(__file__).parent / 'results/repair-reselection-pilot-20261023'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        self.assertEqual((receipt['cells'], receipt['processes'], receipt['mutation_calls']), (8, 16, 700000))
+        report = (root / 'README.md').read_text()
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for path, item in manifest.items():
+                self.assertEqual(sha(evidence / path), item['sha256'])
+                self.assertEqual((evidence / path).stat().st_size, item['bytes'])
+            rejected = json.loads((evidence / 'r1/rejected.json').read_text())
+            self.assertEqual(rejected['commands'][-1]['exit'], 8)
+            self.assertIn('1580', (evidence / 'r1/candidate-ctest.log').read_text())
+            self.assertIn('3072', (evidence / 'r1/candidate-ctest.log').read_text())
+            identity = json.loads((evidence / 'r2/identity.json').read_text())
+            self.assertEqual(sha(evidence / 'r2/graph_backend.cpp'), identity['candidate_source_sha256'])
+            self.assertEqual(sha(evidence / 'r2/baseline.cpp'), identity['production_source_sha256'])
+            self.assertIn('100% tests passed', (evidence / 'followup/san-ctest.log').read_text())
+            audit = json.loads((evidence / 'audit.json').read_text())
+            self.assertEqual(audit['status'], 'PASS')
+            self.assertTrue(audit['no_production_change'])
+            rows = json.loads((evidence / 'followup/rows.json').read_text())
+            self.assertEqual(rows, audit['rows'])
+            self.assertEqual(len(rows), 7)
+            plan = json.loads((evidence / 'followup/plan.json').read_text())
+            self.assertEqual([[r['dataset'], r['storage'], r['workload']] for r in rows], plan['cells'])
+            released = json.loads((evidence / 'followup/released-snapshot-receipts.json').read_text())
+            self.assertEqual(len(released), 14)
+            for row in rows:
+                self.assertTrue(row['initial_snapshot_equal'])
+                self.assertTrue(row['final_geometry_layout_equal'])
+                tag = row['dataset'] + '-' + row['storage'] + '-' + row['workload']
+                for side in ['baseline', 'candidate']:
+                    folder = evidence / ('followup/' + tag + '-' + side)
+                    with (folder / 'neighbors.csv').open() as stream:
+                        records = list(csv.DictReader(stream))
+                    self.assertEqual(len(records), 20000)
+                    for ef in [512, 10000]:
+                        selected = [r for r in records if int(r['ef']) == ef]
+                        self.assertEqual(len(selected), 10000)
+                        for view in ['maintained', 'canonical', 'same_order']:
+                            hits = 0
+                            for q in range(1000):
+                                group = selected[q * 10:(q + 1) * 10]
+                                self.assertEqual([(int(r['query']), int(r['rank'])) for r in group], [(q, rank) for rank in range(10)])
+                                truth = {int(r['truth_id']) for r in group}
+                                values = [(float(r[view + '_distance']), int(r[view + '_id'])) for r in group]
+                                self.assertEqual(values, sorted(values))
+                                self.assertEqual(len({i for _, i in values}), 10)
+                                self.assertTrue(all(math.isfinite(d) and 0 <= i < 10000 for d, i in values))
+                                hits += len(truth & {i for _, i in values})
+                            self.assertEqual(hits / 10000, row['quality'][side][str(ef)][view])
+                    with (folder / 'mutation-time.csv').open() as stream:
+                        timing = list(csv.DictReader(stream))
+                    self.assertEqual(timing, [row['loop_time'][side]])
+                    self.assertEqual(int(timing[0]['calls']), 25000 if row['workload'] == 'update' else 50000)
+                    self.assertTrue(math.isfinite(float(timing[0]['wall_ms'])) and float(timing[0]['wall_ms']) >= 0)
+                    release = next(r for r in released if r['cell'] == tag + '-' + side)
+                    self.assertEqual(next(i['sha256'] for i in release['snapshots'] if i['path'].endswith('/maintained.snapshot')), row[side + '_sha256'])
+                base = row['quality']['baseline']['512']['maintained']
+                candidate = row['quality']['candidate']['512']['maintained']
+                self.assertIn(f' | {base:.4f} | {candidate:.4f} | {(candidate-base)*100:+.2f} | ', report)
+
+
 if __name__ == '__main__':
     unittest.main()
