@@ -355,6 +355,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `early_stop` | object | absent (off) | Distance-based early termination: `{"type": "distance", "alpha": <float>}`. `alpha` is at least 1 and optional; when omitted it is chosen from `k`. See [Distance-based early termination](#distance-based-early-termination). |
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
@@ -366,62 +367,67 @@ auto result = index->KnnSearch(
 
 ### Distance-based early termination
 
-An optional `early_stop` object can reduce work within the normal fixed-`ef_search`
-traversal:
+An optional `early_stop` object lets a query finish before it spends the whole
+`ef_search` budget, once the remaining candidates are clearly farther than the results it
+already holds:
 
 ```json
-{"hgraph":{"ef_search":652,"early_stop":{"type":"distance","alpha":1.10}}}
+{"hgraph":{"ef_search":600,"early_stop":{"type":"distance","alpha":1.1}}}
 ```
 
-The search keeps track of the best `k` eligible results already found. Once all `k`
-are available, it may stop when the nearest pending candidate has a distance at
-least `alpha` times the current kth distance. The existing candidate admission and
-fixed-ef termination remain in effect. The comparison uses VSAG distance scores:
-squared distance for `l2`, and `1 - cosine` for `cosine`. A negative kth score caused
-by cosine roundoff is treated as zero for this comparison.
-As in ordinary KNN search, a requested distance threshold filters the selected
-results afterwards and may reduce the returned count below `k`.
+Once the search holds `k` eligible results, it stops when the nearest candidate still
+waiting to be expanded is at least `alpha` times as far as the current kth result.
+Candidate admission and the normal fixed-ef termination are unchanged, so a query that never
+meets this condition runs exactly as it would without `early_stop`. Distances are VSAG
+scores: squared distance for `l2` and `1 - cosine` for `cosine`. For normalized vectors
+`1 - cosine` is half the squared L2 distance, so an `alpha` means the same for both metrics.
+A kth score of zero or below (`k` copies of the query already found; cosine rounding can make
+it slightly negative) ends the search at the next check. A distance `threshold`, if set, still
+filters the selected results afterwards and may return fewer than `k`.
 
-`alpha` must be finite and at least 1. Larger values
-delay early termination: for the same `ef_search` the traversal is identical and only stops
-later. With FP32 base codes and no reordering, a larger value therefore never returns worse
-results. With quantized base codes the rule compares the traversal's approximate distances,
-and with reordering the reorder stage rescans fewer candidates, so recall against exact
-neighbours need not be monotone in `alpha`; calibrate it for each quantization and reorder
-setting. When the kth score is zero, a finite alpha of any magnitude can still allow
-early termination.
+`alpha` must be finite and at least 1; other keys inside `early_stop` are rejected. For the
+same `ef_search`, a larger `alpha` follows the same traversal and stops later, so with FP32
+base codes and no reordering it never returns worse results. With quantized base codes the rule
+compares the traversal's approximate distances, and with reordering fewer candidates reach the
+reorder stage, so recall need not be monotone in `alpha`; calibrate it for each quantization
+and reorder setting.
 
-When `alpha` is omitted, the default depends on `k`: `1.5` at `k = 10` and `1.15` from
-`k = 100` on, linear in `log10(k)` in between and rising to `1.85` at `k = 1`. A larger `k`
-puts the kth distance farther out, so the same ratio stops later and a smaller `alpha` is
-needed for the same effect. The defaults are conservative: on the calibration queries of the
-FP32 evaluation tracked in #2941 (three datasets, three recall targets) they met the recall
-and query-coverage targets at `k = 10` and `k = 100` wherever the fixed baseline did, while
-smaller values saved more work. Other values of `k` were not measured. To go below the default, choose `alpha` on calibration queries under the
-required recall and query coverage, then measure quality and end-to-end performance on
-separate queries. When the search width is at most 1.25 times `k` (normally when `ef_search` ≤ 1.25 `k`), the
-rule is skipped: the search runs as if `early_stop` were absent, and the index logs a warning the
-first time this happens. Close to `k` the rule rarely ends a search early while its own top-k
-state still costs time; in our measurements it saved under 2% of distance computations and
-lowered single-thread QPS by up to 7.4%. When calibrating, check end-to-end time, not only
-distance computations. Omitting `early_stop` disables the policy.
+When `alpha` is omitted, it is chosen from `k`: `1.5` at `k = 10`, `1.15` for `k >= 100`,
+linear in `log10(k)` in between and rising to `1.85` at `k = 1`. A larger `k` puts the kth
+distance farther out, so the same ratio stops later. On three public datasets with 1M vectors
+and `cosine` scores (`k` = 10 and 100, recall targets 0.80 to 0.95, with 90%, 95% or 99% of
+queries required to reach the target), the defaults kept recall and query coverage wherever the
+fixed `ef_search` did, except in one configuration that required all ten of ten neighbours for
+99% of queries. Values calibrated per configuration ranged from 1.13 to 1.54 at `k = 10` (1.85
+in that configuration) and from 1.03 to 1.15 at `k = 100`; those below the default saved more
+work. Calibration and the check used separate queries: choose `alpha` on one set under the
+required recall and query coverage, then check quality and end-to-end time on another (see
+#2941).
 
-This option supports ordinary KNN search with `l2` or `cosine` on any base quantization,
-with or without reordering, with conjugate graph search, and with several distance
-threads per query (`parallel_search_thread_count`), including filters, batched queries,
-and concurrent independent queries. With reordering, the rule acts on the traversal's
-base-code distances and the reorder stage then rescores the candidates the traversal kept.
-The inner-product metric (its distances can be negative, so the ratio is not meaningful),
-custom distance callbacks, range search, iterator search, search sessions and fused RaBitQ
-split storage are unsupported and rejected. Existing MCI, hybrid-traversal, or brute-force
-routes complete normally when selected; the new rule acts on the ordinary HGraph graph
-traversal. A search stopped by the rule reports
-`early_stop_count: 1` in its statistics. For a batched request, the count is the
-number of individual traversals stopped by the rule; a zero count is omitted.
+The rule is skipped when the search width (`ef_search`, raised to at least `k`) is at most
+1.25 times `k`: the search runs as if `early_stop` were absent, and the index logs a warning
+the first time this happens. That close to `k` the rule rarely ends a search early, while its
+own top-k state still costs time; in our measurements it saved under 2% of distance
+computations and lowered single-thread QPS by up to 7.4%.
 
-The criterion is adapted from [Distance Adaptive Beam Search, Algorithm 2](https://arxiv.org/html/2505.15636v1#A2).
-This implementation retains VSAG's fixed-width traversal and operates in its score
-units; the paper's metric/navigability guarantee does not apply to this extension.
+`early_stop` works with KNN search on `l2` or `cosine`, any base quantization, reordering (the
+rule acts on the traversal's base-code distances and the reorder stage then rescores the
+candidates it kept), conjugate graph search, `parallelism`, filters, batched queries and
+concurrent requests. It is rejected with an error for the inner-product metric (its distances
+can be negative, so the ratio has no meaning; for normalized embeddings, `cosine` gives the
+same ranking), custom distance callbacks, range search, iterator search, search sessions and
+fused RaBitQ split storage. When an MCI, hybrid-traversal or brute-force route answers the
+query, the search runs as before.
+
+A search that runs the rule reports `early_stop_count` in its statistics: 1 if the rule ended
+it and 0 if not; a batch reports how many of its queries the rule ended. The count is absent
+when the rule did not run: not requested, skipped near `k`, or answered by a route other than
+the graph traversal. In the search reasoning report, a search the rule ended gives
+`distance_early_stop` as its termination reason.
+
+The rule is adapted from [Distance Adaptive Beam Search, Algorithm 2](https://arxiv.org/html/2505.15636v1#A2).
+This implementation keeps VSAG's fixed-width traversal and distance scores, so the paper's
+guarantee for metric spaces and navigable graphs does not carry over.
 
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 

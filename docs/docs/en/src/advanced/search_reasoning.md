@@ -104,6 +104,10 @@ The quantization check is the legacy heuristic `approximate > 1.5 * true`, appli
 only when the true distance is positive. It is not a metric-independent error bound
 or proof that quantization caused the miss; signed IP distances need particular care.
 
+When `termination_reason` is `distance_early_stop`, the HGraph distance early stop ended the
+traversal, and expected targets it never reached are reported as `not_reachable`. Raise
+`alpha` or drop `early_stop` before suspecting the graph.
+
 When present in a full report, `supports_range` is a boolean describing registered
 range-reasoning support, not availability of the index's RangeSearch API. Unregistered
 index types report false; absence from a status-only report does not mean false.

@@ -141,6 +141,12 @@ Extension availability depends on the index and search path. Applications read t
 by `SearchResultMetrics::Extensions()` and must check whether a key exists. Baseline names are
 reserved; only the internal collector can add extensions, and it rejects a colliding name.
 
+HGraph adds `early_stop_count` (`uint32_t`) to its statistics when a query's graph traversal ran
+the [distance early stop](../indexes/hgraph.md#distance-based-early-termination): the number of
+searches the rule ended, so 0 means it ran and ended none. The key is absent when the rule was
+not requested, was skipped because `ef_search` was too close to `k`, or the query was answered
+by an MCI, hybrid-traversal or brute-force route.
+
 ## Compatibility
 
 - Existing `GetStatistics()` and `GetStatistics(keys)` APIs remain available.
