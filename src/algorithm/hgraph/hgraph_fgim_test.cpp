@@ -928,6 +928,32 @@ TEST_CASE_METHOD(HGraphFGIMTest,
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM reconstruction prunes redundant ties and protects sole incoming edges",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // Node 2 has two incoming edges; 0->2 is redundant with the equally close 0->1.
+    // After pruning 0->2, 3->2 is the sole incoming edge and must remain.
+    const FGIMKnnGraph input{{{1, 0}, {2, 0}}, {{0, 0}}, {{3, 0}}, {{2, 0}}};
+    const auto result = HGraphFGIM::KnnGraphToPG(sources, input, 2);
+    REQUIRE(result[0].size() == 1);
+    REQUIRE(result[0][0].id == 1);
+    REQUIRE(result[3].size() == 1);
+    REQUIRE(result[3][0].id == 2);
+    REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects a missing destination label table",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(2, 0, true);
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    SetUnsupported(*destination, "missing label table");
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM refinement rejects duplicate IDs independently of stored distances",
                  "[ut][hgraph][fgim]") {
     auto lhs = MakeSource(2, 0, true);

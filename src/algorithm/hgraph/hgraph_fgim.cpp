@@ -531,6 +531,7 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
                     ++count;
                     CHECK_ARGUMENT(std::isfinite(distance),
                                    "FGIM reconstruction encountered a non-finite distance");
+                    // Algorithm 5 keeps only strictly closer edges, including tied distances.
                     if (!(edge.distance < distance)) {
                         keep = false;
                         break;
@@ -540,7 +541,7 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
             if (keep) {
                 retained.push_back(edge);
             } else {
-                // Update the recorder so later removals cannot delete the last incoming edge.
+                // Update after each removal; last-incoming protection follows node traversal order.
                 --indegree[edge.id];
             }
         }
@@ -554,7 +555,7 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
         }
     }
     for (auto& row : result) {
-        // Deduplicate by ID first; retain the smaller stored distance if roundoff differs.
+        // Sort each ID's distances ascending so unique keeps its smallest stored distance.
         std::sort(row.begin(), row.end(), [](const auto& lhs, const auto& rhs) {
             return lhs.id < rhs.id || (lhs.id == rhs.id && lhs.distance < rhs.distance);
         });
@@ -581,6 +582,7 @@ HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uin
                                    destination.bottom_graph_->MaxCapacity() >= graph.size();
     CHECK_ARGUMENT(valid_condition_2, "FGIM destination bottom graph capacity is insufficient");
     const bool valid_condition_3 = destination.basic_flatten_codes_ != nullptr &&
+                                   destination.label_table_ != nullptr &&
                                    destination.basic_flatten_codes_->TotalCount() == graph.size() &&
                                    destination.label_table_->GetTotalCount() == graph.size() &&
                                    destination.GetNumberRemoved() == 0;
