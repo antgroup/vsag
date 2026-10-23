@@ -101,6 +101,42 @@ TEST_CASE("SparseDuplicateTracker serialize and deserialize", "[ut][SparseDuplic
     REQUIRE(restored.GetGroupId(5) == 4);
 }
 
+TEST_CASE("SparseDuplicateTracker deserializes singleton and noncanonical groups",
+          "[ut][SparseDuplicateTracker]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    std::stringstream ss;
+    IOStreamWriter writer(ss);
+    const uint64_t group_count = 2;
+    StreamWriter::WriteObj(writer, group_count);
+
+    const InnerIdType singleton = 9;
+    StreamWriter::WriteObj(writer, singleton);
+    StreamWriter::WriteVector(writer, std::vector<InnerIdType>{});
+
+    const InnerIdType head = 7;
+    StreamWriter::WriteObj(writer, head);
+    StreamWriter::WriteVector(writer, std::vector<InnerIdType>{3, 5});
+
+    SparseDuplicateTracker tracker(allocator.get());
+    IOStreamReader reader(ss);
+    tracker.Deserialize(reader);
+
+    REQUIRE(tracker.GetDuplicateIds(singleton).empty());
+    REQUIRE(tracker.GetGroupId(singleton) == singleton);
+    REQUIRE(sorted_duplicates(tracker.GetDuplicateIds(3)) == std::vector<InnerIdType>{5, 7});
+    REQUIRE(tracker.GetGroupId(7) == 3);
+
+    std::stringstream roundtrip;
+    IOStreamWriter roundtrip_writer(roundtrip);
+    tracker.Serialize(roundtrip_writer);
+    SparseDuplicateTracker restored(allocator.get());
+    IOStreamReader roundtrip_reader(roundtrip);
+    restored.Deserialize(roundtrip_reader);
+    REQUIRE(restored.GetDuplicateIds(singleton).empty());
+    REQUIRE(sorted_duplicates(restored.GetDuplicateIds(5)) == std::vector<InnerIdType>{3, 7});
+    REQUIRE(restored.GetGroupId(7) == 3);
+}
+
 TEST_CASE("SparseDuplicateTracker deserializes legacy format", "[ut][SparseDuplicateTracker]") {
     auto allocator = std::make_shared<DefaultAllocator>();
 
