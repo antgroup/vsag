@@ -364,9 +364,11 @@ run(int argc, char** argv) {
         checkpoint(output, 0, cycles, base, queries, *index, format, calls_per_cycle);
     }
     std::ofstream states(output / "states.csv");
-    states << "round,count,rss_kib,peak_kib,snapshot_bytes,rss_before_persistence_kib,threads\n";
+    states << "round,count,rss_kib,peak_kib,snapshot_bytes,rss_before_persistence_kib,threads,proc_"
+              "hwm_kib\n";
     states << "0," << index->Size() << ',' << rss_kib() << ',' << usage().ru_maxrss << ",0,"
-           << rss_kib() << ',' << status_number("Threads:") << '\n';
+           << rss_kib() << ',' << status_number("Threads:") << ',' << status_number("VmHWM:")
+           << '\n';
     uint64_t query_number = 0;
     const auto mixed_query = [&](uint64_t round) {
         const auto q = query_number++ % queries.size();
@@ -464,7 +466,7 @@ run(int argc, char** argv) {
         }
         states << round << ',' << index->Size() << ',' << rss_kib() << ',' << usage().ru_maxrss
                << ',' << std::filesystem::file_size(snapshot) << ',' << before_persistence_rss
-               << ',' << actual_threads << '\n';
+               << ',' << actual_threads << ',' << status_number("VmHWM:") << '\n';
     }
     quality_check(rounds);
     std::ofstream timings(output / "samples.csv");

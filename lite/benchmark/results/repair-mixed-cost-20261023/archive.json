@@ -1,0 +1,18 @@
+{
+  "bytes": 7492762,
+  "sha256": "0cfdc35d83c47884f2108585219f90a2a1c947b02292bf8bfc0df59ce7f8cbc9",
+  "members": 189,
+  "audit": "PASS",
+  "mixed_processes": 3,
+  "mixed_mutation_calls": 225000,
+  "mixed_query_calls": 225000,
+  "save_load_pairs": 300,
+  "cache_processes": 18,
+  "cache_mutation_calls": 750000,
+  "count_cells": 6,
+  "source": "private overlays; default source unchanged",
+  "originals_preserved": true,
+  "cache_adopted": false,
+  "quality_threshold": null,
+  "legacy_peak_boundary": "getrusage can retain launcher history; new proc_hwm_kib is not backfilled into the measured run"
+}

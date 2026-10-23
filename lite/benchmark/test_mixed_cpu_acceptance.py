@@ -703,7 +703,10 @@ class IsolationPublishedTests(unittest.TestCase):
                 self.assertEqual(identity['configuration']['mutation_mode'], mode)
                 self.assertEqual(identity['configuration']['checkpoint_every'], 25)
                 self.assertEqual(sha(raw / 'source.cpp'), sha(evidence / 'tooling/mixed_cpu_acceptance.cpp'))
-                self.assertEqual(sha(raw / 'source.cpp'), sha(Path(__file__).with_name('mixed_cpu_acceptance.cpp')))
+                # Historical E14 must remain bound to its measured source, not a later CSV extension.
+                self.assertEqual(identity['benchmark_source_sha256'],
+                                 '4a2d5b163caac56c6cf8f85808725fe954672969f12dbbad40b74b7d5de93554')
+                self.assertEqual(sha(raw / 'source.cpp'), identity['benchmark_source_sha256'])
                 rows = json.loads((raw / 'rows.json').read_text())
                 if mode in ['replace', 'reinsert']:
                     cell = next(c for c in slot_audit['cells'] if c['mode'] == mode)
@@ -812,6 +815,159 @@ class RepairPilotPublishedTests(unittest.TestCase):
                 base = row['quality']['baseline']['512']['maintained']
                 candidate = row['quality']['candidate']['512']['maintained']
                 self.assertIn(f' | {base:.4f} | {candidate:.4f} | {(candidate-base)*100:+.2f} | ', report)
+
+
+class RepairMixedPublishedTests(unittest.TestCase):
+    def test_mixed_curve_costs_counts_and_rejected_cache_are_recomputable(self):
+        root = Path(__file__).parent / 'results/repair-mixed-cost-20261023'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual(sha(evidence / name), item['sha256'])
+                self.assertEqual((evidence / name).stat().st_size, item['bytes'])
+            complete = json.loads((evidence / 'mixed/completed.json').read_text())
+            self.assertEqual(complete['status'], 'PASS')
+            self.assertEqual((complete['mutation_calls'], complete['interleaved_queries'], complete['save_load_pairs']),
+                             (225000, 225000, 300))
+            identity = json.loads((evidence / 'mixed/identity.json').read_text())
+            self.assertEqual(identity['schema'], 'private-experimental-mixed-v1')
+            self.assertEqual(sha(evidence / 'mixed/source.cpp'), identity['source_sha256'])
+            rows = json.loads((evidence / 'mixed/rows.json').read_text())
+            self.assertEqual([r['side'] for r in rows], ['baseline', 'r2', 'cache'])
+            for row in rows:
+                folder = evidence / 'mixed' / row['side']
+                actual = verify_run(folder, 100, 250, 1000)
+                actual['checkpoints'] = runner.verify_checkpoints(folder, 100, 250, 1000, 25)
+                self.assertEqual(actual, {k:v for k,v in row.items() if k not in ['side', 'snapshots']})
+                self.assertEqual(set(row['snapshots']), {'round-'+str(n) for n in range(1,101)})
+                self.assertTrue(all(v['bytes'] > 0 and len(v['sha256']) == 64 for v in row['snapshots'].values()))
+                with (folder / 'samples.csv').open() as stream:
+                    sequence = iter(csv.DictReader(stream))
+                    def consume(number, identifier, operation):
+                        item = next(sequence)
+                        self.assertEqual((int(item['round']), int(item['id']), item['operation']),
+                                         (number, identifier, operation))
+                    consume(0, -1, 'build')
+                    query = 0
+                    for number in range(1, 101):
+                        for cycle in range(250):
+                            identifier = ((number-1)*65537 + cycle*8191) % 10000
+                            for operation in ['update', 'remove', 'add']:
+                                consume(number, identifier, operation)
+                                consume(number, query % 1000, 'query')
+                                query += 1
+                        consume(number, -1, 'save')
+                        consume(number, -1, 'load')
+                    self.assertIsNone(next(sequence, None))
+            self.assertEqual(rows[1]['snapshots'], rows[2]['snapshots'])
+            for name in ['quality.csv'] + [f'checkpoint-{n}-neighbors.csv' for n in [0,25,50,75,100]]:
+                self.assertEqual((evidence / 'mixed/r2' / name).read_bytes(), (evidence / 'mixed/cache' / name).read_bytes())
+            for number in [0,25,50,75,100]:
+                control = None
+                for side in ['baseline','r2','cache']:
+                    with (evidence / 'mixed' / side / f'checkpoint-{number}-neighbors.csv').open() as stream:
+                        current = [tuple(row[k] for k in ['round','query','rank','truth_id','fresh_id','fresh_distance'])
+                                   for row in csv.DictReader(stream)]
+                    if control is None:
+                        control = current
+                    self.assertEqual(current, control)
+            cached = json.loads((evidence / 'cache/rows.json').read_text())
+            cache_identity = json.loads((evidence / 'cache/identity.json').read_text())
+            self.assertEqual(sha(evidence / 'cache/probe.cpp'), cache_identity['probe_sha256'])
+            self.assertEqual(sha(evidence / 'cache/graph_backend.cpp'), cache_identity['cache_source_sha256'])
+            self.assertEqual(sha(evidence / 'reproduction/graph_backend.r2.cpp'), cache_identity['r2_source_sha256'])
+            self.assertEqual(identity['libraries']['cache']['sha256'], cache_identity['cache_library_sha256'])
+            self.assertEqual(identity['libraries']['r2']['sha256'], cache_identity['r2_library_sha256'])
+            self.assertEqual(len(cached), 18)
+            self.assertEqual(sum(row['calls'] for row in cached), 750000)
+            for mode in ['update', 'replace', 'reinsert']:
+                for trial in range(3):
+                    pair = [r for r in cached if r['workload'] == mode and r['trial'] == trial]
+                    self.assertEqual({r['side'] for r in pair}, {'r2', 'cache'})
+                    self.assertEqual(pair[0]['snapshots'], pair[1]['snapshots'])
+                    self.assertTrue(all(r['loop_wall_ms'] > 0 and r['user_s'] >= 0 and r['system_s'] >= 0 for r in pair))
+            self.assertIn('duplicate include', (evidence / 'cache/first-attempt-probe-tidy.log').read_text())
+            for config in ['release', 'san']:
+                self.assertIn('100% tests passed', (evidence / 'cache' / (config+'-ctest.log')).read_text())
+            counts = json.loads((evidence / 'counts/rows.json').read_text())
+            self.assertEqual({(r['workload'],r['side']) for r in counts},
+                             {(m,s) for m in ['update','replace','reinsert'] for s in ['baseline','r2']})
+            for row in counts:
+                self.assertTrue(row['exact'])
+                log = (evidence / 'counts' / (row['workload']+'-'+row['side']+'.log')).read_text()
+                self.assertEqual(json.loads(next(line[7:] for line in log.splitlines() if line.startswith('COUNTS '))), row['counts'])
+                self.assertLessEqual(row['counts']['repeated_distance'], row['counts']['repair_distance'])
+                self.assertEqual(row['counts']['repairs'], 25000)
+            report = (root / 'README.md').read_text()
+            for row in rows:
+                for operation in ['update','remove','add','query','save','load']:
+                    item = row[operation]
+                    self.assertIn(f"| {row['side']} | {operation} | {item['count']} | {item['p50_us']:.3f} | {item['p99_us']:.3f} | {item['call_only_ops_per_second']:.1f} | {item['wall_sum_ms']/1000:.3f} | {(item['user_sum_ms']+item['system_sum_ms'])/1000:.3f} |", report)
+            for number in [0,25,50,75,100]:
+                values = [r['checkpoints'][str(number)]['maintained_recall'] for r in rows]
+                self.assertIn('| '+str(number)+' | '+' | '.join(f'{v:.4f}' for v in values)+' |', report)
+
+
+class ProcessHighWaterTests(unittest.TestCase):
+    def test_optional_current_process_high_water_and_legacy_compatibility(self):
+        with tempfile.TemporaryDirectory() as directory:
+            folder = Path(directory)
+            AcceptanceTests().fixture(folder)
+            verify_run(folder,1,1,1)
+            path = folder / 'states.csv'
+            with path.open() as stream:
+                states = list(csv.DictReader(stream))
+            def write(values):
+                with path.open('w',newline='') as stream:
+                    writer = csv.DictWriter(stream,fieldnames=list(states[0])+['proc_hwm_kib'])
+                    writer.writeheader()
+                    for row,value in zip(states,values):
+                        writer.writerow(dict(row,proc_hwm_kib=value))
+            write([110,120])
+            verify_run(folder,1,1,1)
+            for invalid in [[0,120],[110,0],[120,110],[80,120]]:
+                write(invalid)
+                with self.assertRaises(AssertionError):
+                    verify_run(folder,1,1,1)
+
+    @unittest.skipUnless(os.environ.get('VSAG_MIXED_PROBE'), 'Compiled C++ probe required')
+    def test_current_process_high_water_excludes_large_launcher_history(self):
+        binary = str(Path(os.environ['VSAG_MIXED_PROBE']).resolve())
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dataset = root / 'data'
+            dataset.mkdir()
+            for filename, count in [('base.fvecs',64),('queries.fvecs',5)]:
+                with (dataset / filename).open('wb') as stream:
+                    for identifier in range(count):
+                        stream.write(struct.pack('<i17f',17,*[(identifier+1)*(d+1)*0.001 for d in range(17)]))
+            snapshots = root / 'snapshots'
+            snapshots.mkdir()
+            output = root / 'output'
+            launcher = '''import subprocess,sys
+ballast=bytearray(96*1024*1024)
+for offset in range(0,len(ballast),4096): ballast[offset]=1
+subprocess.run(sys.argv[1:],check=True)
+'''
+            subprocess.run([sys.executable,'-c',launcher,binary,str(dataset),str(output),
+                            'fp32','1','2',str(snapshots),'resident'],check=True,capture_output=True)
+            verify_run(output,1,2,5)
+            with (output / 'states.csv').open() as stream:
+                states = list(csv.DictReader(stream))
+            self.assertEqual(len(states),2)
+            for state in states:
+                self.assertGreaterEqual(int(state['peak_kib']),96*1024)
+                self.assertGreater(int(state['proc_hwm_kib']),0)
+                self.assertLess(int(state['proc_hwm_kib']),int(state['peak_kib'])/2)
+                self.assertGreaterEqual(int(state['proc_hwm_kib'])+64,int(state['rss_kib']))
 
 
 if __name__ == '__main__':

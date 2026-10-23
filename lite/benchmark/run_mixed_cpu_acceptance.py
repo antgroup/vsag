@@ -83,6 +83,11 @@ def verify_run(output, rounds, cycles, queries, mutation_mode='all'):
     count = int(states[0]['count'])
     assert all(int(row['count']) == count for row in states)
     assert [int(row['round']) for row in states] == list(range(rounds + 1))
+    if any('proc_hwm_kib' in row for row in states):
+        assert all('proc_hwm_kib' in row for row in states)
+        high_water = [int(row['proc_hwm_kib']) for row in states]
+        assert high_water == sorted(high_water)
+        assert all(value > 0 and value >= int(row['rss_kib']) for value, row in zip(high_water, states))
     result['states'] = states
     if mutation_mode != 'all':
         # Verify stage purity and the exact deterministic ID/query schedule, not only totals.

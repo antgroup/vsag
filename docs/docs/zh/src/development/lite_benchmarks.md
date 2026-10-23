@@ -133,3 +133,9 @@ Linux 工具在单线程子进程中进行重建和真值分配，父进程等�
 校验器检查操作纯度、顺序、ID、次数、真值交集、重建对照及全预算结果。
 全部曲线、来源、独立真值复算和原始归档见
 [GIST九组隔离实验](../../../../../lite/benchmark/results/crud-isolation-20261022/)。不改生产修复或承诺逐操作落盘。
+
+### 隔离候选的真实混合验证
+
+GIST/FP32基线与两个仅归档候选各100轮resident混合CRUD，每25轮记录当前数据召回/重建对照，同时保留逐API CPU/P50/P99和RSS。256项缓存三对计时没有稳定收益，不采纳。全部曲线、维护成本、距离计数与负结果见[实验报告](../../../../../lite/benchmark/results/repair-mixed-cost-20261023/)。不改功能分支，不据此宣称RaBitQ或小时级稳定。
+
+后续混合测量在states.csv每轮追加proc_hwm_kib，来自Linux /proc/self/status的VmHWM，在API计时外读取。旧列保持兼容：peak_kib仍是原getrusage峰值，可能包含exec前启动父进程历史；不能把旧数据重标成新口径。候选归档保留偏差、独立启动诊断和全部原值。

@@ -460,3 +460,9 @@ with a same-data fresh rebuild at formal ef512; final `ceiling.csv` additionally
 The verifier checks stage order/counts/IDs, truth intersections, fresh/maintained results and final budget.
 See [all nine GIST cells and raw archives](../../../../../lite/benchmark/results/crud-isolation-20261022/)
 for frozen commands, independent oracle replay and source/build/input identities. No production repair or durability claim.
+
+### Experimental mixed repair validation
+
+GIST/FP32 baseline and two archive-only overlays each run 100 resident mixed rounds, with 25-round current-state quality checkpoints, per-API CPU/P50/P99 and RSS. The 256-entry cache has no stable benefit across three pairs; it is not adopted. All curves, maintenance costs, distance counts and adverse results are retained in [the experimental report](../../../../../lite/benchmark/results/repair-mixed-cost-20261023/). This does not change the feature branch or establish RaBitQ/hour-scale stability.
+
+For new mixed runs, `states.csv` additionally records `proc_hwm_kib` from Linux `/proc/self/status` `VmHWM` once per round, outside API timing. Existing columns remain compatible: legacy `peak_kib` is the unmodified `getrusage` high-water value and can include launcher history across exec. Do not reinterpret old raw results as this new measurement; the experimental archive preserves the observed discrepancy and an independent launcher diagnostic.
