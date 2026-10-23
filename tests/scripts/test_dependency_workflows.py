@@ -21,7 +21,7 @@ def job_text(workflow: Path, job_name: str) -> str:
 
 class DependencyWorkflowTest(unittest.TestCase):
     def test_metrics_helpers_preserve_dedicated_coverage_checks(self) -> None:
-        workflow = ROOT / ".github/workflows/pr-ci.yml"
+        workflow = ROOT / ".github/workflows/pr-ci-community.yml"
         coverage = job_text(workflow, "coverage-config")
         asan = job_text(workflow, "build-asan-x86")
 
@@ -40,7 +40,7 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertNotIn("-DVSAG_USE_SYSTEM_OPENBLAS=AUTO", daily_x86)
 
     def test_pull_request_archive_cache_is_restore_only(self) -> None:
-        pr_ci = (ROOT / ".github/workflows/pr-ci.yml").read_text(encoding="utf-8")
+        pr_ci = (ROOT / ".github/workflows/pr-ci-community.yml").read_text(encoding="utf-8")
 
         self.assertIn("uses: actions/cache/restore@v4", pr_ci)
         self.assertNotIn("uses: actions/cache@v4", pr_ci)
@@ -49,13 +49,25 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:
-        asan = job_text(ROOT / ".github/workflows/pr-ci.yml", "build-asan-x86")
+        asan = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-asan-x86")
         job_configuration, steps = asan.split("    steps:\n", 1)
         self.assertIn(
             "      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads\n",
             job_configuration,
         )
         self.assertIn("          path: .ci-downloads\n", steps)
+
+    def test_team_compiler_cache_is_private_and_never_published_by_pr(self) -> None:
+        team = job_text(ROOT / ".github/workflows/pr-ci-team.yml", "build")
+        self.assertIn('cache="$RUNNER_TEMP/team-ccache"', team)
+        self.assertIn('team_cache.py restore', team)
+        self.assertIn('--source /__ci/cache/snapshot --manifest /__ci/cache/manifest.json', team)
+        self.assertIn('--namespace-file ci-logs/cache-namespace.json', team)
+        self.assertIn('CCACHE_BASEDIR=$GITHUB_WORKSPACE', team)
+        self.assertIn('CCACHE_COMPILERCHECK=content', team)
+        self.assertNotIn('team_cache.py manifest', team)
+        self.assertNotIn('actions/cache/save', team)
+        self.assertNotIn('actions/cache@', team)
 
     def test_external_archives_keep_hash_validation_and_pin_overrides(self) -> None:
         for dependency in ("antlr4", "hdf5", "openblas"):
