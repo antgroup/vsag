@@ -15,11 +15,16 @@
 
 #include "product_quantizer.h"
 
+#include <cstring>
+#include <sstream>
 #include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 using namespace vsag;
 
 const auto dims = {128, 256};
@@ -114,5 +119,105 @@ TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]"
             TestSerializeAndDeserializeMetricPQ<metrics[1]>(dim, pq_dim, count, error);
             TestSerializeAndDeserializeMetricPQ<metrics[2]>(dim, pq_dim, count, error);
         }
+    }
+}
+
+TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][ProductQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr int64_t pq_dim = 8;
+    constexpr int64_t subspace_dim = dim / pq_dim;
+    constexpr uint64_t codebook_len = static_cast<uint64_t>(dim) * 256;  // CENTROIDS_PER_SUBSPACE
+    using QuantizerT = ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+
+    std::string blob;
+    {
+        QuantizerT quantizer(dim, pq_dim, allocator.get());
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        quantizer.Serialize(writer);
+        blob = stream.str();
+    }
+
+    // control: an untampered blob must deserialize cleanly
+    {
+        QuantizerT quantizer(dim, pq_dim, allocator.get());
+        std::stringstream stream(blob);
+        IOStreamReader reader(stream);
+        REQUIRE_NOTHROW(quantizer.Deserialize(reader));
+    }
+
+    auto expect_throw = [&](const std::string& tampered) {
+        QuantizerT quantizer(dim, pq_dim, allocator.get());
+        std::stringstream stream(tampered);
+        IOStreamReader reader(stream);
+        REQUIRE_THROWS_AS(quantizer.Deserialize(reader), VsagException);
+    };
+
+    // locate the quantizer blob triple: int64 pq_dim, int64 subspace_dim, uint64 codebook_len
+    uint64_t hit = blob.size();
+    for (uint64_t i = 0; i + 24 <= blob.size(); ++i) {
+        int64_t pq = 0;
+        int64_t sub = 0;
+        uint64_t len = 0;
+        std::memcpy(&pq, blob.data() + i, 8);
+        std::memcpy(&sub, blob.data() + i + 8, 8);
+        std::memcpy(&len, blob.data() + i + 16, 8);
+        if (pq == pq_dim and sub == subspace_dim and len == codebook_len) {
+            hit = i;
+            break;
+        }
+    }
+    REQUIRE(hit != blob.size());
+
+    // tampered pq_dim: transpose_codebooks() loop bound overflows the codebook buffers
+    {
+        std::string tampered = blob;
+        auto evil = static_cast<int64_t>(4096);
+        std::memcpy(tampered.data() + hit, &evil, 8);
+        expect_throw(tampered);
+    }
+
+    // tampered subspace_dim
+    {
+        std::string tampered = blob;
+        auto evil = static_cast<int64_t>(subspace_dim + 1);
+        std::memcpy(tampered.data() + hit + 8, &evil, 8);
+        expect_throw(tampered);
+    }
+
+    // tampered codebook length: shorter than the construction-time geometry
+    {
+        std::string tampered = blob;
+        auto evil = static_cast<uint64_t>(codebook_len / 2);
+        std::memcpy(tampered.data() + hit + 16, &evil, 8);
+        expect_throw(tampered);
+    }
+
+    // oversized codebook length: must be rejected before any allocation is attempted
+    {
+        std::string tampered = blob;
+        auto evil = static_cast<uint64_t>(1) << 32;  // ~16 GiB of floats if honored
+        std::memcpy(tampered.data() + hit + 16, &evil, 8);
+        expect_throw(tampered);
+    }
+
+    // tampered dim_: locate it by value instead of assuming a fixed offset, so the
+    // test stays correct if the base-class serialization order ever changes
+    uint64_t dim_pos = blob.size();
+    for (uint64_t i = 0; i + 8 <= hit; ++i) {
+        int64_t val = 0;
+        std::memcpy(&val, blob.data() + i, 8);
+        if (val == dim) {
+            dim_pos = i;
+            break;
+        }
+    }
+    REQUIRE(dim_pos != blob.size());
+    {
+        std::string tampered = blob;
+        auto evil = static_cast<int64_t>(dim * 2);
+        std::memcpy(tampered.data() + dim_pos, &evil, 8);
+        expect_throw(tampered);
     }
 }

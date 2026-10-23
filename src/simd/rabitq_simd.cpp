@@ -23,6 +23,25 @@ VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatBinaryIPBatch4, RaBitQFloatBinaryBatch4Type
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatThreeBitIPBatch4, RaBitQFloatThreeBitBatch4Type);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSplitCodeIP, RaBitQFloatSplitCodeType);
 VSAG_DEFINE_SIMD_DISPATCH(RaBitQFloatSupplementCodeIP, RaBitQFloatSupplementCodeType);
+
+static RaBitQFloatPackedSupplementCodeType
+GetRaBitQFloatPackedSupplementCodeIP() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatPackedSupplementCodeIP;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQFloatPackedSupplementCodeIP;
+#endif
+    }
+    return generic::RaBitQFloatPackedSupplementCodeIP;
+}
+
+RaBitQFloatPackedSupplementCodeType RaBitQFloatPackedSupplementCodeIP =
+    GetRaBitQFloatPackedSupplementCodeIP();
+
 static RaBitQFloatExCode7Type
 GetRaBitQFloatExCode7IP() {
     if (SimdStatus::SupportAVX2()) {
@@ -33,6 +52,26 @@ GetRaBitQFloatExCode7IP() {
     return generic::RaBitQFloatExCode7IP;
 }
 RaBitQFloatExCode7Type RaBitQFloatExCode7IP = GetRaBitQFloatExCode7IP();
+static RaBitQExCode7ToVectorType
+GetRaBitQExCode7ToVector() {
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQExCode7ToVector;
+#endif
+    }
+    return generic::RaBitQExCode7ToVector;
+}
+RaBitQExCode7ToVectorType RaBitQExCode7ToVector = GetRaBitQExCode7ToVector();
+static RaBitQExCode7ToBytesType
+GetRaBitQExCode7ToBytes() {
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQExCode7ToBytes;
+#endif
+    }
+    return generic::RaBitQExCode7ToBytes;
+}
+RaBitQExCode7ToBytesType RaBitQExCode7ToBytes = GetRaBitQExCode7ToBytes();
 VSAG_DEFINE_SIMD_DISPATCH_VPOPCNTDQ(RaBitQSQ4UBinaryIP, RaBitQSQ4UBinaryType);
 static RaBitQSQ4UBinaryWithBaseSumType
 GetRaBitQSQ4UBinaryIPWithBaseSum() {
@@ -118,6 +157,23 @@ GetRaBitQPackScalarToSplitPlanes() {
 
 RaBitQPackScalarToSplitPlanesType RaBitQPackScalarToSplitPlanes =
     GetRaBitQPackScalarToSplitPlanes();
+
+static RaBitQPackScalarToSplitCodeType
+GetRaBitQPackScalarToSplitCode() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQPackScalarToSplitCode;
+#endif
+    }
+    if (SimdStatus::SupportAVX2()) {
+#if defined(ENABLE_AVX2)
+        return avx2::RaBitQPackScalarToSplitCode;
+#endif
+    }
+    return generic::RaBitQPackScalarToSplitCode;
+}
+
+RaBitQPackScalarToSplitCodeType RaBitQPackScalarToSplitCode = GetRaBitQPackScalarToSplitCode();
 
 VSAG_DEFINE_SIMD_DISPATCH(FHTRotate, FHTRotateType);
 VSAG_DEFINE_SIMD_DISPATCH(KacsWalk, KacsWalkType);

@@ -15,10 +15,13 @@
 
 #include "sindi_parameter.h"
 
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <string>
 
 #include "inner_string_params.h"
 #include "parameter_test.h"
+#include "sindi.h"
 #include "unittest.h"
 using namespace vsag;
 
@@ -265,15 +268,17 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
 
     SECTION("rerank_type compatibility") {
         SINDIDefaultParam fp32_param;
-        SINDIDefaultParam dmq_param;
-        dmq_param.rerank_type = SPARSE_RERANK_TYPE_DMQ8;
+        SINDIDefaultParam fp16_param;
+        fp16_param.rerank_type = SPARSE_RERANK_TYPE_FP16;
         auto fp32_param_str = generate_sindi_param(fp32_param);
-        auto dmq_param_str = generate_sindi_param(dmq_param);
+        auto fp16_param_str = generate_sindi_param(fp16_param);
         auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
         auto sindi_param2 = std::make_shared<vsag::SINDIParameter>();
         sindi_param1->FromString(fp32_param_str);
-        sindi_param2->FromString(dmq_param_str);
+        sindi_param2->FromString(fp16_param_str);
         REQUIRE_FALSE(sindi_param1->CheckCompatibility(sindi_param2));
+        REQUIRE(sindi_param2->rerank_type == SPARSE_RERANK_TYPE_FP16);
+        REQUIRE(sindi_param2->ToJson()[SPARSE_RERANK_TYPE].GetString() == SPARSE_RERANK_TYPE_FP16);
     }
 
     SECTION("legacy dmq rerank type is rejected") {
@@ -291,6 +296,16 @@ TEST_CASE("SINDI Index Parameters Compatibility Test", "[ut][SINDIParameter]") {
         auto param_str1 = generate_sindi_param(param1);
         auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
         REQUIRE_THROWS(sindi_param1->FromString(param_str1));
+    }
+
+    SECTION("fp16 requires reorder") {
+        SINDIDefaultParam param1;
+        param1.use_reorder = false;
+        param1.rerank_type = SPARSE_RERANK_TYPE_FP16;
+        auto sindi_param1 = std::make_shared<vsag::SINDIParameter>();
+        REQUIRE_THROWS_WITH(
+            sindi_param1->FromString(generate_sindi_param(param1)),
+            Catch::Matchers::ContainsSubstring("rerank_type=fp16 requires use_reorder=true"));
     }
 }
 
@@ -424,5 +439,27 @@ TEST_CASE("SINDI DMQ shared codebook threshold Parameter", "[ut][SINDIParameter]
         default_param.dmq_shared_codebook_threshold = -1;
         auto param = std::make_shared<vsag::SINDIParameter>();
         REQUIRE_THROWS(param->FromString(generate_sindi_param(default_param)));
+    }
+}
+
+TEST_CASE("SINDI build term prune parameters", "[ut][SINDIParameter]") {
+    IndexCommonParam common;
+    auto defaults = std::dynamic_pointer_cast<SINDIParameter>(
+        SINDI::CheckAndMappingExternalParam(JsonType::Parse("{}"), common));
+    REQUIRE(defaults->term_prune_ratio == 0.0F);
+    REQUIRE(defaults->term_retain_threshold == 0);
+    auto configured = std::dynamic_pointer_cast<SINDIParameter>(SINDI::CheckAndMappingExternalParam(
+        JsonType::Parse(R"({"term_prune_ratio":0.5,"term_retain_threshold":2})"), common));
+    SINDIParameter restored;
+    restored.FromJson(configured->ToJson());
+    REQUIRE(restored.term_prune_ratio == 0.5F);
+    REQUIRE(restored.term_retain_threshold == 2);
+    REQUIRE(configured->CheckCompatibility(std::make_shared<SINDIParameter>(restored)));
+    REQUIRE_FALSE(defaults->CheckCompatibility(configured));
+    for (const auto* invalid : {R"({"term_prune_ratio":-0.1})",
+                                R"({"term_prune_ratio":1})",
+                                R"({"term_retain_threshold":-1})",
+                                R"({"term_retain_threshold":1.5})"}) {
+        REQUIRE_THROWS(SINDI::CheckAndMappingExternalParam(JsonType::Parse(invalid), common));
     }
 }

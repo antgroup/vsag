@@ -7,6 +7,7 @@
 - [安装](guide/installation.md)
 - [创建索引](guide/create_index.md)
 - [k-近邻搜索](guide/knn_search.md)
+- [查询统计信息](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
 
@@ -15,6 +16,7 @@
 - [总览](indexes/README.md)
 - [索引参数](resources/index_parameters.md)
 - [HGraph](indexes/hgraph.md)
+  - [自适应邻居剪枝](indexes/adaptive_pruning.md)
 - [LazyHGraph](indexes/lazy_hgraph.md)
 - [IVF](indexes/ivf.md)
 - [SINDI](indexes/sindi.md)
@@ -48,6 +50,7 @@
 
 # 高级功能
 
+- [搜索归因分析](advanced/search_reasoning.md)
 - [索引构建与训练](advanced/build_and_train.md)
 - [HGraph 构建缓存](advanced/build_cache.md)
 - [范围搜索](advanced/range_search.md)

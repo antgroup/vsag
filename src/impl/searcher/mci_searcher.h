@@ -38,6 +38,12 @@ struct MCISearcherParam {
     uint64_t precise_vector_stride{0};
     MetricType metric{MetricType::METRIC_TYPE_L2SQR};
     bool* used_precise_float_csr{nullptr};
+    // Optional dense validity bitmap indexed by inner id (non-zero means valid) and its size.
+    const uint8_t* valid_bitmap{nullptr};
+    uint64_t valid_bitmap_size{0};
+    bool* used_bitmap_fast_path{nullptr};
+    // Pinned deletion filter is independent of the user bitmap and must also be respected.
+    FilterPtr deleted_ids_filter{nullptr};
 };
 
 class MCISearcher {

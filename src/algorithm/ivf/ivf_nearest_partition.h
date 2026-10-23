@@ -15,12 +15,19 @@
 
 #pragma once
 
+#include <optional>
+
 #include "algorithm/inner_index_interface.h"
 #include "index_common_param.h"
 #include "ivf_partition_strategy.h"
 #include "ivf_partition_strategy_parameter.h"
 #include "query_context.h"
 #include "vsag/index.h"
+
+#ifdef VSAG_IVF_NEAREST_PARTITION_TEST_ACCESS
+class IVFNearestPartitionTestAccess;
+#endif
+
 namespace vsag {
 
 class IVFNearestPartition : public IVFPartitionStrategy {
@@ -37,6 +44,12 @@ public:
                   int64_t count,
                   BucketIdType buckets_per_data,
                   QueryContext* ctx) const override;
+
+    Vector<BucketIdType>
+    ClassifyDatasForSearch(const void* datas,
+                           int64_t count,
+                           const InnerSearchParam& param,
+                           QueryContext* ctx) override;
 
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
@@ -56,6 +69,10 @@ public:
     InnerIndexPtr route_index_ptr_{nullptr};
 
 private:
+#ifdef VSAG_IVF_NEAREST_PARTITION_TEST_ACCESS
+    friend class ::IVFNearestPartitionTestAccess;
+#endif
+
     void
     factory_router_index(const IndexCommonParam& common_param);
 
@@ -63,7 +80,20 @@ private:
     classify_datas_by_scan(const void* datas,
                            int64_t count,
                            BucketIdType buckets_per_data,
+                           QueryContext* ctx,
+                           uint64_t dots_buffer_size_bytes) const;
+
+    /// The routing both public entry points share.
+    Vector<BucketIdType>
+    classify_datas_on_host(const void* datas,
+                           int64_t count,
+                           BucketIdType buckets_per_data,
                            QueryContext* ctx) const;
+
+    /// Build-time assignment on the CUDA backend; nothing when the caller
+    /// should use the host path instead.
+    std::optional<Vector<BucketIdType>>
+    classify_datas_on_device(const void* datas, int64_t count, BucketIdType buckets_per_data) const;
 
 private:
     bool use_route_graph_{true};

@@ -260,6 +260,9 @@ PyramidHierarchyParameters::CheckCompatibility(const PyramidHierarchyParameters&
 void
 PyramidParameters::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
+    // FromJson replaces the whole sub-struct; keep this ahead of any later field parsing on
+    // AdaptivePruningParameter. Pyramid alpha is validated per hierarchy after construction.
+    adaptive_pruning.FromJson(json);
     // init graph param
     const auto& graph_json = json[GRAPH_KEY];
 
@@ -270,9 +273,18 @@ PyramidParameters::FromJson(const JsonType& json) {
     this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
-    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+    CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_NSW or
+                       this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+                       this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                   fmt::format("invalid graph_type: {}", this->graph_type));
+    if (this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+        this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
         this->odescent_param = std::make_shared<ODescentParameter>();
         this->odescent_param->FromJson(graph_json);
+        if (this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+            this->pipnn_param.FromJson(graph_json);
+            this->pipnn_param.alpha = this->alpha;
+        }
     } else if (json.Contains(EF_CONSTRUCTION_KEY)) {
         this->ef_construction = json[EF_CONSTRUCTION_KEY].GetUint64();
         CHECK_ARGUMENT(this->ef_construction > 0, "ef_construction must be positive");
@@ -352,11 +364,20 @@ PyramidParameters::FromJson(const JsonType& json) {
             this->hierarchies.emplace_back(std::move(hierarchy));
         }
     }
+    if (this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+        this->pipnn_param.Validate(static_cast<uint64_t>(this->max_degree));
+        for (const auto& hierarchy : this->hierarchies) {
+            auto hierarchy_param = this->pipnn_param;
+            hierarchy_param.alpha = hierarchy.alpha;
+            hierarchy_param.Validate(static_cast<uint64_t>(hierarchy.max_degree));
+        }
+    }
 }
 JsonType
 PyramidParameters::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json[NO_BUILD_LEVELS].SetVector(no_build_levels);
+    json.UpdateJson(adaptive_pruning.ToJson());
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
 
     auto graph_json = graph_param->ToJson();
@@ -364,8 +385,12 @@ PyramidParameters::ToJson() const {
         root_graph_storage_type_to_string(this->root_graph_storage_type));
     graph_json[ALPHA_KEY].SetFloat(this->alpha);
     graph_json[GRAPH_TYPE_KEY].SetString(this->graph_type);
-    if (this->graph_type == GRAPH_TYPE_ODESCENT) {
+    if (this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
+        this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
         graph_json.UpdateJson(odescent_param->ToJson());
+        if (this->graph_type == GRAPH_TYPE_VALUE_PIPNN) {
+            graph_json.UpdateJson(pipnn_param.ToJson());
+        }
     } else {
         json[EF_CONSTRUCTION_KEY].SetUint64(this->ef_construction);
     }
@@ -393,6 +418,14 @@ PyramidParameters::ToJson() const {
 bool
 PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(PyramidParameters, p, other);
+    CHECK_FIELD_EQ(*this, *p, adaptive_pruning.enabled);
+    if (adaptive_pruning.enabled) {
+        CHECK_FIELD_NEAR(*this, *p, alpha, 1e-6F);
+        CHECK_FIELD_NEAR(*this, *p, adaptive_pruning.adjust_step, 1e-6F);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_reverse);
+        CHECK_FIELD_EQ(*this, *p, adaptive_pruning.apply_to_upper);
+    }
+
     CHECK_SUB_PARAM(*this, *p, graph_param);
     CHECK_SUB_PARAM(*this, *p, base_codes_param);
     if (this->has_hierarchies != p->has_hierarchies) {

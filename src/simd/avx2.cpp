@@ -13,12 +13,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
 #include "simd/int8_simd.h"
 #include "simd/kernels/rabitq_pack.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 #include "vsag/attribute.h"
 
 #if defined(ENABLE_AVX2)
@@ -37,6 +43,127 @@ avx2_reduce_add_ps(__m256 a) {
 #endif
 
 namespace vsag::avx2 {
+
+namespace {
+
+#if defined(ENABLE_AVX2)
+constexpr std::array<uint64_t, 256>
+MakeBitExpandLut() {
+    std::array<uint64_t, 256> result{};
+    for (uint64_t value = 0; value < result.size(); ++value) {
+        for (uint64_t lane = 0; lane < 8; ++lane) {
+            result[value] |= ((value >> lane) & 1ULL) << (lane * 8);
+        }
+    }
+    return result;
+}
+
+constexpr auto kBitExpandLut = MakeBitExpandLut();
+static_assert(kBitExpandLut[0x01] == 0x0000000000000001ULL);
+static_assert(kBitExpandLut[0x80] == 0x0100000000000000ULL);
+static_assert(kBitExpandLut[0xA5] == 0x0100010000010001ULL);
+
+inline __m128i
+ExpandCompactSupplementTopBits(const uint8_t* plane, uint64_t group, uint32_t bit) {
+    const uint64_t low = kBitExpandLut[plane[group * 2U]] << bit;
+    const uint64_t high = kBitExpandLut[plane[group * 2U + 1U]] << bit;
+    return _mm_set_epi64x(static_cast<int64_t>(high), static_cast<int64_t>(low));
+}
+
+inline void
+AccumulateCompactSupplement16(__m128i codes, const float* vector, __m256& sum) {
+    const auto low_codes = _mm256_cvtepu8_epi32(codes);
+    const auto high_codes = _mm256_cvtepu8_epi32(_mm_srli_si128(codes, 8));
+    sum = _mm256_fmadd_ps(_mm256_cvtepi32_ps(low_codes), _mm256_loadu_ps(vector), sum);
+    sum = _mm256_fmadd_ps(_mm256_cvtepi32_ps(high_codes), _mm256_loadu_ps(vector + 8), sum);
+}
+
+inline void
+DecodeCompactSupplementChunk(const uint8_t* packed, uint32_t bits, __m128i* values) {
+    const auto low_four_mask = _mm_set1_epi8(0x0F);
+    const auto low_six_mask = _mm_set1_epi8(0x3F);
+    const auto part0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(packed));
+    const auto part1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(packed + 16U));
+    if (bits == 5U) {
+        values[0] = _mm_and_si128(part0, low_four_mask);
+        values[1] = _mm_and_si128(_mm_srli_epi16(part0, 4), low_four_mask);
+        values[2] = _mm_and_si128(part1, low_four_mask);
+        values[3] = _mm_and_si128(_mm_srli_epi16(part1, 4), low_four_mask);
+        for (uint64_t group = 0; group < 4U; ++group) {
+            values[group] = _mm_or_si128(values[group],
+                                         ExpandCompactSupplementTopBits(packed + 32U, group, 4U));
+        }
+        return;
+    }
+
+    const auto part2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(packed + 32U));
+    values[0] = _mm_and_si128(part0, low_six_mask);
+    values[1] = _mm_and_si128(part1, low_six_mask);
+    values[2] = _mm_and_si128(part2, low_six_mask);
+    values[3] =
+        _mm_or_si128(_mm_and_si128(_mm_srli_epi16(part0, 6), _mm_set1_epi8(0x03)),
+                     _mm_or_si128(_mm_and_si128(_mm_srli_epi16(part1, 4), _mm_set1_epi8(0x0C)),
+                                  _mm_and_si128(_mm_srli_epi16(part2, 2), _mm_set1_epi8(0x30))));
+    if (bits == 7U) {
+        for (uint64_t group = 0; group < 4U; ++group) {
+            values[group] = _mm_or_si128(values[group],
+                                         ExpandCompactSupplementTopBits(packed + 48U, group, 6U));
+        }
+    }
+}
+
+inline void
+PackCompactSupplementChunk(const uint8_t* scalar_codes, uint8_t* packed, uint32_t bits) {
+    __m128i values[4];
+    for (uint64_t group = 0; group < 4U; ++group) {
+        values[group] =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(scalar_codes + group * 16U));
+    }
+
+    if (bits == 5U) {
+        const auto low_mask = _mm_set1_epi8(0x0F);
+        const auto part0 = _mm_or_si128(_mm_and_si128(values[0], low_mask),
+                                        _mm_slli_epi16(_mm_and_si128(values[1], low_mask), 4));
+        const auto part1 = _mm_or_si128(_mm_and_si128(values[2], low_mask),
+                                        _mm_slli_epi16(_mm_and_si128(values[3], low_mask), 4));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(packed), part0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(packed + 16U), part1);
+    } else {
+        const auto low_mask = _mm_set1_epi8(0x3F);
+        const auto part0 =
+            _mm_or_si128(_mm_and_si128(values[0], low_mask),
+                         _mm_slli_epi16(_mm_and_si128(values[3], _mm_set1_epi8(0x03)), 6));
+        const auto part1 =
+            _mm_or_si128(_mm_and_si128(values[1], low_mask),
+                         _mm_slli_epi16(_mm_and_si128(values[3], _mm_set1_epi8(0x0C)), 4));
+        const auto part2 =
+            _mm_or_si128(_mm_and_si128(values[2], low_mask),
+                         _mm_slli_epi16(_mm_and_si128(values[3], _mm_set1_epi8(0x30)), 2));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(packed), part0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(packed + 16U), part1);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(packed + 32U), part2);
+    }
+
+    if (bits == 5U or bits == 7U) {
+        const uint32_t top_bit = bits - 1U;
+        const auto bit_mask =
+            _mm256_set1_epi8(static_cast<char>(static_cast<uint8_t>(1U << top_bit)));
+        const auto zero = _mm256_setzero_si256();
+        const auto low_values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(scalar_codes));
+        const auto high_values =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(scalar_codes + 32U));
+        const uint32_t low = ~static_cast<uint32_t>(
+            _mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_and_si256(low_values, bit_mask), zero)));
+        const uint32_t high = ~static_cast<uint32_t>(
+            _mm256_movemask_epi8(_mm256_cmpeq_epi8(_mm256_and_si256(high_values, bit_mask), zero)));
+        const uint64_t top_plane =
+            static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32U);
+        std::memcpy(packed + (bits == 5U ? 32U : 48U), &top_plane, sizeof(top_plane));
+    }
+}
+#endif
+
+}  // namespace
 
 uint64_t
 RaBitQSQ4UBinaryIPWithBaseSum(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
@@ -901,6 +1028,58 @@ RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
 #endif
 }
 
+void
+RaBitQPackScalarToSplitCode(const uint8_t* scalar_codes,
+                            uint8_t* filter_planes,
+                            uint8_t* packed_supplement_code,
+                            uint64_t dim,
+                            uint32_t total_bits,
+                            uint32_t filter_bits) {
+#if defined(ENABLE_AVX2)
+    const uint64_t plane_bytes = (dim + 7U) / 8U;
+    if (plane_bytes != 0U and filter_bits != 0U) {
+        std::memset(filter_planes, 0, plane_bytes * static_cast<uint64_t>(filter_bits));
+    }
+    uint64_t d = 0;
+    const auto zero = _mm256_setzero_si256();
+    for (; d + 32U <= dim; d += 32U) {
+        const auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(scalar_codes + d));
+        for (uint32_t plane = 0; plane < filter_bits; ++plane) {
+            const uint32_t logical_bit = total_bits - plane - 1U;
+            const auto bit_mask =
+                _mm256_set1_epi8(static_cast<char>(static_cast<uint8_t>(1U << logical_bit)));
+            const auto is_zero = _mm256_cmpeq_epi8(_mm256_and_si256(values, bit_mask), zero);
+            const uint32_t packed = ~static_cast<uint32_t>(_mm256_movemask_epi8(is_zero));
+            std::memcpy(filter_planes + static_cast<uint64_t>(plane) * plane_bytes + d / 8U,
+                        &packed,
+                        sizeof(packed));
+        }
+    }
+    simd::RaBitQPackScalarFilterPlanesTail(
+        scalar_codes, filter_planes, dim, total_bits, filter_bits, d);
+    const uint32_t supplement_bits = total_bits - filter_bits;
+    const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+    if (layout.PackedSize() != 0U) {
+        std::memset(packed_supplement_code, 0, layout.PackedSize());
+        if (layout.UsesCompactChunks()) {
+            for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+                PackCompactSupplementChunk(
+                    scalar_codes + chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM,
+                    packed_supplement_code + chunk * layout.ChunkBytes(),
+                    supplement_bits);
+            }
+            simd::RaBitQPackScalarSupplementTail(scalar_codes, packed_supplement_code, layout);
+        } else {
+            simd::RaBitQPackScalarSupplementCode(
+                scalar_codes, packed_supplement_code, dim, supplement_bits);
+        }
+    }
+#else
+    generic::RaBitQPackScalarToSplitCode(
+        scalar_codes, filter_planes, packed_supplement_code, dim, total_bits, filter_bits);
+#endif
+}
+
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
 #if defined(ENABLE_AVX2)
@@ -1259,27 +1438,23 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     if (dim == 0 or supplement_bits == 0) {
         return 0.0F;
     }
+    if (supplement_bits > 7) {
+        return avx::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+    }
 
     const uint64_t plane_bytes = (dim + 7) / 8;
-    const __m256 zero = _mm256_setzero_ps();
-    const __m256i bit_masks = _mm256_setr_epi32(0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80);
-    const __m256i all_ones = _mm256_set1_epi32(-1);
-    const __m256i zero_i = _mm256_setzero_si256();
     __m256 sum = _mm256_setzero_ps();
 
     uint64_t d = 0;
     for (; d + 8 <= dim; d += 8) {
         const uint64_t byte_idx = d >> 3;
-        __m256 code = _mm256_setzero_ps();
+        uint64_t packed_codes = 0;
         for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
             const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
-            __m256i mask = _mm256_set1_epi32(static_cast<int>(plane[byte_idx]));
-            mask = _mm256_and_si256(mask, bit_masks);
-            mask = _mm256_cmpeq_epi32(mask, zero_i);
-            mask = _mm256_andnot_si256(mask, all_ones);
-            const __m256 weight = _mm256_set1_ps(static_cast<float>(1U << bit));
-            code = _mm256_add_ps(code, _mm256_blendv_ps(zero, weight, _mm256_castsi256_ps(mask)));
+            packed_codes |= kBitExpandLut[plane[byte_idx]] << bit;
         }
+        const auto packed = _mm_cvtsi64_si128(static_cast<int64_t>(packed_codes));
+        const auto code = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(packed));
         const __m256 vec = _mm256_loadu_ps(vector + d);
         sum = _mm256_fmadd_ps(code, vec, sum);
     }
@@ -1303,6 +1478,44 @@ RaBitQFloatSupplementCodeIP(const float* vector,
     return result;
 #else
     return avx::RaBitQFloatSupplementCodeIP(vector, supplement_code, dim, supplement_bits);
+#endif
+}
+
+float
+RaBitQFloatPackedSupplementCodeIP(const float* vector,
+                                  const uint8_t* packed_supplement_code,
+                                  uint64_t dim,
+                                  uint32_t supplement_bits) {
+#if defined(ENABLE_AVX2)
+    const simd::RaBitQPackedSupplementLayout layout{dim, supplement_bits};
+    if (not layout.UsesCompactChunks()) {
+        return generic::RaBitQFloatPackedSupplementCodeIP(
+            vector, packed_supplement_code, dim, supplement_bits);
+    }
+
+    __m256 sum = _mm256_setzero_ps();
+    for (uint64_t chunk = 0; chunk < layout.FullChunkCount(); ++chunk) {
+        __m128i values[4];
+        DecodeCompactSupplementChunk(
+            packed_supplement_code + chunk * layout.ChunkBytes(), supplement_bits, values);
+        const uint64_t begin = chunk * simd::RaBitQPackedSupplementLayout::CHUNK_DIM;
+        for (uint64_t group = 0; group < 4U; ++group) {
+            AccumulateCompactSupplement16(values[group], vector + begin + group * 16U, sum);
+        }
+    }
+
+    float result = AVX2_REDUCE_ADD_PS(sum);
+    if (layout.TailDimension() != 0U) {
+        result += generic::RaBitQFloatPackedSupplementCodeIP(
+            vector + layout.FullDimension(),
+            packed_supplement_code + layout.FullChunksSize(),
+            layout.TailDimension(),
+            supplement_bits);
+    }
+    return result;
+#else
+    return generic::RaBitQFloatPackedSupplementCodeIP(
+        vector, packed_supplement_code, dim, supplement_bits);
 #endif
 }
 
@@ -1367,6 +1580,231 @@ RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t 
 #endif
 }
 
+namespace {
+// Byte b -> eight bytes, byte k set to 0x80 when bit k of b is set.
+struct ExCode7FilterMaskTable {
+    long long mask[256];
+    constexpr ExCode7FilterMaskTable() : mask() {
+        for (int value = 0; value < 256; ++value) {
+            long long expanded = 0;
+            for (int lane = 0; lane < 8; ++lane) {
+                if (((value >> lane) & 1) != 0) {
+                    expanded |= static_cast<long long>(0x80) << (8 * lane);
+                }
+            }
+            this->mask[value] = expanded;
+        }
+    }
+};
+constexpr ExCode7FilterMaskTable kExCode7FilterMask{};
+}  // namespace
+
+bool
+RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     uint64_t dim,
+                     uint8_t* out,
+                     uint64_t* code_sum,
+                     uint64_t* code_sq_sum) {
+#if defined(ENABLE_AVX2)
+    if (one_bit_code == nullptr or supplement_code == nullptr or out == nullptr or
+        code_sum == nullptr or not RaBitQExCode7SupportedDim(dim)) {
+        return generic::RaBitQExCode7ToBytes(
+            one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
+    }
+    // dim is a non-zero multiple of 64 from here on, which is what lets the loop below consume
+    // exactly one 56-byte supplement block per 64 lanes.
+    const __m128i mask6 = _mm_set1_epi8(0x3F);
+    const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
+    const __m128i top_mask = _mm_set1_epi8(0x40);
+    const __m128i zero = _mm_setzero_si128();
+    __m128i sums = _mm_setzero_si128();
+    __m256i squares = _mm256_setzero_si256();
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code));
+        const __m128i compact2 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 16));
+        const __m128i compact3 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 32));
+        uint64_t top_bits = 0;
+        std::memcpy(&top_bits, supplement_code + 48, sizeof(top_bits));
+        supplement_code += 56;
+
+        __m128i code0 = _mm_and_si128(compact1, mask6);
+        __m128i code1 = _mm_and_si128(compact2, mask6);
+        __m128i code2 = _mm_and_si128(compact3, mask6);
+        __m128i code3 =
+            _mm_or_si128(_mm_or_si128(_mm_srli_epi16(_mm_and_si128(compact1, mask2), 6),
+                                      _mm_srli_epi16(_mm_and_si128(compact2, mask2), 4)),
+                         _mm_srli_epi16(_mm_and_si128(compact3, mask2), 2));
+        code0 = _mm_or_si128(code0,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 5),
+                                                          static_cast<long long>(top_bits << 6)),
+                                           top_mask));
+        code1 = _mm_or_si128(code1,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 3),
+                                                          static_cast<long long>(top_bits << 4)),
+                                           top_mask));
+        code2 = _mm_or_si128(code2,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 1),
+                                                          static_cast<long long>(top_bits << 2)),
+                                           top_mask));
+        code3 = _mm_or_si128(code3,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits >> 1),
+                                                          static_cast<long long>(top_bits)),
+                                           top_mask));
+
+        const uint8_t* filter = one_bit_code + (block >> 3);
+        code0 = _mm_or_si128(
+            code0,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[1]], kExCode7FilterMask.mask[filter[0]]));
+        code1 = _mm_or_si128(
+            code1,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[3]], kExCode7FilterMask.mask[filter[2]]));
+        code2 = _mm_or_si128(
+            code2,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[5]], kExCode7FilterMask.mask[filter[4]]));
+        code3 = _mm_or_si128(
+            code3,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[7]], kExCode7FilterMask.mask[filter[6]]));
+
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out), code0);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 16), code1);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 32), code2);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(out + 48), code3);
+        out += 64;
+
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code0, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code1, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code2, zero));
+        sums = _mm_add_epi64(sums, _mm_sad_epu8(code3, zero));
+        if (code_sq_sum != nullptr) {
+            const __m128i codes[4] = {code0, code1, code2, code3};
+            for (int g = 0; g < 4; ++g) {
+                const __m256i wide = _mm256_cvtepu8_epi16(codes[g]);
+                squares = _mm256_add_epi32(squares, _mm256_madd_epi16(wide, wide));
+            }
+        }
+    }
+    alignas(16) uint64_t lanes[2];
+    _mm_store_si128(reinterpret_cast<__m128i*>(lanes), sums);
+    *code_sum = lanes[0] + lanes[1];
+    if (code_sq_sum != nullptr) {
+        alignas(32) int32_t partial[8];
+        _mm256_store_si256(reinterpret_cast<__m256i*>(partial), squares);
+        uint64_t total = 0;
+        for (int i = 0; i < 8; ++i) {
+            total += static_cast<uint64_t>(partial[i]);
+        }
+        *code_sq_sum = total;
+    }
+    return true;
+#else
+    return generic::RaBitQExCode7ToBytes(
+        one_bit_code, supplement_code, dim, out, code_sum, code_sq_sum);
+#endif
+}
+
+bool
+RaBitQExCode7ToVector(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      const float* centroid,
+                      float residual_scale,
+                      float full_center,
+                      uint64_t dim,
+                      float* out) {
+#if defined(ENABLE_AVX2)
+    if (one_bit_code == nullptr or supplement_code == nullptr or centroid == nullptr or
+        out == nullptr or not RaBitQExCode7SupportedDim(dim)) {
+        return generic::RaBitQExCode7ToVector(
+            one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
+    }
+    // dim is a non-zero multiple of 64 from here on: the loop below consumes exactly one 56-byte
+    // supplement block per 64 lanes.
+    const __m128i mask6 = _mm_set1_epi8(0x3F);
+    const __m128i mask2 = _mm_set1_epi8(static_cast<char>(0xC0));
+    const __m128i top_mask = _mm_set1_epi8(0x40);
+    const __m256 scale = _mm256_set1_ps(residual_scale);
+    const __m256 center = _mm256_set1_ps(full_center);
+    const __m256i exponent_mask = _mm256_set1_epi32(0x7F800000);
+
+    bool finite = true;
+    for (uint64_t block = 0; block < dim; block += 64) {
+        const __m128i compact1 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code));
+        const __m128i compact2 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 16));
+        const __m128i compact3 =
+            _mm_loadu_si128(reinterpret_cast<const __m128i*>(supplement_code + 32));
+        uint64_t top_bits = 0;
+        std::memcpy(&top_bits, supplement_code + 48, sizeof(top_bits));
+        supplement_code += 56;
+
+        __m128i code0 = _mm_and_si128(compact1, mask6);
+        __m128i code1 = _mm_and_si128(compact2, mask6);
+        __m128i code2 = _mm_and_si128(compact3, mask6);
+        __m128i code3 =
+            _mm_or_si128(_mm_or_si128(_mm_srli_epi16(_mm_and_si128(compact1, mask2), 6),
+                                      _mm_srli_epi16(_mm_and_si128(compact2, mask2), 4)),
+                         _mm_srli_epi16(_mm_and_si128(compact3, mask2), 2));
+
+        code0 = _mm_or_si128(code0,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 5),
+                                                          static_cast<long long>(top_bits << 6)),
+                                           top_mask));
+        code1 = _mm_or_si128(code1,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 3),
+                                                          static_cast<long long>(top_bits << 4)),
+                                           top_mask));
+        code2 = _mm_or_si128(code2,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits << 1),
+                                                          static_cast<long long>(top_bits << 2)),
+                                           top_mask));
+        code3 = _mm_or_si128(code3,
+                             _mm_and_si128(_mm_set_epi64x(static_cast<long long>(top_bits >> 1),
+                                                          static_cast<long long>(top_bits)),
+                                           top_mask));
+
+        const uint8_t* filter = one_bit_code + (block >> 3);
+        code0 = _mm_or_si128(
+            code0,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[1]], kExCode7FilterMask.mask[filter[0]]));
+        code1 = _mm_or_si128(
+            code1,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[3]], kExCode7FilterMask.mask[filter[2]]));
+        code2 = _mm_or_si128(
+            code2,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[5]], kExCode7FilterMask.mask[filter[4]]));
+        code3 = _mm_or_si128(
+            code3,
+            _mm_set_epi64x(kExCode7FilterMask.mask[filter[7]], kExCode7FilterMask.mask[filter[6]]));
+
+        const __m128i groups[4] = {code0, code1, code2, code3};
+        for (int group = 0; group < 4; ++group) {
+            const uint64_t offset = block + static_cast<uint64_t>(group) * 16;
+            const __m256 code_low = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(groups[group]));
+            const __m256 code_high =
+                _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(_mm_srli_si128(groups[group], 8)));
+            const __m256 value_low = _mm256_fmadd_ps(
+                scale, _mm256_sub_ps(code_low, center), _mm256_loadu_ps(centroid + offset));
+            const __m256 value_high = _mm256_fmadd_ps(
+                scale, _mm256_sub_ps(code_high, center), _mm256_loadu_ps(centroid + offset + 8));
+            _mm256_storeu_ps(out + offset, value_low);
+            _mm256_storeu_ps(out + offset + 8, value_high);
+
+            const __m256i bad_low = _mm256_cmpeq_epi32(
+                _mm256_and_si256(_mm256_castps_si256(value_low), exponent_mask), exponent_mask);
+            const __m256i bad_high = _mm256_cmpeq_epi32(
+                _mm256_and_si256(_mm256_castps_si256(value_high), exponent_mask), exponent_mask);
+            finite = finite and (_mm256_movemask_epi8(_mm256_or_si256(bad_low, bad_high)) == 0);
+        }
+    }
+    return finite;
+#else
+    return generic::RaBitQExCode7ToVector(
+        one_bit_code, supplement_code, centroid, residual_scale, full_center, dim, out);
+#endif
+}
+
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_AVX2)
@@ -1393,21 +1831,21 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         return;
     }
     __m256i sum[4];
+    __m256i result_sum[4];
     for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm256_setzero_si256();
+        result_sum[i] = _mm256_setzero_si256();
     }
     // Each 16-bit lane accumulates one lookup byte (<= 255) per iteration and
     // would overflow after ~258 of them, so periodically drain the int16
     // partials into the int32 result and reset the accumulators.
-    constexpr uint64_t kFlushInterval = 32;
+    constexpr uint64_t kFlushInterval = 256;
     uint64_t since_flush = 0;
     auto flush = [&]() {
-        alignas(32) uint16_t temp[16];
         for (int64_t idx = 0; idx < 4; idx++) {
-            _mm256_store_si256((__m256i*)(temp), sum[idx]);
-            for (int64_t j = 0; j < 8; j++) {
-                result[idx * 8 + j] += temp[j] + temp[j + 8];
-            }
+            const auto low = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(sum[idx]));
+            const auto high = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(sum[idx], 1));
+            result_sum[idx] = _mm256_add_epi32(result_sum[idx], _mm256_add_epi32(low, high));
             sum[idx] = _mm256_setzero_si256();
         }
     };
@@ -1433,11 +1871,350 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         }
     }
     flush();
+    for (uint64_t idx = 0; idx < 4; ++idx) {
+        const auto previous =
+            _mm256_loadu_si256(reinterpret_cast<const __m256i*>(result + idx * 8));
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(result + idx * 8),
+                            _mm256_add_epi32(previous, result_sum[idx]));
+    }
     if (pq_dim > i) {
         avx::PQFastScanLookUp32(lookup_table, codes, pq_dim - i, result);
     }
 #else
     avx::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
+#endif
+}
+
+void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+#if defined(ENABLE_AVX2)
+    if (pq_dim == 0) {
+        return;
+    }
+    constexpr uint64_t kSafeGroupCount = 256;
+    const auto low_nibble_mask = _mm256_set1_epi8(0x0F);
+    while (pq_dim >= 2) {
+        const uint64_t group_count = (pq_dim < kSafeGroupCount ? pq_dim : kSafeGroupCount) & ~1ULL;
+        __m256i sums[2][4];
+        for (uint64_t byte_plane = 0; byte_plane < 2; ++byte_plane) {
+            for (uint64_t result_group = 0; result_group < 4; ++result_group) {
+                sums[byte_plane][result_group] = _mm256_setzero_si256();
+            }
+        }
+
+        for (uint64_t group = 0; group < group_count; group += 2) {
+            const auto code = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes));
+            const auto low_codes = _mm256_and_si256(code, low_nibble_mask);
+            const auto high_codes = _mm256_and_si256(_mm256_srli_epi16(code, 4), low_nibble_mask);
+            const auto low_dict =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(low_lookup_table));
+            const auto high_dict =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(high_lookup_table));
+
+            auto accumulate = [&](uint64_t byte_plane, const __m256i dict) {
+                const auto low_values = _mm256_shuffle_epi8(dict, low_codes);
+                const auto high_values = _mm256_shuffle_epi8(dict, high_codes);
+                sums[byte_plane][0] = _mm256_add_epi16(sums[byte_plane][0], low_values);
+                sums[byte_plane][1] =
+                    _mm256_add_epi16(sums[byte_plane][1], _mm256_srli_epi16(low_values, 8));
+                sums[byte_plane][2] = _mm256_add_epi16(sums[byte_plane][2], high_values);
+                sums[byte_plane][3] =
+                    _mm256_add_epi16(sums[byte_plane][3], _mm256_srli_epi16(high_values, 8));
+            };
+            accumulate(0, low_dict);
+            accumulate(1, high_dict);
+            low_lookup_table += 32;
+            high_lookup_table += 32;
+            codes += 32;
+        }
+
+        __m256i nibble_sums[2][2];
+        auto fold_groups = [](__m256i even_words, const __m256i odd_words) {
+            even_words = _mm256_sub_epi16(even_words, _mm256_slli_epi16(odd_words, 8));
+            return _mm256_add_epi16(_mm256_permute2f128_si256(even_words, odd_words, 0x21),
+                                    _mm256_blend_epi32(even_words, odd_words, 0xF0));
+        };
+        for (uint64_t byte_plane = 0; byte_plane < 2; ++byte_plane) {
+            nibble_sums[byte_plane][0] = fold_groups(sums[byte_plane][0], sums[byte_plane][1]);
+            nibble_sums[byte_plane][1] = fold_groups(sums[byte_plane][2], sums[byte_plane][3]);
+        }
+
+        auto combine_byte_planes =
+            [&](const __m256i low_bytes, const __m256i high_bytes, uint64_t result_index) {
+                const auto low0 = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(low_bytes));
+                const auto low1 = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(low_bytes, 1));
+                const auto high0 = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(high_bytes));
+                const auto high1 = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(high_bytes, 1));
+                const auto combined0 = _mm256_add_epi32(low0, _mm256_slli_epi32(high0, 8));
+                const auto combined1 = _mm256_add_epi32(low1, _mm256_slli_epi32(high1, 8));
+                auto* result0 = result + result_index * 8;
+                auto* result1 = result0 + 8;
+                _mm256_storeu_si256(
+                    reinterpret_cast<__m256i*>(result0),
+                    _mm256_add_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(result0)),
+                                     combined0));
+                _mm256_storeu_si256(
+                    reinterpret_cast<__m256i*>(result1),
+                    _mm256_add_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(result1)),
+                                     combined1));
+            };
+        combine_byte_planes(nibble_sums[0][0], nibble_sums[1][0], 0);
+        combine_byte_planes(nibble_sums[0][1], nibble_sums[1][1], 2);
+        pq_dim -= group_count;
+    }
+    if (pq_dim != 0) {
+        avx::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+    }
+#else
+    avx::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#endif
+}
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+#if defined(ENABLE_AVX2)
+    constexpr uint64_t kSafeGroupCount = 256;
+    const auto low_nibble_mask = _mm256_set1_epi8(0x0F);
+    __m256i result_sums[4]{_mm256_setzero_si256(),
+                           _mm256_setzero_si256(),
+                           _mm256_setzero_si256(),
+                           _mm256_setzero_si256()};
+    while (pq_dim >= 2) {
+        const uint64_t group_count = (pq_dim < kSafeGroupCount ? pq_dim : kSafeGroupCount) & ~1ULL;
+        __m256i sums[2][4];
+        for (uint64_t byte_plane = 0; byte_plane < 2; ++byte_plane) {
+            for (uint64_t result_group = 0; result_group < 4; ++result_group) {
+                sums[byte_plane][result_group] = _mm256_setzero_si256();
+            }
+        }
+
+        for (uint64_t group = 0; group < group_count; group += 2) {
+            const auto code = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(codes));
+            const auto low_codes = _mm256_and_si256(code, low_nibble_mask);
+            const auto high_codes = _mm256_and_si256(_mm256_srli_epi16(code, 4), low_nibble_mask);
+            const auto low_dict =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(low_lookup_table));
+            const auto high_dict =
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(high_lookup_table));
+
+            auto accumulate = [&](uint64_t byte_plane, const __m256i dict) {
+                const auto low_values = _mm256_shuffle_epi8(dict, low_codes);
+                const auto high_values = _mm256_shuffle_epi8(dict, high_codes);
+                sums[byte_plane][0] = _mm256_add_epi16(sums[byte_plane][0], low_values);
+                sums[byte_plane][1] =
+                    _mm256_add_epi16(sums[byte_plane][1], _mm256_srli_epi16(low_values, 8));
+                sums[byte_plane][2] = _mm256_add_epi16(sums[byte_plane][2], high_values);
+                sums[byte_plane][3] =
+                    _mm256_add_epi16(sums[byte_plane][3], _mm256_srli_epi16(high_values, 8));
+            };
+            accumulate(0, low_dict);
+            accumulate(1, high_dict);
+            low_lookup_table += 32;
+            high_lookup_table += 32;
+            codes += 32;
+        }
+
+        __m256i nibble_sums[2][2];
+        auto fold_groups = [](__m256i even_words, const __m256i odd_words) {
+            even_words = _mm256_sub_epi16(even_words, _mm256_slli_epi16(odd_words, 8));
+            return _mm256_add_epi16(_mm256_permute2f128_si256(even_words, odd_words, 0x21),
+                                    _mm256_blend_epi32(even_words, odd_words, 0xF0));
+        };
+        for (uint64_t byte_plane = 0; byte_plane < 2; ++byte_plane) {
+            nibble_sums[byte_plane][0] = fold_groups(sums[byte_plane][0], sums[byte_plane][1]);
+            nibble_sums[byte_plane][1] = fold_groups(sums[byte_plane][2], sums[byte_plane][3]);
+        }
+
+        auto combine_byte_planes =
+            [&](const __m256i low_bytes, const __m256i high_bytes, uint64_t result_index) {
+                const auto low0 = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(low_bytes));
+                const auto low1 = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(low_bytes, 1));
+                const auto high0 = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(high_bytes));
+                const auto high1 = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(high_bytes, 1));
+                const auto combined0 = _mm256_add_epi32(low0, _mm256_slli_epi32(high0, 8));
+                const auto combined1 = _mm256_add_epi32(low1, _mm256_slli_epi32(high1, 8));
+                result_sums[result_index] = _mm256_add_epi32(result_sums[result_index], combined0);
+                result_sums[result_index + 1] =
+                    _mm256_add_epi32(result_sums[result_index + 1], combined1);
+            };
+        combine_byte_planes(nibble_sums[0][0], nibble_sums[1][0], 0);
+        combine_byte_planes(nibble_sums[0][1], nibble_sums[1][1], 2);
+        pq_dim -= group_count;
+    }
+    if (pq_dim != 0) {
+        alignas(32) int32_t tail_result[32];
+        avx::PQFastScanLookUp32HighAccOverwrite(
+            low_lookup_table, high_lookup_table, codes, pq_dim, tail_result);
+        for (uint64_t result_group = 0; result_group < 4; ++result_group) {
+            result_sums[result_group] = _mm256_add_epi32(
+                result_sums[result_group],
+                _mm256_load_si256(
+                    reinterpret_cast<const __m256i*>(tail_result + result_group * 8)));
+        }
+    }
+    for (uint64_t result_group = 0; result_group < 4; ++result_group) {
+        _mm256_storeu_si256(reinterpret_cast<__m256i*>(result + result_group * 8),
+                            result_sums[result_group]);
+    }
+#else
+    avx::PQFastScanLookUp32HighAccOverwrite(
+        low_lookup_table, high_lookup_table, codes, pq_dim, result);
+#endif
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+#if defined(ENABLE_AVX2)
+    const auto limit_vec = _mm256_set1_ps(limit);
+    uint32_t mask = 0;
+    for (uint64_t i = 0; i < 4; ++i) {
+        const auto value = _mm256_loadu_ps(values + i * 8);
+        mask |=
+            static_cast<uint32_t>(_mm256_movemask_ps(_mm256_cmp_ps(value, limit_vec, _CMP_LT_OQ)))
+            << (i * 8);
+    }
+    return mask;
+#else
+    return avx::FP32LessThan32Mask(values, limit);
+#endif
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+#if defined(ENABLE_AVX2)
+    if (valid_size != 32) {
+        return avx::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                        filter_bits,
+                                                        delta,
+                                                        sum_vl,
+                                                        query_sum,
+                                                        query_norm,
+                                                        query_bucket_norm_sqr,
+                                                        inv_sqrt_d,
+                                                        f_add,
+                                                        f_scale,
+                                                        filter_norm_codes,
+                                                        valid_size,
+                                                        dists,
+                                                        filter_inner_products);
+    }
+    const auto delta_v = _mm256_set1_ps(delta);
+    const auto sum_vl_v = _mm256_set1_ps(sum_vl);
+    const auto query_sum_v = _mm256_set1_ps(query_sum);
+    const auto query_norm_v = _mm256_set1_ps(query_norm);
+    const auto query_bucket_norm_v = _mm256_set1_ps(query_bucket_norm_sqr);
+    const auto inv_sqrt_d_v = _mm256_set1_ps(inv_sqrt_d);
+    const auto two_v = _mm256_set1_ps(2.0F);
+    const auto max_v = _mm256_set1_ps(std::numeric_limits<float>::max());
+    const auto epsilon_v = _mm256_set1_ps(std::numeric_limits<float>::epsilon());
+    const auto nan_v = _mm256_set1_ps(std::numeric_limits<float>::quiet_NaN());
+    const auto sign_v = _mm256_set1_ps(-0.0F);
+    uint32_t computed_mask = 0;
+    if (filter_bits == 1) {
+        for (uint32_t offset = 0; offset < 32; offset += 8) {
+            auto lookup_sum_v = _mm256_cvtepi32_ps(
+                _mm256_loadu_si256(reinterpret_cast<const __m256i*>(accumulators + offset)));
+            lookup_sum_v = _mm256_add_ps(_mm256_mul_ps(lookup_sum_v, delta_v), sum_vl_v);
+            const auto f_add_v = _mm256_loadu_ps(f_add + offset);
+            const auto f_scale_v = _mm256_loadu_ps(f_scale + offset);
+            const auto abs_f_add_v = _mm256_andnot_ps(sign_v, f_add_v);
+            const auto abs_f_scale_v = _mm256_andnot_ps(sign_v, f_scale_v);
+            auto valid_v =
+                _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(abs_f_add_v, max_v, _CMP_LE_OQ),
+                                            _mm256_cmp_ps(abs_f_scale_v, max_v, _CMP_LE_OQ)),
+                              _mm256_cmp_ps(abs_f_scale_v, epsilon_v, _CMP_GT_OQ));
+            const auto filter_ip_v = _mm256_mul_ps(
+                _mm256_sub_ps(_mm256_mul_ps(two_v, lookup_sum_v), query_sum_v), inv_sqrt_d_v);
+            auto result_v =
+                _mm256_add_ps(_mm256_add_ps(f_add_v, query_bucket_norm_v),
+                              _mm256_mul_ps(_mm256_mul_ps(f_scale_v, query_norm_v), filter_ip_v));
+            const auto abs_result_v = _mm256_andnot_ps(sign_v, result_v);
+            valid_v = _mm256_and_ps(valid_v, _mm256_cmp_ps(abs_result_v, max_v, _CMP_LE_OQ));
+            result_v = _mm256_blendv_ps(max_v, result_v, valid_v);
+            _mm256_storeu_ps(dists + offset, result_v);
+            if (filter_inner_products != nullptr) {
+                _mm256_storeu_ps(filter_inner_products + offset,
+                                 _mm256_blendv_ps(nan_v, filter_ip_v, valid_v));
+            }
+            computed_mask |= static_cast<uint32_t>(_mm256_movemask_ps(valid_v)) << offset;
+        }
+        return computed_mask;
+    }
+
+    const float filter_center = 0.5F * static_cast<float>((1U << filter_bits) - 1U);
+    const auto center_query_sum_v = _mm256_set1_ps(filter_center * query_sum);
+    for (uint32_t offset = 0; offset < 32; offset += 8) {
+        auto lookup_sum_v = _mm256_setzero_ps();
+        for (uint32_t plane = 0; plane < filter_bits; ++plane) {
+            const float weight = static_cast<float>(1U << (filter_bits - plane - 1));
+            auto accumulator_v = _mm256_cvtepi32_ps(_mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(accumulators + plane * 32 + offset)));
+            accumulator_v = _mm256_add_ps(_mm256_mul_ps(accumulator_v, delta_v), sum_vl_v);
+            lookup_sum_v =
+                _mm256_add_ps(lookup_sum_v, _mm256_mul_ps(accumulator_v, _mm256_set1_ps(weight)));
+        }
+        lookup_sum_v = _mm256_sub_ps(lookup_sum_v, center_query_sum_v);
+        const auto f_add_v = _mm256_loadu_ps(f_add + offset);
+        const auto f_scale_v = _mm256_loadu_ps(f_scale + offset);
+        const auto abs_f_add_v = _mm256_andnot_ps(sign_v, f_add_v);
+        const auto abs_f_scale_v = _mm256_andnot_ps(sign_v, f_scale_v);
+        __m256 valid_v =
+            _mm256_and_ps(_mm256_and_ps(_mm256_cmp_ps(abs_f_add_v, max_v, _CMP_LE_OQ),
+                                        _mm256_cmp_ps(abs_f_scale_v, max_v, _CMP_LE_OQ)),
+                          _mm256_cmp_ps(abs_f_scale_v, epsilon_v, _CMP_GT_OQ));
+        const auto norm_code_v = _mm256_loadu_ps(filter_norm_codes + offset);
+        valid_v =
+            _mm256_and_ps(valid_v, _mm256_cmp_ps(norm_code_v, _mm256_setzero_ps(), _CMP_GT_OQ));
+        const auto filter_ip_v = _mm256_div_ps(lookup_sum_v, norm_code_v);
+        auto result_v =
+            _mm256_add_ps(_mm256_add_ps(f_add_v, query_bucket_norm_v),
+                          _mm256_mul_ps(_mm256_mul_ps(f_scale_v, query_norm_v), filter_ip_v));
+        const auto abs_result_v = _mm256_andnot_ps(sign_v, result_v);
+        valid_v = _mm256_and_ps(valid_v, _mm256_cmp_ps(abs_result_v, max_v, _CMP_LE_OQ));
+        result_v = _mm256_blendv_ps(max_v, result_v, valid_v);
+        _mm256_storeu_ps(dists + offset, result_v);
+        if (filter_inner_products != nullptr) {
+            _mm256_storeu_ps(filter_inner_products + offset,
+                             _mm256_blendv_ps(nan_v, filter_ip_v, valid_v));
+        }
+        computed_mask |= static_cast<uint32_t>(_mm256_movemask_ps(valid_v)) << offset;
+    }
+    return computed_mask;
+#else
+    return avx::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                    filter_bits,
+                                                    delta,
+                                                    sum_vl,
+                                                    query_sum,
+                                                    query_norm,
+                                                    query_bucket_norm_sqr,
+                                                    inv_sqrt_d,
+                                                    f_add,
+                                                    f_scale,
+                                                    filter_norm_codes,
+                                                    valid_size,
+                                                    dists,
+                                                    filter_inner_products);
 #endif
 }
 
@@ -1545,4 +2322,82 @@ InverseNormalizeWithCentroid(
 #endif
 }
 
+}  // namespace vsag::avx2
+
+namespace vsag::avx2 {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, true, 8, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, false, 8, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, true, 8, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, false, 8, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, true, 4, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, false, 4, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, true, 4, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::Avx2SQ8Tag>, false, 4, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::avx2

@@ -45,6 +45,8 @@ jobs:
         with:
           fetch-depth: '0'
           persist-credentials: false
+      - name: Configure Git workspace
+        run: ./scripts/ci/configure-git-safe-directory.sh
       - name: Prepare FetchContent Sources
         uses: ./.github/actions/prepare-fetchcontent
         with:

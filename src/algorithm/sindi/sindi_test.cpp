@@ -27,6 +27,7 @@
 #include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization_tags.h"
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
@@ -435,6 +436,7 @@ TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
 }
 
 TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SINDI]") {
+    const auto build_prune = GENERATE(0, 1, 2, 3);
     const auto immutable = GENERATE(false, true);
     const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
                                        SparseValueQuantizationType::FP16,
@@ -451,6 +453,8 @@ TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SIND
         parameter->term_id_limit = 8;
         parameter->window_size = 10000;
         parameter->doc_prune_ratio = 0.0F;
+        parameter->term_prune_ratio = build_prune == 1 || build_prune == 3 ? 0.5F : 0.0F;
+        parameter->term_retain_threshold = build_prune >= 2 ? 2 : 0;
         parameter->use_reorder = false;
         parameter->sparse_value_quant_type = quantization;
         parameter->immutable = immutable;
@@ -475,7 +479,7 @@ TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SIND
         SparseVector sparse_query{1, &term, &query_value};
         auto query = Dataset::Make();
         query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
-        const std::string search_parameters = R"({
+        std::string search_parameters = R"({
             "sindi": {
                 "query_prune_ratio": 0.0,
                 "term_prune_ratio": 0.0,
@@ -483,11 +487,25 @@ TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SIND
                 "n_candidate": 4
             }
         })";
+        if (build_prune != 0) {
+            search_parameters = R"({"sindi": {"query_prune_ratio": 0,
+                "term_prune_ratio": 0, "term_retain_threshold": 0, "n_candidate": 4}})";
+        }
         const auto result = index.KnnSearch(query, 4, search_parameters, nullptr);
         REQUIRE(result->GetDim() == 2);
         std::set<int64_t> result_labels(result->GetIds(),
                                         result->GetIds() + static_cast<uint64_t>(result->GetDim()));
         REQUIRE(result_labels == std::set<int64_t>{11, 13});
+        std::stringstream restored_stream;
+        IOStreamWriter restored_writer(restored_stream);
+        index.Serialize(restored_writer);
+        SINDI restored(parameter, common_param);
+        IOStreamReader restored_reader(restored_stream);
+        restored.Deserialize(restored_reader);
+        const auto restored_result = restored.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(restored_result->GetDim() == 2);
+        REQUIRE(std::set<int64_t>(restored_result->GetIds(), restored_result->GetIds() + 2) ==
+                result_labels);
 
         std::stringstream stream;
         IOStreamWriter writer(stream);
@@ -946,6 +964,95 @@ TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
     }
 }
 
+TEST_CASE("SINDI FP16 rerank build search add and serialize", "[ut][SINDI][fp16]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 16,
+        "window_size": 10000,
+        "doc_prune_ratio": 0.0,
+        "use_quantization": false,
+        "use_reorder": true,
+        "rerank_type": "fp16",
+        "avg_doc_term_length": 3
+    })"));
+
+    uint32_t ids0[] = {1, 4, 7};
+    float values0[] = {100.1F, 0.3333F, 0.2F};
+    uint32_t ids1[] = {1, 4};
+    float values1[] = {0.1F, 0.15F};
+    uint32_t ids2[] = {2, 7};
+    float values2[] = {1.0F, 0.05F};
+    SparseVector vectors[] = {{3, ids0, values0}, {2, ids1, values1}, {2, ids2, values2}};
+    int64_t labels[] = {10, 20, 30};
+    auto base = Dataset::Make();
+    base->NumElements(3)->SparseVectors(vectors)->Ids(labels)->Owner(false);
+
+    SINDI built(parameter, common_param);
+    REQUIRE(built.Build(base).empty());
+    SINDI loaded(parameter, common_param);
+    test_serializion(built, loaded);
+
+    auto unchanged = Dataset::Make();
+    unchanged->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(loaded.UpdateVector(labels[0], unchanged));
+
+    float changed_values[] = {101.0F, values0[1], values0[2]};
+    SparseVector changed_vector{3, ids0, changed_values};
+    auto changed = Dataset::Make();
+    changed->NumElements(1)->SparseVectors(&changed_vector)->Owner(false);
+    REQUIRE_FALSE(loaded.UpdateVector(labels[0], changed));
+
+    SparseVector query_vector{3, ids0, values0};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const std::string search_parameters = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 3
+        }
+    })";
+    auto result = loaded.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 10);
+    const auto statistics = JsonType::Parse(result->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["sparse_fp16"].GetUint64() > 0);
+
+    const auto rounded = [](float value) {
+        return generic::FP16ToFloat(generic::FloatToFP16(value));
+    };
+    const float expected_distance = 1.0F - values0[0] * rounded(values0[0]) -
+                                    values0[1] * rounded(values0[1]) -
+                                    values0[2] * rounded(values0[2]);
+    REQUIRE(std::abs(loaded.CalcDistanceById(query, 10, true) - expected_distance) < 1e-6F);
+
+    float added_value = 0.75F;
+    uint32_t added_id = 4;
+    int64_t added_label = 40;
+    SparseVector added_vector{1, &added_id, &added_value};
+    auto added = Dataset::Make();
+    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+    REQUIRE(loaded.Add(added).empty());
+    REQUIRE(loaded.GetNumElements() == 4);
+
+    auto fp32_parameter = std::make_shared<SINDIParameter>();
+    auto fp32_json = parameter->ToJson();
+    fp32_json[SPARSE_RERANK_TYPE].SetString(SPARSE_RERANK_TYPE_FP32);
+    fp32_parameter->FromJson(fp32_json);
+    SINDI fp32(fp32_parameter, common_param);
+    constexpr uint64_t estimate_count = 10'000;
+    const uint64_t fp16_memory = loaded.EstimateMemory(estimate_count);
+    const uint64_t fp32_memory = fp32.EstimateMemory(estimate_count);
+    REQUIRE(fp16_memory < fp32_memory);
+    REQUIRE(fp32_memory - fp16_memory == estimate_count * 4);
+}
+
 TEST_CASE("SINDI range search ignores repeated zero-distance candidates", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
@@ -1240,8 +1347,13 @@ TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
     SparseVector immutable_vector;
     REQUIRE_THROWS(source->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
     REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
-    REQUIRE_THROWS(immutable->CalcDistanceById(query, ids[0]));
-    REQUIRE_THROWS(immutable->CalDistanceById(query, ids.data(), num_base));
+    auto distances = immutable->CalcDistancesById(query, ids.data(), num_base);
+    REQUIRE(distances->GetDim() == num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[i]) -
+                         distances->GetDistances()[i]) < 1e-3F);
+    }
+    REQUIRE(immutable->CalcDistanceById(query, -1, false) == -1.0F);
 
     for (auto& item : sv_base) {
         delete[] item.vals_;
@@ -2531,20 +2643,12 @@ TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from raw values", "[
             SparseVector missing_query{1, &missing_term, &query_value};
             auto query = Dataset::Make();
             query->NumElements(1)->SparseVectors(&missing_query)->Owner(false);
-            if (immutable) {
-                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
-            } else {
-                REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
-            }
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
 
             uint32_t retained_term = 100;
             SparseVector retained_query{1, &retained_term, &query_value};
             query->SparseVectors(&retained_query);
-            if (immutable) {
-                REQUIRE_THROWS(index.CalcDistanceById(query, label, false));
-            } else {
-                REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
-            }
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
         }
     }
 }

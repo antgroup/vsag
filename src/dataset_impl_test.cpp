@@ -15,7 +15,9 @@
 
 #include "dataset_impl.h"
 
+#include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
+#include "search_metrics_internal.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
@@ -25,6 +27,30 @@ TEST_CASE("Dataset Implement Test", "[ut][dataset]") {
         auto dataset = vsag::Dataset::Make();
         auto* data = static_cast<float*>(allocator.Allocate(sizeof(float) * 1));
         dataset->Float32Vectors(data)->Owner(true, &allocator);
+    }
+
+    SECTION("move preserves allocator and result metadata") {
+        fixtures::MemoryRecordAllocator tracked_allocator;
+        {
+            auto source = std::make_shared<vsag::DatasetImpl>();
+            auto* data = static_cast<float*>(tracked_allocator.Allocate(sizeof(float)));
+            source->Float32Vectors(data)->Owner(true, &tracked_allocator);
+            source->Reasoning(R"({"reason":"moved"})");
+            vsag::SearchResultMetrics metrics;
+            metrics.distance_evaluations = 7;
+            source->SetSearchMetricsInternal(metrics);
+
+            vsag::DatasetImpl moved(std::move(*source));
+            CHECK(moved.GetFloat32Vectors() == data);
+            CHECK(moved.GetReasoning() == R"({"reason":"moved"})");
+            REQUIRE(moved.GetSearchMetricsInternal().has_value());
+            CHECK(moved.GetSearchMetricsInternal()->distance_evaluations == 7);
+            CHECK(source->GetFloat32Vectors() == nullptr);
+            CHECK(source->GetReasoning() == "{}");
+            CHECK_FALSE(source->GetSearchMetricsInternal().has_value());
+            CHECK(source->GetStatistics() == "{}");
+        }
+        CHECK(tracked_allocator.GetCurrentMemory() == 0);
     }
 
     SECTION("delete") {
@@ -734,6 +760,66 @@ TEST_CASE("Dataset Named UInt32 Metadata Test", "[ut][dataset]") {
     null_metadata->NumElements(2)->UInt32Metadata("host_id", nullptr)->Owner(true);
     auto null_metadata_copy = null_metadata->DeepCopy();
     REQUIRE(null_metadata_copy->GetUInt32Metadata("host_id") == nullptr);
+}
+
+TEST_CASE("Dataset Named Int64 Metadata Test", "[ut][dataset]") {
+    {
+        auto* shared_metadata = new int64_t[2]{3, 5};
+        auto aliased = vsag::Dataset::Make();
+        aliased->NumElements(2)
+            ->Dim(1)
+            ->Ids(shared_metadata)
+            ->Int64Metadata("publish_time_stamp", shared_metadata)
+            ->Int64Metadata("updated_time_stamp", shared_metadata)
+            ->Owner(true);
+    }
+
+    auto* first_timestamps = new int64_t[2]{3, 5};
+    auto first = vsag::Dataset::Make();
+    first->NumElements(2)
+        ->Dim(1)
+        ->Ids(first_timestamps)
+        ->Int64Metadata("publish_time_stamp", first_timestamps)
+        ->Owner(true);
+
+    REQUIRE(first->GetInt64Metadata("publish_time_stamp") == first_timestamps);
+    REQUIRE(first->GetInt64Metadata("missing") == nullptr);
+
+    auto copy = first->DeepCopy();
+    REQUIRE(copy->GetInt64Metadata("publish_time_stamp") != first_timestamps);
+    REQUIRE(copy->GetInt64Metadata("publish_time_stamp")[0] == 3);
+    REQUIRE(copy->GetInt64Metadata("publish_time_stamp")[1] == 5);
+
+    auto* appended_ids = new int64_t[2]{7, 11};
+    auto* appended_timestamps = new int64_t[2]{13, 17};
+    auto appended = vsag::Dataset::Make();
+    appended->NumElements(2)
+        ->Dim(1)
+        ->Ids(appended_ids)
+        ->Int64Metadata("publish_time_stamp", appended_timestamps)
+        ->Owner(true);
+    first->Append(appended);
+    REQUIRE(first->GetNumElements() == 4);
+    REQUIRE(first->GetIds()[2] == 7);
+    REQUIRE(first->GetIds()[3] == 11);
+    REQUIRE(first->GetInt64Metadata("publish_time_stamp")[2] == 13);
+    REQUIRE(first->GetInt64Metadata("publish_time_stamp")[3] == 17);
+
+    auto slice = vsag::Dataset::Make();
+    slice->NumElements(2)
+        ->Dim(1)
+        ->Int64Metadata("publish_time_stamp", first->GetInt64Metadata("publish_time_stamp") + 1)
+        ->Owner(false);
+    REQUIRE(slice->GetInt64Metadata("publish_time_stamp")[0] == 5);
+    REQUIRE(slice->GetInt64Metadata("publish_time_stamp")[1] == 13);
+
+    auto missing_metadata = vsag::Dataset::Make()->NumElements(1)->Dim(1)->Owner(false);
+    REQUIRE_THROWS(first->Append(missing_metadata));
+
+    auto null_metadata = vsag::Dataset::Make();
+    null_metadata->NumElements(2)->Int64Metadata("publish_time_stamp", nullptr)->Owner(true);
+    auto null_metadata_copy = null_metadata->DeepCopy();
+    REQUIRE(null_metadata_copy->GetInt64Metadata("publish_time_stamp") == nullptr);
 }
 
 TEST_CASE("Dataset Named String Metadata Test", "[ut][dataset]") {

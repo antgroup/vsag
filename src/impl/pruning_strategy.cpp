@@ -15,6 +15,8 @@
 
 #include "pruning_strategy.h"
 
+#include <cstdlib>
+
 #include "datacell/flatten_datacell.h"
 #include "datacell/graph_interface.h"
 #include "hash_types.h"
@@ -23,6 +25,19 @@
 namespace vsag {
 
 namespace {
+
+/// Optimistic snapshot/validate/commit for reverse edges. Measured as no faster than the
+/// fully-locked path while costing about 27% more CPU (each neighbour then takes the lock
+/// twice instead of once), so it is OFF by default and kept only as an opt-in experiment:
+/// set VSAG_OPTIMISTIC_EDGE=1 to enable it.
+inline bool
+optimistic_edge_on() {
+    static const bool on = []() {
+        const char* env = std::getenv("VSAG_OPTIMISTIC_EDGE");
+        return env != nullptr and env[0] == '1';
+    }();
+    return on;
+}
 
 class PairwiseDistanceComputer {
 public:
@@ -52,9 +67,66 @@ public:
 
 private:
     const DistanceProviderForGraph& distance_provider_;
-    // The helper lives for one pruning pass; its source IDs are bounded by the selected-edge limit.
+    // Cache lifetime follows this object: one selection, or the entire reverse-neighbor loop.
+    // Selection caches contain accepted source IDs; the outer reverse cache contains centers.
     UnorderedMap<InnerIdType, ComputerInterfacePtr> computers_;
 };
+
+void
+select_adaptive_heap(const DistHeapPtr& edges,
+                     InnerIdType center,
+                     uint64_t max_size,
+                     const DistanceProviderForGraph& distance_provider,
+                     Allocator* allocator,
+                     float alpha,
+                     const AdaptivePruningParameter& parameter) {
+    // Keep this cache local to one selection: adaptive passes need at most O(K) source
+    // computers. Sharing the caller's cache across up to K full reverse lists could retain
+    // O(K^2) distinct source computers until insertion finishes. The caller's separate cache
+    // is only for center-to-candidate distances and retains at most K reverse centers.
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+    Vector<PruningCandidate> candidates(allocator);
+    candidates.reserve(edges->Size());
+    while (not edges->Empty()) {
+        candidates.push_back(edges->Top());
+        edges->Pop();
+    }
+    const auto selected = select_edges_adaptive(
+        candidates,
+        center,
+        max_size,
+        alpha,
+        parameter,
+        [&](InnerIdType left, InnerIdType right) {
+            return pairwise_distance.PairwiseDistance(left, right);
+        },
+        allocator);
+    for (const auto& candidate : selected) {
+        edges->Push(candidate.first, candidate.second);
+    }
+}
+
+namespace {
+
+// Applies the reverse-neighbor policy: adaptive selection only for a full list when
+// the caller opted in, otherwise the original fixed-alpha heuristic.
+void
+select_reverse_edges(const DistHeapPtr& edges,
+                     InnerIdType center,
+                     uint64_t max_size,
+                     const DistanceProviderForGraph& distance_provider,
+                     Allocator* allocator,
+                     float alpha,
+                     const AdaptivePruningParameter* pruning) {
+    if (pruning != nullptr && pruning->enabled && pruning->apply_to_reverse) {
+        select_adaptive_heap(
+            edges, center, max_size, distance_provider, allocator, alpha, *pruning);
+        return;
+    }
+    select_edges_by_heuristic(edges, max_size, distance_provider, allocator, alpha);
+}
+
+}  // namespace
 
 }  // namespace
 
@@ -127,77 +199,208 @@ select_edges_by_heuristic(const DistHeapPtr& edges,
 }
 
 InnerIdType
-mutually_connect_new_element(InnerIdType cur_c,
-                             const DistHeapPtr& top_candidates,
-                             const GraphInterfacePtr& graph,
-                             const DistanceProviderForGraph& distance_provider,
-                             const MutexArrayPtr& neighbors_mutexes,
-                             Allocator* allocator,
-                             float alpha) {
-    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+build_forward_links(InnerIdType cur_c,
+                    const DistHeapPtr& top_candidates,
+                    const GraphInterfacePtr& graph,
+                    const DistanceProviderForGraph& distance_provider,
+                    Allocator* allocator,
+                    float alpha,
+                    Vector<InnerIdType>& selected_neighbors_out,
+                    const AdaptivePruningParameter* pruning) {
     const uint64_t max_size = graph->MaximumDegree();
-    select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
+    if (pruning != nullptr && pruning->enabled) {
+        select_adaptive_heap(
+            top_candidates, cur_c, max_size, distance_provider, allocator, alpha, *pruning);
+    } else {
+        select_edges_by_heuristic(top_candidates, max_size, distance_provider, allocator, alpha);
+    }
     if (top_candidates->Size() > max_size) {
         throw VsagException(
             ErrorType::INTERNAL_ERROR,
             "Should be not be more than max_size candidates returned by the heuristic");
     }
 
-    Vector<InnerIdType> selected_neighbors(allocator);
-    selected_neighbors.reserve(max_size);
+    selected_neighbors_out.clear();
+    selected_neighbors_out.reserve(max_size);
     while (not top_candidates->Empty()) {
-        selected_neighbors.emplace_back(top_candidates->Top().second);
+        selected_neighbors_out.emplace_back(top_candidates->Top().second);
         top_candidates->Pop();
     }
 
-    InnerIdType next_closest_entry_point = selected_neighbors.back();
+    // Adaptive pruning can select no neighbour at all, and back() would be invalid. Publish
+    // the empty list so the node still exists, and report cur_c as the entry point.
+    if (selected_neighbors_out.empty()) {
+        graph->InsertNeighborsById(cur_c, selected_neighbors_out);
+        return cur_c;
+    }
+    const InnerIdType next_closest_entry_point = selected_neighbors_out.back();
 
-    graph->InsertNeighborsById(cur_c, selected_neighbors);
+    // Stage A writes only cur_c's own link lists. cur_c is not reachable from the graph
+    // until this write completes, which is what lets stage A run without neighbour locks.
+    graph->InsertNeighborsById(cur_c, selected_neighbors_out);
 
+    return next_closest_entry_point;
+}
+
+void
+link_back_edges(InnerIdType cur_c,
+                const Vector<InnerIdType>& selected_neighbors,
+                const GraphInterfacePtr& graph,
+                const DistanceProviderForGraph& distance_provider,
+                const MutexArrayPtr& neighbors_mutexes,
+                Allocator* allocator,
+                float alpha,
+                const AdaptivePruningParameter* pruning) {
+    PairwiseDistanceComputer pairwise_distance(distance_provider, allocator);
+    const uint64_t max_size = graph->MaximumDegree();
     for (auto selected_neighbor : selected_neighbors) {
         if (selected_neighbor == cur_c) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Trying to connect an element to itself");
         }
 
-        LockGuard lock(neighbors_mutexes, selected_neighbor);
+        // Reference path: the whole read-modify-write under the neighbour lock.
+        auto locked_update = [&]() {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
 
-        Vector<InnerIdType> neighbors(allocator);
-        graph->GetNeighbors(selected_neighbor, neighbors);
+            Vector<InnerIdType> neighbors(allocator);
+            graph->GetNeighbors(selected_neighbor, neighbors);
 
-        uint64_t sz_link_list_other = neighbors.size();
+            const uint64_t sz = neighbors.size();
+            if (sz > max_size) {
+                throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
+            }
+            if (sz < max_size) {
+                neighbors.emplace_back(cur_c);
+                graph->InsertNeighborsById(selected_neighbor, neighbors);
+                return;
+            }
 
-        if (sz_link_list_other > max_size) {
-            throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
-        }
-        // If cur_c is already present in the neighboring connections of `selected_neighbors[idx]` then no need to modify any connections or run the heuristics.
-        if (sz_link_list_other < max_size) {
-            neighbors.emplace_back(cur_c);
-            graph->InsertNeighborsById(selected_neighbor, neighbors);
-        } else {
-            // finding the "weakest" element to replace it with the new one
             float d_max = pairwise_distance.PairwiseDistance(selected_neighbor, cur_c);
-
             auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
             candidates->Push(d_max, cur_c);
-
-            for (uint64_t j = 0; j < sz_link_list_other; j++) {
+            for (uint64_t j = 0; j < sz; ++j) {
                 candidates->Push(
                     pairwise_distance.PairwiseDistance(selected_neighbor, neighbors[j]),
                     neighbors[j]);
             }
-
-            select_edges_by_heuristic(candidates, max_size, distance_provider, allocator, alpha);
-
+            // The reverse center is the existing neighbor, not the newly inserted node.
+            // This selection and publication stay under that neighbor's existing lock.
+            select_reverse_edges(candidates,
+                                 selected_neighbor,
+                                 max_size,
+                                 distance_provider,
+                                 allocator,
+                                 alpha,
+                                 pruning);
             Vector<InnerIdType> cand_neighbors(allocator);
             while (not candidates->Empty()) {
                 cand_neighbors.emplace_back(candidates->Top().second);
                 candidates->Pop();
             }
-
             graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
+        };
+
+        if (not optimistic_edge_on()) {
+            locked_update();
+            continue;
+        }
+
+        // ---- phase 1: snapshot the neighbour list under a short lock ----
+        Vector<InnerIdType> snapshot(allocator);
+        {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
+            graph->GetNeighbors(selected_neighbor, snapshot);
+        }
+
+        const uint64_t snap_sz = snapshot.size();
+        if (snap_sz > max_size) {
+            throw VsagException(ErrorType::INTERNAL_ERROR, "Bad value of sz_link_list_other");
+        }
+
+        if (snap_sz < max_size) {
+            // Cheap append: the outcome does not depend on list contents, only on the size,
+            // so a size check is enough to validate. The write stays under the lock because
+            // InsertNeighborsById reads the current list as part of its own update.
+            bool appended = false;
+            {
+                LockGuard lock(neighbors_mutexes, selected_neighbor);
+                Vector<InnerIdType> cur(allocator);
+                graph->GetNeighbors(selected_neighbor, cur);
+                if (cur.size() == snap_sz) {
+                    cur.emplace_back(cur_c);
+                    graph->InsertNeighborsById(selected_neighbor, cur);
+                    appended = true;
+                }
+            }
+            if (not appended) {
+                locked_update();  // lock already released above
+            }
+            continue;
+        }
+
+        // ---- phase 2: the expensive pruning, with NO lock held ----
+        auto candidates = std::make_shared<StandardHeap<true, false>>(allocator, -1);
+        candidates->Push(pairwise_distance.PairwiseDistance(selected_neighbor, cur_c), cur_c);
+        for (uint64_t j = 0; j < snap_sz; ++j) {
+            candidates->Push(pairwise_distance.PairwiseDistance(selected_neighbor, snapshot[j]),
+                             snapshot[j]);
+        }
+        select_reverse_edges(
+            candidates, selected_neighbor, max_size, distance_provider, allocator, alpha, pruning);
+        Vector<InnerIdType> cand_neighbors(allocator);
+        while (not candidates->Empty()) {
+            cand_neighbors.emplace_back(candidates->Top().second);
+            candidates->Pop();
+        }
+
+        // ---- phase 3: validate under the lock and commit, or fall back ----
+        bool snapshot_still_valid = false;
+        {
+            LockGuard lock(neighbors_mutexes, selected_neighbor);
+            Vector<InnerIdType> cur(allocator);
+            graph->GetNeighbors(selected_neighbor, cur);
+            snapshot_still_valid =
+                (cur.size() == snap_sz and
+                 std::equal(cur.begin(), cur.end(), snapshot.begin(), snapshot.end()));
+            if (snapshot_still_valid) {
+                graph->InsertNeighborsById(selected_neighbor, cand_neighbors);
+            }
+        }
+        if (not snapshot_still_valid) {
+            // The lock is released, so recomputing through locked_update() cannot
+            // self-deadlock on the same non-recursive shared_mutex.
+            locked_update();
         }
     }
+}
+
+InnerIdType
+mutually_connect_new_element(InnerIdType cur_c,
+                             const DistHeapPtr& top_candidates,
+                             const GraphInterfacePtr& graph,
+                             const DistanceProviderForGraph& distance_provider,
+                             const MutexArrayPtr& neighbors_mutexes,
+                             Allocator* allocator,
+                             float alpha,
+                             const AdaptivePruningParameter* pruning) {
+    Vector<InnerIdType> selected_neighbors(allocator);
+    const auto next_closest_entry_point = build_forward_links(cur_c,
+                                                              top_candidates,
+                                                              graph,
+                                                              distance_provider,
+                                                              allocator,
+                                                              alpha,
+                                                              selected_neighbors,
+                                                              pruning);
+    link_back_edges(cur_c,
+                    selected_neighbors,
+                    graph,
+                    distance_provider,
+                    neighbors_mutexes,
+                    allocator,
+                    alpha,
+                    pruning);
 
     return next_closest_entry_point;
 }
@@ -230,10 +433,17 @@ mutually_connect_new_element(InnerIdType cur_c,
                              const FlattenInterfacePtr& flatten,
                              const MutexArrayPtr& neighbors_mutexes,
                              Allocator* allocator,
-                             float alpha) {
+                             float alpha,
+                             const AdaptivePruningParameter* pruning) {
     FlattenDistanceProvider distance_provider(flatten, nullptr);
-    return mutually_connect_new_element(
-        cur_c, top_candidates, graph, distance_provider, neighbors_mutexes, allocator, alpha);
+    return mutually_connect_new_element(cur_c,
+                                        top_candidates,
+                                        graph,
+                                        distance_provider,
+                                        neighbors_mutexes,
+                                        allocator,
+                                        alpha,
+                                        pruning);
 }
 
 }  // namespace vsag
