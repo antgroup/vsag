@@ -45,6 +45,9 @@ struct FGIMRefinementStatistics {
     uint64_t indegree_repairs{0};
 };
 
+// All stages borrow non-empty, disjoint source HGraphs with successful Builds.
+// Sources must remain alive and unchanged during each call. Only float32/L2/fp32
+// without deletion, duplicate grouping, or deduplicate storage is supported.
 class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
@@ -58,9 +61,7 @@ public:
                    uint64_t k,
                    uint64_t max_iterations);
 
-    // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.
-    // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
-    // or duplicate grouping/deduplicate storage is supported. Result rows use merged internal IDs.
+    // Result rows use merged internal IDs.
     static FGIMKnnGraph
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
