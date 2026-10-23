@@ -50,6 +50,7 @@ class HGraphFGIM {
 
 public:
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
+    // Each stage validates its inputs so it can also be called independently.
     // A zero iteration budget validates the graph but leaves it unchanged.
     static FGIMRefinementStatistics
     RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
@@ -64,6 +65,10 @@ public:
     BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
 
 private:
+    // Shared checks also apply to an empty destination.
+    static void
+    ValidateStorage(const HGraph& index);
+
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
     // CrossQuery does not repeat full source validation. NaNs are omitted;

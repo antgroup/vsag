@@ -128,6 +128,8 @@ public:
             graph.bottom_graph_->SetTotalCount(0);
         } else if (condition == "missing label table") {
             graph.label_table_ = nullptr;
+        } else if (condition == "incomplete code writes") {
+            graph.pending_code_writes_[0] = HGraph::BASE_CODE;
         }
     }
 
@@ -333,6 +335,10 @@ TEST_CASE_METHOD(HGraphFGIMTest, "FGIM rejects unsupported inputs", "[ut][hgraph
         ExpectInvalid(sources, 3, "at least two");
         sources.push_back(a.get());
         ExpectInvalid(sources, 3, "at least two");
+    }
+    SECTION("incomplete code writes") {
+        SetUnsupported(*b, "incomplete code writes");
+        ExpectInvalid(sources, 3, "complete code writes");
     }
     SECTION("null source") {
         sources[1] = nullptr;
@@ -551,6 +557,10 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 1, 1);
     REQUIRE(stats.distance_evaluations > 0);
     REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(stats.indegree_repairs == 2);
+    REQUIRE(stats.iterations == 1);
+    REQUIRE(graph[2][0].id == 1);
+    REQUIRE(graph[3][0].id == 0);
     REQUIRE(graph[0].size() == 1);
     REQUIRE(graph[0][0].id == 3);
     REQUIRE(graph[1].size() == 1);
@@ -642,7 +652,8 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(stats.distance_evaluations == 0);
     REQUIRE(stats.neighbor_updates == 0);
     REQUIRE(stats.indegree_repairs == 0);
-    REQUIRE(stats.iterations < 8);
+    // A second visit drains reverse-new; leftover reverse-old alone is converged.
+    REQUIRE(stats.iterations == 2);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
@@ -764,4 +775,21 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(after_indegree[4] == 1);
     REQUIRE(*std::min_element(after_indegree.begin(), after_indegree.end()) > 0);
 }
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement rejects duplicate IDs independently of stored distances",
+                 "[ut][hgraph][fgim]") {
+    auto lhs = MakeSource(2, 0, true);
+    auto rhs = MakeSource(2, 1, true);
+    Vector<const HGraph*> sources({lhs.get(), rhs.get()}, common.allocator_.get());
+    // ID uniqueness must hold even when supplied distances differ from recomputation.
+    // A lower_bound for (0,3) would stop at ID 2 and miss the existing ID 3.
+    const float epsilon = std::numeric_limits<float>::epsilon();
+    FGIMKnnGraph graph{{{2, epsilon}, {3, 2 * epsilon}}, {{2, 0}}, {{0, 0}, {3, 0}}, {{0, 0}}};
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 3, 1);
+    REQUIRE(stats.distance_evaluations > 0);
+    REQUIRE(graph[0].size() == 2);
+    REQUIRE(graph[0][0].id == 2);
+    REQUIRE(graph[0][1].id == 3);
+}
+
 }  // namespace vsag
