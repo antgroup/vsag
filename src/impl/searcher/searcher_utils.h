@@ -14,21 +14,26 @@
 
 #pragma once
 
-#include <cmath>
 #include <limits>
+
+#include "utils/float_utils.h"
 
 namespace vsag {
 
 inline bool
 is_result_distance_eligible(float distance) {
-    return not std::isnan(distance);
+    uint32_t bits = 0;
+    std::memcpy(&bits, &distance, sizeof(bits));
+    // Strip the sign bit to classify both signs alike, including signed zero and infinities.
+    // Reject NaNs even under -ffast-math, preserving the original result eligibility.
+    return (bits & 0x7FFFFFFFU) <= 0x7F800000U;
 }
 
 inline float
 traversal_priority(float distance) {
     // Non-finite nodes can still connect the entry point to valid candidates. Give them a
     // deterministic priority so NaN does not violate the heap's ordering requirements.
-    return std::isfinite(distance) ? -distance : std::numeric_limits<float>::max();
+    return IsFiniteFloatBits(distance) ? -distance : std::numeric_limits<float>::max();
 }
 
 }  // namespace vsag

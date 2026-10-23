@@ -82,7 +82,8 @@ most users need; the exhaustive list is in [Index Parameters](../resources/index
 | `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
 | `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
 | `build_thread_count` | int | `100` | Threads used to parallelise build |
-| `support_duplicate` | bool | `false` | Enable duplicate-ID detection on insert |
+| `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
+| `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |
 | `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
 | `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
@@ -103,8 +104,8 @@ full `Build`. The PiPNN builder accepts dense `float32` input with `metric_type`
 `"ip"`, or `"cosine"`. It builds the bottom graph from the original build vectors, then reuses
 HGraph's route layers, storage, search, filtering, reordering, incremental `Add`, removal, and
 serialization paths. The persistent base storage may use a supported quantizer such as `sq8`,
-including RaBitQ with SQ8 reorder. Cache-assisted build and deduplicated vector storage are not
-supported with PiPNN. The `pipnn_*` parameters in the table above tune this builder;
+including RaBitQ with SQ8 reorder. Cache-assisted build is not supported with PiPNN.
+The `pipnn_*` parameters in the table above tune this builder;
 `ef_construction` does not. The existing `alpha` parameter controls PiPNN's final robust pruning.
 
 `build_thread_count` parallelizes vector preparation, partitioning, candidate generation, and
@@ -123,6 +124,32 @@ For target degree K, scan the existing ordered reservoir at the configured `alph
 The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
 
 The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
+### Deduplicating vector storage
+
+Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
+vectors share one physical code slot while retaining their individual labels. This option
+supports dense-vector HGraph indexes using `graph_type: "nsw"` or `"pipnn"`;
+the separate HNSW index and `graph_type: "odescent"` are not supported.
+
+For PiPNN, initial `Build` groups byte-identical FP32 input rows and encodes each
+representative once. All labels, attributes, and extra information remain independent.
+This also works with adaptive alpha. `duplicate_distance_threshold` does not affect
+PiPNN batch grouping; later incremental `Add` retains its existing threshold/code-based
+duplicate detection. Quantizer training still uses the original training sample.
+
+The following operations and configurations are not supported while storage deduplication
+is enabled:
+
+- force removal (`support_force_remove: true`);
+- cache-assisted build after `ImportCache()`;
+- `Merge`;
+- legacy v0.14 serialization.
+
+`UpdateVector` is supported only for IDs whose vector storage is not shared with another
+duplicate-group member.
+
+Current serialization and streaming serialization are supported.
 
 ## Supported input data types
 

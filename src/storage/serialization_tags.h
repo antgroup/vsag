@@ -38,6 +38,7 @@ enum class StreamSerializationTag : uint32_t {
     SINDI_RERANK_INDEX = 12,
     SINDI_TERM_ID_MAPPER = 13,
     PYRAMID_HIERARCHIES = 14,
+    CODE_SLOT_MAP = 15,
 };
 
 inline const char*
@@ -73,6 +74,8 @@ StreamSerializationTagName(uint32_t tag) {
             return "sindi_term_id_mapper";
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
             return "pyramid_hierarchies";
+        case StreamSerializationTag::CODE_SLOT_MAP:
+            return "code_slot_map";
     }
     return "unknown";
 }
@@ -93,6 +96,7 @@ StreamSerializationTagCritical(uint32_t tag) {
         case StreamSerializationTag::SINDI_RERANK_INDEX:
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
+        case StreamSerializationTag::CODE_SLOT_MAP:
             return true;
         case StreamSerializationTag::ATTRIBUTE_FILTER:
         case StreamSerializationTag::EXTRA_INFO:
@@ -122,6 +126,7 @@ StreamSerializationBlockCurrentVersion(uint32_t tag) {
         case StreamSerializationTag::SINDI_RERANK_INDEX:
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
+        case StreamSerializationTag::CODE_SLOT_MAP:
             return kStreamSerializationBlockVersionV1;
     }
     return kStreamSerializationBlockVersionV1;
