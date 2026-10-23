@@ -100,6 +100,9 @@ if (!results.has_value()) {
 且仅在真实距离为正时适用；它不是与距离度量无关的误差界，也不能证明量化导致了
 未命中，尤其应谨慎解释可能为负的 IP 距离。
 
+`termination_reason` 为 `distance_early_stop` 时，遍历是被 HGraph 的距离比早停结束的，
+它没有走到的期望目标会报告为 `not_reachable`。怀疑图结构之前，先调大 `alpha` 或去掉 `early_stop`。
+
 完整报告中的 `supports_range` 是布尔值，表示已注册的范围搜索归因支持，不代表索引是否提供
 RangeSearch API；未注册的索引类型返回 false。仅状态报告缺少该字段并不表示 false。
 
