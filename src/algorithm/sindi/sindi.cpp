@@ -17,8 +17,6 @@
 
 #include <algorithm>
 #include <cstring>
-#include <deque>
-#include <future>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -35,6 +33,7 @@
 #include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
+#include "impl/searcher/sindi_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_feature_list.h"
@@ -794,7 +793,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(parameters);
     search_param.FromJson(search_json);
-    const auto window_options = SindiSearcher::ParseOptions(search_json);
+    const auto& window_options = search_param.execution_options;
     SindiWindowSearchProfile window_profile;
     stages.enabled = window_options.stage_profile;
     const auto threshold = ParseSearchThreshold(parameters);
@@ -887,7 +886,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    const uint64_t* filter_callback_remaining,
                    const SindiMetadataSearchRoute& metadata_route,
                    uint64_t worker_n_candidate,
-                   const SindiWindowSearchOptions& window_options,
+                   const SindiSearchOptions& window_options,
                    SindiWindowSearchProfile* window_profile) const {
     auto& stages = SindiLastQueryProfile();
     SindiStageTimer preparation_timer(window_options.stage_profile, stages.prepare_us);
@@ -1198,7 +1197,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(parameters);
     search_param.FromJson(search_json);
-    const auto window_options = SindiSearcher::ParseOptions(search_json);
+    const auto& window_options = search_param.execution_options;
     stages.enabled = window_options.stage_profile;
     InnerSearchParam inner_param;
 
@@ -1273,7 +1272,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(request.params_str_);
     search_param.FromJson(search_json);
-    const auto window_options = SindiSearcher::ParseOptions(search_json);
+    const auto& window_options = search_param.execution_options;
     SindiWindowSearchProfile window_profile;
     stages.enabled = window_options.stage_profile;
 

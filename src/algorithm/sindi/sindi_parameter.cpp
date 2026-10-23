@@ -248,6 +248,8 @@ SINDISearchParameter::FromJson(const JsonType& json) {
                    fmt::format("parameters must contains {}", INDEX_SINDI));
     const auto search_json = json[INDEX_SINDI];
 
+    execution_options = SindiSearchOptions::Parse(json);
+
     // Parse common search parameters (timeout_ms, factor, etc.)
     IndexSearchParameter::FromJson(search_json);
 
@@ -335,6 +337,7 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
+    execution_options.WriteTo(json);
     return json;
 }
 

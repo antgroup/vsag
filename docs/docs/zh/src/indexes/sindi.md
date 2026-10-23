@@ -235,6 +235,8 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | `rerank_batch` | bool | `false` | 对 FP32/FP16 稀疏 KNN 候选进行批量重排，减少逐候选调用和读锁获取。推理查询和 DMQ8 保持逐候选重排。 |
 | `rerank_parallelism` | int | `1` | FP32/FP16 稀疏 KNN 重排 worker 数，范围为 `1` 至 `256`。大于 `1` 时启用并行重排并复用查询线程池，调用线程也参与计算。各 worker 使用独立 computer，距离写回原候选位置；等待完成后按原顺序选择全局 top-k，不改变 window 候选容量。 |
 | `rerank_scheduler` | string | `count_static` | 并行重排调度：`nnz_atomic` 复用线程池并行读取候选 NNZ、计算块内前缀和，调用线程也参与；等待完成后，调用线程只汇总 p 个块总量并二分查找 p-1 个边界，不再串行扫描全部候选。按向量累计非零项数划分连续区间，候选不拆分，因此尽量均分；`count_atomic` 按候选数量分区。二者均用 relaxed 原子 fetch-add 每次领取一个候选，完成本区间后依次循环窃取其他区间。`count_static` 保留原来的按数量批量分区，无窃取。单 worker 使用一次批量调用。`stage_profile` 通过内部重排 profile 接口记录估价/分区开销、各 worker 耗时、非零项数和窃取候选数；数量模式开启 profiling 时也读取非零项数用于负载诊断，普通查询不读取。 |
+
+执行选项统一由 `SINDISearchParameter` 解析并序列化，分析器重建查询参数时会保留调度、重排和统计配置。
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |

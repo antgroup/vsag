@@ -117,16 +117,16 @@ TEST_CASE("SINDI weighted partition covers empty and skewed work", "[ut][SindiSe
 }
 
 TEST_CASE("SINDI window options reject invalid modes", "[ut][SindiSearcher]") {
-    REQUIRE(SindiSearcher::ParseOptions(JsonType::Parse(R"({"sindi":{}})")).scheduler ==
+    REQUIRE(SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{}})")).scheduler ==
             SindiWindowScheduler::COUNT_DEQUE);
-    REQUIRE(SindiSearcher::ParseOptions(JsonType::Parse(R"({"sindi":{}})")).rerank_scheduler ==
+    REQUIRE(SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{}})")).rerank_scheduler ==
             SindiRerankScheduler::COUNT_STATIC);
     REQUIRE_THROWS(
-        SindiSearcher::ParseOptions(JsonType::Parse(R"({"sindi":{"window_scheduler":"typo"}})")));
+        SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{"window_scheduler":"typo"}})")));
     for (const auto* mode : {"count_deque", "count_atomic", "cost_atomic"}) {
         auto json = JsonType::Parse(std::string(R"({"sindi":{"window_scheduler":")") + mode +
                                     R"(","window_scheduler_profile":true}})");
-        auto options = SindiSearcher::ParseOptions(json);
+        auto options = SindiSearchOptions::Parse(json);
         REQUIRE(std::string(SindiSearcher::SchedulerName(options.scheduler)) == mode);
         REQUIRE(options.profile);
     }
@@ -198,7 +198,7 @@ TEST_CASE("SINDI rerank batches preserve distances and aggregate statistics",
     REQUIRE_THROWS(SindiSearcher::RerankDistances(
         *cell, query, ids, 0, pool, allocator.get(), nullptr, false));
     for (const auto count : {0, -1, 257}) {
-        REQUIRE_THROWS(SindiSearcher::ParseOptions(
+        REQUIRE_THROWS(SindiSearchOptions::Parse(
             JsonType::Parse(nlohmann::json{{"sindi", {{"rerank_parallelism", count}}}}.dump())));
     }
 }
@@ -366,12 +366,12 @@ TEST_CASE("SINDI rerank atomic ranges balance nonzeros and preserve candidate po
     REQUIRE(completed == zeros.size());
     REQUIRE(fetches == zeros.size() + 16);
     for (const auto* mode : {"count_static", "count_atomic", "nnz_atomic"}) {
-        const auto options = SindiSearcher::ParseOptions(
+        const auto options = SindiSearchOptions::Parse(
             JsonType::Parse(nlohmann::json{{"sindi", {{"rerank_scheduler", mode}}}}.dump()));
         REQUIRE(options.rerank_parallelism == 1);
     }
-    REQUIRE_THROWS(SindiSearcher::ParseOptions(
-        JsonType::Parse(R"({"sindi":{"rerank_scheduler":"invalid"}})")));
+    REQUIRE_THROWS(
+        SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{"rerank_scheduler":"invalid"}})")));
 }
 
 TEST_CASE("SINDI bulk merge preserves legacy candidate sets", "[ut][SindiSearcher]") {
@@ -543,7 +543,7 @@ TEST_CASE("SINDI schedulers preserve all selected windows and candidates", "[ut]
                                                      &statistics};
                     SindiWindowSearchProfile profile;
                     MaxHeap heap(allocator.get());
-                    SindiWindowSearchOptions options{mode, true};
+                    SindiSearchOptions options{mode, true};
                     for (auto& visits : data->visits) {
                         visits.store(0, std::memory_order_relaxed);
                     }
@@ -843,6 +843,47 @@ TEST_CASE("SINDI range entrypoints honor statistics and reset query profiles",
             REQUIRE(nlohmann::json::parse(requested->GetStatistics()).empty() == not statistics);
             REQUIRE(SindiLastQueryProfile().enabled == profile);
             REQUIRE(SindiLastRerankProfile().workers.empty());
+        }
+    }
+}
+
+TEST_CASE("SINDI execution options survive parameter serialization", "[ut][SindiSearcher]") {
+    for (const auto* window : {"count_deque", "count_atomic", "cost_atomic"}) {
+        for (const auto* rerank : {"count_static", "count_atomic", "nnz_atomic"}) {
+            for (bool statistics : {false, true}) {
+                const auto json = nlohmann::json{{"sindi",
+                                                  {{"window_parallelism", 4},
+                                                   {"worker_n_candidate", 500},
+                                                   {"n_candidate", 500},
+                                                   {"window_scheduler", window},
+                                                   {"window_scheduler_profile", true},
+                                                   {"rerank_scheduler", rerank},
+                                                   {"rerank_parallelism", 8},
+                                                   {"rerank_batch", true},
+                                                   {"collect_statistics", statistics},
+                                                   {"stage_profile", true}}}};
+                SINDISearchParameter original;
+                original.FromJson(JsonType::Parse(json.dump()));
+                SINDISearchParameter restored;
+                restored.FromJson(original.ToJson());
+                REQUIRE(restored.window_parallelism == 4);
+                REQUIRE(restored.worker_n_candidate == 500);
+                REQUIRE(restored.execution_options.scheduler ==
+                        original.execution_options.scheduler);
+                REQUIRE(restored.execution_options.rerank_scheduler ==
+                        original.execution_options.rerank_scheduler);
+                REQUIRE(restored.execution_options.rerank_parallelism == 8);
+                REQUIRE(restored.execution_options.rerank_batch);
+                REQUIRE(restored.execution_options.profile);
+                REQUIRE(restored.execution_options.stage_profile);
+                REQUIRE(restored.execution_options.collect_statistics == statistics);
+                restored.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+                REQUIRE(restored.execution_options.scheduler == SindiWindowScheduler::COUNT_DEQUE);
+                REQUIRE(restored.execution_options.rerank_parallelism == 1);
+                REQUIRE(restored.execution_options.collect_statistics);
+                REQUIRE_FALSE(restored.execution_options.profile);
+                REQUIRE_FALSE(restored.execution_options.stage_profile);
+            }
         }
     }
 }

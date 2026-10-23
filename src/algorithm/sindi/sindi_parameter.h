@@ -20,6 +20,7 @@
 
 #include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
+#include "impl/searcher/sindi_search_options.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
 
@@ -102,6 +103,7 @@ public:
     uint32_t n_candidate{0};
     uint32_t worker_n_candidate{0};
     uint32_t window_parallelism{1};
+    SindiSearchOptions execution_options;
     uint64_t filter_callback_limit{0};
 
     // data cell

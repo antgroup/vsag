@@ -46,19 +46,55 @@ struct alignas(64) AtomicRange {
     uint64_t end{0};
 };
 
+template <typename Prefix>
+void
+partition_by_prefix(std::vector<uint64_t>& bounds, uint64_t count, const Prefix& prefix) {
+    const uint64_t workers = bounds.size() - 1;
+    const auto total = prefix(count);
+    if (total == 0) {
+        return;
+    }
+    for (uint64_t i = 1; i < workers; ++i) {
+        const auto minimum = bounds[i - 1] + 1;
+        const auto maximum = count - (workers - i);
+        const auto target = total / workers * i + (total % workers) * i / workers;
+        uint64_t low = minimum, high = maximum + 1;
+        while (low < high) {
+            const auto middle = low + (high - low) / 2;
+            if (prefix(middle) < target) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        auto cut = std::min<uint64_t>(low, maximum);
+        if (cut > minimum and prefix(cut) >= target and target >= prefix(cut - 1) and
+            target - prefix(cut - 1) < prefix(cut) - target) {
+            --cut;
+        }
+        bounds[i] = cut;
+    }
+}
+
 // Join every submitted task even if submission or a worker fails. No in-pool barriers:
 // logical workers may outnumber pool threads, including a single-thread pool.
 template <typename Work>
 void
-run_rerank_workers(uint32_t count, const SafeThreadPoolPtr& pool, const Work& work) {
+run_query_workers(uint32_t count,
+                  const SafeThreadPoolPtr& pool,
+                  const Work& work,
+                  bool caller_participates = true) {
     std::vector<std::future<void>> futures;
-    futures.reserve(count - 1);
+    const auto submitted = count - static_cast<uint32_t>(caller_participates);
+    futures.reserve(submitted);
     std::exception_ptr error;
     try {
-        for (uint32_t me = 0; me + 1 < count; ++me) {
+        for (uint32_t me = 0; me < submitted; ++me) {
             futures.push_back(pool->GeneralEnqueue(work, me));
         }
-        work(count - 1);
+        if (caller_participates) {
+            work(count - 1);
+        }
     } catch (...) {
         error = std::current_exception();
     }
@@ -107,9 +143,9 @@ SindiSearcher::SchedulerName(SindiWindowScheduler scheduler) {
     return "unknown";
 }
 
-SindiWindowSearchOptions
-SindiSearcher::ParseOptions(const JsonType& json) {
-    SindiWindowSearchOptions options;
+SindiSearchOptions
+SindiSearchOptions::Parse(const JsonType& json) {
+    SindiSearchOptions options;
     const auto param = json[INDEX_SINDI];
     if (param.Contains("window_scheduler")) {
         const auto name = param["window_scheduler"].GetString();
@@ -153,6 +189,32 @@ SindiSearcher::ParseOptions(const JsonType& json) {
     return options;
 }
 
+void
+SindiSearchOptions::WriteTo(JsonType& json) const {
+    if (scheduler != SindiWindowScheduler::COUNT_DEQUE) {
+        json[INDEX_SINDI]["window_scheduler"].SetString(SindiSearcher::SchedulerName(scheduler));
+    }
+    if (profile) {
+        json[INDEX_SINDI]["window_scheduler_profile"].SetBool(true);
+    }
+    if (not collect_statistics) {
+        json[INDEX_SINDI]["collect_statistics"].SetBool(false);
+    }
+    if (stage_profile) {
+        json[INDEX_SINDI]["stage_profile"].SetBool(true);
+    }
+    if (rerank_batch) {
+        json[INDEX_SINDI]["rerank_batch"].SetBool(true);
+    }
+    if (rerank_parallelism != 1) {
+        json[INDEX_SINDI]["rerank_parallelism"].SetInt(rerank_parallelism);
+    }
+    if (rerank_scheduler != SindiRerankScheduler::COUNT_STATIC) {
+        json[INDEX_SINDI]["rerank_scheduler"].SetString(
+            rerank_scheduler == SindiRerankScheduler::COUNT_ATOMIC ? "count_atomic" : "nnz_atomic");
+    }
+}
+
 std::vector<uint64_t>
 SindiSearcher::Partition(const std::vector<uint64_t>& costs, uint32_t workers, bool weighted) {
     CHECK_ARGUMENT(workers > 0, "window worker count must be positive");
@@ -167,23 +229,7 @@ SindiSearcher::Partition(const std::vector<uint64_t>& costs, uint32_t workers, b
     }
     std::vector<uint64_t> prefix(count + 1, 0);
     std::partial_sum(costs.begin(), costs.end(), prefix.begin() + 1);
-    const auto total = prefix.back();
-    if (total == 0) {
-        return bounds;
-    }
-    for (uint32_t i = 1; i < workers; ++i) {
-        const auto minimum = bounds[i - 1] + 1;
-        const auto maximum = count - (workers - i);
-        const auto target = total / workers * i + (total % workers) * i / workers;
-        auto found =
-            std::lower_bound(prefix.begin() + minimum, prefix.begin() + maximum + 1, target);
-        uint64_t cut = std::min<uint64_t>(found - prefix.begin(), maximum);
-        if (cut > minimum and prefix[cut] >= target and target >= prefix[cut - 1] and
-            target - prefix[cut - 1] < prefix[cut] - target) {
-            --cut;
-        }
-        bounds[i] = cut;
-    }
+    partition_by_prefix(bounds, count, [&](uint64_t position) { return prefix[position]; });
     bounds.back() = count;
     return bounds;
 }
@@ -310,15 +356,16 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
         static_cast<uint32_t>(std::min<uint64_t>(pool == nullptr ? 1 : workers, ids.size()));
     const bool atomic = scheduler != SindiRerankScheduler::COUNT_STATIC and count > 1;
     const bool weighted = scheduler == SindiRerankScheduler::NNZ_ATOMIC and count > 1;
-    std::vector<uint64_t> costs(ids.size(), 0);
-    std::vector<uint64_t> local_prefix(ids.size(), 0);
+    const uint64_t estimated_count = weighted or stage_profile ? ids.size() : 0;
+    std::vector<uint64_t> costs(estimated_count, 0);
+    std::vector<uint64_t> local_prefix(estimated_count, 0);
     std::vector<uint64_t> block_offsets(count + 1, 0);
     if (stage_profile) {
         profile.workers.resize(count);
     }
     if (weighted or stage_profile) {
         const auto begin = stage_profile ? Clock::now() : Clock::time_point{};
-        run_rerank_workers(count, pool, [&](uint32_t me) {
+        run_query_workers(count, pool, [&](uint32_t me) {
             const auto worker_begin = stage_profile ? Clock::now() : Clock::time_point{};
             const auto first = ids.size() * me / count;
             const auto last = ids.size() * (me + 1) / count;
@@ -359,28 +406,8 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
     for (uint32_t i = 0; i <= count; ++i) {
         bounds[i] = ids.size() * i / count;
     }
-    const auto total = block_offsets.back();
-    if (weighted and total != 0) {
-        for (uint32_t i = 1; i < count; ++i) {
-            const auto minimum = bounds[i - 1] + 1;
-            const auto maximum = ids.size() - (count - i);
-            const auto target = total / count * i + (total % count) * i / count;
-            uint64_t low = minimum, high = maximum + 1;
-            while (low < high) {
-                const auto middle = low + (high - low) / 2;
-                if (prefix(middle) < target) {
-                    low = middle + 1;
-                } else {
-                    high = middle;
-                }
-            }
-            auto cut = std::min<uint64_t>(low, maximum);
-            if (cut > minimum and prefix(cut) >= target and target >= prefix(cut - 1) and
-                target - prefix(cut - 1) < prefix(cut) - target) {
-                --cut;
-            }
-            bounds[i] = cut;
-        }
+    if (weighted) {
+        partition_by_prefix(bounds, ids.size(), prefix);
     }
     auto ranges = std::make_unique<AtomicRange[]>(atomic ? count : 0);
     for (uint32_t i = 0; atomic and i < count; ++i) {
@@ -454,7 +481,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
             profile.workers[me] = local;
         }
     };
-    run_rerank_workers(count, pool, run);
+    run_query_workers(count, pool, run);
     if (stage_profile) {
         profile.dispatch_join_us = elapsed_us(dispatch_begin);
     }
@@ -481,7 +508,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
 
 void
 SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
-                             const SindiWindowSearchOptions& options,
+                             const SindiSearchOptions& options,
                              SindiWindowSearchProfile& profile,
                              MaxHeap& heap) {
     const auto count = static_cast<uint32_t>(req.search.parallel_search_thread_count);
@@ -507,15 +534,17 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
     auto bounds = Partition(costs, count, weighted);
     std::vector<SindiWindowHeap> heaps;
     heaps.reserve(count);
-    auto ranges = std::make_unique<AtomicRange[]>(count);
+    auto ranges = std::make_unique<AtomicRange[]>(deque_mode ? 0 : count);
     std::vector<std::unique_ptr<WindowQueue>> queues;
     if (deque_mode) {
         queues.reserve(count);
     }
     for (uint32_t i = 0; i < count; ++i) {
         heaps.emplace_back(req.allocator);
-        ranges[i].next.store(bounds[i], std::memory_order_relaxed);
-        ranges[i].end = bounds[i + 1];
+        if (not deque_mode) {
+            ranges[i].next.store(bounds[i], std::memory_order_relaxed);
+            ranges[i].end = bounds[i + 1];
+        }
         if (deque_mode) {
             queues.emplace_back(std::make_unique<WindowQueue>());
             for (auto pos = bounds[i]; pos < bounds[i + 1]; ++pos) {
@@ -638,29 +667,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
             profile.workers[me] = local;
         }
     };
-    std::vector<std::future<void>> futures;
-    futures.reserve(count);
-    std::exception_ptr error;
-    // Also join already submitted tasks if enqueue itself throws: tasks capture query-local state.
-    try {
-        for (uint32_t me = 0; me < count; ++me) {
-            futures.push_back(req.pool->GeneralEnqueue(run, me));
-        }
-    } catch (...) {
-        error = std::current_exception();
-    }
-    for (auto& task : futures) {
-        try {
-            task.get();
-        } catch (...) {
-            if (error == nullptr) {
-                error = std::current_exception();
-            }
-        }
-    }
-    if (error != nullptr) {
-        std::rethrow_exception(error);
-    }
+    run_query_workers(count, req.pool, run, false);
     if (options.profile) {
         profile.dispatch_join_us = elapsed_us(dispatch_start);
     }
@@ -673,7 +680,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
 
 std::string
 SindiSearcher::DumpStatistics(const SearchStatistics& statistics,
-                              const SindiWindowSearchOptions& options,
+                              const SindiSearchOptions& options,
                               const SindiWindowSearchProfile& profile) {
     if (not options.profile) {
         return statistics.Dump();
