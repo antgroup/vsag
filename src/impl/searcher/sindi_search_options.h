@@ -31,10 +31,11 @@ struct SindiSearchOptions {
     WriteTo(JsonType& json) const;
 
     SindiWindowScheduler scheduler{SindiWindowScheduler::COUNT_DEQUE};
+    // Internal execution/diagnostic controls; only the window scheduler is a JSON option.
     bool profile{false};
     bool collect_statistics{true};
     bool stage_profile{false};
-    bool rerank_batch{false};
+    bool rerank_batch{true};
     uint32_t rerank_parallelism{1};
     SindiRerankScheduler rerank_scheduler{SindiRerankScheduler::COUNT_STATIC};
 };

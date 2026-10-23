@@ -124,11 +124,11 @@ TEST_CASE("SINDI window options reject invalid modes", "[ut][SindiSearcher]") {
     REQUIRE_THROWS(
         SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{"window_scheduler":"typo"}})")));
     for (const auto* mode : {"count_deque", "count_atomic", "cost_atomic"}) {
-        auto json = JsonType::Parse(std::string(R"({"sindi":{"window_scheduler":")") + mode +
-                                    R"(","window_scheduler_profile":true}})");
+        auto json =
+            JsonType::Parse(std::string(R"({"sindi":{"window_scheduler":")") + mode + R"("}})");
         auto options = SindiSearchOptions::Parse(json);
         REQUIRE(std::string(SindiSearcher::SchedulerName(options.scheduler)) == mode);
-        REQUIRE(options.profile);
+        REQUIRE_FALSE(options.profile);
     }
 }
 
@@ -197,10 +197,6 @@ TEST_CASE("SINDI rerank batches preserve distances and aggregate statistics",
             .empty());
     REQUIRE_THROWS(SindiSearcher::RerankDistances(
         *cell, query, ids, 0, pool, allocator.get(), nullptr, false));
-    for (const auto count : {0, -1, 257}) {
-        REQUIRE_THROWS(SindiSearchOptions::Parse(
-            JsonType::Parse(nlohmann::json{{"sindi", {{"rerank_parallelism", count}}}}.dump())));
-    }
 }
 
 TEST_CASE("SINDI rerank atomic ranges balance nonzeros and preserve candidate positions",
@@ -365,13 +361,6 @@ TEST_CASE("SINDI rerank atomic ranges balance nonzeros and preserve candidate po
     }
     REQUIRE(completed == zeros.size());
     REQUIRE(fetches == zeros.size() + 16);
-    for (const auto* mode : {"count_static", "count_atomic", "nnz_atomic"}) {
-        const auto options = SindiSearchOptions::Parse(
-            JsonType::Parse(nlohmann::json{{"sindi", {{"rerank_scheduler", mode}}}}.dump()));
-        REQUIRE(options.rerank_parallelism == 1);
-    }
-    REQUIRE_THROWS(
-        SindiSearchOptions::Parse(JsonType::Parse(R"({"sindi":{"rerank_scheduler":"invalid"}})")));
 }
 
 TEST_CASE("SINDI bulk merge preserves legacy candidate sets", "[ut][SindiSearcher]") {
@@ -695,13 +684,14 @@ TEST_CASE("SINDI scheduler options integrate with both KNN entrypoints", "[ut][S
     auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors.data())->Owner(false);
     for (const auto* scheduler : {"count_deque", "count_atomic", "cost_atomic"}) {
         const auto options = std::string(R"({"sindi":{"n_candidate":20,"window_parallelism":4,
-            "window_scheduler_profile":true,"window_scheduler":")") +
+            "window_scheduler":")") +
                              scheduler + R"("}})";
         auto result = index.KnnSearch(query, 5, options, nullptr);
         REQUIRE(result->GetDim() == 5);
         REQUIRE(result->GetIds()[0] == 20049);
         auto stats = nlohmann::json::parse(result->GetStatistics());
-        REQUIRE(stats["sindi_scheduler"]["used"] == scheduler);
+        REQUIRE_FALSE(stats.empty());
+        REQUIRE(stats.count("sindi_scheduler") == 0);
         SearchRequest request;
         request.query_ = query;
         request.topk_ = 5;
@@ -711,9 +701,7 @@ TEST_CASE("SINDI scheduler options integrate with both KNN entrypoints", "[ut][S
     }
 }
 
-TEST_CASE("SINDI statistics and phase profiling support parallel reranking",
-          "[ut][SindiSearcher]") {
-    const auto* scheduler = GENERATE("count_static", "count_atomic", "nnz_atomic");
+TEST_CASE("SINDI automatic static reranking follows window parallelism", "[ut][SindiSearcher]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.allocator_ = allocator;
@@ -722,6 +710,7 @@ TEST_CASE("SINDI statistics and phase profiling support parallel reranking",
     auto parameter = std::make_shared<SINDIParameter>();
     parameter->FromJson(JsonType::Parse(R"({"term_id_limit":16,"window_size":10000,
         "use_quantization":false,"use_reorder":true,"rerank_type":"fp32","doc_prune_ratio":0})"));
+    parameter->rerank_type = GENERATE("fp32", "fp16");
     SINDI index(parameter, common);
     std::vector<int64_t> labels(20050);
     std::iota(labels.begin(), labels.end(), 0);
@@ -729,7 +718,10 @@ TEST_CASE("SINDI statistics and phase profiling support parallel reranking",
     std::vector<SparseVector> vectors(labels.size());
     uint32_t term = 3;
     for (uint64_t i = 0; i < labels.size(); ++i) {
-        values[i] = 1 + static_cast<float>(i) * 0.01F;
+        // Keep the selected 500 scores exact in FP16, avoiding ambiguous rounded ties.
+        values[i] = i < labels.size() - 500
+                        ? 1.0F
+                        : 2.0F + static_cast<float>(i - (labels.size() - 500)) * 0.25F;
         vectors[i] = SparseVector{1, &term, &values[i]};
     }
     auto base = Dataset::Make()
@@ -739,58 +731,36 @@ TEST_CASE("SINDI statistics and phase profiling support parallel reranking",
                     ->Owner(false);
     REQUIRE(index.Build(base).empty());
     auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors.data())->Owner(false);
-    for (uint32_t window_workers : {1U, 4U}) {
-        for (uint32_t rerank_workers : {1U, 4U, 16U}) {
-            for (bool statistics : {false, true}) {
-                for (bool batch : {false, true}) {
-                    const auto options = nlohmann::json{{"sindi",
-                                                         {{"n_candidate", 500},
-                                                          {"worker_n_candidate", 500},
-                                                          {"window_parallelism", window_workers},
-                                                          {"window_scheduler", "count_atomic"},
-                                                          {"collect_statistics", statistics},
-                                                          {"stage_profile", true},
-                                                          {"rerank_scheduler", scheduler},
-                                                          {"rerank_batch", batch},
-                                                          {"rerank_parallelism", rerank_workers}}}}
-                                             .dump();
-                    auto result = index.KnnSearch(query, 10, options, nullptr);
-                    for (uint32_t i = 0; i < 10; ++i) {
-                        REQUIRE(result->GetIds()[i] == 20049 - i);
-                    }
-                    REQUIRE(SindiLastQueryProfile().enabled);
-                    REQUIRE(SindiLastQueryProfile().prepare_us >= 0);
-                    REQUIRE(SindiLastQueryProfile().rerank_us >= 0);
-                    REQUIRE(SindiLastQueryProfile().result_us >= 0);
-                    REQUIRE(SindiLastQueryProfile().total_us > 0);
-                    if (statistics) {
-                        const auto output = nlohmann::json::parse(result->GetStatistics());
-                        REQUIRE(output["distance_evaluations_by_phase"]["rerank"] == 500);
-                    } else {
-                        REQUIRE(result->GetStatistics() == "{}");
-                        REQUIRE(SindiLastQueryProfile().statistics_counter_us == 0);
-                        REQUIRE(SindiLastQueryProfile().statistics_json_us == 0);
-                    }
-                    SearchRequest request;
-                    request.query_ = query;
-                    request.topk_ = 10;
-                    request.params_str_ = options;
-                    auto requested = index.SearchWithRequest(request);
-                    REQUIRE(requested->GetIds()[0] == result->GetIds()[0]);
-                    REQUIRE(nlohmann::json::parse(requested->GetStatistics()).empty() ==
-                            not statistics);
-                }
-            }
+    for (uint32_t workers : {1U, 2U, 4U, 16U}) {
+        const auto options = nlohmann::json{{"sindi",
+                                             {{"n_candidate", 500},
+                                              {"worker_n_candidate", 500},
+                                              {"window_parallelism", workers},
+                                              {"window_scheduler", "count_atomic"}}}}
+                                 .dump();
+        auto result = index.KnnSearch(query, 10, options, nullptr);
+        for (uint32_t i = 0; i < 10; ++i) {
+            REQUIRE(result->GetIds()[i] == 20049 - i);
         }
+        const auto output = nlohmann::json::parse(result->GetStatistics());
+        REQUIRE(output["distance_evaluations_by_phase"]["rerank"] == 500);
+        REQUIRE_FALSE(SindiLastQueryProfile().enabled);
+        REQUIRE(SindiLastRerankProfile().workers.empty());
+        SearchRequest request;
+        request.query_ = query;
+        request.topk_ = 10;
+        request.params_str_ = options;
+        auto requested = index.SearchWithRequest(request);
+        for (uint32_t i = 0; i < 10; ++i) {
+            REQUIRE(requested->GetIds()[i] == result->GetIds()[i]);
+            REQUIRE(requested->GetDistances()[i] == result->GetDistances()[i]);
+        }
+        REQUIRE(nlohmann::json::parse(
+                    requested->GetStatistics())["distance_evaluations_by_phase"]["rerank"] == 500);
     }
-    const auto unprofiled = index.KnnSearch(
-        query, 10, R"({"sindi":{"n_candidate":500,"window_parallelism":4}})", nullptr);
-    REQUIRE_FALSE(SindiLastQueryProfile().enabled);
-    REQUIRE(unprofiled->GetIds()[0] == 20049);
 }
 
-TEST_CASE("SINDI range entrypoints honor statistics and reset query profiles",
-          "[ut][SindiSearcher]") {
+TEST_CASE("SINDI range entrypoints retain statistics and scalar reranking", "[ut][SindiSearcher]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.allocator_ = allocator;
@@ -807,83 +777,78 @@ TEST_CASE("SINDI range entrypoints honor statistics and reset query profiles",
     auto base = Dataset::Make()->NumElements(3)->Ids(labels)->SparseVectors(vectors)->Owner(false);
     REQUIRE(index.Build(base).empty());
     auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors)->Owner(false);
-    for (bool statistics : {false, true}) {
-        for (bool profile : {true, false}) {
-            const auto options = nlohmann::json{{"sindi",
-                                                 {{"n_candidate", 20},
-                                                  {"collect_statistics", statistics},
-                                                  {"stage_profile", profile},
-                                                  {"rerank_parallelism", 4},
-                                                  {"rerank_scheduler", "nnz_atomic"}}}}
-                                     .dump();
-            auto result = index.RangeSearch(query, -0.5F, options, nullptr, 2);
-            REQUIRE(result->GetDim() == 2);
-            REQUIRE(result->GetIds()[0] == 2);
-            REQUIRE(result->GetIds()[1] == 1);
-            REQUIRE(nlohmann::json::parse(result->GetStatistics()).empty() == not statistics);
-            REQUIRE(SindiLastQueryProfile().enabled == profile);
-            REQUIRE_FALSE(SindiLastQueryProfile().parallel_rerank);
-            REQUIRE(SindiLastRerankProfile().workers.empty());
-            if (profile) {
-                REQUIRE(SindiLastQueryProfile().windows_us > 0);
-                REQUIRE(SindiLastQueryProfile().rerank_us > 0);
-                REQUIRE(SindiLastQueryProfile().total_us > 0);
-            } else {
-                REQUIRE(SindiLastQueryProfile().total_us == 0);
-            }
-            SearchRequest request;
-            request.query_ = query;
-            request.mode_ = SearchMode::RANGE_SEARCH;
-            request.radius_ = -0.5F;
-            request.limited_size_ = 2;
-            request.params_str_ = options;
-            const auto requested = index.SearchWithRequest(request);
-            REQUIRE(requested->GetDim() == result->GetDim());
-            REQUIRE(requested->GetIds()[0] == result->GetIds()[0]);
-            REQUIRE(nlohmann::json::parse(requested->GetStatistics()).empty() == not statistics);
-            REQUIRE(SindiLastQueryProfile().enabled == profile);
-            REQUIRE(SindiLastRerankProfile().workers.empty());
-        }
-    }
+    const std::string options = R"({"sindi":{"n_candidate":20,"window_parallelism":16}})";
+    auto result = index.RangeSearch(query, -0.5F, options, nullptr, 2);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 2);
+    REQUIRE(result->GetIds()[1] == 1);
+    REQUIRE_FALSE(nlohmann::json::parse(result->GetStatistics()).empty());
+    REQUIRE_FALSE(SindiLastQueryProfile().enabled);
+    REQUIRE(SindiLastRerankProfile().workers.empty());
+    SearchRequest request;
+    request.query_ = query;
+    request.mode_ = SearchMode::RANGE_SEARCH;
+    request.radius_ = -0.5F;
+    request.limited_size_ = 2;
+    request.params_str_ = options;
+    const auto requested = index.SearchWithRequest(request);
+    REQUIRE(requested->GetDim() == result->GetDim());
+    REQUIRE(requested->GetIds()[0] == result->GetIds()[0]);
+    REQUIRE_FALSE(nlohmann::json::parse(requested->GetStatistics()).empty());
+    REQUIRE_FALSE(SindiLastQueryProfile().enabled);
+    REQUIRE(SindiLastRerankProfile().workers.empty());
 }
 
-TEST_CASE("SINDI execution options survive parameter serialization", "[ut][SindiSearcher]") {
+TEST_CASE("SINDI execution options serialize only public controls", "[ut][SindiSearcher]") {
     for (const auto* window : {"count_deque", "count_atomic", "cost_atomic"}) {
-        for (const auto* rerank : {"count_static", "count_atomic", "nnz_atomic"}) {
-            for (bool statistics : {false, true}) {
-                const auto json = nlohmann::json{{"sindi",
-                                                  {{"window_parallelism", 4},
-                                                   {"worker_n_candidate", 500},
-                                                   {"n_candidate", 500},
-                                                   {"window_scheduler", window},
-                                                   {"window_scheduler_profile", true},
-                                                   {"rerank_scheduler", rerank},
-                                                   {"rerank_parallelism", 8},
-                                                   {"rerank_batch", true},
-                                                   {"collect_statistics", statistics},
-                                                   {"stage_profile", true}}}};
-                SINDISearchParameter original;
-                original.FromJson(JsonType::Parse(json.dump()));
-                SINDISearchParameter restored;
-                restored.FromJson(original.ToJson());
-                REQUIRE(restored.window_parallelism == 4);
-                REQUIRE(restored.worker_n_candidate == 500);
-                REQUIRE(restored.execution_options.scheduler ==
-                        original.execution_options.scheduler);
-                REQUIRE(restored.execution_options.rerank_scheduler ==
-                        original.execution_options.rerank_scheduler);
-                REQUIRE(restored.execution_options.rerank_parallelism == 8);
-                REQUIRE(restored.execution_options.rerank_batch);
-                REQUIRE(restored.execution_options.profile);
-                REQUIRE(restored.execution_options.stage_profile);
-                REQUIRE(restored.execution_options.collect_statistics == statistics);
-                restored.FromJson(JsonType::Parse(R"({"sindi":{}})"));
-                REQUIRE(restored.execution_options.scheduler == SindiWindowScheduler::COUNT_DEQUE);
-                REQUIRE(restored.execution_options.rerank_parallelism == 1);
-                REQUIRE(restored.execution_options.collect_statistics);
-                REQUIRE_FALSE(restored.execution_options.profile);
-                REQUIRE_FALSE(restored.execution_options.stage_profile);
-            }
+        // Removed knobs have no effect, like other unrecognized JSON fields.
+        const auto json = nlohmann::json{{"sindi",
+                                          {{"window_parallelism", 4},
+                                           {"worker_n_candidate", 500},
+                                           {"n_candidate", 500},
+                                           {"window_scheduler", window},
+                                           {"window_scheduler_profile", true},
+                                           {"rerank_scheduler", "nnz_atomic"},
+                                           {"rerank_parallelism", 8},
+                                           {"rerank_batch", false},
+                                           {"collect_statistics", false},
+                                           {"stage_profile", true}}}};
+        SINDISearchParameter original;
+        original.FromJson(JsonType::Parse(json.dump()));
+        REQUIRE(original.execution_options.rerank_parallelism == 4);
+        REQUIRE(original.execution_options.rerank_scheduler == SindiRerankScheduler::COUNT_STATIC);
+        REQUIRE(original.execution_options.rerank_batch);
+        REQUIRE(original.execution_options.collect_statistics);
+        REQUIRE_FALSE(original.execution_options.profile);
+        REQUIRE_FALSE(original.execution_options.stage_profile);
+        // Internal experimental controls remain usable without becoming user parameters.
+        original.execution_options.rerank_parallelism = 8;
+        original.execution_options.rerank_scheduler = SindiRerankScheduler::NNZ_ATOMIC;
+        original.execution_options.profile = true;
+        original.execution_options.stage_profile = true;
+        original.execution_options.collect_statistics = false;
+        original.execution_options.rerank_batch = false;
+        const auto serialized = original.ToJson();
+        for (const auto* removed : {"window_scheduler_profile",
+                                    "rerank_scheduler",
+                                    "rerank_parallelism",
+                                    "rerank_batch",
+                                    "collect_statistics",
+                                    "stage_profile"}) {
+            REQUIRE_FALSE(serialized[INDEX_SINDI].Contains(removed));
         }
+        SINDISearchParameter restored;
+        restored.FromJson(serialized);
+        REQUIRE(restored.window_parallelism == 4);
+        REQUIRE(restored.worker_n_candidate == 500);
+        REQUIRE(restored.execution_options.scheduler == original.execution_options.scheduler);
+        REQUIRE(restored.execution_options.rerank_parallelism == 4);
+        REQUIRE(restored.execution_options.rerank_batch);
+        REQUIRE(restored.execution_options.collect_statistics);
+        REQUIRE_FALSE(restored.execution_options.profile);
+        REQUIRE_FALSE(restored.execution_options.stage_profile);
+        restored.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+        REQUIRE(restored.execution_options.scheduler == SindiWindowScheduler::COUNT_DEQUE);
+        REQUIRE(restored.execution_options.rerank_parallelism == 1);
     }
 }
