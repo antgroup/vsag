@@ -87,6 +87,14 @@ HGraphParameter::FromJson(const JsonType& json) {
         const auto& precise_codes_json = json[PRECISE_CODES_KEY];
         this->precise_codes_param = CreateFlattenParam(precise_codes_json);
     }
+    if (this->base_codes_param->quantizer_parameter->GetTypeName() ==
+        QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED) {
+        CHECK_ARGUMENT(use_reorder and this->reorder_source != HGRAPH_REORDER_SOURCE_BASE and
+                           this->precise_codes_param != nullptr and
+                           this->precise_codes_param->quantizer_parameter->GetTypeName() ==
+                               QUANTIZATION_TYPE_VALUE_SQ8_LOCAL,
+                       "sq4_local_shared requires sq8_local precise quantization and reorder");
+    }
 
     CHECK_ARGUMENT(json.Contains(GRAPH_KEY),
                    fmt::format("hgraph parameters must contains {}", GRAPH_KEY));

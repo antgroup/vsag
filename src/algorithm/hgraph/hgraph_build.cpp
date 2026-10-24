@@ -1410,7 +1410,8 @@ HGraph::InitFeatures() {
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
         name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
-        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
+        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL and
+        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -1467,6 +1468,9 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
                                               false);
+    }
+    if (name == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
     }
 }
 
