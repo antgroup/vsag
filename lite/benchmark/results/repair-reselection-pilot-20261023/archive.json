@@ -1,0 +1,10 @@
+{
+  "bytes": 5058342,
+  "sha256": "20ab5f86672dd10ab903e62869a6f35fa2d0778dcbb7a83cb1f708a69f97d618",
+  "members": 110,
+  "cells": 8,
+  "processes": 16,
+  "mutation_calls": 700000,
+  "source": "experimental overlay, not production",
+  "audit": "PASS"
+}

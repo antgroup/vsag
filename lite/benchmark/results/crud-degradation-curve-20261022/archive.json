@@ -1,0 +1,18 @@
+{
+  "sha256": "56cade94f2412aaff6276b54b6b746159647e963e9b717da007a73cc099e33c0",
+  "bytes": 11581407,
+  "members": 33,
+  "audit": {
+    "audit": "PASS",
+    "processes": 3,
+    "datasets": 1,
+    "mutation_calls": 225000,
+    "interleaved_queries": 225000,
+    "source_sha": "1f81202073ddf3cf66b8b28dbcf894d78066294d"
+  },
+  "initial_final_quality_and_all_snapshot_receipts_match_E12": true,
+  "checkpoints": 33,
+  "independent_numpy_FP64_query_states": 110,
+  "production_unchanged": true,
+  "boundary": "Single trial per storage, diagnostic forked rebuild; not an optimization or full acceptance verdict"
+}

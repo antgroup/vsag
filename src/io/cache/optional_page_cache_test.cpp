@@ -79,6 +79,21 @@ private:
     std::atomic<bool> fail_next_{false};
 };
 
+class ObservedLoadCache : public LRUPageCache {
+public:
+    using LRUPageCache::LRUPageCache;
+
+    bool
+    HasLoadParticipants(uint64_t count) const {
+        std::scoped_lock<std::mutex> lock(mutex_);
+        if (loading_pages_.size() != 1) {
+            return false;
+        }
+        // One reference belongs to the map; each reader owns one LoadHandle.
+        return static_cast<uint64_t>(loading_pages_.begin()->second.use_count()) >= count + 1;
+    }
+};
+
 struct CountingBackendState {
     explicit CountingBackendState(uint64_t size, uint8_t seed = 0) : data(size) {
         for (uint64_t i = 0; i < size; ++i) {
@@ -451,7 +466,8 @@ TEST_CASE("OptionalPageCache propagates a failed load and permits retry",
     state->block_reads = true;
     state->fail_next_read = true;
     CachedTestIO io(state, &allocator);
-    io.SetReadCache(std::make_shared<LRUPageCache>(4));
+    auto cache = std::make_shared<ObservedLoadCache>(4);
+    io.SetReadCache(cache);
 
     constexpr uint64_t THREAD_COUNT = 8;
     std::vector<uint8_t> results(THREAD_COUNT);
@@ -461,11 +477,17 @@ TEST_CASE("OptionalPageCache propagates a failed load and permits retry",
         threads.emplace_back([&, i]() { results[i] = io.ReadAt(7, 1, values.data() + i); });
     }
     WaitForBlockedRead(state);
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (not cache->HasLoadParticipants(THREAD_COUNT) and
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    const auto all_joined = cache->HasLoadParticipants(THREAD_COUNT);
     ReleaseBlockedRead(state);
     for (auto& thread : threads) {
         thread.join();
     }
+    REQUIRE(all_joined);
     REQUIRE(state->read_at_calls == 1);
     for (uint8_t result : results) {
         REQUIRE_FALSE(result);
