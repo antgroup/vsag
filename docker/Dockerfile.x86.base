@@ -21,8 +21,23 @@ RUN apt update && apt install -y wget gpg sudo
 
 # install build tools
 RUN apt install -y git g++ cmake ninja-build gdb ccache build-essential lcov gfortran
-RUN apt install -y clang-15 clangd-15 clang-format-15 python3-pip
+RUN apt install -y clang-15 clangd-15 clang-format-15 clang-tidy-15 python3-pip time
 RUN ln -s /usr/bin/clang-format-15 /usr/bin/clang-format
+
+# Pin the x86 GitHub CLI used by compatibility checks; no credentials enter the image.
+RUN set -eu; \
+    gh_version=2.75.0; \
+    gh_sha256=98f910f4cde42a345e241f867f42b2229dda60267d7f87a56d283842519a4cb7; \
+    download_dir="$(mktemp -d)"; \
+    cd "$download_dir"; \
+    archive="gh_${gh_version}_linux_amd64.tar.gz"; \
+    wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${gh_version}/${archive}"; \
+    printf '%s  %s\n' "$gh_sha256" "$archive" | sha256sum -c -; \
+    tar xzf "$archive"; \
+    install -m 0755 "gh_${gh_version}_linux_amd64/bin/gh" /usr/local/bin/gh; \
+    test "$(gh --version | head -1 | awk '{print $3}')" = "$gh_version"; \
+    cd /; \
+    rm -rf "$download_dir"
 
 # install vsag deps (everything except a BLAS backend)
 RUN apt install -y python3-dev libomp-15-dev libaio-dev libcurl4-openssl-dev liburing-dev

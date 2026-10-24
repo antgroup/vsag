@@ -84,7 +84,7 @@ ODescent::prepare_build_flatten() {
 
 FlattenInterfacePtr
 ODescent::CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
-                             const float* build_vectors,
+                             const void* build_vectors,
                              int64_t build_vector_count) {
     if (build_vectors == nullptr or build_vector_count <= 0 or
         not flatten_interface->SupportSplitCodeStorage()) {

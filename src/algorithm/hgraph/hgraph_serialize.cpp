@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 #include "common.h"
 #include "datacell/rabitq_split_datacell.h"
@@ -210,6 +211,16 @@ HGraph::serialize_basic_info() const {
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetUint64(this->max_capacity_.load());
     jsonify_basic_info["total_count"].SetUint64(this->total_count_.load());
+    {
+        std::shared_lock codes_lock(this->persistent_codes_mutex_);
+        if (not this->pending_code_writes_.empty()) {
+            nlohmann::json pending = nlohmann::json::array();
+            for (const auto& [id, mask] : this->pending_code_writes_) {
+                pending.push_back({id, mask});
+            }
+            jsonify_basic_info["pending_code_writes"].SetJson(JsonType::Parse(pending.dump()));
+        }
+    }
     jsonify_basic_info["max_level"].SetUint64(this->route_graphs_.size());
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
 
@@ -229,6 +240,15 @@ HGraph::serialize_basic_info() const {
 void
 HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     logger::debug("jsonify_basic_info:\n{}", dump_basic_info_for_log(jsonify_basic_info));
+    this->pending_code_writes_.clear();
+    if (jsonify_basic_info.Contains("pending_code_writes")) {
+        const auto pending =
+            nlohmann::json::parse(jsonify_basic_info["pending_code_writes"].Dump());
+        for (const auto& entry : pending) {
+            this->pending_code_writes_.emplace(entry.at(0).get<InnerIdType>(),
+                                               entry.at(1).get<uint8_t>());
+        }
+    }
     FROM_JSON(jsonify_basic_info, use_reorder, Bool);
     this->reorder_by_base_ = false;
     FROM_JSON(jsonify_basic_info, reorder_by_base, Bool);
@@ -256,8 +276,16 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     auto max_capacity = jsonify_basic_info["max_capacity"].GetUint64();
     if (max_capacity > std::numeric_limits<InnerIdType>::max()) {
         throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
+            ErrorType::INVALID_BINARY,
             fmt::format("HGraph max_capacity {} exceeds InnerIdType limit", max_capacity));
+    }
+    if (jsonify_basic_info.Contains("total_count")) {
+        const auto reserved_count = jsonify_basic_info["total_count"].GetUint64();
+        if (reserved_count > max_capacity or
+            reserved_count > std::numeric_limits<InnerIdType>::max()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "HGraph total_count exceeds capacity or InnerIdType limit");
+        }
     }
     this->max_capacity_.store(static_cast<InnerIdType>(max_capacity));
 
@@ -1082,8 +1110,11 @@ HGraph::read_streaming_body(StreamReader& reader,
     this->neighbors_mutex_->Resize(new_size);
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
     if (not this->using_dedup_storage()) {
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
-        this->PublishThroughTotalCount();
+        // Keep reservation and visibility separate: a failed Add may have reserved IDs
+        // beyond the written codes. Older metadata without total_count uses the code count.
+        const auto written_count = this->basic_flatten_codes_->TotalCount();
+        this->total_count_ = std::max<uint64_t>(serialized_total_count, written_count);
+        this->published_count_.store(written_count, std::memory_order_release);
     }
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
@@ -1182,8 +1213,11 @@ HGraph::Deserialize(StreamReader& reader) {
             this->extra_infos_->Deserialize(buffer_reader);
         }
         if (not this->using_dedup_storage()) {
-            this->total_count_ = this->basic_flatten_codes_->TotalCount();
-            this->PublishThroughTotalCount();
+            // Preserve reserved IDs without publishing the unwritten tail. Missing legacy
+            // total_count metadata falls back to the written code count.
+            const auto written_count = this->basic_flatten_codes_->TotalCount();
+            this->total_count_ = std::max<uint64_t>(serialized_total_count, written_count);
+            this->published_count_.store(written_count, std::memory_order_release);
         }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
@@ -1319,10 +1353,12 @@ HGraph::initialize_deserialized_runtime_state() {
 
 void
 HGraph::finish_deserialize() {
-    // A deserialized index is complete: every restored id is already searchable. Publish before
-    // anything below can search or report the element count, otherwise the two-phase Add
-    // publication mark would still be zero and the restored index would look empty.
-    this->PublishThroughTotalCount();
+    // Ordinary snapshots can contain reservations beyond the written code range.
+    // Publish written codes only; deduplicated snapshots validate all logical mappings below.
+    this->published_count_.store(this->using_dedup_storage()
+                                     ? this->total_count_.load()
+                                     : this->basic_flatten_codes_->TotalCount(),
+                                 std::memory_order_release);
     if (this->using_dedup_storage()) {
         auto logical_count = this->code_slot_map_->PublishedLogicalCount();
         auto physical_count = this->code_slot_map_->PhysicalCount();

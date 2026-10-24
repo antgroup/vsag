@@ -20,8 +20,11 @@
 #include <chrono>
 #include <cmath>
 #include <future>
+#include <numeric>
+#include <random>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 #include <vector>
 
 #include "datacell/graph_interface.h"
@@ -29,6 +32,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "simd/bf16_simd.h"
 #include "unittest.h"
 
 namespace {
@@ -118,7 +122,8 @@ void
 RequireGraphInvariants(const vsag::GraphInterfacePtr& graph,
                        const vsag::Vector<vsag::InnerIdType>& ids,
                        uint64_t max_degree,
-                       vsag::Allocator* allocator) {
+                       vsag::Allocator* allocator,
+                       bool require_neighbors = true) {
     std::set<vsag::InnerIdType> valid(ids.begin(), ids.end());
     for (const auto id : ids) {
         vsag::Vector<vsag::InnerIdType> neighbors(allocator);
@@ -130,7 +135,7 @@ RequireGraphInvariants(const vsag::GraphInterfacePtr& graph,
             REQUIRE(neighbor != id);
             REQUIRE(valid.find(neighbor) != valid.end());
         }
-        if (ids.size() > 1) {
+        if (require_neighbors && ids.size() > 1) {
             REQUIRE_FALSE(neighbors.empty());
         }
     }
@@ -531,4 +536,192 @@ TEST_CASE("PiPNN builds a connected L2 graph with a sane average degree", "[ut][
         }
     }
     REQUIRE(reached == count);
+}
+
+TEST_CASE("PiPNN pruning scratch does not retain neighbors from another source",
+          "[ut][pipnn][pipnn_adaptive]") {
+    const uint64_t count = GENERATE(1, 2, 65, 129);
+    const bool adaptive = GENERATE(false, true);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(count, adaptive, threads);
+    auto common = MakeCommonParam(4);
+    std::vector<float> vectors(count * 4, 1.0F);
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    vsag::Vector<const float*> rows(common.allocator_.get());
+    for (uint64_t point = 0; point < count; ++point) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>((count - point) * 3));
+        rows.emplace_back(vectors.data() + point * 4);
+    }
+    auto graph = MakeGraph(common, count * 3 + 1, 8);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 256;
+    parameter.leaf_neighbor_count = 255;
+    parameter.reservoir_size = 256;
+    parameter.adaptive_pruning = adaptive;
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(threads);
+    vsag::PiPNNGraphBuilder(
+        parameter, 4, common.metric_, common.allocator_.get(), pool.get(), threads)
+        .Build(graph, ids, rows);
+    for (const auto source : ids) {
+        vsag::Vector<vsag::InnerIdType> expected(common.allocator_.get());
+        for (const auto target : ids) {
+            if (target != source) {
+                expected.emplace_back(target);
+            }
+        }
+        // Coincident points have zero distance, so robust pruning retains the first
+        // max_degree candidates in distance / ID-gap / ID order.
+        std::sort(expected.begin(), expected.end(), [source](auto lhs, auto rhs) {
+            const auto gap = [source](auto target) {
+                return source > target ? source - target : target - source;
+            };
+            return gap(lhs) != gap(rhs) ? gap(lhs) < gap(rhs) : lhs < rhs;
+        });
+        expected.resize(std::min<uint64_t>(8, expected.size()));
+        vsag::Vector<vsag::InnerIdType> actual(common.allocator_.get());
+        graph->GetNeighbors(source, actual);
+        REQUIRE(actual == expected);
+    }
+}
+
+TEST_CASE("PiPNN small leaf candidates match exhaustive directed selection", "[ut][pipnn]") {
+    const auto metric =
+        GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
+    const uint64_t count = GENERATE(2, 6, 7, 17, 18, 63, 64, 65, 96, 127, 128, 129);
+    const uint64_t requested = GENERATE(1, 5, 16, 17);
+    const bool coincident = GENERATE(false, true);
+    CAPTURE(metric, count, requested, coincident);
+    auto common = MakeCommonParam(1, metric);
+    auto* allocator = common.allocator_.get();
+    std::vector<float> values(count);
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    vsag::Vector<const float*> rows(allocator);
+    for (uint64_t i = 0; i < count; ++i) {
+        values[i] = coincident ? 1.0F : static_cast<float>(static_cast<int>(i * 7 % 23) - 11);
+        ids.emplace_back(static_cast<vsag::InnerIdType>((count - i) * 3));
+        rows.emplace_back(&values[i]);
+    }
+    const auto distance = [&](uint64_t lhs, uint64_t rhs) {
+        const float delta = values[lhs] - values[rhs];
+        return metric == vsag::MetricType::METRIC_TYPE_L2SQR ? delta * delta
+                                                             : 1.0F - values[lhs] * values[rhs];
+    };
+    const auto gap = [&](uint64_t source, uint64_t target) {
+        return ids[source] > ids[target] ? ids[source] - ids[target] : ids[target] - ids[source];
+    };
+    // Exhaustive directed full sorting is independent of the symmetric TopK scan.
+    std::vector<std::vector<bool>> proposed(count, std::vector<bool>(count));
+    for (uint64_t source = 0; source < count; ++source) {
+        std::vector<uint64_t> targets;
+        for (uint64_t target = 0; target < count; ++target) {
+            if (source != target) {
+                targets.emplace_back(target);
+            }
+        }
+        std::sort(targets.begin(), targets.end(), [&](auto lhs, auto rhs) {
+            return std::make_tuple(distance(source, lhs), gap(source, lhs), ids[lhs]) <
+                   std::make_tuple(distance(source, rhs), gap(source, rhs), ids[rhs]);
+        });
+        for (uint64_t selected = 0; selected < std::min(requested, count - 1); ++selected) {
+            const auto target = targets[selected];
+            proposed[source][target] = proposed[target][source] = true;
+        }
+    }
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 256;
+    parameter.min_leaf_size = 1;
+    parameter.leaf_neighbor_count = requested;
+    parameter.reservoir_size = count;
+    parameter.alpha = 1.2F;
+    auto graph = MakeGraph(common, count * 3 + 1, 8);
+    vsag::PiPNNGraphBuilder(parameter, 1, metric, allocator).Build(graph, ids, rows);
+    for (uint64_t source = 0; source < count; ++source) {
+        const auto quantized = [&](uint64_t target) {
+            return vsag::generic::BF16ToFloat(vsag::generic::FloatToBF16(distance(source, target)));
+        };
+        // In one dimension, all non-coincident relative projections form exactly
+        // two hash buckets (left/right), independent of hyperplane signs. Equal
+        // coordinates carry the coincident flag and are retained individually.
+        std::vector<uint64_t> candidates;
+        for (const int direction : {-1, 0, 1}) {
+            std::vector<uint64_t> bucket;
+            for (uint64_t target = 0; target < count; ++target) {
+                const int side =
+                    (values[target] > values[source]) - (values[target] < values[source]);
+                if (proposed[source][target] && side == direction) {
+                    bucket.emplace_back(target);
+                }
+            }
+            if (direction != 0 && !bucket.empty()) {
+                const auto best =
+                    *std::min_element(bucket.begin(), bucket.end(), [&](auto a, auto b) {
+                        return std::make_pair(quantized(a), ids[a]) <
+                               std::make_pair(quantized(b), ids[b]);
+                    });
+                bucket = {best};
+            }
+            candidates.insert(candidates.end(), bucket.begin(), bucket.end());
+        }
+        std::sort(candidates.begin(), candidates.end(), [&](auto lhs, auto rhs) {
+            return std::make_tuple(quantized(lhs), gap(source, lhs), ids[lhs]) <
+                   std::make_tuple(quantized(rhs), gap(source, rhs), ids[rhs]);
+        });
+        std::vector<uint64_t> selected;
+        vsag::Vector<vsag::InnerIdType> expected(allocator), actual(allocator);
+        for (const auto candidate : candidates) {
+            if (std::none_of(selected.begin(), selected.end(), [&](auto neighbor) {
+                    return parameter.alpha * distance(neighbor, candidate) < quantized(candidate);
+                })) {
+                selected.emplace_back(candidate);
+                expected.emplace_back(ids[candidate]);
+                if (expected.size() == 8) {
+                    break;
+                }
+            }
+        }
+        graph->GetNeighbors(ids[source], actual);
+        REQUIRE(actual == expected);
+    }
+}
+
+TEST_CASE("PiPNN partition TopK preserves serial and parallel graphs", "[ut][pipnn]") {
+    const uint64_t count = GENERATE(512, 4096);
+    const uint64_t fanout = GENERATE(1, 2, 10, 17);
+    CAPTURE(count, fanout);
+    constexpr uint64_t dimensions = 8;
+    auto common = MakeCommonParam(dimensions);
+    auto* allocator = common.allocator_.get();
+    std::vector<float> vectors((count * 2 + 1) * dimensions);
+    std::mt19937 random(123);
+    for (auto& value : vectors) {
+        value = static_cast<float>(static_cast<int>(random() % 64) - 32);
+    }
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    for (uint64_t point = 0; point < count; ++point) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>((count - point) * 2));
+    }
+    auto rows = MakeRows(vectors, ids, dimensions, allocator);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.max_leaf_size = 256;
+    parameter.min_leaf_size = 1;
+    parameter.leader_sample_rate = 0.125F;
+    parameter.fanout = {fanout, 1};
+    parameter.reservoir_size = 16;
+    auto serial = MakeGraph(common, count * 2 + 1, 8);
+    auto parallel = MakeGraph(common, count * 2 + 1, 8);
+    vsag::PiPNNGraphBuilder(parameter, dimensions, common.metric_, allocator)
+        .Build(serial, ids, rows);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(12);
+    vsag::PiPNNGraphBuilder(parameter, dimensions, common.metric_, allocator, pool.get(), 12)
+        .Build(parallel, ids, rows);
+    // min_leaf_size=1 intentionally permits singleton leaves with empty rows.
+    RequireGraphInvariants(parallel, ids, 8, allocator, false);
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> expected(allocator), actual(allocator);
+        serial->GetNeighbors(id, expected);
+        parallel->GetNeighbors(id, actual);
+        REQUIRE(actual == expected);
+    }
 }

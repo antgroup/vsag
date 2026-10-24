@@ -177,7 +177,9 @@ HGraph::ParallelDeserialize(DeserializeReader& reader) {
     this->bottom_graph_->FinishDeserialize();
     this->validate_and_publish_dedup_state(serialized_total_count);
     if (!this->using_dedup_storage()) {
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        // Keep failed Add reservations unavailable to subsequent Adds after restore.
+        this->total_count_ =
+            std::max<uint64_t>(serialized_total_count, this->basic_flatten_codes_->TotalCount());
     }
     if (this->mci_parameters_.enabled) {
         // Label and MCI whole components can load concurrently; join all tasks before

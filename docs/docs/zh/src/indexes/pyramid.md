@@ -13,6 +13,12 @@ Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量可以附带
 - 示例（单层级）：[`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
 - 示例（多层级）：[`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
 
+## 只读索引
+
+`SetImmutable()` 拒绝后续写入并释放逐向量锁，同时保留反向 ID 映射，以支持高效的
+指定 ID 算分和数据读取。相比丢弃映射，这会多占用一些内存，但避免了线性扫描 ID。
+在反序列化之前或之后冻结索引均适用，序列化格式不变。
+
 ## 工作原理
 
 1. **路径树。** 每条向量在 ID 之外还可以携带多条独立路径，分隔符为 `/`
@@ -75,7 +81,34 @@ auto result = index->KnnSearch(
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add` 和检索路径接收通过 `Dataset::Float32Vectors` 提供的 FP32 向量，`dtype` 应设为 `"float32"`。`base_quantization_type` 选择的是内部编码和存储，本身不会使 API 接受 FP16、BF16 或 INT8 输入。
+Pyramid 的 `Build`、`Add` 和检索支持 `dtype: "float16"`、`dtype: "bfloat16"` 输入，也保留原有的 `"float32"` 输入支持。输入 `dtype` 与存储量化器是两个独立选项：`dtype` 使用 `"float16"` / `"bfloat16"`，量化参数则使用 `"fp16"` / `"bf16"`。
+
+两种半精度输入都通过 `Dataset::Float16Vectors` 提供连续的 `uint16_t` 缓冲区。缓冲区应包含**已经编码的 FP16 或 BF16 位模式**，而不是将浮点数直接数值转换为整数的结果；`dtype` 决定这些位模式的解释方式。Build/Add 缓冲区包含 `NumElements() * Dim()` 个元素，查询缓冲区也必须使用与索引一致的输入格式。ID 和路径的设置与上面的示例相同，将 `Float32Vectors(data)` 和 `Float32Vectors(q)` 分别替换为 `Float16Vectors(half_data)` 和 `Float16Vectors(half_query)` 即可。使用 `Owner(false)` 时，调用期间须保持借用的缓冲区（包括 ID 和路径）有效。
+
+对于半精度输入，`base_quantization_type` 以及启用 `use_reorder: true` 时的 `precise_quantization_type` 支持 `fp16`、`bf16`、`pq`、`sq8` 和 `fp32`。各量化器自身的要求仍然适用，例如 PQ 的训练和维度设置。以下是输入与存储格式匹配的最小配置：
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 32,
+    "index_param": {
+        "graph_type": "nsw",
+        "base_quantization_type": "fp16",
+        "use_reorder": false
+    }
+}
+```
+
+若使用 BF16 输入和 BF16 存储，将 `dtype` 改为 `"bfloat16"`，`base_quantization_type` 改为 `"bf16"`。也支持跨格式存储转换，例如 FP16 输入配 BF16 存储、BF16 输入配 FP32 存储；这不会改变后续查询所需的输入格式。`metric_type: "cosine"` 会在编码前归一化向量，因此即使输入和存储格式匹配，cosine 也不保证逐字节保留输入。
+
+对于 L2/IP，FP16 输入配 FP16 存储、BF16 输入配 BF16 存储会逐位保留输入编码。跨格式存储以及 `pq`/`sq8`/`fp32` 存储会先将输入转换为 float32，不提供相同的半精度位模式保留保证。
+
+在半精度输入索引上调用 `CalcDistanceById` 和 `CalcDistancesById` 时，请使用 `DatasetPtr` 重载，并提供与索引 dtype 一致的原生半精度查询缓冲区。原始 `const float*` 重载仅接受 float32 索引，对半精度输入索引会明确报错。
+
+FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 字节。这指的是**向量编码大小，而非整个索引内存**：图、ID、路径、分配开销以及可选的精排/原始向量副本还会占用空间。仅使用半精度输入并不会自动选择半精度存储，也不代表总内存减半。
+
+半精度输入可使用 `graph_type: "nsw"` 或 `"odescent"`；**PiPNN 仍仅支持 float32 输入**。以上说明仅针对 Pyramid，不代表 VSAG 的所有索引都支持这些输入类型。
 
 ## 构建参数
 
@@ -91,6 +124,7 @@ auto result = index->KnnSearch(
 | `graph_storage_type` | string | `"flat"` | `multi_layer` 根节点的底图存储：`flat` 偏向构建和检索速度，`compressed` 减少图内存。压缩存储要求 `max_degree <= 255`。单层根图、路由图和子图仍使用 Sparse。 |
 | `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |
 | `alpha` | float | `1.2` | 构图剪枝系数；PiPNN 要求有限且不小于 `1.0` |
+| `adaptive_pruning` | boolean | `false` | 可选的 NSW 底图正向/反向 L2 选择器；见[配置与范围](#实验性-nsw-自适应剪枝)。 |
 | `graph_iter_turn` | int | — | ODescent 迭代轮数（`graph_type: "odescent"` 时生效） |
 | `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
 | `pipnn_max_leaf_size` | int | `1024` | PiPNN 分区叶子的最大点数 |
@@ -185,7 +219,7 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 | `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
-| `parallelism` | int | `1` | 大于 `1` 时并行检索查询路径命中的各个子图，各子图结果合并并按 inner id 去重后再重排。它是开关而非并发上限——见表格下方的说明。 |
+| `parallelism` | int | `1` | 单次请求同时检索子图的数量上限。大于 `1` 时使用索引线程池，各子图结果合并并按 inner id 去重后再重排；线程池前提见下方说明。 |
 | `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
 | `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
 | `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
@@ -200,8 +234,9 @@ auto result = index->KnnSearch(
 
 `parallelism` 只有在索引持有线程池时才生效。通过 `Engine` 创建索引、并由 `Resource` 提供 `ThreadPool`（例如 `Engine::CreateThreadPool(n)`），或者建库时设置 `build_thread_count > 1`，索引才会持有线程池。`Factory::CreateIndex` 与 `Index::Load` 都不会挂载线程池，因此这两条路径上 `parallelism` 会被忽略，各子图按顺序串行检索。参数无法生效时，Pyramid 会为每个索引打印一次告警。
 
-`<= 0` 的取值会被钳到 `1`。当 `parallelism >= 2` 时，Pyramid 为每个解析出的子图向索引线程池提交一个任务，等全部完成后按 inner id 合并（取最小距离）。该值不是并发上限：`parallelism: 2` 同样可能同时执行两个以上的子图检索。实际并发为
-`min(解析出的子图数, 索引线程池的空闲 worker 数)`；线程池大小固定，由索引上所有请求共享。另外，一条路径不一定只对应一个任务：结束于中间节点的路径会展开为其下所有索引节点。
+`<= 0` 的取值会被钳到 `1`。当 `parallelism >= 2` 时，Pyramid 最多同时检索 `parallelism` 个解析出的子图。实际并发上限为 `min(parallelism, 线程池大小, 解析出的子图数)`；与其他请求竞争资源时可能更低。因此，线程池为 32、`parallelism: 2` 时最多同时检索两个子图。
+
+结果按 inner id 合并，保留最小距离。结束于中间节点的路径可能展开为多个后代索引节点，这些节点仍共用本次请求的并行预算。
 
 ## 多层级支持 (Multi-Hierarchy)
 
@@ -446,3 +481,38 @@ Pyramid 仅写入已填充的标签槽位，继续使用现有的带长度前缀
 - [索引参数](../resources/index_parameters.md)
 - [图索引增强](../advanced/enhance_graph.md)
 - [HGraph](hgraph.md)
+
+## 实验性 NSW 自适应剪枝
+
+Pyramid 直接复用 HGraph 的[自适应邻居选择器](adaptive_pruning.md)。参数平铺在 `index_param` 下，`adaptive_pruning` 是布尔开关；旧实验版嵌套配置和已删除的 `fill_rejected` 参数会报错，使用旧实验格式的索引需重新构建。配置一次，作用于每个已构建路径节点的底图，包括 `single_layer` 根图和 `multi_layer` 根图的底层。路由层保留原有固定 alpha 策略。平面节点升级为 NSW 图时开始使用该策略。
+
+```json
+{
+    "graph_type": "nsw",
+    "alpha": 1.06,
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": true,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+以上字段放在 `index_param` 内。这是实验配置，不是适用于所有数据集的推荐默认值。
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | NSW 插入时使用共享的多轮选择器 |
+| `adaptive_pruning_adjust_step` | `0.06` | 相对所属 hierarchy 基准 alpha 放宽或收紧的步长 |
+| `adaptive_pruning_apply_to_reverse` | `false` | 同时对已满的反向邻居表重新剪枝，以已有邻居为中心 |
+| `adaptive_pruning_apply_to_upper` | `false` | 保留字段，暂不支持启用上层自适应 |
+
+策略全局共享，各 hierarchy 保留自己的有效 `alpha` 和最大度数；不支持 hierarchy 内单独覆盖 `adaptive_pruning`。每个有效 alpha 都必须有限，且满足 `adjust_step >= 0`、`alpha - 2*adjust_step > 0`、`alpha + 3*adjust_step` 有限。alpha=1.06、step=0.06 时，可能使用的调整值介于 0.94–1.24；这些常数不会根据向量维度自动推导。
+
+启用时要求 `graph_type: "nsw"` 和 `metric_type: "l2"`。导入非空构图缓存后的 Build 会被拒绝，空缓存可以正常使用。ODescent、路由层自适应和更新/精炼路径不在本策略范围内。尚有容量的反向邻居表仍直接追加；距离提供器和量化器不变。
+
+序列化会记录策略。加载要求启用状态一致；启用时还要求 alpha、步长和作用范围一致。旧参数中没有此字段时按关闭处理，从而保证后续 Add 继续使用一致策略；这不保证旧版本 VSAG 能读取新写出的索引。
+
+应在相近 recall 下比较 QPS，同时报告构图时间和内存。更多剪枝轮次可能增加构图耗时，即使得到的图能加速查询。当 `k=10` 时，Pyramid 当前仅接受 `[1, 1000]` 范围内的 `ef_search`。GIST 测试若构图路径全部为空、查询不传 `Paths`，只衡量根图无过滤搜索，不能据此推断路径过滤场景的收益。RaBitQ + SQ8 重排使用现有 SQ8 距离提供器构图，与 RaBitQ 3+5 split 存储配置不同。
+
+
+GIST 1M 的四组合消融中，补边的单因素 QPS 变化为 −3.4%～+4.7%，没有一致收益，因此移除了无条件补边及其参数。反向自适应仍可选：alpha=1.06 时本轮各匹配 recall 档位均减速，alpha=1.2 时均加速。每组只有一份并行构建索引，小幅差异尚不足以证明稳定收益；应按数据集和目标 recall 选择反向开关。

@@ -708,6 +708,18 @@ protected:
     void
     validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
+    /**
+     * @brief Extract a pointer to the data vector at the given index.
+     *
+     * Dispatches on data_type_ to the correct typed getter on the dataset and
+     * offsets by `index * dim_`. Returns nullptr if the underlying pointer is
+     * absent. The returned pointer keeps the representation implied by
+     * data_type_: float32 vectors stay float32, int8 vectors stay int8, and
+     * fp16/bf16 inputs are exposed as their raw 16-bit halves.
+     */
+    [[nodiscard]] const void*
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const;
+
     static void
     filter_search_result_by_threshold(DistHeapPtr& result,
                                       const std::optional<float>& threshold,

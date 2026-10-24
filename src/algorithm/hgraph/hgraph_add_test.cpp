@@ -24,10 +24,10 @@
 #include <functional>
 #include <future>
 #include <initializer_list>
-#include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <numeric>
 #include <random>
 #include <sstream>
@@ -67,13 +67,17 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "io/memory_io/memory_io.h"
+#include "io/memory_io/memory_io_parameter.h"
 #include "layout/fixed_layout.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/scalar_quantization/scalar_quantizer.h"
 #include "quantization/scalar_quantization/sq8_uniform_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "storage/serialization.h"
 #include "storage/stream_reader.h"
+#include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/linear_congruential_generator.h"
@@ -81,6 +85,62 @@
 #include "vsag/deserialize_reader.h"
 #include "vsag/engine.h"
 #include "vsag/options.h"
+#include "vsag/serialize_writer.h"
+
+namespace vsag {
+
+// Fault injection for partial persistent-code writes, without changing the public API.
+class HGraphCodeWriteTestAccess {
+public:
+    static void
+    SetPending(HGraph& graph, InnerIdType id, bool base, bool precise, bool raw) {
+        graph.pending_code_writes_[id] = (base ? HGraph::BASE_CODE : 0) |
+                                         (precise ? HGraph::PRECISE_CODE : 0) |
+                                         (raw ? HGraph::RAW_CODE : 0);
+    }
+
+    static uint8_t
+    Pending(const HGraph& graph, InnerIdType id) {
+        const auto it = graph.pending_code_writes_.find(id);
+        return it == graph.pending_code_writes_.end() ? 0 : it->second;
+    }
+
+    static uint64_t
+    PendingCount(const HGraph& graph) {
+        return graph.pending_code_writes_.size();
+    }
+
+    static uint64_t
+    PendingBucketCount(const HGraph& graph) {
+        return graph.pending_code_writes_.bucket_count();
+    }
+
+    static InnerIdType
+    InnerId(const HGraph& graph, int64_t label) {
+        return graph.label_table_->GetIdByLabel(label);
+    }
+
+    static void
+    SetPrecise(HGraph& graph, const FlattenInterfacePtr& codes) {
+        graph.high_precise_codes_ = codes;
+    }
+
+    static bool
+    CodesLocked(HGraph& graph) {
+        if (graph.persistent_codes_mutex_.try_lock_shared()) {
+            graph.persistent_codes_mutex_.unlock_shared();
+            return false;
+        }
+        return true;
+    }
+
+    static void
+    Move(HGraph& graph, InnerIdType from, InnerIdType to) {
+        graph.move_id(from, to);
+    }
+};
+
+}  // namespace vsag
 
 // Expected model availability is classified from the supported test profiles, independently
 // of the production capability result. Unmodeled profiles must exercise the typed fallback.
@@ -165,6 +225,38 @@ struct HGraphMemoryEstimateTestAccess {
 namespace {
 
 constexpr bool EXPECT_MODELED_BUILD_MEMORY = HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE != 0;
+
+class ArmableRejectingThreadPool final : public vsag::ThreadPool {
+public:
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t) override {
+    }
+
+    void
+    SetPoolSize(uint64_t) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        if (reject_submissions_.load(std::memory_order_acquire)) {
+            throw std::bad_alloc();
+        }
+        task();
+        return {};
+    }
+
+    void
+    SetRejectSubmissions(bool reject) {
+        reject_submissions_.store(reject, std::memory_order_release);
+    }
+
+private:
+    std::atomic<bool> reject_submissions_{false};
+};
 
 vsag::DatasetPtr
 MakeFloatDataset(std::vector<float>& vectors,
@@ -380,7 +472,6 @@ struct BuildMemoryData {
     std::vector<float> vectors;
     std::vector<int64_t> ids;
     vsag::DatasetPtr dataset;
-    uint64_t checksum{1469598103934665603ULL};
 
     BuildMemoryData(uint64_t count, uint64_t dim) : vectors(count * dim), ids(count) {
         std::iota(ids.begin(), ids.end(), int64_t{0});
@@ -394,20 +485,6 @@ struct BuildMemoryData {
         }
         dataset =
             MakeFloatDataset(vectors, ids, static_cast<int64_t>(dim), static_cast<int64_t>(count));
-        RefreshChecksum();
-    }
-
-    void
-    RefreshChecksum() {
-        checksum = 1469598103934665603ULL;
-        for (const auto element : vectors) {
-            uint32_t bits = 0;
-            std::memcpy(&bits, &element, sizeof(bits));
-            checksum = (checksum ^ bits) * 1099511628211ULL;
-        }
-        for (const auto id : ids) {
-            checksum = (checksum ^ static_cast<uint64_t>(id)) * 1099511628211ULL;
-        }
     }
 };
 
@@ -767,24 +844,18 @@ TestSampledDatasetMapBytes() {
     return 4 * sizeof(Node) + map.bucket_count() * sizeof(void*);
 }
 
-struct StandardContribution {
-    std::string name;
-    uint64_t count;
-    uint64_t requested_size;
-    std::string source;
-};
-
-class StandardContributionTable {
+// Sum the independent standard-allocation bounds without storing a report per contribution.
+class StandardAllocationBytes {
 public:
     void
-    Add(std::string name, uint64_t count, uint64_t bytes, std::string source) {
+    Add(const std::string& name, uint64_t count, uint64_t bytes) {
+        CAPTURE(name, count, bytes);
         if (count > 0) {
             REQUIRE(bytes <= std::numeric_limits<uint64_t>::max() / count);
         }
         const auto product = count * bytes;
         REQUIRE(total_ <= std::numeric_limits<uint64_t>::max() - product);
         total_ += product;
-        rows_.push_back({std::move(name), count, bytes, std::move(source)});
     }
 
     uint64_t
@@ -792,50 +863,32 @@ public:
         return total_;
     }
 
-    vsag::JsonType
-    Report() const {
-        vsag::JsonType result;
-        for (const auto& row : rows_) {
-            result[row.name]["count"].SetUint64(row.count);
-            result[row.name]["requested_size"].SetUint64(row.requested_size);
-            result[row.name]["bytes"].SetUint64(row.count * row.requested_size);
-            result[row.name]["source"].SetString(row.source);
-        }
-        return result;
-    }
-
 private:
     uint64_t total_{0};
-    std::vector<StandardContribution> rows_;
 };
 
 void
-AddOwnedString(StandardContributionTable& table,
-               const std::string& name,
-               const std::string& value) {
+AddOwnedString(StandardAllocationBytes& table, const std::string& name, const std::string& value) {
     // Fresh named string objects on these target libraries use SSO up to empty.capacity().
     const auto inline_capacity = std::string{}.capacity();
     const auto heap_bytes = value.capacity() > inline_capacity ? value.capacity() + 1 : 0;
-    table.Add(name, 1, heap_bytes, "retained std::string capacity; pinned basic_string ABI");
+    table.Add(name, 1, heap_bytes);
 }
 
 template <typename Quantizer, typename QuantizerParameter>
 void
-AddConcreteScalarObjects(StandardContributionTable& table) {
+AddConcreteScalarObjects(StandardAllocationBytes& table) {
     using Layout = vsag::FixedLayout<vsag::MemoryBlockIO>;
     using Cell = vsag::FlattenDataCell<Quantizer, Layout>;
-    table.Add("flatten_cell", 1, TestSharedRequest<Cell>(), "flatten_datacell_factory_impl.h");
-    table.Add("quantizer", 1, TestSharedRequest<Quantizer>(), "flatten_datacell.h:301");
-    table.Add("fixed_layout", 1, TestSharedRequest<Layout>(), "flatten_datacell.h:303");
-    table.Add("quantizer_parameter",
-              1,
-              TestSharedRequest<QuantizerParameter>(),
-              "QuantizerParameter::GetQuantizerParameterByJson");
+    table.Add("flatten_cell", 1, TestSharedRequest<Cell>());
+    table.Add("quantizer", 1, TestSharedRequest<Quantizer>());
+    table.Add("fixed_layout", 1, TestSharedRequest<Layout>());
+    table.Add("quantizer_parameter", 1, TestSharedRequest<QuantizerParameter>());
 }
 
 template <vsag::MetricType metric>
 uint64_t
-AddMetricScalarObjects(StandardContributionTable& table, const std::string& quantizer) {
+AddMetricScalarObjects(StandardAllocationBytes& table, const std::string& quantizer) {
     if (quantizer == "fp32") {
         AddConcreteScalarObjects<vsag::FP32Quantizer<metric>, vsag::FP32QuantizerParameter>(table);
         return TestSharedRequest<vsag::Computer<vsag::FP32Quantizer<metric>>>();
@@ -851,7 +904,7 @@ AddMetricScalarObjects(StandardContributionTable& table, const std::string& quan
     return TestSharedRequest<vsag::Computer<vsag::SQ8UniformQuantizer<metric>>>();
 }
 
-StandardContributionTable
+StandardAllocationBytes
 IndependentStandardEnvelope(const vsag::HGraph& graph,
                             const std::string& quantizer,
                             uint64_t dim,
@@ -880,35 +933,22 @@ IndependentStandardEnvelope(const vsag::HGraph& graph,
     }
     const auto sample = std::min(count, std::max(uint64_t{512}, sample_cap));
     const auto trainer_sample = std::min(sample, uint64_t{100000});
-    StandardContributionTable table;
-    table.Add(
-        "public_index", 1, TestSharedRequest<IndexImpl<HGraph>>(), "index_creators/IndexImpl");
-    table.Add("inner_hgraph", 1, TestSharedRequest<HGraph>(), "index_impl.h:58");
-    table.Add("build_cache", 1, sizeof(BuildCache), "hgraph.cpp constructor make_unique");
-    table.Add("feature_list_object", 1, sizeof(IndexFeatureList), "inner_index_interface.cpp:76");
-    table.Add("feature_list_data", 1, (INDEX_FEATURE_COUNT + 7) / 8, "index_feature_list.cpp:37");
-    table.Add("label_table", 1, TestSharedRequest<LabelTable>(), "inner_index_interface.cpp:73");
-    table.Add("reverse_map_object",
-              1,
-              sizeof(PGUnorderedMap<LabelType, InnerIdType>),
-              "label_remap.cpp:35; bucket arrays measured through Allocator");
-    table.Add("deletion_filter_upper",
-              1,
-              TestSharedRequest<RemoveListFilterStorageUpper>(),
-              "label_table.cpp RemoveListFilter; actual target layout check required");
-    table.Add("point_mutex_owner", 1, TestSharedRequest<PointsMutex>(), "hgraph.cpp:108");
-    table.Add("basic_searcher", 1, TestSharedRequest<BasicSearcher>(), "hgraph.cpp:115");
-    table.Add("mci_searcher", 1, TestSharedRequest<MCISearcher>(), "hgraph.cpp:116");
-    table.Add("hybrid_searcher", 1, TestSharedRequest<HybridMCISearcher>(), "hgraph.cpp:117");
-    table.Add("parallel_searcher", 1, TestSharedRequest<ParallelSearcher>(), "hgraph.cpp:156");
-    table.Add("bottom_graph",
-              1,
-              TestSharedRequest<GraphDataCell<MemoryBlockIO>>(),
-              "GraphInterface::MakeInstance");
-    table.Add("block_io_objects",
-              2,
-              TestSharedRequest<MemoryBlockIO>(),
-              "graph_datacell.h and fixed_layout.h; code and graph IO");
+    StandardAllocationBytes table;
+    table.Add("public_index", 1, TestSharedRequest<IndexImpl<HGraph>>());
+    table.Add("inner_hgraph", 1, TestSharedRequest<HGraph>());
+    table.Add("build_cache", 1, sizeof(BuildCache));
+    table.Add("feature_list_object", 1, sizeof(IndexFeatureList));
+    table.Add("feature_list_data", 1, (INDEX_FEATURE_COUNT + 7) / 8);
+    table.Add("label_table", 1, TestSharedRequest<LabelTable>());
+    table.Add("reverse_map_object", 1, sizeof(PGUnorderedMap<LabelType, InnerIdType>));
+    table.Add("deletion_filter_upper", 1, TestSharedRequest<RemoveListFilterStorageUpper>());
+    table.Add("point_mutex_owner", 1, TestSharedRequest<PointsMutex>());
+    table.Add("basic_searcher", 1, TestSharedRequest<BasicSearcher>());
+    table.Add("mci_searcher", 1, TestSharedRequest<MCISearcher>());
+    table.Add("hybrid_searcher", 1, TestSharedRequest<HybridMCISearcher>());
+    table.Add("parallel_searcher", 1, TestSharedRequest<ParallelSearcher>());
+    table.Add("bottom_graph", 1, TestSharedRequest<GraphDataCell<MemoryBlockIO>>());
+    table.Add("block_io_objects", 2, TestSharedRequest<MemoryBlockIO>());
     uint64_t computer_bytes = 0;
     switch (metric) {
         case MetricType::METRIC_TYPE_L2SQR:
@@ -925,41 +965,16 @@ IndependentStandardEnvelope(const vsag::HGraph& graph,
         default:
             FAIL("An unlisted metric needs an independent concrete-type table");
     }
-    table.Add(
-        "hgraph_parameters", 1, TestSharedRequest<HGraphParameter>(), "HGraphParameter factory");
-    table.Add("parameter_pipnn_fanout",
-              param.pipnn_param.fanout.capacity(),
-              sizeof(uint64_t),
-              "pipnn_graph_builder.h fanout initializer; retained parameter buffer");
-    table.Add("hgraph_pipnn_fanout",
-              Access::RetainedFanoutCapacity(graph),
-              sizeof(uint64_t),
-              "hgraph.cpp constructor copies pipnn_param_; retained index buffer");
-    table.Add("flatten_parameters",
-              1,
-              TestSharedRequest<FlattenDataCellParameter>(),
-              "hgraph_parameter.cpp base_codes_param");
-    table.Add("graph_parameters",
-              1,
-              TestSharedRequest<GraphDataCellParameter>(),
-              "GraphInterfaceParameter::GetGraphParameterByJson");
-    table.Add("route_parameters",
-              1,
-              TestSharedRequest<SparseGraphDatacellParameter>(),
-              "hgraph_parameter.cpp hierarchical_graph_param");
-    table.Add("io_parameters",
-              2,
-              TestSharedRequest<MemoryBlockIOParameter>(),
-              "base and graph MemoryBlockIOParameter factories");
+    table.Add("hgraph_parameters", 1, TestSharedRequest<HGraphParameter>());
+    table.Add("parameter_pipnn_fanout", param.pipnn_param.fanout.capacity(), sizeof(uint64_t));
+    table.Add("hgraph_pipnn_fanout", Access::RetainedFanoutCapacity(graph), sizeof(uint64_t));
+    table.Add("flatten_parameters", 1, TestSharedRequest<FlattenDataCellParameter>());
+    table.Add("graph_parameters", 1, TestSharedRequest<GraphDataCellParameter>());
+    table.Add("route_parameters", 1, TestSharedRequest<SparseGraphDatacellParameter>());
+    table.Add("io_parameters", 2, TestSharedRequest<MemoryBlockIOParameter>());
     REQUIRE(param.extra_info_param != nullptr);
-    table.Add("extra_info_parameters",
-              1,
-              TestSharedRequest<ExtraInfoDataCellParameter>(),
-              "inner_index_parameter.cpp:265, even when extra-info size is zero");
-    table.Add("extra_info_io_parameters",
-              1,
-              TestSharedRequest<MemoryBlockIOParameter>(),
-              "extra_info_datacell_parameter.cpp default IO");
+    table.Add("extra_info_parameters", 1, TestSharedRequest<ExtraInfoDataCellParameter>());
+    table.Add("extra_info_io_parameters", 1, TestSharedRequest<MemoryBlockIOParameter>());
     AddOwnedString(table, "param_name", param.name);
     AddOwnedString(table, "param_graph_type", param.graph_type);
     AddOwnedString(table, "param_reorder_source", param.reorder_source);
@@ -980,28 +995,17 @@ IndependentStandardEnvelope(const vsag::HGraph& graph,
 
     const uint64_t pool_copies = capacity > initial_capacity ? 2 : 1;
     const uint64_t lists = (count == 0 ? 1 : 16 * std::max(uint64_t{1}, workers)) + pool_copies - 1;
-    table.Add("visited_pool_objects",
-              pool_copies,
-              TestSharedRequest<VisitedListPool>(),
-              "hgraph_build.cpp resize; old/new pool coexist only on replacement");
-    table.Add("visited_deque_objects",
-              pool_copies * 16,
-              sizeof(Deque<std::shared_ptr<VisitedList>>),
-              "resource_object_pool.h make_unique; elements/maps measured through Allocator");
+    table.Add("visited_pool_objects", pool_copies, TestSharedRequest<VisitedListPool>());
+    table.Add(
+        "visited_deque_objects", pool_copies * 16, sizeof(Deque<std::shared_ptr<VisitedList>>));
     const auto pool_capture = sizeof(VisitedListPool*) + sizeof(uint64_t) + sizeof(Allocator*);
 #if defined(_LIBCPP_VERSION)
     const auto pool_function = TestRoundUp(sizeof(void*) + pool_capture, alignof(void*));
 #else
     const auto pool_function = pool_capture;
 #endif
-    table.Add("visited_constructor_function",
-              pool_copies,
-              pool_function,
-              "resource_object_pool.h constructor: pool pointer, size, allocator captures");
-    table.Add("visited_list_objects",
-              lists,
-              TestSharedRequest<VisitedList>(),
-              "resource_object_pool.h make_shared; bit arrays measured through Allocator");
+    table.Add("visited_constructor_function", pool_copies, pool_function);
+    table.Add("visited_list_objects", lists, TestSharedRequest<VisitedList>());
 
     // Independent replay at the actual degree. Production deliberately replays at degree four.
     std::array<uint64_t, 64> route_counts{};
@@ -1024,77 +1028,38 @@ IndependentStandardEnvelope(const vsag::HGraph& graph,
             continue;
         }
         const auto suffix = std::to_string(level);
-        table.Add("route_graph_" + suffix,
-                  1,
-                  TestSharedRequest<SparseGraphDataCell>(),
-                  "hgraph.cpp generate_one_route_graph");
-        table.Add("route_vector_headers_" + suffix,
-                  route_counts[level],
-                  sizeof(Vector<InnerIdType>),
-                  "sparse_graph_datacell.cpp make_unique; bucket/neighbor arrays measured");
+        table.Add("route_graph_" + suffix, 1, TestSharedRequest<SparseGraphDataCell>());
+        table.Add(
+            "route_vector_headers_" + suffix, route_counts[level], sizeof(Vector<InnerIdType>));
     }
-    table.Add("retained_sq_arrays",
-              quantizer == "sq8" ? 2 : 0,
-              dim * sizeof(float),
-              "scalar_quantizer.cpp:35-36, actual quantizer behavior");
+    table.Add("retained_sq_arrays", quantizer == "sq8" ? 2 : 0, dim * sizeof(float));
     table.Add("trainer_sample",
               count > 0 && quantizer != "fp32" ? 1 : 0,
-              trainer_sample * dim * sizeof(float),
-              "scalar_quantization_trainer.cpp sample_datas");
+              trainer_sample * dim * sizeof(float));
     table.Add("uniform_training_bounds",
               count > 0 && quantizer == "sq8_uniform" ? 2 : 0,
-              dim * sizeof(float),
-              "scalar_quantization_trainer.cpp TrainUniform upper/lower");
+              dim * sizeof(float));
     uint64_t truncation_bytes = 0;
     if (count > 0 && quantizer == "sq8") {
         const auto ignore = std::max<uint64_t>(
             1, static_cast<uint64_t>(static_cast<double>(trainer_sample - 1) * 0.001));
         truncation_bytes = 2 * TestDoublingBufferPeak(ignore + 1, sizeof(float));
     }
-    table.Add("bit8_truncation_heaps",
-              truncation_bytes > 0 ? 1 : 0,
-              truncation_bytes,
-              "scalar_quantization_trainer.cpp:93 bit8 ignore 0.001; two heap buffers");
-    table.Add("sampled_dataset",
-              sample < count ? 1 : 0,
-              TestSharedRequest<DatasetImpl>(),
-              "util_functions.cpp sampled_dataset; input dataset excluded");
+    table.Add("bit8_truncation_heaps", truncation_bytes > 0 ? 1 : 0, truncation_bytes);
+    table.Add("sampled_dataset", sample < count ? 1 : 0, TestSharedRequest<DatasetImpl>());
     table.Add("sampled_dataset_map",
               sample < count ? 1 : 0,
-              sample < count ? TestSampledDatasetMapBytes() : 0,
-              "util_functions.cpp four keys: num_elements, dim, f32_vectors, ids");
+              sample < count ? TestSampledDatasetMapBytes() : 0);
     // At nested route pruning, five shared objects survive together: the bottom probe heap,
     // route result, route filtered result, neighbor candidates and nested queue_closest.
     // Emptying either retained result does not destroy its shared object.
-    table.Add(
-        "worker_heap_objects",
-        5 * workers,
-        TestSharedRequest<StandardHeap<true, false>>(),
-        "hgraph_build.cpp probe/route result/filtered; pruning_strategy.cpp candidates/closest");
-    table.Add("worker_computer_objects",
-              workers,
-              computer_bytes,
-              "Quantizer::FactoryComputer; no transforms or reorder cells");
-    table.Add("skip_strategy_upper",
-              workers,
-              TestSkipStrategyUpper(),
-              "basic_searcher.cpp skip strategy; file-local derived object upper bound");
-    table.Add("failed_ids",
-              0,
-              sizeof(int64_t),
-              "AddBatch.failed_ids remains empty for successful unique labels");
-    table.Add("scheduler_chains",
-              scheduled ? workers : 0,
-              TestSchedulerTaskRequest(),
-              "actual InsertAddBatchWorker bind and two packaged-task layers, D=1");
-    table.Add("scheduler_futures",
-              scheduled ? workers : 0,
-              sizeof(std::future<void>),
-              "run_insert_add_batch_workers reserve W; future object only");
-    table.Add("scheduler_queue",
-              scheduled && workers > 0 ? 1 : 0,
-              TestBuildQueueRequest(workers),
-              "fresh built-in deque/map source envelope; pre-existing workers excluded");
+    table.Add("worker_heap_objects", 5 * workers, TestSharedRequest<StandardHeap<true, false>>());
+    table.Add("worker_computer_objects", workers, computer_bytes);
+    table.Add("skip_strategy_upper", workers, TestSkipStrategyUpper());
+    table.Add("failed_ids", 0, sizeof(int64_t));
+    table.Add("scheduler_chains", scheduled ? workers : 0, TestSchedulerTaskRequest());
+    table.Add("scheduler_futures", scheduled ? workers : 0, sizeof(std::future<void>));
+    table.Add("scheduler_queue", scheduled && workers > 0 ? 1 : 0, TestBuildQueueRequest(workers));
     uint64_t owned_pool_bytes = 0;
     if (owns_pool) {
         const uint64_t started = std::max(threads, Options::Instance().num_threads_building());
@@ -1105,10 +1070,7 @@ IndependentStandardEnvelope(const vsag::HGraph& graph,
             owned_pool_bytes += TestBuildQueueRequest(0);
         }
     }
-    table.Add("owned_constructor_pool",
-              owns_pool ? 1 : 0,
-              owned_pool_bytes,
-              "inner_index_interface.cpp:86; only when threads exceed one and no pool is supplied");
+    table.Add("owned_constructor_pool", owns_pool ? 1 : 0, owned_pool_bytes);
     return table;
 }
 
@@ -1120,8 +1082,8 @@ RunBuildMemoryCell(const std::string& quantizer,
                    uint64_t count,
                    uint64_t sample_cap,
                    bool mixed_labels = false,
-                   vsag::MetricType metric = vsag::MetricType::METRIC_TYPE_L2SQR,
-                   bool primary_cell = false) {
+                   vsag::MetricType metric = vsag::MetricType::METRIC_TYPE_L2SQR) {
+    CAPTURE(quantizer, dim, degree, parallel, count, sample_cap, mixed_labels, metric);
     BuildMemoryData data(count, dim);
     if (mixed_labels) {
         for (uint64_t row = 0; row < count; ++row) {
@@ -1129,7 +1091,6 @@ RunBuildMemoryCell(const std::string& quantizer,
                 row % 2 == 0 ? -static_cast<int64_t>(row / 2) - 1 : static_cast<int64_t>(row / 2);
         }
         std::reverse(data.ids.begin(), data.ids.end());
-        data.RefreshChecksum();
     }
     auto recorder = std::make_shared<PhaseCountingAllocator>();
     auto common = MakeCommonParam(static_cast<int64_t>(dim));
@@ -1157,44 +1118,15 @@ RunBuildMemoryCell(const std::string& quantizer,
     REQUIRE(recorder->Read().phase_peak == initial.current);
     const auto built = index->Build(data.dataset);
     const auto measured = recorder->Read();
-    vsag::JsonType report;
-    report["primary_matrix_cell"].SetBool(primary_cell);
-    report["metric"].SetInt(static_cast<int>(metric));
-    report["compiler"].SetString(__VERSION__);
-    report["block_limit"].SetUint64(vsag::Options::Instance().block_size_limit());
-    report["ef_construction"].SetUint64(64);
-    report["support_duplicate"].SetBool(false);
-    report["deduplicate_storage"].SetBool(false);
-    report["quantizer"].SetString(quantizer);
-    report["dim"].SetUint64(dim);
-    report["degree"].SetUint64(degree);
-    report["requested_threads"].SetUint64(threads);
-    report["pool_width"].SetUint64(parallel ? 8 : 0);
-    report["count"].SetUint64(count);
-    report["sample_cap"].SetUint64(std::max(uint64_t{512}, sample_cap));
-    report["checksum"].SetUint64(data.checksum);
-    report["mixed_labels"].SetBool(mixed_labels);
-    report["A0"].SetUint64(initial.current);
-    report["constructor_peak"].SetUint64(initial.constructor_peak);
-    report["Aphasepeak"].SetUint64(measured.phase_peak);
-    report["Afinal"].SetUint64(measured.current);
-    report["Utest"].SetUint64(standard.Total());
-    report["contributions"].SetJson(standard.Report());
-    report["steady"].SetUint64(steady);
-    report["peak_estimate"].SetUint64(estimate);
-    report["build_success"].SetBool(built.has_value());
-    report["inserted"].SetInt(index->GetNumElements());
-#if defined(_LIBCPP_VERSION)
-    report["stdlib"].SetString("libc++");
-    report["stdlib_version"].SetUint64(_LIBCPP_VERSION);
-#else
-    report["stdlib"].SetString("libstdc++ headers");
-    report["stdlib_version"].SetUint64(__GLIBCXX__);
-#endif
-    std::cout << "HGRAPH_BUILD_MEMORY_CELL " << report.Dump() << std::endl;
     REQUIRE(built.has_value());
     REQUIRE(built.value().empty());
     REQUIRE(index->GetNumElements() == static_cast<int64_t>(count));
+    {
+        // Successful writes clear their markers but retain the batch-sized bucket allocation.
+        const auto graph = InnerHGraph(index);
+        REQUIRE(vsag::HGraphCodeWriteTestAccess::PendingCount(*graph) == 0);
+        REQUIRE(vsag::HGraphCodeWriteTestAccess::PendingBucketCount(*graph) >= 2 * count);
+    }
     REQUIRE(estimate >= steady);
     REQUIRE(measured.phase_peak <= std::numeric_limits<uint64_t>::max() - standard.Total());
     REQUIRE(estimate >= measured.phase_peak + standard.Total());
@@ -1367,9 +1299,6 @@ TEST_CASE("HGraph random level failure preserves existing data and allows retry"
         Access::ExchangeLevelMultiplier(*graph, original);
         REQUIRE_FALSE(failed.has_value());
         REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
-        std::cout << "RNG_FAILURE_REPRO existing=" << existing << " before=" << before_count
-                  << " after=" << index->GetNumElements()
-                  << " first_new_label=" << index->CheckIdExist(100) << std::endl;
         CHECK(index->GetNumElements() == before_count);
         CHECK_FALSE(index->CheckIdExist(100));
         CHECK(Access::Generator(*graph) == before_rng);
@@ -1544,7 +1473,6 @@ TEST_CASE("HGraph duplicate and existing labels consume no generator draws",
     BuildMemoryData addition(8, 16);
     // Existing label 5, in-batch duplicate of the first new label, then fresh labels.
     addition.ids = {100, 5, 100, 101, 102, 103, 104, 105};
-    addition.RefreshChecksum();
     addition.dataset = MakeFloatDataset(
         addition.vectors, addition.ids, 16, static_cast<int64_t>(addition.ids.size()));
     const auto present = RngPresentLabels(index, addition.dataset);
@@ -1820,8 +1748,7 @@ TEST_CASE("HGraph build memory validates the profile and reports modeled ownersh
                                            1537,
                                            1537,
                                            false,
-                                           vsag::MetricType::METRIC_TYPE_L2SQR,
-                                           true);
+                                           vsag::MetricType::METRIC_TYPE_L2SQR);
                         ++reported;
                     }
                 }
@@ -1872,6 +1799,10 @@ TEST_CASE("HGraph build memory covers sampling and storage boundaries",
           "[ut][hgraph][estimate_build_memory]") {
     BlockSizeLimitGuard blocks(uint64_t{1} << 18);
     for (uint64_t count : {uint64_t{1},
+                           uint64_t{2},
+                           uint64_t{3},
+                           uint64_t{4},
+                           uint64_t{5},
                            uint64_t{511},
                            uint64_t{512},
                            uint64_t{513},
@@ -1918,111 +1849,45 @@ TEST_CASE("HGraph build memory uses stored blocks and monotone count dimension d
     }();
     REQUIRE(larger_blocks->EstimateBuildMemory(1) > index->EstimateBuildMemory(1));
 
-    uint64_t previous = 0;
-    for (uint64_t count : {uint64_t{0},
-                           uint64_t{1},
-                           uint64_t{511},
-                           uint64_t{512},
-                           uint64_t{513},
-                           uint64_t{1023},
-                           uint64_t{1024},
-                           uint64_t{1025},
-                           uint64_t{1537},
-                           uint64_t{2048},
-                           uint64_t{65537}}) {
-        const auto current = index->EstimateBuildMemory(count);
-        CAPTURE(count, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
-    previous = 0;
-    for (uint64_t dim : {uint64_t{8},
-                         uint64_t{15},
-                         uint64_t{16},
-                         uint64_t{17},
-                         uint64_t{31},
-                         uint64_t{32},
-                         uint64_t{33},
-                         uint64_t{128}}) {
-        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(dim));
-        const auto current = candidate->EstimateBuildMemory(1537);
-        CAPTURE(dim, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
-    previous = 0;
-    for (uint64_t degree :
-         {uint64_t{4}, uint64_t{5}, uint64_t{8}, uint64_t{16}, uint64_t{32}, uint64_t{64}}) {
-        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("sq8", degree), common);
-        const auto current = candidate->EstimateBuildMemory(1537);
-        CAPTURE(degree, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
+    const auto require_monotone = [](std::initializer_list<uint64_t> values, const auto& estimate) {
+        uint64_t previous = 0;
+        for (uint64_t value : values) {
+            const auto current = estimate(value);
+            CAPTURE(value, previous, current);
+            REQUIRE(current >= previous);
+            previous = current;
+        }
+    };
     auto pool_common = MakeCommonParam(16);
     pool_common.thread_pool_ =
         std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
-    previous = 0;
-    for (uint64_t threads : {uint64_t{1}, uint64_t{2}, uint64_t{4}, uint64_t{8}}) {
-        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("sq8", 8, threads), pool_common);
-        const auto current = candidate->EstimateBuildMemory(1537);
-        CAPTURE(threads, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
-    // Repeat independent axes with a real supplied pool and fixed requested T=4.
-    auto parallel_index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), pool_common);
-    previous = 0;
-    for (uint64_t count : {uint64_t{0},
-                           uint64_t{1},
-                           uint64_t{511},
-                           uint64_t{512},
-                           uint64_t{513},
-                           uint64_t{1023},
-                           uint64_t{1024},
-                           uint64_t{1025},
-                           uint64_t{1537},
-                           uint64_t{2048},
-                           uint64_t{65537}}) {
-        const auto current = parallel_index->EstimateBuildMemory(count);
-        CAPTURE(count, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
-    previous = 0;
-    for (uint64_t dim : {uint64_t{8},
-                         uint64_t{15},
-                         uint64_t{16},
-                         uint64_t{17},
-                         uint64_t{31},
-                         uint64_t{32},
-                         uint64_t{33},
-                         uint64_t{128}}) {
-        auto dimensional = pool_common;
-        dimensional.dim_ = static_cast<int64_t>(dim);
-        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), dimensional);
-        const auto current = candidate->EstimateBuildMemory(1537);
-        CAPTURE(dim, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
-    previous = 0;
-    for (uint64_t degree :
-         {uint64_t{4}, uint64_t{5}, uint64_t{8}, uint64_t{16}, uint64_t{32}, uint64_t{64}}) {
-        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("sq8", degree, 4), pool_common);
-        const auto current = candidate->EstimateBuildMemory(1537);
-        CAPTURE(degree, previous, current);
-        REQUIRE(current >= previous);
-        previous = current;
-    }
     for (bool parallel : {false, true}) {
+        CAPTURE(parallel);
         const auto& selected_common = parallel ? pool_common : common;
+        const uint64_t threads = parallel ? 4 : 1;
+        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), selected_common);
+        require_monotone({0, 1, 511, 512, 513, 1023, 1024, 1025, 1537, 2048, 65537},
+                         [&](uint64_t count) { return candidate->EstimateBuildMemory(count); });
+        require_monotone({8, 15, 16, 17, 31, 32, 33, 128}, [&](uint64_t dim) {
+            auto dimensional = selected_common;
+            dimensional.dim_ = static_cast<int64_t>(dim);
+            return MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), dimensional)
+                ->EstimateBuildMemory(1537);
+        });
+        require_monotone({4, 5, 8, 16, 32, 64}, [&](uint64_t degree) {
+            return MakeHGraphIndex(MakeBuildMemoryJson("sq8", degree, threads), selected_common)
+                ->EstimateBuildMemory(1537);
+        });
         auto fp32 = MakeHGraphIndex(MakeBuildMemoryJson("fp32"), selected_common);
         for (const auto* quantizer : {"sq8", "sq8_uniform"}) {
             auto scalar = MakeHGraphIndex(MakeBuildMemoryJson(quantizer), selected_common);
             REQUIRE(fp32->EstimateBuildMemory(1537) >= scalar->EstimateBuildMemory(1537));
         }
     }
+    require_monotone({1, 2, 4, 8}, [&](uint64_t threads) {
+        return MakeHGraphIndex(MakeBuildMemoryJson("sq8", 8, threads), pool_common)
+            ->EstimateBuildMemory(1537);
+    });
 }
 
 #endif  // HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
@@ -2173,14 +2038,6 @@ TEST_CASE("HGraph bounded Build dispatch gates requested workers on a wider pool
             REQUIRE(counters[0] == workers);
             REQUIRE(counters[1] == workers);
             REQUIRE(counters[2] == workers);
-            vsag::JsonType report;
-            report["requested_threads"].SetUint64(threads);
-            report["pool_width"].SetUint64(8);
-            report["rows"].SetUint64(count);
-            report["submitted"].SetUint64(counters[0]);
-            report["finished"].SetUint64(counters[1]);
-            report["gated_overlap"].SetUint64(counters[2]);
-            std::cout << "HGRAPH_BUILD_DISPATCH_CELL " << report.Dump() << std::endl;
         }
     }
 }
@@ -2499,8 +2356,8 @@ TEST_CASE("HGraph build memory default Engine forwards supported scalar estimate
             REQUIRE(created.has_value());
             vsag::IndexPtr index = created.value();
             RequireExpectedBuildMemoryProfile(index);
-            const auto steady = index->EstimateMemory(17);
 #if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+            const auto steady = index->EstimateMemory(17);
             REQUIRE(index->EstimateBuildMemory(0) > 0);
             const auto peak = index->EstimateBuildMemory(17);
             REQUIRE(peak >= steady);
@@ -2510,18 +2367,6 @@ TEST_CASE("HGraph build memory default Engine forwards supported scalar estimate
             REQUIRE(built.has_value());
             REQUIRE(built.value().empty());
             REQUIRE(index->GetNumElements() == 17);
-            vsag::JsonType report;
-            report["quantizer"].SetString(quantizer);
-            report["requested_threads"].SetUint64(threads);
-            report["count"].SetUint64(17);
-            report["steady"].SetUint64(steady);
-            report["expected_modeled_profile"].SetBool(EXPECT_MODELED_BUILD_MEMORY);
-#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
-            report["peak_estimate"].SetUint64(peak);
-#endif
-            report["build_success"].SetBool(true);
-            report["accounting"].SetString("public default Engine integration; no byte recorder");
-            std::cout << "HGRAPH_BUILD_MEMORY_ENGINE " << report.Dump() << std::endl;
         }
     }
 }
@@ -2590,23 +2435,6 @@ TEST_CASE("HGraph new worker allocation types match the target source rules",
     REQUIRE(user_task >= TestSharedRequest<std::packaged_task<void()>>());
     REQUIRE(backend_task >= TestSharedRequest<std::packaged_task<void()>>());
     REQUIRE(total >= user_task + backend_task);
-    vsag::JsonType report;
-    report["worker_object"].SetUint64(sizeof(Access::Worker));
-    report["worker_bind"].SetUint64(sizeof(Access::WorkerBind));
-    report["backend_bind"].SetUint64(sizeof(BackendBind));
-    report["user_task_request"].SetUint64(user_task);
-    report["backend_task_request"].SetUint64(backend_task);
-    report["complete_chain_request"].SetUint64(total);
-    report["filter_object_upper"].SetUint64(kFilterUpperSize);
-    report["filter_total_allocation_upper"].SetUint64(
-        TestSharedRequest<RemoveListFilterStorageUpper>());
-    report["compiler"].SetString(__VERSION__);
-#if defined(_LIBCPP_VERSION)
-    report["libcpp_version"].SetUint64(_LIBCPP_VERSION);
-#else
-    report["glibcxx_header_version"].SetUint64(__GLIBCXX__);
-#endif
-    std::cout << "HGRAPH_BUILD_MEMORY_LAYOUT " << report.Dump() << std::endl;
 #else
     auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
     RequireExpectedBuildMemoryProfile(index);
@@ -2645,17 +2473,9 @@ TEST_CASE("HGraph memory estimation checks integer arithmetic",
         REQUIRE(larger_block_estimate - precision_estimate == 2);
     }
 
-    auto require_invalid_argument = [&index](uint64_t count) {
-        bool caught_invalid_argument = false;
-        try {
-            (void)index->EstimateMemory(count);
-        } catch (const vsag::VsagException& e) {
-            REQUIRE(e.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
-            caught_invalid_argument = true;
-        } catch (...) {
-            FAIL("Expected VsagException for unrepresentable memory estimation");
-        }
-        REQUIRE(caught_invalid_argument);
+    const auto require_invalid_argument = [&index](uint64_t count) {
+        RequireEstimateError([&] { (void)index->EstimateMemory(count); },
+                             vsag::ErrorType::INVALID_ARGUMENT);
     };
 
     // FP32 code bytes overflow before block rounding.
@@ -2699,6 +2519,417 @@ TEST_CASE("HGraph non-fused SetImmutable does not require a fused searcher",
     auto result = index->KnnSearch(query, 1, kBruteForceSearchParams);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetIds()[0] == ids[0]);
+}
+
+TEST_CASE("HGraph Tune requires a complete source after Add",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base_count = 2;
+    const auto source = GENERATE(std::string("raw"), std::string("precise"), std::string("base"));
+    const bool reject_add = GENERATE(true, false);
+    const bool dedup = GENERATE(false, true);
+    const bool add_after_failure = GENERATE(false, true);
+    CAPTURE(source, reject_add, dedup, add_after_failure);
+
+    auto rejecting_pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common_param = MakeCommonParam(dim);
+    common_param.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(rejecting_pool);
+    auto hgraph_json = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "sq8",
+        "max_degree": 8,
+        "ef_construction": 32,
+        "build_thread_count": 1,
+        "store_raw_vector": true
+    })");
+    if (source == "precise") {
+        hgraph_json["store_raw_vector"].SetBool(false);
+        hgraph_json["use_reorder"].SetBool(true);
+        hgraph_json["precise_quantization_type"].SetString("fp32");
+    } else if (source == "base") {
+        hgraph_json["store_raw_vector"].SetBool(false);
+        hgraph_json["base_quantization_type"].SetString("fp32");
+    }
+    hgraph_json["support_duplicate"].SetBool(dedup);
+    hgraph_json["deduplicate_storage"].SetBool(dedup);
+    auto index = MakeHGraphIndex(hgraph_json, common_param);
+
+    std::vector<float> base_vectors = {
+        0.0F,
+        0.0F,
+        0.0F,
+        0.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+        1.0F,
+    };
+    std::vector<int64_t> base_ids = {10, 20};
+    auto base = MakeFloatDataset(base_vectors, base_ids, dim, base_count);
+    REQUIRE(index->Build(base).has_value());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    // Binary coordinates are represented exactly by both SQ8 and BF16.
+    std::vector<float> add_vectors = {1.0F, 0.0F, 0.0F, 0.0F};
+    std::vector<int64_t> add_ids = {30};
+    auto add = MakeFloatDataset(add_vectors, add_ids, dim, 1);
+
+    rejecting_pool->SetRejectSubmissions(reject_add);
+    auto add_result = index->Add(add);
+    rejecting_pool->SetRejectSubmissions(false);
+
+    if (reject_add) {
+        REQUIRE_FALSE(add_result.has_value());
+        REQUIRE(add_result.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+        // The label is reserved before enqueue, but its vector and links were never written.
+        REQUIRE(index->GetNumElements() == base_count);
+    } else {
+        REQUIRE(add_result.has_value());
+        REQUIRE(add_result.value().empty());
+        REQUIRE(index->GetNumElements() == base_count + 1);
+    }
+    REQUIRE(index->CheckIdExist(add_ids[0]));
+
+    if (add_after_failure) {
+        std::vector<float> later_vectors = {1.0F, 1.0F, 0.0F, 0.0F};
+        std::vector<int64_t> later_ids{40};
+        auto later = index->Add(MakeFloatDataset(later_vectors, later_ids, dim, 1));
+        REQUIRE(later.has_value());
+        REQUIRE(later.value().empty());
+    }
+    const auto count_before_tune = index->GetNumElements();
+
+    auto query = MakeFloatQuery(base_vectors, dim);
+    const std::string search_params =
+        add_after_failure ? R"({"hgraph":{"ef_search":32}})" : kBruteForceSearchParams;
+    auto before = index->KnnSearch(query, base_count + 2, search_params);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value()->GetDim() ==
+            base_count + (reject_add ? 0 : 1) + (add_after_failure ? 1 : 0));
+
+    auto tune_result = index->Tune(R"({
+        "index_param": {
+            "base_quantization_type": "bf16",
+            "max_degree": 8,
+            "ef_construction": 32
+        }
+    })",
+                                   true);
+    REQUIRE(tune_result.has_value());
+    REQUIRE(tune_result.value() == not reject_add);
+    REQUIRE(index->GetNumElements() == count_before_tune);
+    auto after = index->KnnSearch(query, base_count + 2, search_params);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+    for (int64_t i = 0; i < before.value()->GetDim(); ++i) {
+        REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+        REQUIRE(after.value()->GetDistances()[i] == before.value()->GetDistances()[i]);
+    }
+    if (reject_add) {
+        // Rejection must not disable future tuning, even when explicitly requested above.
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+        auto binary = index->Serialize();
+        REQUIRE(binary.has_value());
+        auto restored = MakeHGraphIndex(hgraph_json, common_param);
+        auto restored_result = restored->Deserialize(binary.value());
+        if (dedup) {
+            // Deduplicated deserialization already rejects an unbound logical ID.
+            REQUIRE_FALSE(restored_result.has_value());
+            return;
+        }
+        REQUIRE(restored_result.has_value());
+        auto restored_tune =
+            restored->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})", true);
+        REQUIRE(restored_tune.has_value());
+        REQUIRE_FALSE(restored_tune.value());
+        REQUIRE(restored->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+    }
+}
+
+TEST_CASE("HGraph restore preserves unfinished reservations before a later Add",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source][hgraph_restore_reservation]") {
+    const auto restore_mode =
+        GENERATE(std::string("ordinary"), std::string("streaming"), std::string("parallel"));
+    CAPTURE(restore_mode);
+    auto pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common = MakeCommonParam(4);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto parameters = MakeFp32HGraphJson(false);
+    auto index = MakeHGraphIndex(parameters, common);
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> labels{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, labels, 4, 2)).has_value());
+    std::vector<float> missing{1, 0, 0, 0};
+    std::vector<int64_t> failed_label{30};
+    pool->SetRejectSubmissions(true);
+    const auto failed = index->Add(MakeFloatDataset(missing, failed_label, 4, 1));
+    pool->SetRejectSubmissions(false);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+
+    auto restored = MakeHGraphIndex(parameters, MakeCommonParam(4));
+    if (restore_mode == "streaming") {
+        std::stringstream snapshot;
+        REQUIRE(index->SerializeStreaming(snapshot).has_value());
+        REQUIRE(restored->DeserializeStreaming(snapshot).has_value());
+    } else if (restore_mode == "parallel") {
+        class MemorySnapshot : public vsag::SerializeWriter, public vsag::DeserializeReader {
+        public:
+            void
+            Write(const char* data, uint64_t size) override {
+                bytes.append(data, size);
+            }
+            [[nodiscard]] uint64_t
+            Size() const override {
+                return bytes.size();
+            }
+            void
+            Read(uint64_t offset, uint64_t size, void* dest) override {
+                if (size > bytes.size() or offset > bytes.size() - size) {
+                    throw std::out_of_range("snapshot read");
+                }
+                std::memcpy(dest, bytes.data() + offset, size);
+            }
+            std::string bytes;
+        } snapshot;
+        REQUIRE(index->Serialize(snapshot, 4096).has_value());
+        REQUIRE(restored->ParallelDeserialize(snapshot).has_value());
+    } else {
+        auto binary = index->Serialize();
+        REQUIRE(binary.has_value());
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+    }
+    // Restoring reservations must not make the unwritten tail searchable.
+    REQUIRE(restored->GetNumElements() == 2);
+    auto before = restored->KnnSearch(MakeFloatQuery(vectors, 4), 4, kBruteForceSearchParams);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value()->GetDim() == 2);
+    REQUIRE_FALSE(ResultContainsId(before.value(), 30));
+
+    std::vector<float> later{1, 1, 0, 0};
+    std::vector<int64_t> later_label{40};
+    auto added = restored->Add(MakeFloatDataset(later, later_label, 4, 1));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::InnerId(*graph, 30) == 2);
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::InnerId(*graph, 40) == 3);
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::Pending(*graph, 2) != 0);
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::Pending(*graph, 3) == 0);
+    const auto tuned = restored->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})", true);
+    REQUIRE(tuned.has_value());
+    REQUIRE_FALSE(tuned.value());
+    REQUIRE(restored->CheckFeature(vsag::IndexFeature::SUPPORT_TUNE));
+}
+
+TEST_CASE("HGraph Tune accepts complete shared code slots",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source]") {
+    constexpr int64_t dim = 4;
+    auto common_param = MakeCommonParam(dim);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(), common_param);
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> ids{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, 2)).has_value());
+    std::vector<float> duplicate(dim, 1.0F);
+    std::vector<int64_t> duplicate_ids{30};
+    auto added = index->Add(MakeFloatDataset(duplicate, duplicate_ids, dim, 1));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+
+    // Three logical IDs share two physical slots; physical count is not logical coverage.
+    auto tuned = index->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})", true);
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value());
+    REQUIRE(index->GetNumElements() == 3);
+    RequireRangeContains(index, MakeFloatQuery(duplicate, dim), {20, 30}, 2);
+}
+
+TEST_CASE("HGraph Tune coverage follows code compaction",
+          "[ut][hgraph][add][hgraph_tune_incomplete_source]") {
+    constexpr int64_t dim = 4;
+    const int64_t removed_id = GENERATE(10, 30);
+    const bool complete_tail = GENERATE(false, true);
+    CAPTURE(removed_id, complete_tail);
+    auto pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common_param = MakeCommonParam(dim);
+    common_param.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["support_force_remove"].SetBool(true);
+    auto index = MakeHGraphIndex(parameters, common_param);
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> ids{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, 2)).has_value());
+    std::vector<float> added_vector{1, 0, 0, 0};
+    std::vector<int64_t> added_id{30};
+    pool->SetRejectSubmissions(true);
+    REQUIRE_FALSE(index->Add(MakeFloatDataset(added_vector, added_id, dim, 1)).has_value());
+    pool->SetRejectSubmissions(false);
+    if (complete_tail) {
+        added_id[0] = 40;
+        REQUIRE(index->Add(MakeFloatDataset(added_vector, added_id, dim, 1)).has_value());
+    }
+    auto removed = index->Remove({removed_id}, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(removed.has_value());
+    REQUIRE(removed.value() == 1);
+    added_id[0] = 50;
+    REQUIRE(index->Add(MakeFloatDataset(added_vector, added_id, dim, 1)).has_value());
+    auto tuned = index->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})");
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value() == (removed_id == 30));
+}
+
+TEST_CASE("HGraph Tune tracks the retained raw storage after an alias changes",
+          "[ut][hgraph][hgraph_tune_incomplete_source][hgraph_tune_review]") {
+    const bool drop_precise = GENERATE(false, true);
+    auto parameters = MakeFp32ReorderHGraphJson();
+    parameters["deduplicate_storage"].SetBool(false);
+    parameters["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(parameters, MakeCommonParam(4));
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> ids{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, 4, 2)).has_value());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    // Model an interrupted base write: raw aliases base, but precise is complete.
+    vsag::HGraphCodeWriteTestAccess::SetPending(*graph, 1, true, false, true);
+    const auto tuned = index->Tune(
+        drop_precise ? R"({"index_param":{"base_quantization_type":"bf16"}})"
+                     : R"({"index_param":{"base_quantization_type":"bf16","use_reorder":true,
+                                "precise_quantization_type":"fp32"}})");
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value());
+    // Keeping precise rebinds raw to complete precise storage. Dropping precise instead
+    // retains the incomplete old base as raw; rebuilding base cannot repair that old object.
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::Pending(*graph, 1) == (drop_precise ? 4 : 0));
+    const auto again = index->Tune(R"({"index_param":{"base_quantization_type":"fp32"}})");
+    REQUIRE(again.has_value());
+    REQUIRE(again.value() == not drop_precise);
+}
+
+TEST_CASE("HGraph code compaction preserves coverage when a later move throws",
+          "[ut][hgraph][hgraph_tune_incomplete_source][hgraph_tune_review]") {
+    using Cell = vsag::FlattenDataCell<vsag::FP32Quantizer<vsag::MetricType::METRIC_TYPE_L2SQR>,
+                                       vsag::FixedLayout<vsag::MemoryIO>>;
+    class ThrowingMoveCell : public Cell {
+    public:
+        using Cell::Cell;
+        void
+        Move(vsag::InnerIdType /*from*/, vsag::InnerIdType /*to*/) override {
+            throw std::bad_alloc();
+        }
+    };
+    const bool incomplete_source = GENERATE(false, true);
+    auto common = MakeCommonParam(4);
+    auto parameters = MakeFp32ReorderHGraphJson();
+    parameters["deduplicate_storage"].SetBool(false);
+    parameters["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(parameters, common);
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> ids{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, 4, 2)).has_value());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    vsag::HGraphCodeWriteTestAccess::SetPending(*graph, 0, true, false, true);
+    vsag::HGraphCodeWriteTestAccess::SetPending(
+        *graph, 1, incomplete_source, false, incomplete_source);
+    auto failing =
+        std::make_shared<ThrowingMoveCell>(std::make_shared<vsag::FP32QuantizerParameter>(),
+                                           std::make_shared<vsag::MemoryIOParameter>(),
+                                           common);
+    vsag::HGraphCodeWriteTestAccess::SetPrecise(*graph, failing);
+    REQUIRE_THROWS_AS(vsag::HGraphCodeWriteTestAccess::Move(*graph, 1, 0), std::bad_alloc);
+    // Base (and its raw alias) moved successfully, so they inherit source coverage even
+    // though precise Move failed. Only precise is conservatively unknown after its exception.
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::Pending(*graph, 0) == (incomplete_source ? 7 : 2));
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::Pending(*graph, 1) == (incomplete_source ? 5 : 0));
+}
+
+TEST_CASE("HGraph Tune and brute force search finish concurrently",
+          "[ut][hgraph][hgraph_tune_review]") {
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(parameters, MakeCommonParam(4));
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> ids{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, 4, 2)).has_value());
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(4)->Float32Vectors(new float[4]{0, 0, 0, 0})->Owner(true);
+    class PausingFilter : public vsag::Filter {
+    public:
+        bool
+        CheckValid(int64_t /*id*/) const override {
+            return true;
+        }
+        float
+        ValidRatio() const override {
+            entered.store(true);
+            while (not released.load()) {
+                std::this_thread::yield();
+            }
+            return 1.0F;
+        }
+        mutable std::atomic<bool> entered{false};
+        std::atomic<bool> released{false};
+    };
+    auto filter = std::make_shared<PausingFilter>();
+    auto start = std::make_shared<std::atomic<bool>>(false);
+    std::packaged_task<bool()> search([index, query, filter] {
+        for (uint64_t i = 0; i < 1000; ++i) {
+            auto result = index->KnnSearch(query, 2, kBruteForceSearchParams, filter);
+            if (not result.has_value() or result.value()->GetDim() != 2 or
+                result.value()->GetIds()[0] != 10 or result.value()->GetDistances()[0] != 0) {
+                return false;
+            }
+        }
+        return true;
+    });
+    std::packaged_task<bool()> tune([index, start] {
+        while (not start->load()) {
+            std::this_thread::yield();
+        }
+        for (uint64_t i = 0; i < 50; ++i) {
+            const auto result =
+                index->Tune(i % 2 == 0 ? R"({"index_param":{"base_quantization_type":"bf16"}})"
+                                       : R"({"index_param":{"base_quantization_type":"fp32"}})");
+            if (not result.has_value() or not result.value()) {
+                return false;
+            }
+        }
+        return true;
+    });
+    auto searched = search.get_future();
+    auto tuned = tune.get_future();
+    std::thread search_thread(std::move(search));
+    std::thread tune_thread(std::move(tune));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (not filter->entered.load() and std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    // ValidRatio runs under the search's global read lock, before its codes read lock.
+    // Let Tune reach the swap while that global lock is held. The old lock ordering
+    // takes codes exclusively here, reproducing the cycle when the filter is released.
+    start->store(true);
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    const auto swap_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (not vsag::HGraphCodeWriteTestAccess::CodesLocked(*graph) and
+           std::chrono::steady_clock::now() < swap_deadline) {
+        std::this_thread::yield();
+    }
+    filter->released.store(true);
+    const bool search_ready = searched.wait_until(deadline) == std::future_status::ready;
+    const bool tune_ready = tuned.wait_until(deadline) == std::future_status::ready;
+    // Detached workers own all their state on failure; future destruction cannot hang the test.
+    if (search_ready) {
+        search_thread.join();
+    } else {
+        search_thread.detach();
+    }
+    if (tune_ready) {
+        tune_thread.join();
+    } else {
+        tune_thread.detach();
+    }
+    REQUIRE(search_ready);
+    REQUIRE(tune_ready);
+    REQUIRE(searched.get());
+    REQUIRE(tuned.get());
 }
 
 TEST_CASE("HGraph exact duplicate fallback supports every dense data type",
@@ -3782,6 +4013,7 @@ TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",
     constexpr uint64_t build_threads = 4;
     auto common_param = MakeCommonParam(dim, build_threads);
     auto hgraph_json = MakeFp32HGraphJson(true, static_cast<int64_t>(build_threads));
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {
@@ -3929,6 +4161,7 @@ TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates se
     constexpr int64_t dim = 2;
     auto common_param = MakeCommonParam(dim);
     auto hgraph_json = MakeFp32HGraphJson();
+    hgraph_json["graph_type"].SetString(GENERATE("nsw", "pipnn"));
     auto index = MakeHGraphIndex(hgraph_json, common_param);
 
     std::vector<float> seed_vectors = {
@@ -4050,6 +4283,151 @@ TEST_CASE("HGraph optimized build accepts MRLE RaBitQ split with raw-vector stor
     REQUIRE(session.Active());
 }
 
+TEST_CASE("HGraph adaptive pruning build reload and add", "[ut][hgraph][adaptive_pruning]") {
+    const int64_t threads = GENERATE(1, 4);
+    auto common = MakeCommonParam(2, threads);
+    auto json = MakeFp32HGraphJson(false, threads);
+    json["alpha"].SetFloat(1.06F);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    const bool reverse = GENERATE(false, true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(reverse);
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    for (int64_t i = 0; i < 128; ++i) {
+        vectors.push_back(static_cast<float>(i % 16));
+        vectors.push_back(static_cast<float>(i / 16));
+        ids.push_back(i);
+    }
+    auto build = index->Build(MakeFloatDataset(vectors, ids, 2, ids.size()));
+    REQUIRE(build.has_value());
+    REQUIRE(build.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> query = {3.0F, 3.0F};
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(query, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 51);
+    std::vector<float> added = {3.25F, 3.25F};
+    std::vector<int64_t> added_ids = {128};
+    auto add = restored->Add(MakeFloatDataset(added, added_ids, 2, 1));
+    REQUIRE(add.has_value());
+    REQUIRE(add.value().empty());
+    found = restored->KnnSearch(MakeFloatQuery(added, 2), 1, R"({"hgraph":{"ef_search":128}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 128);
+    auto incompatible_json = MakeFp32HGraphJson(false, threads);
+    auto incompatible = MakeHGraphIndex(incompatible_json, common);
+    CHECK_FALSE(incompatible->Deserialize(binary.value()).has_value());
+    auto changed = vsag::JsonType::Parse(json.Dump());
+    changed["adaptive_pruning_adjust_step"].SetFloat(0.03F);
+    CHECK_FALSE(MakeHGraphIndex(changed, common)->Deserialize(binary.value()).has_value());
+    auto wrong_scope = vsag::JsonType::Parse(json.Dump());
+    wrong_scope["adaptive_pruning_apply_to_reverse"].SetBool(not reverse);
+    CHECK_FALSE(MakeHGraphIndex(wrong_scope, common)->Deserialize(binary.value()).has_value());
+    json["alpha"].SetFloat(1.12F);
+    CHECK_FALSE(MakeHGraphIndex(json, common)->Deserialize(binary.value()).has_value());
+}
+
+TEST_CASE("HGraph adaptive pruning unsupported contexts", "[ut][hgraph][adaptive_pruning]") {
+    auto common = MakeCommonParam(2);
+    auto json = MakeFp32HGraphJson(false);
+    json["adaptive_pruning"].SetBool(true);
+    SECTION("ODescent") {
+        json["graph_type"].SetString("odescent");
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Inner product") {
+        common.metric_ = vsag::MetricType::METRIC_TYPE_IP;
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Unsupported scope") {
+        json["adaptive_pruning_apply_to_upper"].SetBool(true);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+    SECTION("Invalid threshold") {
+        json["adaptive_pruning_adjust_step"].SetFloat(1.0F);
+        CHECK_THROWS(MakeHGraphIndex(json, common));
+    }
+}
+
+TEST_CASE("HGraph adaptive pruning rejects imported build caches",
+          "[ut][hgraph][adaptive_pruning][cache]") {
+    auto common = MakeCommonParam(2);
+    std::vector<float> vectors = {0, 0, 1, 0, 0, 1, 1, 1};
+    std::vector<int64_t> ids = {10, 20, 30, 40};
+    std::vector<std::string> source_ids = {"a", "b", "c", "d"};
+    auto data = MakeFloatDatasetWithSourceIds(vectors, ids, source_ids, 2, 4);
+    auto json = MakeFp32HGraphJson(false);
+    auto source = MakeHGraphIndex(json, common);
+    REQUIRE(source->Build(data).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+    cache.seekg(0);
+    json["adaptive_pruning"].SetBool(true);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto target = MakeHGraphIndex(json, common);
+    REQUIRE(target->ImportCache(cache).has_value());
+    const auto result = target->Build(data);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    CHECK(result.error().message.find("adaptive_pruning") != std::string::npos);
+}
+
+TEST_CASE("HGraph adaptive pruning RaBitQ split and fused lifecycle",
+          "[ut][hgraph][adaptive_pruning][fused]") {
+    const bool fused = GENERATE(false, true);
+    const int64_t threads = GENERATE(1, 4);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    auto common = MakeCommonParam(dim, threads);
+    auto json = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "max_degree":8, "ef_construction":32, "use_reorder":true, "reorder_source":"base",
+        "alpha":1.06, "adaptive_pruning":true
+    })");
+    json["rabitq_fused_datacell"].SetBool(fused);
+    // Split incremental Add already requires raw vectors for its temporary SQ8 build store.
+    json["store_raw_vector"].SetBool(not fused);
+    json["build_thread_count"].SetInt(threads);
+    json["adaptive_pruning_apply_to_reverse"].SetBool(GENERATE(false, true));
+    auto index = MakeHGraphIndex(json, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto built = index->Build(MakeFloatDataset(vectors, ids, dim, count));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    std::vector<float> added(dim, 2.0F);
+    std::vector<int64_t> added_ids = {count};
+    auto result = restored->Add(MakeFloatDataset(added, added_ids, dim, 1));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    auto found =
+        restored->KnnSearch(MakeFloatQuery(added, dim), 1, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == count);
+}
+
 TEST_CASE("HGraph fused Add preencoding preserves row mapping and rejects failed batches",
           "[ut][hgraph][fused][preencode]") {
     constexpr int64_t dim = 64;
@@ -4132,4 +4510,189 @@ TEST_CASE("HGraph fused Add preencoding preserves row mapping and rejects failed
     for (int64_t i = 0; i < count * dim; ++i) {
         REQUIRE(restored_vectors->GetFloat32Vectors()[i] == expected->GetFloat32Vectors()[i]);
     }
+}
+
+TEST_CASE("HGraph Merge rejects unfinished inputs before copying any unit",
+          "[ut][hgraph][hgraph_review_lifecycle]") {
+    const bool fail_add = GENERATE(false, true);
+    const bool incomplete_destination = GENERATE(false, true);
+    auto pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common = MakeCommonParam(4);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto param = MakeFp32HGraphJson(false);
+    auto source = MakeHGraphIndex(param, common);
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> labels{10, 20};
+    REQUIRE(source->Build(MakeFloatDataset(vectors, labels, 4, 2)).has_value());
+    std::vector<float> missing{1, 0, 0, 0};
+    std::vector<int64_t> missing_label{30};
+    if (fail_add) {
+        pool->SetRejectSubmissions(true);
+        REQUIRE_FALSE(source->Add(MakeFloatDataset(missing, missing_label, 4, 1)).has_value());
+        pool->SetRejectSubmissions(false);
+    }
+    std::vector<int64_t> later_label{40};
+    REQUIRE(source->Add(MakeFloatDataset(missing, later_label, 4, 1)).has_value());
+    auto destination = MakeHGraphIndex(param, MakeCommonParam(4));
+    auto complete = MakeHGraphIndex(param, MakeCommonParam(4));
+    std::vector<int64_t> complete_labels{50, 60};
+    REQUIRE(complete->Build(MakeFloatDataset(vectors, complete_labels, 4, 2)).has_value());
+    vsag::IdMapFunction identity = [](int64_t id) { return std::make_tuple(true, id); };
+    if (incomplete_destination) {
+        std::swap(source, destination);
+    }
+    const auto before = destination->GetNumElements();
+    auto result = incomplete_destination
+                      ? destination->Merge({{complete, identity}})
+                      : destination->Merge({{complete, identity}, {source, identity}});
+    if (fail_add) {
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(destination->GetNumElements() == before);
+        REQUIRE_FALSE(destination->CheckIdExist(50));
+        auto damaged = incomplete_destination ? destination : source;
+        auto tuned = damaged->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})", true);
+        REQUIRE(tuned.has_value());
+        REQUIRE_FALSE(tuned.value());
+    } else {
+        REQUIRE(result.has_value());
+        REQUIRE(destination->GetNumElements() == 5);
+        auto tuned =
+            destination->Tune(R"({"index_param":{"base_quantization_type":"bf16"}})", true);
+        REQUIRE(tuned.has_value());
+        REQUIRE(tuned.value());
+    }
+}
+
+TEST_CASE("HGraph restore validates reservation metadata and accepts legacy counts",
+          "[ut][hgraph][hgraph_review_lifecycle]") {
+    const auto mode =
+        GENERATE(std::string("ordinary"), std::string("streaming"), std::string("parallel"));
+    const auto mutation =
+        GENERATE(std::string("capacity"), std::string("overflow"), std::string("legacy"));
+    CAPTURE(mode, mutation);
+    auto param = MakeFp32HGraphJson(false);
+    auto index = MakeHGraphIndex(param, MakeCommonParam(4));
+    std::vector<float> vectors{0, 0, 0, 0, 1, 1, 1, 1};
+    std::vector<int64_t> labels{10, 20};
+    REQUIRE(index->Build(MakeFloatDataset(vectors, labels, 4, 2)).has_value());
+    class Snapshot : public vsag::SerializeWriter, public vsag::DeserializeReader {
+    public:
+        void
+        Write(const char* data, uint64_t size) override {
+            bytes.append(data, size);
+        }
+        [[nodiscard]] uint64_t
+        Size() const override {
+            return bytes.size();
+        }
+        void
+        Read(uint64_t offset, uint64_t size, void* dest) override {
+            if (size > bytes.size() or offset > bytes.size() - size) {
+                throw std::out_of_range("snapshot read");
+            }
+            std::memcpy(dest, bytes.data() + offset, size);
+        }
+        std::string bytes;
+    } snapshot;
+    auto mutate = [&](const vsag::MetadataPtr& metadata) {
+        auto info = metadata->Get(vsag::BASIC_INFO);
+        if (mutation == "legacy") {
+            info.GetInnerJson()->erase("total_count");
+        } else {
+            const uint64_t count =
+                mutation == "capacity"
+                    ? info["max_capacity"].GetUint64() + 1
+                    : static_cast<uint64_t>(std::numeric_limits<vsag::InnerIdType>::max()) + 1;
+            info["total_count"].SetUint64(count);
+        }
+        metadata->Set(vsag::BASIC_INFO, info);
+    };
+    if (mode == "streaming") {
+        std::stringstream stream;
+        REQUIRE(index->SerializeStreaming(stream).has_value());
+        snapshot.bytes = stream.str();
+        vsag::IOStreamReader reader(stream);
+        auto metadata = vsag::StreamHeader::Read(reader);
+        mutate(metadata);
+        std::ostringstream header;
+        vsag::IOStreamWriter writer(header);
+        vsag::StreamHeader::Write(writer, metadata);
+        snapshot.bytes =
+            header.str() + snapshot.bytes.substr(vsag::test::StreamingBodyOffset(snapshot.bytes));
+    } else {
+        if (mode == "parallel") {
+            REQUIRE(index->Serialize(snapshot, 4096).has_value());
+        } else {
+            std::stringstream stream;
+            REQUIRE(index->Serialize(stream).has_value());
+            snapshot.bytes = stream.str();
+        }
+        vsag::ReadFuncStreamReader reader(
+            [&](uint64_t offset, uint64_t size, void* dest) { snapshot.Read(offset, size, dest); },
+            0,
+            snapshot.bytes.size());
+        auto footer = vsag::Footer::Parse(reader);
+        REQUIRE(footer != nullptr);
+        mutate(footer->GetMetadata());
+        std::ostringstream output;
+        vsag::IOStreamWriter writer(output);
+        footer->Write(writer);
+        snapshot.bytes =
+            snapshot.bytes.substr(0, snapshot.bytes.size() - footer->Length()) + output.str();
+    }
+    auto restored = MakeHGraphIndex(param, MakeCommonParam(4));
+    std::stringstream input(snapshot.bytes);
+    auto result = mode == "streaming"  ? restored->DeserializeStreaming(input)
+                  : mode == "parallel" ? restored->ParallelDeserialize(snapshot)
+                                       : restored->Deserialize(input);
+    if (mutation == "legacy") {
+        REQUIRE(result.has_value());
+        REQUIRE(restored->GetNumElements() == 2);
+        std::vector<int64_t> added_label{30};
+        REQUIRE(restored->Add(MakeFloatDataset(vectors, added_label, 4, 1)).has_value());
+        auto graph = std::static_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+        REQUIRE(vsag::HGraphCodeWriteTestAccess::InnerId(*graph, 30) == 2);
+    } else {
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_BINARY);
+    }
+}
+
+TEST_CASE("HGraph optimized fused build omits Tune pending metadata",
+          "[ut][hgraph][hgraph_review_lifecycle]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 32;
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "base_io_type":"memory_io", "base_supplement_io_type":"memory_io",
+        "graph_io_type":"memory_io", "graph_storage_type":"flat", "graph_type":"nsw",
+        "rabitq_use_fht":true, "rabitq_fused_datacell":true,
+        "rabitq_bits_per_dim_base":2, "rabitq_bits_per_dim_precise":6,
+        "use_reorder":true, "reorder_source":"base", "store_raw_vector":false,
+        "max_degree":8, "ef_construction":32, "build_thread_count":1
+    })");
+    auto index = MakeHGraphIndex(param, MakeCommonParam(dim));
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * 17 + d * 13) % 97) / 97.0F;
+        }
+    }
+    REQUIRE(index->Build(MakeFloatDataset(vectors, labels, dim, count)).has_value());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(vsag::HGraphCodeWriteTestAccess::PendingCount(*graph) == 0);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    vsag::IOStreamReader reader(stream);
+    auto metadata = vsag::StreamHeader::Read(reader);
+    REQUIRE_FALSE(metadata->Get(vsag::BASIC_INFO).Contains("pending_code_writes"));
+    stream.seekg(0);
+    auto restored = MakeHGraphIndex(param, MakeCommonParam(dim));
+    REQUIRE(restored->DeserializeStreaming(stream).has_value());
+    REQUIRE(restored->GetNumElements() == count);
+    REQUIRE(
+        restored->KnnSearch(MakeFloatQuery(vectors, dim), 1, kBruteForceSearchParams).has_value());
 }

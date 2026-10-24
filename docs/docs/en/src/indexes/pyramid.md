@@ -15,6 +15,14 @@ results.
 - Example (single hierarchy): [`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
 - Example (multi-hierarchy): [`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
 
+## Read-only indexes
+
+`SetImmutable()` rejects further writes and releases per-vector locks, while retaining
+the reverse ID map for efficient ID-based distance and retrieval operations. The map
+uses additional memory compared with discarding it, but avoids linear ID scans.
+This applies whether the index is frozen before or after deserialization; the
+serialized format is unchanged.
+
 ## How it works
 
 1. **Path tree.** Each vector can carry independent paths in addition to its id.
@@ -81,7 +89,34 @@ auto result = index->KnnSearch(
 
 ## Input data type
 
-The public `Build`, `Add`, and search paths currently accept FP32 vectors supplied with `Dataset::Float32Vectors`; set `dtype` to `"float32"`. `base_quantization_type` selects internal encoding and storage and does not by itself enable FP16, BF16, or INT8 input.
+Pyramid accepts `dtype: "float16"` and `dtype: "bfloat16"` input for `Build`, `Add`, and search, as well as the existing `"float32"` input. The input `dtype` is distinct from the storage quantizer: use `"float16"` / `"bfloat16"` for `dtype`, but `"fp16"` / `"bf16"` for quantization parameters.
+
+For either half input type, supply `Dataset::Float16Vectors` with a contiguous `uint16_t` buffer containing the **encoded FP16 or BF16 bit patterns**, not integers obtained by numerically casting floats. `dtype` determines how these bits are interpreted. Build/Add buffers contain `NumElements() * Dim()` entries; query buffers must use the same input format as the index. Supply IDs and paths as in the example above, replacing `Float32Vectors(data)` and `Float32Vectors(q)` with `Float16Vectors(half_data)` and `Float16Vectors(half_query)`. With `Owner(false)`, keep the borrowed buffers (including IDs and paths) alive for the operation.
+
+For half input, supported `base_quantization_type` and, when `use_reorder` is `true`, `precise_quantization_type` values are `fp16`, `bf16`, `pq`, `sq8`, and `fp32`. Quantizer-specific requirements still apply (for example, PQ training and dimension settings). A minimal matching-format configuration is:
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 32,
+    "index_param": {
+        "graph_type": "nsw",
+        "base_quantization_type": "fp16",
+        "use_reorder": false
+    }
+}
+```
+
+For BF16 input with BF16 storage, change `dtype` to `"bfloat16"` and `base_quantization_type` to `"bf16"`. Cross-format storage conversion is also supported, such as FP16 input with BF16 storage or BF16 input with FP32 storage; this does not change the required input format of subsequent queries. `metric_type: "cosine"` normalizes vectors before encoding, so matching-format input does not imply byte-for-byte preservation for cosine.
+
+For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and `pq`/`sq8`/`fp32` storage convert the input through float32; they do not provide the same half-bit preservation guarantee.
+
+For `CalcDistanceById` and `CalcDistancesById` on half-input indexes, use the `DatasetPtr` overload with a native half query buffer matching the index dtype. The raw `const float*` overloads accept only float32 indexes and reject half-input indexes.
+
+An FP16 or BF16 stored vector code occupies `2 * dim` bytes, compared with `4 * dim` for FP32. This is **vector-code size, not total index memory**: graphs, IDs, paths, allocation overhead, and any reorder/raw-vector copies also consume space. Half input alone does not select half storage or halve total memory.
+
+Use `graph_type: "nsw"` or `"odescent"` with half input. **PiPNN remains float32-only.** These guarantees describe Pyramid, not every VSAG index.
 
 ## Build parameters
 
@@ -97,6 +132,7 @@ Build-time parameters live under `index_param`.
 | `graph_storage_type` | string | `"flat"` | Bottom-graph storage for a `multi_layer` root: `flat` favors construction and search speed, while `compressed` reduces graph memory. Compressed storage requires `max_degree <= 255`. Single-layer roots, routing graphs, and child graphs remain sparse. |
 | `ef_construction` | int | `400` | Candidate list size for `nsw` builds. |
 | `alpha` | float | `1.2` | Pruning factor during graph construction; PiPNN requires a finite value at least `1.0`. |
+| `adaptive_pruning` | boolean | `false` | Optional NSW bottom forward/reverse L2 selector; see [configuration and scope](#experimental-adaptive-nsw-pruning). |
 | `graph_iter_turn` | int | — | ODescent iterations (effective with `graph_type: "odescent"`). |
 | `neighbor_sample_rate` | float | — | ODescent neighbor sampling rate. |
 | `pipnn_max_leaf_size` | int | `1024` | Maximum PiPNN partition leaf size. |
@@ -193,7 +229,7 @@ Search-time parameters live under the `pyramid` sub-object:
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
-| `parallelism` | int | `1` | Values greater than `1` enable parallel search of the sub-graphs reached by the query paths; the per-subgraph results are merged and de-duplicated before reordering. It is a switch rather than a concurrency limit — see the note below the table. |
+| `parallelism` | int | `1` | Maximum concurrent sub-graph searches for one request. Values greater than `1` use the index thread pool; results are merged and de-duplicated before reordering. See the thread pool requirement below. |
 | `hierarchies` | string[] | `[]` | Select which hierarchy to search. Empty means use the default (unnamed) hierarchy. |
 | `hierarchy_op` | string | `"single"` | How to combine results across hierarchies: `single` (search one hierarchy), `union`, or `intersection`. **Note:** `union` and `intersection` are not yet implemented — setting them will cause `KnnSearch`/`RangeSearch` to return an error. |
 | `rabitq_error_rate` | float | `1.9` | Positive lower-bound error multiplier for this search. The default `1.9` is relatively large; increasing it improves accuracy but slows down search. |
@@ -208,8 +244,9 @@ auto result = index->KnnSearch(
 
 `parallelism` only takes effect when the index owns a thread pool. An index created through an `Engine` whose `Resource` supplies a `ThreadPool` (for example `Engine::CreateThreadPool(n)`), or an index built with `build_thread_count > 1`, has one. `Factory::CreateIndex` and `Index::Load` do not attach a thread pool, so on those paths `parallelism` is ignored and the routed sub-graphs are searched one after another. When the parameter cannot be honored, Pyramid logs a warning once per index.
 
-Values `<= 0` are clamped to `1`. With `parallelism >= 2`, Pyramid submits one task per resolved sub-graph to the index's thread pool, waits for all of them, and then merges the candidates by inner id (keeping the smallest distance). The value is not a concurrency cap: `parallelism: 2` can still run more than two sub-graph searches at the same time. The effective concurrency is
-`min(number of resolved sub-graphs, free workers in the index thread pool)`, and that pool is fixed in size and shared by every request on the index. Note that one path does not always map to one task: a path that ends at an intermediate node expands to all of its descendant index nodes.
+Values `<= 0` are clamped to `1`. With `parallelism >= 2`, Pyramid searches at most `parallelism` resolved sub-graphs concurrently. The effective concurrency is bounded by `min(parallelism, thread pool size, number of resolved sub-graphs)`; contention with other requests may reduce it. Thus `parallelism: 2` uses at most two simultaneous sub-graph searches even with a 32-thread pool.
+
+Results are merged by inner id, keeping the smallest distance. A path ending at an intermediate node can expand to multiple descendant index nodes; those nodes share the same request budget.
 
 ## Multi-Hierarchy Support
 
@@ -473,3 +510,40 @@ the corrected lookup behavior; upgrade the reader as well.
 - [Index Parameters](../resources/index_parameters.md)
 - [Graph Enhancement](../advanced/enhance_graph.md)
 - [HGraph](hgraph.md)
+
+## Experimental adaptive NSW pruning
+
+Pyramid reuses the [adaptive neighbor selector](adaptive_pruning.md) used by HGraph. Parameters are flat fields under `index_param` and `adaptive_pruning` is a boolean; the old
+experimental nested object and the removed `fill_rejected` option are rejected, so indexes
+using that experimental schema must be rebuilt. Configure its flat fields once under `index_param`; it applies to the bottom graph of each built path node, including a `single_layer` root and the bottom of a `multi_layer` root. Routing layers keep their existing fixed-alpha selection. Flat nodes start using the policy when they are promoted to NSW graphs.
+
+```json
+{
+    "graph_type": "nsw",
+    "alpha": 1.06,
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": true,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+These fields belong inside `index_param`; the example is an experiment configuration, not a recommended default for every dataset.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | Use the shared multi-pass selector during NSW insertion |
+| `adaptive_pruning_adjust_step` | `0.06` | Step used to relax or tighten the hierarchy's baseline alpha |
+| `adaptive_pruning_apply_to_reverse` | `false` | Also re-prune full reverse lists, centered on the existing neighbor |
+| `adaptive_pruning_apply_to_upper` | `false` | Reserved; enabling upper-layer adaptation is unsupported |
+
+The policy is global, while each hierarchy retains its own effective `alpha` and maximum degree. There is no hierarchy-specific `adaptive_pruning` override. Every effective alpha must be finite, with `adjust_step >= 0`, `alpha - 2*adjust_step > 0`, and finite `alpha + 3*adjust_step`. For alpha 1.06 and step 0.06, the possible adjusted values span 0.94–1.24; these constants are not derived automatically from vector dimension.
+
+Enabled mode requires `graph_type: "nsw"` and `metric_type: "l2"`. A build with a nonempty imported cache is rejected; an empty cache is accepted. ODescent, routing-layer adaptation, and update/refinement paths are outside this policy's scope. Reverse lists with spare capacity still append directly. The distance provider and quantizer are unchanged.
+
+Serialization records the policy. Reload requires matching enabled state and, when enabled, matching alpha, step and scope settings. Parameters saved without this field mean disabled mode. This allows consistent subsequent `Add` operations; it does not guarantee that older VSAG binaries can read newly serialized indexes.
+
+Compare QPS at comparable recall, together with build time and memory. Extra pruning passes can increase construction time even when the resulting graph accelerates queries. For `k=10`, Pyramid currently accepts `ef_search` only in `[1, 1000]`. A root-only GIST run with empty build paths and no query `Paths` measures unfiltered root search; its gains do not establish gains for path-filtered workloads. For RaBitQ + SQ8 reorder, construction uses the existing SQ8 distance provider; this configuration is distinct from RaBitQ 3+5 split storage.
+
+
+In the GIST 1M four-combination ablation, the single-factor QPS change from filling ranged from −3.4% to +4.7%, without consistent benefit, so unconditional filling and its option were removed. Reverse adaptation remains optional: it slowed all matched recall targets at alpha=1.06 and improved them at alpha=1.2 in this experiment. Each configuration used one parallel-built index; small differences do not establish stable gains. Select the reverse setting for the dataset and target recall.
