@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "datacell/sq_local_split_datacell_factory_impl.h"
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
@@ -108,6 +109,14 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
         actual_quantization = tq_param->GetBottomQuantizationName();
     }
 
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT) {
+        CHECK_ARGUMENT(not is_transform_quantizer, "sq_local_split does not support transforms");
+        return MakeSQLocalSplitDataCell<metric>(param, common_param);
+    }
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT) {
+        CHECK_ARGUMENT(not is_transform_quantizer, "sq_local_split does not support transforms");
+        return MakeSQLocalSplitDataCell<metric>(param, common_param);
+    }
     if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL) {
         const bool supported = !is_transform_quantizer;
         CHECK_ARGUMENT(supported, "sq8_local does not support transforms");

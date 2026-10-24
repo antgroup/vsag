@@ -2262,6 +2262,9 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SQ_LOCAL_BITS_PER_DIM_BASE || key == SQ_LOCAL_BITS_PER_DIM_PRECISE ||
+                   key == SQ_LOCAL_BITS_PER_DIM_QUERY) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][key].SetJson(value);
         } else if (key == PYRAMID_PRECISE_QUANTIZATION_TYPE) {
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
         } else if (key == PYRAMID_GRAPH_MAX_DEGREE) {
@@ -2333,6 +2336,7 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
         }
     }
     ApplyRaBitQSplitConfig(ParseRaBitQSplitConfig(external_param), inner_json);
+    ApplySQLocalSplitConfig(external_param, inner_json);
     ValidateMRLEDim(external_param, common_param.dim_);
     if (RequiresRawVectorForTransformQuantizer(inner_json) and
         not RequiresRawVectorForMRLERaBitQSplit(inner_json)) {

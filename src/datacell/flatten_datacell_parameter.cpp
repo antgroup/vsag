@@ -73,11 +73,14 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
         json.Contains(QUANTIZATION_PARAMS_KEY),
         fmt::format("flatten interface parameters must contains {}", QUANTIZATION_PARAMS_KEY));
 
-    const bool is_split_codes =
+    const bool is_rabitq_split_codes =
         json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == RABITQ_SPLIT_CODES;
+    const bool is_sq_local_split_codes =
+        json.Contains(CODES_TYPE_KEY) && json[CODES_TYPE_KEY].GetString() == SQ_LOCAL_SPLIT_CODES;
+    const bool is_split_codes = is_rabitq_split_codes or is_sq_local_split_codes;
     this->quantizer_parameter =
         QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
-    if (is_split_codes) {
+    if (is_rabitq_split_codes) {
         const auto canonical_quantizer_json = this->quantizer_parameter->ToJson();
         CHECK_ARGUMENT(
             canonical_quantizer_json.Contains(RABITQ_QUANTIZATION_VERSION_KEY) &&
@@ -86,16 +89,24 @@ FlattenDataCellParameter::FromJson(const JsonType& json) {
             "codes_type=rabitq_split requires a split RaBitQ quantizer");
     }
     this->name = FLATTEN_DATA_CELL;
-    if (is_split_codes) {
+    if (is_rabitq_split_codes) {
         this->name = RABITQ_SPLIT_DATA_CELL;
+    }
+    if (is_sq_local_split_codes) {
+        this->name = SQ_LOCAL_SPLIT_DATA_CELL;
     }
 }
 
 JsonType
 FlattenDataCellParameter::ToJson() const {
     JsonType json;
-    json[CODES_TYPE_KEY].SetString(this->name == RABITQ_SPLIT_DATA_CELL ? RABITQ_SPLIT_CODES
-                                                                        : FLATTEN_CODES);
+    if (this->name == RABITQ_SPLIT_DATA_CELL) {
+        json[CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
+    } else if (this->name == SQ_LOCAL_SPLIT_DATA_CELL) {
+        json[CODES_TYPE_KEY].SetString(SQ_LOCAL_SPLIT_CODES);
+    } else {
+        json[CODES_TYPE_KEY].SetString(FLATTEN_CODES);
+    }
     json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
     if (this->supplement_io_parameter != nullptr) {
         json[SUPPLEMENT_IO_PARAMS_KEY].SetJson(this->supplement_io_parameter->ToJson());

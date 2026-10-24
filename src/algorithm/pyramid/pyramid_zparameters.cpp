@@ -291,7 +291,8 @@ PyramidParameters::FromJson(const JsonType& json) {
     }
 
     this->base_codes_param = CreateFlattenParam(json[BASE_CODES_KEY]);
-    const bool use_split_codes = this->base_codes_param->name == RABITQ_SPLIT_DATA_CELL;
+    const bool use_split_codes = this->base_codes_param->name == RABITQ_SPLIT_DATA_CELL or
+                                 this->base_codes_param->name == SQ_LOCAL_SPLIT_DATA_CELL;
     this->reorder_source =
         use_split_codes ? HGRAPH_REORDER_SOURCE_BASE : HGRAPH_REORDER_SOURCE_PRECISE;
 

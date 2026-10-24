@@ -143,3 +143,64 @@ Existing `sq8`, `sq4`, `sq8_uniform`, defaults and their formats are unchanged.
 The local types require readers that support them. Records and quantizer metadata use existing native binary conventions, not a new cross-endian format. Loading validates dimension, metric and record length. HGraph serialization preserves base and precise stores, including RaBitQ plus either local quantizer. Tune can create them from retained raw data or FP32 codes; lossy local codes alone cannot supply a later precision-changing Tune. Existing `ignore_reorder`, `reorder_source` and Tune restrictions remain applicable.
 
 No broad recall/throughput benchmark campaign accompanies this change.
+
+### Split local SQ (`sq_local_split`)
+
+`sq_local_split` is the split-storage variant of the local scalar quantizer. It reuses the FHT
+random-sign rotation that RaBitQ applies, then scalar-quantizes the rotated vector per vector with
+`x + y` bits per component:
+
+```
+d_hat = v_min + delta * c,        c = (hi << y) | lo
+```
+
+The high `x` bits (`hi`) are stored with the per-vector metadata (`v_min`, `delta`, `|d_hat|^2`,
+`sum(c)`); the low `y` bits (`lo`) go to a separate supplement storage. The filter record can stay
+in memory while the supplement can live on a slower backend, which is the same deployment pattern
+as the RaBitQ `x + y` split.
+
+| parameter | meaning | range |
+| --- | --- | --- |
+| `sq_local_bits_per_dim_base` | `x`, high bits used as the filter | `1 <= x <= 7` |
+| `sq_local_bits_per_dim_precise` | `y`, low bits used as the supplement | `1 <= y <= 7`, `x + y <= 8` |
+| `sq_local_bits_per_dim_query` | `32` = FP32 query (default), `8` = SQ8 query | `32` or `8` |
+
+Only dense `float32` with `l2`, `ip` or `cosine` is supported. HGraph and Pyramid select the split
+storage automatically: the index keeps `reorder_source = base` and reads the base records, so no
+separate precise store is created.
+
+Distance evaluation keeps the rotated FP32 query:
+
+```
+<q, d_hat> = v_min * sum(q) + delta * <q, c>
+```
+
+With a quantized query (`sq_local_bits_per_dim_query = 8`) the per-vector constant `sum(c)` closes
+the formula: `<q_hat, c> = q_min * sum(c) + delta_q * <c_q, c>`. Reading only the filter record
+drops the low bits and yields a valid lower bound on the inner product, used for pruning.
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 960,
+    "index_param": {
+        "base_quantization_type": "sq_local_split",
+        "sq_local_bits_per_dim_base": 3,
+        "sq_local_bits_per_dim_precise": 5,
+        "max_degree": 32,
+        "ef_construction": 200
+    }
+}
+```
+
+During construction the datacell keeps a temporary byte-per-dimension layout
+(`FlattenOptimizedBuildInterface`): graph construction compares byte codes with a vectorizable
+kernel, and `FinalizeOptimizedBuild()` packs the split records once. Serialization writes both
+records plus the rotation signs; loading validates the dimension, metric and record sizes.
+
+Measured on GIST1M (960 dims, 1M vectors, Pyramid, `max_degree = 32`,
+`ef_construction = 200`, 32 build threads), compared with RaBitQ split `x = 3, y = 5` at the same
+parameters: build `415.9 s` vs `427.4 s`, index memory `1.49 GB` vs `1.48 GB`, recall@10 within
+`0.001` at every `ef_search`, and search latency `0.45 / 0.69 / 1.15 / 2.02 ms` vs
+`1.22 / 1.81 / 2.64 / 4.67 ms` at `ef_search = 32 / 64 / 128 / 256`.

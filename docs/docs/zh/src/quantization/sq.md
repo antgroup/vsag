@@ -139,3 +139,60 @@ HGraph 向这些存储传入原始向量，由量化器负责 cosine 归一化�
 新类型需要支持它们的读取版本。记录及元数据沿用原生二进制序列化约定，不引入跨字节序格式。加载校验维度、度量和记录长度。HGraph 序列化保留基础及精排存储，包括 RaBitQ 加任一 local 量化器。Tune 可从保留的原始数据或 FP32 编码生成这些存储；仅有有损 local 编码时不能执行后续改变精度的 Tune。原有 `ignore_reorder`、`reorder_source` 及 Tune 限制保持不变。
 
 本次变更未开展大规模召回率或吞吐基准测试。
+
+### 分片 local SQ（`sq_local_split`）
+
+`sq_local_split` 是 local 标量量化的分片存储版本。它复用 RaBitQ 的 FHT 随机符号旋转，再对旋转后的
+向量做逐向量标量量化，每个分量 `x + y` bit：
+
+```
+d_hat = v_min + delta * c,        c = (hi << y) | lo
+```
+
+高位 `x` bit（`hi`）与逐向量元数据（`v_min`、`delta`、`|d_hat|^2`、`sum(c)`）一起存放；低位 `y` bit
+（`lo`）写入独立的 supplement 存储。filter 记录可以常驻内存，supplement 可放在更慢的后端，这与
+RaBitQ 的 `x + y` 分片是同一种部署方式。
+
+| 参数 | 含义 | 取值范围 |
+| --- | --- | --- |
+| `sq_local_bits_per_dim_base` | `x`，作为过滤用的高位 bit 数 | `1 <= x <= 7` |
+| `sq_local_bits_per_dim_precise` | `y`，作为精排用的低位 bit 数 | `1 <= y <= 7`，`x + y <= 8` |
+| `sq_local_bits_per_dim_query` | `32` = FP32 查询（默认），`8` = SQ8 查询 | `32` 或 `8` |
+
+仅支持稠密 `float32` 与 `l2`、`ip`、`cosine`。HGraph 与 Pyramid 会自动选择分片存储：索引保持
+`reorder_source = base` 并直接读取 base 记录，不再创建独立的精排存储。
+
+距离计算保留旋转后的 FP32 查询：
+
+```
+<q, d_hat> = v_min * sum(q) + delta * <q, c>
+```
+
+当查询也量化（`sq_local_bits_per_dim_query = 8`）时，逐向量常量 `sum(c)` 补齐公式：
+`<q_hat, c> = q_min * sum(c) + delta_q * <c_q, c>`。只读 filter 记录会丢掉低位，得到内积的下界，
+用于剪枝。
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 960,
+    "index_param": {
+        "base_quantization_type": "sq_local_split",
+        "sq_local_bits_per_dim_base": 3,
+        "sq_local_bits_per_dim_precise": 5,
+        "max_degree": 32,
+        "ef_construction": 200
+    }
+}
+```
+
+构建期 datacell 会保留一份临时的“每维一字节”布局（`FlattenOptimizedBuildInterface`）：构图时的
+码-码距离走可向量化的内核，`FinalizeOptimizedBuild()` 一次性打包成两段分片记录。序列化会写入两段
+记录与旋转符号；加载时校验维度、度量与记录长度。
+
+GIST1M（960 维、100 万向量、Pyramid、`max_degree = 32`、`ef_construction = 200`、32 构建线程）上，
+与同参数的 RaBitQ split（`x = 3, y = 5`）对比：构建 `415.9 s` 对 `427.4 s`，索引内存
+`1.49 GB` 对 `1.48 GB`，各 `ef_search` 下 recall@10 相差不超过 `0.001`，检索延迟
+`ef_search = 32 / 64 / 128 / 256` 时分别为 `0.45 / 0.69 / 1.15 / 2.02 ms` 对
+`1.22 / 1.81 / 2.64 / 4.67 ms`。

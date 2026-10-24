@@ -95,6 +95,7 @@ const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8_LOCAL = "sq8_local";
+const char* const QUANTIZATION_TYPE_VALUE_SQ_LOCAL_SPLIT = "sq_local_split";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM = "sq8_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
@@ -196,6 +197,7 @@ const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets
 const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_scan_ratio";
 const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
 const char* const RABITQ_SPLIT_DATA_CELL = "rabitq_split_data_cell";
+const char* const SQ_LOCAL_SPLIT_DATA_CELL = "sq_local_split_datacell";
 const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
 const char* const MULTI_VECTOR_DATA_CELL = "multi_vector_data_cell";
 
@@ -218,9 +220,13 @@ const char* const DATACELL_OFFSETS = "datacell_offsets";
 const char* const DATACELL_SIZES = "datacell_sizes";
 const char* const BASIC_INFO = "basic_info";
 
+const char* const SQ_LOCAL_BITS_PER_DIM_PRECISE = "sq_local_bits_per_dim_precise";
+const char* const SQ_LOCAL_BITS_PER_DIM_BASE = "sq_local_bits_per_dim_base";
+const char* const SQ_LOCAL_BITS_PER_DIM_QUERY = "sq_local_bits_per_dim_query";
 const char* const CODES_TYPE_KEY = "codes_type";
 const char* const FLATTEN_CODES = "flatten";
 const char* const RABITQ_SPLIT_CODES = "rabitq_split";
+const char* const SQ_LOCAL_SPLIT_CODES = "sq_local_split";
 const char* const SPARSE_CODES = "sparse";
 
 const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
