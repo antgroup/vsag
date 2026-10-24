@@ -32,6 +32,10 @@
 
 namespace vsag {
 
+namespace {
+constexpr const char* K_SEARCH_NO_LOCK = "search_no_lock";
+}
+
 HGraphParameter::HGraphParameter(const JsonType& json) : HGraphParameter() {
     this->FromJson(json);
 }
@@ -491,6 +495,23 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
                        "ef_search exceeds int64_t range");
     }
     obj.ef_search = ef_search_json.GetInt();
+    obj.hgraph_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains("hgraph_ef_search")) {
+        obj.hgraph_ef_search = params[INDEX_TYPE_HGRAPH]["hgraph_ef_search"].GetInt();
+        CHECK_ARGUMENT(obj.hgraph_ef_search >= 1, "hgraph_ef_search must be at least 1");
+    }
+    obj.mci_ef_search = 0;
+    if (params[INDEX_TYPE_HGRAPH].Contains("mci_ef_search")) {
+        obj.mci_ef_search = params[INDEX_TYPE_HGRAPH]["mci_ef_search"].GetInt();
+        CHECK_ARGUMENT(obj.mci_ef_search >= 1, "mci_ef_search must be at least 1");
+    }
+    // Both routes default to the shared `ef_search` when their own value is not given.
+    if (obj.hgraph_ef_search <= 0) {
+        obj.hgraph_ef_search = obj.ef_search;
+    }
+    if (obj.mci_ef_search <= 0) {
+        obj.mci_ef_search = obj.ef_search;
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
     }
@@ -545,6 +566,23 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
         CHECK_ARGUMENT(obj.mci_seed_max_count >= 0,
                        "hgraph mci_seed_max_count must be non-negative");
     }
+    CHECK_ARGUMENT(not params[INDEX_TYPE_HGRAPH].Contains("mci_seed_no_lock"),
+                   "hgraph mci_seed_no_lock was renamed to search_no_lock");
+    if (params[INDEX_TYPE_HGRAPH].Contains(K_SEARCH_NO_LOCK)) {
+        CHECK_ARGUMENT(params[INDEX_TYPE_HGRAPH][K_SEARCH_NO_LOCK].IsBool(),
+                       "hgraph search_no_lock must be a boolean");
+        obj.search_no_lock = params[INDEX_TYPE_HGRAPH][K_SEARCH_NO_LOCK].GetBool();
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains("mci_expansion_idle_window")) {
+        obj.mci_expansion_idle_window =
+            params[INDEX_TYPE_HGRAPH]["mci_expansion_idle_window"].GetInt();
+        CHECK_ARGUMENT(obj.mci_expansion_idle_window >= 0,
+                       "hgraph mci_expansion_idle_window must be non-negative");
+    }
+    if (params[INDEX_TYPE_HGRAPH].Contains("mci_expansion_lower_bound")) {
+        obj.mci_expansion_lower_bound =
+            params[INDEX_TYPE_HGRAPH]["mci_expansion_lower_bound"].GetBool();
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD)) {
         obj.mci_hgraph_valid_ratio_threshold =
             params[INDEX_TYPE_HGRAPH][HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD].GetFloat();
@@ -584,6 +622,10 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_SKIP_STRATEGY].GetString());
     }
 
+    // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+    CHECK_ARGUMENT(not obj.search_no_lock or obj.parallel_search_thread_count == 1,
+                   "search_no_lock requires hgraph.parallelism=1; "
+                   "concurrent independent queries are supported");
     return obj;
 }
 }  // namespace vsag

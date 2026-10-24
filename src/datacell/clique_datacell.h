@@ -15,12 +15,14 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <limits>
 #include <shared_mutex>
 
 #include "container_types.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 
@@ -28,6 +30,16 @@ class StreamReader;
 class StreamWriter;
 
 DEFINE_POINTER(CliqueDataCell);
+
+struct CliqueDataCellBaseView {
+    // Pins the CSR pointer storage for the lifetime of this view.
+    std::shared_lock<std::shared_mutex> guard;
+    const InnerIdType* p_maxc{nullptr};
+    const InnerIdType* maxcs{nullptr};
+    const InnerIdType* p_node_to_cid{nullptr};
+    const InnerIdType* node_to_cids{nullptr};
+    uint64_t total_clique_count{0};
+};
 
 struct CliqueDataCellStats {
     bool has_index{false};
@@ -185,6 +197,22 @@ public:
     void
     GetCliqueMembers(InnerIdType clique_id, Vector<InnerIdType>& members) const;
 
+    // No delta rows are visited or scanned for emptiness on this path.
+    [[nodiscard]] bool
+    TryGetBaseViewNoLock(uint64_t total, CliqueDataCellBaseView& view) const {
+        assert(SearchLockScope::IsNoLock());
+        if (available_total_.load(std::memory_order_acquire) != total or
+            p_maxc_.size() != total_clique_count_ + 1 or p_node_to_cid_.size() != total + 1) {
+            return false;
+        }
+        view.p_maxc = p_maxc_.data();
+        view.maxcs = maxcs_.data();
+        view.p_node_to_cid = p_node_to_cid_.data();
+        view.node_to_cids = node_to_cids_.data();
+        view.total_clique_count = total_clique_count_;
+        return total_clique_count_ != 0;
+    }
+
     [[nodiscard]] uint64_t
     GetCliqueMemberCount(InnerIdType clique_id) const;
 
@@ -221,6 +249,9 @@ public:
 
     [[nodiscard]] bool
     TryGetSearchView(uint64_t total, CliqueDataCellSearchView& view) const;
+
+    [[nodiscard]] bool
+    TryGetBaseView(uint64_t total, CliqueDataCellBaseView& view) const;
 
     [[nodiscard]] CliqueDataCellStats
     CollectStats(uint64_t total) const;

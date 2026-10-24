@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "utils/search_lock.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -49,7 +50,7 @@ DenseDuplicateTracker::SetDuplicateId(InnerIdType group_id, InnerIdType duplicat
 
 auto
 DenseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<InnerIdType> {
-    std::shared_lock lock(mutex_);
+    auto lock = MakeSearchReadLock(mutex_);
 
     if (id >= duplicate_ids_.size()) {
         return {};
@@ -66,7 +67,7 @@ DenseDuplicateTracker::GetDuplicateIds(InnerIdType id) const -> std::vector<Inne
 
 auto
 DenseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
-    std::shared_lock lock(mutex_);
+    auto lock = MakeSearchReadLock(mutex_);
 
     if (id >= duplicate_ids_.size()) {
         return id;
@@ -83,7 +84,7 @@ DenseDuplicateTracker::GetGroupId(InnerIdType id) const -> InnerIdType {
 
 void
 DenseDuplicateTracker::Serialize(StreamWriter& writer) const {
-    std::shared_lock lock(mutex_);
+    auto lock = MakeSearchReadLock(mutex_);
 
     StreamWriter::WriteObj(writer, duplicate_count_);
     size_t size = duplicate_ids_.size();

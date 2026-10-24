@@ -26,6 +26,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "resource_object.h"
 #include "typing.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 
@@ -59,6 +60,12 @@ public:
     }
 
     ~ResourceObjectPool() {
+        auto* node = no_lock_pool_.load(std::memory_order_relaxed);
+        while (node != nullptr) {
+            auto* next = node->next;
+            delete node;
+            node = next;
+        }
         if (owned_allocator_ != nullptr) {
             for (int i = 0; i < kSubPoolCount; ++i) {
                 pool_[i].reset();
@@ -68,6 +75,9 @@ public:
 
     std::shared_ptr<T>
     TakeOne() {
+        if (SearchLockScope::IsNoLock()) {
+            return take_one_without_lock();
+        }
         thread_local static uint64_t prefer_pool_id_{
             std::hash<std::thread::id>()(std::this_thread::get_id()) % kSubPoolCount};
         auto pool_id = prefer_pool_id_;
@@ -95,6 +105,11 @@ public:
     void
     ReturnOne(std::shared_ptr<T>& obj) {
         auto pool_id = obj->source_pool_id_;
+        if (pool_id == kSubPoolCount) {
+            // Use the object's origin, not the current query flag: returns can cross scopes.
+            obj->no_lock_lease_->store(false, std::memory_order_release);
+            return;
+        }
         std::lock_guard<std::mutex> lock(sub_pool_mutexes_[pool_id]);
         pool_[pool_id]->emplace_back(obj);
     }
@@ -105,6 +120,44 @@ public:
     }
 
 private:
+    struct NoLockNode {
+        explicit NoLockNode(std::shared_ptr<T> value) : object(std::move(value)) {
+        }
+        std::shared_ptr<T> object;
+        std::atomic<bool> in_use{true};
+        NoLockNode* next{nullptr};
+    };
+
+    std::shared_ptr<T>
+    take_one_without_lock() {
+        for (auto* node = no_lock_pool_.load(std::memory_order_acquire); node != nullptr;
+             node = node->next) {
+            bool available = false;
+            if (node->in_use.compare_exchange_strong(
+                    available, true, std::memory_order_acquire, std::memory_order_relaxed)) {
+                try {
+                    node->object->Reset();
+                } catch (...) {
+                    node->in_use.store(false, std::memory_order_release);
+                    throw;
+                }
+                return node->object;
+            }
+        }
+        auto obj = this->constructor_();
+        obj->source_pool_id_ = kSubPoolCount;
+        obj->Reset();
+        auto node = std::make_unique<NoLockNode>(obj);
+        obj->no_lock_lease_ = &node->in_use;
+        node->next = no_lock_pool_.load(std::memory_order_relaxed);
+        while (not no_lock_pool_.compare_exchange_weak(
+            node->next, node.get(), std::memory_order_release, std::memory_order_relaxed)) {
+        }
+        node.release();
+        memory_usage_.fetch_add(sizeof(NoLockNode), std::memory_order_relaxed);
+        return obj;
+    }
+
     inline void
     fill(uint64_t size) {
         for (uint64_t i = 0; i < size; ++i) {
@@ -116,6 +169,7 @@ private:
 private:
     std::unique_ptr<Deque<std::shared_ptr<T>>> pool_[kSubPoolCount];
     std::mutex sub_pool_mutexes_[kSubPoolCount];
+    std::atomic<NoLockNode*> no_lock_pool_{nullptr};
     uint64_t init_size_{0};
 
     std::atomic<int64_t> memory_usage_{0};

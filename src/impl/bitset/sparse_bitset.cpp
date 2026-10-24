@@ -18,6 +18,8 @@
 #include <cstdint>
 #include <mutex>
 
+#include "utils/search_lock.h"
+
 namespace vsag {
 
 void
@@ -32,7 +34,7 @@ SparseBitset::Set(int64_t pos, bool value) {
 
 bool
 SparseBitset::Test(int64_t pos) const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    auto lock = MakeSearchMutexLock(mutex_);
     return r_.contains(pos);
 }
 

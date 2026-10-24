@@ -26,6 +26,7 @@
 #include "datacell/dense_duplicate_tracker.h"
 #include "impl/allocator/default_allocator.h"
 #include "unittest.h"
+#include "utils/search_lock.h"
 
 using namespace vsag;
 
@@ -268,6 +269,29 @@ TEST_CASE("LabelTable Without Reverse Map", "[ut][LabelTable]") {
         auto [success2, id2] = label_table.TryGetIdByLabel(999);
         REQUIRE(success2 == false);
     }
+}
+
+TEST_CASE("LabelTable no-lock lookup preserves missing and removed labels",
+          "[ut][LabelTable][search_no_lock]") {
+    const auto use_reverse_map = GENERATE(false, true);
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable table(allocator.get(), use_reverse_map);
+    table.Insert(0, 100);
+    table.Insert(1, 200);
+    table.MarkRemove(100);
+    for (const bool return_removed : {false, true}) {
+        for (const int64_t label : {100, 200, 999}) {
+            const auto expected = table.TryGetIdByLabel(label, return_removed);
+            const SearchLockScope scope(true);
+            REQUIRE(table.TryGetIdByLabel(label, return_removed) == expected);
+        }
+    }
+    const SearchLockScope scope(true);
+    REQUIRE_FALSE(table.TryGetIdByLabel(100).first);
+    REQUIRE_FALSE(table.TryGetIdByLabel(999).first);
+    REQUIRE(table.TryGetIdByLabel(200).second == 1);
+    REQUIRE_FALSE(table.GetDeletedIdsFilter()->CheckValid(int64_t{0}));
+    REQUIRE(table.GetDeletedIdsFilter()->CheckValid(int64_t{1}));
 }
 
 TEST_CASE("LabelTable Supports Configurable Remap Implementation", "[ut][LabelTable]") {
