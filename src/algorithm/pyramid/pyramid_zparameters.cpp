@@ -69,6 +69,19 @@ root_graph_storage_type_to_string(GraphStorageTypes storage_type) {
     return GRAPH_STORAGE_TYPE_VALUE_FLAT;
 }
 
+uint32_t
+parse_route_min_size(const JsonType& json, const std::string& context) {
+    const auto& value = *json.GetInnerJson();
+    CHECK_ARGUMENT(value.is_number_integer(),
+                   fmt::format("{} route_min_size must be an integer", context));
+    CHECK_ARGUMENT(value.is_number_unsigned() || value.get<int64_t>() >= 0,
+                   fmt::format("{} route_min_size must be non-negative", context));
+    const auto threshold = value.get<uint64_t>();
+    CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
+                   fmt::format("{} route_min_size exceeds uint32_t", context));
+    return static_cast<uint32_t>(threshold);
+}
+
 bool
 has_multi_layer_root(const PyramidParameters& params) {
     if (not params.has_hierarchies) {
@@ -84,6 +97,7 @@ void
 validate_root_graph_config(const std::string& root_graph_type,
                            const std::vector<int32_t>& no_build_levels,
                            int64_t max_degree,
+                           uint32_t route_min_size,
                            const std::string& context) {
     validate_root_graph_type(root_graph_type, context);
     CHECK_ARGUMENT(
@@ -91,17 +105,20 @@ validate_root_graph_config(const std::string& root_graph_type,
             std::find(no_build_levels.begin(), no_build_levels.end(), 0) == no_build_levels.end(),
         fmt::format("{} multi-layer root graph requires level 0 to be built", context));
     CHECK_ARGUMENT(
-        root_graph_type != PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER || max_degree > 1,
-        fmt::format("{} multi-layer root graph requires max_degree greater than 1", context));
+        (route_min_size == 0 && root_graph_type != PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER) ||
+            max_degree > 1,
+        fmt::format("{} multi-layer routing requires max_degree greater than 1", context));
 }
 
 void
 validate_root_graph_algorithm(const std::string& root_graph_type,
                               const std::string& graph_type,
+                              uint32_t route_min_size,
                               const std::string& context) {
     CHECK_ARGUMENT(
-        root_graph_type != PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER || graph_type != GRAPH_TYPE_ODESCENT,
-        fmt::format("{} multi-layer root graph does not support odescent", context));
+        (route_min_size == 0 && root_graph_type != PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER) ||
+            graph_type != GRAPH_TYPE_ODESCENT,
+        fmt::format("{} multi-layer routing does not support odescent", context));
 }
 
 PyramidSearchParameters::HierarchyOp
@@ -166,8 +183,11 @@ PyramidHierarchyParameters::FromJson(const JsonType& json) {
     if (json.IsString()) {
         name = json.GetString();
         CHECK_ARGUMENT(not name.empty(), "hierarchy name must not be empty");
-        validate_root_graph_config(
-            root_graph_type, no_build_levels, max_degree, fmt::format("hierarchy {}", name));
+        validate_root_graph_config(root_graph_type,
+                                   no_build_levels,
+                                   max_degree,
+                                   route_min_size,
+                                   fmt::format("hierarchy {}", name));
         return;
     }
 
@@ -207,6 +227,10 @@ PyramidHierarchyParameters::FromJson(const JsonType& json) {
                        fmt::format("hierarchy {} index_min_size exceeds uint32_t", name));
         index_min_size = static_cast<uint32_t>(index_min_size_value);
     }
+    if (json.Contains(PYRAMID_ROUTE_MIN_SIZE)) {
+        route_min_size =
+            parse_route_min_size(json[PYRAMID_ROUTE_MIN_SIZE], fmt::format("hierarchy {}", name));
+    }
     if (json.Contains(PYRAMID_ROOT_GRAPH_TYPE)) {
         CHECK_ARGUMENT(json[PYRAMID_ROOT_GRAPH_TYPE].IsString(),
                        fmt::format("hierarchy {} root_graph_type must be a string", name));
@@ -217,8 +241,11 @@ PyramidHierarchyParameters::FromJson(const JsonType& json) {
             level >= 0,
             fmt::format("hierarchy {} no_build_levels values must be non-negative", name));
     }
-    validate_root_graph_config(
-        root_graph_type, no_build_levels, max_degree, fmt::format("hierarchy {}", name));
+    validate_root_graph_config(root_graph_type,
+                               no_build_levels,
+                               max_degree,
+                               route_min_size,
+                               fmt::format("hierarchy {}", name));
 }
 
 JsonType
@@ -230,6 +257,7 @@ PyramidHierarchyParameters::ToJson() const {
     json[EF_CONSTRUCTION_KEY].SetUint64(ef_construction);
     json[ALPHA_KEY].SetFloat(alpha);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
+    json[PYRAMID_ROUTE_MIN_SIZE].SetUint64(route_min_size);
     json[PYRAMID_ROOT_GRAPH_TYPE].SetString(root_graph_type);
     return json;
 }
@@ -249,7 +277,7 @@ PyramidHierarchyParameters::CheckCompatibility(const PyramidHierarchyParameters&
     }
     if (max_degree != other.max_degree || ef_construction != other.ef_construction ||
         alpha != other.alpha || index_min_size != other.index_min_size ||
-        root_graph_type != other.root_graph_type) {
+        route_min_size != other.route_min_size || root_graph_type != other.root_graph_type) {
         logger::error(
             "PyramidHierarchyParameters::CheckCompatibility: build params are not compatible");
         return false;
@@ -313,14 +341,21 @@ PyramidParameters::FromJson(const JsonType& json) {
     if (json.Contains(INDEX_MIN_SIZE)) {
         this->index_min_size = json[INDEX_MIN_SIZE].GetInt();
     }
+    if (json.Contains(PYRAMID_ROUTE_MIN_SIZE)) {
+        route_min_size = parse_route_min_size(json[PYRAMID_ROUTE_MIN_SIZE], "Pyramid");
+    }
     if (json.Contains(PYRAMID_ROOT_GRAPH_TYPE)) {
         CHECK_ARGUMENT(json[PYRAMID_ROOT_GRAPH_TYPE].IsString(),
                        "root_graph_type must be a string");
         this->root_graph_type = json[PYRAMID_ROOT_GRAPH_TYPE].GetString();
     }
-    validate_root_graph_config(
-        this->root_graph_type, this->no_build_levels, this->max_degree, "Pyramid");
-    validate_root_graph_algorithm(this->root_graph_type, this->graph_type, "Pyramid");
+    validate_root_graph_config(this->root_graph_type,
+                               this->no_build_levels,
+                               this->max_degree,
+                               this->route_min_size,
+                               "Pyramid");
+    validate_root_graph_algorithm(
+        this->root_graph_type, this->graph_type, this->route_min_size, "Pyramid");
 
     if (json.Contains(PYRAMID_PERSIST_SOURCE_ID_KEY)) {
         this->persist_source_id = json[PYRAMID_PERSIST_SOURCE_ID_KEY].GetBool();
@@ -354,10 +389,12 @@ PyramidParameters::FromJson(const JsonType& json) {
             hierarchy.ef_construction = this->ef_construction;
             hierarchy.alpha = this->alpha;
             hierarchy.index_min_size = this->index_min_size;
+            hierarchy.route_min_size = this->route_min_size;
             hierarchy.root_graph_type = this->root_graph_type;
             hierarchy.FromJson(hierarchy_json);
             validate_root_graph_algorithm(hierarchy.root_graph_type,
                                           this->graph_type,
+                                          hierarchy.route_min_size,
                                           fmt::format("hierarchy {}", hierarchy.name));
             CHECK_ARGUMENT(seen_names.insert(hierarchy.name).second,
                            fmt::format("duplicate hierarchy name {}", hierarchy.name));
@@ -397,6 +434,7 @@ PyramidParameters::ToJson() const {
     json[GRAPH_KEY].SetJson(graph_json);
     json[USE_REORDER_KEY].SetBool(this->use_reorder);
     json[INDEX_MIN_SIZE].SetInt(index_min_size);
+    json[PYRAMID_ROUTE_MIN_SIZE].SetUint64(route_min_size);
     json[PYRAMID_ROOT_GRAPH_TYPE].SetString(root_graph_type);
     json[SUPPORT_DUPLICATE].SetBool(support_duplicate);
     json[PYRAMID_PERSIST_SOURCE_ID_KEY].SetBool(persist_source_id);
@@ -477,6 +515,7 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
         CHECK_SUB_PARAM(*this, *p, raw_vector_param);
     }
     CHECK_FIELD_EQ(*this, *p, index_min_size);
+    CHECK_FIELD_EQ(*this, *p, route_min_size);
     CHECK_FIELD_EQ(*this, *p, root_graph_type);
     if (has_multi_layer_root(*this)) {
         CHECK_FIELD_EQ(*this, *p, root_graph_storage_type);
