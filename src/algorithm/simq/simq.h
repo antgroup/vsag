@@ -162,7 +162,6 @@ private:
     std::shared_ptr<TokenCodeInterface> token_codes_;
     std::string quantization_type_{"fp32"};
     std::string representative_quantization_type_{"fp32"};
-
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
 
@@ -207,6 +206,8 @@ private:
     int64_t random_seed_{42};
     int64_t default_coarse_k_{8};
     int64_t default_rerank_k_{100};
+    uint64_t final_graph_build_count_{0};
+    uint64_t center_update_count_{0};
 
     uint64_t resize_increase_count_bit_{10};
 

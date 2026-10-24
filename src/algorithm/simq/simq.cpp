@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <future>
+#include <iostream>
 #include <limits>
 #include <nlohmann/json.hpp>
 #include <numeric>
@@ -180,7 +181,6 @@ public:
                             int64_t random_seed,
                             int64_t build_thread_count,
                             IndexCommonParam common_param,
-                            std::shared_ptr<SafeThreadPool> thread_pool,
                             FlattenInterfacePtr storage,
                             std::string quantization)
         : init_cluster_ratio_(init_cluster_ratio),
@@ -189,7 +189,6 @@ public:
           random_seed_(static_cast<int>(random_seed)),
           build_thread_count_(build_thread_count),
           common_param_(std::move(common_param)),
-          thread_pool_(std::move(thread_pool)),
           storage_(std::move(storage)),
           quantization_(std::move(quantization)) {
         token_codes_ = std::dynamic_pointer_cast<TokenCodeInterface>(storage_);
@@ -201,6 +200,7 @@ public:
     void
     Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim);
 
+    std::atomic<uint64_t> center_update_count_{0};
     std::vector<int> cluster_centers_;
     std::unordered_map<int, std::vector<ClusterMemberEntry>> clusters_;
     std::vector<int> vec_to_cluster_;
@@ -213,25 +213,43 @@ private:
     find_nearest_cluster(int vec_id) const;
 
     float
-    ip_distance(uint64_t v1, uint64_t v2) const;
+    ip_distance(int v1, int v2) const;
 
     static void
     sorted_insert(std::vector<ClusterMemberEntry>& members, InnerIdType vec_id, float dist);
 
-    void
-    split_cluster(int old_center_id, int64_t dim);
+    int
+    split_cluster(int old_center_id);
 
+    struct ClusterCenterState {
+        std::vector<double> sum;
+        std::vector<float> mean;
+        std::vector<uint8_t> encoded_mean;
+    };
+    // Document-quantizer codes are never reused as HGraph-quantizer codes.
+    std::unordered_map<int, ClusterCenterState> centers_;
+    const float*
+    center_vector(int cid) const {
+        return centers_.at(cid).mean.data();
+    }
+    void
+    refresh_center(int cid, bool in_graph);
+    void
+    split_overflow_clusters(int cid);
+    void
+    rebuild_center_sum(int cid);
+    void
+    insert_token(int vid, int nearest, bool allow_split = true);
     float init_cluster_ratio_;
     int max_cluster_size_;
     int split_start_idx_;
     int random_seed_;
     int64_t build_thread_count_;
     IndexCommonParam common_param_;
-    std::shared_ptr<SafeThreadPool> thread_pool_;
 
     FlattenInterfacePtr storage_;
-    std::string quantization_;
     std::shared_ptr<TokenCodeInterface> token_codes_;
+    std::string quantization_;
     const uint8_t* codes_{nullptr};
     uint64_t code_size_{0};
     int64_t num_vecs_{0};
@@ -261,9 +279,7 @@ HGraphDynamicClustering::find_nearest_cluster(int vec_id) const {
     }
 
     thread_local std::vector<float> query;
-    if (query.size() != static_cast<size_t>(dim_)) {
-        query.resize(static_cast<uint64_t>(dim_));
-    }
+    query.resize(static_cast<uint64_t>(dim_));
     storage_->Decode(codes_ + static_cast<uint64_t>(vec_id) * code_size_, query.data());
     auto query_ds = Dataset::Make();
     query_ds->NumElements(1)->Dim(dim_)->Float32Vectors(query.data())->Owner(false);
@@ -275,24 +291,17 @@ HGraphDynamicClustering::find_nearest_cluster(int vec_id) const {
 
     int nearest_id = static_cast<int>(result->GetIds()[0]);
 
-    bool found = false;
-    for (int cid : cluster_centers_) {
-        if (cid == nearest_id) {
-            found = true;
-            break;
-        }
-    }
-
-    if (!found) {
-        return cluster_centers_.empty() ? 0 : cluster_centers_[0];
-    }
-
-    return nearest_id;
+    return clusters_.count(nearest_id) ? nearest_id : cluster_centers_.front();
 }
 
 float
-HGraphDynamicClustering::ip_distance(uint64_t v1, uint64_t v2) const {
-    return token_codes_->ComputeTokenCodes(codes_ + v1 * code_size_, codes_ + v2 * code_size_);
+HGraphDynamicClustering::ip_distance(int v1, int v2) const {
+    const auto center = centers_.find(v2);
+    const auto* center_code = center == centers_.end()
+                                  ? codes_ + static_cast<uint64_t>(v2) * code_size_
+                                  : center->second.encoded_mean.data();
+    return token_codes_->ComputeTokenCodes(codes_ + static_cast<uint64_t>(v1) * code_size_,
+                                           center_code);
 }
 
 void
@@ -307,39 +316,113 @@ HGraphDynamicClustering::sorted_insert(std::vector<ClusterMemberEntry>& members,
 }
 
 void
-HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
+HGraphDynamicClustering::rebuild_center_sum(int cid) {
+    // Membership changes occur only before workers start or under the graph write lock.
+    auto& center = centers_[cid];
+    center.sum.assign(dim_, 0.0);
+    center.mean.resize(dim_);
+    center.encoded_mean.resize(code_size_);
+    std::vector<float> decoded(dim_);
+    const auto& members = clusters_.at(cid);
+    CHECK_ARGUMENT(not members.empty(), "simq: cannot initialize an empty cluster");
+    for (const auto& member : members) {
+        storage_->Decode(codes_ + static_cast<uint64_t>(member.vec_id) * code_size_,
+                         decoded.data());
+        for (int64_t d = 0; d < dim_; ++d) {
+            center.sum[d] += decoded[d];
+        }
+    }
+    for (int64_t d = 0; d < dim_; ++d) {
+        center.mean[d] = static_cast<float>(center.sum[d] / members.size());
+    }
+    token_codes_->EncodeToken(center.mean.data(), center.encoded_mean.data());
+}
+
+void
+HGraphDynamicClustering::insert_token(int vid, int nearest, bool allow_split) {
+    CHECK_ARGUMENT(vid >= 0 and vid < num_vecs_ and clusters_.count(nearest) != 0,
+                   "simq: invalid token assignment");
+    const float dist = ip_distance(vid, nearest);
+    sorted_insert(clusters_.at(nearest), static_cast<InnerIdType>(vid), dist);
+    vec_to_cluster_[vid] = nearest;
+    thread_local std::vector<float> decoded;
+    decoded.resize(static_cast<uint64_t>(dim_));
+    storage_->Decode(codes_ + static_cast<uint64_t>(vid) * code_size_, decoded.data());
+    auto& sum = centers_.at(nearest).sum;
+    for (int64_t d = 0; d < dim_; ++d) {
+        sum[d] += decoded[d];
+    }
+    refresh_center(nearest, true);
+    if (allow_split and static_cast<int>(clusters_.at(nearest).size()) > max_cluster_size_) {
+        split_overflow_clusters(nearest);
+    }
+}
+
+void
+HGraphDynamicClustering::refresh_center(int cid, bool in_graph) {
+    auto& members = clusters_.at(cid);
+    CHECK_ARGUMENT(not members.empty(), "simq: cannot update an empty cluster");
+    auto& center = centers_.at(cid);
+    auto& mean = center.mean;
+    const auto& sum = center.sum;
+    mean.resize(dim_);
+    for (int64_t d = 0; d < dim_; ++d) {
+        mean[d] = static_cast<float>(sum[d] / static_cast<double>(members.size()));
+    }
+    token_codes_->EncodeToken(mean.data(), center.encoded_mean.data());
+    for (auto& member : members) {
+        member.distance = ip_distance(member.vec_id, cid);
+    }
+    std::sort(members.begin(), members.end(), [](const auto& a, const auto& b) {
+        return a.distance == b.distance ? a.vec_id < b.vec_id : a.distance < b.distance;
+    });
+    if (in_graph) {
+        auto data = Dataset::Make();
+        data->NumElements(1)->Dim(dim_)->Float32Vectors(mean.data())->Owner(false);
+        CHECK_ARGUMENT(hgraph_->UpdateVector(cid, data, true), "simq: center update failed");
+    }
+    ++center_update_count_;
+}
+
+int
+HGraphDynamicClustering::split_cluster(int old_center_id) {
+    // The caller holds the exclusive graph lock (or there is only one worker).
+    // HGraph's own Add acquires neighbor locks internally; temporarily remove
+    // extra vector read locking to avoid recursive acquisition of those locks.
+    hgraph_->SetClusterVectorNodeLocks(false);
+    struct RestoreVectorLocks {
+        HGraph* graph;
+        ~RestoreVectorLocks() {
+            graph->SetClusterVectorNodeLocks(true);
+        }
+    } restore{hgraph_.get()};
     auto it = clusters_.find(old_center_id);
     if (it == clusters_.end()) {
-        return;  // Cluster not found
+        return -1;  // Cluster not found
     }
     auto& cluster = it->second;
 
     if (cluster.empty() || static_cast<int>(cluster.size()) < split_start_idx_) {
-        return;  // Not enough elements to split
-    }
-    // Guard the reverse-iterator offset below: `begin() + (split_start_idx_ - 1)`
-    // is undefined behaviour when split_start_idx_ is 0.
-    if (split_start_idx_ < 1) {
-        return;
+        return -1;  // Not enough elements to split
     }
 
-    // IP self-distance is not necessarily zero (especially with quantization).
-    // Prefer a non-center candidate; when none is available, fall back to the
-    // farthest member in the cluster.
-    int new_center_id = -1;
-    for (auto member = cluster.rbegin();
-         member != std::make_reverse_iterator(cluster.begin() + (split_start_idx_ - 1));
-         ++member) {
-        if (clusters_.count(static_cast<int>(member->vec_id)) == 0) {
-            new_center_id = static_cast<int>(member->vec_id);
-            break;
+    int new_center_id = static_cast<int>(cluster.back().vec_id);
+    if (clusters_.count(new_center_id) != 0) {
+        // A non-unit seed or moving mean need not leave the original seed first in distance order.
+        auto candidate = std::find_if(cluster.rbegin(), cluster.rend(), [&](const auto& entry) {
+            return clusters_.count(static_cast<int>(entry.vec_id)) == 0;
+        });
+        CHECK_ARGUMENT(candidate != cluster.rend(), "simq: split requires a fresh center label");
+        new_center_id = static_cast<int>(candidate->vec_id);
+        // Keep the chosen representative in the moved partition.
+        if (candidate->vec_id != cluster.back().vec_id) {
+            std::iter_swap(candidate, cluster.rbegin());
         }
     }
 
-    if (new_center_id < 0) {
-        new_center_id = static_cast<int>(cluster.back().vec_id);
+    if (new_center_id < 0 || new_center_id >= num_vecs_) {
+        return -1;
     }
-    CHECK_ARGUMENT(new_center_id < num_vecs_, "SIMQ split center ID out of bounds");
 
     auto split_it = cluster.begin() + (split_start_idx_ - 1);
     std::vector<ClusterMemberEntry> to_move(split_it, cluster.end());
@@ -360,18 +443,39 @@ HGraphDynamicClustering::split_cluster(int old_center_id, int64_t /*dim*/) {
 
     clusters_[new_center_id] = std::move(new_cluster);
     cluster_centers_.push_back(new_center_id);
+    // Splitting changes membership; rebuild both sums before publishing either mean.
+    rebuild_center_sum(old_center_id);
+    rebuild_center_sum(new_center_id);
+    refresh_center(old_center_id, true);
+    refresh_center(new_center_id, false);
 
     if (hgraph_ != nullptr) {
-        std::vector<float> new_center(dim_);
-        storage_->Decode(codes_ + new_center_id * code_size_, new_center.data());
         auto label = static_cast<int64_t>(new_center_id);
         auto new_ds = Dataset::Make();
         new_ds->NumElements(1)
             ->Dim(dim_)
-            ->Float32Vectors(new_center.data())
+            ->Float32Vectors(center_vector(new_center_id))
             ->Ids(&label)
             ->Owner(false);
-        hgraph_->Add(new_ds);
+        CHECK_ARGUMENT(hgraph_->Add(new_ds).empty(), "simq: new cluster label already exists");
+    }
+    return new_center_id;
+}
+
+void
+HGraphDynamicClustering::split_overflow_clusters(int cid) {
+    // The caller holds the graph write lock, or no insertion workers are running.
+    std::vector<int> pending{cid};
+    while (not pending.empty()) {
+        const auto current = pending.back();
+        pending.pop_back();
+        if (clusters_.at(current).size() <= static_cast<uint64_t>(max_cluster_size_)) {
+            continue;
+        }
+        const auto created = split_cluster(current);
+        CHECK_ARGUMENT(created >= 0, "simq: failed to split an overflowing cluster");
+        pending.push_back(current);
+        pending.push_back(created);
     }
 }
 
@@ -379,6 +483,7 @@ void
 HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim) {
     codes_ = codes;
     code_size_ = storage_->GetQuantizerCodeSize();
+    CHECK_ARGUMENT(code_size_ > 0, "simq: empty token encoding");
     num_vecs_ = num_vecs;
     dim_ = dim;
 
@@ -397,82 +502,91 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
     for (int cid : init_centers) {
         clusters_[cid] = {{static_cast<InnerIdType>(cid), 0.0F}};
         vec_to_cluster_[cid] = cid;
+        rebuild_center_sum(cid);
     }
 
     build_hgraph(init_centers, dim);
+    hgraph_->SetClusterVectorNodeLocks(true);
 
-    const int64_t batch_size = 10000;  // Process 10k tokens per batch
-    const int64_t num_threads = std::max<int64_t>(1, build_thread_count_);
-
-    auto remaining_it = all_indices.begin() + num_init;
-
-    while (remaining_it != all_indices.end()) {
-        auto batch_end = remaining_it;
-        int64_t count = 0;
-        while (batch_end != all_indices.end() && count < batch_size) {
-            ++batch_end;
-            ++count;
-        }
-
-        if (count == 0) {
-            break;
-        }
-
-        std::vector<std::pair<int, int>> batch_assignments(count);  // (vid, nearest_cid)
-
-        if (num_threads > 1 && count > 100 && thread_pool_) {
-            std::vector<std::future<void>> futures;
-            const int64_t chunk_size = (count + num_threads - 1) / num_threads;
-
-            for (int64_t t = 0; t < num_threads; ++t) {
-                const int64_t start = t * chunk_size;
-                const int64_t end = std::min(start + chunk_size, count);
-                if (start >= count) {
-                    break;
-                }
-
-                futures.push_back(thread_pool_->GeneralEnqueue([&, t, start, end]() {
-                    for (int64_t i = start; i < end; ++i) {
-                        int vid = *(remaining_it + i);
-                        int nearest = find_nearest_cluster(vid);
-                        batch_assignments[i] = {vid, nearest};
+    const auto insertion_start = std::chrono::steady_clock::now();
+    const int64_t first = num_init;
+    const int64_t workers =
+        std::max<int64_t>(1, std::min<int64_t>(build_thread_count_, num_vecs_ - first));
+    if (workers > 1) {
+        // A dedicated VSAG pool avoids nested HGraph Add work blocking on the
+        // same saturated pool while this worker holds the graph write lock.
+        auto insertion_pool = SafeThreadPool::FactoryDefaultThreadPool();
+        insertion_pool->SetPoolSize(workers);
+        std::shared_mutex graph_mutex;
+        std::atomic<int64_t> next{first};
+        std::atomic<bool> stop{false};
+        std::vector<std::future<void>> futures;
+        try {
+            for (int64_t t = 0; t < workers; ++t) {
+                futures.push_back(insertion_pool->GeneralEnqueue([&]() {
+                    try {
+                        while (not stop.load(std::memory_order_relaxed)) {
+                            const int64_t pos = next.fetch_add(1, std::memory_order_relaxed);
+                            if (pos >= num_vecs_) {
+                                break;
+                            }
+                            const int vid = all_indices[pos];
+                            int nearest;
+                            bool overflow = false;
+                            {
+                                std::shared_lock<std::shared_mutex> graph_read(graph_mutex);
+                                nearest = find_nearest_cluster(vid);
+                                // Reuse the HGraph node's existing PointsMutex write lock.
+                                auto node_write = hgraph_->AcquireClusterNodeWriteLock(nearest);
+                                insert_token(vid, nearest, false);
+                                overflow = clusters_.at(nearest).size() > max_cluster_size_;
+                            }
+                            if (overflow) {
+                                // Release both read/node locks before acquiring graph write.
+                                std::unique_lock<std::shared_mutex> graph_write(graph_mutex);
+                                if (clusters_.at(nearest).size() > max_cluster_size_) {
+                                    split_overflow_clusters(nearest);
+                                }
+                            }
+                        }
+                    } catch (...) {
+                        stop.store(true, std::memory_order_relaxed);
+                        throw;
                     }
                 }));
             }
-
-            for (auto& f : futures) {
-                f.get();
+        } catch (...) {
+            stop.store(true, std::memory_order_relaxed);
+            for (auto& future : futures) {
+                future.wait();
             }
-        } else {
-            for (int64_t i = 0; i < count; ++i) {
-                int vid = *(remaining_it + i);
-                int nearest = find_nearest_cluster(vid);
-                batch_assignments[i] = {vid, nearest};
+            throw;
+        }
+        // Drain every worker before any captured build state can be destroyed.
+        std::exception_ptr error;
+        for (auto& future : futures) {
+            try {
+                future.get();
+            } catch (...) {
+                if (not error) {
+                    error = std::current_exception();
+                }
             }
         }
-
-        for (const auto& [vid, nearest] : batch_assignments) {
-            if (vid < 0 || vid >= num_vecs_) {
-                continue;  // Invalid vector ID
-            }
-            if (nearest < 0 || nearest >= num_vecs_) {
-                continue;  // Invalid cluster ID
-            }
-            if (clusters_.find(nearest) == clusters_.end()) {
-                continue;  // Invalid cluster ID
-            }
-
-            float dist = ip_distance(vid, nearest);
-            sorted_insert(clusters_[nearest], static_cast<InnerIdType>(vid), dist);
-            vec_to_cluster_[vid] = nearest;
-
-            if (static_cast<int>(clusters_[nearest].size()) > max_cluster_size_) {
-                split_cluster(nearest, dim);
-            }
+        if (error) {
+            std::rethrow_exception(error);
         }
-
-        remaining_it = batch_end;
+    } else {
+        for (int64_t pos = first; pos < num_vecs_; ++pos) {
+            const int vid = all_indices[pos];
+            insert_token(vid, find_nearest_cluster(vid));
+        }
     }
+    const double insertion_seconds =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - insertion_start).count();
+    std::cerr << "SIMQ_TOKEN_INSERT_PROFILE threads=" << workers << " tokens=" << num_vecs_ - first
+              << " seconds=" << insertion_seconds << " center_updates=" << center_update_count_
+              << std::endl;
 }
 
 }  // anonymous namespace
@@ -508,6 +622,7 @@ std::vector<int64_t>
 SIMQ::Build(const DatasetPtr& data) {
     std::unique_lock lock(global_mutex_);
 
+    final_graph_build_count_ = 0;
     const MultiVector* mvs = data->GetMultiVectors();
     CHECK_ARGUMENT(mvs != nullptr, "simq build: data.multi_vectors is nullptr");
 
@@ -602,10 +717,27 @@ SIMQ::run_clustering(const uint8_t* token_codes,
                                        random_seed_,
                                        static_cast<int64_t>(build_thread_count_),
                                        common_param_,
-                                       this->thread_pool_,
                                        mv_codes_,
                                        quantization_type_);
     clustering.Fit(token_codes, num_vecs, dim);
+    center_update_count_ = clustering.center_update_count_;
+    {  // Verify membership and capacity after all insertion workers finish.
+        std::vector<uint8_t> seen(static_cast<uint64_t>(num_vecs), 0);
+        uint64_t assigned = 0;
+        for (const auto& [cid, members] : clustering.clusters_) {
+            CHECK_ARGUMENT(members.size() <= static_cast<uint64_t>(max_cluster_size_),
+                           "simq: overflowing final cluster");
+            for (const auto& member : members) {
+                CHECK_ARGUMENT(member.vec_id < num_vecs, "simq: invalid member token");
+                CHECK_ARGUMENT(not seen[member.vec_id], "simq: duplicate member token");
+                CHECK_ARGUMENT(clustering.vec_to_cluster_[member.vec_id] == cid,
+                               "simq: inconsistent token assignment");
+                seen[member.vec_id] = 1;
+                ++assigned;
+            }
+        }
+        CHECK_ARGUMENT(assigned == num_vecs, "simq: missing member tokens");
+    }
 
     auto nc = static_cast<int64_t>(clustering.cluster_centers_.size());
     num_clusters_ = nc;
@@ -648,75 +780,15 @@ SIMQ::run_clustering(const uint8_t* token_codes,
 }
 
 void
-SIMQ::build_rep_hgraph(const uint8_t* token_codes, int64_t dim) {
+SIMQ::build_rep_hgraph(const uint8_t* codes, int64_t dim) {
     const auto cluster_count = static_cast<uint64_t>(num_clusters_);
+    const auto code_size = mv_codes_->GetQuantizerCodeSize();
     std::vector<std::vector<InnerIdType>> members(cluster_count);
     for (uint64_t tid = 0; tid < vec_to_cluster_.size(); ++tid) {
         members[vec_to_cluster_[tid]].push_back(static_cast<InnerIdType>(tid));
     }
-    const auto code_size = mv_codes_->GetQuantizerCodeSize();
-    std::vector<InnerIdType> representatives(cluster_count);
-    representative_codes_.resize(static_cast<uint64_t>(num_clusters_) * code_size);
-    const auto find_representative = [&](int64_t ci) -> InnerIdType {
-        // Per-thread scratch: sized once, then reused across clusters.
-        thread_local std::vector<float> mean;
-        thread_local std::vector<float> decoded;
-        thread_local std::vector<uint8_t> mean_code;
-        if (mean.size() != static_cast<size_t>(dim)) {
-            mean.assign(dim, 0.0F);
-            decoded.resize(dim);
-            mean_code.resize(code_size);
-        } else {
-            std::fill(mean.begin(), mean.end(), 0.0F);
-        }
-        CHECK_ARGUMENT(not members[ci].empty(), "simq empty partition");
-        for (const auto tid : members[ci]) {
-            mv_codes_->Decode(token_codes + tid * code_size, decoded.data());
-            for (int64_t d = 0; d < dim; ++d) {
-                mean[d] += decoded[d];
-            }
-        }
-        for (auto& value : mean) {
-            value /= static_cast<float>(members[ci].size());
-        }
-        token_codes_->EncodeToken(mean.data(), mean_code.data());
-        float best = std::numeric_limits<float>::max();
-        InnerIdType best_rep = members[ci][0];
-        for (const auto tid : members[ci]) {
-            const auto distance =
-                token_codes_->ComputeTokenCodes(mean_code.data(), token_codes + tid * code_size);
-            if (distance < best) {
-                best = distance;
-                best_rep = tid;
-            }
-        }
-        return best_rep;
-    };
-
-    if (this->thread_pool_ && num_clusters_ > 10) {
-        std::vector<std::future<void>> futures;
-        futures.reserve(num_clusters_);
-        for (int64_t c = 0; c < num_clusters_; ++c) {
-            futures.emplace_back(this->thread_pool_->GeneralEnqueue(
-                [&, c]() { representatives[c] = find_representative(c); }));
-        }
-        wait_all_futures(futures);
-    } else {
-        for (int64_t c = 0; c < num_clusters_; ++c) {
-            representatives[c] = find_representative(c);
-        }
-    }
-    for (int64_t c = 0; c < num_clusters_; ++c) {
-        std::memcpy(representative_codes_.data() + c * code_size,
-                    token_codes + representatives[c] * code_size,
-                    code_size);
-    }
-    // Split ordering must use one model and the FINAL representative.
-    for (uint64_t tid = 0; tid < vec_to_cluster_.size(); ++tid) {
-        token_to_dist_[tid] = token_codes_->ComputeTokenCodes(
-            token_codes + tid * code_size,
-            token_codes + representatives[vec_to_cluster_[tid]] * code_size);
-    }
+    representative_quantization_type_ = quantization_type_;
+    representative_codes_.resize(cluster_count * code_size);
     IndexCommonParam cp = common_param_;
     cp.metric_ = MetricType::METRIC_TYPE_IP;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
@@ -725,19 +797,44 @@ SIMQ::build_rep_hgraph(const uint8_t* token_codes, int64_t dim) {
         simq_graph_parameters(quantization_type_, static_cast<int64_t>(build_thread_count_)), cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
     constexpr uint64_t batch_limit = 4096;
-    for (uint64_t offset = 0; offset < representatives.size(); offset += batch_limit) {
-        const uint64_t count = std::min(batch_limit, representatives.size() - offset);
-        std::vector<float> scratch(count * dim);
+    for (uint64_t offset = 0; offset < cluster_count; offset += batch_limit) {
+        const uint64_t count = std::min(batch_limit, cluster_count - offset);
+        std::vector<float> means(count * dim);
         std::vector<int64_t> labels(count);
-        for (uint64_t i = 0; i < count; ++i) {
-            labels[i] = static_cast<int64_t>(static_cast<uint64_t>(offset + i));
-            mv_codes_->Decode(token_codes + representatives[offset + i] * code_size,
-                              scratch.data() + i * dim);
+        const auto compute_mean = [&](uint64_t i) {
+            const auto cid = offset + i;
+            CHECK_ARGUMENT(not members[cid].empty(), "simq empty partition");
+            std::vector<double> sum(dim, 0.0);
+            std::vector<float> decoded(dim);
+            for (auto tid : members[cid]) {
+                mv_codes_->Decode(codes + static_cast<uint64_t>(tid) * code_size, decoded.data());
+                for (int64_t d = 0; d < dim; ++d) {
+                    sum[d] += decoded[d];
+                }
+            }
+            auto* mean = means.data() + i * dim;
+            for (int64_t d = 0; d < dim; ++d) {
+                mean[d] = static_cast<float>(sum[d] / members[cid].size());
+            }
+            labels[i] = static_cast<int64_t>(cid);
+            token_codes_->EncodeToken(mean, representative_codes_.data() + cid * code_size);
+        };
+        if (this->thread_pool_ && count > 10) {
+            std::vector<std::future<void>> futures;
+            for (uint64_t i = 0; i < count; ++i) {
+                futures.emplace_back(
+                    this->thread_pool_->GeneralEnqueue([&, i]() { compute_mean(i); }));
+            }
+            wait_all_futures(futures);
+        } else {
+            for (uint64_t i = 0; i < count; ++i) {
+                compute_mean(i);
+            }
         }
         auto ds = Dataset::Make()
                       ->NumElements(static_cast<int64_t>(count))
                       ->Dim(dim)
-                      ->Float32Vectors(scratch.data())
+                      ->Float32Vectors(means.data())
                       ->Ids(labels.data())
                       ->Owner(false);
         if (offset == 0) {
@@ -746,6 +843,12 @@ SIMQ::build_rep_hgraph(const uint8_t* token_codes, int64_t dim) {
             rep_hgraph_->Add(ds);
         }
     }
+    for (uint64_t tid = 0; tid < vec_to_cluster_.size(); ++tid) {
+        token_to_dist_[tid] = token_codes_->ComputeTokenCodes(
+            codes + tid * code_size,
+            representative_codes_.data() + vec_to_cluster_[tid] * code_size);
+    }
+    ++final_graph_build_count_;
 }
 
 static void
@@ -1206,6 +1309,7 @@ SIMQ::coarse_search(const float* query_tokens,
     const auto n_docs = static_cast<size_t>(total_count_);
     std::vector<float> score_buf(n_docs, 0.0F);
     std::vector<bool> seen_buf(n_docs, false);
+    std::vector<bool> candidate_seen(n_docs, false);
     std::vector<InnerIdType> dirty_list;
     std::vector<InnerIdType> seen_dirty_list;
     dirty_list.reserve(n_docs);
@@ -1316,7 +1420,9 @@ SIMQ::coarse_search(const float* query_tokens,
                 }
                 seen_buf[doc_id] = true;
                 seen_dirty_list.push_back(doc_id);
-                if (score_buf[doc_id] == 0.0F) {
+                // Zero is a valid accumulated score, not an unseen-document marker.
+                if (not candidate_seen[doc_id]) {
+                    candidate_seen[doc_id] = true;
                     dirty_list.push_back(doc_id);
                 }
                 score_buf[doc_id] += cscore;
@@ -1954,6 +2060,14 @@ SIMQ::GetStats() const {
     JsonType stats;
 
     uint64_t count = total_count_.load();
+    stats["final_graph_build_count"].SetUint64(final_graph_build_count_);
+    stats["final_graph_node_count"].SetUint64(rep_hgraph_ ? rep_hgraph_->GetNumElements() : 0);
+    stats["center_update_count"].SetUint64(center_update_count_);
+    stats["num_clusters"].SetInt(num_clusters_);
+    stats["empty_cluster_count"].SetUint64(
+        std::count(cluster_token_counts_.begin(), cluster_token_counts_.end(), 0));
+    stats["assigned_token_count"].SetUint64(
+        std::accumulate(cluster_token_counts_.begin(), cluster_token_counts_.end(), uint64_t{0}));
     stats["total_count"].SetUint64(count);
     stats["total_token_count"].SetUint64(token_to_doc_.size());
 
