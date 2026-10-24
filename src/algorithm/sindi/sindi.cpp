@@ -455,7 +455,8 @@ SINDI::Add(const DatasetPtr& base) {
     }
     const auto previous_window_count = mutable_term_datacell_->GetWindowCount();
     auto failed_ids = this->add(base, true);
-    if (mutable_term_datacell_->GetWindowCount() != previous_window_count) {
+    if (mutable_term_datacell_->GetWindowCount() != previous_window_count or
+        metadata_filter_.HasTimeMetadata()) {
         this->cal_memory_usage();
     }
     return failed_ids;
