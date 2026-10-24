@@ -12,14 +12,14 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-PR = (ROOT / '.github/workflows/pr-ci.yml').read_text(encoding='utf-8')
+PR = (ROOT / '.github/workflows/pr-ci-community.yml').read_text(encoding='utf-8')
 BENCH = (ROOT / '.github/workflows/build_performance.yml').read_text(encoding='utf-8')
 
 
 def block(workflow, header, description):
     """Extract our block-style YAML subset, stopping at the next peer/ancestor."""
     match = re.search(r'^( *)' + header + r'[ \t]*(?:#.*)?$', workflow, re.MULTILINE)
-    workflow_name = 'pr-ci.yml' if workflow == PR else 'build_performance.yml' if workflow == BENCH else 'provided workflow'
+    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'build_performance.yml' if workflow == BENCH else 'provided workflow'
     if match is None:
         raise AssertionError(f'Missing {description} in {workflow_name}; check its name and block formatting')
     lines = []
@@ -41,7 +41,7 @@ def job(workflow, name):
 
 def python_step(name, workflow=None):
     body = textwrap.dedent(step(BENCH if workflow is None else workflow, name))
-    opening = re.search(r"^([ \t]*)python3 - <<'PY'[ \t]*$", body, re.MULTILINE)
+    opening = re.search(r"^([ \t]*)python3 (?:-I )?- <<'PY'[ \t]*$", body, re.MULTILINE)
     if opening is None:
         raise AssertionError(f"Step {name!r} missing expected inline Python marker python3 - <<'PY'")
     source = body[opening.end() + 1:]
@@ -122,7 +122,7 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertEqual((root / 'executed').read_bytes(), executed)
 
     def test_single_pr_build_and_preserved_options(self):
-        with self.assertRaisesRegex(AssertionError, "Missing step 'Missing step' in pr-ci.yml"):
+        with self.assertRaisesRegex(AssertionError, "Missing step 'Missing step' in pr-ci-community.yml"):
             step(PR, 'Missing step')
         self.assertIn('uses: actions/cache/restore@v4', step(PR, 'Restore ExternalProject Archives'))
         x86 = job(PR, 'build-asan-x86')
@@ -144,6 +144,19 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('retention-days: 1', step(PR, 'Save Build'))
         makefile = (ROOT / 'Makefile').read_text(encoding='utf-8')
         self.assertIn('-DCMAKE_BUILD_TYPE=Sanitize -DENABLE_ASAN=ON -DENABLE_TSAN=OFF -DENABLE_CCACHE=ON -DENABLE_TESTS=ON', makefile)
+
+    def test_team_reuses_asan_build_contract_without_running_benchmarks(self):
+        team = (ROOT / '.github/workflows/pr-ci-team.yml').read_text(encoding='utf-8')
+        build = job(team, 'build')
+        self.assertEqual(build.count('make asan DEBUG_BUILD_DIR="$TEAM_ARTIFACTS/build" COMPILE_JOBS="$COMPILE_JOBS"'), 1)
+        for option in ("COMPILE_JOBS: '24'", 'CMAKE_GENERATOR: Ninja',
+                       "-DVSAG_USE_SYSTEM_OPENBLAS=ON", "VSAG_ENABLE_EXAMPLES: 'ON'",
+                       "VSAG_ENABLE_TOOLS: 'ON'", 'ccache --zero-stats', '/usr/bin/time -p'):
+            self.assertIn(option, build)
+        self.assertNotIn('python3 scripts/collect_build_metrics.py', build)
+        self.assertNotIn('--clear-ccache', build)
+        self.assertIn('ccache --print-stats', build)
+        self.assertIn('clang-tidy-15', step(team, 'Lint changed sources'))
 
     def test_security_and_isolation(self):
         self.assertIn('permissions:\n  contents: read\n', BENCH)

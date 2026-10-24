@@ -1,0 +1,149 @@
+name: Team Full Validation
+
+on:
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: team-full-validation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  route:
+    name: Validate controlled Team route
+    runs-on: ubuntu-22.04
+    outputs:
+      team: ${{ steps.route.outputs.team }}
+      image: ${{ steps.route.outputs.image }}
+    steps:
+      # No checkout or execution of PR-provided code before routing.
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: route
+        with:
+          script: |
+            // BEGIN ROUTE POLICY
+            core.setOutput('team', 'false');
+            core.setOutput('image', '');
+            const fallback = reason => core.info(`Controlled validation not selected: ${reason}`);
+            if (context.repo.owner !== 'antgroup' || context.repo.repo !== 'vsag') {
+              return fallback('not the canonical repository');
+            }
+            if (context.eventName !== 'pull_request') {
+              return fallback('this is not a PR');
+            }
+            let stage = 'read PR';
+            try {
+              const eventPR = context.payload.pull_request;
+              if (!eventPR || !Number.isSafeInteger(eventPR.number) || eventPR.number < 1) {
+                return fallback('missing PR identity');
+              }
+              const {data: pr} = await github.rest.pulls.get({
+                owner: 'antgroup', repo: 'vsag', pull_number: eventPR.number
+              });
+              // BEGIN CONTROLLED SCOPE
+              const controlledBranch = 'codex/team-ci-isolation-probe';
+              if (eventPR.number !== 3155 || pr.number !== 3155 ||
+                  pr.user?.login?.toLowerCase() !== 'wxyucs' ||
+                  pr.head?.repo?.full_name?.toLowerCase() !== 'wxyucs/vsag' ||
+                  pr.head?.ref !== controlledBranch || pr.base?.ref !== 'main') {
+                return fallback('outside the reviewed contributor PR and branch');
+              }
+              // END CONTROLLED SCOPE
+              if (pr.state !== 'open' || pr.base.repo.full_name !== 'antgroup/vsag' ||
+                  pr.head.sha !== eventPR.head.sha || pr.base.sha !== eventPR.base.sha) {
+                return fallback('closed PR or stale event');
+              }
+              // Resolve main once; both policy files must come from this trusted commit.
+              stage = 'resolve main';
+              const {data: main} = await github.rest.repos.getCommit({
+                owner: 'antgroup', repo: 'vsag', ref: 'main'
+              });
+              stage = 'read routing config';
+              const {data: configFile} = await github.rest.repos.getContent({
+                owner: 'antgroup', repo: 'vsag', path: '.github/ci-routing.json', ref: main.sha
+              });
+              if (configFile.type !== 'file' || configFile.encoding !== 'base64' ||
+                  !Number.isSafeInteger(configFile.size) || configFile.size < 0 || configFile.size > 16384) {
+                return fallback('invalid routing config file');
+              }
+              stage = 'parse routing config';
+              const config = JSON.parse(Buffer.from(configFile.content, 'base64').toString('utf8'));
+              if (!config || Array.isArray(config) || typeof config !== 'object' ||
+                  typeof config.team_enabled !== 'boolean' || typeof config.team_image !== 'string' ||
+                  Object.keys(config).some(key => !['team_enabled', 'team_image'].includes(key))) {
+                return fallback('invalid routing config schema');
+              }
+              if (!config.team_enabled) {
+                return fallback('team routing is disabled');
+              }
+              const image = config.team_image;
+              if (!/^ghcr\.io\/antgroup\/vsag@sha256:[a-f0-9]{64}$/.test(image)) {
+                return fallback('a digest-pinned team image is required');
+              }
+              // BEGIN CONTROLLED IMAGE
+              const reviewedImage = 'ghcr.io/antgroup/vsag@sha256:ccfe5a122031782debf8c24d41e648029f79a98d0bc5a0a7217bcb1a05ca4e17';
+              if (image !== reviewedImage) {
+                return fallback('canonical main image differs from the reviewed validation digest');
+              }
+              // END CONTROLLED IMAGE
+              stage = 'read allowlist';
+              const {data: file} = await github.rest.repos.getContent({
+                owner: 'antgroup', repo: 'vsag', path: '.github/maintainers.json', ref: main.sha
+              });
+              if (file.type !== 'file' || file.encoding !== 'base64' || file.size > 16384) {
+                return fallback('invalid allowlist file');
+              }
+              stage = 'parse allowlist';
+              const policy = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+              const names = policy.maintainers;
+              if (!Array.isArray(names) || names.length > 1000 ||
+                  !names.every(name => typeof name === 'string' &&
+                    /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(name))) {
+                return fallback('invalid allowlist schema');
+              }
+              if (!names.some(name => name.toLowerCase() === pr.user.login.toLowerCase())) {
+                return fallback('PR author is not allowlisted');
+              }
+              core.info(`Team Linux CI: policy from main at ${main.sha}`);
+              core.setOutput('image', image);
+              core.setOutput('team', 'true');
+            } catch (error) {
+              // Avoid logging arbitrary API bodies, policy contents or credential-bearing URLs.
+              const kind = error instanceof SyntaxError ? 'invalid JSON' : 'request or policy error';
+              const status = Number.isInteger(error?.status) ? ` (HTTP ${error.status})` : '';
+              core.warning(`Could not validate team routing at ${stage}: ${kind}${status}; controlled validation remains disabled.`);
+            }
+            // END ROUTE POLICY
+
+  team:
+    name: Team
+    needs: route
+    if: needs.route.outputs.team == 'true'
+    concurrency:
+      group: vsag-team-validation
+      queue: max
+      cancel-in-progress: false
+    uses: ./.github/workflows/pr-ci-team.yml
+    with:
+      runner: vsag-linux-validate
+      image: ghcr.io/antgroup/vsag@sha256:ccfe5a122031782debf8c24d41e648029f79a98d0bc5a0a7217bcb1a05ca4e17
+
+  validation-result:
+    name: Controlled validation result
+    if: always()
+    needs: [route, team]
+    runs-on: ubuntu-22.04
+    env:
+      ROUTE_RESULT: ${{ needs.route.result }}
+      TEAM_SELECTED: ${{ needs.route.outputs.team }}
+      TEAM_RESULT: ${{ needs.team.result }}
+    steps:
+      - name: Require actual controlled Team success
+        run: |
+          test "$ROUTE_RESULT" = success
+          test "$TEAM_SELECTED" = true
+          test "$TEAM_RESULT" = success
