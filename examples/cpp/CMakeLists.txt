@@ -183,6 +183,9 @@ target_link_libraries(114_index_simq vsag)
 add_executable(330_feature_timeout_search 330_feature_timeout_search.cpp)
 target_link_libraries(330_feature_timeout_search vsag)
 
+add_executable(601_utils_rpt_partition 601_utils_rpt_partition.cpp)
+target_link_libraries(601_utils_rpt_partition vsag)
+
 add_executable(332_feature_search_session 332_feature_search_session.cpp)
 target_link_libraries(332_feature_search_session vsag)
 
