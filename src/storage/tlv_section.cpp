@@ -39,6 +39,53 @@ namespace vsag {
 
 namespace {
 
+class ForwardChecksumReader : public StreamReader {
+public:
+    ForwardChecksumReader(StreamReader& source, uint64_t length)
+        : StreamReader(length), source_(source) {
+    }
+
+    void
+    Read(char* data, uint64_t size) override {
+        if (size > length_ - cursor_) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "forward block reader exceeds payload boundary");
+        }
+        if (size == 0) {
+            return;
+        }
+        source_.Read(data, size);
+        checksum_ = StreamHeader::UpdateChecksum(checksum_, std::string_view(data, size));
+        cursor_ += size;
+    }
+
+    void
+    Seek(uint64_t cursor) override {
+        (void)cursor;
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "forward block reader does not support seek");
+    }
+
+    [[nodiscard]] uint64_t
+    GetCursor() const override {
+        return cursor_;
+    }
+
+    void
+    Finish(uint32_t expected_checksum) {
+        this->Skip(length_ - cursor_);
+        if (StreamHeader::FinalizeChecksum(checksum_) != expected_checksum) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "streaming block payload checksum mismatch");
+        }
+    }
+
+private:
+    StreamReader& source_;
+    uint64_t cursor_{0};
+    uint32_t checksum_{StreamHeader::InitialChecksum()};
+};
+
 struct FileCloser {
     void
     operator()(std::FILE* file) const {
@@ -327,6 +374,19 @@ ReadSeekableBlockPayload(StreamReader& reader,
     ReadFuncStreamReader block_reader(read_func, 0, header.value_len);
     deserialize(block_reader);
     validate_seekable_block_cursor(block_reader, header);
+}
+
+void
+ReadForwardBlockPayload(StreamReader& reader,
+                        const StreamBlockHeader& header,
+                        const std::function<void(StreamReader&)>& deserialize) {
+    if (header.value_len == std::numeric_limits<uint64_t>::max()) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "chunked streaming block payload is not implemented yet");
+    }
+    ForwardChecksumReader block(reader, header.value_len);
+    deserialize(block);
+    block.Finish(header.payload_checksum);
 }
 
 void
