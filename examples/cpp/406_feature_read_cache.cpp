@@ -14,6 +14,7 @@
 
 #include <vsag/vsag.h>
 
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <random>
@@ -47,6 +48,8 @@ main(int argc, char** argv) {
     std::string precise_file_path = argc > 1 ? argv[1] : "vsag_read_cache_precise";
 
     /******************* Create HGraph Index with ReadCache on precise codes *****************/
+    // Build the graph using in-memory SQ8 codes; disk FP32 codes still serve query reranking.
+    // This keeps the example quick without changing disk writes or the one-page read cache.
     std::string hgraph_build_parameters = R"(
     {
         "dtype": "float32",
@@ -58,6 +61,7 @@ main(int argc, char** argv) {
             "ef_construction": 40,
             "alpha": 1.2,
             "use_reorder": true,
+            "build_by_base": true,
             "precise_quantization_type": "fp32",
             "base_io_type": "memory_io",
             "precise_io_type": "async_io",
@@ -70,7 +74,7 @@ main(int argc, char** argv) {
     )";
     vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
     vsag::Engine engine(&resource);
-    vsag::Options::Instance().set_block_size_limit(2 * 1024 * 1024);
+    vsag::Options::Instance().set_block_size_limit(2ULL * 1024 * 1024);
     auto index_result = engine.CreateIndex("hgraph", hgraph_build_parameters);
     if (not index_result.has_value()) {
         std::cerr << "Failed to create index: " << index_result.error().message << std::endl;
@@ -87,7 +91,12 @@ main(int argc, char** argv) {
         return -1;
     }
 
-    /******************* Serialize to Disk *****************/
+    if (index->GetNumElements() != num_vectors) {
+        std::cerr << "Unexpected element count after build" << std::endl;
+        return -1;
+    }
+
+    /******************* Serialize to BinarySet *****************/
     auto serialize_result = index->Serialize();
     if (not serialize_result.has_value()) {
         auto error = serialize_result.error();
@@ -95,7 +104,7 @@ main(int argc, char** argv) {
         return -1;
     }
 
-    /******************* Deserialize from Disk *****************/
+    /******************* Deserialize from BinarySet *****************/
     auto deserialize_result = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters);
     if (not deserialize_result.has_value()) {
         std::cerr << "Failed to create index for deserialization: "
@@ -109,6 +118,11 @@ main(int argc, char** argv) {
         return -1;
     }
 
+    if (restored_index->GetNumElements() != num_vectors) {
+        std::cerr << "Unexpected element count after restoration" << std::endl;
+        return -1;
+    }
+
     /******************* Prepare Query Dataset *****************/
     std::vector<float> query_vector(dim);
     for (int64_t i = 0; i < dim; ++i) {
@@ -118,7 +132,7 @@ main(int argc, char** argv) {
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
     /******************* KnnSearch For Restored Index *****************/
-    auto hgraph_search_parameters = R"(
+    const auto* hgraph_search_parameters = R"(
     {
         "hgraph": {
             "ef_search": 40
@@ -132,6 +146,18 @@ main(int argc, char** argv) {
         return -1;
     }
     auto result = search_result.value();
+    if (result->GetNumElements() != 1 or result->GetDim() != topk or result->GetIds() == nullptr or
+        result->GetDistances() == nullptr) {
+        std::cerr << "Unexpected search result shape" << std::endl;
+        return -1;
+    }
+    for (int64_t i = 0; i < topk; ++i) {
+        if (result->GetIds()[i] < 0 or result->GetIds()[i] >= num_vectors or
+            not std::isfinite(result->GetDistances()[i])) {
+            std::cerr << "Invalid search result" << std::endl;
+            return -1;
+        }
+    }
 
     /******************* Print Search Result *****************/
     std::cout << "results: " << std::endl;
