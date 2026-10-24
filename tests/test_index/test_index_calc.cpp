@@ -119,29 +119,30 @@ TestIndex::TestBatchCalcDistanceById(const IndexPtr& index,
                              result.value()->GetDistances()[j]) < error);
         }
     }
-    SECTION("test non-existing id") {
+    {
+        INFO("test non-existing id");
         int64_t test_num = 10;
         std::vector<int64_t> no_exist_ids(test_num);
         for (int i = 0; i < test_num; ++i) {
             no_exist_ids[i] = -i - 1;
         }
         tl::expected<DatasetPtr, vsag::Error> result;
-        queries->NumElements(1);
+        auto query = get_one_query(queries, 0);
         if (is_sparse || queries->GetSparseVectors() != nullptr ||
             queries->GetInt8Vectors() != nullptr || queries->GetFloat16Vectors() != nullptr) {
-            result = index->CalcDistancesById(queries, no_exist_ids.data(), test_num);
+            result = index->CalcDistancesById(query, no_exist_ids.data(), test_num);
         } else {
-            result = index->CalcDistancesById(
-                queries->GetFloat32Vectors(), no_exist_ids.data(), test_num);
+            result =
+                index->CalcDistancesById(query->GetFloat32Vectors(), no_exist_ids.data(), test_num);
         }
         for (int i = 0; i < test_num; ++i) {
             fixtures::dist_t dist = result.value()->GetDistances()[i];
             REQUIRE(dist == -1);
         }
-        queries->NumElements(query_count);
     }
 
-    SECTION("test topk single-query batch") {
+    {
+        INFO("test topk single-query batch");
         if (not index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
             return;
         }
@@ -233,7 +234,8 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         }
     }
 
-    SECTION("test non-existing id with multi-query") {
+    {
+        INFO("test non-existing id with multi-query");
         int64_t test_num = 5;
         std::vector<int64_t> mixed_ids(num_queries * test_num);
         for (int64_t q = 0; q < num_queries; ++q) {
@@ -266,7 +268,8 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         }
     }
 
-    SECTION("test topk multi-query batch") {
+    {
+        INFO("test topk multi-query batch");
         int64_t topk = std::min(gt_topK, (int64_t)3);
         auto topk_result = index->CalcDistancesById(queries, batch_ids, gt_topK, true, topk);
         REQUIRE(topk_result.has_value());
@@ -295,7 +298,8 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         }
     }
 
-    SECTION("test topk > count returns all") {
+    {
+        INFO("test topk > count returns all");
         int64_t big_topk = gt_topK + 100;
         auto big_result = index->CalcDistancesById(queries, batch_ids, gt_topK, true, big_topk);
         REQUIRE(big_result.has_value());
@@ -317,7 +321,8 @@ TestIndex::TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
         }
     }
 
-    SECTION("test topk -1 no ids in result") {
+    {
+        INFO("test topk -1 no ids in result");
         auto default_result = index->CalcDistancesById(queries, batch_ids, gt_topK);
         REQUIRE(default_result.has_value());
         REQUIRE(default_result.value()->GetIds() == nullptr);

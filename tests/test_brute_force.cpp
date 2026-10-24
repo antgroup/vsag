@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <mutex>
 #include <sstream>
@@ -26,6 +27,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "framework/test_budget_context.h"
 #include "functest.h"
 #include "storage/serialization_tags.h"
 #include "storage/streaming_serialization_test_utils.h"
@@ -256,18 +258,77 @@ TEST_CASE("BruteForce empty search exposes zero statistics", "[ut][bruteforce][s
 
 BruteForceResourcePtr
 BruteForceTestIndex::GetResource(bool sample) {
+    const auto identity = budget::CurrentCaseIdentity(__FILE__);
+    auto policy = budget::CurrentPolicy(!sample);
+    const auto seed = budget::CaseSeed(identity.name, policy.seed);
     auto resource = std::make_shared<BruteForceTestResource>();
-    if (sample) {
-        // RandomValue uses random_device here, outside Catch2's reproducible RNG seed.
-        resource->dims = fixtures::get_common_used_dims(/*count=*/1);
-        resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
-        resource->base_count = BruteForceTestIndex::base_count;
-    } else {
-        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
-        resource->test_cases = BruteForceTestIndex::all_test_cases;
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
-        resource->base_count = BruteForceTestIndex::base_count * 3;
+    const auto selected = budget::ShuffledIndices(all_test_cases.size(), seed);
+    for (uint64_t i = 0; i < (sample ? 3 : all_test_cases.size()); ++i) {
+        resource->test_cases.push_back(all_test_cases[selected[i]]);
+    }
+    const std::vector<std::string> metrics{"ip", "l2", "cosine"};
+    const auto selected_metrics = budget::ShuffledIndices(metrics.size(), seed + 1);
+    for (uint64_t i = 0; i < (sample ? 1 : 2); ++i) {
+        resource->metric_types.push_back(metrics[selected_metrics[i]]);
+    }
+    // Every helper below passes the class's fixed 1000-row dataset size, including Daily.
+    resource->base_count = base_count;
+    auto quantizers = resource->test_cases;
+    auto actual_metrics = resource->metric_types;
+    const auto& name = identity.name;
+    if (name.find("GetDistance By ID") != std::string::npos ||
+        name.find("Remove By ID") != std::string::npos) {
+        quantizers = {{"fp32", 0.99F}};
+    }
+    if (name.find("Remove By ID") != std::string::npos) {
+        actual_metrics = {"l2"};
+    }
+    const bool estimate_memory = name.find("Estimate Memory") != std::string::npos;
+    const bool data_only = estimate_memory || name.find("Random Allocator") != std::string::npos;
+    const auto desired_dims = estimate_memory ? std::vector<int>{1536}
+                              : sample
+                                  ? fixtures::get_common_used_dims(1, static_cast<int>(seed % 1000))
+                                  : fixtures::get_index_test_dims(3, static_cast<int>(seed % 1000));
+    std::vector<std::vector<budget::RunSpec>> candidates;
+    for (const uint64_t dimension_limit : {8, 32, 64, 128, 256, 1536}) {
+        std::vector<budget::RunSpec> runs;
+        for (const auto& metric : actual_metrics) {
+            for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+                for (const auto& [quantizer, recall] : quantizers) {
+                    budget::Workload work;
+                    work.dim = estimate_memory
+                                   ? 1536
+                                   : std::min<uint64_t>(desired_dims[d], dimension_limit);
+                    work.num = base_count;
+                    work.min_num = base_count;
+                    work.query_num = 100;
+                    work.metric = metric;
+                    work.quantizer = quantizer;
+                    work.oracle_runs = 1;
+                    if (!data_only) {
+                        // Complete-helper upper bounds include both Build search-parallelism
+                        // variants, TestGeneral, copied indexes and attribute-filter searches.
+                        work.train_num = base_count;
+                        work.train_runs = 2;
+                        work.build_runs = 2;
+                        work.search_runs = 48;
+                        work.search_candidates = base_count;
+                        work.serialize_runs = 6;
+                        work.update_num = base_count;
+                    }
+                    // EstimateMemory and RandomAllocator only create the dataset and an
+                    // empty index; their helpers neither build nor search an index.
+                    runs.push_back({metric + "/" + std::to_string(d) + "/" + quantizer, work});
+                }
+            }
+        }
+        candidates.push_back(std::move(runs));
+    }
+    policy.cap_points = sample ? 2000000000ULL : 400000000000ULL;
+    const auto plan = budget::PlanCase(identity, policy, candidates);
+    plan.Log(std::cout);
+    for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+        resource->dims.push_back(static_cast<int>(plan.Runs()[d * quantizers.size()].workload.dim));
     }
     return resource;
 }
@@ -442,7 +503,7 @@ static void
 TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    auto size = 1024 * 1024 * 2;
     std::vector<int32_t> search_threads_counts{1, 3};
     constexpr static const char* search_param_tmp2 = R"(
     {{
