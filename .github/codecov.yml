@@ -81,6 +81,10 @@ component_management:
       name: layout
       paths:
         - src/layout/**
+    - component_id: module_lite
+      name: lite
+      paths:
+        - src/lite/**
     - component_id: module_simd
       name: simd
       paths:

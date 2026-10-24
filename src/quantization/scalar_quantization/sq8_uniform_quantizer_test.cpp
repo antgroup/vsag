@@ -15,6 +15,10 @@
 
 #include "sq8_uniform_quantizer.h"
 
+#include <array>
+#include <cstdint>
+#include <vector>
+
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
 #include "scalar_quantizer_test_utils.h"
@@ -76,6 +80,39 @@ TEST_CASE("SQ8 Uniform Compute", "[ut][SQ8UniformQuantizer]") {
 
 template <MetricType metric>
 void
+test_unaligned_sq8_uniform_codes() {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 7;
+    SQ8UniformQuantizer<metric> quantizer(dim, allocator.get());
+    const std::array<float, dim* 2> training = {
+        -1.0F, -0.5F, 0.0F, 0.5F, 1.0F, 1.5F, 2.0F, 2.0F, 1.5F, 1.0F, 0.5F, 0.0F, -0.5F, -1.0F};
+    REQUIRE(quantizer.Train(training.data(), 2));
+
+    const auto code_size = quantizer.GetCodeSize();
+    std::vector<uint8_t> aligned_first(code_size);
+    std::vector<uint8_t> aligned_second(code_size);
+    std::vector<uint8_t> unaligned_first_storage(code_size + 1);
+    std::vector<uint8_t> unaligned_second_storage(code_size + 1);
+    auto* unaligned_first = unaligned_first_storage.data() + 1;
+    auto* unaligned_second = unaligned_second_storage.data() + 1;
+
+    REQUIRE(quantizer.EncodeOne(training.data(), aligned_first.data()));
+    REQUIRE(quantizer.EncodeOne(training.data() + dim, aligned_second.data()));
+    REQUIRE(quantizer.EncodeOne(training.data(), unaligned_first));
+    REQUIRE(quantizer.EncodeOne(training.data() + dim, unaligned_second));
+    CHECK(std::equal(aligned_first.begin(), aligned_first.end(), unaligned_first));
+    CHECK(std::equal(aligned_second.begin(), aligned_second.end(), unaligned_second));
+    CHECK(quantizer.Compute(unaligned_first, unaligned_second) ==
+          quantizer.Compute(aligned_first.data(), aligned_second.data()));
+}
+
+TEST_CASE("SQ8 Uniform supports unaligned code buffers", "[ut][SQ8UniformQuantizer]") {
+    test_unaligned_sq8_uniform_codes<MetricType::METRIC_TYPE_L2SQR>();
+    test_unaligned_sq8_uniform_codes<MetricType::METRIC_TYPE_IP>();
+}
+
+template <MetricType metric>
+void
 TestSerializeAndDeserializeMetricSQ8Uniform(uint64_t dim, int count, float error = 1e-5) {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     SQ8UniformQuantizer<metric> quantizer1(dim, allocator.get());
@@ -91,7 +128,7 @@ TEST_CASE("SQ8 Uniform Serialize and Deserialize", "[ut][SQ8UniformQuantizer]") 
         float error = 4 * 1.0f / 255.0f;
         for (auto count : counts) {
             TestSerializeAndDeserializeMetricSQ8Uniform<metrics[0]>(dim, count, error);
-            //            TestSerializeAndDeserializeMetricSQ8Uniform<metrics[1]>(dim, count, error);
+            // TestSerializeAndDeserializeMetricSQ8Uniform<metrics[1]>(dim, count, error);
             TestSerializeAndDeserializeMetricSQ8Uniform<metrics[2]>(dim, count, error);
         }
     }
