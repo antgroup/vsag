@@ -217,3 +217,56 @@ TEST_CASE("BruteForce legacy search keeps JSON statistics compatibility",
     CHECK(json["distance_evaluations"].GetUint64() == 12);
     REQUIRE(result.value()->GetSearchMetrics().has_value());
 }
+
+TEST_CASE("HGraph reports early_stop_count when the distance early stop is armed",
+          "[ft][search_statistics][distance_early_stop]") {
+    auto created = vsag::Factory::CreateIndex("hgraph", R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 4,
+        "index_param": {"base_quantization_type": "fp32", "max_degree": 8,
+                        "ef_construction": 64, "build_thread_count": 1}})");
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    std::vector<float> vectors(64 * 4, 0.0F);
+    std::vector<int64_t> ids(64);
+    for (int64_t i = 0; i < 64; ++i) {
+        vectors[i * 4] = static_cast<float>(i + 1);
+        ids[i] = i;
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(64)
+                    ->Dim(4)
+                    ->Float32Vectors(vectors.data())
+                    ->Ids(ids.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+    static const float origin[] = {0.0F, 0.0F, 0.0F, 0.0F};
+    auto count = [&](const std::string& params) {
+        vsag::SearchRequest request;
+        request.query_ =
+            vsag::Dataset::Make()->NumElements(1)->Dim(4)->Float32Vectors(origin)->Owner(false);
+        request.topk_ = 2;
+        request.params_str_ = params;
+        auto result = index->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        return result.value()->GetStatistics({"early_stop_count"})[0];
+    };
+    // Missing: the rule was not requested. Zero: it ran and never ended the search.
+    REQUIRE(count(R"({"hgraph":{"ef_search":32}})").empty());
+    REQUIRE(count(R"({"hgraph":{"ef_search":32,"early_stop":{"type":"distance","alpha":1e30}}})") ==
+            "0");
+    REQUIRE(count(R"({"hgraph":{"ef_search":32,"early_stop":{"type":"distance","alpha":1.1}}})") ==
+            "1");
+    // Skipped because the search width (2) is within 1.25 * k: not reported either.
+    REQUIRE(count(R"({"hgraph":{"ef_search":2,"early_stop":{"type":"distance","alpha":1.1}}})")
+                .empty());
+
+    vsag::SearchRequest disabled;
+    disabled.query_ =
+        vsag::Dataset::Make()->NumElements(1)->Dim(4)->Float32Vectors(origin)->Owner(false);
+    disabled.topk_ = 2;
+    disabled.params_str_ =
+        R"({"hgraph":{"ef_search":32,"early_stop":{"type":"distance"}},"want_statistics":false})";
+    auto result = index->SearchWithRequest(disabled);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics() == "{}");
+}

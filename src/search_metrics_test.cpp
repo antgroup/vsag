@@ -72,6 +72,36 @@ TEST_CASE("Legacy search statistics keeps integer accessor compatibility", "[ut]
     CHECK(json["hops"].GetUint64() == std::numeric_limits<uint32_t>::max());
 }
 
+TEST_CASE("Distance early-stop statistics preserve legacy and typed ownership",
+          "[ut][search_metrics][distance_early_stop]") {
+    vsag::SearchMetrics disabled;
+    CHECK_FALSE(disabled.base.ToJson().Contains("early_stop_count"));
+    auto disabled_snapshot = std::move(disabled).Snapshot();
+    CHECK(disabled_snapshot.Extensions().count("early_stop_count") == 0);
+    CHECK_FALSE(vsag::JsonType::Parse(disabled_snapshot.Dump()).Contains("early_stop_count"));
+
+    // Armed but never fired: the count is reported as zero, unlike a search without the rule.
+    vsag::SearchMetrics armed;
+    armed.base.early_stop_armed.store(true, std::memory_order_relaxed);
+    CHECK(armed.base.ToJson()["early_stop_count"].GetUint64() == 0);
+    auto armed_snapshot = std::move(armed).Snapshot();
+    CHECK(std::get<uint32_t>(armed_snapshot.Extensions().at("early_stop_count")) == 0);
+
+    vsag::SearchMetrics enabled;
+    CHECK_FALSE(enabled.AddExtension("early_stop_count", uint64_t{999}));
+    enabled.base.early_stop_armed.store(true, std::memory_order_relaxed);
+    enabled.base.early_stop_count.store(std::numeric_limits<uint32_t>::max(),
+                                        std::memory_order_relaxed);
+    auto legacy = enabled.base.ToJson();
+    auto snapshot = std::move(enabled).Snapshot();
+    CHECK(legacy["early_stop_count"].GetUint64() == std::numeric_limits<uint32_t>::max());
+    CHECK(std::get<uint32_t>(snapshot.Extensions().at("early_stop_count")) ==
+          std::numeric_limits<uint32_t>::max());
+    CHECK(vsag::JsonType::Parse(snapshot.Dump())["early_stop_count"].GetUint64() ==
+          std::numeric_limits<uint32_t>::max());
+    CHECK(vsag::MetricsSchema::Base().Fields().size() == 19);
+}
+
 TEST_CASE("Search metrics serializes uint32 fields without signed overflow",
           "[ut][search_metrics]") {
     vsag::SearchResultMetrics metrics;

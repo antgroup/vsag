@@ -127,6 +127,10 @@ BruteForce 在关闭时会跳过统计采集。其他索引可能仍执行内部
 扩展字段是否存在取决于索引和搜索路径。应用通过 `SearchResultMetrics::Extensions()` 返回的 const map
 读取，并在读取前检查字段。基线字段名是保留名称；只有内部 collector 可以增加扩展，且会拒绝重名字段。
 
+HGraph 在查询的图遍历运行了[基于距离比的早停](../indexes/hgraph.md#基于距离比的早停)时，在统计中增加
+`early_stop_count`（`uint32_t`）：被规则提前结束的搜索数，0 表示规则运行了但没有结束任何搜索。
+未设置规则、因 `ef_search` 太接近 `k` 被跳过，或查询由 MCI、混合遍历或暴力扫描路径回答时，不返回这个字段。
+
 ## 兼容性
 
 - 已有 `GetStatistics()` 和 `GetStatistics(keys)` API 保持可用；

@@ -271,6 +271,7 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
+| `early_stop` | object | 不设置（关闭） | 基于距离比的早停：`{"type": "distance", "alpha": <float>}`。`alpha` 不小于 1，可省略，省略时按 `k` 取值。详见[基于距离比的早停](#基于距离比的早停)。 |
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
@@ -279,6 +280,28 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
+
+### 基于距离比的早停
+
+可选的 `early_stop` 配置让查询在剩余候选明显比已有结果远时提前结束，不必用完整个 `ef_search` 预算：
+
+```json
+{"hgraph":{"ef_search":600,"early_stop":{"type":"distance","alpha":1.1}}}
+```
+
+结果数达到 `k` 后，如果最近的待展开候选的距离不小于当前第 k 近结果距离的 `alpha` 倍，搜索就结束。候选准入和固定 ef 的正常终止条件不变，所以从未满足这个条件的查询与不设置 `early_stop` 时完全一样。比较使用 VSAG 的距离分数：`l2` 为平方距离，`cosine` 为 `1 - cosine`。对归一化向量，`1 - cosine` 等于平方 L2 距离的一半，所以同一个 `alpha` 对两种度量含义相同。第 k 近分数为零或更低时（说明已找到 `k` 个与查询相同的点；cosine 的舍入可能让它略小于零），下一次检查就会结束搜索。设置了距离 `threshold` 时，仍在选出结果后再筛选，返回数量可能少于 `k`。
+
+`alpha` 必须有限且不小于 1；`early_stop` 中的其他键会报错。在相同 `ef_search` 下，较大的 `alpha` 走的是同一条遍历、只是停得更晚，所以在 FP32 基础编码且不重排时不会返回更差的结果。使用量化基础编码时，规则比较的是遍历中的近似距离；启用重排时，进入重排阶段的候选会变少。因此召回不一定随 `alpha` 单调变化，需要按每种量化和重排设置分别校准。
+
+省略 `alpha` 时按 `k` 取值：`k = 10` 时为 `1.5`，`k >= 100` 时为 `1.15`，两者之间按 `log10(k)` 线性变化，`k = 1` 时升到 `1.85`。`k` 越大，第 k 近距离越靠外，同一个比值停得越晚。在三个 100 万向量的公开数据集上（`cosine` 距离，`k` 为 10 和 100，召回目标 0.80 到 0.95，要求 90%、95% 或 99% 的查询达到目标），凡是固定 `ef_search` 达标的配置，默认值都保持了召回和 query coverage，只有一个配置例外：它要求 99% 的查询找全 10 个近邻。按配置单独校准的值在 `k = 10` 时为 1.13 到 1.54（那个例外为 1.85），`k = 100` 时为 1.03 到 1.15，其中低于默认值的省得更多。校准和检查用的是不同的查询：先在一组查询上按要求的召回和 query coverage 选 `alpha`，再在另一组查询上检查质量和端到端耗时（见 #2941）。
+
+搜索宽度（`ef_search`，小于 `k` 时按 `k` 计）不超过 `k` 的 1.25 倍时，规则不生效：搜索按未设置 `early_stop` 的方式进行，索引在第一次遇到这种情况时打印一条警告。这时规则很少能提前结束搜索，却仍要维护自己的前 k 个结果；实测距离计算只少不到 2%，单线程 QPS 最多降低 7.4%。
+
+`early_stop` 支持 `l2` 或 `cosine` 的 KNN 搜索，基础量化类型不限，也支持重排（规则作用于遍历中的基础编码距离，之后重排阶段再对保留的候选重新计算距离）、共轭图搜索、`parallelism`、过滤、批量查询和并发请求。内积度量（距离可能为负，比值没有意义；对归一化向量，`cosine` 给出相同的排序）、自定义距离、范围搜索、迭代器搜索、搜索会话和融合的 RaBitQ 拆分存储不支持，会直接报错。由 MCI、混合遍历或暴力扫描路径回答查询时，搜索照常进行。
+
+运行了规则的搜索在统计中返回 `early_stop_count`：被规则提前结束为 1，否则为 0；批量请求返回被规则提前结束的查询数。规则没有运行时（未设置、因接近 `k` 被跳过，或由图遍历以外的路径回答）不返回这个字段。搜索推理报告中，被规则提前结束的搜索终止原因为 `distance_early_stop`。
+
+规则改编自 [Distance Adaptive Beam Search 的 Algorithm 2](https://arxiv.org/html/2505.15636v1#A2)。这里保留了 VSAG 的固定宽度遍历和距离分数，论文针对度量空间和可导航图的理论保证不适用。
 
 ### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
 

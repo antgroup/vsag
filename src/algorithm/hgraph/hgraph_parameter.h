@@ -124,8 +124,34 @@ public:
     FromParsedJson(const JsonType& params);
 
 public:
+    // The alpha of the distance early stop when early_stop omits it: 1.5 at k = 10 and 1.15 for
+    // k >= 100, linear in log10(k) in between and rising to 1.85 at k = 1. A larger k puts the
+    // k-th distance farther out, so the same ratio stops later. On three 1M-vector datasets
+    // (recall targets 0.80 to 0.95) these values kept recall and query coverage wherever the
+    // fixed ef_search did, except one k = 10 configuration that required all ten neighbours for
+    // 99% of queries. A larger alpha only stops later along the same traversal; with FP32 base
+    // codes and no reordering it never returns worse results.
+    static constexpr float DISTANCE_EARLY_STOP_ALPHA_AT_K10 = 1.5F;
+    static constexpr float DISTANCE_EARLY_STOP_ALPHA_AT_K100 = 1.15F;
+
+    static float
+    DefaultDistanceEarlyStopAlpha(int64_t k);
+
+    // The distance early stop needs a search width well above k. With ef at most this multiple
+    // of k it seldom ends a search early while its own top-k state still costs time (held-out
+    // measurements: under 2% fewer distance computations, up to 7.4% lower single-thread QPS),
+    // so such searches run without it.
+    static constexpr double DISTANCE_EARLY_STOP_MIN_EF_TO_K = 1.25;
+
+    static bool
+    DistanceEarlyStopApplies(uint64_t ef, int64_t k);
+
     int64_t ef_search{30};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
+    // early_stop requests the distance early stop; early_stop_alpha is its explicit alpha, or 0
+    // to use DefaultDistanceEarlyStopAlpha(k).
+    bool early_stop{false};
+    float early_stop_alpha{0.0F};
     bool use_reorder{false};
     bool use_extra_info_filter{false};
     bool rabitq_one_bit_search{false};
