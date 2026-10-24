@@ -1269,6 +1269,18 @@ RaBitQuantizer<metric>::SupplementErrorOffset() const {
 }
 
 template <MetricType metric>
+uint64_t
+RaBitQuantizer<metric>::SupplementNormCodeOffset() const {
+    return split_layout_.supplement_norm_code_offset;
+}
+
+template <MetricType metric>
+uint64_t
+RaBitQuantizer<metric>::SupplementNormOffset() const {
+    return split_layout_.supplement_norm_offset;
+}
+
+template <MetricType metric>
 bool
 RaBitQuantizer<metric>::SupportSplitCodeStorage() const {
     return split_layout_.is_split;
@@ -3385,6 +3397,26 @@ RaBitQuantizer<metric>::TransformResidualQuery(const float* query, float* transf
                   pca_data.data() + this->original_dim_,
                   transformed_query + this->dim_);
     }
+}
+
+template <MetricType metric>
+bool
+RaBitQuantizer<metric>::PrepareGpuResidualQuery(const float* transformed_query,
+                                                float* normalized_query,
+                                                float* query_norm,
+                                                float* query_sum) const {
+    if (metric != MetricType::METRIC_TYPE_L2SQR or transformed_query == nullptr or
+        normalized_query == nullptr or query_norm == nullptr or query_sum == nullptr or
+        num_bits_per_dim_query_ != 32 or num_bits_per_dim_base_ == 1) {
+        return false;
+    }
+    *query_norm = NormalizeWithCentroid(
+        transformed_query, this->centroid_.data(), normalized_query, this->dim_);
+    *query_sum = 0.0F;
+    for (uint64_t d = 0; d < this->dim_; ++d) {
+        *query_sum += normalized_query[d];
+    }
+    return IsFiniteRaBitQValue(*query_norm) and IsFiniteRaBitQValue(*query_sum);
 }
 
 template <MetricType metric>

@@ -1460,6 +1460,7 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
                 RaBitQSplitBucketDataCell::pack_location(bucket_id, offset_id);
         }
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
         return offset_id;
     }
 
@@ -1525,6 +1526,7 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
                 invalidate_old_lane(bucket_id, old_offset_id);
             }
             ++this->bucket_versions_[bucket_id];
+            this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
             this->locations_[inner_id] = target_location;
             return offset_id;
         }
@@ -1570,6 +1572,7 @@ RaBitQSplitBucketDataCell::InsertVector(const void* vector,
         write_target(offset_id);
         invalidate_old_lane(old_bucket_id, old_offset_id);
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
         if (old_bucket_id != bucket_id) {
             ++this->bucket_versions_[old_bucket_id];
         }
@@ -1639,6 +1642,7 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
                 RaBitQSplitBucketDataCell::pack_location(bucket_id, offset_id);
         }
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
         return;
     }
 
@@ -1722,6 +1726,7 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
                 invalidate_old_lane(bucket_id, old_offset_id);
             }
             ++this->bucket_versions_[bucket_id];
+            this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
             this->locations_[inner_id] = target_location;
             return;
         }
@@ -1770,6 +1775,7 @@ RaBitQSplitBucketDataCell::InsertVectorWithOffset(const void* vector,
             invalidate_old_lane(old_bucket_id, old_offset_id);
         }
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
         if (old_bucket_id != bucket_id) {
             ++this->bucket_versions_[old_bucket_id];
         }
@@ -1907,6 +1913,7 @@ RaBitQSplitBucketDataCell::MergeOther(const BucketInterfacePtr& other, InnerIdTy
             }
         }
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
     }
     this->rebuild_locations();
 }
@@ -1968,6 +1975,7 @@ RaBitQSplitBucketDataCell::package_fastscan(bool force) {
             }
         }
         ++this->bucket_versions_[bucket_id];
+        this->gpu_index_epoch_.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -2137,6 +2145,207 @@ RaBitQSplitBucketDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
 void
 RaBitQSplitBucketDataCell::FinalizeLoad() {
     this->rebuild_residual_centroid_transforms();
+}
+
+std::shared_ptr<gpu::CudaRabitqIndex>
+RaBitQSplitBucketDataCell::build_gpu_index(uint64_t budget_bytes) {
+    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(this->codes_.get());
+    RaBitQGpuLayout layout;
+    if (split_codes == nullptr or not split_codes->GetGpuLayout(&layout) or
+        not this->use_l2_residual_query() or layout.filter_bits < 2 or layout.filter_bits > 3 or
+        layout.supplement_bits == 0 or layout.supplement_bits > 8 or
+        this->fastscan_block_size_ == 0) {
+        return nullptr;
+    }
+
+    std::lock_guard cache_lock(this->gpu_index_mutex_);
+    const uint64_t epoch = this->gpu_index_epoch_.load(std::memory_order_acquire);
+    if (this->gpu_index_ != nullptr and this->cached_gpu_index_epoch_ == epoch) {
+        return this->gpu_index_;
+    }
+
+    std::vector<uint64_t> bucket_offsets(static_cast<uint64_t>(this->bucket_count_) + 1, 0);
+    for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+        std::shared_lock lock(this->bucket_mutexes_[bucket_id]);
+        bucket_offsets[static_cast<uint64_t>(bucket_id) + 1] =
+            bucket_offsets[static_cast<uint64_t>(bucket_id)] + this->inner_ids_[bucket_id].size();
+    }
+    const uint64_t record_count = bucket_offsets.back();
+    if (record_count == 0) {
+        return nullptr;
+    }
+
+    const uint64_t filter_planes_size = layout.plane_bytes * layout.filter_bits;
+    std::vector<uint8_t> filter_codes(record_count * filter_planes_size, 0);
+    std::vector<uint8_t> supplement_codes(record_count * layout.supplement_code_size, 0);
+    std::vector<uint64_t> inner_ids(record_count, EMPTY_INNER_ID);
+    std::vector<float> filter_adds(record_count, std::numeric_limits<float>::max());
+    std::vector<float> filter_scales(record_count, 0.0F);
+    std::vector<float> filter_norm_codes(record_count, 0.0F);
+    std::vector<float> full_adds(record_count, std::numeric_limits<float>::quiet_NaN());
+    std::vector<float> full_norm_codes(record_count, 0.0F);
+    std::vector<float> base_norms(record_count, 0.0F);
+    std::vector<float> base_errors(record_count, 0.0F);
+    std::vector<uint8_t> one_bit_code(layout.one_bit_code_size, 0);
+
+    const uint64_t packed_size = filter_planes_size * FASTSCAN_BATCH_SIZE;
+    for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
+        std::shared_lock bucket_lock(this->bucket_mutexes_[bucket_id]);
+        std::lock_guard codes_lock(this->codes_insert_mutex_);
+        const uint64_t bucket_begin = bucket_offsets[static_cast<uint64_t>(bucket_id)];
+        const uint64_t snapshot_size = bucket_offsets[static_cast<uint64_t>(bucket_id) + 1] -
+                                       bucket_offsets[static_cast<uint64_t>(bucket_id)];
+        const uint64_t bucket_size =
+            std::min<uint64_t>(snapshot_size, this->inner_ids_[bucket_id].size());
+        for (uint64_t offset = 0; offset < bucket_size; ++offset) {
+            const uint64_t record = bucket_begin + offset;
+            const auto inner_id = this->inner_ids_[bucket_id][offset];
+            inner_ids[record] = inner_id;
+            if (inner_id == EMPTY_INNER_ID) {
+                continue;
+            }
+            this->get_filter_code(bucket_id, static_cast<InnerIdType>(offset), one_bit_code.data());
+            if (not split_codes->CopySupplementCode(
+                    inner_id, supplement_codes.data() + record * layout.supplement_code_size)) {
+                continue;
+            }
+            std::memcpy(filter_codes.data() + record * filter_planes_size,
+                        one_bit_code.data(),
+                        filter_planes_size);
+            std::memcpy(filter_norm_codes.data() + record,
+                        one_bit_code.data() + layout.one_bit_norm_code_offset,
+                        sizeof(float));
+            const auto* supplement = supplement_codes.data() + record * layout.supplement_code_size;
+            std::memcpy(full_norm_codes.data() + record,
+                        supplement + layout.supplement_norm_code_offset,
+                        sizeof(float));
+            std::memcpy(base_norms.data() + record,
+                        supplement + layout.supplement_norm_offset,
+                        sizeof(float));
+            std::memcpy(base_errors.data() + record,
+                        supplement + layout.supplement_error_offset,
+                        sizeof(float));
+            if (offset < this->residual_bias_[bucket_id].size()) {
+                full_adds[record] = this->residual_bias_[bucket_id][offset];
+            }
+            const uint64_t block_index = offset / FASTSCAN_BATCH_SIZE;
+            const uint64_t index_in_block = offset % FASTSCAN_BATCH_SIZE;
+            const auto* block =
+                this->fastscan_blocks_[bucket_id].data() + block_index * this->fastscan_block_size_;
+            std::memcpy(filter_adds.data() + record,
+                        block + packed_size + index_in_block * sizeof(float),
+                        sizeof(float));
+            std::memcpy(filter_scales.data() + record,
+                        block + packed_size + sizeof(float) * FASTSCAN_BATCH_SIZE +
+                            index_in_block * sizeof(float),
+                        sizeof(float));
+        }
+    }
+    if (this->gpu_index_epoch_.load(std::memory_order_acquire) != epoch) {
+        return nullptr;
+    }
+
+    const gpu::CudaRabitqBuildData data{bucket_offsets.data(),
+                                        filter_codes.data(),
+                                        supplement_codes.data(),
+                                        inner_ids.data(),
+                                        filter_adds.data(),
+                                        filter_scales.data(),
+                                        filter_norm_codes.data(),
+                                        full_adds.data(),
+                                        full_norm_codes.data(),
+                                        base_norms.data(),
+                                        base_errors.data(),
+                                        static_cast<uint64_t>(this->bucket_count_),
+                                        record_count,
+                                        layout.dim,
+                                        filter_planes_size,
+                                        layout.supplement_code_size,
+                                        layout.filter_bits,
+                                        layout.supplement_bits};
+    auto result = gpu::CudaCreateRabitqIndex(data, budget_bytes);
+    if (result != nullptr) {
+        this->gpu_index_ = result;
+        this->cached_gpu_index_epoch_ = epoch;
+    }
+    return result;
+}
+
+bool
+RaBitQSplitBucketDataCell::GpuBatchSearch(const float* queries,
+                                          uint64_t query_count,
+                                          const int32_t* bucket_ids,
+                                          uint32_t nprobe,
+                                          uint32_t candidate_count,
+                                          uint32_t topk,
+                                          uint64_t* inner_ids,
+                                          float* distances,
+                                          int32_t device_id,
+                                          uint64_t memory_budget) {
+    if (queries == nullptr or bucket_ids == nullptr or inner_ids == nullptr or
+        distances == nullptr or query_count == 0 or nprobe == 0 or topk == 0 or
+        candidate_count < topk or not this->use_l2_residual_query()) {
+        return false;
+    }
+    gpu::CudaDeviceScope device(device_id);
+    if (not device.Bound()) {
+        return false;
+    }
+    const uint64_t budget = gpu::CudaSuggestedBudget(memory_budget);
+    const uint64_t search_epoch = this->gpu_index_epoch_.load(std::memory_order_acquire);
+    auto index = this->build_gpu_index(budget);
+    auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(this->codes_.get());
+    RaBitQGpuLayout layout;
+    if (index == nullptr or split_codes == nullptr or not split_codes->GetGpuLayout(&layout) or
+        this->gpu_index_epoch_.load(std::memory_order_acquire) != search_epoch) {
+        return false;
+    }
+
+    this->ensure_residual_centroid_transforms();
+    std::vector<float> transformed_queries(query_count * this->residual_transform_size_, 0.0F);
+    std::vector<float> normalized_queries(query_count * layout.dim, 0.0F);
+    std::vector<float> query_norms(query_count, 0.0F);
+    std::vector<float> query_sums(query_count, 0.0F);
+    std::vector<float> query_bucket_norm_sqrs(query_count * nprobe, 0.0F);
+    std::vector<float> residual_query(this->residual_transform_size_, 0.0F);
+    for (uint64_t query = 0; query < query_count; ++query) {
+        auto* transformed = transformed_queries.data() + query * this->residual_transform_size_;
+        this->codes_->TransformResidualQuery(queries + query * this->dim_, transformed);
+        if (not split_codes->PrepareGpuResidualQuery(transformed,
+                                                     normalized_queries.data() + query * layout.dim,
+                                                     query_norms.data() + query,
+                                                     query_sums.data() + query)) {
+            return false;
+        }
+        for (uint32_t probe = 0; probe < nprobe; ++probe) {
+            const auto bucket_id = bucket_ids[query * nprobe + probe];
+            if (bucket_id < 0 or bucket_id >= this->bucket_count_) {
+                return false;
+            }
+            FP32Sub(transformed,
+                    this->residual_centroid_transforms_.data() +
+                        static_cast<uint64_t>(bucket_id) * this->residual_transform_size_,
+                    residual_query.data(),
+                    this->residual_transform_size_);
+            query_bucket_norm_sqrs[query * nprobe + probe] =
+                this->codes_->ComputeTransformedResidualQueryNormSqr(residual_query.data());
+        }
+    }
+
+    const bool searched = gpu::CudaSearchRabitq(index,
+                                                normalized_queries.data(),
+                                                query_norms.data(),
+                                                query_sums.data(),
+                                                bucket_ids,
+                                                query_bucket_norm_sqrs.data(),
+                                                query_count,
+                                                nprobe,
+                                                candidate_count,
+                                                topk,
+                                                inner_ids,
+                                                distances,
+                                                budget);
+    return searched and this->gpu_index_epoch_.load(std::memory_order_acquire) == search_epoch;
 }
 
 uint64_t

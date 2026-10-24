@@ -636,6 +636,18 @@ public:
     SupplementErrorOffset() const;
 
     [[nodiscard]] uint64_t
+    SupplementNormCodeOffset() const;
+
+    [[nodiscard]] uint64_t
+    SupplementNormOffset() const;
+
+    bool
+    PrepareGpuResidualQuery(const float* transformed_query,
+                            float* normalized_query,
+                            float* query_norm,
+                            float* query_sum) const;
+
+    [[nodiscard]] uint64_t
     AlignCodeField(uint64_t size) const;
 
 private:
