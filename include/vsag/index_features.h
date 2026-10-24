@@ -91,6 +91,8 @@ enum IndexFeature {
     SUPPORT_GET_STATS,               /**< Supports static index analysis via GetStats */
     SUPPORT_ANALYZE_INDEX_BY_SEARCH, /**< Supports query-based index analysis */
 
+    SUPPORT_ESTIMATE_BUILD_MEMORY, /**< Supports estimating peak build memory */
+
     INDEX_FEATURE_COUNT /** must be last one */
 };
 }  // namespace vsag

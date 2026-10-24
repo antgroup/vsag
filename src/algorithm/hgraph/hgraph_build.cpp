@@ -14,12 +14,15 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <exception>
 #include <fstream>
 #include <future>
 #include <limits>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -226,6 +229,8 @@ HGraph::build_by_pipnn(const DatasetPtr& data) {
 
 std::vector<int64_t>
 HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
+    // Build has exclusive access; reject invalid levels before allocating IDs or training.
+    this->validate_random_levels(static_cast<uint64_t>(data->GetNumElements()));
     std::vector<int64_t> failed_ids;
 
     auto pipnn_parameter = this->pipnn_param_;
@@ -716,7 +721,6 @@ HGraph::assign_batch_levels(Vector<AddRow>& rows) {
     if (rows.empty()) {
         return;
     }
-    std::scoped_lock lock(this->add_mutex_);
     for (auto& row : rows) {
         row.level = this->get_random_level() - 1;
     }
@@ -729,6 +733,10 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
     auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
     const auto* source_id = data->GetSourceID();
+    // Keep the live RNG unchanged between preflight and assignment. Do not hold the label
+    // lock across resize(): insertion/search acquire global protection before label locks.
+    std::scoped_lock preparation_lock(this->add_prepare_mutex_);
+    this->validate_random_levels(static_cast<uint64_t>(total));
     for (int64_t j = 0; j < total; ++j) {
         {
             std::shared_lock label_lock(this->label_lookup_mutex_);
@@ -741,7 +749,7 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
 
         InnerIdType inner_id;
         {
-            std::scoped_lock lock(this->add_mutex_);
+            std::scoped_lock id_lock(this->add_mutex_);
             inner_id = this->get_unique_inner_ids(1).at(0);
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
@@ -833,10 +841,83 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 }
 
 void
-HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+HGraph::InsertAddBatchWorkContext::RunRows() {
+    while (true) {
+        uint64_t row = next_row.fetch_add(1, std::memory_order_relaxed);
+        if (row >= row_count) {
+            return;
+        }
+        try {
+            row_function(row_state, row);
+        } catch (...) {
+            // Retain arbitrary C++ row exceptions and continue attempts;
+            // the exception from the lowest failing row is rethrown after workers complete.
+            std::lock_guard<std::mutex> error_lock(error_mutex);
+            if (error == nullptr or row < error_row) {
+                error_row = row;
+                error = std::current_exception();
+            }
+        }
+    }
+}
+
+void
+HGraph::InsertAddBatchWorker::operator()() const {
+    context->RunRows();
+}
+
+void
+HGraph::run_insert_add_batch_workers(SafeThreadPool& pool,
+                                     uint64_t thread_count,
+                                     InsertAddBatchWorkContext& context) {
+    const uint64_t worker_count = insert_worker_count(true, thread_count, context.row_count);
+    if (worker_count == 0) {
+        return;
+    }
     std::vector<std::future<void>> futures;
-    HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+    // Drain submitted workers before their stack-owned context expires if submission fails.
+    HGraphBuildTaskGuard guard(futures, worker_count);
+    try {
+        for (uint64_t i = 0; i < worker_count; ++i) {
+            futures.emplace_back(pool.GeneralEnqueue(InsertAddBatchWorker{&context}));
+        }
+    } catch (...) {
+        const auto enqueue_exception = std::current_exception();
+        // Keep submission failure primary, but report secondary failures after draining.
+        const auto report_secondary = [](const std::exception_ptr& error) noexcept {
+            try {
+                try {
+                    std::rethrow_exception(error);
+                } catch (const std::exception& e) {
+                    logger::error("HGraph insertion worker failed while draining: {}", e.what());
+                } catch (...) {
+                    logger::error("HGraph insertion worker failed with an unknown exception");
+                }
+            } catch (...) {
+                // Intentionally silent: if logging itself throws, drop the secondary report so the
+                // original submission exception is rethrown unchanged; no fallback output.
+            }
+        };
+        try {
+            wait_all_futures(futures);
+        } catch (...) {
+            report_secondary(std::current_exception());
+        }
+        // RunRows retains row failures in the context rather than in the worker futures.
+        if (context.error != nullptr) {
+            report_secondary(context.error);
+        }
+        std::rethrow_exception(enqueue_exception);
+    }
+    wait_all_futures(futures);
+    // Worker completion synchronizes error-record reads below; no lock is needed after the wait.
+    if (context.error != nullptr) {
+        std::rethrow_exception(context.error);
+    }
+}
+
+void
+HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
     this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
@@ -855,24 +936,51 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         this->insert_one_logical_point(vector_data, row, context);
     };
 
-    for (const auto& row : batch.rows) {
-        const auto* extra_info =
-            extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
-        const AttributeSet* cur_attr_set = nullptr;
-        if (attr_sets != nullptr) {
-            cur_attr_set = attr_sets + row.input_idx;
-        }
-        if (context.use_parallel_add) {
-            auto future = this->thread_pool_->GeneralEnqueue(
-                add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
-            futures.emplace_back(std::move(future));
-        } else {
+    if (not context.use_parallel_add) {
+        for (const auto& row : batch.rows) {
+            const auto* extra_info =
+                extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
+            const AttributeSet* cur_attr_set = nullptr;
+            if (attr_sets != nullptr) {
+                cur_attr_set = attr_sets + row.input_idx;
+            }
             add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
         }
+        return;
     }
-    if (context.use_parallel_add) {
-        wait_all_futures(futures);
-    }
+
+    // RowState borrows the stack lambda and call state; synchronous worker draining keeps
+    // them alive until every submitted worker completes, including exceptional exits.
+    struct RowState {
+        HGraph* self;
+        const DatasetPtr* data;
+        const AddBatch* batch;
+        const char* extra_infos;
+        const AttributeSet* attr_sets;
+        uint64_t extra_info_size;
+        decltype(add_func)* insert_row;
+    };
+
+    RowState state{this, &data, &batch, extra_infos, attr_sets, this->extra_info_size_, &add_func};
+
+    InsertAddBatchWorkContext work;
+    work.row_function = [](void* raw_state, uint64_t row_idx) {
+        auto* row_state = static_cast<RowState*>(raw_state);
+        const auto& row = row_state->batch->rows[row_idx];
+        const auto* extra_info =
+            row_state->extra_infos == nullptr
+                ? nullptr
+                : row_state->extra_infos + row.input_idx * row_state->extra_info_size;
+        const AttributeSet* cur_attr_set =
+            row_state->attr_sets == nullptr ? nullptr : row_state->attr_sets + row.input_idx;
+        (*row_state->insert_row)(row_state->self->get_data(*row_state->data, row.input_idx),
+                                 row,
+                                 extra_info,
+                                 cur_attr_set);
+    };
+    work.row_state = &state;
+    work.row_count = batch.rows.size();
+    run_insert_add_batch_workers(*this->thread_pool_, this->build_thread_count_, work);
 }
 
 bool
@@ -1941,6 +2049,9 @@ HGraph::build_with_cache(const DatasetPtr& data) {
     CHECK_ARGUMENT(this->cache_ != nullptr, "build_with_cache requires an imported cache");
     CHECK_ARGUMENT(data->GetSourceID() != nullptr,
                    "build_with_cache requires Dataset::SourceID to be set");
+
+    // Build has exclusive access (empty index checked above); validate before allocating IDs.
+    this->validate_random_levels(static_cast<uint64_t>(data->GetNumElements()));
 
     const auto build_begin = build_cache_now_us();
     this->Train(data);
