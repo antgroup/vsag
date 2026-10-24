@@ -193,10 +193,20 @@ HGraph::KnnSearch(const DatasetPtr& query,
     while (true) {
         auto search_result = DistanceHeap::MakeInstanceBySize<true, false>(ctx.alloc, k);
         if (is_last_filter) {
+            if (const auto* pending_duplicates = iter_filter_ctx->GetPendingDuplicates();
+                pending_duplicates != nullptr) {
+                for (const auto& [pending_id, pending_dist] : *pending_duplicates) {
+                    if (iter_filter_ctx->CheckPoint(pending_id)) {
+                        search_result->Push(pending_dist, pending_id);
+                    }
+                }
+            }
             while (!iter_filter_ctx->Empty()) {
                 uint32_t cur_inner_id = iter_filter_ctx->GetTopID();
                 float cur_dist = iter_filter_ctx->GetTopDist();
-                search_result->Push(cur_dist, cur_inner_id);
+                if (not iter_filter_ctx->IsPendingDuplicate(cur_inner_id)) {
+                    search_result->Push(cur_dist, cur_inner_id);
+                }
                 iter_filter_ctx->PopDiscard();
             }
         } else {
@@ -232,8 +242,9 @@ HGraph::KnnSearch(const DatasetPtr& query,
             search_param.rerank_topk = k;
             search_param.parallel_search_thread_count = params.parallel_search_thread_count;
             search_param.enable_reorder = params.enable_reorder;
-            search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
             search_param.consider_duplicate = this->support_duplicate_;
+            search_param.max_duplicates_per_group = params.max_duplicates_per_group;
+            search_param.enable_rabitq_one_bit_search = params.rabitq_one_bit_search;
             search_param.skip_ratio = params.skip_ratio;
             search_param.skip_strategy_type = params.skip_strategy_type;
 
@@ -904,6 +915,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         base_search_param.topk = std::max(base_search_param.topk, LOOK_AT_K);
     }
     base_search_param.consider_duplicate = this->support_duplicate_;
+    base_search_param.max_duplicates_per_group = params.max_duplicates_per_group;
     base_search_param.enable_reorder = use_custom_distance ? false : params.enable_reorder;
     base_search_param.enable_rabitq_one_bit_search =
         use_custom_distance ? false : params.rabitq_one_bit_search;
