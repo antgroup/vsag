@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <optional>
+
 #include "argparse/argparse.hpp"
 #include "eval_job.h"
 #include "yaml-cpp/yaml.h"
@@ -23,6 +25,9 @@ namespace vsag::eval {
 
 class EvalConfig {
 public:
+    static void
+    AddCliArguments(argparse::ArgumentParser& parser);
+
     static EvalConfig
     Load(argparse::ArgumentParser& parser);
 
@@ -31,6 +36,9 @@ public:
 
     static void
     CheckKeyAndType(YAML::Node& yaml_node);
+
+    void
+    Validate() const;
 
 public:
     std::string dataset_path;
@@ -57,6 +65,7 @@ public:
     bool enable_latency{true};
     bool enable_percent_latency{true};
     bool use_id_based_recall{false};
+    std::optional<double> recall_target;
 
     EvalConfig() = default;
 };
