@@ -903,8 +903,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                        "corrupt fused graph neighbor count");
         const auto* neighbors = current_node.neighbors;
         uint32_t cursor = 0;
-        while (cursor < neighbor_count) {
-            InnerIdType batch_ids[4]{};
+        const auto collect_batch = [&](InnerIdType* ids) {
             uint32_t batch_count = 0;
             while (cursor < neighbor_count and batch_count < 4) {
                 InnerIdType neighbor = 0;
@@ -913,13 +912,18 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     visited_list->TestAndSet(neighbor)) {
                     continue;
                 }
-                batch_ids[batch_count] = neighbor;
+                ids[batch_count] = neighbor;
                 graph->PrefetchFusedFilter(neighbor);
                 ++batch_count;
             }
-            if (batch_count == 0) {
-                continue;
-            }
+            return batch_count;
+        };
+        InnerIdType batch_ids[4]{};
+        uint32_t batch_count = collect_batch(batch_ids);
+        while (batch_count > 0) {
+            // Fetch the next batch while scoring and reranking this one.
+            InnerIdType next_ids[4]{};
+            const uint32_t next_count = collect_batch(next_ids);
             HGraphRaBitQFusedDataCell::CodeView batch_codes[4]{};
             for (uint32_t lane = 0; lane < batch_count; ++lane) {
                 batch_codes[lane] = graph->GetCodeView(batch_ids[lane]);
@@ -987,6 +991,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                         full_distance_available[lane]);
                 }
             }
+            std::copy_n(next_ids, next_count, batch_ids);
+            batch_count = next_count;
         }
     }
 
