@@ -117,6 +117,90 @@ make pyvsag PY_VERSION=3.10
 cd tests/python && pytest -q
 ```
 
+## 统计 testcase 预算与耗时
+
+`scripts/testing/test_budget_report.py` 只读取已保存的测试列表、结果和成本记录，不运行测试；
+不依赖 Team CI 的库存生成工具：
+
+```bash
+build/tests/functests '~[daily]' --list-tests --reporter xml > functests-list.xml
+build/tests/unittests '~[daily]' --list-tests --reporter xml > unittests-list.xml
+python3 scripts/testing/test_budget_report.py \
+  --list-tests tests/functests=functests-list.xml \
+  --list-tests tests/unittests=unittests-list.xml \
+  --source-root "$PWD" --output budget-report.md
+```
+
+`--list-tests` 接收 Catch2 列表 XML，而非执行结果 XML。上述列表命令只枚举，不执行测试。
+保留所有列出的用例（包括模板展开），报告器不会额外排除 daily。
+已有执行结果可加 `--xml tests/functests=report.xml`，同一源码版本的成本日志可加
+`--cost tests/functests=cost.log`。列表 XML 的哈希只标识输入列表，不代表测试二进制哈希。
+
+Catch2 XML reporter 会把预算日志放入 `StdOut`。同一份已保存的执行 XML 可以显式导入两类数据：
+`--xml` 只读取耗时，`--cost` 先解码 XML 转义，再只读取 `StdOut` 中的 `[test-budget]` 行：
+
+```bash
+python3 scripts/testing/test_budget_report.py \
+  --list-tests tests/functests=functests-list.xml \
+  --xml tests/functests=report.xml --cost tests/functests=report.xml \
+  --source-root "$PWD" --output budget-report.md
+```
+
+XML 没有预算记录时，成本仍标为 **unknown**；带前缀但格式错误的记录会报错，不会静默丢弃。
+
+已有 Team CI 产物也可提供冻结库存和执行结果：
+
+```bash
+python3 scripts/testing/test_budget_report.py \
+  --inventory team-plan-RUN-ATTEMPT.zip \
+  --result team-results-0-RUN-ATTEMPT.zip \
+  --result team-results-1-RUN-ATTEMPT.zip \
+  --result team-results-2-RUN-ATTEMPT.zip \
+  --result team-results-3-RUN-ATTEMPT.zip \
+  --output budget-report.md
+```
+
+库存也可使用 schema 3 的 inventory/plan JSON，结果也可直接使用分片 `result.json`。
+Catch2 XML 使用 `--xml tests/functests=report.xml`；不要再通过 `--result` 重复输入同一批用例。
+`--binary tests/functests` 只统计功能测试，`--group-by family` 按索引族统计，
+`--format json` 输出每个用例的分类明细。
+
+计数保留二进制身份：同时编入单元与功能测试二进制的同一源码用例计为两项。
+分类按固定优先级互斥地归入 Tune、恢复、序列化、修改/并发、搜索/过滤、构建/训练、
+数据/量化/SIMD 或 Other。这是名称、标签和源码位置的启发式分类，不表示断言覆盖率。
+
+可选参数 `--cost tests/functests=cost.jsonl` 接收 schema 1 的完整 testcase 成本记录。
+每条包含 `model_version`、`unit`、`policy`、`case`（`name`、`tags`、`source_file`、
+`source_line`）、`cap_points` 和 `total_points`。测试日志可为记录添加 `[test-budget]` 前缀；
+此时忽略其他日志行。只统计顶层预算上限和估算成本，不重复累加内部 `runs`。Catch generator
+重入产生的完全相同计划只计一次，另记录 `identical_plan_repetitions`；同一用例出现不同计划会报错。
+桥接记录若标签为空且 `source_line: 0`，必须按二进制、名称、完整源码身份唯一匹配库存。
+Catch 原始的绝对路径或含父目录的相对路径只作为身份字符串，报告器不会打开这些源码路径。
+优先精确匹配完整路径；只有需要把绝对路径映射为仓库相对身份时，才使用
+`--source-root /absolute/checkout`。不允许只按文件名匹配，冻结库存的 ID 和摘要保持不变。
+
+用例数量、预算上限、估算成本、实测 case 秒数分别使用独立分母；不同模型、单位和策略不会混合。
+未提供的数据标为 **unknown**，不会当作零；缺少成本记录时仍能生成耗时基线。
+case 秒数之和**既不是 CI 墙钟耗时，也不是 CPU 时间**。失败与超预算记录仍会显示；
+报告命令不替代 CI 的完整执行检查。
+
+本地脚本回归命令：`python3 tests/scripts/test_test_budget_report.py`。
+
+## 预算策略
+
+`tests/fixtures/core/test_budget.h` 根据 N、D、Q，以及数据准备、训练、构建、搜索、参考答案计算、
+序列化和修改操作的声明次数估算逻辑成本。一个 testcase 的完整配置矩阵共用一个预算上限。
+每个候选都保留所需配置和合法最小规模；没有合法候选能满足上限时，计划失败。
+Catch generator 重入复用同一完整计划，不会重新获得一份预算。`CurrentPolicy` 使用 Catch
+`--rng-seed` 的种子，因此同一 testcase 和种子的资源选择可复现。
+
+第一批接入 HGraph、IVF、BruteForce、Warp 和 Dataset 测试中的随机资源族，并未覆盖每个静态用例；
+未接入者在报告中仍显示未建模。PR HGraph Tune 保留四类代表转换，Q=20、N≤400；
+PiPNN 使用一类转换，Q=10、N=256。Daily 保留全部十类转换，Q=100。
+
+逻辑点数和声明上界不等于墙钟秒数，也不是通用运行时间保证。预算不替代断言或超时；
+预算不足不能静默跳过 testcase，也不能把未完成的运行判为通过。
+
 ## 参考
 
 - 功能测试源代码目录：`tests/`

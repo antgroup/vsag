@@ -56,7 +56,8 @@ public:
                         float valid_ratio = 0.8,
                         uint64_t extra_info_size = 0,
                         int64_t id_shift = 16,
-                        const std::string& vector_type = "dense");
+                        const std::string& vector_type = "dense",
+                        uint64_t query_count = 100);
 
     /**
      * @brief Gets a test dataset with duplicate vectors.
@@ -74,7 +75,8 @@ public:
                         const std::string& metric_str = "l2",
                         bool with_path = false,
                         float valid_ratio = 0.8,
-                        uint64_t extra_info_size = 0);
+                        uint64_t extra_info_size = 0,
+                        uint64_t query_count = 100);
 
     /**
      * @brief Gets the NaN test dataset for specified metric.
@@ -115,7 +117,8 @@ private:
             float filter_ratio = 0.8,
             uint64_t extra_info_size = 0,
             int64_t id_shift = 16,
-            const std::string& vector_type = "dense");
+            const std::string& vector_type = "dense",
+            uint64_t query_count = 100);
 
 private:
     std::unordered_map<std::string, TestDatasetPtr> pool_;   // Cache of TestDataset objects.
