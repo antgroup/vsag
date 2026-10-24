@@ -81,6 +81,9 @@ and `metric_type` **must** be `"ip"`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of lowest-weight postings permanently removed per term per window during `Build`; `[0, 1)`, disabled by default. |
 | `term_retain_threshold` | integer | `0` | Build-time posting cap per term, divided across windows; `0` disables the cap. |
+
+Execution settings are parsed and serialized with `SINDISearchParameter`, so analysis searches retain the requested scheduler, rerank and statistics options.
+
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
@@ -248,10 +251,15 @@ Search-time parameters live under the `sindi` sub-object:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
+| `window_parallelism` | int | `1` | Number of window-search workers (`1` to `16`). Workers run in a reusable thread pool and steal pending windows from one another. The merged heap keeps up to `n_candidate` candidates before reranking. When this is greater than `1`, KNN search ignores `timeout_ms`; window scanning for queries with a filter, active callback limit, or reasoning trace still uses one worker. |
+| `worker_n_candidate` | int | `n_candidate` | Per-worker candidate heap capacity; omit to inherit the effective final candidate count. If set, it must be positive and `worker_n_candidate × window_parallelism ≥` the final candidate count. For example, `n_candidate=500`, `window_parallelism=2`, and `worker_n_candidate=300` are valid. Reducing this value can lower recall when top candidates are unevenly distributed across workers; the aggregate capacity bound does not guarantee retaining the global top candidates. |
+| `window_scheduler` | string | `"count_deque"` | Parallel KNN window scheduling: `count_deque` retains the count-based deque/try-lock implementation; `count_atomic` uses count-based contiguous ranges and shared atomic cursors; `cost_atomic` balances contiguous ranges by the sum of query-pruned, term-pruned posting scan counts, then uses atomic cursors. Each atomic worker drains its range and then visits other ranges in cyclic order. |
 | `filter_callback_limit` | uint64 | `0` | Maximum user `Filter::CheckValid` callback invocations for one filtered search request. A value of `0` disables the limit. Internal checks such as the deleted-ID filter do not count. Reaching a positive limit stops candidate and window scanning after processing the final callback result and returns the already filtered candidates, so the result may be partial. The limit applies to KNN and range search through both the regular APIs and `SearchWithRequest`. |
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
+
+FP32/FP16 sparse KNN reranking automatically uses count-based static batches with the same parallelism as `window_parallelism` (capped by the candidate count). The caller participates using the same query thread pool; each worker writes distances at independent candidate positions, and final top-k selection follows the original candidate order. A single worker processes one batch. Reasoning queries, DMQ8 and range search retain scalar reranking. Library distance counters and result statistics remain enabled.
 
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.
