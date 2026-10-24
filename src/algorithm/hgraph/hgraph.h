@@ -67,7 +67,7 @@ class FlattenOptimizedBuildInterface;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
-class MciIncrementalAddExecutor;
+class MciIncrementalUpdateExecutor;
 class IteratorFilterContext;
 class RaBitQSplitDataCellInterface;
 struct RaBitQFusedCodeView;
@@ -98,7 +98,7 @@ public:
     friend class HGraphAnalyzer;
     friend class HGraphCodeWriteTestAccess;
     friend class HGraphOptimizedBuildSession;
-    friend class MciIncrementalAddExecutor;
+    friend class MciIncrementalUpdateExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -1109,6 +1109,9 @@ private:
     void
     build_mci_clique_index(const void* vectors = nullptr);
 
+    /// Companion reads shared by the serial update and the planning pass. A null view reads the
+    /// live structure under the cell lock; a non-null view is the frozen read session of one
+    /// planning chunk, which reports the same clique ids without taking a lock per query.
     void
     mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
                           InnerIdType node_id,
