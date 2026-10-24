@@ -1,0 +1,26 @@
+name: Team Isolation Probe
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/team-isolation-probe.yml'
+      - '.github/workflows/team-isolation-worker.yml'
+      - 'scripts/ci/team_source.py'
+      - 'tests/scripts/test_team_isolation_workflow.py'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: team-isolation-probe-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: Team isolation
+    if: github.event.pull_request.head.repo.full_name == 'wxyucs/vsag' && (github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe' || github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe-b' || github.event.pull_request.head.ref == 'codex/team-ci-isolation-probe-c')
+    concurrency:
+      group: vsag-team-isolation-vm
+      queue: max
+      cancel-in-progress: false
+    uses: ./.github/workflows/team-isolation-worker.yml
