@@ -35,6 +35,7 @@
 - [Product Quantization (PQ)](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
