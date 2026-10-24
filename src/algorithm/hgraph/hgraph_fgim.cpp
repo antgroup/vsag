@@ -1,0 +1,466 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "hgraph_fgim.h"
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <unordered_set>
+
+#include "hgraph.h"
+#include "impl/query_computer_pool.h"
+#include "simd/fp32_simd.h"
+#include "vsag/constants.h"
+
+namespace vsag {
+
+namespace {
+
+// ID breaks storage-order ties; refinement replacement compares distance only.
+bool
+fgim_less(const FGIMNeighbor& lhs, const FGIMNeighbor& rhs) {
+    return lhs.distance < rhs.distance || (lhs.distance == rhs.distance && lhs.id < rhs.id);
+}
+
+}  // namespace
+
+void
+HGraphFGIM::ValidateStorage(const HGraph& index) {
+    CHECK_ARGUMENT(index.GetNumberRemoved() == 0, "FGIM does not support deleted nodes");
+    CHECK_ARGUMENT(index.data_type_ == DataTypes::DATA_TYPE_FLOAT, "FGIM requires float32 vectors");
+    CHECK_ARGUMENT(index.metric_ == MetricType::METRIC_TYPE_L2SQR, "FGIM requires L2");
+    CHECK_ARGUMENT(!index.support_duplicate_, "FGIM does not support duplicate grouping");
+    CHECK_ARGUMENT(!index.deduplicate_storage_, "FGIM does not support deduplicate storage");
+    CHECK_ARGUMENT(!index.use_conjugate_graph_,
+                   "FGIM internal search does not support conjugate graph enhancement");
+    CHECK_ARGUMENT(
+        index.basic_flatten_codes_ != nullptr &&
+            index.basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32,
+        "FGIM requires fp32 base storage");
+    // GetVectorByInnerId and search may select precise or raw storage instead of base.
+    const bool valid_precise_storage =
+        !index.has_precise_reorder() ||
+        (index.high_precise_codes_ != nullptr &&
+         index.high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
+    CHECK_ARGUMENT(valid_precise_storage,
+                   "FGIM requires fp32 precise storage when reorder is enabled");
+    const bool valid_raw_storage =
+        !index.create_new_raw_vector_ ||
+        (index.raw_vector_ != nullptr &&
+         index.raw_vector_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32);
+    CHECK_ARGUMENT(valid_raw_storage, "FGIM requires fp32 raw vector storage");
+    CHECK_ARGUMENT(index.pending_code_writes_.empty(), "FGIM requires complete code writes");
+}
+
+std::vector<InnerIdType>
+HGraphFGIM::ValidateSourcesAndGetOffsets(const Vector<const HGraph*>& source_graphs, uint64_t k) {
+    CHECK_ARGUMENT(source_graphs.size() >= 2, "FGIM requires at least two source HGraphs");
+    const bool valid_k = k > 0 && k <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+    CHECK_ARGUMENT(valid_k, "FGIM k must be positive and representable as int64_t");
+
+    std::vector<InnerIdType> offsets{0};
+    uint64_t total = 0;
+    int64_t dimension = 0;
+    std::unordered_set<const HGraph*> seen_sources;
+    for (uint64_t i = 0; i < source_graphs.size(); ++i) {
+        const auto* source = source_graphs[i];
+        CHECK_ARGUMENT(source != nullptr, "FGIM source HGraph must not be null");
+        CHECK_ARGUMENT(seen_sources.insert(source).second, "FGIM source HGraphs must be distinct");
+        const auto count = source->GetNumElements();
+        CHECK_ARGUMENT(count > 0, "FGIM source HGraphs must be non-empty");
+        ValidateStorage(*source);
+        const bool valid_dimension = source->dim_ > 0 && (i == 0 || source->dim_ == dimension);
+        CHECK_ARGUMENT(valid_dimension, "FGIM requires matching positive dimensions");
+        dimension = source->dim_;
+        CHECK_ARGUMENT(
+            static_cast<uint64_t>(count) <= std::numeric_limits<InnerIdType>::max() - total,
+            "FGIM total node count exceeds the merged internal ID capacity");
+        const bool fully_built = source->bottom_graph_ != nullptr &&
+                                 source->label_table_ != nullptr &&
+                                 source->bottom_graph_->TotalCount() == count &&
+                                 source->basic_flatten_codes_->TotalCount() == count &&
+                                 source->label_table_->GetTotalCount() == count;
+        CHECK_ARGUMENT(fully_built, "FGIM requires dense, fully built source HGraphs");
+        total += static_cast<uint64_t>(count);
+        offsets.push_back(static_cast<InnerIdType>(total));
+    }
+    return offsets;
+}
+
+void
+HGraphFGIM::AppendOriginalCandidates(const HGraph& source,
+                                     InnerIdType local_u,
+                                     InnerIdType source_offset,
+                                     FGIMNeighborList& candidates) {
+    Vector<InnerIdType> neighbors(source.allocator_);
+    source.bottom_graph_->GetNeighbors(local_u, neighbors);
+    for (InnerIdType local_v : neighbors) {
+        const bool valid_neighbor = local_v < source.GetNumElements() && local_v != local_u;
+        CHECK_ARGUMENT(valid_neighbor, "FGIM encountered an invalid original neighbor");
+        // Both distance operands remain in the source-local internal ID space.
+        // Validated fp32/L2 storage layers contain the same vectors, so base distances
+        // are comparable to CrossQuery distances; bitwise equality is not assumed.
+        const float distance = source.basic_flatten_codes_->ComputePairVectors(local_u, local_v);
+        candidates.push_back({source_offset + local_v, distance});
+    }
+}
+
+FGIMNeighborList
+HGraphFGIM::CrossQuery(const HGraph& target,
+                       const float* query,
+                       int64_t l,
+                       SearchStatistics* stats) {
+    const bool valid_query = query != nullptr && l > 0 && target.GetNumElements() > 0;
+    CHECK_ARGUMENT(valid_query,
+                   "FGIM CrossQuery requires a query, positive L and a non-empty target");
+    CHECK_ARGUMENT(!target.use_conjugate_graph_,
+                   "FGIM internal search does not support conjugate graph enhancement");
+    QueryComputerPool computers(query, stats);
+    QueryContext ctx{.alloc = target.allocator_, .stats = stats};
+    ctx.computer_pool = &computers;
+    ctx.track_distance_evaluations = stats != nullptr;
+
+    InnerSearchParam param;
+    param.ep = target.entry_point_id_;
+    param.topk = 1;
+    param.ef = 1;
+    // Reuse HGraph's routing and bottom search; no external labels or Dataset packing.
+    ctx.distance_phase = DistanceEvaluationPhase::ROUTING;
+    for (int64_t level = static_cast<int64_t>(target.route_graphs_.size()) - 1; level >= 0;
+         --level) {
+        const auto route = target.search_one_graph(query,
+                                                   target.route_graphs_[level],
+                                                   target.basic_flatten_codes_,
+                                                   param,
+                                                   VisitedListPtr{},
+                                                   &ctx);
+        if (!route->Empty()) {
+            param.ep = route->Top().second;
+        }
+    }
+    const int64_t topk = std::min(l, target.GetNumElements());
+    // A source with fewer than L nodes cannot fill an L-sized search pool.
+    param.ef = static_cast<uint64_t>(topk);
+    param.topk = topk;
+    param.rerank_topk = topk;
+    // Mirror native search; public FGIM sources reject duplicate grouping.
+    param.consider_duplicate = target.support_duplicate_;
+    // Validated sources have no deletions; no user filter is applied.
+    param.is_inner_id_allowed = target.create_search_filter(nullptr, false);
+    ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
+    auto result = target.search_one_graph(
+        query, target.bottom_graph_, target.basic_flatten_codes_, param, VisitedListPtr{}, &ctx);
+    if (target.use_reorder_) {
+        target.reorder(query, target.get_reorder_codes(), result, topk, nullptr, ctx);
+    }
+    while (result->Size() > static_cast<uint64_t>(topk)) {
+        result->Pop();
+    }
+    FGIMNeighborList neighbors;
+    neighbors.reserve(result->Size());
+    while (!result->Empty()) {
+        const auto record = result->Top();
+        result->Pop();
+        // Match unthresholded HGraph search: omit NaN, but preserve infinity so
+        // BuildInitialKnnGraph throws INVALID_ARGUMENT for non-finite candidates.
+        if (!std::isnan(record.first)) {
+            neighbors.push_back({record.second, record.first});
+        }
+    }
+    // Canonicalize ties without changing the candidate set chosen by HGraph.
+    std::sort(neighbors.begin(), neighbors.end(), fgim_less);
+    return neighbors;
+}
+
+FGIMKnnGraph
+HGraphFGIM::BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k) {
+    const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
+    const uint64_t other_count = source_graphs.size() - 1;
+    // ceil(k / (m - 1)), without overflowing k + m - 2.
+    const auto query_count = static_cast<int64_t>(k / other_count + (k % other_count != 0 ? 1 : 0));
+    FGIMKnnGraph graph(offsets.back());
+    Vector<float> vector(source_graphs.front()->dim_, source_graphs.front()->allocator_);
+
+    for (uint64_t i = 0; i < source_graphs.size(); ++i) {
+        const auto& source = *source_graphs[i];
+        const auto source_count = static_cast<InnerIdType>(source.GetNumElements());
+        for (InnerIdType local_u = 0; local_u < source_count; ++local_u) {
+            auto& candidates = graph[offsets[i] + local_u];
+            AppendOriginalCandidates(source, local_u, offsets[i], candidates);
+            source.GetVectorByInnerId(local_u, vector.data());
+            for (uint64_t j = 0; j < source_graphs.size(); ++j) {
+                if (j != i) {
+                    const auto cross = CrossQuery(*source_graphs[j], vector.data(), query_count);
+                    for (const auto& neighbor : cross) {
+                        // CrossQuery IDs are target-local; apply the target prefix exactly once.
+                        candidates.push_back({offsets[j] + neighbor.id, neighbor.distance});
+                    }
+                }
+            }
+            for (const auto& candidate : candidates) {
+                CHECK_ARGUMENT(std::isfinite(candidate.distance), "FGIM requires finite distances");
+            }
+            std::sort(candidates.begin(), candidates.end(), fgim_less);
+            if (candidates.size() > k) {
+                candidates.resize(k);
+                // The retained row lives for the whole pipeline; release unused candidate capacity.
+                FGIMNeighborList(candidates.begin(), candidates.end()).swap(candidates);
+            }
+        }
+    }
+    return graph;
+}
+
+namespace {
+
+// Persistent rows are always sorted; flags move with their corresponding edges.
+void
+fgim_insert(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edge) {
+    const auto position = std::lower_bound(row.begin(), row.end(), edge, fgim_less) - row.begin();
+    row.insert(row.begin() + position, edge);
+    flags.insert(flags.begin() + position, 1);
+}
+
+bool
+fgim_update(FGIMNeighborList& row, std::vector<uint8_t>& flags, FGIMNeighbor edge, uint64_t k) {
+    // Paper Section 4.2.1 requires a strictly shorter distance for replacement.
+    // Equal-distance candidates never replace stored neighbors, even with a smaller ID.
+    if (row.size() == k && edge.distance >= row.back().distance) {
+        return false;
+    }
+    // A bounded O(k) ID scan is needed: rows are distance-sorted, not ID-sorted.
+    for (const auto& current : row) {
+        if (current.id == edge.id) {
+            return false;
+        }
+    }
+    if (row.size() == k) {
+        row.pop_back();
+        flags.pop_back();
+    }
+    fgim_insert(row, flags, edge);
+    return true;
+}
+
+void
+fgim_unique(std::vector<InnerIdType>& ids) {
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+}
+
+// Algorithm 4. Best-effort repair preserves degree and the last incoming edge.
+// A zero-indegree node can remain if no unprotected edge has a removable target.
+uint64_t
+fgim_repair_indegree(FGIMKnnGraph& graph, std::vector<std::vector<uint8_t>>& flags) {
+    std::vector<uint64_t> indegree(graph.size(), 0);
+    std::vector<std::vector<InnerIdType>> protected_edges(graph.size());
+    for (const auto& row : graph) {
+        for (const auto& edge : row) {
+            ++indegree[edge.id];
+        }
+    }
+    uint64_t repairs = 0;
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        if (indegree[u] != 0) {
+            continue;
+        }
+        // The source row cannot change: self loops are forbidden.
+        for (const auto& edge : graph[u]) {
+            auto& target = graph[edge.id];
+            auto& target_flags = flags[edge.id];
+            auto& protected_ids = protected_edges[edge.id];
+            for (uint64_t i = target.size(); i > 0; --i) {
+                const auto removed = target[i - 1].id;
+                if (indegree[removed] <= 1 ||
+                    std::binary_search(protected_ids.begin(), protected_ids.end(), removed)) {
+                    continue;
+                }
+                --indegree[removed];
+                ++indegree[u];
+                target.erase(target.begin() + static_cast<int64_t>(i - 1));
+                target_flags.erase(target_flags.begin() + static_cast<int64_t>(i - 1));
+                // L2 is symmetric: the reverse edge has the same distance.
+                // Repair may replace an edge without a distance improvement (Algorithm 4).
+                fgim_insert(target, target_flags, {u, edge.distance});
+                protected_ids.insert(
+                    std::lower_bound(protected_ids.begin(), protected_ids.end(), u), u);
+                ++repairs;
+                break;
+            }
+            if (indegree[u] != 0) {
+                break;
+            }
+        }
+    }
+    // A zero-indegree node may remain if no donor has a replaceable edge.
+    return repairs;
+}
+
+}  // namespace
+
+FGIMRefinementStatistics
+HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
+                           FGIMKnnGraph& graph,
+                           uint64_t k,
+                           uint64_t max_iterations) {
+    const auto offsets = ValidateSourcesAndGetOffsets(source_graphs, k);
+    CHECK_ARGUMENT(graph.size() == offsets.back(), "FGIM refinement node count mismatch");
+    std::vector<InnerIdType> ids;
+    for (InnerIdType u = 0; u < graph.size(); ++u) {
+        const auto& row = graph[u];
+        CHECK_ARGUMENT(row.size() <= k, "FGIM refinement degree exceeds k");
+        CHECK_ARGUMENT(std::is_sorted(row.begin(), row.end(), fgim_less),
+                       "FGIM refinement requires sorted neighbor lists");
+        ids.clear();
+        for (const auto& edge : row) {
+            const bool valid_condition_1 = edge.id < graph.size() && edge.id != u &&
+                                           std::isfinite(edge.distance) && edge.distance >= 0;
+            CHECK_ARGUMENT(valid_condition_1, "FGIM refinement encountered an invalid neighbor");
+            ids.push_back(edge.id);
+        }
+        std::sort(ids.begin(), ids.end());
+        CHECK_ARGUMENT(std::adjacent_find(ids.begin(), ids.end()) == ids.end(),
+                       "FGIM refinement encountered duplicate neighbors");
+    }
+    FGIMRefinementStatistics stats;
+    if (max_iterations == 0) {
+        return stats;
+    }
+
+    const uint64_t dimension = source_graphs.front()->dim_;
+    CHECK_ARGUMENT(graph.size() <= std::numeric_limits<uint64_t>::max() / dimension,
+                   "FGIM refinement vector size overflow");
+    // Decode once, not for every candidate pair. Reuse the FP32 storage distance kernel.
+    Vector<float> vectors(source_graphs.front()->allocator_);
+    vectors.resize(graph.size() * dimension);
+    // Every source is non-empty, so its index fits the validated merged ID range.
+    Vector<InnerIdType> source_ids(graph.size(), source_graphs.front()->allocator_);
+    for (uint64_t i = 0; i < source_graphs.size(); ++i) {
+        for (InnerIdType local = 0; local < source_graphs[i]->GetNumElements(); ++local) {
+            const uint64_t merged = offsets[i] + local;
+            source_graphs[i]->GetVectorByInnerId(local, vectors.data() + merged * dimension);
+            source_ids[merged] = static_cast<InnerIdType>(i);
+        }
+    }
+    std::vector<std::vector<uint8_t>> flags(graph.size());
+    std::vector<std::vector<InnerIdType>> reverse_new(graph.size());
+    std::vector<std::vector<InnerIdType>> reverse_old(graph.size());
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        flags[u].assign(graph[u].size(), 1);
+    }
+    uint64_t pending_reverse_new = 0;
+    std::vector<uint8_t> visited(graph.size());
+    std::vector<InnerIdType> stack;
+    std::vector<InnerIdType> new_ids;
+    std::vector<InnerIdType> old_ids;
+    const auto compare = [&stats, &source_ids, &vectors, dimension, &graph, &flags, k](
+                             InnerIdType a, InnerIdType b, bool both_new) {
+        if (a == b) {
+            return;
+        }
+        if (source_ids[a] == source_ids[b]) {
+            ++stats.same_source_pairs_skipped;
+            return;
+        }
+        if (both_new) {
+            ++stats.new_new_pairs;
+        } else {
+            ++stats.new_old_pairs;
+        }
+        const float distance = FP32ComputeL2Sqr(vectors.data() + uint64_t{a} * dimension,
+                                                vectors.data() + uint64_t{b} * dimension,
+                                                dimension);
+        ++stats.distance_evaluations;
+        CHECK_ARGUMENT(std::isfinite(distance),
+                       "FGIM refinement encountered a non-finite distance");
+        if (fgim_update(graph[a], flags[a], {b, distance}, k)) {
+            ++stats.neighbor_updates;
+        }
+        if (fgim_update(graph[b], flags[b], {a, distance}, k)) {
+            ++stats.neighbor_updates;
+        }
+    };
+    for (uint64_t iteration = 0; iteration < max_iterations; ++iteration) {
+        std::fill(visited.begin(), visited.end(), 0);
+        const auto updates_before = stats.neighbor_updates;
+        for (InnerIdType root = 0; root < graph.size(); ++root) {
+            if (visited[root] != 0) {
+                continue;
+            }
+            visited[root] = 1;
+            stack.push_back(root);
+            while (!stack.empty()) {
+                const auto u = stack.back();
+                stack.pop_back();
+                new_ids.clear();
+                old_ids.clear();
+                for (uint64_t i = 0; i < graph[u].size(); ++i) {
+                    const auto v = graph[u][i].id;
+                    if (flags[u][i] != 0) {
+                        new_ids.push_back(v);
+                        if (reverse_new[v].empty()) {
+                            ++pending_reverse_new;
+                        }
+                        reverse_new[v].push_back(u);
+                        flags[u][i] = 0;
+                    } else {
+                        old_ids.push_back(v);
+                        reverse_old[v].push_back(u);
+                    }
+                    if (visited[v] == 0) {
+                        visited[v] = 1;
+                        stack.push_back(v);
+                    }
+                }
+                new_ids.insert(new_ids.end(), reverse_new[u].begin(), reverse_new[u].end());
+                old_ids.insert(old_ids.end(), reverse_old[u].begin(), reverse_old[u].end());
+                if (!reverse_new[u].empty()) {
+                    --pending_reverse_new;
+                }
+                reverse_new[u].clear();
+                reverse_old[u].clear();
+                fgim_unique(new_ids);
+                fgim_unique(old_ids);
+                // A vertex seen as both new and old is processed only as new.
+                old_ids.erase(std::remove_if(old_ids.begin(),
+                                             old_ids.end(),
+                                             [&](InnerIdType v) {
+                                                 return std::binary_search(
+                                                     new_ids.begin(), new_ids.end(), v);
+                                             }),
+                              old_ids.end());
+                for (uint64_t i = 0; i < new_ids.size(); ++i) {
+                    for (uint64_t j = i + 1; j < new_ids.size(); ++j) {
+                        compare(new_ids[i], new_ids[j], true);
+                    }
+                    for (const auto old_id : old_ids) {
+                        compare(new_ids[i], old_id, false);
+                    }
+                }
+            }
+        }
+        const auto repairs = fgim_repair_indegree(graph, flags);
+        stats.indegree_repairs += repairs;
+        ++stats.iterations;
+        // Pending reverse-new edges need another visit. With no updates or repairs,
+        // all row flags are old; leftover reverse-old entries cannot form a new pair.
+        if (stats.neighbor_updates == updates_before && repairs == 0 && pending_reverse_new == 0) {
+            break;
+        }
+    }
+    return stats;
+}
+
+}  // namespace vsag
