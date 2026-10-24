@@ -448,6 +448,7 @@ jobs:
           pip3 uninstall pyvsag -y
           pip3 install ./wheelhouse/*.whl
           pip3 install numpy pyjson pytest
+          pip3 install "langchain-core>=1,<2" "langchain-tests==1.1.9"
       - name: Run Python Test
         run: |
           cd ./tests/python/
