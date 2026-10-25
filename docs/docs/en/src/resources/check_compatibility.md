@@ -46,6 +46,30 @@ The tool creates a current-version index instance, deserializes the old index fi
 small KNN search. It prints `<identifier> success` when both load and search succeed; otherwise it
 prints `<identifier> failed` and exits with a non-zero status.
 
+
+The optional second argument selects the input directory. Otherwise the tool uses
+`COMPATIBILITY_INDEX_DIR`, falling back to `/tmp` when it is unset or empty. The same
+directory supplies the index, both JSON files and the vector fixture; it may be mounted read-only.
+
+```bash
+COMPATIBILITY_INDEX_DIR=/path/to/fixtures BUILD_DIR=./build bash scripts/check_compatibility.sh
+./build/tools/check_compatibility/check_compatibility v1.1.0_hgraph /path/to/fixtures
+```
+
+The script requires Python 3 and derives the test cases from the published `v*_*.index` files.
+Before invoking the tool, it validates every maintained index triplet: the index and both
+parameter files must be nonempty, and the parameter files must contain JSON objects. Orphan
+JSON sidecars are reported without creating additional test cases; they remain part of the
+complete release manifest verification. The vector fixture must be exactly 20,480,000 bytes
+(10,000 vectors, 512 float32 values each); missing, truncated or oversized inputs fail. The tool still checks
+the first 500 vectors with top-1 search and requires their original IDs. Removed HNSW,
+fresh-HNSW and DiskANN fixtures remain excluded; an empty maintained set cannot pass.
+
+These checks validate local structure, not the release inventory or content checksums.
+CI cache/download producers must separately verify the complete expected asset manifest and
+hashes before publishing inputs. In particular, an entirely missing triplet or a same-size
+corrupted vector file cannot be detected from directory enumeration and size alone.
+
 ## Local Entry Point
 
 A short local pointer is kept at `tools/check_compatibility/README.md` for developers browsing the
