@@ -474,3 +474,7 @@ Independent archive-only 4096-entry cache and per-repair scratch-capacity reuse 
 ### Exact-order repair batching pilot
 
 An archive-only adapter reuses the shared batch template while preserving the existing AVX512 accumulation order. Release/SAN numerical checks, wide mutation checks and every pure-mutation repeat are retained in the [pilot evidence](../../../../../lite/benchmark/results/repair-exact-batch-20261025/). This is not a new mixed-workload, latency-quantile or recall measurement and does not change production.
+
+### Degree-deficit-only repair policy pilot
+
+An isolated graph-changing policy retains full adjacency rows and reselects deficit rows, while keeping incoming protection. All three pure workloads, independent current-data truth/rebuild controls, Save/Load checks and every timing pair are retained in the [pilot archive](../../../../../lite/benchmark/results/repair-deficit-policy-20261025/). This is not default adoption or a new mixed-workload/memory result.

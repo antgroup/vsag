@@ -1,0 +1,57 @@
+{
+  "parent": "bbc5b94bd46b3c682852df4effec423bcc5d879a",
+  "bytes": 2015619,
+  "sha256": "0af1e19ec1405aea97889b50fde8c402baf0223b27c26b5edd573b5236cd07c5",
+  "members": 120,
+  "audit": "PASS",
+  "quality_processes": 6,
+  "pure_timing_processes": 18,
+  "mutation_calls": 1000000,
+  "release_tests": 5,
+  "sanitizer_tests": 5,
+  "quality_threshold": null,
+  "default_adopted": false,
+  "mixed_measured": false,
+  "production_unchanged": true,
+  "summary": {
+    "update": {
+      "wall": {
+        "r2": 8.565389041,
+        "deficit": 8.44870987
+      },
+      "cpu": {
+        "r2": 8.565161,
+        "deficit": 8.448428
+      },
+      "change_percent": -1.3622168291654968,
+      "paired_median_percent": -1.362216829165508,
+      "wins": 3
+    },
+    "replace": {
+      "wall": {
+        "r2": 12.731106766,
+        "deficit": 9.053982345
+      },
+      "cpu": {
+        "r2": 12.730618999999999,
+        "deficit": 9.053735
+      },
+      "change_percent": -28.882990996668234,
+      "paired_median_percent": -28.774907821943295,
+      "wins": 3
+    },
+    "reinsert": {
+      "wall": {
+        "r2": 13.715979373,
+        "deficit": 9.897878974
+      },
+      "cpu": {
+        "r2": 13.715245999999999,
+        "deficit": 9.897504
+      },
+      "change_percent": -27.836877667780378,
+      "paired_median_percent": -27.03817861093868,
+      "wins": 3
+    }
+  }
+}

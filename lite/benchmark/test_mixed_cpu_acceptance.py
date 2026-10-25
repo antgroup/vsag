@@ -1145,5 +1145,89 @@ class RepairExactBatchPublishedTests(unittest.TestCase):
                     self.assertIn(f"| {mode} | {trial+1} | {pair['r2']:.6f} | {pair['cache']:.6f} | {(pair['cache']/pair['r2']-1)*100:+.2f}% |", report)
 
 
+
+class RepairDeficitPolicyPublishedTests(unittest.TestCase):
+    def test_policy_quality_controls_and_every_cost_repeat(self):
+        root = Path(__file__).parent / 'results/repair-deficit-policy-20261025'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual((sha(archive), archive.stat().st_size), (receipt['sha256'], receipt['bytes']))
+        self.assertIsNone(receipt['quality_threshold'])
+        self.assertFalse(receipt['default_adopted'])
+        self.assertFalse(receipt['mixed_measured'])
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual((sha(evidence / name), (evidence / name).stat().st_size), (item['sha256'], item['bytes']))
+            pilot = evidence / 'pilot'
+            identity = json.loads((pilot / 'identity.json').read_text())
+            self.assertEqual(identity['parent'], 'bbc5b94bd46b3c682852df4effec423bcc5d879a')
+            self.assertEqual(sha(pilot / 'graph_backend.cpp'), identity['candidate_source_sha256'])
+            original = (evidence / 'reproduction/graph_backend.r2.cpp').read_text()
+            self.assertEqual(sha(evidence / 'reproduction/graph_backend.r2.cpp'), identity['r2_source_sha256'])
+            addition = ('            // Isolated policy pilot: keep full rows, reselect only degree-deficit rows.\n'
+                        '            // Incoming protection below still runs for every affected row and old target.\n'
+                        '            if (old_neighbors.size() == std::min(max_degree_, Size() - 1)) {\n'
+                        '                continue;\n'
+                        '            }\n')
+            self.assertEqual((pilot / 'graph_backend.cpp').read_text().replace(addition, ''), original)
+            commands = json.loads((pilot / 'commands.json').read_text())
+            self.assertTrue(all(c['exit'] == 0 for c in commands))
+            self.assertTrue({'tidy', 'quality-tidy', 'release-ctest', 'san-ctest', 'san-quality-update', 'san-quality-replace', 'san-quality-reinsert'}.issubset({c['tag'] for c in commands}))
+            quality = json.loads((pilot / 'quality.json').read_text())
+            timing = json.loads((pilot / 'timing.json').read_text())
+            self.assertEqual((len(quality), len(timing)), (3, 18))
+            report = (root / 'README.md').read_text()
+            for item in quality:
+                mode = item['workload']
+                sides = {}
+                for side in ['r2', 'deficit']:
+                    with (pilot / f'quality-{mode}-{side}-neighbors.csv').open() as stream:
+                        rows = list(csv.DictReader(stream))
+                    self.assertEqual(len(rows), 20000)
+                    sides[side] = rows
+                    for ef in [512, 10000]:
+                        selected = [r for r in rows if int(r['ef']) == ef]
+                        hits = {view: 0 for view in ['maintained', 'canonical', 'same_order']}
+                        for query in range(1000):
+                            group = selected[query * 10:(query + 1) * 10]
+                            self.assertEqual({int(r['query']) for r in group}, {query})
+                            self.assertEqual([int(r['rank']) for r in group], list(range(10)))
+                            truth = {int(r['truth_id']) for r in group}
+                            self.assertEqual(len(truth), 10)
+                            for view in hits:
+                                values = [(float(r[view + '_distance']), int(r[view + '_id'])) for r in group]
+                                self.assertEqual(values, sorted(values))
+                                self.assertEqual(len({i for _, i in values}), 10)
+                                hits[view] += len(truth & {i for _, i in values})
+                        self.assertEqual({v: h/10000 for v, h in hits.items()}, item['quality'][side][str(ef)])
+                for view in ['canonical', 'same_order']:
+                    self.assertEqual([(r[view+'_id'], r[view+'_distance']) for r in sides['r2']], [(r[view+'_id'], r[view+'_distance']) for r in sides['deficit']])
+                self.assertEqual([(r['query'], r['rank'], r['ef'], r['truth_id']) for r in sides['r2']], [(r['query'], r['rank'], r['ef'], r['truth_id']) for r in sides['deficit']])
+                self.assertTrue(item['save_load_results_equal'])
+                self.assertTrue(item['current_geometry_layout_equal'])
+                q = item['quality']
+                self.assertIn(f"| {mode} | {q['r2']['512']['maintained']:.4f} | {q['deficit']['512']['maintained']:.4f} |", report)
+                for side in ['r2', 'deficit']:
+                    chosen = [r for r in timing if r['workload'] == mode and r['side'] == side]
+                    self.assertEqual([r['trial'] for r in chosen], [0, 1, 2])
+                    for row in chosen:
+                        self.assertEqual(row['snapshots']['final.snapshot'], item['snapshots'][side]['maintained.snapshot'])
+                        tag = f"timing-{mode}-{row['trial']}-{side}"
+                        with (pilot / (tag+'-mutation-time.csv')).open() as stream:
+                            raw = next(csv.DictReader(stream))
+                        self.assertEqual((float(raw['wall_ms']), int(raw['calls'])), (row['loop_wall_ms'], row['calls']))
+                        with (pilot / (tag+'-cpu.csv')).open() as stream:
+                            raw = next(csv.DictReader(stream))
+                        self.assertEqual((float(raw['user_s']), float(raw['system_s'])), (row['user_s'], row['system_s']))
+                wall = {s: statistics.median(r['loop_wall_ms'] for r in timing if r['workload'] == mode and r['side'] == s)/1000 for s in ['r2', 'deficit']}
+                self.assertEqual(wall, receipt['summary'][mode]['wall'])
+                self.assertIn(f"| {mode} | {wall['r2']:.6f} | {wall['deficit']:.6f} | {(wall['deficit']/wall['r2']-1)*100:+.2f}% |", report)
+
+
 if __name__ == '__main__':
     unittest.main()
