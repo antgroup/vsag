@@ -93,8 +93,9 @@ Routing tests execute the actual inline router with mocked API responses and cov
 
 ## Advisory Team timing summaries
 
-Team build, test shards and compatibility jobs write diagnostic Markdown to their
-GitHub Job Summaries. The hosted Team Summary compares completed job and step
+Team build, test shards and compatibility jobs retain diagnostic artifacts.
+The final hosted Team Summary job publishes one consolidated GitHub Job Summary.
+It compares completed job and step
 intervals from the **current run attempt** against
 `scripts/ci/team_timing_baseline.json`, frozen from successful PR #3143,
 run 40171699713, attempt 2. The baseline was measured with a warm compiler cache.
@@ -118,7 +119,7 @@ identity gates remain authoritative. API access is read-only and confined to the
 hosted reporting job; inability to retrieve timing data does not fail the PR.
 
 The native Jobs API supplies complete job/step timing; existing shard result JSON
-and ccache statistics supply local diagnostics. Per-job reports list the slowest
+and ccache statistics supply local diagnostics. Collapsed sections list the slowest
 cases/examples, which overlap across workers and therefore cannot be summed into
 wall-clock time. Raw diagnostic artifacts retain their existing three-day lifetime.
 No background timing collector, infrastructure mutation or automatic baseline
@@ -126,3 +127,5 @@ refresh is introduced. Workflow-version authorization remains a separate deploym
 operation; this change does not bypass it.
 
 Validate the reporter offline with `python3 -m unittest tests/scripts/test_team_timing.py`.
+
+Only the final Team Summary job publishes Markdown; execution jobs retain their diagnostic artifacts. The stage budget table stays expanded, with job/step timings, compiler cache and shard details under closed `<details>` sections in a fixed order. Budget usage is green at or below 90%, yellow above 90% through 100%, and red above 100%, using colored icons and text rather than custom CSS. Red remains advisory and never changes the PR gate.

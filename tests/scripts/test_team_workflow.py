@@ -325,8 +325,7 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertIn('max-parallel: 4', tests)
         self.assertIn('fail-fast: false', tests)
         self.assertIn('--workers 4 --batch-size 32 --batch-target-seconds 25', tests)
-        advisory = ('Report build timing budget', 'Report test timing budget',
-                    'Report compatibility timing budget', 'Report Team execution budget')
+        advisory = ('Download build timing diagnostics', 'Report Team execution budget')
         gate_source = TEAM
         for name in advisory:
             gate_source = gate_source.replace(step(TEAM, name), '')

@@ -312,15 +312,6 @@ jobs:
             /__ci/artifacts/meta/complete.json
           if-no-files-found: error
           retention-days: 3
-      - name: Report build timing budget
-        if: always()
-        continue-on-error: true
-        run: |
-          if test -f scripts/ci/team_timing.py; then
-            python3 scripts/ci/team_timing.py --kind build
-          else
-            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -488,15 +479,6 @@ jobs:
             ci-logs/extras.json
           if-no-files-found: error
           retention-days: 3
-      - name: Report test timing budget
-        if: always()
-        continue-on-error: true
-        run: |
-          if test -f scripts/ci/team_timing.py; then
-            python3 scripts/ci/team_timing.py --kind test
-          else
-            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -567,15 +549,6 @@ jobs:
           path: ci-logs/compatibility-result.json
           if-no-files-found: error
           retention-days: 3
-      - name: Report compatibility timing budget
-        if: always()
-        continue-on-error: true
-        run: |
-          if test -f scripts/ci/team_timing.py; then
-            python3 scripts/ci/team_timing.py --kind compatibility
-          else
-            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
-          fi
       - name: Upload compatibility diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -661,10 +634,6 @@ jobs:
           summary = module.merge_results(plan, results)
           module.write_json('ci-summary/summary.json', summary)
           assert summary['success'], '; '.join(summary['errors'])
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
-              output.write(f'Team test inventory: {summary["observed_count"]}/{summary["expected_count"]} cases completed.\n')
-              output.write(f'Examples: {summary["observed_example_count"]}/{summary["expected_example_count"]} completed.\n')
-              output.write('Independent index compatibility: passed for the same run and tested commit.\n')
           PY
       - name: Upload merged test summary
         if: ${{ !cancelled() && hashFiles('ci-summary/summary.json') != '' }}
@@ -674,6 +643,13 @@ jobs:
           path: ci-summary/summary.json
           if-no-files-found: error
           retention-days: 3
+      - name: Download build timing diagnostics
+        if: always() && needs.changes.outputs.cpp == 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@v5
+        with:
+          name: team-build-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ci-summary/build
       - name: Report Team execution budget
         if: always() && needs.changes.outputs.cpp == 'true'
         continue-on-error: true
@@ -681,7 +657,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if test -f scripts/ci/team_timing.py; then
-            python3 scripts/ci/team_timing.py --kind aggregate
+            python3 scripts/ci/team_timing.py --kind aggregate --directory ci-summary
           else
             echo 'Timing report unavailable: checkout did not complete.' >> "$GITHUB_STEP_SUMMARY"
           fi
