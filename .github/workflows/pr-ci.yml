@@ -123,6 +123,10 @@ jobs:
 
   team:
     name: Team
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
     needs: route
     if: needs.route.outputs.team == 'true'
     concurrency:

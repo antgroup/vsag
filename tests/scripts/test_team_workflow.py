@@ -325,7 +325,12 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertIn('max-parallel: 4', tests)
         self.assertIn('fail-fast: false', tests)
         self.assertIn('--workers 4 --batch-size 32 --batch-target-seconds 25', tests)
-        self.assertNotIn('continue-on-error', TEAM)
+        advisory = ('Report build timing budget', 'Report test timing budget',
+                    'Report compatibility timing budget', 'Report Team execution budget')
+        gate_source = TEAM
+        for name in advisory:
+            gate_source = gate_source.replace(step(TEAM, name), '')
+        self.assertNotIn('continue-on-error', gate_source)
         for name in ('Upload build diagnostics', 'Upload test diagnostics', 'Upload small test results'):
             self.assertIn('if: always()', step(TEAM, name))
         self.assertNotIn('Format and helper checks', job(TEAM, 'build'))

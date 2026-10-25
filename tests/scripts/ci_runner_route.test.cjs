@@ -168,7 +168,12 @@ test('team format check has its own clean checkout and remains required', () => 
 
 test('team shard failures remain fatal and diagnostics always upload', () => {
   const team = fs.readFileSync(path.join(root, '.github/workflows/pr-ci-team.yml'), 'utf8');
-  assert.ok(!team.includes('continue-on-error'));
+  const advisory = team.split(/(?=^      - )/m).filter(block => block.includes('continue-on-error'));
+  assert.equal(advisory.length, 4);
+  for (const block of advisory) {
+    assert.match(block, /^      - name: Report (?:build timing budget|test timing budget|compatibility timing budget|Team execution budget)\n/);
+    assert.match(block, /        continue-on-error: true\n/);
+  }
   assert.match(team, /fail-fast: false/);
   assert.match(team, /shard: \[0, 1, 2, 3\]/);
   assert.match(team, /--workers 4 --batch-size 32 --batch-target-seconds 25/);
