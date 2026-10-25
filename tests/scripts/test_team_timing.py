@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.error
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -88,10 +89,50 @@ class TimingTest(unittest.TestCase):
     def test_api_failure_does_not_print_private_error_or_fail_gate(self):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / 'summary.md'
-            with patch('sys.argv', ['timing', '--kind', 'aggregate', '--output', str(output)]), patch.object(TIMING, 'fetch_jobs', side_effect=RuntimeError('secret address')):
+            with patch('sys.argv', ['timing', '--kind', 'aggregate', '--output', str(output)]), patch.object(TIMING, 'fetch_jobs', side_effect=RuntimeError('secret address')), contextlib.redirect_stdout(io.StringIO()):
                 TIMING.main()
             self.assertIn('unavailable', output.read_text())
             self.assertNotIn('secret address', output.read_text())
+
+    def test_api_failure_preserves_downloaded_diagnostics(self):
+        for error in (TimeoutError('private URL'), TIMING.urllib.error.HTTPError(
+                'private URL', 503, 'unavailable', {}, None)):
+            with self.subTest(error=type(error).__name__), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                (root / 'build').mkdir()
+                (root / 'build/ccache-stats.tsv').write_text('direct_cache_hit 8\npreprocessed_cache_hit 0\ncache_miss 2\n')
+                (root / 'summary.json').write_text('{"observed_count": 10, "expected_count": 10}')
+                (root / 'compatibility').mkdir()
+                (root / 'compatibility/compatibility-result.json').write_text('{"compatibility": "success"}')
+                shard = root / 'results/team-results-0-123-2/shard-0'
+                shard.mkdir(parents=True)
+                (shard / 'result.json').write_text(json.dumps(dict(shard=0, seconds=20, success=True,
+                    context=dict(run_id='123', run_attempt='2', test_sha='abc'),
+                    batches=[dict(tests=[dict(name='slow-case', seconds=10)])])))
+                output = root / 'report.md'
+                with patch.dict(os.environ, dict(GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='2', TEAM_TEST_SHA='abc')), patch(
+                        'sys.argv', ['timing', '--kind', 'aggregate', '--directory', temp, '--output', str(output)]), patch.object(
+                        TIMING, 'fetch_jobs', side_effect=error), contextlib.redirect_stdout(io.StringIO()) as stdout:
+                    TIMING.main()
+                report = output.read_text()
+                for value in ('8 hits / 2 misses', 'Cases: **10/10**', 'slow-case',
+                              'Compatibility outcome: **success**', '| Missing |', 'Jobs API timing data unavailable'):
+                    self.assertIn(value, report)
+                self.assertNotIn('private URL', report)
+                self.assertEqual(report.count('## Team CI timing budget'), 1)
+                self.assertEqual(report.count('<details>'), 8)
+                self.assertIn('::warning::', stdout.getvalue())
+
+    def test_inventory_absent_or_malformed_remains_visible(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            for content in (None, '{broken', '[]'):
+                if content is not None:
+                    (root / 'summary.json').write_text(content)
+                report = '\n'.join(TIMING.diagnostics(root, BASELINE))
+                self.assertIn('<summary>Test inventory completeness</summary>', report)
+                self.assertIn('Inventory diagnostics unavailable', report)
+                self.assertEqual(report.count('<details>'), 7)
 
     def test_build_cache_and_missing_data(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -120,12 +161,44 @@ class TimingTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     TIMING.local('test', root, BASELINE)
 
+    def test_color_boundaries_and_missing(self):
+        for actual, color in [(0, '🟢'), (90, '🟢'), (90.01, '🟡'), (100, '🟡'), (100.01, '🔴')]:
+            with self.subTest(actual=actual):
+                self.assertIn(color, TIMING.row('stage', actual, 80, 100))
+        self.assertIn('| Missing |', TIMING.row('stage', None, 80, 100))
+
+    def test_single_report_with_collapsed_details_and_partial_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'build').mkdir()
+            (root / 'build/build.log').write_text('real 221.19\n')
+            (root / 'compatibility').mkdir()
+            (root / 'compatibility/compatibility-result.json').write_text('{"compatibility": "success"}')
+            with patch.dict(os.environ, {'GITHUB_RUN_ID': '123', 'GITHUB_RUN_ATTEMPT': '2'}):
+                shard = root / 'results/team-results-0-123-2/shard-0'
+                shard.mkdir(parents=True)
+                (shard / 'result.json').write_text('{broken')
+                report = TIMING.aggregate(fixture(), BASELINE, root)
+            self.assertEqual(report.count('## Team CI timing budget'), 1)
+            self.assertEqual(report.count('<details>'), 8)
+            self.assertEqual(report.count('</details>'), 8)
+            self.assertNotIn('<details open', report)
+            self.assertLess(report.index('Execution envelope (100%)'), report.index('<details>'))
+            self.assertIn('3.69 min', report)
+            self.assertNotIn('| Missing |', report)
+            self.assertIn('Compatibility outcome: **success**', report)
+            self.assertIn('JSONDecodeError', report)
+            self.assertIn('No unique shard result', report)
+            self.assertIn('all succeeded', report)
+
     def test_workflow_reporting_is_advisory_and_permissions_are_scoped(self):
         text = (ROOT / '.github/workflows/pr-ci-team.yml').read_text()
         for name in ('build', 'test', 'compatibility'):
-            self.assertIn('name: Report {} timing budget\n        if: always()\n        continue-on-error: true'.format(name), text)
+            self.assertNotIn('name: Report {} timing budget'.format(name), text)
         self.assertIn("if: always() && needs.changes.outputs.cpp == 'true'\n        continue-on-error: true", text)
         self.assertEqual(text.count('actions: read'), 1)
+        self.assertNotIn('GITHUB_STEP_SUMMARY', text.split('  summary:')[0])
+        self.assertIn('--kind aggregate --directory ci-summary', text)
         self.assertIn('Require all Team jobs to pass or be intentionally skipped', text)
 
 

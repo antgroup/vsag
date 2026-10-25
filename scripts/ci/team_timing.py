@@ -34,7 +34,9 @@ def minutes(value):
 def row(label, actual, baseline, budget):
     used = '{:.0%}'.format(actual / budget) if number(actual) else 'N/A'
     delta = '{:+.1f} s'.format(actual - baseline) if number(actual) and number(baseline) else 'N/A'
-    state = 'WARN: over budget' if number(actual) and actual > budget else ('Within budget' if number(actual) else 'Missing')
+    state = ('Missing' if not number(actual) else
+             '🔴 WARN: over budget' if actual > budget else
+             '🟡 Near budget' if actual > budget * .9 else '🟢 Within budget')
     return '| {} | {} | {} | {} | {} | {} | {} |'.format(
         escape(label), minutes(budget), minutes(baseline), minutes(actual), used, delta, state)
 
@@ -109,10 +111,11 @@ def fetch_jobs():
 def header(baseline):
     return ['## Team CI timing budget', '',
             '[Baseline: #3143, attempt 2]({}) — fixed warm-cache reference.'.format(baseline['url']),
-            'Advisory only: timing warnings do not change test conclusions or the PR gate.', '']
+            'Advisory only: timing warnings do not change test conclusions or the PR gate.',
+            '🟢 ≤90% · 🟡 >90% to 100% · 🔴 >100% of budget. Missing data is N/A.', '']
 
 
-def aggregate(jobs, baseline):
+def aggregate(jobs, baseline, directory=None):
     lines = header(baseline)
     lines += ['### Execution envelope (15-minute budget)',
               'Build job start → last required build/check/test/compatibility job completion. '
@@ -128,6 +131,7 @@ def aggregate(jobs, baseline):
     complete_success = len(selected) == len(REQUIRED) and all(j.get('conclusion') == 'success' for j in selected.values())
     lines += ['', 'Required execution jobs: **{}**. Timing status is not test success.'.format(
         'all succeeded' if complete_success else 'failed, skipped, missing or incomplete'), '',
+        '<details>', '<summary>Job timings, slow steps and shard balance</summary>', '',
         '### Individual jobs (parallel rows must not be added)', ''] + table()
     for name in REQUIRED:
         job = selected.get(name, {})
@@ -154,12 +158,46 @@ def aggregate(jobs, baseline):
         seconds = [end - start for start, end in durations]
         lines += ['', 'Shard job spread: **{:.1f} s**, slowest/fastest **{:.2f}×**.'.format(
             max(seconds) - min(seconds), max(seconds) / max(min(seconds), .001))]
+    lines += ['', '</details>', '']
+    if directory is not None:
+        lines += diagnostics(directory, baseline)
     return '\n'.join(lines) + '\n'
 
 
-def local(kind, directory, baseline):
+def diagnostics(directory, baseline):
     root = Path(directory)
-    lines = header(baseline) + table()
+    sections = [('Build and compiler cache', 'build', root / 'build')]
+    sections += [('Shard {}: slowest cases and examples'.format(i), 'test',
+                  root / 'results' / 'team-results-{}-{}-{}'.format(
+                      i, os.environ.get('GITHUB_RUN_ID', ''), os.environ.get('GITHUB_RUN_ATTEMPT', '')))
+                 for i in range(4)]
+    sections += [('Index compatibility', 'compatibility', root / 'compatibility')]
+    lines = []
+    inventory = root / 'summary.json'
+    lines += ['<details>', '<summary>Test inventory completeness</summary>', '']
+    try:
+        data = load(inventory)
+        lines += ['Cases: **{}/{}**; examples: **{}/{}**.'.format(
+            *[escape(data.get(key, 'N/A')) for key in (
+                'observed_count', 'expected_count',
+                'observed_example_count', 'expected_example_count')])]
+    except Exception:
+        lines += ['Inventory diagnostics unavailable; correctness gates remain authoritative.']
+    lines += ['', '</details>', '']
+    for title, kind, path in sections:
+        try:
+            detail = local(kind, path, baseline, include_header=False)
+        except Exception as error:
+            detail = 'Timing data unavailable ({}).'.format(type(error).__name__)
+        lines += ['<details>', '<summary>{}</summary>'.format(title), '', detail, '</details>', '']
+    return lines
+
+
+def local(kind, directory, baseline, include_header=True):
+    root = Path(directory)
+    lines = header(baseline) if include_header else []
+    if include_header or kind in ('build', 'test'):
+        lines += table()
     if kind == 'build':
         log = root / 'build.log'
         matches = re.findall(r'^real\s+(\d+(?:\.\d+)?)\s*$', log.read_text(errors='replace'), re.M) if log.exists() else []
@@ -205,7 +243,8 @@ def local(kind, directory, baseline):
     else:
         result = root / 'compatibility-result.json'
         outcome = load(result).get('compatibility', 'unknown') if result.exists() else 'unknown'
-        lines.append(row('Compatibility job (see final Summary)', None, baseline['jobs'][COMPAT], baseline['job_budgets'][COMPAT]))
+        if include_header:
+            lines.append(row('Compatibility job (see final Summary)', None, baseline['jobs'][COMPAT], baseline['job_budgets'][COMPAT]))
         lines += ['', 'Compatibility outcome: **{}**. Full job and check-step timing appear in Team Summary.'.format(escape(outcome))]
     lines += ['', 'Local command timing excludes job setup and artifact uploads. Full job timing appears in Team Summary.']
     return '\n'.join(lines) + '\n'
@@ -214,7 +253,7 @@ def local(kind, directory, baseline):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kind', choices=['aggregate', 'build', 'test', 'compatibility'], required=True)
-    parser.add_argument('--directory', default='ci-logs')
+    parser.add_argument('--directory', help='Diagnostic root (use ci-summary for aggregate; defaults to ci-logs for local reports)')
     parser.add_argument('--jobs', help='Offline exact-attempt Jobs API JSON fixture')
     parser.add_argument('--baseline', default=str(BASELINE))
     parser.add_argument('--output', default=os.environ.get('GITHUB_STEP_SUMMARY'))
@@ -222,10 +261,16 @@ def main():
     try:
         baseline = load(args.baseline)
         if args.kind == 'aggregate':
-            jobs = load(args.jobs)['jobs'] if args.jobs else fetch_jobs()
-            report = aggregate(jobs, baseline)
+            try:
+                jobs = load(args.jobs)['jobs'] if args.jobs else fetch_jobs()
+                report = aggregate(jobs, baseline)
+            except Exception as error:
+                report = aggregate([], baseline)
+                report += '\nJobs API timing data unavailable ({}).\n'.format(type(error).__name__)
+            if args.directory is not None:
+                report += '\n'.join(diagnostics(args.directory, baseline)) + '\n'
         else:
-            report = local(args.kind, args.directory, baseline)
+            report = local(args.kind, args.directory or 'ci-logs', baseline)
     except Exception as error:
         # Do not print exception text: HTTP or file errors can contain private URLs/paths.
         report = '## Team CI timing budget\n\nTiming data unavailable ({}). Existing test gates remain authoritative.\n'.format(type(error).__name__)
