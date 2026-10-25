@@ -1451,6 +1451,12 @@ HGraph::GetMemoryUsageDetail() const {
         std::shared_lock graph_lock(this->conjugate_graph_mutex_);
         memory_usage["conjugate_graph"] = this->conjugate_graph_->GetMemoryUsage();
     }
+    if (this->reader_ != nullptr) {
+        memory_usage["reader"] = get_reader_memory_usage(this->reader_);
+    }
+    if (this->precise_reader_ != nullptr && this->precise_reader_.get() != this->reader_.get()) {
+        memory_usage["precise_reader"] = get_reader_memory_usage(this->precise_reader_);
+    }
     return memory_usage;
 }
 
