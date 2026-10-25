@@ -970,5 +970,114 @@ subprocess.run(sys.argv[1:],check=True)
                 self.assertGreaterEqual(int(state['proc_hwm_kib'])+64,int(state['rss_kib']))
 
 
+
+class RepairCostReusePublishedTests(unittest.TestCase):
+    def test_all_pairs_counts_quality_and_costs_are_recomputable(self):
+        root = Path(__file__).parent / 'results/repair-cost-reuse-20261025'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        self.assertEqual((receipt['pure_processes'], receipt['mixed_processes'], receipt['diagnostic_processes']), (36, 6, 9))
+        self.assertIsNone(receipt['quality_threshold'])
+        report = (root / 'README.md').read_text()
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual(sha(evidence / name), item['sha256'])
+                self.assertEqual((evidence / name).stat().st_size, item['bytes'])
+            old = json.loads((evidence / 'diagnostic256/rows.json').read_text())
+            larger = json.loads((evidence / 'diagnostic4096/rows.json').read_text())
+            self.assertEqual((len(old), len(larger)), (6, 3))
+            for mode in ['update', 'replace', 'reinsert']:
+                ref = next(r for r in old if r['mode'] == mode and r['side'] == 'r2')
+                for capacity, values in [(256, old), (4096, larger)]:
+                    row = next(r for r in values if r['mode'] == mode and r['side'] == 'cache')
+                    self.assertEqual(row['final_snapshot_sha256'], ref['final_snapshot_sha256'])
+                    c = row['counts']
+                    self.assertEqual(c['cache_calls'], c['candidate_total'] + c['comparisons'])
+                    self.assertEqual(c['comparisons'], ref['counts']['comparisons'])
+                    self.assertGreater(c['cache_hits'], 0)
+                    self.assertLess(c['cache_hits'], c['cache_calls'])
+                    self.assertIn(f"| {mode} | {capacity} | {c['cache_calls']} | {c['cache_hits']} | {c['cache_hits']/c['cache_calls']*100:.2f}% |", report)
+            def median(values, key):
+                return statistics.median(key(r) for r in values)
+            for label, folder, entries in [('4096 cache', 'cache4096', 4096), ('scratch reuse', 'reuse', 0)]:
+                identity = json.loads((evidence / folder / 'identity.json').read_text())
+                self.assertEqual(identity['cache_entries'], entries)
+                self.assertEqual(sha(evidence / folder / 'graph_backend.cpp'), identity['cache_source_sha256'])
+                self.assertEqual(sha(evidence / 'reproduction/graph_backend.r2.cpp'), identity['r2_source_sha256'])
+                self.assertEqual(identity['r2_source_sha256'], 'a4cc79be004315a9c1004d40dc0dd7e0a2ea76a413a0edafca3aec2069bd9c97')
+                values = json.loads((evidence / folder / 'rows.json').read_text())
+                self.assertEqual(len(values), 18)
+                self.assertTrue(all(r['exact_r2'] for r in values))
+                for mode in ['update', 'replace', 'reinsert']:
+                    selected = {s: [r for r in values if r['workload'] == mode and r['side'] == s] for s in ['r2', 'cache']}
+                    self.assertEqual([r['trial'] for r in selected['r2']], [0, 1, 2])
+                    self.assertEqual([r['trial'] for r in selected['cache']], [0, 1, 2])
+                    self.assertEqual(len({json.dumps(r['snapshots'], sort_keys=True) for r in selected['r2'] + selected['cache']}), 1)
+                    wall = {s: median(rs, lambda r: r['loop_wall_ms']/1000) for s, rs in selected.items()}
+                    self.assertIn(f"| {label} | {mode} | {wall['r2']:.6f} | {wall['cache']:.6f} | {(wall['cache']/wall['r2']-1)*100:+.2f}% |", report)
+                    for row in selected['r2'] + selected['cache']:
+                        tag = f"{mode}-{row['trial']}-{row['side']}"
+                        with (evidence / folder / (tag + '-mutation-time.csv')).open() as stream:
+                            raw = next(csv.DictReader(stream))
+                        self.assertEqual(float(raw['wall_ms']), row['loop_wall_ms'])
+                        self.assertEqual(int(raw['calls']), row['calls'])
+                        with (evidence / folder / (tag + '-cpu.csv')).open() as stream:
+                            raw = next(csv.DictReader(stream))
+                        self.assertEqual((float(raw['user_s']), float(raw['system_s'])), (row['user_s'], row['system_s']))
+            identity = json.loads((evidence / 'mixed/identity.json').read_text())
+            self.assertEqual(identity['schema'], 'private-experimental-mixed-v2')
+            self.assertEqual(sha(evidence / 'mixed/source.cpp'), identity['source_sha256'])
+            self.assertEqual(identity['source_sha256'], '86d699ecc810536bb3c4d4731143b07c8cc4488246a22a560eebec0df12922a7')
+            self.assertEqual(identity['configuration']['trials'], 3)
+            self.assertEqual(identity['libraries']['r2']['sha256'], '967a0f5a4ab17019b04ab5e7cdc6e5b3e12e81df0655927eea77aac612b1387f')
+            self.assertEqual(identity['inputs']['base.fvecs']['sha256'], '359290ad0de501d683122967de2b353ecd6522b0ffc630c59ca945e228fd5444')
+            self.assertEqual(identity['inputs']['queries.fvecs']['sha256'], '0d1d620049de12da455ed7201e97cbab372c4d54d0e6dedbc8c503f62c911299')
+            self.assertEqual(tuple(identity['configuration'][k] for k in ['dimension', 'degree', 'ef_construction', 'ef_search', 'k', 'rounds', 'cycles', 'checkpoint_every']), (960, 16, 128, 512, 10, 100, 250, 25))
+            values = json.loads((evidence / 'mixed/rows.json').read_text())
+            self.assertEqual([(r['trial'], r['side']) for r in values], [(0, 'r2'), (0, 'reuse'), (1, 'reuse'), (1, 'r2'), (2, 'r2'), (2, 'reuse')])
+            self.assertEqual(len({json.dumps(r['snapshots'], sort_keys=True) for r in values}), 1)
+            for row in values:
+                folder = evidence / 'mixed' / row['folder']
+                actual = verify_run(folder, 100, 250, 1000)
+                actual['checkpoints'] = runner.verify_checkpoints(folder, 100, 250, 1000, 25)
+                self.assertEqual(actual, {k: v for k, v in row.items() if k not in ['side', 'trial', 'folder', 'snapshots']})
+                self.assertEqual(set(row['snapshots']), {'round-' + str(n) for n in range(1, 101)})
+                self.assertTrue(all(v['bytes'] > 0 and len(v['sha256']) == 64 for v in row['snapshots'].values()))
+                with (folder / 'samples.csv').open() as stream:
+                    sequence = iter(csv.DictReader(stream))
+                    def consume(number, identifier, operation):
+                        item = next(sequence)
+                        self.assertEqual((int(item['round']), int(item['id']), item['operation']), (number, identifier, operation))
+                    consume(0, -1, 'build')
+                    query = 0
+                    for number in range(1, 101):
+                        for cycle in range(250):
+                            identifier = ((number-1)*65537 + cycle*8191) % 10000
+                            for operation in ['update', 'remove', 'add']:
+                                consume(number, identifier, operation)
+                                consume(number, query % 1000, 'query')
+                                query += 1
+                        consume(number, -1, 'save')
+                        consume(number, -1, 'load')
+                    self.assertIsNone(next(sequence, None))
+                self.assertTrue(all(int(s['proc_hwm_kib']) > 0 for s in row['states']))
+                mutation_wall = sum(row[o]['wall_sum_ms'] for o in ['update', 'remove', 'add'])/1000
+                self.assertIn(f"| {row['trial']+1} | {row['side']} | {mutation_wall:.3f} |", report)
+            for name in ['quality.csv'] + [f'checkpoint-{n}-neighbors.csv' for n in [0, 25, 50, 75, 100]]:
+                self.assertEqual(len({(evidence / 'mixed' / r['folder'] / name).read_bytes() for r in values}), 1)
+            for side in ['r2', 'reuse']:
+                selected = [r for r in values if r['side'] == side]
+                for operation in ['update', 'remove', 'add', 'query', 'save', 'load']:
+                    rs = [r[operation] for r in selected]
+                    self.assertIn(f"| {side} | {operation} | {rs[0]['count']} | {median(rs, lambda r: r['p50_us']):.3f} | {median(rs, lambda r: r['p99_us']):.3f} |", report)
+
+
 if __name__ == '__main__':
     unittest.main()
