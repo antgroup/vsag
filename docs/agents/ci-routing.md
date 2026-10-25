@@ -90,3 +90,39 @@ node .github/scripts/check-docs.mjs
 ```
 
 Routing tests execute the actual inline router with mocked API responses and cover policy source pinning, forks, author identity, fallback, stale events and failure propagation. Shard tests cover inventory completeness, exact filtering, merge failures, timeout and cancellation; workflow tests cover the multi-job contract and build-directory handling. The CMake/Ninja regression needs both tools to exercise the real build path. These checks do not replace a complete team workflow run, warm/cold cache validation, or deployment lifecycle tests. Measure completion time only after those checks pass; no performance result is implied by this configuration.
+
+## Advisory Team timing summaries
+
+Team build, test shards and compatibility jobs write diagnostic Markdown to their
+GitHub Job Summaries. The hosted Team Summary compares completed job and step
+intervals from the **current run attempt** against
+`scripts/ci/team_timing_baseline.json`, frozen from successful PR #3143,
+run 40171699713, attempt 2. The baseline was measured with a warm compiler cache.
+It is descriptive evidence, not a guarantee that all PRs or cold builds match it.
+
+The 15-minute advisory budget is divided into build (7 minutes), the parallel
+validation envelope (7 minutes), and handoff/checks tail (1 minute). The parallel
+envelope is earliest consumer job start to latest consumer job completion;
+it includes four shards and compatibility without adding their overlapping times.
+The total runs from build job start to the last required execution job completion.
+The same baseline scope is **690 seconds**, distinct from the previous **753.991
+seconds** that included routing and final resource cleanup. Initial admission queue,
+this reporting job, final resource cleanup and Community jobs are excluded;
+internal scheduling gaps remain included and are not called measured queue time.
+
+Individual job and command sub-budgets are diagnostic and must not be added to the
+15-minute total. Missing, skipped or partial results are reported as unavailable,
+not as zero-cost success. Failed jobs retain available timings and their failure
+conclusion. Budget overruns only produce warnings: all existing test and artifact
+identity gates remain authoritative. API access is read-only and confined to the
+hosted reporting job; inability to retrieve timing data does not fail the PR.
+
+The native Jobs API supplies complete job/step timing; existing shard result JSON
+and ccache statistics supply local diagnostics. Per-job reports list the slowest
+cases/examples, which overlap across workers and therefore cannot be summed into
+wall-clock time. Raw diagnostic artifacts retain their existing three-day lifetime.
+No background timing collector, infrastructure mutation or automatic baseline
+refresh is introduced. Workflow-version authorization remains a separate deployment
+operation; this change does not bypass it.
+
+Validate the reporter offline with `python3 -m unittest tests/scripts/test_team_timing.py`.

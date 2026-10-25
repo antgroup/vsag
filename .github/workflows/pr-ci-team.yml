@@ -91,6 +91,7 @@ jobs:
           python3 -m unittest tests/scripts/test_team_test_shards.py
           python3 -m unittest tests/scripts/test_team_mixed.py
           python3 -m unittest tests/scripts/test_team_workflow.py
+          python3 -m unittest tests/scripts/test_team_timing.py
           python3 -m unittest tests/scripts/test_team_cache.py
           python3 -m unittest tests/scripts/test_team_source.py
           python3 -m unittest tests/scripts/test_compatibility_inputs.py
@@ -311,6 +312,15 @@ jobs:
             /__ci/artifacts/meta/complete.json
           if-no-files-found: error
           retention-days: 3
+      - name: Report build timing budget
+        if: always()
+        continue-on-error: true
+        run: |
+          if test -f scripts/ci/team_timing.py; then
+            python3 scripts/ci/team_timing.py --kind build
+          else
+            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload build diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -478,6 +488,15 @@ jobs:
             ci-logs/extras.json
           if-no-files-found: error
           retention-days: 3
+      - name: Report test timing budget
+        if: always()
+        continue-on-error: true
+        run: |
+          if test -f scripts/ci/team_timing.py; then
+            python3 scripts/ci/team_timing.py --kind test
+          else
+            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload test diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -548,6 +567,15 @@ jobs:
           path: ci-logs/compatibility-result.json
           if-no-files-found: error
           retention-days: 3
+      - name: Report compatibility timing budget
+        if: always()
+        continue-on-error: true
+        run: |
+          if test -f scripts/ci/team_timing.py; then
+            python3 scripts/ci/team_timing.py --kind compatibility
+          else
+            echo 'Timing report unavailable: source preparation did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Upload compatibility diagnostics
         if: always()
         uses: actions/upload-artifact@v5
@@ -560,6 +588,9 @@ jobs:
 
   summary:
     name: Team Summary
+    permissions:
+      contents: read
+      actions: read
     if: always()
     needs: [changes, checks, build, tests, compatibility]
     runs-on: ubuntu-22.04
@@ -643,6 +674,17 @@ jobs:
           path: ci-summary/summary.json
           if-no-files-found: error
           retention-days: 3
+      - name: Report Team execution budget
+        if: always() && needs.changes.outputs.cpp == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if test -f scripts/ci/team_timing.py; then
+            python3 scripts/ci/team_timing.py --kind aggregate
+          else
+            echo 'Timing report unavailable: checkout did not complete.' >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Require all Team jobs to pass or be intentionally skipped
         if: always()
         run: |
