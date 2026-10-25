@@ -190,6 +190,7 @@ const char* const HGRAPH_RABITQ_FUSED_DATACELL = "rabitq_fused_datacell";
 const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
 const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
 const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
+const char* const HGRAPH_PARAMETER_MAX_DUPLICATES_PER_GROUP = "max_duplicates_per_group";
 const char* const HGRAPH_USE_MCI = "use_mci";
 const char* const HGRAPH_USE_HYBRID_TRAVERSAL = "use_hybrid_traversal";
 const char* const HGRAPH_HYBRID_VOB = "hybrid_vob";
