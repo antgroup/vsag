@@ -470,3 +470,7 @@ For new mixed runs, `states.csv` additionally records `proc_hwm_kib` from Linux 
 ### Repair implementation cost follow-up
 
 Independent archive-only 4096-entry cache and per-repair scratch-capacity reuse experiments retain all pure-mutation repeats and three mixed CRUD pairs. The mixed graphs and ordered quality results match r2 exactly, but scratch reuse is slower in all three mixed pairs (+4.84% median mutation wall) and is rejected. CPU, latency, process VmHWM and adverse results are separately reported. See the [cost evidence](../../../../../lite/benchmark/results/repair-cost-reuse-20261025/). No production source, feature PR, persistence contract or quality threshold changes.
+
+### Exact-order repair batching pilot
+
+An archive-only adapter reuses the shared batch template while preserving the existing AVX512 accumulation order. Release/SAN numerical checks, wide mutation checks and every pure-mutation repeat are retained in the [pilot evidence](../../../../../lite/benchmark/results/repair-exact-batch-20261025/). This is not a new mixed-workload, latency-quantile or recall measurement and does not change production.

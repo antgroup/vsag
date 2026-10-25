@@ -1079,5 +1079,71 @@ class RepairCostReusePublishedTests(unittest.TestCase):
                     self.assertIn(f"| {side} | {operation} | {rs[0]['count']} | {median(rs, lambda r: r['p50_us']):.3f} | {median(rs, lambda r: r['p99_us']):.3f} |", report)
 
 
+
+class RepairExactBatchPublishedTests(unittest.TestCase):
+    def test_numerical_safety_graphs_and_all_pure_repeats_are_recomputable(self):
+        root = Path(__file__).parent / 'results/repair-exact-batch-20261025'
+        receipt = json.loads((root / 'archive.json').read_text())
+        archive = root / 'raw.tar.gz'
+        self.assertEqual(sha(archive), receipt['sha256'])
+        self.assertEqual(archive.stat().st_size, receipt['bytes'])
+        self.assertFalse(receipt['mixed_measured'])
+        self.assertEqual((receipt['pure_processes'], receipt['mutation_calls']), (18, 750000))
+        self.assertIsNone(receipt['quality_threshold'])
+        from pack_mixed_cpu_acceptance import unpack
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / 'evidence'
+            unpack(archive, evidence)
+            manifest = json.loads((evidence / 'manifest.json').read_text())
+            self.assertEqual(len(manifest) + 1, receipt['members'])
+            for name, item in manifest.items():
+                self.assertEqual(sha(evidence / name), item['sha256'])
+                self.assertEqual((evidence / name).stat().st_size, item['bytes'])
+            identity = json.loads((evidence / 'pilot/identity.json').read_text())
+            self.assertEqual(identity['candidate_kind'], 'exact-order-first-neighbor-batch')
+            self.assertEqual(identity['cache_entries'], 0)
+            self.assertEqual(identity['parent'], 'ccf82521f309df70ff2430ab283153f9cc8d4b09')
+            self.assertEqual(identity['r2_source_sha256'], 'a4cc79be004315a9c1004d40dc0dd7e0a2ea76a413a0edafca3aec2069bd9c97')
+            self.assertEqual(sha(evidence / 'reproduction/graph_backend.r2.cpp'), identity['r2_source_sha256'])
+            self.assertEqual(sha(evidence / 'pilot/graph_backend.cpp'), identity['cache_source_sha256'])
+            self.assertEqual(sha(evidence / 'pilot/repair_batch_avx512.cpp'), identity['kernel_source_sha256'])
+            for config in ['release', 'san']:
+                self.assertEqual((evidence / 'pilot' / (config + '-numeric.log')).read_text().strip(), 'PASS exact_float_bits 4352')
+            commands = json.loads((evidence / 'pilot/commands.json').read_text())
+            self.assertTrue(all(c['exit'] == 0 for c in commands))
+            self.assertTrue({'kernel-tidy', 'numeric-tidy', 'release-ctest', 'san-ctest', 'release-numeric', 'san-numeric'}.issubset({c['tag'] for c in commands}))
+            self.assertIn('Called function pointer is null', (evidence / 'pilot/first-attempt/kernel-tidy.log').read_text())
+            self.assertIn('bugprone-exception-escape', (evidence / 'pilot/numeric-attempt/numeric-tidy.log').read_text())
+            self.assertIn('FileExistsError', (evidence / 'pilot/resume-attempt/controller.log').read_text())
+            sanity = json.loads((evidence / 'pilot/san-mutation-checks.json').read_text())
+            self.assertEqual(sanity['status'], 'PASS')
+            self.assertEqual([r['mode'] for r in sanity['rows']], ['update', 'replace', 'reinsert'])
+            self.assertTrue(all(r['dim'] == 960 and r['snapshots']['r2'] == r['snapshots']['san'] for r in sanity['rows']))
+            values = json.loads((evidence / 'pilot/rows.json').read_text())
+            self.assertEqual(len(values), 18)
+            self.assertTrue(all(r['exact_r2'] for r in values))
+            report = (root / 'README.md').read_text()
+            for mode in ['update', 'replace', 'reinsert']:
+                selected = {s: [r for r in values if r['workload'] == mode and r['side'] == s] for s in ['r2', 'cache']}
+                self.assertEqual([r['trial'] for r in selected['r2']], [0, 1, 2])
+                self.assertEqual([r['trial'] for r in selected['cache']], [0, 1, 2])
+                self.assertEqual(len({json.dumps(r['snapshots'], sort_keys=True) for r in selected['r2'] + selected['cache']}), 1)
+                wall = {s: statistics.median(r['loop_wall_ms'] for r in rs)/1000 for s, rs in selected.items()}
+                self.assertIn(f"| {mode} | {wall['r2']:.6f} | {wall['cache']:.6f} | {(wall['cache']/wall['r2']-1)*100:+.2f}% |", report)
+                for row in selected['r2'] + selected['cache']:
+                    tag = f"{mode}-{row['trial']}-{row['side']}"
+                    with (evidence / 'pilot' / (tag + '-mutation-time.csv')).open() as stream:
+                        raw = next(csv.DictReader(stream))
+                    self.assertEqual((float(raw['wall_ms']), int(raw['calls'])), (row['loop_wall_ms'], row['calls']))
+                    with (evidence / 'pilot' / (tag + '-cpu.csv')).open() as stream:
+                        raw = next(csv.DictReader(stream))
+                    self.assertEqual((float(raw['user_s']), float(raw['system_s'])), (row['user_s'], row['system_s']))
+                summary = receipt['summary'][mode]
+                self.assertEqual(summary['wall'], wall)
+                for trial in range(3):
+                    pair = {r['side']: r['loop_wall_ms']/1000 for r in values if r['workload'] == mode and r['trial'] == trial}
+                    self.assertIn(f"| {mode} | {trial+1} | {pair['r2']:.6f} | {pair['cache']:.6f} | {(pair['cache']/pair['r2']-1)*100:+.2f}% |", report)
+
+
 if __name__ == '__main__':
     unittest.main()
