@@ -48,6 +48,8 @@ run() {
     shift
     echo "==> $name"
     local -a statuses
+    # grep -vE returns 1 when it filters every line; tolerate that when rpt_bench succeeds,
+    # while still propagating genuine grep errors.
     "$RPT_BENCH" "$@" -o "$OUT_DIR/$name.json" 2>&1 |
         grep -vE "^cpu |====|running on|instance spec|\[info\]|\[debug\]" || {
             statuses=("${PIPESTATUS[@]}")
