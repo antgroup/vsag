@@ -134,8 +134,11 @@ struct RPTPartitionParams {
 /**
  * @brief Partitions vectors into near-uniform buckets using a random projection tree.
  *
- * The vectors are recursively split along random projection directions. Given `n`
- * vectors and a target bucket size `L = params.bucket_size`, the result satisfies:
+ * The vectors are recursively split along random projection directions. Each node is assigned
+ * the number of leaves it must produce, and the cut rank is chosen to divide those target leaves
+ * between its children. The cut is generally not the projection median, and no additional
+ * random threshold offset is used. Given `n` vectors and a target bucket size `L`, the result
+ * satisfies:
  *   - the number of partitions equals `ceil(n / L)`;
  *   - every partition holds at most `L` vectors;
  *   - when `n >= L`, every partition holds at least `floor(L / 2)` vectors, and the
