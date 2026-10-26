@@ -16,11 +16,17 @@
 #include "product_quantizer.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
+#include <limits>
+#include <sstream>
 #include <vector>
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag_exception.h"
 
 using namespace vsag;
 
@@ -116,5 +122,93 @@ TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]"
             TestSerializeAndDeserializeMetricPQ<metrics[1]>(dim, pq_dim, count, error);
             TestSerializeAndDeserializeMetricPQ<metrics[2]>(dim, pq_dim, count, error);
         }
+    }
+}
+
+TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][ProductQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr int64_t pq_dim = 8;
+    constexpr int64_t subspace_dim = dim / pq_dim;
+    constexpr uint64_t codebook_len = dim * 256;
+    using QuantizerT = ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+
+    QuantizerT original(dim, pq_dim, allocator.get());
+    std::stringstream output;
+    IOStreamWriter writer(output);
+    original.Serialize(writer);
+    const auto blob = output.str();
+
+    // Consume the base header using its serialized types to locate the PQ metadata.
+    std::stringstream header(blob);
+    IOStreamReader header_reader(header);
+    uint64_t stored_dim = 0;
+    MetricType stored_metric;
+    uint64_t stored_code_size = 0;
+    bool stored_trained = false;
+    StreamReader::ReadObj(header_reader, stored_dim);
+    StreamReader::ReadObj(header_reader, stored_metric);
+    StreamReader::ReadObj(header_reader, stored_code_size);
+    StreamReader::ReadObj(header_reader, stored_trained);
+    const auto pq_offset = header_reader.GetCursor();
+    REQUIRE(stored_dim == dim);
+    REQUIRE(blob.size() == pq_offset + 3 * sizeof(uint64_t) + codebook_len * sizeof(float));
+
+    SECTION("untampered roundtrip") {
+        QuantizerT loaded(dim, pq_dim, allocator.get());
+        std::stringstream input(blob);
+        IOStreamReader reader(input);
+        REQUIRE_NOTHROW(loaded.Deserialize(reader));
+        std::stringstream roundtrip;
+        IOStreamWriter roundtrip_writer(roundtrip);
+        loaded.Serialize(roundtrip_writer);
+        REQUIRE(roundtrip.str() == blob);
+    }
+
+    auto expect_invalid = [&](uint64_t offset, auto value) {
+        std::string tampered = blob;
+        std::memcpy(tampered.data() + offset, &value, sizeof(value));
+        QuantizerT loaded(dim, pq_dim, allocator.get());
+        std::stringstream input(tampered);
+        IOStreamReader reader(input);
+        try {
+            loaded.Deserialize(reader);
+            FAIL("malformed PQ metadata was accepted");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+            // Rejection must precede reading the codebook payload.
+            REQUIRE(reader.GetCursor() == pq_offset + 3 * sizeof(uint64_t));
+        }
+    };
+
+    SECTION("shrunk pq dimension") {
+        expect_invalid(pq_offset, pq_dim - 1);
+    }
+    SECTION("negative pq dimension") {
+        expect_invalid(pq_offset, int64_t{-1});
+    }
+    SECTION("oversized pq dimension") {
+        expect_invalid(pq_offset, std::numeric_limits<int64_t>::max());
+    }
+    SECTION("shrunk subspace dimension") {
+        expect_invalid(pq_offset + sizeof(int64_t), subspace_dim - 1);
+    }
+    SECTION("negative subspace dimension") {
+        expect_invalid(pq_offset + sizeof(int64_t), int64_t{-1});
+    }
+    SECTION("oversized subspace dimension") {
+        expect_invalid(pq_offset + sizeof(int64_t), std::numeric_limits<int64_t>::max());
+    }
+    SECTION("shrunk codebook length") {
+        expect_invalid(pq_offset + 2 * sizeof(int64_t), codebook_len / 2);
+    }
+    SECTION("oversized codebook length") {
+        expect_invalid(pq_offset + 2 * sizeof(int64_t), std::numeric_limits<uint64_t>::max());
+    }
+    SECTION("shrunk header dimension") {
+        expect_invalid(0, uint64_t{dim / 2});
+    }
+    SECTION("oversized header dimension") {
+        expect_invalid(0, std::numeric_limits<uint64_t>::max());
     }
 }
