@@ -1294,6 +1294,64 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
     }
 }
 
+TEST_CASE("HGraph MCI filter queries labels under pinned deletion view",
+          "[ut][hgraph][mci][label_table]") {
+    constexpr int64_t total = 24;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    auto created = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    REQUIRE(index->Remove(ids.back(), vsag::RemoveMode::MARK_REMOVE).value() == 1);
+
+    class AbsentLookupFilter : public HalfRatioAllValidFilter {
+    public:
+        AbsentLookupFilter(const std::vector<int64_t>& valid, vsag::IndexPtr index)
+            : HalfRatioAllValidFilter(valid), index_(std::move(index)) {
+        }
+        bool
+        CheckValid(int64_t id) const override {
+            ++callbacks_;
+            if (index_->CheckIdExist(999999999) or not index_->CheckIdExist(1000) or
+                index_->CheckIdExist(1023)) {
+                saw_unexpected_label_ = true;
+            }
+            auto missing = index_->GetRawVectorByIds(&absent_label_, 1);
+            if (missing.has_value()) {
+                saw_unexpected_label_ = true;
+            }
+            return HalfRatioAllValidFilter::CheckValid(id);
+        }
+        vsag::IndexPtr index_;
+        int64_t absent_label_ = 999999999;
+        mutable int64_t callbacks_ = 0;
+        mutable bool saw_unexpected_label_ = false;
+    };
+    const std::vector<int64_t> valid(ids.begin(), ids.end() - 1);
+    auto filter = std::make_shared<AbsentLookupFilter>(valid, index);
+    auto result = index->KnnSearch(
+        make_dataset(ids, vectors, 1, 1, dim),
+        3,
+        R"({"hgraph":{"ef_search":32,"use_mci":true,"mci_seed_ratio":0.5,"mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    if (not result.has_value()) {
+        FAIL(result.error().message);
+    }
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(filter->callbacks_ > 0);
+    REQUIRE_FALSE(filter->saw_unexpected_label_);
+}
+
 TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][hgraph][mci]") {
     constexpr int64_t dim = 4;
     constexpr int64_t base_count = 24;

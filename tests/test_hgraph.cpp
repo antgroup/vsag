@@ -6086,6 +6086,88 @@ TEST_CASE("(PR) HGraph Batch SearchWithRequest layout and restore", "[ft][hgraph
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
+    SECTION("ordinary callback relabel with a pinned deletion view") {
+        class RelabelFilter : public vsag::Filter {
+        public:
+            RelabelFilter(vsag::IndexPtr index, int64_t old_label, int64_t new_label)
+                : index_(std::move(index)), old_label_(old_label), new_label_(new_label) {
+            }
+            bool
+            CheckValid(int64_t /*id*/) const override {
+                if (not updated_) {
+                    updated_ = true;
+                    auto result = index_->UpdateId(old_label_, new_label_);
+                    update_ok_ = result.has_value() and result.value();
+                }
+                return true;
+            }
+            bool
+            CheckValid(const char* /*data*/) const override {
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            vsag::IndexPtr index_;
+            int64_t old_label_;
+            int64_t new_label_;
+            mutable bool updated_ = false;
+            mutable bool update_ok_ = false;
+        };
+        const auto old_label = dataset->base_->GetIds()[0];
+        const auto removed_label = dataset->base_->GetIds()[1];
+        REQUIRE(restored->Remove(removed_label, vsag::RemoveMode::MARK_REMOVE).value());
+        auto filter = std::make_shared<RelabelFilter>(restored, old_label, 999999999);
+        request.enable_filter_ = true;
+        request.filter_ = filter;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(filter->updated_);
+        REQUIRE(filter->update_ok_);
+        REQUIRE(result.has_value());
+    }
+    SECTION("callback relabel into a tombstoned label with a pinned deletion view") {
+        class TombstoneRelabelFilter : public vsag::Filter {
+        public:
+            TombstoneRelabelFilter(vsag::IndexPtr index, int64_t old_label, int64_t new_label)
+                : index_(std::move(index)), old_label_(old_label), new_label_(new_label) {
+            }
+            bool
+            CheckValid(int64_t /*id*/) const override {
+                if (not updated_) {
+                    updated_ = true;
+                    auto result = index_->UpdateId(old_label_, new_label_);
+                    update_ok_ = result.has_value() and result.value();
+                }
+                return true;
+            }
+            bool
+            CheckValid(const char* /*data*/) const override {
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            vsag::IndexPtr index_;
+            int64_t old_label_;
+            int64_t new_label_;
+            mutable bool updated_ = false;
+            mutable bool update_ok_ = false;
+        };
+        const auto old_label = dataset->base_->GetIds()[0];
+        const auto removed_label = dataset->base_->GetIds()[1];
+        REQUIRE(restored->Remove(removed_label, vsag::RemoveMode::MARK_REMOVE).value());
+        auto filter = std::make_shared<TombstoneRelabelFilter>(restored, old_label, removed_label);
+        request.enable_filter_ = true;
+        request.filter_ = filter;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(filter->updated_);
+        REQUIRE(filter->update_ok_);
+        REQUIRE(result.has_value());
+        REQUIRE(restored->CheckIdExist(removed_label));
+        REQUIRE_FALSE(restored->CheckIdExist(old_label));
+    }
     SECTION("null query on a populated index reports invalid argument") {
         request.query_ = nullptr;
         auto result = restored->SearchWithRequest(request);
@@ -6141,4 +6223,137 @@ TEST_CASE("HGraph empty index distance validation", "[hgraph][distance_contract]
     REQUIRE_FALSE(index->CalcDistancesById(query, ids, 2, true, 0).has_value());
     REQUIRE_FALSE(index->CalcDistancesById(query, nullptr, 2).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(static_cast<const float*>(nullptr), ids[0]).has_value());
+}
+
+TEST_CASE("HGraph concurrent Add with small resize step does not race",
+          "[hgraph][concurrent][tsan]") {
+    // End-to-end counterpart of the LabelTable unit test.  Adding
+    // concurrently from many threads without a prior Build forces
+    // frequent HGraph::resize -> LabelTable::Resize.  With
+    // resize_increase_count_bit:1, every insertion batch can trigger
+    // a reallocation, maximising overlap between the Insert on one
+    // thread and the Resize on another.  TSan must find no data race.
+    constexpr int kThreads = 8;
+    constexpr int64_t kVectorCount = 2000;
+    constexpr int64_t kDim = 32;
+
+    const char* kHgraphParam = R"END(
+        {"dtype":"float32","metric_type":"l2","dim":32,
+         "index_param":{"max_degree":8,"ef_construction":20,
+                        "build_thread_count":1,"resize_increase_count_bit":1}}
+    )END";
+
+    auto index = vsag::Factory::CreateIndex("hgraph", kHgraphParam).value();
+
+    std::vector<float> vectors(static_cast<size_t>(kVectorCount * kDim), 0.5f);
+    for (int64_t i = 0; i < kVectorCount; ++i) {
+        vectors[static_cast<size_t>(i * kDim)] += static_cast<float>(i) * 1e-6f;
+    }
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> add_failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (not go.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            int64_t chunk = kVectorCount / kThreads;
+            int64_t start = t * chunk;
+            int64_t end = (t == kThreads - 1) ? kVectorCount : start + chunk;
+            auto ds = vsag::Dataset::Make();
+            ds->Dim(kDim)->NumElements(1)->Owner(false);
+            for (int64_t i = start; i < end; ++i) {
+                ds->Ids(&i)->Float32Vectors(vectors.data() + i * kDim);
+                auto res = index->Add(ds);
+                if (not res.has_value()) {
+                    add_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    REQUIRE(add_failures.load() == 0);
+    REQUIRE(index->GetNumElements() == kVectorCount);
+}
+
+TEST_CASE("HGraph concurrent Add with force-remove flag does not race in codes storage",
+          "[hgraph][concurrent][tsan]") {
+    // This test targets the flatten-codes storage race that occurs when
+    // support_force_remove is true: insert_persistent_codes skips the
+    // add_mutex_ shared lock in that mode and only serialises on
+    // persistent_codes_mutex_.  resize, in turn, reallocates
+    // basic_flatten_codes_ under global_mutex_ (via add_mutex_ exclusive
+    // in prepare_add_batch).  Before the fix the two paths had no common
+    // lock and a concurrent resize could free storage while InsertVector
+    // was writing into it, yielding garbage offset/size in ByteIO::Write.
+    constexpr int kThreads = 8;
+    constexpr int64_t kVectorCount = 2000;
+    constexpr int64_t kDim = 32;
+
+    const char* kHgraphParam = R"END(
+        {"dtype":"float32","metric_type":"l2","dim":32,
+         "index_param":{"max_degree":8,"ef_construction":20,
+                        "build_thread_count":1,"resize_increase_count_bit":1,
+                        "support_force_remove":true}}
+    )END";
+
+    auto index = vsag::Factory::CreateIndex("hgraph", kHgraphParam).value();
+
+    std::vector<float> vectors(static_cast<size_t>(kVectorCount * kDim), 0.5f);
+    for (int64_t i = 0; i < kVectorCount; ++i) {
+        vectors[static_cast<size_t>(i * kDim)] += static_cast<float>(i) * 1e-6f;
+    }
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> add_failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (not go.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            int64_t chunk = kVectorCount / kThreads;
+            int64_t start = t * chunk;
+            int64_t end = (t == kThreads - 1) ? kVectorCount : start + chunk;
+            auto ds = vsag::Dataset::Make();
+            ds->Dim(kDim)->NumElements(1)->Owner(false);
+            for (int64_t i = start; i < end; ++i) {
+                ds->Ids(&i)->Float32Vectors(vectors.data() + i * kDim);
+                auto res = index->Add(ds);
+                if (not res.has_value()) {
+                    add_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    REQUIRE(add_failures.load() == 0);
+    REQUIRE(index->GetNumElements() == kVectorCount);
 }

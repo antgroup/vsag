@@ -808,10 +808,15 @@ InnerIndexInterface::ExportIDs() const {
     std::shared_lock lock(this->label_lookup_mutex_);
     DatasetPtr result = Dataset::Make();
     auto num_element = this->label_table_->GetTotalCount();
-    auto* labels = static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element));
-    const auto* origin_label = this->label_table_->GetAllLabels();
-    memcpy(labels, origin_label, sizeof(LabelType) * num_element);
-    result->NumElements(num_element)->Ids(labels)->Dim(1)->Owner(true, allocator_);
+    auto release_labels = [this](LabelType* ptr) { allocator_->Deallocate(ptr); };
+    std::unique_ptr<LabelType, decltype(release_labels)> labels(
+        static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element)),
+        release_labels);
+    this->label_table_->CopyAllLabels(labels.get(), num_element);
+    // Complete potentially throwing metadata setup before sharing ownership of the IDs.
+    result->NumElements(num_element)->Dim(1)->Owner(true, allocator_);
+    result->Ids(labels.get());
+    static_cast<void>(labels.release());
     return result;
 }
 

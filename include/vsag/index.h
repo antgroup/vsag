@@ -831,6 +831,11 @@ public:
      * - id_map_func determines which IDs from the sub-index are retained
      * - Specifies the ID remapping into the destination index space
      *
+     * Merge requires exclusive ownership of the destination index: do not call Add,
+     * Remove, or another Merge concurrently with this operation. A mapping callback
+     * can inspect destination labels before each row is published, and other index
+     * components besides the label table are also updated during the merge.
+     *
      * @param merge_units Vector containing:
      *   - index: Source sub-index to merge from
      *   - id_map_func: Filter+remap function that for each source ID (int64_t) returns:
