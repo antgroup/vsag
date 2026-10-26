@@ -16,11 +16,17 @@
 #include "product_quantizer.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
+#include <limits>
+#include <sstream>
 #include <vector>
 
 #include "fixtures.h"
 #include "impl/allocator/safe_allocator.h"
 #include "quantization/quantizer_test.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "vsag_exception.h"
 
 using namespace vsag;
 
@@ -115,6 +121,101 @@ TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]"
             TestSerializeAndDeserializeMetricPQ<metrics[0]>(dim, pq_dim, count, error);
             TestSerializeAndDeserializeMetricPQ<metrics[1]>(dim, pq_dim, count, error);
             TestSerializeAndDeserializeMetricPQ<metrics[2]>(dim, pq_dim, count, error);
+        }
+    }
+}
+
+TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][ProductQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr int64_t pq_dim = 8;
+    constexpr int64_t subspace_dim = dim / pq_dim;
+    using QuantizerT = ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+    constexpr uint64_t codebook_len = dim * QuantizerT::CENTROIDS_PER_SUBSPACE;
+
+    QuantizerT original(dim, pq_dim, allocator.get());
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    original.Serialize(writer);
+    const auto blob = stream.str();
+
+    // Follow the base wrapper's serialized field types to locate the PQ payload.
+    std::stringstream header(blob);
+    IOStreamReader header_reader(header);
+    uint64_t stored_dim = 0;
+    MetricType stored_metric;
+    uint64_t stored_code_size = 0;
+    bool stored_trained = false;
+    StreamReader::ReadObj(header_reader, stored_dim);
+    StreamReader::ReadObj(header_reader, stored_metric);
+    StreamReader::ReadObj(header_reader, stored_code_size);
+    StreamReader::ReadObj(header_reader, stored_trained);
+    const auto pq_offset = header_reader.GetCursor();
+    REQUIRE(stored_dim == dim);
+    REQUIRE(stored_code_size == pq_dim);
+
+    SECTION("untampered") {
+        QuantizerT loaded(dim, pq_dim, allocator.get());
+        std::stringstream input(blob);
+        IOStreamReader reader(input);
+        REQUIRE_NOTHROW(loaded.Deserialize(reader));
+        REQUIRE(loaded.codebooks_ == original.codebooks_);
+        REQUIRE(reader.GetCursor() == blob.size());
+    }
+
+    auto reject = [&](uint64_t offset, auto value) {
+        auto tampered = blob;
+        REQUIRE(offset + sizeof(value) <= tampered.size());
+        std::memcpy(tampered.data() + offset, &value, sizeof(value));
+        QuantizerT loaded(dim, pq_dim, allocator.get());
+        std::stringstream input(tampered);
+        IOStreamReader reader(input);
+        try {
+            loaded.Deserialize(reader);
+            FAIL("malformed geometry was accepted");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+        }
+        // Rejection must precede reading the codebook payload or resizing its vector.
+        REQUIRE(reader.GetCursor() == pq_offset + 2 * sizeof(int64_t) + sizeof(uint64_t));
+        REQUIRE(loaded.codebooks_.size() == codebook_len);
+        REQUIRE(loaded.pq_dim_ == pq_dim);
+        REQUIRE(loaded.subspace_dim_ == subspace_dim);
+    };
+
+    SECTION("pq_dim zero") {
+        reject(pq_offset, int64_t{0});
+    }
+    SECTION("pq_dim malformed") {
+        for (auto value :
+             {int64_t{-1}, pq_dim - 1, pq_dim + 1, std::numeric_limits<int64_t>::max()}) {
+            reject(pq_offset, value);
+        }
+    }
+    SECTION("subspace_dim malformed") {
+        for (auto value : {int64_t{-1},
+                           int64_t{0},
+                           subspace_dim - 1,
+                           subspace_dim + 1,
+                           std::numeric_limits<int64_t>::max()}) {
+            reject(pq_offset + sizeof(int64_t), value);
+        }
+    }
+    SECTION("codebook length malformed") {
+        for (auto value : {uint64_t{0},
+                           codebook_len / 2,
+                           codebook_len + 1,
+                           uint64_t{1} << 32,
+                           std::numeric_limits<uint64_t>::max()}) {
+            reject(pq_offset + 2 * sizeof(int64_t), value);
+        }
+    }
+    SECTION("dim malformed") {
+        for (auto value : {uint64_t{0},
+                           uint64_t{dim - 1},
+                           uint64_t{dim + 1},
+                           std::numeric_limits<uint64_t>::max()}) {
+            reject(0, value);
         }
     }
 }
