@@ -54,6 +54,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
@@ -538,6 +539,9 @@ private:
 
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
+        if (SearchLockScope::IsNoLock()) {
+            return {};
+        }
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
             return std::shared_lock<std::shared_mutex>(this->global_mutex_);
         }

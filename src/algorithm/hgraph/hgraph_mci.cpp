@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "../mci/mci_builder.h"
+#include "../mci/mci_clique_activation.h"
 #include "../mci/mci_coverage.h"
 #include "../mci/mci_local_builder.h"
 #include "datacell/graph_interface.h"
@@ -36,6 +37,7 @@
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
 #include "simd/fp32_simd.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 namespace {
@@ -579,22 +581,23 @@ HGraph::try_mci_search(const SearchRequest& request,
                                ? total_count
                                : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
     mci_param.hops_limit = search_param.hops_limit;
+    mci_param.packed_filter = params.mci_packed_filter;
+    mci_param.batch_distance = params.mci_batch_distance;
+    mci_param.activation_cap = params.mci_activation_cap;
+    mci_param.depth_limit = params.mci_hops_limit;
+    mci_param.expansion_idle_window = params.mci_expansion_idle_window;
 
-    Vector<InnerIdType> seed_inner_ids(ctx->alloc);
+    bool exhaustive_seeds = false;
+    auto seed_inner_ids = this->collect_hybrid_seeds(
+        request, inner_filter, params, total_count, nullptr, &exhaustive_seeds, ctx->alloc);
+    Vector<InnerIdType> valid_inner_ids(ctx->alloc);
     {
         // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
         // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
         // inner ids. Label mutations take this mutex exclusively, so they have to be excluded while
         // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
         // lock order this function and the index already use.
-        std::shared_lock label_lock(this->label_lookup_mutex_);
-        if (bitset_seed_source) {
-            seed_inner_ids = collect_bitset_seed_inner_ids(
-                inner_filter, total_count, mci_param.seed_count, ctx->alloc);
-        } else {
-            seed_inner_ids = collect_seed_inner_ids(
-                request.filter_, this->label_table_, mci_param.seed_count, ctx->alloc);
-        }
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
         // A deletion CombinedFilter hides the user's bitmap. Obtain it through the label wrapper
         // directly, retaining its identity-mapping check; the pinned deletion filter below remains
         // an independent constraint. Extra-info filters do not use the label/inner-id bitmap space.
@@ -610,14 +613,22 @@ HGraph::try_mci_search(const SearchRequest& request,
             }
         }
     }
+    if (params.mci_packed_filter and not bitset_seed_source and not params.use_extra_info_filter) {
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+        valid_inner_ids = collect_seed_inner_ids(
+            request.filter_, this->label_table_, std::numeric_limits<uint64_t>::max(), ctx->alloc);
+        mci_param.valid_inner_ids = valid_inner_ids.data();
+        mci_param.valid_inner_count = valid_inner_ids.size();
+    }
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;
+    mci_param.enumerated_valid_count = exhaustive_seeds ? result.seed_count : 0;
     mci_param.seed_inner_ids = &seed_inner_ids;
     if (seed_inner_ids.empty()) {
         return result;
     }
 
-    std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
     auto precise_flatten = this->get_precise_codes();
     if (precise_flatten != nullptr) {
         uint64_t precise_vector_stride = 0;
@@ -714,7 +725,7 @@ HGraph::collect_hybrid_seeds(const SearchRequest& request,
     // Both samplers read the label table: id-based sampling maps labels to inner ids, and
     // the bitmap sampler relies on the filter being indexed by inner id. Label mutations
     // take label_lookup_mutex_ exclusively, so exclude them while those reads happen.
-    std::shared_lock label_lock(this->label_lookup_mutex_);
+    auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
     if (bitset_seed_source) {
         // The bitset sampler strides over the id space and stops at the budget, so it cannot
         // prove exhaustiveness here. Reporting false only forgoes the skip, never correctness.
@@ -882,7 +893,9 @@ void
 AssignMCICliquesToDatacell(CliqueDataCellPtr& mci_cliques,
                            Vector<Vector<InnerIdType>>& cliques,
                            uint64_t total,
-                           Allocator* allocator) {
+                           Allocator* allocator,
+                           const MCIGraphView* activation_graph = nullptr,
+                           uint64_t thread_count = 1) {
     Vector<InnerIdType> p_maxc(allocator);
     Vector<InnerIdType> maxcs(allocator);
     Vector<Vector<InnerIdType>> node_to_clique(total, Vector<InnerIdType>(allocator), allocator);
@@ -895,13 +908,15 @@ AssignMCICliquesToDatacell(CliqueDataCellPtr& mci_cliques,
         p_maxc.push_back(static_cast<InnerIdType>(maxcs.size()));
     }
 
+    if (activation_graph != nullptr) {
+        rank_mci_clique_activation(*activation_graph, cliques, node_to_clique, thread_count);
+    }
     Vector<InnerIdType> p_node_to_cid(allocator);
     Vector<InnerIdType> node_to_cids(allocator);
     p_node_to_cid.push_back(0);
     for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
         auto& ids = node_to_clique[inner_id];
-        std::sort(ids.begin(), ids.end());
-        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+        // Rows are already unique (one incidence per clique); keep their activation order.
         node_to_cids.insert(node_to_cids.end(), ids.begin(), ids.end());
         p_node_to_cid.push_back(static_cast<InnerIdType>(node_to_cids.size()));
     }
@@ -921,7 +936,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
     }
     std::scoped_lock build_lock(this->mci_build_mutex_);
     this->mci_pending_mutations_ = 0;
-    std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
 
     const auto total = this->total_count_.load();
     if (total == 0) {
@@ -1047,7 +1062,13 @@ HGraph::build_mci_clique_index(const void* vectors) {
         build_params.thread_count = static_cast<uint64_t>(this->build_thread_count_);
         build_params.metric = this->metric_;
         auto cliques = BuildMCICliques(float_vectors, graph_view, build_params, this->allocator_);
-        AssignMCICliquesToDatacell(this->mci_cliques_, cliques, total, this->allocator_);
+        AssignMCICliquesToDatacell(
+            this->mci_cliques_,
+            cliques,
+            total,
+            this->allocator_,
+            this->mci_parameters_.clique_activation_order ? &graph_view : nullptr,
+            worker_count);
         logger::info("hgraph mci v3 clique build finished, total_cliques={}", cliques.size());
         this->cal_memory_usage();
         return;
@@ -1467,7 +1488,20 @@ HGraph::build_mci_clique_index(const void* vectors) {
         max_membership = std::max(max_membership, membership);
     }
 
-    AssignMCICliquesToDatacell(this->mci_cliques_, cliques, total, this->allocator_);
+    const auto* graph_neighbors =
+        graph.raw_neighbors != nullptr ? graph.raw_neighbors : graph.neighbors.data();
+    MCIGraphView activation_graph{graph_neighbors,
+                                  graph.counts.empty() ? nullptr : graph.counts.data(),
+                                  graph.total,
+                                  graph.row_stride,
+                                  graph.uniform_count};
+    AssignMCICliquesToDatacell(
+        this->mci_cliques_,
+        cliques,
+        total,
+        this->allocator_,
+        this->mci_parameters_.clique_activation_order ? &activation_graph : nullptr,
+        worker_count);
     logger::info(
         "hgraph mci clique build finished, total_cliques={}, total_memberships={}, "
         "avg_membership={}, max_membership={}",
@@ -1531,7 +1565,7 @@ HGraph::search_mci_knn(InnerIdType query_inner_id,
             const auto* labels = result->GetIds();
             const auto count = result->GetDim();
             knn_ids.reserve(static_cast<uint64_t>(count));
-            std::shared_lock label_lock(this->label_lookup_mutex_);
+            auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
             for (int64_t i = 0; i < count; ++i) {
                 auto [found, inner_id] = this->label_table_->TryGetIdByLabel(labels[i]);
                 if (found and inner_id < visible_total and inner_id != query_inner_id) {
@@ -2342,7 +2376,7 @@ HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
         removed_inner_ids.empty()) {
         return;
     }
-    std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
     // Project the whole batch before repairing: no temporary cliques for later deletions.
     const auto snapshot =
         this->mci_cliques_->PrepareDelete(removed_inner_ids,
@@ -2375,7 +2409,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     const auto old_total = this->total_count_.load();
     Vector<std::pair<InnerIdType, int64_t>> targets(this->allocator_);
     {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
         for (auto label : ids) {
             auto [found, id] = this->label_table_->TryGetIdByLabel(label, true);
             if (found) {
@@ -2427,7 +2461,7 @@ HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
     // MARK_REMOVE and FORCE_REMOVE, and MCI remains unpublished until repair is complete.
     force_lock.unlock();
     {
-        std::shared_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
         Vector<InnerIdType> memberships(this->allocator_);
         for (auto old_id : snapshot.repair_node_ids) {
             // The snapshot precedes compaction: never use its IDs in the new slot space.

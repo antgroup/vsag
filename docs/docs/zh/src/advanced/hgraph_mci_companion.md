@@ -484,3 +484,60 @@ build/tests/unittests '[mci],[LabelTable],RaBitQSplitDataCell serialize and meth
 其中两个集成测试当时使用 Debug 基准程序作正确性验证。未完成全量 lint、全量测试和 90% 覆盖率验证。
 review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数据集加载复测、ABI、序列化兼容
 及更全面的并发修改仍需独立验证；不能把定向测试当作生产就绪证明。
+
+## 压缩过滤位图与按点限制团激活
+
+以下参数位于搜索 JSON 的 `hgraph` 对象内，作用于分流后的 MCI 路径。
+它们不改变稀疏图搜索或 `use_hybrid_traversal=true` 的联合展开算法。
+
+| 搜索参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `mci_packed_filter` | `true` | 从完整的合法 inner ID 或身份映射下的字节位图构造查询私有的单比特位图。静态 CSR 支持运行时选择 AVX512／AVX2 和标量回退，保留成员顺序；没有完整来源时沿用原谓词检查。 |
+| `mci_batch_distance` | `true` | 每批最多对 64 个首次访问的合法点调用距离接口；选择下一父节点和检查收敛前提交剩余批次。FP32 内核可能选择不同的严格等距 ID。 |
+| `mci_activation_cap` | `0` | 每个展开点只考虑其存储顺序中的前若干条团归属，0 表示不限。已经访问过的团仍占用前缀。这会改变搜索图，可能降低召回。 |
+| `mci_hops_limit` | `4294967295` | 独立于旧 HGraph `hops_limit` 的深度限制：种子深度为 1，孩子深度为父节点加 1；达到限制的点已经打分，但不继续展开。 |
+| `mci_expansion_idle_window` | `0` | 连续若干父节点没有成功插入新候选时结束，0 为关闭。判断的是候选队列，不只是最终 top-k 结果堆。 |
+| `search_no_lock` | `false` | 同步查询期间跳过索引读锁。调用者必须排除一切索引修改和销毁；查询内部 `parallelism` 必须为 1，可运行多条独立并发查询。共享可变查询池仍保留同步。MCI 无锁路径要求已经压实的静态 CSR，存在待合并 delta／墓碑时拒绝执行。 |
+
+关闭压缩位图和距离合批，保持激活上限为零、深度与收敛参数为默认值，可关闭这些优化。
+分流 MCI 与联合 Hybrid 使用相同的 coverage 种子预算；种子已经计算全部合法点时，
+直接跳过团展开和 packed bitmap 构造。
+
+要获得有用的团激活顺序，在构建的 `index_param` 中设置
+`"mci_clique_activation_order": true`，默认关闭。排序先贪心选择对该点既有输入 KNN
+候选带来最多新增覆盖的团，再按近边密度排列剩余团。归属不超过 32 个团的点保持原顺序。
+该过程不新增距离计算，直接重排现有“点→团”CSR，使用当前 MCI 格式序列化，
+无需额外 sidecar 或持久化的归属副本；它与全局团 ID 重排序是两项不同的操作。
+
+对于开启排序的新建静态索引，激活上限至少为 `max(32, 输入 KNN 行宽)` 时，能保留原团已经
+表示的全部输入 KNN 边，包含未重排的短行。这不保证保留过滤后所需的更远邻居，也不保证过滤召回。旧索引不排序仍可使用，
+但限制的是它原有的存储顺序。增量修改和压实保留归属关系，却可能改变优先级；
+需要完整重建才能恢复构建时的贪心顺序，并重新验证召回，不能假设 flush 会恢复排序。
+
+例如，采用少量种子的纯 MCI 查询可以配置为：
+
+```json
+{
+  "hgraph": {
+    "ef_search": 80,
+    "use_mci": true,
+    "use_hybrid_traversal": false,
+    "hgraph_valid_ratio_threshold": 1.0,
+    "mci_seed_ratio": 0.05,
+    "mci_seed_coverage": 0,
+    "mci_activation_cap": 128,
+    "mci_hops_limit": 9,
+    "mci_expansion_idle_window": 0,
+    "mci_packed_filter": true,
+    "mci_batch_distance": true,
+    "search_no_lock": true,
+    "parallelism": 1
+  }
+}
+```
+
+以上只是工作量控制的示例，不是跨数据集通用的召回参数。应在验证集标定 cap、种子预算和 ef。
+压缩位图与合批降低执行开销，团激活、深度和收敛限制还会以召回为代价减少搜索工作。
+
+无锁分流 MCI 在 HGraph 导航前先尝试执行；成功时不会计算无用的导航距离，也不申请
+HGraph 访问列表。MCI 不可用时仍正常回退到图导航与搜索。

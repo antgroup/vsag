@@ -1334,12 +1334,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
         ->Owner(false);
 
     auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
-    auto result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 filter);
+    auto result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
@@ -1354,12 +1354,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) ==
             expected_seed_count);
 
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0,"timeout_ms":0}})",
-                                 filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0,"timeout_ms":0}})",
+        filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"is_timeout"})[0] == "true");
 
@@ -1367,12 +1367,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(stats["mci_max_clique_size"].GetInt() > 0);
 
     auto callback_filter = std::make_shared<CallbackOnlyFilter>();
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 callback_filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        callback_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("disabled")");
 
@@ -1397,24 +1397,24 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     for (auto id : ids) {
         all_invalid->Set(id);
     }
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 all_invalid);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        all_invalid);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
 
     const std::vector<int64_t> mixed_ids{9000, ids[base_count + 1]};
     auto mixed_filter = std::make_shared<HalfRatioAllValidFilter>(mixed_ids);
-    result =
-        index.value()->KnnSearch(query,
-                                 1,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 mixed_filter);
+    result = index.value()->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        mixed_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == ids[base_count + 1]);
@@ -1423,12 +1423,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
 
     const std::vector<int64_t> stale_ids{9000, 9001, 9002};
     auto stale_filter = std::make_shared<CountingValidIdsFilter>(stale_ids);
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 stale_filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        stale_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");

@@ -31,6 +31,14 @@ DEFINE_POINTER(MCISearcher);
 
 struct MCISearcherParam {
     uint64_t seed_count{500};
+    bool packed_filter{true};
+    bool batch_distance{true};
+    uint32_t activation_cap{0};
+    uint32_t depth_limit{std::numeric_limits<uint32_t>::max()};
+    uint64_t expansion_idle_window{0};
+    const InnerIdType* valid_inner_ids{nullptr};
+    uint64_t valid_inner_count{0};
+    uint64_t enumerated_valid_count{0};
     uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
     const Vector<InnerIdType>* seed_inner_ids{nullptr};
     const float* precise_vectors{nullptr};
