@@ -27,11 +27,12 @@ struct RPTPartitionParams;
  * @brief Random projection tree (RPT) partitioner.
  *
  * Splits a vector set into partitions whose sizes are bounded by the target bucket size.
- * Instead of stopping at the median once a node is small enough (which yields a power of
- * two leaves), every node is assigned the number of leaves `k = ceil(n / L)` it must
- * produce and is cut at the position that hands `ceil(k / 2)` leaves to the left child.
- * Every leaf therefore ends up with either `floor(N / K)` or `ceil(N / K)` vectors, where
- * `K = ceil(N / L)` is the total number of partitions.
+ * Every node draws a random projection direction, is assigned the number of leaves
+ * `k = ceil(n / L)` it must produce, and is cut at the projection rank that hands
+ * `ceil(k / 2)` leaves to the left child. The cut is therefore generally not the projection
+ * median, and no additional random threshold offset is used. Every leaf ends up with either
+ * `floor(N / K)` or `ceil(N / K)` vectors, where `K = ceil(N / L)` is the total number of
+ * partitions.
  *
  * The permutation of ids is partitioned in place and no vector data is copied. The input
  * pointer is owned by the caller and is not retained after `Run` returns.

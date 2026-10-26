@@ -58,15 +58,18 @@ seed. Every partition holds either `floor(n / K)` or `ceil(n / K)` vectors.
 
 ## How It Works
 
-A plain RPT cuts every node at its median until the node fits into a bucket. That yields a power
-of two leaves, overshooting `ceil(n / L)` by up to 45% and leaving buckets only ~64% full.
+At each node, this implementation draws a random projection direction and assigns the node the
+number of leaves `k = ceil(n_node / L)` it must produce. With `n_node = q * k + r`, the node is
+cut so that the left child receives `ceil(k / 2)` leaves and
+`q * ceil(k / 2) + min(r, ceil(k / 2))` vectors. The cut rank is therefore chosen to balance the
+target leaf counts; it is generally not the projection median, and no additional random threshold
+offset is used. The cut position is found with `std::nth_element` on the projection values; ties
+are broken by vector id, so duplicated vectors and constant projections are handled without
+special cases. Vectors whose projection is `NaN` are ranked last.
 
-Instead, every node is assigned the number of leaves `k = ceil(n_node / L)` it must produce.
-With `n_node = q * k + r`, the node is cut so that the left child receives `ceil(k / 2)` leaves
-and `q * ceil(k / 2) + min(r, ceil(k / 2))` vectors. The cut position is found with
-`std::nth_element` on the projection values; ties are broken by vector id, so duplicated vectors
-and constant projections are handled without special cases. Vectors whose projection is `NaN`
-are ranked last.
+The size guarantees above follow from this construction. Locality behavior is an empirical
+property of the random projection directions and the input data; it does not claim the theoretical
+guarantees of other RPT variants that use a randomly perturbed projection threshold.
 
 Each node draws its projection direction from a generator seeded by a hash of the user seed and
 the node position, so the output is independent of the traversal order.
