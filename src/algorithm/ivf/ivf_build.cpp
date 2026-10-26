@@ -153,6 +153,8 @@ IVF::Train(const DatasetPtr& data) {
     if (this->is_trained_) {
         return;
     }
+    CHECK_ARGUMENT(common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "IVF train only supports float32 data, use dtype: float32");
 
     int64_t total_elements = data->GetNumElements();
     int64_t dim = data->GetDim();
@@ -183,6 +185,8 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
     }
+    CHECK_ARGUMENT(common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "IVF add only supports float32 data, use dtype: float32");
     this->bucket_->Unpack();
     if (precise_bucket_ != nullptr) {
         this->precise_bucket_->Unpack();

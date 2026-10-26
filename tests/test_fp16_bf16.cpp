@@ -223,4 +223,26 @@ TEST_CASE("HGraph typed native distance contract", "[ft][hgraph][distance_contra
     }
 }
 
+TEST_CASE("IVF rejects float16 and bfloat16", "[ft][ivf][fp16]") {
+    for (const auto& dtype : {std::string("float16"), std::string("bfloat16")}) {
+        const std::string quant = dtype == "float16" ? "fp16" : "bf16";
+        const std::string param = R"(
+        {
+            "dtype": ")" + dtype + R"(",
+            "metric_type": "l2",
+            "dim": 32,
+            "index_param": {
+                "base_quantization_type": ")" +
+                                  quant + R"(",
+                "bucket_count": 4
+            }
+        }
+        )";
+
+        auto result = vsag::Factory::CreateIndex("ivf", param);
+        REQUIRE(!result.has_value());
+        REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
+}
+
 }  // namespace vsag

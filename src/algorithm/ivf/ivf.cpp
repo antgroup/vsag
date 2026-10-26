@@ -219,9 +219,11 @@ build_default_ivf_param(const JsonType& external_param) {
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+    if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
+                            fmt::format("{} not support {} datatype, IVF only supports float32",
+                                        INDEX_IVF,
+                                        ToString(common_param.data_type_)));
     }
 
     auto inner_json = build_default_ivf_param(external_param);
