@@ -236,4 +236,37 @@ TEST_CASE("AsyncIO optional cache preserves native and cached ownership", "[ut][
     REQUIRE(actual == replacement);
 }
 
+TEST_CASE("AsyncIO one-page cache evicts and invalidates", "[ut][AsyncIO][ReadCache]") {
+    fixtures::TempDir dir("async_io_one_page_cache");
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    AsyncIO io(dir.GenerateRandomFile(false), allocator.get());
+    auto cache = std::make_shared<LRUPageCache>(1);
+    io.SetReadCache(cache);
+    const auto page_size = Page::DEFAULT_PAGE_SIZE;
+    auto data = MakeAsyncData(2 * page_size);
+    data[page_size + 17] ^= 0x3C;
+    io.WriteAt(0, data.data(), data.size());
+
+    uint8_t actual = 0;
+    for (uint64_t page : {0, 1, 0}) {
+        const auto offset = page * page_size + 17;
+        REQUIRE(io.ReadAt(offset, 1, &actual));
+        REQUIRE(actual == data[offset]);
+        REQUIRE(cache->Get(page) != nullptr);
+        REQUIRE(cache->Get(1 - page) == nullptr);
+    }
+
+    const uint8_t replacement = data[17] ^ 0xFF;
+    io.WriteAt(17, &replacement, 1);
+    REQUIRE(cache->Get(0) == nullptr);
+    REQUIRE(io.ReadAt(17, 1, &actual));
+    REQUIRE(actual == replacement);
+
+    REQUIRE_FALSE(io.ReadAt(data.size(), 1, &actual));
+    REQUIRE_FALSE(io.ReadAt(0, 1, nullptr));
+    REQUIRE_FALSE(io.Acquire(data.size(), 1));
+    REQUIRE(io.ReadAt(17, 1, &actual));
+    REQUIRE(actual == replacement);
+}
+
 }  // namespace vsag

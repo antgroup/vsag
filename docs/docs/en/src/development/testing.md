@@ -120,6 +120,102 @@ make pyvsag PY_VERSION=3.10
 cd tests/python && pytest -q
 ```
 
+## Report Testcase Budgets and Time
+
+`scripts/testing/test_budget_report.py` reads saved test listings, results and cost records
+without running tests. It works without Team CI inventory tooling:
+
+```bash
+build/tests/functests '~[daily]' --list-tests --reporter xml > functests-list.xml
+build/tests/unittests '~[daily]' --list-tests --reporter xml > unittests-list.xml
+python3 scripts/testing/test_budget_report.py \
+  --list-tests tests/functests=functests-list.xml \
+  --list-tests tests/unittests=unittests-list.xml \
+  --source-root "$PWD" --output budget-report.md
+```
+
+`--list-tests` consumes Catch2 listing XML, not execution XML. The listing commands enumerate
+tests without executing them. All listed cases are retained, including template expansions;
+the report applies no extra daily exclusions. Add `--xml tests/functests=report.xml` for an
+existing Catch2 execution report, and `--cost tests/functests=cost.log` for budget logs from
+the same source revision. List XML hashes identify the input listings, not binary contents.
+
+Catch2's XML reporter captures budget messages in `StdOut`. Import the same saved execution
+XML explicitly for both measurements; `--xml` imports time only, while `--cost` decodes XML
+escaping and reads only `[test-budget]` lines from `StdOut`:
+
+```bash
+python3 scripts/testing/test_budget_report.py \
+  --list-tests tests/functests=functests-list.xml \
+  --xml tests/functests=report.xml --cost tests/functests=report.xml \
+  --source-root "$PWD" --output budget-report.md
+```
+
+An XML report without marked budget records leaves costs **unknown**; malformed marked
+records fail rather than silently disappearing.
+
+Existing Team CI artifacts can instead supply the frozen inventory and execution results:
+
+```bash
+python3 scripts/testing/test_budget_report.py \
+  --inventory team-plan-RUN-ATTEMPT.zip \
+  --result team-results-0-RUN-ATTEMPT.zip \
+  --result team-results-1-RUN-ATTEMPT.zip \
+  --result team-results-2-RUN-ATTEMPT.zip \
+  --result team-results-3-RUN-ATTEMPT.zip \
+  --output budget-report.md
+```
+
+The inventory can also be schema 3 inventory/plan JSON, and each result can be a shard
+`result.json`. For Catch2 XML use `--xml tests/functests=report.xml` instead of duplicating
+those cases through `--result`. Add `--binary tests/functests` for the functional subset,
+`--group-by family` for index families, or `--format json` for per-case assignments.
+
+Counts retain binary identity: a case compiled into both unit and functional binaries counts
+twice. The ordered, mutually exclusive categories are Tune, recovery, serialization,
+mutation/concurrency, search/filter, build/train, data/quantization/SIMD, and Other. They are
+name/tag/source heuristics, not assertion coverage measurements.
+
+Optional `--cost tests/functests=cost.jsonl` adds schema 1 complete-case cost records. Each
+record has `model_version`, `unit`, `policy`, `case` (`name`, `tags`, `source_file`,
+`source_line`), `cap_points`, and `total_points`. Test logs may prefix records with
+`[test-budget]`; in that mode unrelated log lines are ignored. Only the top-level cap and
+estimated cost count, not nested `runs`. Identical complete plans emitted again by Catch
+generator re-entry count once and expose `identical_plan_repetitions`; differing plans for
+one case fail. A bridge record with empty tags and `source_line: 0` must match exactly one
+inventory case by binary, name, and full source identity. Catch's original absolute or
+parent-relative paths are identity strings, never paths the report opens. Exact full-path
+matching is preferred; use `--source-root /absolute/checkout` only when an absolute path must
+map to a repository-relative identity. Basename matching is forbidden, and frozen inventory
+IDs and digests remain unchanged.
+
+Case-count shares, cap shares, estimated-cost shares, and measured case-second shares have
+separate denominators. Models, units, and policies are never combined. Missing measurements
+remain **unknown**, not zero; a timing-only baseline is valid when cost data is unavailable.
+Case-second sums are **neither elapsed CI time nor CPU time**. Failed cases and over-budget
+records remain visible; this reporting command does not replace CI's completion checks.
+
+Run the report's local fixture tests with `python3 tests/scripts/test_test_budget_report.py`.
+
+## Budget Policy
+
+`tests/fixtures/core/test_budget.h` models logical work using N, D, Q and declared counts
+for data preparation, training, building, searching, reference-oracle calculations,
+serialization and mutations. A testcase plans its complete configuration matrix under one
+cap. Each candidate retains the required configurations and legal minimum sizes; if no legal
+candidate fits, planning fails. Catch generator re-entry shares that complete plan rather
+than granting a fresh cap. `CurrentPolicy` takes its seed from Catch's `--rng-seed`, so resource
+selection is reproducible for the same testcase and seed.
+
+The first integration covers randomized resource families in HGraph, IVF, BruteForce, Warp
+and Dataset tests, not every static testcase. Uninstrumented cases remain unmodeled in reports.
+PR HGraph Tune keeps four representative transitions with Q=20 and N≤400; PiPNN uses one
+transition with Q=10 and N=256. Daily keeps all ten transitions with Q=100.
+
+Logical points and declared upper bounds are neither elapsed seconds nor a universal runtime
+limit. The budget does not replace assertions or timeouts, and exhausting it cannot silently
+skip a testcase or turn an incomplete run into a pass.
+
 ## References
 
 - `tests/` directory

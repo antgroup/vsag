@@ -194,3 +194,11 @@ Example:
 ```text
 [skip ci] docs: update contribution examples
 ```
+
+### Community and team CI
+
+PR CI uses a common routing entry point. GitHub-hosted community checks remain
+available to every contributor. An opt-in team Linux path reads its contributor
+allowlist exclusively from `.github/maintainers.json` on `main`; personal forks
+are supported. Compilation on the team path uses 16 jobs. See [CI routing and rollback](docs/agents/ci-routing.md)
+for activation prerequisites, required-check migration, and manual fallback.

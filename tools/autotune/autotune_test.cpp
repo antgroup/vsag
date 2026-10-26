@@ -829,6 +829,103 @@ TEST_CASE("AutoTune CLI keeps only the recommended artifact by default") {
     REQUIRE(std::filesystem::is_regular_file(result["report_path"].get<std::string>()));
 }
 
+TEST_CASE("AutoTune existing-index example preserves its exact recall constraint") {
+    vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
+    ScopedBlockSizeLimit block_size_limit(2UL * 1024 * 1024);
+    constexpr int64_t dim = 4;
+    constexpr int64_t base_count = 16;
+    constexpr int64_t query_count = 4;
+    std::vector<int64_t> ids(base_count);
+    std::vector<float> vectors(base_count * dim);
+    for (int64_t i = 0; i < base_count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>(i * dim + j);
+        }
+    }
+
+    int64_t first_base = 0;
+    SECTION("all query neighbors are indexed") {
+        first_base = 0;
+    }
+    SECTION("a missing neighbor makes every candidate infeasible") {
+        // Keep the correct ground truth, but omit query 0's exact neighbor from the index.
+        first_base = 1;
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(base_count - first_base)
+                    ->Dim(dim)
+                    ->Ids(ids.data() + first_base)
+                    ->Float32Vectors(vectors.data() + first_base * dim)
+                    ->Owner(false);
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(query_count)
+                       ->Dim(dim)
+                       ->Float32Vectors(vectors.data())
+                       ->Owner(false);
+    auto ground_truth =
+        vsag::Dataset::Make()->NumElements(query_count)->Dim(1)->Ids(ids.data())->Owner(false);
+    auto created = vsag::Factory::CreateIndex(
+        "hgraph",
+        R"({"dim":4,"dtype":"float32","metric_type":"l2","index_param":{)"
+        R"("base_quantization_type":"fp32","max_degree":8,"ef_construction":40,)"
+        R"("build_thread_count":1}})");
+    REQUIRE(created.has_value());
+    auto built = created.value()->Build(base);
+    REQUIRE(built.has_value());
+    REQUIRE(built->empty());
+
+    const double expected_recall = first_base == 0 ? 1.0 : 0.75;
+    for (const auto ef_search : {4, 8, 16}) {
+        int64_t matches = 0;
+        const auto parameters = JsonType{{"hgraph", {{"ef_search", ef_search}}}}.dump();
+        for (int64_t i = 0; i < query_count; ++i) {
+            auto query = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(dim)
+                             ->Float32Vectors(vectors.data() + i * dim)
+                             ->Owner(false);
+            auto found = created.value()->KnnSearch(query, 1, parameters);
+            REQUIRE(found.has_value());
+            REQUIRE(found.value()->GetDim() == 1);
+            matches += found.value()->GetIds()[0] == ids[i] ? 1 : 0;
+        }
+        REQUIRE(static_cast<double>(matches) / query_count == expected_recall);
+    }
+
+    vsag::autotune::SearchRequest input;
+    input.index = created.value();
+    input.workload = {queries, ground_truth, 1, 1};
+    input.parameter_space = R"({"hgraph":{"ef_search":[4,8,16]}})";
+    input.constraints = {{vsag::autotune::Metric::RECALL_AT_K, 1.0}};
+    input.objective = vsag::autotune::Metric::LATENCY_AVG_MS;
+    input.config.max_trials = 3;
+    const auto tuned = vsag::autotune::TuneSearch(input);
+    REQUIRE(tuned.has_value());
+    INFO(tuned->report.dump(2));
+    REQUIRE(tuned->report["trials"].size() == 3);
+    for (const auto& trial : tuned->report["trials"]) {
+        REQUIRE(trial["status"] == "success");
+        REQUIRE(trial["metrics"]["recall_at_k"] == expected_recall);
+    }
+    if (first_base == 0) {
+        REQUIRE(tuned->status == vsag::autotune::TuneStatus::SUCCESS);
+        REQUIRE(tuned->metrics["recall_at_k"] == 1.0);
+        REQUIRE_FALSE(tuned->parameters.empty());
+    } else {
+        REQUIRE(tuned->status == vsag::autotune::TuneStatus::NO_FEASIBLE_CANDIDATE);
+        REQUIRE(tuned->parameters.empty());
+        REQUIRE(tuned->metrics.empty());
+        REQUIRE(tuned->report["recommendation"].is_null());
+        REQUIRE(tuned->best_effort["constraint_evaluation"]["satisfied"] == false);
+        const auto& violations = tuned->best_effort["constraint_evaluation"]["violations"];
+        REQUIRE(violations.size() == 1);
+        REQUIRE(violations[0]["metric"] == "recall_at_k");
+        REQUIRE(violations[0]["actual"] == 0.75);
+        REQUIRE(violations[0]["expected"] == 1.0);
+    }
+}
+
 TEST_CASE("AutoTune searches an in-memory existing index") {
     vsag::Options::Instance().logger()->SetLevel(vsag::Logger::kOFF);
     ScopedBlockSizeLimit block_size_limit(256UL * 1024);
