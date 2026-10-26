@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "typing.h"
+#include "vsag/utils.h"
 
 namespace vsag {
 class Allocator;
@@ -55,6 +56,12 @@ public:
     std::vector<std::vector<int64_t>>
     Run(const float* datas, uint64_t count, uint64_t dim, const RPTPartitionParams& params);
 
+    RPTPartitionResult
+    RunWithAllocator(const float* datas,
+                     uint64_t count,
+                     uint64_t dim,
+                     const RPTPartitionParams& params);
+
 private:
     void
     split(uint64_t begin, uint64_t end, uint64_t leaves, uint64_t depth, uint64_t node_seed);
@@ -74,9 +81,8 @@ private:
     emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves);
 
 private:
-    friend class RPTPartitionTestAccess;
-
     const uint64_t dim_{0};
+    Allocator* const allocator_{nullptr};
 
     const float* datas_{nullptr};
     uint64_t max_depth_{0};
@@ -84,7 +90,7 @@ private:
     Vector<InnerIdType> ids_;    // permutation of vector ids, partitioned in place
     Vector<float> projections_;  // projection value of each vector on the current node
     Vector<float> direction_;    // projection direction of the current node
-    std::vector<std::vector<int64_t>> partitions_;
+    RPTPartitionResult partitions_;
 };
 
 }  // namespace vsag

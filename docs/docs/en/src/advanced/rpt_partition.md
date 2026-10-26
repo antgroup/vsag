@@ -39,22 +39,29 @@ Declarations live in
 | `n` | Number of vectors. `n == 0` returns an empty result. |
 | `x` | Row-major array of `n * d` floats. Owned by the caller; neither modified nor retained. |
 | `params.bucket_size` | Target bucket size `L`. Every partition holds at most `L` vectors. Must be positive. |
-| `params.max_depth` | Safety bound on recursion depth. When reached, the remaining vectors are split into chunks of nearly equal size in the current permutation order, preserving the size guarantees. |
-| `params.seed` | Random seed. The same input and seed always yield the same partitions. |
+| `params.max_depth` | Safety bound on recursion depth. When `0`, projection splits are disabled and the input IDs are returned in contiguous, size-balanced chunks; locality is not guaranteed. At a positive depth limit, remaining vectors are split into nearly equal chunks in the current permutation order. |
+| `params.seed` | Random seed. The same input, parameters, and seed always yield the same partitions. Node directions are derived from the seed and node position; use a different seed for an independent partition. |
 
 The result is one `std::vector<int64_t>` per partition, holding the row indices into `x`.
 
+Callers that need the returned partition memory to be tracked by a VSAG allocator can use the
+five-argument overload with an `Allocator*`. It returns `RPTPartitionResult`, whose outer and
+inner vectors use the supplied allocator. The allocator must remain alive until the result is
+destroyed. The four-argument overload above remains available and returns standard-library
+vectors.
+
 ## Size Guarantees
 
-Given `n` vectors and bucket size `L`, let `K = ceil(n / L)`. The output always satisfies:
+For `n > 0`, given `n` vectors and bucket size `L`, let `K = ceil(n / L)`. The output always
+satisfies:
 
 - exactly `K` partitions are produced;
-- every partition holds at most `L` vectors;
-- when `n >= L`, every partition holds at least `floor(L / 2)` vectors, and the largest partition
-  is at most twice the size of the smallest one.
+- every partition holds either `floor(n / K)` or `ceil(n / K)` vectors.
 
-These guarantees hold by construction and do not depend on the data distribution or on the
-seed. Every partition holds either `floor(n / K)` or `ceil(n / K)` vectors.
+The first two guarantees hold by construction and do not depend on the data distribution or on
+the seed. They imply that every partition holds at most `L` vectors. When `n >= L`, they also
+imply that every partition holds at least `floor(L / 2)` vectors and that the largest partition
+is at most twice the size of the smallest one.
 
 ## How It Works
 
@@ -72,7 +79,13 @@ property of the random projection directions and the input data; it does not cla
 guarantees of other RPT variants that use a randomly perturbed projection threshold.
 
 Each node draws its projection direction from a generator seeded by a hash of the user seed and
-the node position, so the output is independent of the traversal order.
+the node position, so the output is independent of the traversal order. Consequently, node
+directions are deterministic for a given seed and tree shape. Changing only the input size or
+bucket size does not provide an independent random partition; use a different seed when an
+independent partition is required.
+
+When `max_depth == 0`, no projection split is performed: the initial ID order is divided into
+contiguous, size-balanced ranges. The size guarantees still hold, but locality is not guaranteed.
 
 Memory overhead beyond the input is one id permutation (`n * 4` bytes), one projection buffer
 (`n * 4` bytes) and one direction vector (`d * 4` bytes). No vector data is copied.

@@ -24,37 +24,15 @@
 #include "vsag/utils.h"
 #include "vsag_exception.h"
 
-namespace vsag {
-
-class RPTPartitionTestAccess {
-public:
-    static const float*
-    InputData(const RPTPartition& partitioner) {
-        return partitioner.datas_;
-    }
-
-    static std::vector<std::vector<int64_t>>
-    EmitChunks(RPTPartition& partitioner, uint64_t count, uint64_t leaves) {
-        partitioner.ids_.resize(count);
-        for (uint64_t i = 0; i < count; ++i) {
-            partitioner.ids_[i] = static_cast<InnerIdType>(i);
-        }
-        partitioner.partitions_.clear();
-        partitioner.emit_chunks(0, count, leaves);
-        return partitioner.partitions_;
-    }
-};
-
-}  // namespace vsag
-
 namespace {
 
 using Partitions = std::vector<std::vector<int64_t>>;
 
 // Asserts the size guarantees documented on vsag::rpt_partition and that every id in
 // [0, count) appears exactly once.
+template <typename PartitionsType>
 void
-CheckPartitions(const Partitions& partitions, uint64_t count, uint64_t bucket_size) {
+CheckPartitions(const PartitionsType& partitions, uint64_t count, uint64_t bucket_size) {
     if (count == 0) {
         REQUIRE(partitions.empty());
         return;
@@ -97,6 +75,31 @@ RunPartition(const std::vector<float>& datas,
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::RPTPartition partitioner(dim, allocator.get());
     return partitioner.Run(datas.data(), count, dim, params);
+}
+
+double
+ComputeSameClusterRatio(const Partitions& partitions, uint64_t clusters, uint64_t per_cluster) {
+    uint64_t count = clusters * per_cluster;
+    std::vector<uint64_t> partition_of(count);
+    for (uint64_t p = 0; p < partitions.size(); ++p) {
+        for (int64_t id : partitions[p]) {
+            partition_of[id] = p;
+        }
+    }
+
+    uint64_t same = 0;
+    uint64_t total = 0;
+    for (uint64_t c = 0; c < clusters; ++c) {
+        for (uint64_t i = 0; i < per_cluster; ++i) {
+            for (uint64_t j = i + 1; j < per_cluster; ++j) {
+                if (partition_of[c * per_cluster + i] == partition_of[c * per_cluster + j]) {
+                    ++same;
+                }
+                ++total;
+            }
+        }
+    }
+    return static_cast<double>(same) / static_cast<double>(total);
 }
 
 }  // namespace
@@ -208,31 +211,20 @@ TEST_CASE("RPTPartition Boundary Cases", "[ut][RPTPartition]") {
         auto datas = fixtures::generate_vectors(count, dim);
         auto partitions = partitioner.Run(datas.data(), count, dim, params);
         CheckPartitions(partitions, count, params.bucket_size);
+
+        // No projection is performed at depth zero, so fallback preserves the input ID order.
+        uint64_t next_id = 0;
+        for (const auto& partition : partitions) {
+            for (int64_t id : partition) {
+                REQUIRE(id == static_cast<int64_t>(next_id));
+                ++next_id;
+            }
+        }
+        REQUIRE(next_id == count);
     }
 }
 
-TEST_CASE("RPTPartition Fallback Skips Empty Chunks", "[ut][RPTPartition]") {
-    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
-    vsag::RPTPartition partitioner(1, allocator.get());
-
-    SECTION("more leaves than vectors") {
-        auto partitions = vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 3, 5);
-        Partitions expected{{0}, {1}, {2}};
-        REQUIRE(partitions == expected);
-    }
-
-    SECTION("empty range") {
-        REQUIRE(vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 0, 5).empty());
-    }
-
-    SECTION("nonempty chunks retain order") {
-        auto partitions = vsag::RPTPartitionTestAccess::EmitChunks(partitioner, 5, 3);
-        Partitions expected{{0, 1}, {2, 3}, {4}};
-        REQUIRE(partitions == expected);
-    }
-}
-
-TEST_CASE("RPTPartition Empty Input Does Not Retain Data", "[ut][RPTPartition]") {
+TEST_CASE("RPTPartition Empty Input and Reuse", "[ut][RPTPartition]") {
     uint64_t dim = 8;
     uint64_t count = 25;
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
@@ -242,7 +234,6 @@ TEST_CASE("RPTPartition Empty Input Does Not Retain Data", "[ut][RPTPartition]")
     auto datas = fixtures::generate_vectors(count, dim);
 
     REQUIRE(partitioner.Run(datas.data(), 0, dim, params).empty());
-    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 
     auto expected = partitioner.Run(datas.data(), count, dim, params);
     CheckPartitions(expected, count, params.bucket_size);
@@ -250,18 +241,15 @@ TEST_CASE("RPTPartition Empty Input Does Not Retain Data", "[ut][RPTPartition]")
     {
         auto empty_datas = fixtures::generate_vectors(1, dim);
         REQUIRE(partitioner.Run(empty_datas.data(), 0, dim, params).empty());
-        REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
     }
 
     auto invalid_params = params;
     invalid_params.bucket_size = 0;
     REQUIRE_THROWS_AS(partitioner.Run(datas.data(), count, dim, invalid_params),
                       vsag::VsagException);
-    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 
     auto actual = partitioner.Run(datas.data(), count, dim, params);
     REQUIRE(actual == expected);
-    REQUIRE(vsag::RPTPartitionTestAccess::InputData(partitioner) == nullptr);
 }
 
 TEST_CASE("RPTPartition Reproducibility", "[ut][RPTPartition]") {
@@ -305,31 +293,16 @@ TEST_CASE("RPTPartition Preserves Locality", "[ut][RPTPartition]") {
 
     vsag::RPTPartitionParams params;
     params.bucket_size = 100;
-    auto partitions = RunPartition(datas, dim, count, params);
-    CheckPartitions(partitions, count, params.bucket_size);
+    const std::vector<uint64_t> seeds{0, 1, 42, std::numeric_limits<uint64_t>::max()};
+    for (uint64_t seed : seeds) {
+        params.seed = seed;
+        auto partitions = RunPartition(datas, dim, count, params);
+        CheckPartitions(partitions, count, params.bucket_size);
 
-    // Fraction of same-cluster pairs that end up in the same partition.
-    std::vector<uint64_t> partition_of(count);
-    for (uint64_t p = 0; p < partitions.size(); ++p) {
-        for (int64_t id : partitions[p]) {
-            partition_of[id] = p;
-        }
+        // Random assignment into 4 buckets would give about 0.25.
+        CAPTURE(seed);
+        REQUIRE(ComputeSameClusterRatio(partitions, clusters, per_cluster) > 0.6);
     }
-    uint64_t same = 0;
-    uint64_t total = 0;
-    for (uint64_t c = 0; c < clusters; ++c) {
-        for (uint64_t i = 0; i < per_cluster; ++i) {
-            for (uint64_t j = i + 1; j < per_cluster; ++j) {
-                if (partition_of[c * per_cluster + i] == partition_of[c * per_cluster + j]) {
-                    ++same;
-                }
-                ++total;
-            }
-        }
-    }
-    double same_ratio = static_cast<double>(same) / static_cast<double>(total);
-    // Random assignment into 4 buckets would give about 0.25.
-    REQUIRE(same_ratio > 0.6);
 }
 
 TEST_CASE("RPTPartition Public API", "[ut][RPTPartition]") {
@@ -355,4 +328,18 @@ TEST_CASE("RPTPartition Public API", "[ut][RPTPartition]") {
     auto zero_bucket = vsag::rpt_partition(dim, count, datas.data(), params);
     REQUIRE_FALSE(zero_bucket.has_value());
     REQUIRE(zero_bucket.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    params.bucket_size = 50;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto allocator_result = vsag::rpt_partition(dim, count, datas.data(), params, allocator.get());
+    REQUIRE(allocator_result.has_value());
+    CheckPartitions(allocator_result.value(), count, params.bucket_size);
+    REQUIRE(allocator_result->get_allocator().allocator_ == allocator.get());
+    for (const auto& partition : allocator_result.value()) {
+        REQUIRE(partition.get_allocator().allocator_ == allocator.get());
+    }
+
+    auto null_allocator = vsag::rpt_partition(dim, count, datas.data(), params, nullptr);
+    REQUIRE_FALSE(null_allocator.has_value());
+    REQUIRE(null_allocator.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }

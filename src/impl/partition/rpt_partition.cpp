@@ -65,7 +65,12 @@ next_uniform(uint64_t& state) {
 }  // namespace
 
 RPTPartition::RPTPartition(uint64_t dim, Allocator* allocator)
-    : dim_(dim), ids_(allocator), projections_(allocator), direction_(allocator) {
+    : dim_(dim),
+      allocator_(allocator),
+      ids_(allocator),
+      projections_(allocator),
+      direction_(allocator),
+      partitions_(AllocatorWrapper<RPTPartitionBucket>(allocator)) {
 }
 
 std::vector<std::vector<int64_t>>
@@ -73,6 +78,20 @@ RPTPartition::Run(const float* datas,
                   uint64_t count,
                   uint64_t dim,
                   const RPTPartitionParams& params) {
+    auto partitions = this->RunWithAllocator(datas, count, dim, params);
+    std::vector<std::vector<int64_t>> result;
+    result.reserve(partitions.size());
+    for (const auto& partition : partitions) {
+        result.emplace_back(partition.begin(), partition.end());
+    }
+    return result;
+}
+
+RPTPartitionResult
+RPTPartition::RunWithAllocator(const float* datas,
+                               uint64_t count,
+                               uint64_t dim,
+                               const RPTPartitionParams& params) {
     if (dim == 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "dim must be positive");
     }
@@ -96,7 +115,7 @@ RPTPartition::Run(const float* datas,
     partitions_.clear();
     if (count == 0) {
         datas_ = nullptr;
-        return {};
+        return std::move(partitions_);
     }
 
     datas_ = datas;
@@ -144,6 +163,7 @@ RPTPartition::split(
     this->generate_direction(node_seed, direction_.data());
     this->project(begin, end, direction_.data());
 
+    // project() refreshed only IDs in [begin, end); projection values for other IDs may be stale.
     // Ties on the projection value are broken by id so that the cut position is always
     // reachable (e.g. for duplicated vectors) and the output is deterministic.
     const float* projections = projections_.data();
@@ -210,7 +230,7 @@ RPTPartition::project(uint64_t begin, uint64_t end, const float* direction) {
 
 void
 RPTPartition::emit_leaf(uint64_t begin, uint64_t end) {
-    std::vector<int64_t> partition;
+    RPTPartitionBucket partition{AllocatorWrapper<int64_t>(allocator_)};
     partition.reserve(end - begin);
     for (uint64_t i = begin; i < end; ++i) {
         partition.push_back(static_cast<int64_t>(ids_[i]));
@@ -224,6 +244,8 @@ RPTPartition::emit_chunks(uint64_t begin, uint64_t end, uint64_t leaves) {
     uint64_t quotient = count / leaves;
     uint64_t remainder = count % leaves;
     uint64_t cursor = begin;
+    // Valid Run calls have leaves <= count because bucket_size must be positive. Keep this
+    // guard so the helper remains safe if it is reused with a larger leaf count in the future.
     for (uint64_t i = 0; i < leaves; ++i) {
         uint64_t chunk = quotient + (i < remainder ? 1 : 0);
         if (chunk > 0) {
@@ -239,6 +261,25 @@ rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& 
         auto allocator = SafeAllocator::FactoryDefaultAllocator();
         RPTPartition partitioner(d, allocator.get());
         return partitioner.Run(x, n, d, params);
+    } catch (const VsagException& e) {
+        return tl::unexpected(e.error_);
+    } catch (const std::exception& e) {
+        return tl::unexpected(Error(ErrorType::INTERNAL_ERROR, e.what()));
+    }
+}
+
+tl::expected<RPTPartitionResult, Error>
+rpt_partition(uint64_t d,
+              uint64_t n,
+              const float* x,
+              const RPTPartitionParams& params,
+              Allocator* allocator) {
+    try {
+        if (allocator == nullptr) {
+            return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT, "allocator must not be null"));
+        }
+        RPTPartition partitioner(d, allocator);
+        return partitioner.RunWithAllocator(x, n, d, params);
     } catch (const VsagException& e) {
         return tl::unexpected(e.error_);
     } catch (const std::exception& e) {

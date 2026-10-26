@@ -15,15 +15,22 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "vsag/allocator.h"
 #include "vsag/bitset.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 
 namespace vsag {
+
+/// One RPT partition whose storage is backed by a VSAG Allocator.
+using RPTPartitionBucket = std::vector<int64_t, AllocatorWrapper<int64_t>>;
+/// RPT partitions whose outer and inner storage are backed by the same VSAG Allocator.
+using RPTPartitionResult = std::vector<RPTPartitionBucket, AllocatorWrapper<RPTPartitionBucket>>;
 
 /**
  * @brief Performs k-means clustering on the given data.
@@ -122,12 +129,16 @@ struct RPTPartitionParams {
     /// Must be positive; zero is rejected with INVALID_ARGUMENT.
     uint64_t bucket_size{1000};
 
-    /// Upper bound on the tree depth. When reached, the remaining vectors are split
-    /// into chunks of nearly equal size in the current permutation order, preserving
-    /// the size guarantees.
+    /// Upper bound on the tree depth. When zero, projection splits are disabled and the input
+    /// IDs are returned in contiguous, size-balanced chunks; locality is not guaranteed. When
+    /// reached at a positive depth, the remaining vectors are split into chunks of nearly equal
+    /// size in the current permutation order, preserving the size guarantees.
     uint64_t max_depth{64};
 
-    /// Random seed. The same input and seed always produce the same partitions.
+    /// Random seed. The same input, parameters, and seed always produce the same partitions.
+    /// Node directions are derived from the seed and node position, so changing only the
+    /// input size or bucket size does not provide an independent random partition; use a
+    /// different seed when an independent partition is required.
     uint64_t seed{0};
 };
 
@@ -137,12 +148,13 @@ struct RPTPartitionParams {
  * The vectors are recursively split along random projection directions. Each node is assigned
  * the number of leaves it must produce, and the cut rank is chosen to divide those target leaves
  * between its children. The cut is generally not the projection median, and no additional
- * random threshold offset is used. Given `n` vectors and a target bucket size `L`, the result
- * satisfies:
- *   - the number of partitions equals `ceil(n / L)`;
- *   - every partition holds at most `L` vectors;
- *   - when `n >= L`, every partition holds at least `floor(L / 2)` vectors, and the
- *     ratio between the largest and the smallest partition never exceeds 2.
+ * random threshold offset is used. Given `n > 0` vectors and a target bucket size `L`, let
+ * `K = ceil(n / L)`. The result satisfies:
+ *   - the number of partitions equals `K`;
+ *   - every partition holds either `floor(n / K)` or `ceil(n / K)` vectors;
+ *   - consequently, every partition holds at most `L` vectors, and when `n >= L`, every
+ *     partition holds at least `floor(L / 2)` vectors and the ratio between the largest and
+ *     smallest partition never exceeds 2.
  *
  * The locality behavior assumes Euclidean geometry. For cosine similarity, L2-normalize
  * the input vectors before calling this function; unit-normalized vectors have equivalent
@@ -159,5 +171,17 @@ struct RPTPartitionParams {
  */
 tl::expected<std::vector<std::vector<int64_t>>, Error>
 rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& params);
+
+/**
+ * @brief Allocator-aware overload of rpt_partition.
+ *
+ * Both the outer result and every partition use the supplied allocator. The allocator must
+ * outlive the returned result.
+ *
+ * @param allocator Allocator used for the returned outer and inner vectors. Must not be null.
+ */
+tl::expected<RPTPartitionResult, Error>
+rpt_partition(
+    uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& params, Allocator* allocator);
 
 }  // namespace vsag

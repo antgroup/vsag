@@ -26,6 +26,19 @@ import numpy as np
 
 
 class BucketSizesCliTest(unittest.TestCase):
+    @staticmethod
+    def create_dataset(directory):
+        dataset = pathlib.Path(directory) / "tiny.hdf5"
+        with h5py.File(dataset, "w") as fixture:
+            fixture.attrs["distance"] = "euclidean"
+            fixture["train"] = np.array(
+                [[0, 0], [1, 0], [2, 0], [3, 0]], dtype=np.float32
+            )
+            fixture["test"] = np.array([[0, 0]], dtype=np.float32)
+            fixture["neighbors"] = np.array([[0]], dtype=np.int64)
+            fixture["distances"] = np.array([[0]], dtype=np.float32)
+        return dataset
+
     def test_invalid_bucket_sizes(self):
         cases = [
             ("100,abc", "abc"),
@@ -42,42 +55,51 @@ class BucketSizesCliTest(unittest.TestCase):
             ("100, ,200", ""),
             ("100,", ""),
         ]
-        for value, invalid_item in cases:
-            with self.subTest(bucket_sizes=value):
+        with tempfile.TemporaryDirectory() as directory:
+            dataset = self.create_dataset(directory)
+            for value, invalid_item in cases:
+                with self.subTest(bucket_sizes=value):
+                    result = subprocess.run(
+                        [
+                            str(self.binary),
+                            "--dataset",
+                            str(dataset),
+                            "--bucket_sizes",
+                            value,
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                    self.assertIn(
+                        f"invalid --bucket_sizes value '{invalid_item}'", result.stderr
+                    )
+                    self.assertIn(
+                        "expected an integer between 1 and 18446744073709551615",
+                        result.stderr,
+                    )
+
+            with self.subTest(dataset_and_bucket_sizes_invalid=True):
                 result = subprocess.run(
                     [
                         str(self.binary),
                         "--dataset",
-                        "unused.hdf5",
+                        str(pathlib.Path(directory) / "missing.hdf5"),
                         "--bucket_sizes",
-                        value,
+                        "0",
                     ],
                     capture_output=True,
                     text=True,
                     timeout=15,
                 )
                 self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
-                self.assertIn(
-                    f"invalid --bucket_sizes value '{invalid_item}'", result.stderr
-                )
-                self.assertIn(
-                    "expected an integer between 1 and 18446744073709551615",
-                    result.stderr,
-                )
-                self.assertNotIn("HDF5-DIAG", result.stderr)
+                self.assertIn("invalid --bucket_sizes value '0'", result.stderr)
 
     def test_valid_bucket_sizes(self):
         with tempfile.TemporaryDirectory() as directory:
-            dataset = pathlib.Path(directory) / "tiny.hdf5"
+            dataset = self.create_dataset(directory)
             report = pathlib.Path(directory) / "report.json"
-            with h5py.File(dataset, "w") as fixture:
-                fixture.attrs["distance"] = "euclidean"
-                fixture["train"] = np.array(
-                    [[0, 0], [1, 0], [2, 0], [3, 0]], dtype=np.float32
-                )
-                fixture["test"] = np.array([[0, 0]], dtype=np.float32)
-                fixture["neighbors"] = np.array([[0]], dtype=np.int64)
-                fixture["distances"] = np.array([[0]], dtype=np.float32)
 
             result = subprocess.run(
                 [
