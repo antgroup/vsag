@@ -127,15 +127,17 @@ TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][Produc
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 32;
     constexpr int64_t pq_dim = 8;
-    constexpr uint64_t codebook_len = dim * 256;
     using QuantizerT = ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+    constexpr uint64_t codebook_len = dim * QuantizerT::CENTROIDS_PER_SUBSPACE;
     QuantizerT original(dim, pq_dim, allocator.get());
     std::stringstream output;
     IOStreamWriter writer(output);
     original.Serialize(writer);
     const auto blob = output.str();
 
-    // The base wrapper writes dim, metric, code size, and training state first.
+    // Offsets intentionally follow the 1.0 Quantizer::Serialize field order:
+    // dim (at offset zero), metric, code size, then training state. Update these
+    // offsets if that layout changes; the blob-size assertion checks its total size.
     constexpr uint64_t geometry_offset =
         sizeof(uint64_t) + sizeof(MetricType) + sizeof(uint64_t) + sizeof(bool);
     REQUIRE(blob.size() == geometry_offset + 3 * sizeof(uint64_t) + codebook_len * sizeof(float));
@@ -168,26 +170,38 @@ TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][Produc
     };
 
     SECTION("pq dimension") {
-        for (int64_t value : {int64_t{0}, int64_t{-1}, pq_dim / 2, pq_dim * 2,
+        for (int64_t value : {int64_t{0},
+                              int64_t{-1},
+                              pq_dim / 2,
+                              pq_dim * 2,
                               std::numeric_limits<int64_t>::max()}) {
             expect_invalid(geometry_offset, value);
         }
     }
     SECTION("subspace dimension") {
-        for (int64_t value : {int64_t{0}, int64_t{-1}, int64_t{2}, int64_t{5},
+        for (int64_t value : {int64_t{0},
+                              int64_t{-1},
+                              int64_t{2},
+                              int64_t{5},
                               std::numeric_limits<int64_t>::max()}) {
             expect_invalid(geometry_offset + sizeof(int64_t), value);
         }
     }
     SECTION("codebook length") {
-        for (uint64_t value : {uint64_t{0}, codebook_len / 2, codebook_len + 1,
-                               uint64_t{1} << 32, std::numeric_limits<uint64_t>::max()}) {
+        for (uint64_t value : {uint64_t{0},
+                               codebook_len / 2,
+                               codebook_len + 1,
+                               uint64_t{1} << 32,
+                               std::numeric_limits<uint64_t>::max()}) {
             expect_invalid(geometry_offset + 2 * sizeof(int64_t), value);
         }
     }
     SECTION("base dimension") {
-        for (uint64_t value : {uint64_t{0}, uint64_t{dim / 2}, uint64_t{dim * 2},
+        for (uint64_t value : {uint64_t{0},
+                               uint64_t{dim / 2},
+                               uint64_t{dim * 2},
                                std::numeric_limits<uint64_t>::max()}) {
+            // dim is the first field in the 1.0 base wrapper (see layout above).
             expect_invalid(0, value);
         }
     }
