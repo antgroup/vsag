@@ -502,6 +502,7 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
     const bool batch = GENERATE(false, true);
     const bool packed = GENERATE(false, true);
     const bool nested_throws = GENERATE(false, true);
+    const uint32_t nested_depth = GENERATE(1, 3);
     Vector<InnerIdType> seeds(allocator.get());
     seeds.push_back(0);
     const std::vector<uint8_t> bitmap(6, 1);
@@ -541,25 +542,38 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
             Vector<InnerIdType> inner_seeds({5}, allocator.get());
             inner_params.seed_inner_ids = &inner_seeds;
             inner_params.valid_bitmap = inner_bitmap.data();
-            inner_params.deleted_ids_filter = nullptr;
-            if (nested_throws) {
-                // Throw from inside the nested traversal, after its scratch was borrowed.
-                class ThrowingFilter : public Filter {
-                public:
-                    [[nodiscard]] bool
-                    CheckValid(int64_t /*id*/) const override {
-                        throw std::runtime_error("nested predicate failed");
+            class NestedFilter : public Filter {
+            public:
+                mutable std::function<void()> on_check;
+                bool
+                CheckValid(int64_t /*id*/) const override {
+                    if (on_check) {
+                        auto callback = std::exchange(on_check, nullptr);
+                        callback();
                     }
-                };
-                inner_params.deleted_ids_filter = std::make_shared<ThrowingFilter>();
-                REQUIRE_THROWS_AS(
-                    searcher.Search(cliques, flatten, &query, search, inner_params, nullptr),
-                    std::runtime_error);
-            } else {
+                    return true;
+                }
+            };
+            auto inner_filter = std::make_shared<NestedFilter>();
+            inner_params.deleted_ids_filter = inner_filter;
+            std::function<void(uint32_t)> run_nested;
+            run_nested = [&](uint32_t levels) {
+                if (levels > 1) {
+                    inner_filter->on_check = [&, levels] { run_nested(levels - 1); };
+                } else if (nested_throws) {
+                    inner_filter->on_check = [] {
+                        throw std::runtime_error("nested predicate failed");
+                    };
+                }
                 auto inner =
                     searcher.Search(cliques, flatten, &query, search, inner_params, nullptr);
                 REQUIRE(inner->Size() == 1);
                 REQUIRE(inner->Top().second == 5);
+            };
+            if (nested_throws) {
+                REQUIRE_THROWS_AS(run_nested(nested_depth), std::runtime_error);
+            } else {
+                run_nested(nested_depth);
             }
             nested = true;
         };

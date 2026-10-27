@@ -551,7 +551,9 @@ Complete-ID preparation uses direct conversion only after validating identity la
 other labels still use the reverse map. Unknown/deleted labels are excluded, duplicates are
 removed, and already sorted input avoids another sort. A worker reuses its temporary buffer
 without sharing it with concurrent or nested queries. Traversal epoch marks and packed member
-buffers also belong to separate scratch slots at each nesting depth. Callback-only filters
+buffers also belong to separate scratch slots at each nesting depth. A worker retains at most
+two scratch objects after the outermost query returns; deeper temporary slots are released
+only after all active views have expired. Callback-only filters
 remember rejected IDs so overlapping cliques evaluate each point's predicate at most once.
 This preparation remains inside query time. A nested public search installs its own
 `search_no_lock` setting (default `false`) and restores the outer policy when it returns.

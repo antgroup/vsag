@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -40,9 +41,11 @@ namespace {
 struct MCIEpochMarks {
     std::vector<uint16_t> marks;
     uint16_t tag{1};
+    uint64_t domain{0};
 
     void
     Reset(uint64_t size) {
+        domain = size;
         if (marks.size() < size) {
             marks.assign(size, 0);
             tag = 1;
@@ -57,14 +60,13 @@ struct MCIEpochMarks {
 
     [[nodiscard]] bool
     Get(InnerIdType id) const {
-        return id < marks.size() and marks[id] == tag;
+        return id < domain and marks[id] == tag;
     }
 
     void
     Set(InnerIdType id) {
-        if (id >= marks.size()) {
-            marks.resize(static_cast<uint64_t>(id) + 1, 0);
-        }
+        // Both node and clique callers validate the logical domain before marking.
+        assert(id < domain);
         marks[id] = tag;
     }
 };
@@ -82,6 +84,11 @@ public:
 
     ~MCISearchScratchLease() {
         --depth;
+        // Reuse the ordinary and one nested slot, but do not pin an arbitrarily deep
+        // callback's full-size marks forever. Reclaim only after all views are gone.
+        if (depth == 0 and cache.size() > 2) {
+            cache.resize(2);
+        }
     }
 
     MCISearchScratchLease(const MCISearchScratchLease&) = delete;
