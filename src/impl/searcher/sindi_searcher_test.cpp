@@ -1063,3 +1063,85 @@ TEST_CASE("SINDI nested queries finish with every supplied pool worker occupied"
         }
     }
 }
+
+TEST_CASE("SINDI inline window workers preserve reduced candidate budgets", "[ut][SindiSearcher]") {
+    const bool reorder = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool custom_pool = GENERATE(false, true);
+    const auto* scheduler = GENERATE("count_deque", "count_atomic", "cost_atomic");
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto deferred = std::make_shared<DeferredPool>();
+    auto nested = std::make_shared<RecoverableDefaultPool>(1);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.thread_pool_ = custom_pool ? std::make_shared<SafeThreadPool>(deferred)
+                                      : std::make_shared<SafeThreadPool>(nested);
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", reorder},
+        {"immutable", immutable},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    std::vector<int64_t> labels(40000);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::vector<float> values(labels.size());
+    std::vector<SparseVector> vectors(labels.size());
+    uint32_t term = 3;
+    for (uint64_t i = 0; i < labels.size(); ++i) {
+        // Interleave the score ranks across all four windows. Each partition's
+        // five candidates suffice to retain its share of the true global top-20.
+        values[i] = static_cast<float>((i % 10000) * 4 + i / 10000);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(labels.size())
+                    ->Ids(labels.data())
+                    ->SparseVectors(vectors.data())
+                    ->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    float query_value = 1;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto options = nlohmann::json{{"sindi",
+                                         {{"n_candidate", 20},
+                                          {"window_parallelism", 4},
+                                          {"worker_n_candidate", 5},
+                                          {"window_scheduler", scheduler}}}}
+                             .dump();
+    for (const bool request_api : {false, true}) {
+        DatasetPtr result;
+        auto search = [&]() {
+            if (request_api) {
+                SearchRequest request;
+                request.query_ = query;
+                request.topk_ = 10;
+                request.params_str_ = options;
+                result = index.SearchWithRequest(request);
+            } else {
+                result = index.KnnSearch(query, 10, options, nullptr);
+            }
+        };
+        auto future = custom_pool ? deferred->Enqueue(search) : nested->RunQuery(search);
+        auto custom_worker = std::async(std::launch::async, [&]() {
+            if (custom_pool) {
+                deferred->RunOne();
+            }
+        });
+        const auto completed = future.wait_for(std::chrono::seconds(5));
+        deferred->WaitUntilEmpty();
+        nested->RecoverQueuedWork();
+        future.get();
+        custom_worker.get();
+        REQUIRE(completed == std::future_status::ready);
+        REQUIRE(result->GetDim() == 10);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(result->GetIds()[i] == (3 - i % 4) * 10000 + 9999 - i / 4);
+            REQUIRE(result->GetDistances()[i] == 1.0F - (39999.0F - static_cast<float>(i)));
+        }
+    }
+}

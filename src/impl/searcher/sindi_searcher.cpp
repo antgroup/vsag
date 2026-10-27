@@ -486,6 +486,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
                              SindiWindowSearchProfile& profile,
                              MaxHeap& heap) {
     const auto count = static_cast<uint32_t>(req.search.parallel_search_thread_count);
+    const bool inline_execution = req.pool == nullptr or req.pool->RequiresInlineExecution();
     const bool deque_mode = options.scheduler == SindiWindowScheduler::COUNT_DEQUE;
     const bool weighted = options.scheduler == SindiWindowScheduler::COST_ATOMIC;
     profile.ran = true;
@@ -587,6 +588,12 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
             return true;
         };
         auto take = [&](uint32_t& window, uint32_t& victim) {
+            if (inline_execution) {
+                // Sequential logical workers must keep their partition budgets separate.
+                // Otherwise worker zero steals every window into one reduced candidate heap.
+                victim = me;
+                return pop(me, window);
+            }
             if (deque_mode) {
                 for (uint32_t offset = 0; offset < count; ++offset) {
                     victim = (me + offset) % count;
