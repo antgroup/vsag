@@ -505,6 +505,39 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
         REQUIRE_FALSE(SearchLockScope::IsNoLock());
     }
 
+    // A continuation can be advanced while another unlocked search is still on the stack.
+    for (bool no_lock : {false, true}) {
+        auto session_params = JsonType::Parse(small_search);
+        session_params["hgraph"]["use_mci"].SetBool(false);
+        session_params["hgraph"]["brute_force_threshold"].SetFloat(0);
+        session_params["hgraph"]["search_no_lock"].SetBool(no_lock);
+        for (bool options_overload : {false, true}) {
+            bool observed_policy = false;
+            auto session_filter = std::make_shared<ValidLabels>();
+            session_filter->ids = inner_filter->ids;
+            session_filter->on_check = [&] {
+                REQUIRE(SearchLockScope::IsNoLock() == no_lock);
+                observed_policy = true;
+            };
+            filter->on_check = [&] {
+                auto opened =
+                    loaded->OpenSearchSession(query, 8, session_params.Dump(), session_filter);
+                REQUIRE(opened.has_value());
+                REQUIRE(SearchLockScope::IsNoLock());
+                auto next = options_overload ? opened.value()->Next(SearchSessionNextOptions{
+                                                   8, session_params.Dump(), session_filter})
+                                             : opened.value()->Next(8);
+                REQUIRE(next.has_value());
+                REQUIRE(observed_policy);
+                REQUIRE(SearchLockScope::IsNoLock());
+            };
+            auto outer = loaded->KnnSearch(query, 32, small_search, filter);
+            REQUIRE(outer.has_value());
+            REQUIRE(observed_policy);
+            REQUIRE_FALSE(SearchLockScope::IsNoLock());
+        }
+    }
+
     // Huge finite coverage targets must be ignored before any float-to-integer cast.
     // Exercise the shared budget helper in both routed and joint traversal, capped and uncapped.
     for (bool hybrid : {false, true}) {

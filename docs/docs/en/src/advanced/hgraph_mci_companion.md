@@ -561,7 +561,8 @@ that the predicate is stable throughout the query. If membership changes mid-que
 need not match either predicate generation. This preparation remains inside query time.
 Nested public synchronous searches first restore default locking at the API boundary;
 HGraph then installs its own `search_no_lock` setting (default `false`). Other backends
-therefore do not inherit an outer HGraph opt-in. Return or exception restores the outer policy.
+therefore do not inherit an outer HGraph opt-in. Each continuation-session `Next` also installs
+its own call's policy. Return or exception restores the outer policy.
 Callbacks remain subject to the outer request's exclusion of mutation and destruction.
 
 For useful activation priorities, build with `"mci_clique_activation_order": true` in
