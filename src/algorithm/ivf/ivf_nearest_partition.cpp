@@ -89,7 +89,9 @@ IVFNearestPartition::IVFNearestPartition(BucketIdType bucket_count,
       use_route_graph_(this->ivf_partition_strategy_param_->use_route_graph),
       common_param_(common_param) {
     if (this->use_route_graph_) {
-        this->factory_router_index(common_param);
+        auto router_common = common_param;
+        router_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+        this->factory_router_index(router_common);
     }
 }
 

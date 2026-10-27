@@ -42,6 +42,8 @@
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -740,7 +742,7 @@ HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
         throw VsagException(ErrorType::INTERNAL_ERROR,
                             fmt::format("failed to get vector by inner id {}", inner_id));
     }
-    codes->Decode(buffer.Data(), data);
+    codes->DecodeToFloat(buffer.Data(), data);
 }
 
 void
@@ -951,15 +953,27 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
             Vector<int8_t> base_data(data_size, allocator_);
-            GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
+            {
+                std::shared_lock<std::shared_mutex> lock;
+                if (this->using_dedup_storage() &&
+                    !this->immutable_.load(std::memory_order_acquire)) {
+                    lock = this->acquire_global_read_lock();
+                }
+                auto codes = has_precise_reorder() ? high_precise_codes_ : basic_flatten_codes_;
+                codes = create_new_raw_vector_ ? raw_vector_ : codes;
+                auto buffer = codes->AcquireCodesById(inner_id);
+                CHECK_ARGUMENT(static_cast<bool>(buffer), "failed to get native vector for update");
+                // Internal distance computers consume native data, not the float32 export.
+                codes->Decode(buffer.Data(), reinterpret_cast<float*>(base_data.data()));
+            }
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -973,9 +987,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

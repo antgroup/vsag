@@ -209,11 +209,31 @@ FloatToBF16(const float fp32_value) {
 
 float
 FP16ToFloat(const uint16_t fp16_value) {
-    uint32_t sign = (fp16_value >> 15) & 0x1;
-    int32_t exp = ((fp16_value >> 10) & 0x1F) - 15;
-    uint32_t mantissa = (fp16_value & 0x3FF) << 13;
+    const uint32_t sign = static_cast<uint32_t>(fp16_value & 0x8000) << 16;
+    uint32_t exp = (fp16_value >> 10) & 0x1F;
+    uint32_t mantissa = fp16_value & 0x3FF;
     FP32Struct fp32;
-    fp32.int_value = (sign << 31) | ((exp + 127) << 23) | mantissa;
+    if (exp == 0) {
+        if (mantissa == 0) {
+            fp32.int_value = sign;
+        } else {
+            // Normalize the half subnormal before rebiasing its exponent.
+            exp = 113;
+            while ((mantissa & 0x400) == 0) {
+                mantissa <<= 1;
+                --exp;
+            }
+            fp32.int_value = sign | (exp << 23) | ((mantissa & 0x3FF) << 13);
+        }
+    } else if (exp == 0x1F) {
+        // Preserve the NaN payload, quieting signaling NaNs like hardware conversion.
+        fp32.int_value = sign | 0x7F800000 | (mantissa << 13);
+        if (mantissa != 0) {
+            fp32.int_value |= 0x00400000;
+        }
+    } else {
+        fp32.int_value = sign | ((exp + 112) << 23) | (mantissa << 13);
+    }
     return fp32.float_value;
 }
 
@@ -221,16 +241,29 @@ uint16_t
 FloatToFP16(const float fp32_value) {
     FP32Struct fp32;
     fp32.float_value = fp32_value;
-    uint16_t sign = (fp32.int_value >> 31) & 0x1;
-    int32_t exp = ((fp32.int_value >> 23) & 0xFF) - 127;
+    const uint16_t sign = (fp32.int_value >> 16) & 0x8000;
+    const uint32_t exp = (fp32.int_value >> 23) & 0xFF;
     uint32_t mantissa = fp32.int_value & 0x007FFFFF;
-
-    if (exp > 15) {
-        exp = 15;
-    } else if (exp < -14) {
-        exp = -14;
+    if (exp == 0xFF) {
+        return sign | 0x7C00 | (mantissa == 0 ? 0 : ((mantissa >> 13) | 0x0200));
     }
-    return (sign << 15) | ((exp + 15) << 10) | (mantissa >> 13);
+    if (exp > 142) {
+        return sign | 0x7C00;
+    }
+    if (exp < 102) {
+        return sign;
+    }
+    if (exp < 113) {
+        // Include the implicit leading bit and round subnormals to nearest-even.
+        mantissa |= 0x00800000;
+        const uint32_t shift = 126 - exp;
+        const uint32_t halfway = 1U << (shift - 1);
+        const uint32_t rounded = (mantissa + halfway - 1 + ((mantissa >> shift) & 1)) >> shift;
+        return sign | rounded;
+    }
+    // A mantissa carry naturally advances the exponent (including to infinity).
+    const uint32_t rounded = (mantissa + 0xFFF + ((mantissa >> 13) & 1)) >> 13;
+    return sign | (((exp - 112) << 10) + rounded);
 }
 
 float

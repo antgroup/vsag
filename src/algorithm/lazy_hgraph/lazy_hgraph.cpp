@@ -26,6 +26,8 @@
 #include "impl/graph_build_helper.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/constants.h"
@@ -106,8 +108,6 @@ make_wrapper_common_param(IndexCommonParam common_param) {
 ParamPtr
 LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
-    CHECK_ARGUMENT(common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT,
-                   "lazy_hgraph only supports float32 vectors");
     reject_flat_param(external_param, INDEX_BRUTE_FORCE);
     reject_flat_param(external_param, "bruteforce");
     reject_flat_param(external_param, "flat");
@@ -231,6 +231,27 @@ LazyHGraph::TransitionToGraph() {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }
 
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        const auto* exported = build_data->GetFloat32Vectors();
+        CHECK_ARGUMENT(exported != nullptr, "lazy_hgraph transition requires exported vectors");
+        const auto count = static_cast<uint64_t>(valid_count);
+        const bool valid_vector_size = dim_ > 0 && count <= std::numeric_limits<uint64_t>::max() /
+                                                                sizeof(uint16_t) /
+                                                                static_cast<uint64_t>(dim_);
+        CHECK_ARGUMENT(valid_vector_size, "lazy_hgraph transition vector size is too large");
+        const auto value_count = count * static_cast<uint64_t>(dim_);
+        auto* native_data =
+            static_cast<uint16_t*>(this->allocator_->Allocate(value_count * sizeof(uint16_t)));
+        // GetDataByIds owns its buffers with this allocator. Keep the metadata and
+        // attach native storage to the same Dataset for the entire synchronous build.
+        build_data->Float16Vectors(native_data);
+        for (uint64_t i = 0; i < value_count; ++i) {
+            native_data[i] = data_type_ == DataTypes::DATA_TYPE_FP16
+                                 ? generic::FloatToFP16(exported[i])
+                                 : generic::FloatToBF16(exported[i]);
+        }
+    }
+
     auto new_graph = GraphBuildHelper::BuildIndexCandidate(
         [&] { return std::make_shared<HGraph>(graph_param_, this->common_param_); },
         build_data,
@@ -261,6 +282,14 @@ LazyHGraph::RangeSearch(const DatasetPtr& query,
 
 float
 LazyHGraph::CalcDistanceById(const float* query,
+                             int64_t id,
+                             bool calculate_precise_distance) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalcDistanceById(query, id, calculate_precise_distance);
+}
+
+float
+LazyHGraph::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
     std::shared_lock lock(this->phase_mutex_);

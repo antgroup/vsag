@@ -17,6 +17,8 @@
 
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_all.hpp>
+#include <cmath>
+#include <limits>
 
 #include "simd_status.h"
 #include "unittest.h"
@@ -44,6 +46,75 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
         uint16_t fp16 = generic::FloatToFP16(item);
         float decode_fp32 = generic::FP16ToFloat(fp16);
         REQUIRE(std::abs(decode_fp32 - item) < 1);
+    }
+}
+
+TEST_CASE("FP16 IEEE conversion boundaries", "[ut][simd]") {
+    const std::vector<std::pair<uint16_t, float>> cases = {
+        {0x0000, 0.0F},
+        {0x8000, -0.0F},
+        {0x0001, std::ldexp(1.0F, -24)},
+        {0x8001, -std::ldexp(1.0F, -24)},
+        {0x03FF, std::ldexp(1023.0F, -24)},
+        {0x83FF, -std::ldexp(1023.0F, -24)},
+        {0x0400, std::ldexp(1.0F, -14)},
+        {0x8400, -std::ldexp(1.0F, -14)},
+        {0x7BFF, 65504.0F},
+        {0xFBFF, -65504.0F},
+        {0x7C00, std::numeric_limits<float>::infinity()},
+        {0xFC00, -std::numeric_limits<float>::infinity()},
+    };
+    for (const auto& [bits, value] : cases) {
+        CAPTURE(bits);
+        const float decoded = generic::FP16ToFloat(bits);
+        REQUIRE(decoded == value);
+        REQUIRE(std::signbit(decoded) == std::signbit(value));
+        REQUIRE(generic::FloatToFP16(value) == bits);
+    }
+    for (uint16_t bits : {0x7C01, 0x7E00, 0x7FFF, 0xFC01, 0xFE00, 0xFFFF}) {
+        CAPTURE(bits);
+        const float decoded = generic::FP16ToFloat(bits);
+        REQUIRE(std::isnan(decoded));
+        REQUIRE(std::signbit(decoded) == ((bits & 0x8000) != 0));
+        REQUIRE(generic::FloatToFP16(decoded) == (bits | 0x0200));
+    }
+    REQUIRE((generic::FloatToFP16(std::numeric_limits<float>::quiet_NaN()) & 0x7FFF) > 0x7C00);
+}
+
+TEST_CASE("FP16 conversion rounds to nearest even", "[ut][simd]") {
+    REQUIRE(generic::FloatToFP16(std::ldexp(1.0F, -25)) == 0x0000);
+    REQUIRE(generic::FloatToFP16(-std::ldexp(1.0F, -25)) == 0x8000);
+    REQUIRE(generic::FloatToFP16(std::nextafter(std::ldexp(1.0F, -25), 1.0F)) == 0x0001);
+    REQUIRE(generic::FloatToFP16(std::ldexp(3.0F, -25)) == 0x0002);
+    REQUIRE(generic::FloatToFP16(std::ldexp(2047.0F, -25)) == 0x0400);
+    REQUIRE(generic::FloatToFP16(1.0F + std::ldexp(1.0F, -11)) == 0x3C00);
+    REQUIRE(generic::FloatToFP16(1.0F + std::ldexp(3.0F, -11)) == 0x3C02);
+    REQUIRE(generic::FloatToFP16(65519.0F) == 0x7BFF);
+    REQUIRE(generic::FloatToFP16(65520.0F) == 0x7C00);
+    REQUIRE(generic::FloatToFP16(-65520.0F) == 0xFC00);
+    REQUIRE(generic::FloatToFP16(std::numeric_limits<float>::max()) == 0x7C00);
+    REQUIRE(generic::FloatToFP16(std::numeric_limits<float>::denorm_min()) == 0x0000);
+    REQUIRE(generic::FloatToFP16(-std::numeric_limits<float>::denorm_min()) == 0x8000);
+}
+
+TEST_CASE("FP16 finite bit patterns roundtrip", "[ut][simd]") {
+    for (uint32_t bits = 0; bits <= 0xFFFF; ++bits) {
+        if ((bits & 0x7C00) == 0x7C00) {
+            continue;
+        }
+        CAPTURE(bits);
+        const uint32_t exponent = (bits >> 10) & 0x1F;
+        const uint32_t mantissa = bits & 0x3FF;
+        float expected = exponent == 0 ? std::ldexp(static_cast<float>(mantissa), -24)
+                                       : std::ldexp(static_cast<float>(1024 + mantissa),
+                                                    static_cast<int>(exponent) - 25);
+        if ((bits & 0x8000) != 0) {
+            expected = -expected;
+        }
+        const float decoded = generic::FP16ToFloat(static_cast<uint16_t>(bits));
+        REQUIRE(decoded == expected);
+        REQUIRE(std::signbit(decoded) == std::signbit(expected));
+        REQUIRE(generic::FloatToFP16(decoded) == bits);
     }
 }
 
@@ -90,6 +161,23 @@ TEST_CASE("FP16 SIMD Compute", "[ut][simd]") {
         TEST_ACCURACY(FP16ComputeIP);
         TEST_ACCURACY(FP16ComputeL2Sqr);
     }
+}
+
+TEST_CASE("FP16 SIMD conversion boundaries", "[ut][simd]") {
+    const int64_t dim = GENERATE(1, 7, 8, 15, 16, 17, 32);
+    const uint16_t boundary_bits[] = {
+        0x0000, 0x8000, 0x0001, 0x8001, 0x03FF, 0x83FF, 0x0400, 0x8400};
+    std::vector<uint8_t> vec1(dim * 2);
+    std::vector<uint8_t> vec2(dim * 2);
+    auto* query = reinterpret_cast<uint16_t*>(vec1.data());
+    auto* codes = reinterpret_cast<uint16_t*>(vec2.data());
+    for (int64_t j = 0; j < dim; ++j) {
+        query[j] = boundary_bits[j % 8];
+        codes[j] = 0x3C00;  // Exactly 1.0, keeping subnormal contributions observable.
+    }
+    const int64_t i = 0;
+    TEST_ACCURACY(FP16ComputeIP);
+    TEST_ACCURACY(FP16ComputeL2Sqr);
 }
 
 #define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                         \

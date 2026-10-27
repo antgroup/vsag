@@ -1227,6 +1227,78 @@ TEST_CASE("(PR) BruteForce RangeSearch After MarkRemove",
     }
 }
 
+TEST_CASE("(PR) BruteForce Force Remove Cross Block Allocation Failure",
+          "[ft][remove][memory][bruteforce][pr]") {
+    constexpr int64_t dim = 3;
+    constexpr uint64_t block_size = 256 * 1024;
+    constexpr int64_t count = block_size / (dim * sizeof(float)) + 1;
+    BlockSizeLimitGuard block_size_guard(block_size);
+    // The final 12-byte record starts at byte 262140 and straddles the block boundary.
+    // FixedLayout::Move must allocate a contiguous lease before overwriting slot zero.
+    static_assert(((count - 1) * dim * sizeof(float)) % block_size + dim * sizeof(float) >
+                  block_size);
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>(i * dim + j);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", dim, "fp32");
+    auto allocator = std::make_shared<TrackingAllocator>();
+    auto index_result =
+        vsag::Factory::CreateIndex(fixtures::BruteForceTestIndex::name, param, allocator.get());
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+    REQUIRE(index->Build(base).has_value());
+    auto allocated_bytes = allocator->AllocatedBytes();
+    allocator->SetAllocationLimit(allocated_bytes);
+    auto oom_remove = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(not oom_remove.has_value());
+    REQUIRE(oom_remove.error().type == vsag::ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(index->GetNumElements() == count);
+    REQUIRE(index->GetNumberRemoved() == 0);
+    REQUIRE(index->CheckIdExist(ids.front()));
+    REQUIRE(index->CheckIdExist(ids.back()));
+    REQUIRE(allocator->AllocatedBytes() == allocated_bytes);
+    allocator->SetAllocationLimit(std::numeric_limits<uint64_t>::max());
+
+    // Both original records, reverse mappings and search results survive the failed move.
+    for (auto id : {ids.front(), ids.back()}) {
+        auto data = index->GetDataByIds(&id, 1);
+        REQUIRE(data.has_value());
+        REQUIRE(data.value()->GetIds()[0] == id);
+        REQUIRE(memcmp(data.value()->GetFloat32Vectors(),
+                       vectors.data() + id * dim,
+                       dim * sizeof(float)) == 0);
+        auto query = vsag::Dataset::Make();
+        query->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data() + id * dim)->Owner(false);
+        auto result = index->KnnSearch(query, 1, "");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetIds()[0] == id);
+    }
+    auto retry = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(retry.has_value());
+    REQUIRE(retry.value() == 1);
+    REQUIRE(index->GetNumElements() == count - 1);
+    REQUIRE(not index->CheckIdExist(ids.front()));
+    auto tail_id = ids.back();
+    auto tail = index->GetDataByIds(&tail_id, 1);
+    REQUIRE(tail.has_value());
+    REQUIRE(tail.value()->GetIds()[0] == tail_id);
+    REQUIRE(memcmp(tail.value()->GetFloat32Vectors(),
+                   vectors.data() + tail_id * dim,
+                   dim * sizeof(float)) == 0);
+}
+
 TEST_CASE("(PR) BruteForce Force Remove Reclaims Storage",
           "[ft][remove][memory][bruteforce][concurrent][pr]") {
     constexpr int64_t dim = 4;
@@ -1258,14 +1330,20 @@ TEST_CASE("(PR) BruteForce Force Remove Reclaims Storage",
     auto allocated_bytes_before_remove = allocator->AllocatedBytes();
     auto memory_before_remove = index->GetMemoryUsage();
 
+    // The tail record fits in one block: encoded Move borrows its bytes and needs no
+    // temporary allocation, unlike the old decode/re-encode path.
+    auto allocations_before_remove = allocator->AllocationCount();
     allocator->SetAllocationLimit(allocator->AllocatedBytes());
-    auto oom_remove = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
-    REQUIRE(not oom_remove.has_value());
-    REQUIRE(index->GetNumElements() == count);
-    REQUIRE(index->CheckIdExist(ids.front()));
+    auto allocation_free_remove = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(allocation_free_remove.has_value());
+    REQUIRE(allocation_free_remove.value() == 1);
+    REQUIRE(index->GetNumElements() == count - 1);
+    REQUIRE(not index->CheckIdExist(ids.front()));
+    REQUIRE(index->CheckIdExist(ids.back()));
+    REQUIRE(allocator->AllocationCount() == allocations_before_remove);
     allocator->SetAllocationLimit(std::numeric_limits<uint64_t>::max());
 
-    std::vector<int64_t> initial_removed(ids.begin(), ids.begin() + count / 2);
+    std::vector<int64_t> initial_removed(ids.begin() + 1, ids.begin() + count / 2);
     auto remove_result = index->Remove(initial_removed, vsag::RemoveMode::FORCE_REMOVE);
     REQUIRE(remove_result.has_value());
     REQUIRE(remove_result.value() == initial_removed.size());

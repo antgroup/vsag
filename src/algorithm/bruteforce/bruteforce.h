@@ -222,7 +222,7 @@ private:
     shrink_to_fit();
 
     void
-    add_one(const float* data, InnerIdType inner_id);
+    add_one(const void* data, InnerIdType inner_id);
 
     /**
      * @brief Recalculate and cache the memory-usage counter.
@@ -246,6 +246,9 @@ private:
      */
     ComputerInterfacePtr
     make_search_computer(const DatasetPtr& query) const;
+
+    float
+    calc_native_distance_by_id(const void* vector, int64_t id) const;
 
 private:
     FlattenInterfacePtr inner_codes_{nullptr};  // quantized or raw vector storage

@@ -82,6 +82,11 @@ public:
     }
 
     bool
+    DecodeToFloat(const uint8_t* codes, float* data) override {
+        return this->quantizer_->DecodeOneToFloat(codes, data);
+    }
+
+    bool
     Encode(const float* data, uint8_t* codes) override {
         return this->quantizer_->EncodeOne(data, codes);
     }
