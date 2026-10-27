@@ -108,6 +108,7 @@ ground truth 和其他配置，每次只调整一项，同时比较查询质量�
       "ef_search": 120,
       "use_mci": true,
       "mci_seed_ratio": 0.1,
+      "search_no_lock": false,
       "hgraph_valid_ratio_threshold": 0.2
     }
 }
@@ -133,6 +134,17 @@ seed 数量提高到 `ceil(mci_seed_coverage * 合法点数)`；否则覆盖项�
 上限，代价是更长的播种阶段。默认值 `32768` 让枚举本身在绝对量级上仍然便宜——
 32768 个 inner id 是 128 KiB，可以留在 cache 里——所以饱和跳过依然划算，而不会把
 宽谓词变成接近全扫描规模的播种阶段。
+`search_no_lock` 是布尔查询参数，默认 `false`，替代 `mci_seed_no_lock`（旧名称会报错）。
+开启后，HGraph 和 MCI 搜索中的路由、标签/删除集合、向量、clique 和结果处理等读锁
+使用空锁。访问表池改用独立的原子借还链表，不会无保护地读写原来的共享队列。
+搜索算法、过滤和不存在/已删除 ID 的处理语义保持不变。
+
+此选项仅用于只读内存索引：查询期间不能并发构建、添加、删除、更新向量/标签、调优、
+扩容或反序列化。支持多个独立查询并发，也支持带锁与无锁查询混合并发。
+`hgraph.parallelism` 必须为 1，因为单查询内部的工作线程池需要同步；
+可用多个线程分别执行独立查询。该参数不关闭分配器、操作系统、外部过滤器或磁盘缓存内部的同步。
+锁策略只在本次调用内生效，正常返回或抛出异常后恢复，不修改索引共享的锁对象。
+查询统计字段为 `search_no_lock`。已有索引可直接复用，无须重建或重新保存。
 
 MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤器也可以
 使用，但自定义 `Filter` 能给搜索规划提供更准确的选择率信息。
@@ -484,3 +496,120 @@ build/tests/unittests '[mci],[LabelTable],RaBitQSplitDataCell serialize and meth
 其中两个集成测试当时使用 Debug 基准程序作正确性验证。未完成全量 lint、全量测试和 90% 覆盖率验证。
 review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数据集加载复测、ABI、序列化兼容
 及更全面的并发修改仍需独立验证；不能把定向测试当作生产就绪证明。
+
+### 静态 MCI 团遍历的 bitmap 预取
+
+存在不可变、按 inner-id 索引的合法性 bitmap 时，静态 MCI 以 32 个成员为一块读取团成员，并预取前方最多 96 个位置的成员对应的 bitmap 缓存行。局部合法性掩码按原始顺序选出成员，随后沿用既有 epoch 节点判重和距离计算，减少每个不合法成员上的依赖分支。此过程不预处理完整合法点集合，不改变种子、团成员或搜索顺序。没有可直接读取的 bitmap 时，继续使用原始访问路径。
+
+开发对照使用环境参数：`VSAG_MCI_MEMBER_MODE`（0 原始逐点访问、1 滚动预取、2 分块预取、3 分块合法性掩码、4 掩码加预取，默认 4），`VSAG_MCI_MEMBER_DISTANCE`（默认 96，上限 256）、`VSAG_MCI_MEMBER_BLOCK`（默认 32，上限 64）和 `VSAG_MCI_MEMBER_LOCALITY`（GCC 预取局部性提示，默认 1）。参数在每条查询开始读取一次，应在并发检索前设置，查询运行时不修改进程环境。这些参数不改变索引序列化格式，无需重建索引。
+
+### 查询临时合法团 CSR
+
+静态索引的 MCI 分流路径支持实验搜索参数 `hgraph.mci_filtered_cliques=true`（默认 false），要求 `search_no_lock=true`。过滤器提供完整合法 ID 列表时，查询先映射、排序并去重合法内部 ID，再枚举其点到团关联，通过计数、前缀和及填充建立紧凑合法团成员表。每个线程复用连续成员池、紧凑团元数据及 epoch 索引，没有逐团堆分配，也不逐查询清空全部团状态。仅包含一个合法点的团不保存成员。
+
+临时表构造和 ID 准备均包含在查询时间内；搜索直接访问合法成员，跳过 bitmap 和过滤器回调，保留点及团的访问判重。成员按内部 ID 递增排列，可能改变原始团成员遍历顺序，因此有限搜索宽度下的返回结果可能变化。完整种子覆盖时跳过构造。没有完整合法 ID 列表或列表无法完整映射时，保留原访问路径。此功能只构造查询私有视图，不修改已保存索引，也不为过滤图新增连接。
+
+查询统计包含 `mci_filtered_cliques_requested`、`mci_filtered_cliques_used`、`mci_filtered_id_prepare_ms`、`mci_filtered_clique_build_ms`、`mci_filtered_incidences`、`mci_filtered_nonempty_cliques`、`mci_filtered_kept_cliques`、`mci_filtered_members` 和 `mci_filtered_capacity_bytes`。`mci_member_checks` 记录实际扫描的合法成员槽，`mci_filtered_source_member_checks` 记录所访问原团对应的原始成员槽数。
+
+### 动态候选团扫描
+
+MCI 分流路径新增实验参数 `hgraph.mci_dynamic_clique_scan=true`，默认 false。要求 `search_no_lock=true`、不可变的基准 CSR、可完整映射的 `GetValidIds` 合法点列表，以及 `mci_filtered_cliques=false`。复用已保存索引；合法 ID 不完整时明确拒绝，不静默切换算法。
+
+计算所有采样种子的距离，以其中最近的 `max(k, mci_ef_search)` 个点初始化候选最大堆及其团并集 X。线程私有、可复用的 epoch 数组记录各团被当前候选覆盖的次数。按内部 ID 递增扫描剩余合法点，检查其点到团 CSR；任一团计数为正时，该点只计算一次距离，并立即更新候选堆及 top-k 结果堆。用 B 替换 A 时，A 所属团计数减一，B 所属团计数加一。检查下一个合法点前提交完整更新；实现先加 B 再减 A，避免公共团短暂归零引起无效激活。候选距离相等时优先较小的内部 ID。
+
+团计数从零变为正数时，安排下一轮检查尚未计算距离的合法点，包括本轮扫描位置之前的点。完整一轮没有新激活团后停止，此时最终 X 不再覆盖任何尚未评分的合法点。这仍是依赖扫描顺序和有限 ef 的近似搜索。种子覆盖全部合法点时跳过团并集构造及后续扫描。此路径不物化全部合法团成员，不扫描原团成员槽，也不逐查询清空全部状态。
+
+动态替换可能沿多层传播，因此不再严格限定两跳。此模式拒绝 `mci_hops_limit`，统计中的 `mci_hops_limit=0` 表示不适用深度限制，扫描轮数不表示图跳数。原团遍历路径可用正 uint32 参数 `hgraph.mci_hops_limit`（默认 3）进行对照。原遍历的 idle 和 lower-bound 提前停止选项不控制动态扫描。
+
+统计包括 `mci_dynamic_clique_scan_used`、`mci_dynamic_selected_seeds`、`mci_dynamic_scored_points`、`mci_dynamic_scan_passes`、`mci_dynamic_point_checks`、`mci_dynamic_clique_checks`、`mci_dynamic_count_updates`、`mci_dynamic_activations`、`mci_dynamic_replacements`、`mci_dynamic_active_cliques`，以及 `mci_dynamic_` 前缀的合法 ID 准备、初始团并集和扫描耗时。`mci_member_checks=0` 表示没有检查原团成员槽，点到团检查另行计数。所有准备工作均包含在原生查询时间内。
+
+### 有序单遍与双遍团扫描
+
+设置 `mci_dynamic_clique_scan=true` 后，参数 `hgraph.mci_clique_scan_passes=1` 或 `2` 启用最多一遍或两遍的有序扫描；省略时保留原来的收敛扫描。要求不可变点到团 CSR 每行团 ID 严格递增，旧索引若不满足此前提则不支持此实验模式。本次使用的去重 Cohere10M 索引已全量核验全部点及归属。索引序列化格式不变。
+
+每个线程复用合法点元数据：内部 ID、CSR 起止位置、最小及最大团 ID。序列1按完整团 ID 行的字典序排列，完全相同行按内部 ID 打破平局；序列2按最大团 ID 排列序列1的位置。最小、最大主键使用稳定基数排序，仅最小团 ID 相同的小组需要比较剩余字典序。序列2的后缀最小位置表可直接找到序列1中最大团 ID 能达到下界的最早位置。每32个连续点还保存块内最大团 ID。
+
+当前候选团并集 X 维护准确引用计数和带 epoch 的层次位图，缓存 X 的最小、最大团 ID，提供紧凑成员判断和后继查找，不逐查询清空全部位图。候选替换完整提交后才判断下一个点。点的团 ID 区间与 X 不相交时跳过，整块不相交时跳过32点；序列1最小团 ID 超过当前 X 上界时终止。通过活跃团后继跳过点的无效团前缀，团 ID 超过活跃上界时停止行内判断。查询中预取后方点的不可变 CSR。
+
+第二遍同时使用第一遍中新激活团的 ID 范围和当前 X 边界，通过序列2跳到安全起点。初始终点设为第一遍最后一次激活的位置之前，因为此后覆盖只可能缩小；第二遍若产生新激活，则扩大激活范围并恢复完整可扫描后缀。每点最多评分一次。遍数有上限，因此不同于原收敛模式，不保证最终 X 已不再覆盖未评分点；扫描轮数和排序均不表示图跳数。
+
+实验开关 `hgraph.mci_clique_scan_gallop` 默认 false，true 时在行内反复使用后继与二分跳跃，要求启用有界扫描；false 在初次前缀跳过后顺序检查紧凑位图。同一 ef 和遍数下，两种实现返回结果相同。排序、位图维护和检索均包含在原生查询计时内。`mci_bounded_` 统计记录遍数上限、相交实现、排序耗时、范围及空隙拒绝、前缀/块/尾部跳过、第二遍起点及初始终点、二分比较次数、初始及最终 X 边界。排序耗时同时包含在 `mci_dynamic_scan_ms` 内。
+
+### 分流 MCI 分支的导航
+
+非迭代 KNN 路径在遍历 HGraph 导航层之前，先尝试以过滤集合提供的种子执行 MCI。成功接管请求的 MCI 分支不使用 HGraph 入口点，导航层距离次数为零。MCI 不可用或不能接管请求时，仍执行普通 HGraph 的入口点导航。该优化不改变索引格式或 MCI 种子预算。
+
+### 多团扫描候选使用 HGraph 邻域
+
+实验查询参数 `hgraph.mci_hub_clique_threshold` 默认为 0（关闭）。正数阈值启用按点分流：团归属数量大于等于阈值的候选点仍可进入候选堆和结果堆，但不激活自己的全部团，改用已有底层 HGraph 邻居作为该点的扩展邻域。普通候选点仍精确维护其团并集引用计数。索引中的完整团归属保持不变，因此其他候选仍可通过公共团发现多团点。
+
+`hgraph.mci_hub_hgraph_hops` 默认 1，仅接受 1 或 2。一跳对尚未评分的合法邻居计算距离；两跳另外访问一跳非法邻居的邻接表，桥接点本身不评分、不进入任何堆。新接受的合法多团候选进入待处理队列，处理时已经出堆的点跳过。图扩展和距离计算均通过 query epoch 标记判重。
+
+要求旧分流选择动态扫描 MCI、`search_no_lock=true`、不可变 CSR 和已有底层 HGraph。支持原收敛扫描与有序一遍/两遍扫描。不另起一次全局 HGraph 检索，`hgraph_ef_search` 不限制这种局部替代邻域。该操作属于近似邻域替换，不保证召回不变。种子覆盖全部合法点时仍跳过全部团和图扩展。索引格式及序列化保持不变。
+
+`mci_hub_` 统计包含阈值、跳数、接受的多团候选数、未激活归属数、实际扩展多团点数、非法桥接扩展数、邻居检查数和新评分邻居数。最后一项已经包含在总距离次数中，不应再加一次。所有相关工作均计入原生查询时间。
+
+### 全局 MCI 相关性路由
+
+实验 API 位于 include/vsag/global_mci_hybrid.h，复用一个现有 FP32/L2 HGraph 及其静态全局 MCI。先调用 GlobalMCIHybrid::Create(index)，再调用其 KnnSearch。不使用分区索引、聚类中心或负载的相关性标签。router 存活期间索引必须不可变。仅支持 search_no_lock=true、查询内部 parallelism=1；可并发执行独立查询。
+
+先按保留率分流：保留比例大于等于 hgraph_valid_ratio_threshold（默认 0.05）时直接执行过滤 HGraph。显式设置 correlation_method="clique_probe" 的其余查询先执行完整未过滤 HGraph 搜索，包括底图，使用 correlation_navigation_ef（默认 80）得到近似 top-10 锚点。满足过滤条件的锚点优先加入 MCI 种子，仍受 mci_seed_max_count 约束。
+
+预测只检查这些锚点覆盖的全局 MCI 团。按锚点轮流取至多 correlation_max_cliques（256）个不同团，再在这些团内分散检查至多 correlation_member_budget（8192）个成员槽。线程私有 epoch 标记对重复向量去重。局部合法点密度除以全局保留比例得到富集度。它是局部产出的启发式指标，并非整个重叠团并集的无偏估计。
+
+富集度不高于 correlation_negative_ratio（0.5），且独立假设下样本中的期望合法点数达到 correlation_min_expected（1），则判断负相关，精确扫描全部合法点。富集度不低于 correlation_positive_ratio（2）且至少命中一个合法点，则判断正相关。其余情况继续全局 MCI；样本不足或为空不会强制扫描。导航与预测均不读取 ground truth。correlation_routing=false 提供原保留率分流；correlation_probe_only=true 保留导航、预测和种子注入，但不切换扫描。
+
+查询参数示例（直接传入，或包在 global_mci_hybrid 下）：
+
+    {
+      "correlation_method": "clique_probe",
+      "hgraph_valid_ratio_threshold": 0.05,
+      "ef_search": 40,
+      "mci_ef_search": 40,
+      "hgraph_ef_search": 80,
+      "mci_seed_ratio": 0.1,
+      "mci_seed_coverage": 0,
+      "mci_seed_max_count": 10000,
+      "mci_hops_limit": 3,
+      "search_no_lock": true,
+      "parallelism": 1,
+      "correlation_navigation_ef": 80,
+      "correlation_max_cliques": 256,
+      "correlation_member_budget": 8192
+    }
+
+过滤器应通过 GetValidIds 提供完整合法集合；不能枚举时扫描分支逐一检查索引标签。导航、团采样、ID 转换、扫描准备和最终检索全部位于查询 API 内，必须计入端到端时延。结果统计 global_mci_hybrid 包含实际分支、预测结果、样本计数、合法导航种子数、导航及检索距离次数和各阶段耗时。router 不重建、不重排、不剪枝索引，也不修改序列化格式。
+
+### 两组距离采样的相关性预测
+
+GlobalMCIHybrid 的 MCI 分支默认使用 correlation_method="distance_samples"。全部相关性参数均有默认值，平时通过 wrapper 检索时可以省略。此预测不执行 HGraph 导航，也不读取团成员关系；外层保留率分流仍先执行。复用保存好的索引，不改变序列化。
+
+从全集不放回均匀采样 correlation_global_samples（512）个内部 ID，从完整 GetValidIds 列表不放回均匀采样 correlation_valid_samples（256）个位置。correlation_sample_seed（42）固定全集样本；合法样本另外混合 query 向量的位模式，保证相同 query/filter 可复现。提供方的 ID 顺序必须稳定，列表必须完整且无重复。采样、映射和距离计算全部计入查询时间；全集采样与谓词无关。
+
+以全集距离的 correlation_radius_quantile（0.1）分位数确定半径，合法样本落入半径的比例除以全集样本对应比例，得到富集度。距离相等时采用实际的闭区间全集比例。使用 correlation_confidence_z（1.96）的近似 Wilson 区间构造富集度区间：上界不高于 correlation_negative_ratio（0.5）则转扫描，下界不低于 correlation_positive_ratio（2）则判断正相关，其余中性。这是不确定性启发式，不是自适应分位数下的严格联合置信保证，也不能保证代表更小的真实 top-k 邻域。
+
+全部合法样本使用已经算好的准确距离作为 MCI 种子，替换普通 seed_ratio 采样列表；数量必须满足 mci_seed_max_count，0 表示不限。内部桥接使用 mci_seed_replace、mci_seed_ids 及对齐且有限的 mci_seed_distances。缓存种子以 hops=1 进入候选队列和结果队列，不再计算距离；转扫描时也复用这些距离。全集样本与合法样本重叠的点仅计算一次。索引向量和图结构保持不可变。
+
+correlation_method="sample_seeds" 是对照：使用相同合法样本和距离复用，不采样全集、不预测、不切换扫描。显式设置 correlation_method="clique_probe" 可使用原 HGraph top-10 预测。统计区分 sample_distances、reused_sample_distances、search_distances、total_distances，复用次数不计作新的距离计算。采样、映射、参数序列化、预测和正式检索全部计时。
+
+
+### 静态路由的兼容性和采样预算
+
+普通 HGraph/MCI API 保留上游的 live/delta 遍历。仅设置 `search_no_lock=true` 不会选择实验静态算法。wrapper 通过已有静态路由参数接入；该路径中的 `mci_hops_limit` 以种子深度 1、子点深度为父点深度加 1 计数。达到深度上限的点可进入结果，但不继续展开。构建、更新和加载索引保留上游实现，本次修改不包含此前实验中的构建剪枝和团重排序。
+
+| 两组距离采样参数 | 默认值 | 允许值 |
+| --- | ---: | --- |
+| `correlation_method` | `distance_samples` | `distance_samples`、`sample_seeds`、`clique_probe` |
+| `correlation_routing` | `true` | 布尔值 |
+| `correlation_probe_only` | `false` | 布尔值 |
+| `correlation_global_samples` | 512 | 整数 1–65536 |
+| `correlation_valid_samples` | 256 | 整数 1–1024，决定替换后的种子预算 |
+| `correlation_sample_seed` | 42 | 整数 0–1000000000 |
+| `correlation_radius_quantile` | 0.1 | (0,1] 内的有限值 |
+| `correlation_confidence_z` | 1.96 | 有限正数 |
+| `correlation_negative_ratio` | 0.5 | [0,1) 内的有限值 |
+| `correlation_positive_ratio` | 2.0 | 大于 1 的有限值 |
+
+`mci_seed_max_count` 必须为 0，或至少等于配置的 `correlation_valid_samples`，即使合法点总数更小也是如此；wrapper 会拒绝不足的上限。两种采样模式要求完整、唯一、顺序稳定的 `GetValidIds`，不会像旧团探测方式那样在缺失时退回全库枚举。大规模谓词优先提供 bitmap 接口。`correlation_probe_only=true` 保留预测并禁用预测触发的扫描；`correlation_method="sample_seeds"` 用相同合法种子对照，不做全集采样。MCI 分支不保证精确召回。
+
+两组距离采样预测默认启用。例如只传 `{"ef_search":40}`，或传 `{}` 接受 wrapper 的全部默认配置，即可检索，无需填写上述相关性字段。仍可显式传参覆盖默认值。普通 `Index::KnnSearch` 不会因为传入这些参数而自动创建 `GlobalMCIHybrid`。

@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "search_metrics_internal.h"
+#include "utils/search_lock.h"
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
 
@@ -334,7 +335,7 @@ public:
 
     DatasetPtr
     Statistics(const std::string& statistics) override {
-        std::unique_lock lock(this->StatisticsMutex_);
+        auto lock = MakeSearchMutexLock(this->StatisticsMutex_);
         this->SearchMetrics_.reset();
         this->Statistics_ = statistics;
         this->StatisticsCacheValid_ = true;
@@ -343,14 +344,14 @@ public:
 
     void
     SetSearchMetricsInternal(SearchResultMetrics metrics) override {
-        std::unique_lock lock(this->StatisticsMutex_);
+        auto lock = MakeSearchMutexLock(this->StatisticsMutex_);
         this->SearchMetrics_ = std::move(metrics);
         this->StatisticsCacheValid_ = false;
     }
 
     std::optional<SearchResultMetrics>
     GetSearchMetricsInternal() const override {
-        std::shared_lock lock(this->StatisticsMutex_);
+        auto lock = MakeSearchReadLock(this->StatisticsMutex_);
         return this->SearchMetrics_;
     }
 
@@ -360,12 +361,12 @@ public:
     std::string
     GetStatistics() const override {
         {
-            std::shared_lock lock(this->StatisticsMutex_);
+            auto lock = MakeSearchReadLock(this->StatisticsMutex_);
             if (this->StatisticsCacheValid_) {
                 return this->Statistics_;
             }
         }
-        std::unique_lock lock(this->StatisticsMutex_);
+        auto lock = MakeSearchMutexLock(this->StatisticsMutex_);
         if (not this->StatisticsCacheValid_ && this->SearchMetrics_.has_value()) {
             this->Statistics_ = this->SearchMetrics_->Dump();
             this->StatisticsCacheValid_ = true;

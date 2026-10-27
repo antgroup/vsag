@@ -54,6 +54,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
@@ -82,6 +83,8 @@ struct RaBitQFusedCodeView;
  */
 class HGraph : public InnerIndexInterface {
 public:
+    friend class GlobalMCIHybrid;
+
     static ParamPtr
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
@@ -541,6 +544,9 @@ private:
 
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
+        if (SearchLockScope::IsNoLock()) {
+            return {};
+        }
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
             return std::shared_lock<std::shared_mutex>(this->global_mutex_);
         }
@@ -1076,6 +1082,8 @@ private:
         HybridSearchStats hybrid_stats{};
         // Seed budget the traversal resolved for the current filter, before sampling.
         uint64_t hybrid_seed_budget{0};
+        bool seed_saturated{false};
+        bool search_no_lock{false};
     };
 
     [[nodiscard]] MCIHybridSearchResult
@@ -1085,6 +1093,14 @@ private:
                    const void* query,
                    const InnerSearchParam& search_param,
                    QueryContext* ctx) const;
+
+    [[nodiscard]] MCIHybridSearchResult
+    try_live_mci_search(const SearchRequest& request,
+                        const HGraphSearchParameters& params,
+                        const FilterPtr& inner_filter,
+                        const void* query,
+                        const InnerSearchParam& search_param,
+                        QueryContext* ctx) const;
 
     /**
      * Seeds for the dynamic neighbor traversal. Uses the exact seed budget of try_mci_search

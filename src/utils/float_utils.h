@@ -31,4 +31,12 @@ IsFiniteFloatBits(float value) {
     return (bits & 0x7F800000U) != 0x7F800000U;
 }
 
+// Double-precision counterpart for search parameters and filter-retention validation.
+inline bool
+is_finite_double_bits(double value) {
+    uint64_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    return (bits & 0x7FF0000000000000ULL) != 0x7FF0000000000000ULL;
+}
+
 }  // namespace vsag

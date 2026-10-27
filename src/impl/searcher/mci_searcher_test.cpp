@@ -16,6 +16,7 @@
 
 #include "impl/label_table/label_table.h"
 #include "searcher_test.h"
+#include "utils/search_lock.h"
 
 using namespace vsag;
 
@@ -172,4 +173,79 @@ TEST_CASE("MCISearcher threshold results backfill past non-finite traversal seed
     REQUIRE(result->Size() == 1);
     REQUIRE(result->Top().second == 1);
     REQUIRE(result->Top().first == 1.0F);
+}
+
+TEST_CASE("Static MCI reuses cached seeds and propagates depth in both storage paths",
+          "[ut][mci][mci_distance_sampling][regression]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
+    std::vector<float> vectors{0, 1, 2, 3};
+    std::vector<InnerIdType> ids{0, 1, 2, 3};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> offsets({0, 2, 4, 6}, allocator.get());
+    Vector<InnerIdType> members({0, 1, 1, 2, 2, 3}, allocator.get());
+    Vector<InnerIdType> inverse_offsets({0, 1, 3, 5, 6}, allocator.get());
+    Vector<InnerIdType> inverse({0, 0, 1, 1, 2, 2}, allocator.get());
+    cliques->Assign(std::move(offsets),
+                    std::move(members),
+                    std::move(inverse_offsets),
+                    std::move(inverse),
+                    ids.size());
+    const bool raw = GENERATE(false, true);
+    const bool bitmap = GENERATE(false, true);
+    const bool exhaustive = GENERATE(false, true);
+    const bool cached = GENERATE(false, true);
+    const uint32_t depth = GENERATE(1U, 2U, 3U, 4U);
+    Vector<InnerIdType> seeds(allocator.get());
+    Vector<float> distances(allocator.get());
+    for (uint64_t i = 0; i < (exhaustive ? 4 : 1); ++i) {
+        seeds.push_back(i);
+        distances.push_back((3.0F - vectors[i]) * (3.0F - vectors[i]));
+    }
+    MCISearcherParam params;
+    params.seed_count = seeds.size();
+    params.seed_inner_ids = &seeds;
+    params.seed_distances = cached ? &distances : nullptr;
+    params.enumerated_valid_count = exhaustive ? seeds.size() : 0;
+    params.hops_limit = depth;
+    params.expansion_idle_window = 0;
+    params.precise_vectors = raw ? vectors.data() : nullptr;
+    params.dim = 1;
+    params.precise_vector_stride = 1;
+    uint8_t mask[]{1, 1, 1, 1};
+    params.valid_bitmap = bitmap ? mask : nullptr;
+    params.valid_bitmap_size = 4;
+    bool saturated = false;
+    params.skipped_expansion = &saturated;
+    InnerSearchParam search;
+    search.ef = 4;
+    search.topk = 4;
+    SearchStatistics stats;
+    QueryContext context;
+    context.alloc = allocator.get();
+    context.stats = &stats;
+    const float query = 3.0F;
+    const SearchLockScope scope(true);
+    auto result = MCISearcher(common).Search(cliques, flatten, &query, search, params, &context);
+    const uint64_t expected = exhaustive ? 4 : depth;
+    REQUIRE(result->Size() == expected);
+    CHECK(saturated == exhaustive);
+    CHECK(stats.dist_cmp.load() == expected - (cached ? seeds.size() : 0));
+    for (uint64_t id = 0; id < expected; ++id) {
+        REQUIRE_FALSE(result->Empty());
+        CHECK(result->Top().second == id);
+        CHECK(result->Top().first == (query - vectors[id]) * (query - vectors[id]));
+        result->Pop();
+    }
 }

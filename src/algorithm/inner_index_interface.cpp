@@ -40,6 +40,7 @@
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/tlv_section.h"
+#include "utils/search_lock.h"
 #include "utils/slow_task_timer.h"
 #include "utils/util_functions.h"
 #include "vsag/allocator.h"
@@ -805,7 +806,7 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
 
 DatasetPtr
 InnerIndexInterface::ExportIDs() const {
-    std::shared_lock lock(this->label_lookup_mutex_);
+    auto lock = MakeSearchReadLock(this->label_lookup_mutex_);
     DatasetPtr result = Dataset::Make();
     auto num_element = this->label_table_->GetTotalCount();
     auto* labels = static_cast<LabelType*>(allocator_->Allocate(sizeof(LabelType) * num_element));
@@ -847,7 +848,7 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     inner_ids.clear();
     inner_ids.reserve(static_cast<uint64_t>(count));
     {
-        std::shared_lock lock(this->label_lookup_mutex_);
+        auto lock = MakeSearchReadLock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
             inner_ids.emplace_back(this->label_table_->GetIdByLabel(ids[i]));
         }
@@ -978,7 +979,7 @@ InnerIndexInterface::GetExtraInfoByIds(const int64_t* ids, int64_t count, char* 
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION, "extra_info is NULL");
     }
     for (int64_t i = 0; i < count; ++i) {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto lock = MakeSearchReadLock(this->label_lookup_mutex_);
         auto inner_id = this->label_table_->GetIdByLabel(ids[i]);
         this->extra_infos_->GetExtraInfoById(inner_id, extra_infos + i * extra_info_size_);
     }
@@ -992,7 +993,7 @@ InnerIndexInterface::UpdateExtraInfo(const DatasetPtr& new_base) {
     CHECK_ARGUMENT(new_base->GetNumElements() == 1, "new_base size must be one");
     auto label = new_base->GetIds()[0];
     if (this->extra_infos_ != nullptr) {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
+        auto label_lock = MakeSearchReadLock(this->label_lookup_mutex_);
         if (not this->label_table_->CheckLabel(label)) {
             return false;
         }
@@ -1140,7 +1141,7 @@ InnerIndexInterface::calc_distance_by_id(const float* query,
     Vector<InnerIdType> inner_ids(allocator_);
     Vector<int64_t> positions(allocator_);
     {
-        std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+        auto lock = MakeSearchReadLock(this->label_lookup_mutex_);
         for (int64_t i = 0; i < count; ++i) {
             auto [success, inner_id] = this->label_table_->TryGetIdByLabel(ids[i]);
             if (success) {
