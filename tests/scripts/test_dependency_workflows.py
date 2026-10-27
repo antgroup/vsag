@@ -2,7 +2,10 @@
 """Regression checks for dependency workflow trust and source guards."""
 
 from pathlib import Path
+import os
 import re
+import shlex
+import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -99,13 +102,15 @@ class TsanCleanupTest(unittest.TestCase):
         self.assertIn("node24_diagnostics after\n", script)
         diagnostics = "\n".join(
             f"{command}() {{ return 1; }}"
-            for command in ("date", "ls", "readlink", "stat", "awk", "timeout")
+            for command in ("date", "ls", "readlink", "stat", "awk")
         )
+        diagnostics += '\ntimeout() { return "${PROBE_STATUS:-1}"; }'
         return diagnostics + "\n" + script.replace("/useless", str(sandbox))
 
-    def run_cleanup(self, sandbox: Path, prefix: str = "") -> subprocess.CompletedProcess:
+    def run_cleanup(self, sandbox: Path, env=None) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["sh", "-e", "-c", prefix + self.cleanup_script(sandbox)],
+            ["sh", "-e", "-c", self.cleanup_script(sandbox)],
+            env={**os.environ, **(env or {})},
             text=True, capture_output=True, timeout=10,
         )
 
@@ -145,19 +150,59 @@ class TsanCleanupTest(unittest.TestCase):
             self.assertEqual(list(sandbox.iterdir()), [])
             self.assertIn("(after cleanup)", result.stdout)
 
-    def test_cleanup_failure_propagates_before_next_entry_or_diagnostics(self) -> None:
+    def test_cleanup_failure_attempts_later_entries_and_prints_diagnostics(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
-            sandbox = Path(temporary)
-            (sandbox / "a").mkdir()
-            (sandbox / "b").mkdir()
-            result = self.run_cleanup(
-                sandbox, 'rm() { echo "cleanup failed: $*" >&2; return 23; };\n'
+            root = Path(temporary)
+            sandbox = root / "cleanup"
+            sandbox.mkdir()
+            node = sandbox / "runner-cache/externals/node24/bin/node"
+            node.parent.mkdir(parents=True)
+            node.write_text("runtime\n")
+            for name in ("a", "b", "c"):
+                (sandbox / name).mkdir()
+                (sandbox / name / "payload").write_text("delete me\n")
+            stub_dir = root / "bin"
+            stub_dir.mkdir()
+            stub = stub_dir / "rm"
+            real_rm = shlex.quote(shutil.which("rm"))
+            failed_path = shlex.quote(str(sandbox / "b"))
+            stub.write_text(
+                "#!/bin/sh\n"
+                f'if [ "$3" = {failed_path} ]; then\n'
+                '  echo "cleanup failed: $3" >&2\n'
+                "  exit 23\n"
+                "fi\n"
+                f'exec {real_rm} "$@"\n'
             )
-            self.assertEqual(result.returncode, 23, result.stderr)
+            stub.chmod(0o755)
+
+            result = self.run_cleanup(
+                sandbox, {"PATH": str(stub_dir) + os.pathsep + os.environ["PATH"]}
+            )
+
+            self.assertNotEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stderr.count("cleanup failed:"), 1)
-            self.assertIn(str(sandbox / "a"), result.stderr)
-            self.assertNotIn("(after cleanup)", result.stdout)
-            self.assertEqual({path.name for path in sandbox.iterdir()}, {"a", "b"})
+            self.assertIn(str(sandbox / "b"), result.stderr)
+            self.assertIn("(before cleanup)", result.stdout)
+            self.assertIn("(after cleanup)", result.stdout)
+            self.assertEqual({path.name for path in sandbox.iterdir()}, {"b", "runner-cache"})
+            self.assertEqual((sandbox / "b/payload").read_text(), "delete me\n")
+            self.assertEqual(node.read_text(), "runtime\n")
+
+    def test_failed_node_probes_report_status_and_allow_cleanup(self) -> None:
+        for status in (124, 127):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temporary:
+                sandbox = Path(temporary)
+                (sandbox / "tools").mkdir()
+
+                result = self.run_cleanup(sandbox, {"PROBE_STATUS": str(status)})
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(list(sandbox.iterdir()), [])
+                before, after = result.stdout.split("(after cleanup)")
+                self.assertIn("(before cleanup)", before)
+                self.assertEqual(before.count(f"node --version exit={status}"), 1)
+                self.assertEqual(after.count(f"node --version exit={status}"), 1)
 
 
 if __name__ == "__main__":

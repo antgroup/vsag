@@ -60,17 +60,19 @@ jobs:
               stat -L "$path" || true
             done
             awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
-            timeout -k 1s 5s /__e/node24/bin/node --version || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
             echo "::endgroup::"
           }
           node24_diagnostics before
+          cleanup_failed=0
           for path in /useless/*; do
             case "$path" in
               /useless/runner-cache) continue ;;
             esac
-            rm -rf -- "$path"
+            rm -rf -- "$path" || cleanup_failed=1
           done
           node24_diagnostics after
+          exit "$cleanup_failed"
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
