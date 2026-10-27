@@ -1519,8 +1519,12 @@ TEST_CASE("HGraph companion MCI incrementally adds INT8 vectors", "[ut][hgraph][
                                  filter);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
-    REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) > 0);
-    REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) > 0);
+    // The seed budget covers every valid point, so neither clique expansion nor
+    // HGraph navigation should add work, including after incremental insertion.
+    REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) == total);
+    REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) == 0);
+    const auto search_stats = vsag::JsonType::Parse(search_result.value()->GetStatistics());
+    REQUIRE(search_stats["distance_evaluations_by_phase"]["routing"].GetUint64() == 0);
 }
 
 TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][mci]") {

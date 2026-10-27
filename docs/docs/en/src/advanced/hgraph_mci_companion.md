@@ -614,6 +614,6 @@ These are example effort controls, not dataset-independent recommended recall se
 Calibrate the cap, seed budget and ef on validation queries. Packed filtering and batching
 reduce execution cost; activation, depth and idle limits additionally trade search work for recall.
 
-An unlocked routed MCI query is attempted before HGraph navigation. If it succeeds,
+A routed MCI query is attempted before HGraph navigation under either lock policy. If it succeeds,
 no unused route-graph distances or HGraph visited-list acquisition are performed;
 an unavailable MCI path still falls back to the normal graph route.

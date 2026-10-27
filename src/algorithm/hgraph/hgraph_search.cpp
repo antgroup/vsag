@@ -1066,11 +1066,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             search_param.time_cost->Reset();
         }
         // MCI collects its own filter-derived seeds and never reads the HGraph entry point.
-        // Try that route first; an unavailable MCI route still uses normal HGraph navigation.
+        // Try it first with either lock policy; an unavailable route still uses HGraph navigation.
         MCIHybridSearchResult mci_result(params, ft);
         bool mci_tried = false;
-        if (params.search_no_lock and not params.use_hybrid_traversal and
-            not use_custom_distance and
+        if (not params.use_hybrid_traversal and not use_custom_distance and
             // NOLINTNEXTLINE(readability-simplify-boolean-expr)
             not(params.brute_force_threshold > 0.0F and
                 mci_result.valid_ratio <= params.brute_force_threshold)) {

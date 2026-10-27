@@ -403,6 +403,45 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
     const std::string search = R"({"hgraph":{"ef_search":32,"use_mci":true,
         "hgraph_valid_ratio_threshold":1,"mci_seed_ratio":100,"mci_seed_coverage":0,
         "mci_activation_cap":8,"mci_hops_limit":9,"search_no_lock":true,"parallelism":1}})";
+    // Both lock policies must skip unused navigation when MCI succeeds, while graph
+    // fallback and joint traversal must still navigate the actual upper layers.
+    std::vector<int64_t> mci_ids;
+    for (bool no_lock : {false, true}) {
+        for (uint32_t route = 0; route < 4; ++route) {
+            INFO("no_lock=" << no_lock << ", route=" << route);
+            auto route_search = JsonType::Parse(search);
+            route_search["hgraph"]["search_no_lock"].SetBool(no_lock);
+            std::string expected_route = "mci";
+            if (route == 1) {
+                route_search["hgraph"]["use_mci"].SetBool(false);
+                expected_route = "disabled";
+            } else if (route == 2) {
+                route_search["hgraph"]["hgraph_valid_ratio_threshold"].SetFloat(0);
+                expected_route = "hgraph";
+            } else if (route == 3) {
+                route_search["hgraph"]["use_hybrid_traversal"].SetBool(true);
+                expected_route = "hybrid";
+            }
+            auto routed = loaded->KnnSearch(query, 4, route_search.Dump(), filter);
+            REQUIRE(routed.has_value());
+            REQUIRE(routed.value()->GetDim() == 4);
+            const auto stats = JsonType::Parse(routed.value()->GetStatistics());
+            REQUIRE(stats["mci_hybrid_route"].GetString() == expected_route);
+            const auto routing = stats["distance_evaluations_by_phase"]["routing"].GetUint64();
+            if (route == 0) {
+                REQUIRE(routing == 0);
+                const std::vector<int64_t> ids(routed.value()->GetIds(),
+                                               routed.value()->GetIds() + routed.value()->GetDim());
+                if (mci_ids.empty()) {
+                    mci_ids = ids;
+                }
+                REQUIRE(ids == mci_ids);
+            } else {
+                REQUIRE(routing > 0);
+            }
+            REQUIRE_FALSE(SearchLockScope::IsNoLock());
+        }
+    }
     std::vector<std::future<bool>> workers;
     for (uint64_t t = 0; t < 4; ++t) {
         workers.emplace_back(std::async(std::launch::async, [&] {
