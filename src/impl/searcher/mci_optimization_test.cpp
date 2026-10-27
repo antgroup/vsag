@@ -221,6 +221,8 @@ TEST_CASE("MCI search optimization parameters reject malformed budgets",
     }
     REQUIRE_THROWS(HGraphSearchParameters::FromJson(
         R"({"hgraph":{"ef_search":40,"search_no_lock":true,"parallelism":2}})"));
+    REQUIRE_THROWS(
+        HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":40,"mci_seed_max_count":-1}})"));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
     {
         const SearchLockScope outer(true);
@@ -458,6 +460,50 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
                        reference.value()->GetIds() + reference.value()->GetDim(),
                        result.value()->GetIds()));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
+
+    // A nested query on another backend must not inherit HGraph's unlocked policy.
+    auto other_made = Factory::CreateIndex("brute_force",
+                                           R"({"dtype":"float32","metric_type":"l2","dim":4,
+            "index_param":{"base_quantization_type":"fp32"}})");
+    REQUIRE(other_made.has_value());
+    auto other = other_made.value();
+    REQUIRE(other->Build(base).has_value());
+    REQUIRE(other->Remove(labels[0]).value() == 1);
+    auto other_filter = std::make_shared<ValidLabels>();
+    other_filter->ids = labels;
+    for (uint32_t method = 0; method < 3; ++method) {
+        bool observed_locked = false;
+        other_filter->on_check = [&] {
+            REQUIRE_FALSE(SearchLockScope::IsNoLock());
+            observed_locked = true;
+        };
+        filter->on_check = [&] {
+            tl::expected<DatasetPtr, Error> nested_result = [&] {
+                if (method == 0) {
+                    return other->KnnSearch(query, 8, "{}", other_filter);
+                }
+                if (method == 1) {
+                    return other->RangeSearch(query, 1.0e9F, "{}", other_filter);
+                }
+                SearchRequest request;
+                request.query_ = query;
+                request.topk_ = 8;
+                request.params_str_ = "{}";
+                request.filter_ = other_filter;
+                return other->SearchWithRequest(request);
+            }();
+            REQUIRE(nested_result.has_value());
+            REQUIRE(observed_locked);
+            for (int64_t i = 0; i < nested_result.value()->GetDim(); ++i) {
+                REQUIRE(nested_result.value()->GetIds()[i] != labels[0]);
+            }
+            REQUIRE(SearchLockScope::IsNoLock());
+        };
+        auto outer_result = loaded->KnnSearch(query, 32, small_search, filter);
+        REQUIRE(outer_result.has_value());
+        REQUIRE(observed_locked);
+        REQUIRE_FALSE(SearchLockScope::IsNoLock());
+    }
 
     // Huge finite coverage targets must be ignored before any float-to-integer cast.
     // Exercise the shared budget helper in both routed and joint traversal, capped and uncapped.

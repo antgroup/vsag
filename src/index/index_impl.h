@@ -27,6 +27,7 @@
 #include "index_common_param.h"
 #include "query_context.h"
 #include "search_metrics_internal.h"
+#include "utils/search_lock.h"
 #include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -346,6 +347,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -360,6 +362,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -374,6 +377,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -385,6 +389,7 @@ public:
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(search_param.parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -412,6 +417,7 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -430,6 +436,7 @@ public:
                         const std::string& parameters,
                         const FilterPtr& filter,
                         Allocator* allocator) const override {
+        const SearchLockScope public_search_scope(false);
         // InnerIndexInterface stores a raw allocator; retain common resources too.
         // Destruction order releases the backend before its allocator/thread pool.
         struct SessionOwner {
@@ -475,6 +482,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
@@ -486,6 +494,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -498,6 +507,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -510,6 +520,7 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -549,6 +560,7 @@ public:
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
+        const SearchLockScope public_search_scope(false);
         bool want_statistics = true;
         std::optional<SearchRequest> normalized_request;
         std::optional<nlohmann::json> parsed_params;

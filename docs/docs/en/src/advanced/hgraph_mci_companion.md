@@ -557,8 +557,11 @@ only after all active views have expired. During clique traversal, callback-only
 remember accepted and rejected IDs so overlapping cliques do not repeat their predicate calls.
 The packed path can skip the user predicate using the already prepared complete valid set.
 This bound excludes predicate calls during seed collection or source preparation and assumes
-that the predicate is stable throughout the query. This preparation remains inside query time. A nested public search installs its own
-`search_no_lock` setting (default `false`) and restores the outer policy when it returns.
+that the predicate is stable throughout the query. If membership changes mid-query, results
+need not match either predicate generation. This preparation remains inside query time.
+Nested public synchronous searches first restore default locking at the API boundary;
+HGraph then installs its own `search_no_lock` setting (default `false`). Other backends
+therefore do not inherit an outer HGraph opt-in. Return or exception restores the outer policy.
 Callbacks remain subject to the outer request's exclusion of mutation and destruction.
 
 For useful activation priorities, build with `"mci_clique_activation_order": true` in

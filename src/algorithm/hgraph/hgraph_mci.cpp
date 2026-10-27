@@ -770,7 +770,7 @@ HGraph::collect_hybrid_seeds(const SearchRequest& request,
         if (valid_label_count > 0) {
             const auto covered = std::ceil(static_cast<double>(params.mci_seed_coverage) *
                                            static_cast<double>(valid_label_count));
-            const bool fits_cap = params.mci_seed_max_count <= 0 or
+            const bool fits_cap = params.mci_seed_max_count == 0 or
                                   covered <= static_cast<double>(params.mci_seed_max_count);
             // Oversized coverage is ignored, not clamped. Check it while still floating
             // point, before converting a potentially unrepresentable target to uint64_t.
