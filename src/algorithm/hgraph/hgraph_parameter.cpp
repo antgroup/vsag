@@ -527,11 +527,14 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
             if (hgraph[key].IsNumberUnsigned()) {
                 CHECK_ARGUMENT(hgraph[key].GetUint64() <= UINT32_MAX,
                                fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(hgraph[key].GetUint64());
+            } else {
+                const auto parsed = hgraph[key].GetInt();
+                const bool valid_budget =
+                    parsed >= 0 and static_cast<uint64_t>(parsed) <= UINT32_MAX;
+                CHECK_ARGUMENT(valid_budget, fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(parsed);
             }
-            const auto parsed = hgraph[key].GetInt();
-            const bool valid_budget = parsed >= 0 and static_cast<uint64_t>(parsed) <= UINT32_MAX;
-            CHECK_ARGUMENT(valid_budget, fmt::format("{} exceeds uint32 range", key));
-            value = static_cast<uint32_t>(parsed);
         }
     };
     parse_bool("search_no_lock", obj.search_no_lock);

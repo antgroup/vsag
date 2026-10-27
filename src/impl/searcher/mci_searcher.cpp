@@ -69,6 +69,42 @@ struct MCIEpochMarks {
     }
 };
 
+// Keep one scratch per active call, not just per worker: user filters can issue a
+// nested search while the outer call still owns epoch marks and packed member views.
+class MCISearchScratchLease {
+public:
+    MCISearchScratchLease() {
+        if (depth == cache.size()) {
+            cache.emplace_back(std::make_unique<Scratch>());
+        }
+        scratch_ = cache[depth++].get();
+    }
+
+    ~MCISearchScratchLease() {
+        --depth;
+    }
+
+    MCISearchScratchLease(const MCISearchScratchLease&) = delete;
+    MCISearchScratchLease&
+    operator=(const MCISearchScratchLease&) = delete;
+
+    struct Scratch {
+        MCIEpochMarks visited_nodes;
+        MCIEpochMarks visited_cliques;
+        MCIPackedFilter packed;
+    };
+
+    [[nodiscard]] Scratch&
+    Get() const {
+        return *scratch_;
+    }
+
+private:
+    Scratch* scratch_;
+    inline static thread_local uint64_t depth{0};
+    inline static thread_local std::vector<std::unique_ptr<Scratch>> cache;
+};
+
 bool
 mci_check_overtime(const InnerSearchParam& inner_search_param, QueryContext* ctx) {
     if (inner_search_param.time_cost == nullptr or
@@ -131,9 +167,10 @@ search_clique_view(const CliqueDataCellSearchView& view,
     const auto candidate_limit =
         std::max<int64_t>(inner_search_param.topk, static_cast<int64_t>(inner_search_param.ef));
     auto result_heap = DistanceHeap::MakeInstanceBySize<true, true>(allocator, candidate_limit);
-    thread_local MCIEpochMarks visited_nodes;
-    thread_local MCIEpochMarks visited_cliques;
-    thread_local MCIPackedFilter packed;
+    const MCISearchScratchLease scratch;
+    auto& visited_nodes = scratch.Get().visited_nodes;
+    auto& visited_cliques = scratch.Get().visited_cliques;
+    auto& packed = scratch.Get().packed;
     visited_nodes.Reset(total);
     visited_cliques.Reset(view.total_clique_count);
     MCISearchCandidateQueue candidates(allocator);
@@ -198,6 +235,9 @@ search_clique_view(const CliqueDataCellSearchView& view,
         if (visited_nodes.Get(id) or (not view.static_csr and not view.IsLiveNode(id))) {
             return false;
         }
+        // Remember rejected fallback IDs too: overlapping cliques must not repeat user
+        // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
+        visited_nodes.Set(id);
         if (not known_valid and valid_bitmap == nullptr and
             inner_search_param.is_inner_id_allowed != nullptr and
             not inner_search_param.is_inner_id_allowed->CheckValid(id)) {
@@ -207,7 +247,6 @@ search_clique_view(const CliqueDataCellSearchView& view,
             not mci_param.deleted_ids_filter->CheckValid(id)) {
             return false;
         }
-        visited_nodes.Set(id);  // Also deduplicate points waiting in this batch.
         batch_depth = depth;
         batch_ids[batch_count++] = id;
         if (not mci_param.batch_distance or batch_count == batch_ids.size()) {
@@ -253,6 +292,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
         if (check_overtime and mci_check_overtime(inner_search_param, ctx)) {
             break;
         }
+        // Seed scoring and every preceding parent have already flushed their batches.
         auto* candidate = candidates.GetClosestUnexpanded();
         if (candidate == nullptr) {
             break;

@@ -550,7 +550,12 @@ phase has scored the complete valid set, it skips clique expansion and packed-bi
 Complete-ID preparation uses direct conversion only after validating identity label mapping;
 other labels still use the reverse map. Unknown/deleted labels are excluded, duplicates are
 removed, and already sorted input avoids another sort. A worker reuses its temporary buffer
-without sharing it with concurrent or nested queries. This preparation remains inside query time.
+without sharing it with concurrent or nested queries. Traversal epoch marks and packed member
+buffers also belong to separate scratch slots at each nesting depth. Callback-only filters
+remember rejected IDs so overlapping cliques evaluate each point's predicate at most once.
+This preparation remains inside query time. A nested public search installs its own
+`search_no_lock` setting (default `false`) and restores the outer policy when it returns.
+Callbacks remain subject to the outer request's exclusion of mutation and destruction.
 
 For useful activation priorities, build with `"mci_clique_activation_order": true` in
 `index_param`. This is off by default. It greedily ranks each point's incident cliques by
@@ -563,7 +568,12 @@ incidence array is needed. It is independent of any global clique-ID reordering.
 For a fresh build with activation ordering, a cap of at least `max(32, input KNN row width)`
 preserves all *already represented input KNN* edges (including the unchanged short rows). This does not preserve every farther edge needed after
 filtering, and it is not a filtered-recall guarantee. An old index without ranking still works,
-but a cap then uses its existing storage order. Incremental changes and compaction preserve
+but a cap then uses its existing storage order, rather than a useful activation priority.
+Tune nonzero caps with a ranked build and revalidate recall. This is a positional prefix,
+not a quota of new cliques: if its entries were already visited, this parent expands no
+new clique. The KNN-edge property above describes the stored truncated graph, not a
+minimum amount of new work or a recall guarantee for each expanded parent.
+Incremental changes and compaction preserve
 memberships, but can change these priorities; rebuild to restore the full-build greedy order
 and revalidate recall. Do not assume that flushing after mutation restores the ranked order.
 

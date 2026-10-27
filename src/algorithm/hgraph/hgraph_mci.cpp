@@ -56,6 +56,7 @@ public:
     }
 
     ~MCIValidIdScratch() {
+        // A nested query may already have returned a buffer; keep the larger capacity.
         if (ids.capacity() > cached_ids.capacity()) {
             ids.swap(cached_ids);
         }
@@ -970,6 +971,11 @@ AssignMCICliquesToDatacell(CliqueDataCellPtr& mci_cliques,
         p_maxc.push_back(static_cast<InnerIdType>(maxcs.size()));
     }
 
+    // Increasing clique IDs already give ascending rows. Normalize before ranking so
+    // both default and ranked builds retain one incidence per (node, clique) pair.
+    for (auto& ids : node_to_clique) {
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    }
     if (activation_graph != nullptr) {
         rank_mci_clique_activation(*activation_graph, cliques, node_to_clique, thread_count);
     }

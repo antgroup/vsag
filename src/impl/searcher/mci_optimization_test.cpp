@@ -22,6 +22,9 @@ using namespace vsag;
 TEST_CASE("MCI packed predicate preserves CSR order and checks gather bounds",
           "[ut][mci][MCIPackedFilter]") {
     MCIPackedFilter filter;
+    REQUIRE_FALSE(filter.IsValid(0));
+    const auto empty_members = filter.Filter(nullptr, 0, 0);
+    REQUIRE(empty_members.begin() == empty_members.end());
     const uint64_t total = GENERATE(0, 1, 31, 32, 33, 1031);
     const uint64_t count = GENERATE(0, 1, 7, 8, 15, 16, 17, 63, 65, 133);
     std::vector<uint8_t> bitmap(total, 0);
@@ -49,10 +52,19 @@ TEST_CASE("MCI packed predicate preserves CSR order and checks gather bounds",
                      bitmap.data(),
                      from_ids ? (valid.empty() ? &empty : valid.data()) : nullptr,
                      valid.size());
+        REQUIRE_FALSE(filter.IsValid(static_cast<InnerIdType>(total)));
+        REQUIRE_FALSE(filter.IsValid(UINT32_MAX));
+        REQUIRE_FALSE(filter.IsValid(static_cast<InnerIdType>(((total + 31) / 32) * 32)));
+        for (InnerIdType id = 0; id < total; ++id) {
+            REQUIRE(filter.IsValid(id) == (bitmap[id] != 0));
+        }
         const auto scalar = filter.Filter(members.data(), members.size(), total, false);
         REQUIRE(std::vector<InnerIdType>(scalar.begin(), scalar.end()) == expected);
         const auto simd = filter.Filter(members.data(), members.size(), total, true);
         REQUIRE(std::vector<InnerIdType>(simd.begin(), simd.end()) == expected);
+        const auto oversized_domain = filter.Filter(members.data(), members.size(), total + 99);
+        REQUIRE(std::vector<InnerIdType>(oversized_domain.begin(), oversized_domain.end()) ==
+                expected);
     }
     std::fill(bitmap.begin(), bitmap.end(), 0);
     filter.Build(total, bitmap.data(), nullptr, 0);
@@ -194,8 +206,13 @@ TEST_CASE("MCI search optimization parameters reject malformed budgets",
     REQUIRE(defaults.mci_activation_cap == 0);
     for (const std::string& field :
          {"mci_activation_cap", "mci_hops_limit", "mci_expansion_idle_window"}) {
+        for (const std::string& value : {"0", "1", "2147483648", "4294967295"}) {
+            std::string parameters = R"({"hgraph":{"ef_search":40,")";
+            parameters.append(field).append("\":").append(value).append("}}");
+            REQUIRE_NOTHROW(HGraphSearchParameters::FromJson(parameters));
+        }
         for (const std::string& value :
-             {"-1", "1.5", "true", "4294967296", "18446744073709551615"}) {
+             {"-1", "1.5", "true", "4294967296", "9223372036854775807", "18446744073709551615"}) {
             INFO(field << "=" << value);
             std::string parameters = R"({"hgraph":{"ef_search":40,")";
             parameters.append(field).append("\":").append(value).append("}}");
@@ -419,8 +436,15 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
     auto reference = loaded->KnnSearch(query, 32, small_search, filter);
     REQUIRE(reference.has_value());
     bool nested = false;
+    bool saw_inner_policy = false;
+    inner_filter->on_check = [&] {
+        REQUIRE_FALSE(SearchLockScope::IsNoLock());
+        saw_inner_policy = true;
+    };
+    auto locked_search = JsonType::Parse(small_search);
+    locked_search["hgraph"]["search_no_lock"].SetBool(false);
     filter->on_check = [&] {
-        auto inner_result = loaded->KnnSearch(query, 32, small_search, inner_filter);
+        auto inner_result = loaded->KnnSearch(query, 32, locked_search.Dump(), inner_filter);
         REQUIRE(inner_result.has_value());
         nested = true;
         REQUIRE(SearchLockScope::IsNoLock());
@@ -428,9 +452,130 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
     auto result = loaded->KnnSearch(query, 32, small_search, filter);
     REQUIRE(result.has_value());
     REQUIRE(nested);
+    REQUIRE(saw_inner_policy);
     REQUIRE(result.value()->GetDim() == reference.value()->GetDim());
     REQUIRE(std::equal(reference.value()->GetIds(),
                        reference.value()->GetIds() + reference.value()->GetDim(),
                        result.value()->GetIds()));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
+}
+
+TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scratch",
+          "[ut][mci][MCISearcher][MCIOptimization]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    const auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    const auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer, io, common);
+    const std::vector<float> vectors{0, 1, 2, 3, 4, 5};
+    std::vector<InnerIdType> ids{0, 1, 2, 3, 4, 5};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto cliques = std::make_shared<CliqueDataCell>(allocator.get());
+    Vector<InnerIdType> co({0, 4, 9, 13}, allocator.get());
+    Vector<InnerIdType> members({0, 1, 2, 3, 1, 2, 3, 4, 5, 0, 2, 4, 5}, allocator.get());
+    Vector<InnerIdType> no({0, 2, 4, 7, 9, 11, 13}, allocator.get());
+    Vector<InnerIdType> ci({0, 2, 0, 1, 0, 1, 2, 0, 1, 1, 2, 1, 2}, allocator.get());
+    cliques->Assign(std::move(co), std::move(members), std::move(no), std::move(ci), ids.size());
+    class CountingFilter : public Filter {
+    public:
+        mutable std::vector<uint32_t> checks = std::vector<uint32_t>(6, 0);
+        mutable std::function<void()> on_member;
+        bool
+        CheckValid(int64_t id) const override {
+            ++checks[id];
+            if (id == 1 and on_member) {
+                auto callback = std::exchange(on_member, nullptr);
+                callback();
+            }
+            return id != 2;
+        }
+    };
+    auto filter = std::make_shared<CountingFilter>();
+    const bool raw = GENERATE(false, true);
+    const bool batch = GENERATE(false, true);
+    const bool packed = GENERATE(false, true);
+    const bool nested_throws = GENERATE(false, true);
+    Vector<InnerIdType> seeds(allocator.get());
+    seeds.push_back(0);
+    const std::vector<uint8_t> bitmap(6, 1);
+    MCISearcherParam params;
+    params.seed_inner_ids = &seeds;
+    params.seed_count = 1;
+    params.packed_filter = packed;
+    params.batch_distance = batch;
+    params.precise_vectors = raw ? vectors.data() : nullptr;
+    params.dim = 1;
+    params.precise_vector_stride = 1;
+    InnerSearchParam search;
+    search.ef = 6;
+    search.topk = 6;
+    // No complete source: exercise callback rejection on overlapping cliques.
+    search.is_inner_id_allowed = filter;
+    const float query = 5.25F;
+    MCISearcher searcher(common);
+    const SearchLockScope scope(true);
+    SECTION("Fallback rejections are deduplicated") {
+        auto result = searcher.Search(cliques, flatten, &query, search, params, nullptr);
+        REQUIRE(result->Size() == 5);
+        for (auto count : filter->checks) {
+            REQUIRE(count == 1);
+        }
+    }
+    SECTION("Nested traversal and unwinding preserve the outer scratch") {
+        search.is_inner_id_allowed = nullptr;
+        params.deleted_ids_filter = filter;
+        params.valid_bitmap = bitmap.data();
+        params.valid_bitmap_size = bitmap.size();
+        bool nested = false;
+        filter->on_member = [&] {
+            // This callback fires after the outer Filter() returned its member view.
+            auto inner_params = params;
+            const std::vector<uint8_t> inner_bitmap{0, 0, 0, 0, 0, 1};
+            Vector<InnerIdType> inner_seeds({5}, allocator.get());
+            inner_params.seed_inner_ids = &inner_seeds;
+            inner_params.valid_bitmap = inner_bitmap.data();
+            inner_params.deleted_ids_filter = nullptr;
+            if (nested_throws) {
+                // Throw from inside the nested traversal, after its scratch was borrowed.
+                class ThrowingFilter : public Filter {
+                public:
+                    [[nodiscard]] bool
+                    CheckValid(int64_t /*id*/) const override {
+                        throw std::runtime_error("nested predicate failed");
+                    }
+                };
+                inner_params.deleted_ids_filter = std::make_shared<ThrowingFilter>();
+                REQUIRE_THROWS_AS(
+                    searcher.Search(cliques, flatten, &query, search, inner_params, nullptr),
+                    std::runtime_error);
+            } else {
+                auto inner =
+                    searcher.Search(cliques, flatten, &query, search, inner_params, nullptr);
+                REQUIRE(inner->Size() == 1);
+                REQUIRE(inner->Top().second == 5);
+            }
+            nested = true;
+        };
+        SearchStatistics stats;
+        QueryContext ctx{.alloc = allocator.get(), .stats = &stats};
+        auto result = searcher.Search(cliques, flatten, &query, search, params, &ctx);
+        REQUIRE(nested);
+        REQUIRE(result->Size() == 5);
+        REQUIRE(stats.dist_cmp.load() == 5);
+        REQUIRE(stats.hops.load() == 3);
+        while (not result->Empty()) {
+            REQUIRE(result->Top().second != 2);
+            result->Pop();
+        }
+        // A throwing nested query must return its scratch slot before another query starts.
+        result = searcher.Search(cliques, flatten, &query, search, params, nullptr);
+        REQUIRE(result->Size() == 5);
+    }
 }

@@ -9,7 +9,9 @@
 namespace vsag {
 
 // A request-local policy. Index mutex objects are never swapped or globally disabled.
-// The caller must exclude all index mutation for the duration of an unlocked search.
+// The caller must exclude all index mutation for the duration of an unlocked search,
+// including callbacks. Each nested public search installs its own explicit policy and
+// restores this one on return; lower-level helpers inherit the active request policy.
 class SearchLockScope {
 public:
     explicit SearchLockScope(bool no_lock) : previous_(search_no_lock) {

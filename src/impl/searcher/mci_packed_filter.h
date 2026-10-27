@@ -30,12 +30,14 @@ public:
         [[nodiscard]] const InnerIdType*
         // NOLINTNEXTLINE(readability-identifier-naming): range-for protocol
         end() const {
+            // An empty vector may have null data; avoid arithmetic on that pointer.
             return count == 0 ? data : data + count;
         }
     };
 
     void
     Build(uint64_t total, const uint8_t* bitmap, const InnerIdType* ids, uint64_t count) {
+        total_ = total;
         words_.assign((total + 31) / 32, 0);
         if (ids != nullptr) {
             for (uint64_t i = 0; i < count; ++i) {
@@ -54,11 +56,12 @@ public:
 
     [[nodiscard]] bool
     IsValid(InnerIdType id) const {
-        return (words_[id / 32] & (uint32_t{1} << (id % 32))) != 0;
+        return id < total_ and (words_[id / 32] & (uint32_t{1} << (id % 32))) != 0;
     }
 
     Members
     Filter(const InnerIdType* members, uint64_t count, uint64_t total, bool simd = true) {
+        total = std::min(total, total_);
         if (selected_.size() < count) {
             selected_.resize(count);
         }
@@ -133,6 +136,7 @@ private:
         return offset;
     }
 #endif
+    uint64_t total_{0};
     std::vector<uint32_t> words_;
     std::vector<InnerIdType> selected_;
 };
