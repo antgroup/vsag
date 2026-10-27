@@ -768,13 +768,15 @@ HGraph::collect_hybrid_seeds(const SearchRequest& request,
         int64_t valid_label_count = 0;
         request.filter_->GetValidIds(&valid_labels, valid_label_count);
         if (valid_label_count > 0) {
-            const auto covered =
-                static_cast<uint64_t>(std::ceil(static_cast<double>(params.mci_seed_coverage) *
-                                                static_cast<double>(valid_label_count)));
+            const auto covered = std::ceil(static_cast<double>(params.mci_seed_coverage) *
+                                           static_cast<double>(valid_label_count));
             const bool fits_cap = params.mci_seed_max_count <= 0 or
-                                  covered <= static_cast<uint64_t>(params.mci_seed_max_count);
-            if (covered <= total_count and fits_cap) {
-                seed_budget = std::max(seed_budget, covered);
+                                  covered <= static_cast<double>(params.mci_seed_max_count);
+            // Oversized coverage is ignored, not clamped. Check it while still floating
+            // point, before converting a potentially unrepresentable target to uint64_t.
+            if (covered <= static_cast<double>(total_count) and fits_cap and
+                covered < static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+                seed_budget = std::max(seed_budget, static_cast<uint64_t>(covered));
             }
         }
     }

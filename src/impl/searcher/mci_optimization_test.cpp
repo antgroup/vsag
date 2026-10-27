@@ -458,6 +458,29 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
                        reference.value()->GetIds() + reference.value()->GetDim(),
                        result.value()->GetIds()));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
+
+    // Huge finite coverage targets must be ignored before any float-to-integer cast.
+    // Exercise the shared budget helper in both routed and joint traversal, capped and uncapped.
+    for (bool hybrid : {false, true}) {
+        auto oversized = JsonType::Parse(small_search);
+        oversized["hgraph"]["use_hybrid_traversal"].SetBool(hybrid);
+        auto baseline = loaded->KnnSearch(query, 32, oversized.Dump(), filter);
+        REQUIRE(baseline.has_value());
+        const std::string budget_key = hybrid ? "hybrid_seed_budget" : "mci_seed_count";
+        const auto expected_budget =
+            JsonType::Parse(baseline.value()->GetStatistics())[budget_key].GetUint64();
+        REQUIRE(expected_budget == 8);
+        for (int64_t cap : {0, 16}) {
+            oversized["hgraph"]["mci_seed_max_count"].SetInt(cap);
+            for (float coverage : {1.0e20F, 3.0e38F}) {
+                oversized["hgraph"]["mci_seed_coverage"].SetFloat(coverage);
+                auto actual = loaded->KnnSearch(query, 32, oversized.Dump(), filter);
+                REQUIRE(actual.has_value());
+                REQUIRE(JsonType::Parse(actual.value()->GetStatistics())[budget_key].GetUint64() ==
+                        expected_budget);
+            }
+        }
+    }
 }
 
 TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scratch",
