@@ -23,6 +23,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "data_type.h"
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
@@ -35,11 +36,14 @@
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
+#include "impl/pipnn/row_accessor.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "utils/util_functions.h"
@@ -330,7 +334,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         this->PublishThroughTotalCount();
     }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
-    Vector<const float*> pipnn_vectors(allocator_);
+    Vector<const void*> pipnn_vectors(allocator_);
     if (use_pipnn) {
         pipnn_vectors.reserve(valid_indices.size());
     }
@@ -360,8 +364,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             this->attr_filter_index_->Insert(attr_sets[i], inner_id);
         }
         if (use_pipnn) {
-            pipnn_vectors.emplace_back(
-                static_cast<const float*>(get_data(data, static_cast<uint32_t>(i))));
+            pipnn_vectors.emplace_back(get_data(data, static_cast<uint32_t>(i)));
         }
         auto level = this->get_random_level() - 1;
         if (level >= 0) {
@@ -424,7 +427,34 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        const bool pipnn_needs_half_to_float = this->data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                               this->data_type_ == DataTypes::DATA_TYPE_BF16;
+        // fp16/bf16: copy scattered half-precision vectors into a single dense
+        // buffer (N * dim * 2B) and let PiPNN convert on the fly via RowAccessor.
+        // This avoids the O(N * dim * 4B) full fp32 conversion buffer.
+        Vector<uint16_t> pipnn_half_dense(allocator_);
+        if (pipnn_needs_half_to_float) {
+            pipnn_half_dense.resize(static_cast<uint64_t>(pipnn_vectors.size()) *
+                                    static_cast<uint64_t>(dim_));
+            for (uint64_t idx = 0; idx < pipnn_vectors.size(); ++idx) {
+                std::memcpy(pipnn_half_dense.data() + idx * static_cast<uint64_t>(dim_),
+                            pipnn_vectors[idx],
+                            static_cast<uint64_t>(dim_) * sizeof(uint16_t));
+            }
+            RowAccessor accessor;
+            accessor.data = pipnn_half_dense.data();
+            accessor.data_type_ = this->data_type_;
+            accessor.count_ = pipnn_vectors.size();
+            accessor.dim_ = static_cast<uint64_t>(dim_);
+            pipnn_builder.Build(bottom_graph_, inner_ids, accessor);
+        } else {
+            Vector<const float*> pipnn_f32_vectors(allocator_);
+            pipnn_f32_vectors.reserve(pipnn_vectors.size());
+            for (const auto* vec : pipnn_vectors) {
+                pipnn_f32_vectors.emplace_back(static_cast<const float*>(vec));
+            }
+            pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_f32_vectors);
+        }
         if (this->using_dedup_storage() and not defer_persistent_codes) {
             materialize_storage();
         }

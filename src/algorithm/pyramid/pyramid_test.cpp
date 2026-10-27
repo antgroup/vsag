@@ -38,6 +38,7 @@
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "simd/fp16_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "unittest.h"
@@ -2717,4 +2718,81 @@ TEST_CASE("Pyramid joins accepted node tasks before reporting failures",
     pool->WaitUntilEmpty();
     pool->before_task = {};
     CHECK(pool->running == 0);
+}
+
+TEST_CASE("Pyramid PiPNN supports fp16 input", "[ut][pyramid][pipnn][fp16]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 200;
+
+    std::mt19937 gen(42);
+    std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<std::string> paths(count, "a");
+
+    std::vector<float> fp32_vectors(count * dim);
+    for (auto& v : fp32_vectors) v = dist(gen);
+    std::vector<uint16_t> fp16_vectors(count * dim);
+    for (int64_t i = 0; i < count * dim; ++i) {
+        fp16_vectors[i] = vsag::generic::FloatToFP16(fp32_vectors[i]);
+    }
+
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FP16;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "graph_type": "pipnn",
+        "base_quantization_type": "fp16",
+        "use_reorder": false,
+        "max_degree": 16,
+        "ef_construction": 64,
+        "index_min_size": 8
+    })");
+    auto index = std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common);
+
+    auto ds = vsag::Dataset::Make()
+                  ->NumElements(count)
+                  ->Dim(dim)
+                  ->Ids(ids.data())
+                  ->Float16Vectors(fp16_vectors.data())
+                  ->Paths(paths.data())
+                  ->Owner(false);
+    auto build_result = index->Build(ds);
+    REQUIRE(build_result.has_value());
+
+    // Query must match the index dtype (fp16)
+    std::vector<float> query_f32(dim);
+    for (auto& v : query_f32) v = dist(gen);
+    std::vector<uint16_t> fp16_query(dim);
+    for (int64_t d = 0; d < dim; ++d) {
+        fp16_query[d] = vsag::generic::FloatToFP16(query_f32[d]);
+    }
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float16Vectors(fp16_query.data())
+                     ->Owner(false);
+    auto result = index->KnnSearch(query, 10, R"({"pyramid":{"ef_search":64}})", vsag::FilterPtr{});
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetIds()[0] >= 0);
+}
+
+TEST_CASE("Pyramid PiPNN rejects unsupported dtypes", "[ut][pyramid][pipnn]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 32;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_INT8;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "graph_type": "pipnn",
+        "base_quantization_type": "fp32",
+        "use_reorder": false,
+        "max_degree": 16,
+        "ef_construction": 64,
+        "index_min_size": 8
+    })");
+    REQUIRE_THROWS_AS(std::make_shared<vsag::IndexImpl<vsag::Pyramid>>(external, common),
+                      vsag::VsagException);
 }

@@ -4149,3 +4149,97 @@ TEST_CASE("Pyramid with extra_info: PIPNN dedup path", "[ft][pyramid][extra_info
     TestIndex::TestBuildIndex(index, dataset, true);
     TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
 }
+
+TEST_CASE("PiPNN ImportCache only, no Build", "[ft][pyramid][pipnn][cache]") {
+    constexpr int64_t D = 32, N = 200;
+    const auto param = R"(
+    {"dtype":"float32","metric_type":"l2","dim":32,
+     "index_param":{"base_quantization_type":"fp32","max_degree":16,
+     "ef_construction":100,"build_thread_count":1,"graph_type":"pipnn",
+     "persist_source_id":true}}
+    )";
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> d(-1, 1);
+    std::vector<float> v(D * N);
+    for (auto& x : v) x = d(rng);
+    std::vector<int64_t> ids(N);
+    for (int64_t i = 0; i < N; ++i) ids[i] = i + 1;
+    std::vector<std::string> sids(N);
+    for (int64_t i = 0; i < N; ++i) sids[i] = "s" + std::to_string(i);
+    auto ds = vsag::Dataset::Make();
+    ds->Dim(D)->NumElements(N)->Float32Vectors(v.data())->Ids(ids.data())->Owner(true);
+    ds->SourceID(sids.data());
+    auto idx = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(idx->Build(ds).has_value());
+    std::stringstream buf;
+    REQUIRE(idx->ExportCache(buf).has_value());
+    REQUIRE(buf.tellp() > 0);
+    buf.seekg(0);
+    auto imp = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(imp->ImportCache(buf).has_value());
+    UNSCOPED_INFO("ImportCache only: no crash on teardown");
+}
+
+TEST_CASE("PiPNN ExportCache + ImportCache + Build warm path smoke test",
+          "[ft][pyramid][pipnn][cache]") {
+    constexpr int64_t TEST_DIM = 32;
+    constexpr int64_t TEST_COUNT = 200;
+
+    const auto param = R"(
+    {"dtype":"float32","metric_type":"l2","dim":32,
+     "index_param":{"base_quantization_type":"fp32","max_degree":16,
+     "ef_construction":100,"build_thread_count":8,"graph_type":"pipnn",
+     "persist_source_id":true}}
+    )";
+
+    std::mt19937 rng(42);
+    std::uniform_real_distribution<float> dist(-1.0F, 1.0F);
+    std::vector<float> vectors(TEST_DIM * TEST_COUNT);
+    for (auto& v : vectors) v = dist(rng);
+    std::vector<int64_t> ids(TEST_COUNT);
+    for (int64_t i = 0; i < TEST_COUNT; ++i) ids[i] = i + 1;
+    std::vector<std::string> source_id_buf;
+    for (int64_t i = 0; i < TEST_COUNT; ++i) {
+        source_id_buf.push_back("sid_" + std::to_string(i));
+    }
+
+    auto dataset = vsag::Dataset::Make();
+    dataset->Dim(TEST_DIM)
+        ->NumElements(TEST_COUNT)
+        ->Float32Vectors(vectors.data())
+        ->Ids(ids.data())
+        ->Owner(true);
+    dataset->SourceID(source_id_buf.data());
+
+    // Step 1: Build baseline PiPNN Pyramid
+    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    REQUIRE(baseline->Build(dataset).has_value());
+    REQUIRE(baseline->GetNumElements() == TEST_COUNT);
+
+    // Step 2: ExportCache
+    std::stringstream cache_buf;
+    auto export_result = baseline->ExportCache(cache_buf);
+    REQUIRE(export_result.has_value());
+    auto cache_size = cache_buf.tellp();
+    REQUIRE(cache_size > 0);
+    UNSCOPED_INFO("PiPNN ExportCache exported " << cache_size << " bytes");
+
+    // Step 3: ImportCache into fresh index
+    cache_buf.seekg(0);
+    auto warmed = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto import_result = warmed->ImportCache(cache_buf);
+    REQUIRE(import_result.has_value());
+
+    // Step 4: Warm Build — should use build_with_cache
+    auto warm_build = warmed->Build(dataset);
+    REQUIRE(warm_build.has_value());
+    REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+
+    // Step 5: Verify searchability
+    auto query = vsag::Dataset::Make();
+    query->Dim(TEST_DIM)->NumElements(1)->Float32Vectors(vectors.data())->Owner(false);
+    auto search_params = R"({"pyramid": {"ef_search": 100}})";
+    auto result = warmed->KnnSearch(query, 10, search_params);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+}

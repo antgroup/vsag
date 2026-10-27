@@ -39,6 +39,7 @@
 #include "impl/blas/blas_function.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "pipnn_adaptive_pruning.h"
+#include "row_accessor.h"
 #include "simd/basic_func.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp32_simd.h"
@@ -261,7 +262,30 @@ public:
           thread_count_(thread_count),
           dimensions_(dimensions),
           metric_(metric),
-          rows_(rows),
+          rows_ptr_(&rows),
+          accessor_(*static_cast<const RowAccessor*>(nullptr)),
+          ids_(allocator),
+          reservoirs_(allocator),
+          reservoir_states_(allocator) {
+    }
+
+    PiPNNPipeline(const PiPNNGraphBuilderParameter& parameter,
+                  uint64_t dimensions,
+                  MetricType metric,
+                  Allocator* allocator,
+                  SafeThreadPool* thread_pool,
+                  uint64_t thread_count,
+                  GraphInterfacePtr graph,
+                  const RowAccessor& accessor)
+        : parameter_(parameter),
+          allocator_(allocator),
+          graph_(std::move(graph)),
+          thread_pool_(thread_pool),
+          thread_count_(thread_count),
+          dimensions_(dimensions),
+          metric_(metric),
+          rows_ptr_(nullptr),
+          accessor_(accessor),
           ids_(allocator),
           reservoirs_(allocator),
           reservoir_states_(allocator) {
@@ -352,7 +376,17 @@ private:
 
     [[nodiscard]] const float*
     vector_by_local_id(uint32_t local_id) const {
-        return rows_[local_id];
+        if (rows_ptr_ != nullptr) {
+            return (*rows_ptr_)[local_id];
+        }
+        // vector_by_local_id may be called from parallel workers, so the buffer
+        // must be per-call, not shared.  dimensions_ is small (typically <= 2048)
+        // so a stack allocation is fine.  The returned pointer is valid only until
+        // the next call; callers that need two rows simultaneously must copy.
+        thread_local std::vector<float> tl_scratch;
+        tl_scratch.resize(accessor_.dim_);
+        accessor_.CopyRow(local_id, tl_scratch.data());
+        return tl_scratch.data();
     }
 
 private:
@@ -364,8 +398,9 @@ private:
 
     uint64_t dimensions_;
     MetricType metric_;
-    // Build() is synchronous, so the pipeline borrows rows only for its own lifetime.
-    const Vector<const float*>& rows_;
+    // Build() is synchronous, so the pipeline borrows rows/accessor for its own lifetime.
+    const Vector<const float*>* rows_ptr_{nullptr};
+    const RowAccessor& accessor_;
     uint64_t reservoir_size_{0};
     Vector<InnerIdType> ids_;
     float* norms_{nullptr};
@@ -396,7 +431,10 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
 void
 PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
     ids_.assign(ids_sequence.begin(), ids_sequence.end());
-    require_argument(ids_.size() == rows_.size(), "PiPNN IDs and rows must have equal sizes");
+    require_argument(rows_ptr_ == nullptr || ids_.size() == rows_ptr_->size(),
+                     "PiPNN IDs and rows must have equal sizes");
+    require_argument(rows_ptr_ != nullptr || ids_.size() <= accessor_.Count(),
+                     "PiPNN ID count exceeds row accessor count");
     require_argument(ids_.size() <= std::numeric_limits<uint32_t>::max(),
                      "PiPNN point count exceeds the local ID limit");
     if (ids_.empty()) {
@@ -415,14 +453,16 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
             const auto id = ids_[local_id];
             require_argument(id < graph_capacity, "PiPNN input ID is outside the graph capacity");
             require_argument(seen_ids.emplace(id).second, "PiPNN input IDs must be unique");
-            require_argument(rows_[local_id] != nullptr, "PiPNN input rows must not be null");
+            require_argument((rows_ptr_ != nullptr ? (*rows_ptr_)[local_id] != nullptr : true),
+                             "PiPNN input rows must not be null");
         }
     } else {
         parallel_for(ids_.size(), 256, [&](uint64_t begin, uint64_t end) {
             for (uint64_t local_id = begin; local_id < end; ++local_id) {
                 require_argument(ids_[local_id] < graph_capacity,
                                  "PiPNN input ID is outside the graph capacity");
-                require_argument(rows_[local_id] != nullptr, "PiPNN input rows must not be null");
+                require_argument((rows_ptr_ != nullptr ? (*rows_ptr_)[local_id] != nullptr : true),
+                                 "PiPNN input rows must not be null");
             }
         });
     }
@@ -1388,7 +1428,15 @@ float
 PiPNNPipeline::pair_distance(uint32_t lhs, uint32_t rhs) const {
     const auto* left = vector_by_local_id(lhs);
     const auto* right = vector_by_local_id(rhs);
-    const float dot = FP32ComputeIP(left, right, dimensions_);
+    float dot;
+    if (rows_ptr_ != nullptr) {
+        dot = FP32ComputeIP(left, right, dimensions_);
+    } else {
+        // fp16/bf16: vector_by_local_id reuses thread_local buffer, so left
+        // is stale after the second call.  Copy left into a local buffer.
+        std::vector<float> left_copy(left, left + dimensions_);
+        dot = FP32ComputeIP(left_copy.data(), right, dimensions_);
+    }
     return distance_from_dot(lhs, rhs, dot);
 }
 
@@ -1722,6 +1770,17 @@ PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
     for (const auto& [representative, duplicate] : duplicates) {
         graph->SetDuplicateId(representative, duplicate);
     }
+}
+
+void
+PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
+                         const Vector<InnerIdType>& ids_sequence,
+                         const RowAccessor& accessor) const {
+    require_argument(graph != nullptr, "PiPNN graph must not be null");
+    parameter_.Validate(graph->MaximumDegree());
+    PiPNNPipeline(
+        parameter_, dimensions_, metric_, allocator_, thread_pool_, thread_count_, graph, accessor)
+        .Build(ids_sequence);
 }
 
 }  // namespace vsag
