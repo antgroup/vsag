@@ -229,11 +229,19 @@ heap. Time, host, tombstone, and user `Filter` conditions use AND semantics. Fai
 documents can make adjacent logical partitions share a physical window; the exact day check keeps
 boundary results correct.
 
-Time-aware indexes are build-once. A mutable index may receive `publish_time_stamp` through
-`Build()` or the first `Add()` while empty, but rejects every later `Add()`. Mutable host-only
-indexes retain incremental `Add()` support. Publish-time filtering supports mutable and immutable
-indexes with either `use_reorder` setting, applies only to KNN search, and is preserved by standard
-and streaming serialization. A restored mutable time-aware index remains build-once.
+Mutable time-aware indexes support incremental `Add()`. The initial `Build()` or first `Add()` on
+an empty index must supply one `publish_time_stamp` value per vector; every later `Add()` must
+also supply it and preserve whether host metadata is present. Each batch is sorted internally by
+time and appended as a contiguous ID segment. Dates may overlap across batches, so older dates
+can be backfilled. Missing-time documents remain at the end of each segment, and queries route
+through matching partitions in every segment. An existing index without time metadata cannot
+gain it through `Add()`. Publish-time filtering applies only to KNN and is preserved by standard
+and streaming serialization; a restored mutable index can continue to accept time-aware `Add()`.
+Immutable and DMQ8 rerank runtimes still reject incremental writes.
+Many small `Add()` batches create many segments, so time-filtered queries check more segment
+directories; batch inserts when practical.
+The new time metadata format is v2: current readers accept v1 snapshots, while older readers
+cannot load snapshots written in v2.
 
 Queries without a time selector scan every time and missing-time partition. Host-only queries
 select that host from every partition. Exact time filtering disables term-level posting pruning in
