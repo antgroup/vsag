@@ -18,6 +18,7 @@
 
 #include <algorithm>
 #include <array>
+#include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <cmath>
@@ -2771,7 +2772,18 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     };
 
     // ---- (1) baseline build ----
-    auto baseline = vsag::Factory::CreateIndex("pyramid", param).value();
+    const auto split_rabitq = GENERATE(false, true);
+    CAPTURE(split_rabitq);
+    auto build_params = vsag::JsonType::Parse(param);
+    if (split_rabitq) {
+        build_params["index_param"]["base_quantization_type"].SetString("rabitq");
+        build_params["index_param"]["precise_quantization_type"].SetString("rabitq");
+        build_params["index_param"]["rabitq_bits_per_dim_base"].SetInt(3);
+        build_params["index_param"]["rabitq_bits_per_dim_precise"].SetInt(5);
+        build_params["index_param"]["use_reorder"].SetBool(true);
+    }
+    const auto cache_param = build_params.Dump();
+    auto baseline = vsag::Factory::CreateIndex("pyramid", cache_param).value();
     auto baseline_build = baseline->Build(make_dataset());
     REQUIRE(baseline_build.has_value());
     REQUIRE(baseline->GetNumElements() == TEST_COUNT);
@@ -2779,7 +2791,7 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
     // ---- (2) preserve SourceID in the all-in-one module section ----
     auto binary = baseline->Serialize();
     REQUIRE(binary.has_value());
-    auto all_in_one = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto all_in_one = vsag::Factory::CreateIndex("pyramid", cache_param).value();
     REQUIRE(all_in_one->Deserialize(binary.value()).has_value());
 
     // ---- (3) export cache from the footer-deserialized index ----
@@ -2790,12 +2802,15 @@ TEST_CASE("Pyramid ExportCache + ImportCache + Build acceleration smoke test",
 
     // ---- (4) fresh index, import cache, build again ----
     cache_buf.seekg(0);
-    auto warmed = vsag::Factory::CreateIndex("pyramid", param).value();
+    auto warmed = vsag::Factory::CreateIndex("pyramid", cache_param).value();
     auto import_result = warmed->ImportCache(cache_buf);
     REQUIRE(import_result.has_value());
     auto warmed_build = warmed->Build(make_dataset());
     REQUIRE(warmed_build.has_value());
     REQUIRE(warmed->GetNumElements() == TEST_COUNT);
+    // Neither variant has a separate reorder store: FP32 disables reorder, while split
+    // RaBitQ keeps both code parts in base even with use_reorder enabled.
+    REQUIRE(warmed->GetMemoryUsageDetail().count("precise_codes") == 0);
     auto restored_data =
         warmed->GetDataByIdsWithFlag(ids.data() + 1, 1, DATA_FLAG_ID | DATA_FLAG_PATH);
     REQUIRE(restored_data.has_value());
@@ -3689,14 +3704,65 @@ TEST_CASE("Pyramid cached source component remains reachable from routed entries
     }
 }
 
-TEST_CASE("Pyramid warm cache preserves raw vectors and precise distances",
+TEST_CASE("Pyramid warm cache preserves separate precise codes without raw vectors",
+          "[ft][pyramid][cache][precise_codes][pr]") {
+    DuplicateClassFixture fixture(
+        GENERATE(std::string("single_layer"), std::string("multi_layer")));
+    auto params = vsag::JsonType::Parse(fixture.params);
+    params["index_param"]["base_quantization_type"].SetString("sq8");
+    params["index_param"]["precise_quantization_type"].SetString("fp32");
+    params["index_param"]["use_reorder"].SetBool(true);
+    params["index_param"]["store_raw_vector"].SetBool(false);
+    fixture.params = params.Dump();
+    auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(cold->Build(fixture.Dataset()).has_value());
+    std::stringstream cache;
+    REQUIRE(cold->ExportCache(cache).has_value());
+    auto warm = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(warm->ImportCache(cache).has_value());
+    REQUIRE(warm->Build(fixture.Dataset()).has_value());
+    REQUIRE(vsag::JsonType::Parse(warm->GetStats())["build_cache_hit_nodes"].GetInt() > 0);
+    auto binary = warm->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    for (const auto& index : {warm, restored}) {
+        const auto memory = index->GetMemoryUsageDetail();
+        REQUIRE(memory.count("precise_codes") == 1);
+        REQUIRE(memory.count("raw_vector") == 0);
+        // An off-grid query avoids SQ8 quantization accidentally matching exact FP32 results.
+        const float query[2]{0.3F, 0.7F};
+        for (uint64_t row = 0; row < fixture.ids.size(); ++row) {
+            const auto distance = index->CalcDistanceById(query, fixture.ids[row], true);
+            REQUIRE(distance.has_value());
+            float expected = 0.0F;
+            for (int64_t d = 0; d < fixture.dim; ++d) {
+                const auto delta = query[d] - fixture.vectors[row * fixture.dim + d];
+                expected += delta * delta;
+            }
+            REQUIRE(distance.value() == Catch::Approx(expected));
+        }
+    }
+}
+
+TEST_CASE("Pyramid warm cache preserves raw vectors and raw-backed exact distances",
           "[ft][pyramid][cache][raw_vector][duplicate_raw_cache][pr]") {
     const auto duplicate = GENERATE(false, true);
     const auto root = GENERATE(std::string("single_layer"), std::string("multi_layer"));
     DuplicateClassFixture fixture(root);
     auto params = vsag::JsonType::Parse(fixture.params);
     params["index_param"]["support_duplicate"].SetBool(duplicate);
-    params["index_param"]["base_quantization_type"].SetString("sq8");
+    const auto split_rabitq = GENERATE(false, true);
+    CAPTURE(duplicate, root, split_rabitq);
+    params["index_param"]["base_quantization_type"].SetString(split_rabitq ? "rabitq" : "sq8");
+    params["index_param"]["precise_quantization_type"].SetString("fp32");
+    params["index_param"]["use_reorder"].SetBool(true);
+    if (split_rabitq) {
+        params["index_param"]["precise_quantization_type"].SetString("rabitq");
+        params["index_param"]["rabitq_bits_per_dim_base"].SetInt(3);
+        params["index_param"]["rabitq_bits_per_dim_precise"].SetInt(5);
+        params["index_param"]["use_reorder"].SetBool(true);
+    }
     params["index_param"]["store_raw_vector"].SetBool(true);
     fixture.params = params.Dump();
     auto cold = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
@@ -3712,6 +3778,10 @@ TEST_CASE("Pyramid warm cache preserves raw vectors and precise distances",
     auto restored = vsag::Factory::CreateIndex("pyramid", fixture.params).value();
     REQUIRE(restored->Deserialize(binary.value()).has_value());
     for (const auto& index : {cold, warm, restored}) {
+        const auto memory = index->GetMemoryUsageDetail();
+        REQUIRE(memory.count("precise_codes") == (split_rabitq ? 0 : 1));
+        REQUIRE(memory.count("raw_vector") == 1);
+        // CalcDistanceById(..., true) prefers raw vectors over either reorder representation.
         auto raw = index->GetRawVectorByIds(fixture.ids.data(), fixture.ids.size(), nullptr);
         REQUIRE(raw.has_value());
         REQUIRE(std::equal(

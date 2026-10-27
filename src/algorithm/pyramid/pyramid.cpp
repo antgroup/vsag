@@ -44,6 +44,7 @@
 #include "impl/reasoning/reasoning_context.h"
 #include "io/common/io_parameter.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
+#include "pyramid_fast_build.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "query_context.h"
 #include "storage/empty_index_binary_set.h"
@@ -71,6 +72,14 @@ hash_construction_code(const uint8_t* data, uint64_t size) {
 }  // namespace
 
 namespace {
+
+bool
+supports_parallel_encode(const FlattenInterfacePtr& codes) {
+    const auto name = codes->GetQuantizerName();
+    return codes->InMemory() &&
+           (name == QUANTIZATION_TYPE_VALUE_FP32 || name == QUANTIZATION_TYPE_VALUE_RABITQ ||
+            name == QUANTIZATION_TYPE_VALUE_SQ8);
+}
 
 void
 drain_futures(Vector<std::future<void>>& futures, std::exception_ptr first_exception = nullptr) {
@@ -1956,12 +1965,6 @@ Pyramid::encode_add_batch(const DatasetPtr& base, const AddBatch& batch) {
             }
         }
     };
-    const auto supports_parallel_encode = [](const FlattenInterfacePtr& codes) {
-        const auto name = codes->GetQuantizerName();
-        return codes->InMemory() &&
-               (name == QUANTIZATION_TYPE_VALUE_FP32 || name == QUANTIZATION_TYPE_VALUE_RABITQ ||
-                name == QUANTIZATION_TYPE_VALUE_SQ8);
-    };
     const bool stores_support_parallel_encode =
         supports_parallel_encode(base_codes_) &&
         (not has_precise_reorder() || supports_parallel_encode(precise_codes_)) &&
@@ -2403,43 +2406,28 @@ Pyramid::Build(const DatasetPtr& base) {
     if (graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         populate_hierarchy_trees(base);
     }
-    auto optimized_codes =
-        std::dynamic_pointer_cast<FlattenOptimizedBuildInterface>(construction_codes());
-    if (optimized_codes != nullptr and
-        optimized_codes->BeginOptimizedBuild({thread_pool_, build_thread_count_})) {
-        optimized_build_codes_ = std::move(optimized_codes);
-    }
-    try {
-        std::vector<int64_t> result;
-        if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
-            auto failed = this->Add(base);
-            if (support_duplicate_ and failed.empty()) {
-                for (const auto& [name, hierarchy] : hierarchies_) {
-                    std::vector<std::pair<std::string, IndexNode*>> nodes;
-                    collect_graph_nodes(hierarchy->root.get(), std::string{}, nodes);
-                    for (const auto& [path, node] : nodes) {
-                        repair_duplicate_connectivity(*node);
-                    }
+    PyramidOptimizedBuildSession optimized_build(*this);
+    std::vector<int64_t> result;
+    if (graph_type_ == GRAPH_TYPE_VALUE_NSW) {
+        auto failed = this->Add(base);
+        if (support_duplicate_ and failed.empty()) {
+            for (const auto& [name, hierarchy] : hierarchies_) {
+                std::vector<std::pair<std::string, IndexNode*>> nodes;
+                collect_graph_nodes(hierarchy->root.get(), std::string{}, nodes);
+                for (const auto& [path, node] : nodes) {
+                    repair_duplicate_connectivity(*node);
                 }
             }
-            result = failed;
-        } else {
-            this->Train(base);
-            result = this->build_by_batch_graph(base);
         }
-        if (optimized_build_codes_ != nullptr) {
-            optimized_build_codes_->FinalizeOptimizedBuild();
-            optimized_build_codes_.reset();
-        }
-        return result;
-    } catch (...) {
-        // All build workers must be drained before releasing their temporary scalar codes.
-        if (optimized_build_codes_ != nullptr) {
-            optimized_build_codes_->AbortOptimizedBuild();
-            optimized_build_codes_.reset();
-        }
-        throw;
+        result = failed;
+    } else {
+        this->Train(base);
+        result = this->build_by_batch_graph(base);
     }
+    // All build workers must be drained before releasing their temporary scalar codes;
+    // the session destructor aborts the build if this commit is not reached.
+    optimized_build.Commit();
+    return result;
 }
 
 void
@@ -3778,6 +3766,13 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
 
     CHECK_ARGUMENT(source_ids != nullptr, "build_with_cache requires dataset with source_ids");
 
+    // Reuse the same optimized RaBitQ build session as the plain build path. The session
+    // must begin before resize() so the temporary scalar-code storage grows alongside the
+    // persistent split storage; on any exception the session destructor aborts the build.
+    PyramidOptimizedBuildSession optimized_build(*this);
+    logger::debug("[pyramid_build_cache] optimized RaBitQ build session active: {}",
+                  optimized_build.Active());
+
     this->Train(base);
     resize(data_num);
     for (int64_t i = 0; i < data_num; ++i) {
@@ -3786,12 +3781,24 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
         label_table_->Insert(inner_id, data_ids[i]);
         label_table_->InsertSourceId(inner_id, source_ids[i]);
     }
-    base_codes_->BatchInsertVector(data_vectors, data_num);
+    const auto insert_codes = [&](const FlattenInterfacePtr& codes) {
+        // resize() preallocates the full ID range, but not every store supports disjoint writes.
+        // Keep unsupported quantizers and non-memory IO on the serial path, as in cold Add.
+        ParallelBatchInsertVector(
+            codes,
+            static_cast<InnerIdType>(data_num),
+            nullptr,
+            supports_parallel_encode(codes) ? this->thread_pool_.get() : nullptr,
+            this->build_thread_count_,
+            [=](InnerIdType begin) { return element_ptr(data_vectors, begin); });
+    };
+    // ParallelBatchInsertVector joins all accepted tasks before propagating failures.
+    insert_codes(base_codes_);
     if (has_precise_reorder()) {
-        precise_codes_->BatchInsertVector(data_vectors, data_num);
+        insert_codes(precise_codes_);
     }
     if (raw_vector_ != nullptr) {
-        raw_vector_->BatchInsertVector(data_vectors, data_num);
+        insert_codes(raw_vector_);
     }
     cur_element_count_ = data_num;
 
@@ -4320,6 +4327,7 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
 
     // Imported-cache eligibility rejects repeated labels, so this matches the normal Build result
     // for the same valid dataset: no failed ids.
+    optimized_build.Commit();
     return {};
 }
 

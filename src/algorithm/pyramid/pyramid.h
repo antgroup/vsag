@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/pyramid/pyramid_build_cache.h"
+#include "algorithm/pyramid/pyramid_fast_build.h"
 #include "algorithm/pyramid/pyramid_path_store.h"
 #include "datacell/flatten_optimized_build_interface.h"
 #include "datacell/graph_interface.h"
@@ -283,6 +284,7 @@ public:
 
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
+    friend class PyramidOptimizedBuildSession;
 
 private:
     void
