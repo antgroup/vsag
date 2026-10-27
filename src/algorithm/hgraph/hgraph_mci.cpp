@@ -46,6 +46,68 @@ constexpr uint64_t K_MCI_MIN_CLIQUE_SIZE = 2;
 constexpr uint64_t K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER = 64;
 constexpr uint64_t K_MCI_MIN_BITSET_SEED_SAMPLES = 4096;
 
+// Detach the cached buffer while a query owns it. A nested search on the same worker can
+// then borrow another buffer without invalidating this query's prepared predicate.
+class MCIValidIdScratch {
+public:
+    MCIValidIdScratch() {
+        ids.swap(cached_ids);
+        ids.clear();
+    }
+
+    ~MCIValidIdScratch() {
+        if (ids.capacity() > cached_ids.capacity()) {
+            ids.swap(cached_ids);
+        }
+    }
+
+    MCIValidIdScratch(const MCIValidIdScratch&) = delete;
+    MCIValidIdScratch&
+    operator=(const MCIValidIdScratch&) = delete;
+
+    std::vector<InnerIdType> ids;
+
+private:
+    inline static thread_local std::vector<InnerIdType> cached_ids;
+};
+
+// Unlike seed sampling, predicate packing needs the entire mapped set, including real
+// labels after unknown entries. Identity labels need no reverse-map lookup or stride division.
+void
+collect_mci_valid_inner_ids(const FilterPtr& filter,
+                            const LabelTablePtr& labels,
+                            std::vector<InnerIdType>& inner_ids) {
+    const int64_t* valid_labels = nullptr;
+    int64_t valid_count = 0;
+    filter->GetValidIds(&valid_labels, valid_count);
+    if (valid_labels == nullptr or valid_count <= 0) {
+        return;
+    }
+    inner_ids.reserve(static_cast<uint64_t>(valid_count));
+    if (labels->IsIdentityMapping()) {
+        const auto total = static_cast<uint64_t>(labels->GetTotalCount());
+        const auto deleted_ids = labels->GetDeletedIdsReadView();
+        for (int64_t i = 0; i < valid_count; ++i) {
+            const auto label = valid_labels[i];
+            if (label >= 0 and static_cast<uint64_t>(label) < total and
+                (deleted_ids == nullptr or deleted_ids->CheckValid(label))) {
+                inner_ids.push_back(static_cast<InnerIdType>(label));
+            }
+        }
+    } else {
+        for (int64_t i = 0; i < valid_count; ++i) {
+            const auto [found, inner_id] = labels->TryGetIdByLabel(valid_labels[i]);
+            if (found) {
+                inner_ids.push_back(inner_id);
+            }
+        }
+    }
+    if (not std::is_sorted(inner_ids.begin(), inner_ids.end())) {
+        std::sort(inner_ids.begin(), inner_ids.end());
+    }
+    inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
+}
+
 Vector<InnerIdType>
 collect_seed_inner_ids(const FilterPtr& filter,
                        const LabelTablePtr& label_table,
@@ -590,7 +652,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     bool exhaustive_seeds = false;
     auto seed_inner_ids = this->collect_hybrid_seeds(
         request, inner_filter, params, total_count, nullptr, &exhaustive_seeds, ctx->alloc);
-    Vector<InnerIdType> valid_inner_ids(ctx->alloc);
+    MCIValidIdScratch valid_inner_ids;
     {
         // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
         // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
@@ -613,12 +675,12 @@ HGraph::try_mci_search(const SearchRequest& request,
             }
         }
     }
-    if (params.mci_packed_filter and not bitset_seed_source and not params.use_extra_info_filter) {
+    if (params.mci_packed_filter and not bitset_seed_source and not params.use_extra_info_filter and
+        not exhaustive_seeds and not seed_inner_ids.empty() and params.mci_hops_limit > 1) {
         auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
-        valid_inner_ids = collect_seed_inner_ids(
-            request.filter_, this->label_table_, std::numeric_limits<uint64_t>::max(), ctx->alloc);
-        mci_param.valid_inner_ids = valid_inner_ids.data();
-        mci_param.valid_inner_count = valid_inner_ids.size();
+        collect_mci_valid_inner_ids(request.filter_, this->label_table_, valid_inner_ids.ids);
+        mci_param.valid_inner_ids = valid_inner_ids.ids.data();
+        mci_param.valid_inner_count = valid_inner_ids.ids.size();
     }
     result.seed_count = seed_inner_ids.size();
     mci_param.seed_count = result.seed_count;

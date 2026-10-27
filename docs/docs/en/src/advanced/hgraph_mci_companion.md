@@ -547,6 +547,11 @@ and leaving the new depth/convergence options at their defaults disables these o
 The coverage seed budget is applied to routed MCI as well as joint Hybrid. When the seed
 phase has scored the complete valid set, it skips clique expansion and packed-bitmap construction.
 
+Complete-ID preparation uses direct conversion only after validating identity label mapping;
+other labels still use the reverse map. Unknown/deleted labels are excluded, duplicates are
+removed, and already sorted input avoids another sort. A worker reuses its temporary buffer
+without sharing it with concurrent or nested queries. This preparation remains inside query time.
+
 For useful activation priorities, build with `"mci_clique_activation_order": true` in
 `index_param`. This is off by default. It greedily ranks each point's incident cliques by
 new coverage of that point's existing input KNN candidates, then orders the tail by near-edge

@@ -1,9 +1,12 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 
+#include <functional>
 #include <future>
+#include <limits>
 #include <numeric>
 #include <sstream>
+#include <utility>
 
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/mci/mci_clique_activation.h"
@@ -75,7 +78,7 @@ TEST_CASE("MCI activation greedily covers near edges and persists in existing CS
         }
     }
     std::vector<InnerIdType> neighbors(total * degree, UINT32_MAX);
-    std::iota(neighbors.begin(), neighbors.begin() + degree, 1);
+    std::iota(neighbors.begin(), neighbors.begin() + static_cast<int64_t>(degree), 1);
     MCIGraphView graph{neighbors.data(), nullptr, total, degree, degree};
     const auto original = rows;
     rank_mci_clique_activation(graph, cliques, rows, GENERATE(1, 4));
@@ -89,10 +92,12 @@ TEST_CASE("MCI activation greedily covers near edges and persists in existing CS
         std::sort(sorted.begin(), sorted.end());
         REQUIRE(sorted == original[id]);
     }
-    Vector<InnerIdType> co(allocator.get()), no(allocator.get());
+    Vector<InnerIdType> co(allocator.get());
+    Vector<InnerIdType> no(allocator.get());
     co.push_back(0);
     no.push_back(0);
-    Vector<InnerIdType> members(allocator.get()), ids(allocator.get());
+    Vector<InnerIdType> members(allocator.get());
+    Vector<InnerIdType> ids(allocator.get());
     for (const auto& clique : cliques) {
         members.insert(members.end(), clique.begin(), clique.end());
         co.push_back(members.size());
@@ -192,8 +197,9 @@ TEST_CASE("MCI search optimization parameters reject malformed budgets",
         for (const std::string& value :
              {"-1", "1.5", "true", "4294967296", "18446744073709551615"}) {
             INFO(field << "=" << value);
-            REQUIRE_THROWS(HGraphSearchParameters::FromJson("{\"hgraph\":{\"ef_search\":40,\"" +
-                                                            field + "\":" + value + "}}"));
+            std::string parameters = R"({"hgraph":{"ef_search":40,")";
+            parameters.append(field).append("\":").append(value).append("}}");
+            REQUIRE_THROWS(HGraphSearchParameters::FromJson(parameters));
         }
     }
     REQUIRE_THROWS(HGraphSearchParameters::FromJson(
@@ -304,14 +310,15 @@ TEST_CASE("MCI batches across overlapping cliques and skips exhaustive expansion
                       VsagException);
 }
 
-TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrently",
+TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
           "[ut][mci][MCIOptimization][hgraph]") {
     constexpr int64_t total = 64;
     constexpr int64_t dim = 4;
     std::vector<int64_t> labels(total);
     std::vector<float> vectors(total * dim);
+    const bool identity = GENERATE(false, true);
     for (int64_t u = 0; u < total; ++u) {
-        labels[u] = 1000 + u * 2;
+        labels[u] = identity ? u : 1000 + u * 2;
         for (int64_t j = 0; j < dim; ++j) {
             vectors[u * dim + j] = static_cast<float>((u * 7 + j * 13) % 71);
         }
@@ -338,8 +345,13 @@ TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrentl
     class ValidLabels : public Filter {
     public:
         std::vector<int64_t> ids;
+        mutable std::function<void()> on_check;
         bool
         CheckValid(int64_t label) const override {
+            if (on_check) {
+                auto callback = std::exchange(on_check, nullptr);
+                callback();
+            }
             return std::find(ids.begin(), ids.end(), label) != ids.end();
         }
         float
@@ -349,7 +361,7 @@ TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrentl
         void
         GetValidIds(const int64_t** out, int64_t& count) const override {
             *out = ids.data();
-            count = ids.size();
+            count = static_cast<int64_t>(ids.size());
         }
     };
     auto filter = std::make_shared<ValidLabels>();
@@ -359,10 +371,14 @@ TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrentl
     // Unknown labels must not make preparation subsample away a real legal label.
     filter->ids.insert(filter->ids.begin(), 9000);
     filter->ids.push_back(9001);
+    filter->ids.push_back(-1);
+    filter->ids.push_back(std::numeric_limits<int64_t>::max());
+    filter->ids.push_back(labels[0]);
+    std::reverse(filter->ids.begin(), filter->ids.end());
     auto query =
         Dataset::Make()->NumElements(1)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     const std::string search = R"({"hgraph":{"ef_search":32,"use_mci":true,
-        "hgraph_valid_ratio_threshold":1,"mci_seed_ratio":0.1,"mci_seed_coverage":0,
+        "hgraph_valid_ratio_threshold":1,"mci_seed_ratio":100,"mci_seed_coverage":0,
         "mci_activation_cap":8,"mci_hops_limit":9,"search_no_lock":true,"parallelism":1}})";
     std::vector<std::future<bool>> workers;
     for (uint64_t t = 0; t < 4; ++t) {
@@ -371,6 +387,10 @@ TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrentl
                 auto result = loaded->KnnSearch(query, 4, search, filter);
                 if (not result.has_value() or result.value()->GetDim() == 0 or
                     SearchLockScope::IsNoLock()) {
+                    return false;
+                }
+                if (JsonType::Parse(result.value()->GetStatistics())["mci_hybrid_route"]
+                        .GetString() != "mci") {
                     return false;
                 }
                 for (int64_t j = 0; j < result.value()->GetDim(); ++j) {
@@ -385,5 +405,32 @@ TEST_CASE("Ranked MCI builds reloads and searches nonidentity labels concurrentl
     for (auto& worker : workers) {
         REQUIRE(worker.get());
     }
+    REQUIRE_FALSE(SearchLockScope::IsNoLock());
+
+    // A filter callback may issue another MCI query after the outer predicate IDs have
+    // been prepared but before they are packed. Its scratch must not overwrite the outer set.
+    auto inner_filter = std::make_shared<ValidLabels>();
+    for (int64_t u = 1; u < total; u += 2) {
+        inner_filter->ids.push_back(labels[u]);
+    }
+    const std::string small_search = R"({"hgraph":{"ef_search":32,"use_mci":true,
+        "hgraph_valid_ratio_threshold":1,"mci_seed_ratio":1,"mci_seed_coverage":0,
+        "mci_hops_limit":9,"search_no_lock":true,"parallelism":1}})";
+    auto reference = loaded->KnnSearch(query, 32, small_search, filter);
+    REQUIRE(reference.has_value());
+    bool nested = false;
+    filter->on_check = [&] {
+        auto inner_result = loaded->KnnSearch(query, 32, small_search, inner_filter);
+        REQUIRE(inner_result.has_value());
+        nested = true;
+        REQUIRE(SearchLockScope::IsNoLock());
+    };
+    auto result = loaded->KnnSearch(query, 32, small_search, filter);
+    REQUIRE(result.has_value());
+    REQUIRE(nested);
+    REQUIRE(result.value()->GetDim() == reference.value()->GetDim());
+    REQUIRE(std::equal(reference.value()->GetIds(),
+                       reference.value()->GetIds() + reference.value()->GetDim(),
+                       result.value()->GetIds()));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
 }
