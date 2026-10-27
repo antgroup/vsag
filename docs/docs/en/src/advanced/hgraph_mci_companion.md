@@ -144,6 +144,14 @@ enumeration cheap in absolute terms -- 32768 inner ids are 128 KiB and therefore
 so the saturated skip stays a win instead of turning a wide predicate into a scan-sized seed
 phase.
 
+For the pure MCI route with non-contiguous vector storage, a certified complete, sorted seed
+list can be scored directly through the existing batched distance backend, without initializing
+visited marks or maintaining an expansion queue. This shortcut requires static CSR, a complete
+valid bitmap, no timeout and no mutable-predicate revalidation; it validates IDs and the pinned
+deletion view before use. Other queries retain ordinary traversal. The result heap still keeps
+`max(k, ef_search)` entries so existing reorder behavior is preserved. This changes execution
+overhead, not the seed budget, distance precision or serialized index.
+
 The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
 function filters are accepted, but a custom `Filter` gives the search planner better
 selectivity information.

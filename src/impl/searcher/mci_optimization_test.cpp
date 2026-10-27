@@ -327,6 +327,41 @@ TEST_CASE("MCI batches across overlapping cliques and skips exhaustive expansion
     REQUIRE(result->Size() == valid.size());
     REQUIRE(exhaustive_stats.dist_cmp.load() == valid.size());
     REQUIRE(exhaustive_stats.hops.load() == 0);
+    std::vector<std::pair<float, InnerIdType>> exhaustive_results;
+    while (not result->Empty()) {
+        exhaustive_results.push_back(result->Top());
+        result->Pop();
+    }
+    // The certified complete-seed path must match the ordinary seed/frontier path,
+    // including the final partial distance batch and non-binary predicate bytes.
+    params.enumerated_valid_count = 0;
+    SearchStatistics reference_stats;
+    ctx.stats = &reference_stats;
+    result = MCISearcher(common).Search(cliques, flatten, &query, search, params, &ctx);
+    REQUIRE(result->Size() == exhaustive_results.size());
+    for (const auto& expected : exhaustive_results) {
+        REQUIRE(result->Top() == expected);
+        result->Pop();
+    }
+    params.enumerated_valid_count = valid.size();
+    // A pending label deletion can precede the MCI snapshot update. It must disable
+    // the shortcut rather than allow the complete seed list to bypass deletion checks.
+    LabelTable labels(allocator.get());
+    for (InnerIdType id = 0; id < total; ++id) {
+        labels.Insert(id, id);
+    }
+    const auto deleted_id = valid.back();
+    REQUIRE(labels.MarkRemove({static_cast<int64_t>(deleted_id)}) == 1);
+    params.deleted_ids_filter = labels.GetDeletedIdsReadView();
+    SearchStatistics deleted_stats;
+    ctx.stats = &deleted_stats;
+    result = MCISearcher(common).Search(cliques, flatten, &query, search, params, &ctx);
+    REQUIRE(result->Size() == valid.size() - 1);
+    REQUIRE(deleted_stats.dist_cmp.load() == valid.size() - 1);
+    while (not result->Empty()) {
+        REQUIRE(result->Top().second != deleted_id);
+        result->Pop();
+    }
     Vector<InnerIdType> delta({0, 129}, allocator.get());
     cliques->AppendNewClique(delta, total);
     REQUIRE_THROWS_AS(MCISearcher(common).Search(cliques, flatten, &query, search, params, &ctx),

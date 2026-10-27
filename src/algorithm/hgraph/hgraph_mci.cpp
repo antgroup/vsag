@@ -132,14 +132,27 @@ collect_seed_inner_ids(const FilterPtr& filter,
 
     const auto sampled_count = std::min<uint64_t>(seed_count, static_cast<uint64_t>(valid_count));
     inner_ids.reserve(sampled_count);
+    const bool identity = label_table->IsIdentityMapping();
+    const auto total = static_cast<uint64_t>(label_table->GetTotalCount());
+    const auto deleted = identity ? label_table->GetDeletedIdsReadView() : nullptr;
     for (uint64_t i = 0; i < sampled_count; ++i) {
         const auto offset = i * static_cast<uint64_t>(valid_count) / sampled_count;
-        auto [found, inner_id] = label_table->TryGetIdByLabel(valid_labels[offset]);
-        if (found) {
-            inner_ids.push_back(inner_id);
+        const auto label = valid_labels[offset];
+        if (identity) {
+            if (label >= 0 and static_cast<uint64_t>(label) < total and
+                (deleted == nullptr or deleted->CheckValid(label))) {
+                inner_ids.push_back(static_cast<InnerIdType>(label));
+            }
+        } else {
+            auto [found, inner_id] = label_table->TryGetIdByLabel(label);
+            if (found) {
+                inner_ids.push_back(inner_id);
+            }
         }
     }
-    std::sort(inner_ids.begin(), inner_ids.end());
+    if (not std::is_sorted(inner_ids.begin(), inner_ids.end())) {
+        std::sort(inner_ids.begin(), inner_ids.end());
+    }
     inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
     if (enumerates_all_valid != nullptr) {
         // `sampled_count == valid_count` means the whole valid-label list was visited (no
