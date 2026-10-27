@@ -3,6 +3,9 @@
 
 from pathlib import Path
 import re
+import subprocess
+import tempfile
+import textwrap
 import unittest
 
 
@@ -77,6 +80,84 @@ class DependencyWorkflowTest(unittest.TestCase):
             with self.subTest(dependency=dependency):
                 self.assertRegex(recipe, r"URL_HASH\s+(?:MD5|SHA256)=")
                 self.assertIn("vsag_resolve_thirdparty_override", recipe)
+
+
+class TsanCleanupTest(unittest.TestCase):
+    def cleanup_script(self, sandbox: Path) -> str:
+        workflow = ROOT / ".github/workflows/tsan_build_and_test.yml"
+        build = job_text(workflow, "build_tsan")
+        self.assertIn("        - /opt:/useless\n", build)
+        match = re.search(
+            r"(?ms)^      - name: Free Disk Space\n        run: \|\n"
+            r"(?P<script>.*?)(?=^      - |\Z)", build
+        )
+        self.assertIsNotNone(match)
+        # Execute the workflow block itself. Only map its destructive target to
+        # our temporary directory; diagnostic commands never touch the host.
+        script = textwrap.dedent(match.group("script"))
+        self.assertIn("node24_diagnostics before\n", script)
+        self.assertIn("node24_diagnostics after\n", script)
+        diagnostics = "\n".join(
+            f"{command}() {{ return 1; }}"
+            for command in ("date", "ls", "readlink", "stat", "awk", "timeout")
+        )
+        return diagnostics + "\n" + script.replace("/useless", str(sandbox))
+
+    def run_cleanup(self, sandbox: Path, prefix: str = "") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["sh", "-e", "-c", prefix + self.cleanup_script(sandbox)],
+            text=True, capture_output=True, timeout=10,
+        )
+
+    def test_preserves_runner_runtime_and_hidden_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sandbox = Path(temporary)
+            node = sandbox / "runner-cache/externals/node24/bin/node"
+            node.parent.mkdir(parents=True)
+            node.write_text("runtime\n")
+            for name in ("tools", "directory with spaces", "runner-cache-old"):
+                directory = sandbox / name
+                directory.mkdir()
+                (directory / "payload").write_text("delete me\n")
+            for name in ("file", "file with spaces", "-dash", ".hidden"):
+                (sandbox / name).write_text("payload\n")
+            hidden = sandbox / ".hidden-directory"
+            hidden.mkdir()
+            (hidden / "payload").write_text("keep me\n")
+
+            result = self.run_cleanup(sandbox)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(node.read_text(), "runtime\n")
+            self.assertEqual(
+                {path.name for path in sandbox.iterdir()},
+                {"runner-cache", ".hidden", ".hidden-directory"},
+            )
+            self.assertEqual((hidden / "payload").read_text(), "keep me\n")
+            self.assertIn("(before cleanup)", result.stdout)
+            self.assertIn("(after cleanup)", result.stdout)
+
+    def test_empty_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sandbox = Path(temporary)
+            result = self.run_cleanup(sandbox)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(list(sandbox.iterdir()), [])
+            self.assertIn("(after cleanup)", result.stdout)
+
+    def test_cleanup_failure_propagates_before_next_entry_or_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            sandbox = Path(temporary)
+            (sandbox / "a").mkdir()
+            (sandbox / "b").mkdir()
+            result = self.run_cleanup(
+                sandbox, 'rm() { echo "cleanup failed: $*" >&2; return 23; };\n'
+            )
+            self.assertEqual(result.returncode, 23, result.stderr)
+            self.assertEqual(result.stderr.count("cleanup failed:"), 1)
+            self.assertIn(str(sandbox / "a"), result.stderr)
+            self.assertNotIn("(after cleanup)", result.stdout)
+            self.assertEqual({path.name for path in sandbox.iterdir()}, {"a", "b"})
 
 
 if __name__ == "__main__":
