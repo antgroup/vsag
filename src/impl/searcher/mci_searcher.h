@@ -32,6 +32,8 @@ DEFINE_POINTER(MCISearcher);
 struct MCISearcherParam {
     uint64_t seed_count{500};
     bool packed_filter{true};
+    // Mapped labels may change during a locked query on a mutable index.
+    bool revalidate_predicate{false};
     bool batch_distance{true};
     uint32_t activation_cap{0};
     uint32_t depth_limit{std::numeric_limits<uint32_t>::max()};

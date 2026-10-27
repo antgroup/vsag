@@ -245,7 +245,7 @@ search_clique_view(const CliqueDataCellSearchView& view,
         // Remember rejected fallback IDs too: overlapping cliques must not repeat user
         // callbacks or deletion lookups. Byte/packed rejection above remains a cheap probe.
         visited_nodes.Set(id);
-        if (not known_valid and valid_bitmap == nullptr and
+        if ((mci_param.revalidate_predicate or (not known_valid and valid_bitmap == nullptr)) and
             inner_search_param.is_inner_id_allowed != nullptr and
             not inner_search_param.is_inner_id_allowed->CheckValid(id)) {
             return false;

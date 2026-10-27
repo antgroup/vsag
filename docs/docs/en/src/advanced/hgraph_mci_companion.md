@@ -559,6 +559,9 @@ The packed path can skip the user predicate using the already prepared complete 
 This bound excludes predicate calls during seed collection or source preparation and assumes
 that the predicate is stable throughout the query. If membership changes mid-query, results
 need not match either predicate generation. This preparation remains inside query time.
+For a locked query on a mutable index, prepared membership is rechecked against the current
+label before a newly visited point is scored; cached membership alone cannot bypass the predicate.
+Public distance reads and other index operations also reset the default policy at their boundary.
 Nested public synchronous searches first restore default locking at the API boundary;
 HGraph then installs its own `search_no_lock` setting (default `false`). Other backends
 therefore do not inherit an outer HGraph opt-in. Each continuation-session `Next` also installs

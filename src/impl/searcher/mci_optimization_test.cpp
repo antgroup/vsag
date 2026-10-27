@@ -1,6 +1,7 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <functional>
 #include <future>
 #include <limits>
@@ -8,8 +9,10 @@
 #include <sstream>
 #include <utility>
 
+#include "algorithm/hgraph/hgraph.h"
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/mci/mci_clique_activation.h"
+#include "index/index_impl.h"
 #include "mci_packed_filter.h"
 #include "mci_searcher.h"
 #include "searcher_test.h"
@@ -221,8 +224,9 @@ TEST_CASE("MCI search optimization parameters reject malformed budgets",
     }
     REQUIRE_THROWS(HGraphSearchParameters::FromJson(
         R"({"hgraph":{"ef_search":40,"search_no_lock":true,"parallelism":2}})"));
-    REQUIRE_THROWS(
-        HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":40,"mci_seed_max_count":-1}})"));
+    REQUIRE_THROWS_WITH(
+        HGraphSearchParameters::FromJson(R"({"hgraph":{"ef_search":40,"mci_seed_max_count":-1}})"),
+        Catch::Matchers::ContainsSubstring("mci_seed_max_count must be non-negative"));
     REQUIRE_FALSE(SearchLockScope::IsNoLock());
     {
         const SearchLockScope outer(true);
@@ -501,7 +505,7 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
         };
         auto outer_result = loaded->KnnSearch(query, 32, small_search, filter);
         REQUIRE(outer_result.has_value());
-        REQUIRE(observed_locked);
+        REQUIRE(observed_locked);  // Ensure the policy assertion inside the callback ran.
         REQUIRE_FALSE(SearchLockScope::IsNoLock());
     }
 
@@ -559,6 +563,38 @@ TEST_CASE("Ranked MCI builds reloads and searches mapped labels concurrently",
                         expected_budget);
             }
         }
+    }
+
+    // Keep the predicate fixed while a legal label is renamed after complete-ID preparation.
+    auto rename_filter = std::make_shared<ValidLabels>();
+    rename_filter->ids = labels;
+    auto mutable_search = JsonType::Parse(small_search);
+    mutable_search["hgraph"]["search_no_lock"].SetBool(false);
+    mutable_search["hgraph"]["ef_search"].SetInt(total);
+    mutable_search["hgraph"]["mci_activation_cap"].SetInt(0);
+    auto near_renamed = Dataset::Make()
+                            ->NumElements(1)
+                            ->Dim(dim)
+                            ->Float32Vectors(vectors.data() + dim)
+                            ->Owner(false);
+    auto before_rename =
+        loaded->KnnSearch(near_renamed, total, mutable_search.Dump(), rename_filter);
+    REQUIRE(before_rename.has_value());
+    REQUIRE(std::find(before_rename.value()->GetIds(),
+                      before_rename.value()->GetIds() + before_rename.value()->GetDim(),
+                      labels[1]) !=
+            before_rename.value()->GetIds() + before_rename.value()->GetDim());
+    bool renamed = false;
+    rename_filter->on_check = [&] {
+        REQUIRE(loaded->UpdateId(labels[1], 900000).value());
+        renamed = true;
+    };
+    auto after_rename =
+        loaded->KnnSearch(near_renamed, total, mutable_search.Dump(), rename_filter);
+    REQUIRE(after_rename.has_value());
+    REQUIRE(renamed);
+    for (int64_t i = 0; i < after_rename.value()->GetDim(); ++i) {
+        REQUIRE(rename_filter->CheckValid(after_rename.value()->GetIds()[i]));
     }
 }
 
@@ -700,4 +736,73 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
         result = searcher.Search(cliques, flatten, &query, search, params, nullptr);
         REQUIRE(result->Size() == 5);
     }
+}
+
+TEST_CASE("Public distance reads isolate an outer unlocked query", "[ut][index_impl][mci]") {
+    class PolicyProbe : public vsag::HGraph {
+    public:
+        using HGraph::HGraph;
+        mutable uint64_t calls{0};
+        float
+        CalcDistanceById(const float* /*query*/,
+                         int64_t /*id*/,
+                         bool /*calculate_precise_distance*/) const override {
+            REQUIRE_FALSE(vsag::SearchLockScope::IsNoLock());
+            ++calls;
+            return 0;
+        }
+        float
+        CalcDistanceById(const vsag::DatasetPtr& /*query*/,
+                         int64_t /*id*/,
+                         bool /*calculate_precise_distance*/) const override {
+            REQUIRE_FALSE(vsag::SearchLockScope::IsNoLock());
+            ++calls;
+            return 0;
+        }
+        vsag::DatasetPtr
+        CalcDistancesById(const float* /*query*/,
+                          const int64_t* /*ids*/,
+                          int64_t /*count*/,
+                          bool /*calculate_precise_distance*/,
+                          int64_t /*topk*/) const override {
+            REQUIRE_FALSE(vsag::SearchLockScope::IsNoLock());
+            ++calls;
+            return vsag::Dataset::Make()->NumElements(1)->Dim(0);
+        }
+        vsag::DatasetPtr
+        CalcDistancesById(const vsag::DatasetPtr& /*query*/,
+                          const int64_t* /*ids*/,
+                          int64_t /*count*/,
+                          bool /*calculate_precise_distance*/,
+                          int64_t /*topk*/) const override {
+            REQUIRE_FALSE(vsag::SearchLockScope::IsNoLock());
+            ++calls;
+            return vsag::Dataset::Make()->NumElements(1)->Dim(0);
+        }
+    };
+    vsag::IndexCommonParam common;
+    common.dim_ = 4;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto config = vsag::JsonType::Parse(
+        R"({"base_quantization_type":"fp32","max_degree":16,"ef_construction":32})");
+    auto index = std::make_shared<vsag::IndexImpl<PolicyProbe>>(config, common);
+    float vector[4]{};
+    int64_t id = 0;
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(4)->Float32Vectors(vector)->Owner(false);
+    {
+        const vsag::SearchLockScope outer(true);
+        REQUIRE(index->CalcDistanceById(vector, id, false).has_value());
+        REQUIRE(vsag::SearchLockScope::IsNoLock());
+        REQUIRE(index->CalcDistanceById(query, id, false).has_value());
+        REQUIRE(vsag::SearchLockScope::IsNoLock());
+        REQUIRE(index->CalcDistancesById(vector, &id, 1, false).has_value());
+        REQUIRE(vsag::SearchLockScope::IsNoLock());
+        REQUIRE(index->CalcDistancesById(query, &id, 1, false).has_value());
+        REQUIRE(vsag::SearchLockScope::IsNoLock());
+    }
+    REQUIRE(std::dynamic_pointer_cast<PolicyProbe>(index->GetInnerIndex())->calls == 4);
+    REQUIRE_FALSE(vsag::SearchLockScope::IsNoLock());
 }

@@ -645,6 +645,8 @@ HGraph::try_mci_search(const SearchRequest& request,
                                : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
     mci_param.hops_limit = search_param.hops_limit;
     mci_param.packed_filter = params.mci_packed_filter;
+    mci_param.revalidate_predicate =
+        not params.search_no_lock and not this->immutable_.load(std::memory_order_acquire);
     mci_param.batch_distance = params.mci_batch_distance;
     mci_param.activation_cap = params.mci_activation_cap;
     mci_param.depth_limit = params.mci_hops_limit;
