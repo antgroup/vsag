@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -54,6 +53,14 @@ public:
     // Split delay: wait this many seconds after first overflow before
     // actually splitting.  0 = immediate split (original behaviour).
     double split_delay_seconds{0.0};
+
+    // When true, bitwise-identical representative vectors share one graph node
+    // instead of occupying individual slots (default false for compatibility).
+    bool support_duplicate{false};
+
+    // When true, duplicate vector codes share the existing storage slot.
+    // Requires support_duplicate.  Default false.
+    bool deduplicate_storage{false};
 
     // Storage for doc token vectors (used during MaxSim rerank)
     FlattenInterfaceParamPtr base_codes_param{nullptr};
