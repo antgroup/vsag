@@ -17,7 +17,12 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <atomic>
+#include <exception>
+#include <functional>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <utility>
 
 #include "common.h"
@@ -56,6 +61,67 @@ read_nested_vector(StreamReader& reader,
         values.emplace_back(allocator);
         StreamReader::ReadVector(reader, values.back());
     }
+}
+
+// Run `body(worker_id, begin, end)` over [0, count) with a shared atomic cursor. The calling thread
+// is worker 0, exceptions are re-thrown after every worker joins, and small inputs stay serial.
+void
+ParallelForItems(uint64_t count,
+                 uint64_t workers,
+                 const std::function<void(uint64_t, uint64_t, uint64_t)>& body,
+                 uint64_t grain = 256) {
+    if (count == 0) {
+        return;
+    }
+    grain = std::max<uint64_t>(1, grain);
+    // One worker per grain at most, and no threads at all for a single grain: spawning a pool for
+    // a few hundred items costs more than the items themselves.
+    const auto grains = (count + grain - 1) / grain;
+    workers = std::min<uint64_t>(workers, grains);
+    if (workers <= 1) {
+        body(0, 0, count);
+        return;
+    }
+    std::atomic<uint64_t> next{0};
+    std::exception_ptr worker_exception = nullptr;
+    std::mutex exception_mutex;
+    auto worker = [&](uint64_t worker_id) {
+        while (true) {
+            const auto begin = next.fetch_add(grain, std::memory_order_relaxed);
+            if (begin >= count) {
+                break;
+            }
+            body(worker_id, begin, std::min<uint64_t>(count, begin + grain));
+        }
+    };
+    auto guarded = [&](uint64_t worker_id) {
+        try {
+            worker(worker_id);
+        } catch (...) {
+            std::lock_guard<std::mutex> lock(exception_mutex);
+            if (worker_exception == nullptr) {
+                worker_exception = std::current_exception();
+            }
+        }
+    };
+    std::vector<std::thread> pool;
+    pool.reserve(workers - 1);
+    for (uint64_t worker_id = 1; worker_id < workers; ++worker_id) {
+        pool.emplace_back(guarded, worker_id);
+    }
+    guarded(0);
+    for (auto& thread : pool) {
+        thread.join();
+    }
+    if (worker_exception != nullptr) {
+        std::rethrow_exception(worker_exception);
+    }
+}
+
+void
+SortAndUnique(Vector<InnerIdType>& values) {
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
 }
 
 }  // namespace
@@ -134,21 +200,23 @@ CliqueDataCell::reset_delta_unlocked(uint64_t total) {
 }
 
 void
-CliqueDataCell::Flush(uint64_t total) {
+CliqueDataCell::Flush(uint64_t total, uint64_t thread_count) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total, "cannot flush an incomplete MCI companion");
     if (needs_compaction_) {
-        compact_unlocked(total, nullptr);
+        compact_unlocked(total, nullptr, thread_count);
     }
 }
 
 void
-CliqueDataCell::RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total) {
+CliqueDataCell::RemapNodes(const Vector<InnerIdType>& old_to_new,
+                           uint64_t total,
+                           uint64_t thread_count) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     // Callers commit the deletion batch before moving any slot: CommitDelete sizes inactive_nodes_
     // for the pre-compaction slot space, which is exactly the domain old_to_new is built for.
     CHECK_ARGUMENT(old_to_new.size() == inactive_nodes_.size(), "invalid MCI remap size");
-    compact_unlocked(total, &old_to_new);
+    compact_unlocked(total, &old_to_new, thread_count);
     available_total_.store(0, std::memory_order_release);
 }
 
@@ -166,7 +234,9 @@ CliqueDataCell::GetInactiveNodeIds() const {
 }
 
 void
-CliqueDataCell::compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_to_new) {
+CliqueDataCell::compact_unlocked(uint64_t total,
+                                 const Vector<InnerIdType>* old_to_new,
+                                 uint64_t thread_count) {
     Vector<uint8_t> new_inactive(allocator_);
     uint64_t inactive_count = 0;
     if (old_to_new != nullptr) {
@@ -187,46 +257,163 @@ CliqueDataCell::compact_unlocked(uint64_t total, const Vector<InnerIdType>* old_
         }
         CHECK_ARGUMENT(mapped_count == total, "incomplete MCI node permutation");
     }
-    Vector<InnerIdType> offsets(allocator_);
-    Vector<InnerIdType> members(allocator_);
-    Vector<InnerIdType> inverse_offsets(total + 1, 0, allocator_);
-    offsets.push_back(0);
-    Vector<InnerIdType> row(allocator_);
-    for (uint64_t cid = 0; cid < total_logical_clique_count_unlocked(); ++cid) {
-        row.clear();
-        get_clique_members_unlocked(static_cast<InnerIdType>(cid), row);
-        if (old_to_new != nullptr) {
-            uint64_t live_count = 0;
-            for (auto id : row) {
-                const auto mapped = (*old_to_new)[id];
-                if (mapped != std::numeric_limits<InnerIdType>::max()) {
-                    row[live_count++] = mapped;
-                }
-            }
-            row.resize(live_count);
+
+    const auto logical_cliques = total_logical_clique_count_unlocked();
+    const auto workers = std::max<uint64_t>(1, thread_count);
+    const bool remap = old_to_new != nullptr;
+    // Translate a clique row in place and drop the slots a physical remove took away. Both passes
+    // below run this over the same clique in the same order, so their sizes and contents agree.
+    auto filter_row = [&](Vector<InnerIdType>& row) {
+        if (not remap) {
+            return;
         }
-        if (row.empty()) {
+        uint64_t live_count = 0;
+        for (auto id : row) {
+            const auto mapped = (*old_to_new)[id];
+            if (mapped != std::numeric_limits<InnerIdType>::max()) {
+                row[live_count++] = mapped;
+            }
+        }
+        row.resize(live_count);
+    };
+
+    // Pass 1: how many live members each clique keeps. Empty cliques are dropped, and the surviving
+    // order is the clique id order, exactly like the serial appends this replaces.
+    Vector<InnerIdType> row_sizes(logical_cliques, 0, allocator_);
+    ParallelForItems(logical_cliques, workers, [&](uint64_t, uint64_t begin, uint64_t end) {
+        Vector<InnerIdType> row(allocator_);
+        for (uint64_t cid = begin; cid < end; ++cid) {
+            row.clear();
+            this->get_clique_members_unlocked(static_cast<InnerIdType>(cid), row);
+            filter_row(row);
+            row_sizes[cid] = static_cast<InnerIdType>(row.size());
+        }
+    });
+
+    Vector<InnerIdType> offsets(allocator_);
+    Vector<InnerIdType> fill_offsets(logical_cliques, 0, allocator_);
+    offsets.reserve(logical_cliques + 1);
+    offsets.push_back(0);
+    uint64_t member_total = 0;
+    for (uint64_t cid = 0; cid < logical_cliques; ++cid) {
+        const auto size = static_cast<uint64_t>(row_sizes[cid]);
+        if (size == 0) {
             continue;
         }
-        CHECK_ARGUMENT(members.size() + row.size() <= std::numeric_limits<InnerIdType>::max(),
+        CHECK_ARGUMENT(member_total + size <= std::numeric_limits<InnerIdType>::max(),
                        "MCI CSR memberships exceed offset capacity");
-        members.insert(members.end(), row.begin(), row.end());
-        offsets.push_back(static_cast<InnerIdType>(members.size()));
-        for (auto id : row) {
-            ++inverse_offsets[id + 1];
-        }
+        fill_offsets[cid] = static_cast<InnerIdType>(member_total);
+        member_total += size;
+        offsets.push_back(static_cast<InnerIdType>(member_total));
     }
+    const auto count = offsets.size() - 1;
+
+    // Pass 2: fill the clique-to-member CSR and count node memberships per worker. The per-worker
+    // histograms remove the need for atomic counters, and their reduce is order independent.
+    Vector<InnerIdType> members(member_total, 0, allocator_);
+    const auto histogram_bytes = (total + 1) * sizeof(InnerIdType);
+    constexpr uint64_t kHistogramBudgetBytes = 32ULL << 20;
+    const auto histogram_workers = std::max<uint64_t>(
+        1,
+        std::min<uint64_t>(workers,
+                           kHistogramBudgetBytes / std::max<uint64_t>(1, histogram_bytes)));
+    std::vector<Vector<InnerIdType>> histogram(histogram_workers,
+                                               Vector<InnerIdType>(total + 1, 0, allocator_));
+    ParallelForItems(
+        logical_cliques, histogram_workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            auto& local = histogram[worker_id];
+            Vector<InnerIdType> row(allocator_);
+            for (uint64_t cid = begin; cid < end; ++cid) {
+                if (row_sizes[cid] == 0) {
+                    continue;
+                }
+                row.clear();
+                this->get_clique_members_unlocked(static_cast<InnerIdType>(cid), row);
+                filter_row(row);
+                auto* destination = members.data() + fill_offsets[cid];
+                for (auto id : row) {
+                    *destination++ = id;
+                    ++local[id + 1];
+                }
+            }
+        });
+
+    Vector<InnerIdType> inverse_offsets(total + 1, 0, allocator_);
+    ParallelForItems(total, histogram_workers, [&](uint64_t, uint64_t begin, uint64_t end) {
+        for (uint64_t id = begin; id < end; ++id) {
+            InnerIdType sum = 0;
+            for (const auto& local : histogram) {
+                sum += local[id + 1];
+            }
+            inverse_offsets[id + 1] = sum;
+        }
+    });
     for (uint64_t id = 0; id < total; ++id) {
         inverse_offsets[id + 1] += inverse_offsets[id];
     }
-    Vector<InnerIdType> inverse(members.size(), 0, allocator_);
-    Vector<InnerIdType> cursor(inverse_offsets, allocator_);
-    const auto count = offsets.size() - 1;
-    for (uint64_t cid = 0; cid < count; ++cid) {
-        for (auto offset = offsets[cid]; offset < offsets[cid + 1]; ++offset) {
-            inverse[cursor[members[offset]]++] = static_cast<InnerIdType>(cid);
+
+    // Pass 3: transpose the clique memberships into the node-to-clique CSR. Cliques are split into
+    // contiguous blocks, each block is scattered by exactly one worker in clique order, and every
+    // block owns a disjoint region of each node row. Nothing races and no slice needs sorting, so
+    // the result is identical to the serial single-cursor build for any block count.
+    const uint64_t cursor_bytes = (total + 1) * sizeof(InnerIdType);
+    constexpr uint64_t kCursorBudgetBytes = 32ULL << 20;
+    const auto cursor_blocks =
+        std::max<uint64_t>(1, kCursorBudgetBytes / std::max<uint64_t>(1, cursor_bytes));
+    const auto blocks = std::max<uint64_t>(
+        1, std::min<uint64_t>(count, std::min<uint64_t>(workers * 2, cursor_blocks)));
+    const auto cliques_per_block = (count + blocks - 1) / blocks;
+    // Per-block membership counts at node+1 and the matching row starts at node. The two live in
+    // separate arrays because the start pass reads one node's count while another worker writes a
+    // neighbouring node's start.
+    Vector<InnerIdType> block_counts(blocks * (total + 1), 0, allocator_);
+    Vector<InnerIdType> block_start(blocks * total, 0, allocator_);
+    ParallelForItems(
+        blocks,
+        workers,
+        [&](uint64_t, uint64_t begin, uint64_t end) {
+            for (uint64_t block = begin; block < end; ++block) {
+                auto* counts = block_counts.data() + block * (total + 1);
+                const auto cid_begin = block * cliques_per_block;
+                const auto cid_end = std::min(count, cid_begin + cliques_per_block);
+                for (uint64_t cid = cid_begin; cid < cid_end; ++cid) {
+                    for (auto offset = offsets[cid]; offset < offsets[cid + 1]; ++offset) {
+                        ++counts[members[offset] + 1];
+                    }
+                }
+            }
+        },
+        1);
+    ParallelForItems(total, workers, [&](uint64_t, uint64_t begin, uint64_t end) {
+        for (uint64_t node = begin; node < end; ++node) {
+            InnerIdType running = inverse_offsets[node];
+            for (uint64_t block = 0; block < blocks; ++block) {
+                const auto count = block_counts[block * (total + 1) + node + 1];
+                block_start[block * total + node] = running;
+                running += count;
+            }
         }
-    }
+    });
+    Vector<InnerIdType> inverse(member_total, 0, allocator_);
+    ParallelForItems(
+        blocks,
+        workers,
+        [&](uint64_t, uint64_t begin, uint64_t end) {
+            for (uint64_t block = begin; block < end; ++block) {
+                auto* cursor = block_start.data() + block * total;
+                const auto cid_begin = block * cliques_per_block;
+                const auto cid_end = std::min(count, cid_begin + cliques_per_block);
+                for (uint64_t cid = cid_begin; cid < cid_end; ++cid) {
+                    const auto clique_id = static_cast<InnerIdType>(cid);
+                    for (auto offset = offsets[cid]; offset < offsets[cid + 1]; ++offset) {
+                        const auto node_id = members[offset];
+                        inverse[cursor[node_id]++] = clique_id;
+                    }
+                }
+            }
+        },
+        1);
+
     // Allocate every replacement before publishing, so allocation failure leaves the index intact.
     Vector<Vector<InnerIdType>> new_delta(allocator_);
     Vector<Vector<InnerIdType>> new_extra(count, Vector<InnerIdType>(allocator_), allocator_);
@@ -484,7 +671,7 @@ CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
     UnorderedSet<InnerIdType> deleting(allocator_);
     deleting.reserve(node_ids.size());
     for (auto node_id : node_ids) {
-        if (node_id < inactive_nodes_.size() and not is_node_inactive_unlocked(node_id)) {
+        if (this->IsNodeLiveUnlocked(node_id)) {
             deleting.insert(node_id);
             collect_node_clique_ids_unlocked(node_id, snapshot.affected_clique_ids);
         }
@@ -538,6 +725,137 @@ CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
         }
     }
     std::sort(snapshot.repair_node_ids.begin(), snapshot.repair_node_ids.end());
+    return snapshot;
+}
+
+bool
+CliqueDataCell::IsNodeLiveUnlocked(InnerIdType node_id) const {
+    return node_id < inactive_nodes_.size() and inactive_nodes_[node_id] == 0;
+}
+
+MCIDeleteSnapshot
+CliqueDataCell::PrepareDeleteParallel(const Vector<InnerIdType>& node_ids,
+                                      uint64_t clique_size_threshold,
+                                      uint64_t node_mct_threshold,
+                                      uint64_t thread_count) const {
+    const auto workers = std::max<uint64_t>(1, thread_count);
+    MCIDeleteSnapshot snapshot(allocator_);
+    // One shared lock covers all three stages: no mutation can run while a snapshot is prepared,
+    // and every stage therefore reads the same pre-mutation state.
+    auto read_lock = this->AcquireReadLock();
+
+    // Membership masks keep the per-member decisions O(1) and cache friendly. They are read-only
+    // while the stages run, so every worker shares them without copying.
+    Vector<uint8_t> deleting_mask(inactive_nodes_.size(), 0, allocator_);
+    for (auto node_id : node_ids) {
+        if (this->IsNodeLiveUnlocked(node_id)) {
+            deleting_mask[node_id] = 1;
+        }
+    }
+    auto is_deleting = [&deleting_mask](InnerIdType node_id) {
+        return node_id < deleting_mask.size() and deleting_mask[node_id] != 0;
+    };
+
+    // Stage 1: affected cliques of every deleting node.
+    std::vector<Vector<InnerIdType>> affected_by_worker(workers, Vector<InnerIdType>(allocator_));
+    ParallelForItems(
+        node_ids.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            auto& local = affected_by_worker[worker_id];
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto node_id = node_ids[i];
+                if (is_deleting(node_id)) {
+                    this->collect_node_clique_ids_unlocked(node_id, local);
+                }
+            }
+        });
+    // Deduplicate while merging, then sort only the unique ids: the raw per-node lists repeat each
+    // shared clique once per removing node, and sorting that many entries would dominate the stage.
+    Vector<uint8_t> affected_mask(total_logical_clique_count_unlocked(), 0, allocator_);
+    for (const auto& local : affected_by_worker) {
+        for (auto clique_id : local) {
+            if (clique_id < affected_mask.size() and affected_mask[clique_id] == 0) {
+                affected_mask[clique_id] = 1;
+                snapshot.affected_clique_ids.push_back(clique_id);
+            }
+        }
+    }
+    SortAndUnique(snapshot.affected_clique_ids);
+
+    // Stage 2: retire every affected clique whose surviving member count falls below the threshold,
+    // and collect its survivors as repair candidates.
+    std::vector<Vector<InnerIdType>> retired_by_worker(workers, Vector<InnerIdType>(allocator_));
+    std::vector<Vector<InnerIdType>> candidates_by_worker(workers, Vector<InnerIdType>(allocator_));
+    const auto affected = snapshot.affected_clique_ids;
+    ParallelForItems(
+        affected.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            Vector<InnerIdType> members(allocator_);
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto clique_id = affected[i];
+                members.clear();
+                this->get_clique_members_unlocked(clique_id, members);
+                uint64_t remaining_count = 0;
+                for (auto member : members) {
+                    if (not is_deleting(member)) {
+                        ++remaining_count;
+                    }
+                }
+                if (remaining_count >= clique_size_threshold) {
+                    continue;
+                }
+                retired_by_worker[worker_id].push_back(clique_id);
+                for (auto member : members) {
+                    if (not is_deleting(member)) {
+                        candidates_by_worker[worker_id].push_back(member);
+                    }
+                }
+            }
+        });
+    Vector<InnerIdType> candidates(allocator_);
+    Vector<uint8_t> candidate_mask(inactive_nodes_.size(), 0, allocator_);
+    for (const auto& local : retired_by_worker) {
+        snapshot.retired_clique_ids.insert(
+            snapshot.retired_clique_ids.end(), local.begin(), local.end());
+    }
+    for (const auto& local : candidates_by_worker) {
+        for (auto node_id : local) {
+            if (candidate_mask[node_id] == 0) {
+                candidate_mask[node_id] = 1;
+                candidates.push_back(node_id);
+            }
+        }
+    }
+    SortAndUnique(snapshot.retired_clique_ids);
+    // Filled after the parallel stage so the mask itself is never written concurrently.
+    Vector<uint8_t> retiring_mask(total_logical_clique_count_unlocked(), 0, allocator_);
+    for (auto clique_id : snapshot.retired_clique_ids) {
+        retiring_mask[clique_id] = 1;
+    }
+
+    // Stage 3: project the whole batch. Every retiring clique is excluded together, and a survivor
+    // is repaired only when its remaining memberships fall below the threshold.
+    std::vector<Vector<InnerIdType>> repair_by_worker(workers, Vector<InnerIdType>(allocator_));
+    ParallelForItems(
+        candidates.size(), workers, [&](uint64_t worker_id, uint64_t begin, uint64_t end) {
+            Vector<InnerIdType> clique_ids(allocator_);
+            for (uint64_t i = begin; i < end; ++i) {
+                const auto node_id = candidates[i];
+                clique_ids.clear();
+                this->collect_node_clique_ids_unlocked(node_id, clique_ids);
+                uint64_t projected_mct = 0;
+                for (auto clique_id : clique_ids) {
+                    if (clique_id >= retiring_mask.size() or retiring_mask[clique_id] == 0) {
+                        ++projected_mct;
+                    }
+                }
+                if (projected_mct < node_mct_threshold) {
+                    repair_by_worker[worker_id].push_back(node_id);
+                }
+            }
+        });
+    for (const auto& local : repair_by_worker) {
+        snapshot.repair_node_ids.insert(snapshot.repair_node_ids.end(), local.begin(), local.end());
+    }
+    SortAndUnique(snapshot.repair_node_ids);
     return snapshot;
 }
 
