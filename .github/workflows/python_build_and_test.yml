@@ -102,31 +102,11 @@ jobs:
             pip3 install numpy pyjson pytest
       
       - name: Run Python Test
+        shell: bash
         run: |
-            cd ./tests/python/
-            echo "=== Running pytest with detailed output ==="
-            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-            echo "=== Test execution completed ==="
-        continue-on-error: true
-      
-      - name: Analyze Test Results
-        run: |
-            cd ./tests/python/
-            echo "=== Analyzing test results ==="
-            if grep -q "FAILED\|ERROR" test-output.log; then
-              echo "❌ Some tests failed!"
-              echo "=== Failed tests summary ==="
-              grep -A 5 "FAILED\|ERROR" test-output.log || true
-              exit 1
-            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
-              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
-              echo "✅ All tests passed! ($PASSED tests)"
-            else
-              echo "⚠️ Could not determine test results"
-              cat test-output.log
-              exit 1
-            fi
-      
+          set -euo pipefail
+          cd ./tests/python/
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5
@@ -161,31 +141,11 @@ jobs:
           pip3 install numpy pyjson pytest
       
       - name: Run Python Test
+        shell: bash
         run: |
-            cd ./tests/python/
-            echo "=== Running pytest with detailed output ==="
-            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-            echo "=== Test execution completed ==="
-        continue-on-error: true
-      
-      - name: Analyze Test Results
-        run: |
-            cd ./tests/python/
-            echo "=== Analyzing test results ==="
-            if grep -q "FAILED\|ERROR" test-output.log; then
-              echo "❌ Some tests failed!"
-              echo "=== Failed tests summary ==="
-              grep -A 5 "FAILED\|ERROR" test-output.log || true
-              exit 1
-            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
-              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
-              echo "✅ All tests passed! ($PASSED tests)"
-            else
-              echo "⚠️ Could not determine test results"
-              cat test-output.log
-              exit 1
-            fi
-      
+          set -euo pipefail
+          cd ./tests/python/
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5

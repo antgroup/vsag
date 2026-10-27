@@ -205,5 +205,169 @@ class TsanCleanupTest(unittest.TestCase):
                 self.assertEqual(after.count(f"node --version exit={status}"), 1)
 
 
+class FailurePropagationTest(unittest.TestCase):
+    def test_pytest_exit_status_wins_over_success_looking_log(self):
+        import os
+        import subprocess
+        import tempfile
+        import textwrap
+        from tests.scripts.test_build_benchmark_workflow import step
+        jobs = [('pr-ci-community.yml', 'test-python-x86'),
+                ('python_build_and_test.yml', 'test_python_x86'),
+                ('python_build_and_test.yml', 'test_python_aarch64')]
+        for filename, name in jobs:
+            body = job_text(ROOT / '.github/workflows' / filename, name)
+            run = step(body, 'Run Python Test')
+            self.assertNotIn('continue-on-error', run)
+            self.assertIn('if: always()', step(body, 'Upload Test Logs'))
+            script = textwrap.dedent(run.split('run: |\n', 1)[1])
+            for code in (0, 1, 2, 5, 137):
+                with self.subTest(workflow=filename, job=name, code=code), tempfile.TemporaryDirectory() as tmp:
+                    root = Path(tmp); (root / 'tests/python').mkdir(parents=True)
+                    fake = root / 'python3'
+                    marker = f'pytest-result-exit-{code}'
+                    fake.write_text('#!/bin/sh\necho "1 passed"\necho ' + marker + '\nexit ' + str(code) + '\n')
+                    fake.chmod(0o755)
+                    result = subprocess.run(['bash', '-c', script], cwd=root,
+                        env=dict(os.environ, PATH=str(root) + os.pathsep + os.environ['PATH']),
+                        capture_output=True, text=True)
+                    self.assertEqual(result.returncode, code)
+                    self.assertIn(marker, result.stdout)
+                    self.assertIn(marker, (root / 'tests/python/test-output.log').read_text())
+
+    def test_lint_pattern_is_data_and_dispatch_has_a_base(self):
+        import os
+        import subprocess
+        import tempfile
+        import textwrap
+        from tests.scripts.test_build_benchmark_workflow import step
+        body = job_text(ROOT / '.github/workflows/pr-ci-community.yml', 'build-asan-x86')
+        self.assertIn("BASE_BRANCH: ${{ github.base_ref || 'main' }}", body)
+        lint = step(body, 'Run Lint')
+        script = textwrap.dedent(lint.split('run: |\n', 1)[1])
+        self.assertNotIn('${{', script)
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); (root/'scripts/linters').mkdir(parents=True)
+            runner=root/'scripts/linters/run-clang-tidy-15.sh'
+            runner.write_text('#!/bin/bash\nprintf "%s\\n" "${@: -1}"\n');runner.chmod(0o755)
+            pattern="src/it's $(touch injected).cpp$"
+            result=subprocess.run(['bash','-c',script],cwd=root,env=dict(os.environ,LINT_PATTERN=pattern),capture_output=True,text=True)
+            self.assertEqual(result.returncode,0)
+            self.assertEqual(result.stdout.strip(),pattern)
+            self.assertFalse((root/'injected').exists())
+
+    def test_compatibility_workflows_fail_closed_and_use_private_input_directory(self):
+        from tests.scripts.test_build_benchmark_workflow import step
+        for filename in ['pr-ci-community.yml','check_compatibility.yml']:
+            body=job_text(ROOT/'.github/workflows'/filename,'compatibility')
+            download=step(body,'Download Compatibility Indexes from Release')
+            self.assertIn('download_compatibility_inputs.py',download)
+            self.assertNotIn('||',download)
+            self.assertIn('COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs',body)
+            self.assertNotIn('runner.temp', body.split('    steps:', 1)[0])
+            self.assertLess(body.index('actions/checkout@v4'),body.index('download_compatibility_inputs.py'))
+
+
+class CompatibilityDownloadTest(unittest.TestCase):
+    def setUp(self):
+        import importlib.util
+        import tempfile
+        spec=importlib.util.spec_from_file_location('compat_download',ROOT/'scripts/ci/download_compatibility_inputs.py')
+        self.module=importlib.util.module_from_spec(spec);spec.loader.exec_module(self.module)
+        self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
+        self.directory=Path(self.temp.name)/'inputs'
+        import hashlib
+        self.expected={'release_id':123,'assets':{'v1_test.index':{'id':1,'size':4,'digest':'sha256:'+hashlib.sha256(b'data').hexdigest(),'updated_at':'now'}}}
+
+    def test_download_failure_partial_size_digest_and_release_changes_reject(self):
+        import copy
+        import subprocess
+        from unittest.mock import patch
+        for case in ['success','download-error','missing','truncated','corrupt','extra','changed-release']:
+            with self.subTest(case=case):
+                directory=self.directory/case
+                def transfer(*args,**kwargs):
+                    if case=='download-error':raise subprocess.CalledProcessError(1,args[0])
+                    if case!='missing':(directory/'v1_test.index').write_bytes(b'bad' if case=='truncated' else b'xxxx' if case=='corrupt' else b'data')
+                    if case=='extra':(directory/'extra.index').write_bytes(b'data')
+                after=copy.deepcopy(self.expected)
+                if case=='changed-release':after['assets']['v1_test.index']['id']=2
+                with patch.object(self.module,'inventory',side_effect=[self.expected,after]), patch.object(self.module.subprocess,'run',side_effect=transfer):
+                    if case=='success':self.module.download(directory)
+                    elif case=='changed-release':
+                        with self.assertRaisesRegex(ValueError, 'changed during download'):
+                            self.module.download(directory)
+                    else:
+                        with self.assertRaises((ValueError,subprocess.CalledProcessError)):self.module.download(directory)
+
+    def test_inventory_uses_all_pages_and_optional_api_digests(self):
+        from unittest.mock import patch
+        assets=[{'id':1,'name':'v1_test.index','size':4,'state':'uploaded','digest':None},
+                {'id':2,'name':'vectors.bin','size':4,'state':'uploaded','digest':None}]
+        with patch.object(self.module,'api',side_effect=[{'id':123,'tag_name':'compatibility-indexes'},[[assets[0]],[assets[1]]]]) as api:
+            actual=self.module.inventory()
+            self.assertEqual(set(actual['assets']),{'v1_test.index','vectors.bin'})
+            self.assertTrue(api.call_args.kwargs['paginated'])
+        self.directory.mkdir()
+        for name in actual['assets']:(self.directory/name).write_bytes(b'data')
+        self.module.verify(self.directory,actual)
+
+
+    def test_missing_and_null_digest_through_api_json(self):
+        import json
+        from unittest.mock import patch
+        for missing in (True, False):
+            with self.subTest(missing=missing):
+                asset = {'id': 1, 'name': 'v1_test.index', 'size': 4, 'state': 'uploaded'}
+                if not missing:
+                    asset['digest'] = None
+                responses = [json.dumps({'id': 123, 'tag_name': 'compatibility-indexes'}),
+                             json.dumps([[asset]])]
+                with patch.object(self.module.subprocess, 'check_output', side_effect=responses) as command:
+                    actual = self.module.inventory()
+                self.assertEqual(command.call_args.args[0][-2:], ['--paginate', '--slurp'])
+                self.assertIsNone(actual['assets']['v1_test.index']['digest'])
+                self.directory.mkdir(exist_ok=True)
+                path = self.directory / 'v1_test.index'
+                path.write_bytes(b'data')
+                self.module.verify(self.directory, actual)
+                path.write_bytes(b'bad')
+                with self.assertRaisesRegex(ValueError, 'incomplete'):
+                    self.module.verify(self.directory, actual)
+
+
+    def test_republished_release_through_api_json(self):
+        import copy
+        import json
+        from unittest.mock import patch
+        asset = dict(self.expected['assets']['v1_test.index'],
+                     name='v1_test.index', state='uploaded')
+        release = {'id': 123, 'tag_name': 'compatibility-indexes'}
+        for mutation in ('replaced-id', 'added-asset'):
+            with self.subTest(mutation=mutation):
+                after = [copy.deepcopy(asset)]
+                if mutation == 'replaced-id':
+                    after[0]['id'] = 2
+                else:
+                    after.append(dict(asset, id=2, name='new.index'))
+                responses = [json.dumps(release), json.dumps([[asset]]),
+                             json.dumps(release), json.dumps([after])]
+                directory = self.directory / mutation
+                def transfer(*args, **kwargs):
+                    (directory / 'v1_test.index').write_bytes(b'data')
+                with patch.object(self.module.subprocess, 'check_output', side_effect=responses) as api, \
+                        patch.object(self.module.subprocess, 'run', side_effect=transfer):
+                    with self.assertRaisesRegex(ValueError, 'changed during download'):
+                        self.module.download(directory)
+                self.assertEqual(api.call_count, 4)
+                self.assertEqual((directory / 'v1_test.index').read_bytes(), b'data')
+
+    def test_correct_size_wrong_digest_rejected(self):
+        self.directory.mkdir()
+        (self.directory / 'v1_test.index').write_bytes(b'xxxx')
+        with self.assertRaisesRegex(ValueError, 'digest mismatch'):
+            self.module.verify(self.directory, self.expected)
+
+
 if __name__ == "__main__":
     unittest.main()
