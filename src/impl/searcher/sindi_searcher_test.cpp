@@ -1279,3 +1279,113 @@ TEST_CASE("SINDI deferred pool recovery also releases later query stages", "[ut]
     query.get();
     REQUIRE(completed == std::future_status::ready);
 }
+
+TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][SindiSearcher]") {
+    const bool reorder = GENERATE(false, true);
+    const bool immutable = GENERATE(false, true);
+    const bool multiple_windows = GENERATE(false, true);
+    const auto* scheduler = GENERATE("count_deque", "count_atomic", "cost_atomic");
+    // External default pool, legacy custom pool, and same-pool nested query.
+    const auto pool_mode = GENERATE(0, 1, 2);
+    CAPTURE(reorder, immutable, multiple_windows, scheduler, pool_mode);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto external = std::make_shared<DefaultThreadPool>(4);
+    auto legacy = std::make_shared<DeferredPool>();
+    auto nested = std::make_shared<RecoverableDefaultPool>(1);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    std::shared_ptr<ThreadPool> selected = external;
+    if (pool_mode == 1) {
+        selected = legacy;
+    } else if (pool_mode == 2) {
+        selected = nested;
+    }
+    common.thread_pool_ = std::make_shared<SafeThreadPool>(selected);
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", reorder},
+        {"immutable", immutable},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    const uint64_t unmatched = multiple_windows ? 30000 : 0;
+    const auto count = unmatched + 20;
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::vector<float> values(count, 1);
+    std::vector<SparseVector> vectors(count);
+    uint32_t matching_term = 3;
+    uint32_t other_term = 7;
+    for (uint64_t i = 0; i < count; ++i) {
+        values[i] = i < unmatched ? 1.0F : static_cast<float>(i - unmatched + 1);
+        vectors[i] = SparseVector{1, i < unmatched ? &other_term : &matching_term, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(count)
+                    ->Ids(labels.data())
+                    ->SparseVectors(vectors.data())
+                    ->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    float query_value = 1;
+    SparseVector query_vector{1, &matching_term, &query_value};
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    for (const bool request_api : {false, true}) {
+        // One worker must satisfy the existing aggregate-capacity validation.
+        const std::string insufficient = R"({"sindi":{"n_candidate":20,
+            "window_parallelism":1,"worker_n_candidate":5}})";
+        if (request_api) {
+            SearchRequest request;
+            request.query_ = query;
+            request.topk_ = 10;
+            request.params_str_ = insufficient;
+            REQUIRE_THROWS_AS(index.SearchWithRequest(request), VsagException);
+        } else {
+            REQUIRE_THROWS_AS(index.KnnSearch(query, 10, insufficient, nullptr), VsagException);
+        }
+        // Serial validation requires the full global budget. The reduced parallel
+        // request must still return ten results even if only one worker finds matches.
+        for (const auto workers : {1, 4}) {
+            const auto options = nlohmann::json{{"sindi",
+                                                 {{"n_candidate", 20},
+                                                  {"window_parallelism", workers},
+                                                  {"worker_n_candidate", workers == 1 ? 20 : 5},
+                                                  {"query_prune_ratio", 0},
+                                                  {"term_prune_ratio", 0},
+                                                  {"window_scheduler", scheduler}}}}
+                                     .dump();
+            DatasetPtr result;
+            auto search = [&]() {
+                if (request_api) {
+                    SearchRequest request;
+                    request.query_ = query;
+                    request.topk_ = 10;
+                    request.params_str_ = options;
+                    result = index.SearchWithRequest(request);
+                } else {
+                    result = index.KnnSearch(query, 10, options, nullptr);
+                }
+            };
+            if (pool_mode == 2) {
+                auto future = nested->RunQuery(search);
+                const auto completed = future.wait_for(std::chrono::seconds(5));
+                if (completed != std::future_status::ready) {
+                    nested->RecoverQueuedWork();
+                }
+                future.get();
+                REQUIRE(completed == std::future_status::ready);
+            } else {
+                search();
+            }
+            CAPTURE(request_api, workers);
+            REQUIRE(result->GetDim() == 10);
+            for (int64_t i = 0; i < 10; ++i) {
+                REQUIRE(result->GetIds()[i] == static_cast<int64_t>(count) - 1 - i);
+                REQUIRE(result->GetDistances()[i] == static_cast<float>(i - 19));
+            }
+        }
+    }
+}

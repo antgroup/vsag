@@ -92,6 +92,9 @@ public:
         if (const auto* pool = dynamic_cast<const SafeThreadPool*>(pool_)) {
             return pool->RequiresInlineExecution();
         }
+        // Even if some workers are idle now, the pool reserves none for this query.
+        // Concurrent nested queries could occupy them all before submit/join finishes;
+        // execute same-pool queries inline rather than relying on transient spare capacity.
         if (const auto* identity = dynamic_cast<const ThreadPoolWorkerIdentity*>(pool_)) {
             return identity->IsCurrentThread();
         }

@@ -494,6 +494,10 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
     const auto count = static_cast<uint32_t>(req.search.parallel_search_thread_count);
     const bool inline_execution =
         count == 1 or req.pool == nullptr or req.pool->RequiresInlineExecution();
+    // A single matching window cannot be split between workers. Its owner must
+    // retain at least top-k even when the requested per-worker budget is smaller.
+    const auto worker_candidates = std::max(
+        req.worker_candidates, static_cast<uint64_t>(std::max<int64_t>(0, req.search.topk)));
     const bool deque_mode = options.scheduler == SindiWindowScheduler::COUNT_DEQUE;
     const bool weighted = options.scheduler == SindiWindowScheduler::COST_ATOMIC;
     profile.ran = true;
@@ -558,7 +562,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         Vector<float> dists(req.window_size, 0.0F, req.allocator);
         SindiQueryContext context(req.allocator);
         auto param = req.search;
-        param.ef = req.worker_candidates;
+        param.ef = worker_candidates;
         uint32_t range_offset = 0;
         uint64_t claimed_pos = 0;
         auto local_cursor = bounds[me];
