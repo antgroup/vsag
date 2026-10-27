@@ -202,6 +202,7 @@ public:
     Deserialize(StreamReader& reader) {
         uint64_t size = 0;
         StreamReader::ReadObj(reader, size);
+        reader.ValidateReadSize(size);
         const uint64_t serialized_start = reader.GetCursor();
         if constexpr (SkipDeserialize) {
             (void)CheckedEnd(serialized_start, size);

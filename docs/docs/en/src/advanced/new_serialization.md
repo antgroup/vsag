@@ -171,6 +171,9 @@ the index.
 HGraph parses known block payloads directly with forward reads and skips, without payload-sized
 buffers or temporary files. Skipped bytes are included in incremental checksum validation; any
 unconsumed suffix is drained with an 8 KiB buffer after component deserialization succeeds.
+Serialized vector counts, string lengths, and byte-storage extents are checked against the
+remaining block bytes before allocation. Label counts are also bounded by the recorded index
+capacity, and label-remap counts cannot exceed the label-table size.
 Checksum validation may finish after component state has changed. If `DeserializeStreaming`
 fails, discard the target index; it must not be queried or reused. Other index types still use
 their existing block readers.

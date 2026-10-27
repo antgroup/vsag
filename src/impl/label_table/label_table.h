@@ -313,7 +313,7 @@ public:
     }
 
     void
-    Deserialize(StreamReader& reader);
+    Deserialize(StreamReader& reader, uint64_t max_labels = std::numeric_limits<uint64_t>::max());
 
     void
     Resize(uint64_t new_size) {

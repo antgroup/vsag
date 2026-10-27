@@ -46,11 +46,16 @@ public:
     }
 
     void
-    Read(char* data, uint64_t size) override {
+    ValidateReadSize(uint64_t size) const override {
         if (size > length_ - cursor_) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "forward block reader exceeds payload boundary");
         }
+    }
+
+    void
+    Read(char* data, uint64_t size) override {
+        this->ValidateReadSize(size);
         if (size == 0) {
             return;
         }

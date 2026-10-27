@@ -684,11 +684,17 @@ HGraph::serialize_streaming_body(StreamWriter& writer) const {
 void
 HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
     if (this->support_duplicate_) {
-        this->label_table_->Deserialize(reader);
+        this->label_table_->Deserialize(reader, this->max_capacity_.load());
     } else {
-        StreamReader::ReadVector(reader, this->label_table_->label_table_);
+        StreamReader::ReadVector(
+            reader, this->label_table_->label_table_, this->max_capacity_.load());
         uint64_t size;
         StreamReader::ReadObj(reader, size);
+        reader.ValidateCount(size, sizeof(LabelType) + sizeof(InnerIdType));
+        if (size > this->label_table_->label_table_.size()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "serialized label remap exceeds label table size");
+        }
         this->label_table_->ResetRemap(size);
         for (uint64_t i = 0; i < size; ++i) {
             LabelType key;
@@ -717,6 +723,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
                                             sid_count,
                                             label_table_size));
         }
+        reader.ValidateCount(sid_count, sizeof(uint64_t));
         Vector<std::string> sid_table(sid_count, std::string{}, allocator_);
         for (uint64_t i = 0; i < sid_count; ++i) {
             sid_table[i] = StreamReader::ReadString(reader);
