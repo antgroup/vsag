@@ -310,12 +310,14 @@ SINDISearchParameter::FromJson(const JsonType& json) {
         CHECK_ARGUMENT(threads <= 16, "window_parallelism must be in [1, 16]");
         window_parallelism = threads;
     }
-    execution_options.rerank_parallelism = static_cast<uint32_t>(window_parallelism);
+    execution_options.rerank_parallelism = window_parallelism;
     worker_n_candidate = 0;
     if (search_json.Contains("worker_n_candidate")) {
         const auto candidates = search_json["worker_n_candidate"].GetInt();
         CHECK_ARGUMENT(candidates > 0, "worker_n_candidate must be positive");
-        worker_n_candidate = candidates;
+        CHECK_ARGUMENT(candidates <= std::numeric_limits<uint32_t>::max(),
+                       "worker_n_candidate must not exceed UINT32_MAX");
+        worker_n_candidate = static_cast<uint32_t>(candidates);
     }
 
     if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {

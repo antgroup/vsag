@@ -49,6 +49,7 @@ struct alignas(64) AtomicRange {
 template <typename Prefix>
 void
 partition_by_prefix(std::vector<uint64_t>& bounds, uint64_t count, const Prefix& prefix) {
+    bounds.back() = count;
     const uint64_t workers = bounds.size() - 1;
     const auto total = prefix(count);
     if (total == 0) {
@@ -58,7 +59,8 @@ partition_by_prefix(std::vector<uint64_t>& bounds, uint64_t count, const Prefix&
         const auto minimum = bounds[i - 1] + 1;
         const auto maximum = count - (workers - i);
         const auto target = total / workers * i + (total % workers) * i / workers;
-        uint64_t low = minimum, high = maximum + 1;
+        uint64_t low = minimum;
+        uint64_t high = maximum + 1;
         while (low < high) {
             const auto middle = low + (high - low) / 2;
             if (prefix(middle) < target) {
@@ -84,6 +86,24 @@ run_query_workers(uint32_t count,
                   const SafeThreadPoolPtr& pool,
                   const Work& work,
                   bool caller_participates = true) {
+    // External pools do not expose a general worker-identity API. Known default pools
+    // can detect nested queries; unrecognized custom pools conservatively execute inline.
+    if (pool == nullptr or pool->RequiresInlineExecution()) {
+        std::exception_ptr error;
+        for (uint32_t me = 0; me < count; ++me) {
+            try {
+                work(me);
+            } catch (...) {
+                if (error == nullptr) {
+                    error = std::current_exception();
+                }
+            }
+        }
+        if (error != nullptr) {
+            std::rethrow_exception(error);
+        }
+        return;
+    }
     std::vector<std::future<void>> futures;
     const auto submitted = count - static_cast<uint32_t>(caller_participates);
     futures.reserve(submitted);
@@ -183,7 +203,6 @@ SindiSearcher::Partition(const std::vector<uint64_t>& costs, uint32_t workers, b
     std::vector<uint64_t> prefix(count + 1, 0);
     std::partial_sum(costs.begin(), costs.end(), prefix.begin() + 1);
     partition_by_prefix(bounds, count, [&](uint64_t position) { return prefix[position]; });
-    bounds.back() = count;
     return bounds;
 }
 
@@ -194,8 +213,8 @@ SindiSearcher::EstimateWindowCost(const SindiSearchTermDataCell& datacell,
                                   bool full_term_scan) {
     const auto* compact = dynamic_cast<const ImmutableSindiTermDataCell*>(&datacell);
     const auto* mutable_cell = dynamic_cast<const MutableSindiTermDataCell*>(&datacell);
-    CHECK_ARGUMENT(compact != nullptr or mutable_cell != nullptr,
-                   "cost_atomic requires an in-memory SINDI DataCell");
+    const bool in_memory = compact != nullptr or mutable_cell != nullptr;
+    CHECK_ARGUMENT(in_memory, "cost_atomic requires an in-memory SINDI DataCell");
     uint64_t cost = 0;
     for (uint32_t i = 0; i < computer.pruned_len_; ++i) {
         const auto term = computer.sorted_query_[i].first;
@@ -259,7 +278,8 @@ SindiSearcher::MergeHeaps(std::vector<SindiWindowHeap>& heaps,
     candidates.reserve(total);
     for (const auto& local_heap : heaps) {
         for (const auto& candidate : local_heap.Candidates()) {
-            // Inspect the exponent bits: -Ofast can optimize away std::isfinite checks.
+            // All-one exponent bits identify both infinities and NaNs, but not signed zero.
+            // Inspect bits because -Ofast can optimize away std::isfinite checks.
             uint32_t bits = 0;
             std::memcpy(&bits, &candidate.first, sizeof(bits));
             if ((bits & 0x7F800000U) == 0x7F800000U) {
@@ -270,14 +290,14 @@ SindiSearcher::MergeHeaps(std::vector<SindiWindowHeap>& heaps,
         }
     }
     const auto selected = std::min(total, limit);
+    const auto selected_end = candidates.begin() + static_cast<int64_t>(selected);
     const CompareByFirst compare;
     if (selected < total) {
-        std::nth_element(
-            candidates.begin(), candidates.begin() + selected, candidates.end(), compare);
+        std::nth_element(candidates.begin(), selected_end, candidates.end(), compare);
     }
     if (selected > 0 and selected < total) {
-        const auto worst =
-            std::max_element(candidates.begin(), candidates.begin() + selected, compare);
+        const auto worst = std::max_element(candidates.begin(), selected_end, compare);
+        // Both finite scores are stored floats. Exact equality also groups +0 and -0.
         if (worst->first == candidates[selected].first) {
             legacy_merge();
             return false;
@@ -386,6 +406,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
     const auto dispatch_begin = stage_profile ? Clock::now() : Clock::time_point{};
     auto run = [&](uint32_t me) {
         const auto begin = stage_profile ? Clock::now() : Clock::time_point{};
+        // Preserve estimation timings recorded by the earlier parallel NNZ pass.
         SindiRerankWorkerProfile local =
             stage_profile ? profile.workers[me] : SindiRerankWorkerProfile{};
         auto computer = datacell.FactoryComputer(&query);
@@ -422,7 +443,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
                     if (stage_profile) {
                         ++local.candidates;
                         local.nonzeros += costs[position];
-                        local.stolen_candidates += offset > 0;
+                        local.stolen_candidates += static_cast<uint64_t>(offset > 0);
                     }
                 }
             }
@@ -510,8 +531,10 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         profile.initial_costs.resize(count, 0);
         profile.workers.resize(count);
         for (uint32_t i = 0; i < count; ++i) {
-            profile.initial_costs[i] = std::accumulate(
-                costs.begin() + bounds[i], costs.begin() + bounds[i + 1], uint64_t{0});
+            profile.initial_costs[i] =
+                std::accumulate(costs.begin() + static_cast<int64_t>(bounds[i]),
+                                costs.begin() + static_cast<int64_t>(bounds[i + 1]),
+                                uint64_t{0});
         }
         profile.partition_us = elapsed_us(phase_start);
     }
@@ -532,6 +555,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         uint64_t claimed_pos = 0;
         auto pop = [&](uint32_t victim, uint32_t& window) {
             if (options.profile and victim != me) {
+                // Count every probe, including empty or contended victims.
                 ++local.steal_attempts;
             }
             if (not deque_mode) {
@@ -586,7 +610,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         while (take(window, victim)) {
             if (options.profile) {
                 ++local.windows;
-                local.stolen_windows += victim != me;
+                local.stolen_windows += static_cast<uint64_t>(victim != me);
                 if (weighted) {
                     local.estimated_cost += costs[claimed_pos];
                 }

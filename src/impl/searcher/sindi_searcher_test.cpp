@@ -17,9 +17,12 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
+#include <deque>
 #include <future>
 #include <limits>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <random>
@@ -59,9 +62,10 @@ public:
     }
 };
 
-class RejectingPool final : public ThreadPool {
+class RejectingPool final : public DefaultThreadPool {
 public:
-    DefaultThreadPool pool{4};
+    RejectingPool() : DefaultThreadPool(4) {
+    }
     uint32_t enqueues{0};
 
     std::future<void>
@@ -69,20 +73,79 @@ public:
         if (++enqueues == 3) {
             throw std::runtime_error("injected enqueue failure");
         }
-        return pool.Enqueue(std::move(task));
+        return DefaultThreadPool::Enqueue(std::move(task));
     }
+};
+
+// Models a pool whose workers are occupied by queries. The test can release queued
+// work after a timeout, so the old blocking-join bug fails without hanging the suite.
+class DeferredPool final : public ThreadPool {
+public:
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        auto packaged = std::make_shared<std::packaged_task<void()>>(std::move(task));
+        auto future = packaged->get_future();
+        std::lock_guard<std::mutex> lock(mutex_);
+        tasks_.emplace_back([packaged]() { (*packaged)(); });
+        return future;
+    }
+
+    bool
+    RunOne() {
+        std::function<void()> task;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (tasks_.empty()) {
+                return false;
+            }
+            task = std::move(tasks_.front());
+            tasks_.pop_front();
+        }
+        task();
+        return true;
+    }
+
     void
     WaitUntilEmpty() override {
-        pool.WaitUntilEmpty();
+        while (RunOne()) {
+        }
     }
     void
-    SetQueueSizeLimit(uint64_t n) override {
-        pool.SetQueueSizeLimit(n);
+    SetQueueSizeLimit(uint64_t) override {
     }
     void
-    SetPoolSize(uint64_t n) override {
-        pool.SetPoolSize(n);
+    SetPoolSize(uint64_t) override {
     }
+
+private:
+    std::mutex mutex_;
+    std::deque<std::function<void()>> tasks_;
+};
+// Actual default-pool workers run the queries. Inner submissions remain recoverable
+// from the test thread if a regression reintroduces a blocking join.
+class RecoverableDefaultPool final : public DefaultThreadPool {
+public:
+    explicit RecoverableDefaultPool(uint32_t workers) : DefaultThreadPool(workers) {
+        SetQueueSizeLimit(1);
+    }
+
+    std::future<void>
+    RunQuery(std::function<void()> task) {
+        return DefaultThreadPool::Enqueue(std::move(task));
+    }
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        return deferred_.Enqueue(std::move(task));
+    }
+
+    void
+    RecoverQueuedWork() {
+        deferred_.WaitUntilEmpty();
+    }
+
+private:
+    DeferredPool deferred_;
 };
 }  // namespace
 
@@ -188,9 +251,36 @@ TEST_CASE("SINDI rerank batches preserve distances and aggregate statistics",
     REQUIRE_THROWS(SindiSearcher::RerankDistances(
         *cell, query, ids, 8, rejecting_pool, allocator.get(), nullptr, false));
     REQUIRE(rejecting->enqueues == 3);
+    for (const auto scheduler : {SindiRerankScheduler::COUNT_STATIC,
+                                 SindiRerankScheduler::COUNT_ATOMIC,
+                                 SindiRerankScheduler::NNZ_ATOMIC}) {
+        auto deferred = std::make_shared<DeferredPool>();
+        auto shared_pool = std::make_shared<SafeThreadPool>(deferred);
+        Vector<float> actual(allocator.get());
+        auto query_task = deferred->Enqueue([&]() {
+            Vector<InnerIdType> local_ids(ids);
+            actual = SindiSearcher::RerankDistances(
+                *cell, query, local_ids, 4, shared_pool, allocator.get(), nullptr, true, scheduler);
+        });
+        auto occupied_worker = std::async(std::launch::async, [&]() { deferred->RunOne(); });
+        const auto completed = query_task.wait_for(std::chrono::seconds(5));
+        deferred->WaitUntilEmpty();
+        query_task.get();
+        occupied_worker.get();
+        // Verify that draining deferred callbacks after the query is safe.
+        deferred->WaitUntilEmpty();
+        REQUIRE(completed == std::future_status::ready);
+        for (uint64_t i = 0; i < ids.size(); ++i) {
+            REQUIRE(actual[i] == 1.0F - static_cast<float>(ids[i]) * 0.5F);
+        }
+    }
     ids[0] = 99999;
     REQUIRE_THROWS(SindiSearcher::RerankDistances(
         *cell, query, ids, 4, pool, allocator.get(), nullptr, false));
+    ids[10] = 99999;
+    auto custom_pool = std::make_shared<SafeThreadPool>(std::make_shared<DeferredPool>());
+    REQUIRE_THROWS(SindiSearcher::RerankDistances(
+        *cell, query, ids, 4, custom_pool, allocator.get(), nullptr, false));
     ids.clear();
     REQUIRE(
         SindiSearcher::RerankDistances(*cell, query, ids, 4, pool, allocator.get(), nullptr, false)
@@ -599,6 +689,44 @@ TEST_CASE("SINDI schedulers preserve all selected windows and candidates", "[ut]
         auto first = std::async(std::launch::async, concurrent);
         auto second = std::async(std::launch::async, concurrent);
         REQUIRE(first.get() == second.get());
+        for (const auto scheduler : {SindiWindowScheduler::COUNT_DEQUE,
+                                     SindiWindowScheduler::COUNT_ATOMIC,
+                                     SindiWindowScheduler::COST_ATOMIC}) {
+            auto deferred = std::make_shared<DeferredPool>();
+            auto shared_pool = std::make_shared<SafeThreadPool>(deferred);
+            std::set<InnerIdType> result;
+            auto query_task = deferred->Enqueue([&]() {
+                SearchStatistics local_stats;
+                SindiWindowSearchProfile local_profile;
+                SindiWindowSearchRequest request{windows,
+                                                 cell,
+                                                 computer,
+                                                 param,
+                                                 metadata,
+                                                 route,
+                                                 shared_pool,
+                                                 allocator.get(),
+                                                 8,
+                                                 512,
+                                                 20,
+                                                 false,
+                                                 &local_stats};
+                MaxHeap local_heap(allocator.get());
+                SindiSearcher::SearchWindows(request, {scheduler, true}, local_profile, local_heap);
+                while (not local_heap.empty()) {
+                    result.insert(local_heap.top().second);
+                    local_heap.pop();
+                }
+            });
+            auto occupied_worker = std::async(std::launch::async, [&]() { deferred->RunOne(); });
+            const auto completed = query_task.wait_for(std::chrono::seconds(5));
+            deferred->WaitUntilEmpty();
+            query_task.get();
+            occupied_worker.get();
+            deferred->WaitUntilEmpty();
+            REQUIRE(completed == std::future_status::ready);
+            REQUIRE(result == reference);
+        }
         if (not compact) {
             data->throw_on_first = true;
             SearchStatistics failure_stats;
@@ -850,5 +978,88 @@ TEST_CASE("SINDI execution options serialize only public controls", "[ut][SindiS
         restored.FromJson(JsonType::Parse(R"({"sindi":{}})"));
         REQUIRE(restored.execution_options.scheduler == SindiWindowScheduler::COUNT_DEQUE);
         REQUIRE(restored.execution_options.rerank_parallelism == 1);
+    }
+}
+
+TEST_CASE("SINDI stage accounting keeps rerank time nonnegative", "[ut][SindiSearcher]") {
+    for (const double rerank : {0.0, 1.0, 3.0}) {
+        {
+            SindiQueryProfileScope scope;
+            auto& profile = SindiLastQueryProfile();
+            profile.enabled = true;
+            profile.rerank_us = rerank;
+            profile.statistics_counter_us = 2.0;
+        }
+        REQUIRE(SindiLastQueryProfile().rerank_us == std::max(0.0, rerank - 2.0));
+    }
+}
+
+TEST_CASE("SINDI nested queries finish with every supplied pool worker occupied",
+          "[ut][SindiSearcher]") {
+    const auto workers = GENERATE(1U, 4U);
+    const bool reorder = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<RecoverableDefaultPool>(workers);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    // Nested SafeThreadPool wrappers must preserve the underlying pool identity.
+    common.thread_pool_ = std::make_shared<SafeThreadPool>(std::make_shared<SafeThreadPool>(pool));
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", reorder},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    uint32_t term = 3;
+    float values[]{1, 2, 3};
+    int64_t labels[]{0, 1, 2};
+    SparseVector vectors[]{{1, &term, values}, {1, &term, values + 1}, {1, &term, values + 2}};
+    auto base = Dataset::Make()->NumElements(3)->Ids(labels)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    const std::string options = R"({"sindi":{"n_candidate":20,"window_parallelism":4}})";
+    for (const bool request_api : {false, true}) {
+        std::atomic<uint32_t> entered{0};
+        std::vector<DatasetPtr> results(workers);
+        std::vector<std::future<void>> queries;
+        for (uint32_t i = 0; i < workers; ++i) {
+            queries.push_back(pool->RunQuery([&, i]() {
+                entered.fetch_add(1);
+                while (entered.load() < workers) {
+                    std::this_thread::yield();
+                }
+                if (request_api) {
+                    SearchRequest request;
+                    request.query_ = query;
+                    request.topk_ = 2;
+                    request.params_str_ = options;
+                    results[i] = index.SearchWithRequest(request);
+                } else {
+                    results[i] = index.KnnSearch(query, 2, options, nullptr);
+                }
+            }));
+        }
+        bool completed = true;
+        for (auto& future : queries) {
+            if (future.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+                completed = false;
+                pool->RecoverQueuedWork();
+            }
+        }
+        for (auto& future : queries) {
+            future.get();
+        }
+        pool->RecoverQueuedWork();
+        REQUIRE(completed);
+        for (const auto& result : results) {
+            REQUIRE(result->GetDim() == 2);
+            REQUIRE(result->GetIds()[0] == 2);
+            REQUIRE(result->GetIds()[1] == 1);
+            REQUIRE_FALSE(nlohmann::json::parse(result->GetStatistics()).empty());
+        }
     }
 }

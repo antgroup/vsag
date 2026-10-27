@@ -17,6 +17,7 @@
 
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <limits>
 #include <string>
 
 #include "inner_string_params.h"
@@ -132,6 +133,17 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE_THROWS_AS(
         search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"worker_n_candidate":0}})")),
         vsag::VsagException);
+    for (const auto value : {"4294967296", "4294967297", "9223372036854775807"}) {
+        REQUIRE_THROWS_AS(search_param->FromJson(JsonType::Parse(
+                              std::string(R"({"sindi":{"worker_n_candidate":)") + value + "}}")),
+                          VsagException);
+    }
+    SINDISearchParameter maximum_worker_candidates;
+    maximum_worker_candidates.FromJson(
+        JsonType::Parse(R"({"sindi":{"worker_n_candidate":4294967295}})"));
+    REQUIRE(maximum_worker_candidates.worker_n_candidate == std::numeric_limits<uint32_t>::max());
+    vsag::ParameterTest::TestToJson(
+        std::make_shared<SINDISearchParameter>(maximum_worker_candidates));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 

@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <vector>
@@ -92,7 +93,7 @@ public:
 
     ~SindiQueryProfileScope() {
         if (profile_.enabled) {
-            profile_.rerank_us -= profile_.statistics_counter_us;
+            profile_.rerank_us = std::max(0.0, profile_.rerank_us - profile_.statistics_counter_us);
             profile_.total_us =
                 std::chrono::duration<double, std::micro>(SindiStageTimer::Clock::now() - begin_)
                     .count();

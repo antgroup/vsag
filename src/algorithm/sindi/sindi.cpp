@@ -22,6 +22,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <shared_mutex>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -72,9 +73,10 @@ resolve_worker_candidates(const SINDISearchParameter& param, uint64_t final_cand
         final_candidates / param.window_parallelism +
         static_cast<uint64_t>(final_candidates % param.window_parallelism != 0);
     CHECK_ARGUMENT(worker_candidates >= minimum_worker_candidates,
-                   fmt::format("worker_n_candidate ({}) * window_parallelism ({}) must be at "
-                               "least the final candidate count ({})",
+                   fmt::format("worker_n_candidate ({}) is below the minimum per-worker capacity "
+                               "({}) for window_parallelism ({}) and final candidate count ({})",
                                worker_candidates,
+                               minimum_worker_candidates,
                                param.window_parallelism,
                                final_candidates));
     return worker_candidates;
@@ -918,9 +920,11 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         (window_options.rerank_batch or window_options.rerank_parallelism > 1);
     if ((can_parallel_windows or (batch_rerank and window_options.rerank_parallelism > 1)) and
         search_thread_pool == nullptr) {
-        std::call_once(search_thread_pool_once_, [&]() {
-            search_thread_pool_ = std::make_shared<SafeThreadPool>(
-                std::make_shared<DefaultThreadPool>(SINDI_SEARCH_THREAD_POOL_SIZE));
+        std::call_once(search_thread_pool_once_, [this]() {
+            const auto workers = std::min<uint64_t>(
+                SINDI_SEARCH_THREAD_POOL_SIZE, std::max(1U, std::thread::hardware_concurrency()));
+            search_thread_pool_ =
+                std::make_shared<SafeThreadPool>(std::make_shared<DefaultThreadPool>(workers));
         });
         search_thread_pool = search_thread_pool_;
     }

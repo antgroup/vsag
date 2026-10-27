@@ -82,6 +82,19 @@ public:
         pool_->SetPoolSize(limit);
     }
 
+    // Unknown external pools may already be occupied by the calling query. Submitting
+    // and joining on such a pool can deadlock, including when a bounded queue is full.
+    bool
+    RequiresInlineExecution() const {
+        if (const auto* pool = dynamic_cast<const DefaultThreadPool*>(pool_)) {
+            return pool->IsCurrentThread();
+        }
+        if (const auto* pool = dynamic_cast<const SafeThreadPool*>(pool_)) {
+            return pool->RequiresInlineExecution();
+        }
+        return true;
+    }
+
 private:
     ThreadPool* pool_{nullptr};
     std::shared_ptr<ThreadPool> pool_ptr_{nullptr};
