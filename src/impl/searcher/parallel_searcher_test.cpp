@@ -179,3 +179,81 @@ TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",
     }
     REQUIRE(found_target);
 }
+
+TEST_CASE("ParallelSearcher distance early stop matches BasicSearcher",
+          "[ut][ParallelSearcher][distance_early_stop]") {
+    constexpr uint32_t base_size = 200;
+    constexpr uint64_t dim = 32;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto base_vectors = fixtures::generate_vectors(base_size, dim, true);
+    std::vector<InnerIdType> ids(base_size);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    IndexCommonParam common;
+    common.dim_ = dim;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer_param =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    flatten->Train(base_vectors.data(), base_size);
+    flatten->BatchInsertVector(base_vectors.data(), base_size, ids.data());
+
+    auto pool = std::make_shared<VisitedListPool>(
+        2, allocator.get(), flatten->TotalCount(), allocator.get());
+    auto parallel =
+        std::make_shared<ParallelSearcher>(common, SafeThreadPool::FactoryDefaultThreadPool());
+    auto basic = std::make_shared<BasicSearcher>(common);
+
+    struct Outcome {
+        std::set<std::pair<float, InnerIdType>> values;
+        uint32_t early_stops;
+    };
+    auto run_search = [&](const auto& searcher,
+                          const GraphInterfacePtr& graph,
+                          float alpha,
+                          int64_t threads) {
+        InnerSearchParam search_param;
+        search_param.ep = 0;
+        search_param.ef = 40;
+        search_param.topk = 20;
+        search_param.rerank_topk = 10;
+        search_param.parallel_search_thread_count = threads;
+        SearchStatistics stats;
+        QueryContext context{.alloc = allocator.get(), .stats = &stats};
+        context.distance_early_stop_alpha = alpha;
+        auto visited_list = pool->TakeOne();
+        const auto* query = base_vectors.data() + dim;
+        auto result =
+            alpha > 0.0F
+                ? searcher->SearchWithDistanceEarlyStop(
+                      graph, flatten, visited_list, query, search_param, LabelTablePtr{}, &context)
+                : searcher->Search(
+                      graph, flatten, visited_list, query, search_param, LabelTablePtr{}, &context);
+        pool->ReturnOne(visited_list);
+        Outcome outcome{{}, stats.early_stop_count.load()};
+        while (not result->Empty()) {
+            outcome.values.insert(result->Top());
+            result->Pop();
+        }
+        return outcome;
+    };
+
+    uint32_t total_stops = 0;
+    for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
+        for (const float alpha : {1.0F, 1.05F, 1.5F, 1e30F}) {
+            CAPTURE(alpha);
+            const auto expected = run_search(basic, graph, alpha, 1);
+            const auto actual = run_search(parallel, graph, alpha, 4);
+            REQUIRE(actual.values == expected.values);
+            REQUIRE(actual.early_stops == expected.early_stops);
+            total_stops += actual.early_stops;
+        }
+        REQUIRE(run_search(parallel, graph, 1e30F, 4).values ==
+                run_search(parallel, graph, 0.0F, 4).values);
+    }
+    REQUIRE(total_stops > 0);
+}

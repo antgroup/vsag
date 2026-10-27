@@ -15,7 +15,9 @@
 
 #include "hgraph_parameter.h"
 
+#include <algorithm>
 #include <cmath>
+#include <nlohmann/json.hpp>
 
 #include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -27,6 +29,7 @@
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "inner_string_params.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "utils/float_utils.h"
 #include "utils/param_compat_macros.h"
 #include "vsag/constants.h"
 
@@ -467,6 +470,22 @@ HGraphSearchParameters::FromJson(const std::string& json_string) {
     return FromParsedJson(JsonType::Parse(json_string));
 }
 
+float
+HGraphSearchParameters::DefaultDistanceEarlyStopAlpha(int64_t k) {
+    constexpr double at_k10 = DISTANCE_EARLY_STOP_ALPHA_AT_K10;
+    constexpr double at_k100 = DISTANCE_EARLY_STOP_ALPHA_AT_K100;
+    // Linear in log10(k): at_k10 at k = 10, at_k100 at k = 100, at_k10 + (at_k10 - at_k100) at
+    // k = 1, and never below at_k100.
+    const double decades = std::log10(static_cast<double>(std::max<int64_t>(k, 1)) / 10.0);
+    const double alpha = at_k10 - (at_k10 - at_k100) * decades;
+    return static_cast<float>(std::clamp(alpha, at_k100, 2.0 * at_k10 - at_k100));
+}
+
+bool
+HGraphSearchParameters::DistanceEarlyStopApplies(uint64_t ef, int64_t k) {
+    return static_cast<double>(ef) > DISTANCE_EARLY_STOP_MIN_EF_TO_K * static_cast<double>(k);
+}
+
 HGraphSearchParameters
 HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     HGraphSearchParameters obj;
@@ -491,6 +510,30 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
                        "ef_search exceeds int64_t range");
     }
     obj.ef_search = ef_search_json.GetInt();
+    if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_EARLY_STOP)) {
+        const auto& early_stop = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_EARLY_STOP];
+        CHECK_ARGUMENT(early_stop.IsObject(), "hgraph early_stop must be an object");
+        // A misspelt key must not silently fall back to the default.
+        for (const auto& item : early_stop.GetInnerJson()->items()) {
+            CHECK_ARGUMENT(item.key() == HGRAPH_PARAMETER_EARLY_STOP_TYPE or
+                               item.key() == HGRAPH_PARAMETER_EARLY_STOP_ALPHA,
+                           fmt::format("hgraph early_stop has unknown key {}", item.key()));
+        }
+        CHECK_ARGUMENT(early_stop.Contains(HGRAPH_PARAMETER_EARLY_STOP_TYPE) and
+                           early_stop[HGRAPH_PARAMETER_EARLY_STOP_TYPE].IsString() and
+                           early_stop[HGRAPH_PARAMETER_EARLY_STOP_TYPE].GetString() ==
+                               HGRAPH_PARAMETER_EARLY_STOP_TYPE_DISTANCE,
+                       "hgraph early_stop type must be distance");
+        obj.early_stop = true;
+        if (early_stop.Contains(HGRAPH_PARAMETER_EARLY_STOP_ALPHA)) {
+            CHECK_ARGUMENT(early_stop[HGRAPH_PARAMETER_EARLY_STOP_ALPHA].IsNumber(),
+                           "hgraph early_stop alpha must be numeric");
+            obj.early_stop_alpha = early_stop[HGRAPH_PARAMETER_EARLY_STOP_ALPHA].GetFloat();
+            const bool valid_alpha =
+                IsFiniteFloatBits(obj.early_stop_alpha) and obj.early_stop_alpha >= 1.0F;
+            CHECK_ARGUMENT(valid_alpha, "hgraph early_stop alpha must be finite and at least 1");
+        }
+    }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_HOPS_LIMIT)) {
         obj.hops_limit = params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_HOPS_LIMIT].GetInt();
     }

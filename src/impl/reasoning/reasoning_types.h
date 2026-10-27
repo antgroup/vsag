@@ -45,6 +45,7 @@ enum class ReasoningTermination : uint8_t {
     kLowerBoundReached,
     kHopsLimitReached,
     kTimeout,
+    kDistanceEarlyStop,
 };
 
 enum class ReasoningEvent : uint8_t {

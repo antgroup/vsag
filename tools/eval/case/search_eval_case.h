@@ -100,6 +100,7 @@ private:
     std::atomic<uint64_t> statistics_query_count_{0};
     std::atomic<uint64_t> statistics_dist_cmp_{0};
     std::atomic<uint64_t> statistics_hops_{0};
+    std::atomic<uint64_t> statistics_early_stop_count_{0};
     std::atomic<uint64_t> statistics_io_cnt_{0};
     std::atomic<uint64_t> statistics_io_time_ms_{0};
     std::atomic<uint64_t> statistics_reorder_distance_count_{0};

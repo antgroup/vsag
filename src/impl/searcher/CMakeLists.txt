@@ -17,6 +17,9 @@
 set (SEARCHER_SRC
     basic_searcher.cpp
     basic_searcher.h
+    basic_searcher_early_stop.cpp
+    basic_searcher_impl.h
+    distance_early_stop.h
     hgraph_rabitq_searcher.cpp
     hgraph_rabitq_searcher.h
     hybrid_mci_searcher.cpp
@@ -25,6 +28,8 @@ set (SEARCHER_SRC
     mci_searcher.h
     parallel_searcher.cpp
     parallel_searcher.h
+    parallel_searcher_early_stop.cpp
+    parallel_searcher_impl.h
 )
 
 add_library (searcher OBJECT ${SEARCHER_SRC})
