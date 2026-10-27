@@ -45,7 +45,27 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86-openblas
       # Keep host runner tools intact; the CI image supplies the build toolchain.
+      volumes:
+        - /opt:/useless
     steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || true
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          rm -rf /useless/*
+          node24_diagnostics after
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
