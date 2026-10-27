@@ -49,6 +49,10 @@ add_library (eval_obj OBJECT ${eval_srcs})
 target_link_libraries (eval_obj PRIVATE vsag_eval_common)
 add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
 
+if (NOT ENABLE_TOOLS OR NOT ENABLE_CXX11_ABI)
+    return ()
+endif ()
+
 add_executable (eval_performance main.cpp)
 target_link_libraries (eval_performance PRIVATE
     eval_obj
