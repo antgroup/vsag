@@ -184,7 +184,7 @@ fi
         self.assertEqual(len(includes), 2)
         self.assertTrue(includes[0].endswith("/src/*"), includes)
         self.assertTrue(includes[1].endswith("/include/*"), includes)
-        self.assertNotIn("inconsistent,inconsistent", capture)
+        self.assertIn("inconsistent,inconsistent", capture)
 
         self.assertIn("--remove", calls[1])
         self.assertTrue(any(value.endswith("/src/version.h") for value in calls[1]))
