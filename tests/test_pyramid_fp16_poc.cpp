@@ -288,24 +288,120 @@ TEST_CASE("Pyramid half storage serializes smaller than fp32 storage",
     REQUIRE(sizes[0] < sizes[1]);
 }
 
-TEST_CASE("Pyramid half input rejects PiPNN and missing vectors",
+// Verify PiPNN build and search work correctly on fp16/bf16 input with an
+// index large enough to trigger the multi-level partition path (256 vectors × 64 dims).
+TEST_CASE("Pyramid PiPNN half input builds and searches correctly",
+          "[ft][pyramid][fp16][bf16][half_input]") {
+    const bool bf16 = GENERATE(true, false);
+    const std::string dtype = bf16 ? "bfloat16" : "float16";
+    const std::string quantization = bf16 ? "bf16" : "fp16";
+    constexpr int64_t DIM = 64;
+    constexpr int64_t COUNT = 256;
+    constexpr int64_t TOPK = 5;
+
+    std::mt19937 rng(99);
+    std::vector<float> floats(DIM * COUNT);
+    std::vector<uint16_t> halves(DIM * COUNT);
+    std::vector<int64_t> ids(COUNT);
+    std::vector<std::string> paths(COUNT, "all/half/leaf");
+    std::vector<std::string> source_ids(COUNT);
+    for (int64_t i = 0; i < DIM * COUNT; ++i) {
+        const int sample = static_cast<int>(rng() % 128) - 64;
+        const float input = (sample < 0 ? sample : sample + 1) / 65.0F;
+        halves[i] = bf16 ? generic::FloatToBF16(input) : generic::FloatToFP16(input);
+        floats[i] = bf16 ? generic::BF16ToFloat(halves[i]) : generic::FP16ToFloat(halves[i]);
+    }
+    for (int64_t i = 0; i < COUNT; ++i) {
+        ids[i] = 2000 + 7 * i;
+        source_ids[i] = "half_src_" + std::to_string(i);
+    }
+    auto make_ds = [&](int64_t start, int64_t n, bool half) {
+        auto ds = vsag::Dataset::Make()
+                      ->NumElements(n)
+                      ->Dim(DIM)
+                      ->Ids(ids.data() + start)
+                      ->Paths(paths.data() + start)
+                      ->SourceID(source_ids.data() + start)
+                      ->Owner(false);
+        if (half) {
+            ds->Float16Vectors(halves.data() + start * DIM);
+        } else {
+            ds->Float32Vectors(floats.data() + start * DIM);
+        }
+        return ds;
+    };
+
+    const std::string param = R"({"dtype":")" + dtype + R"(","metric_type":"l2","dim":)" +
+                              std::to_string(DIM) + R"(,
+        "index_param":{"max_degree":16,"ef_construction":16,
+        "build_thread_count":1,"alpha":1.2,"graph_type":"pipnn",
+        "base_quantization_type":")" +
+                              quantization + R"(","precise_quantization_type":"fp32",
+        "index_min_size":8,"persist_source_id":true}})";
+
+    CAPTURE(dtype);
+    SECTION("PiPNN build succeeds and returns non-empty results") {
+        auto half_idx = vsag::Factory::CreateIndex("pyramid", param);
+        REQUIRE(half_idx.has_value());
+        REQUIRE(half_idx.value()->Build(make_ds(0, COUNT, true)).has_value());
+        REQUIRE(half_idx.value()->GetNumElements() == COUNT);
+
+        auto query = make_ds(0, 1, true);
+        auto result =
+            half_idx.value()->KnnSearch(query, TOPK, R"({"pyramid": {"ef_search": 100}})");
+        REQUIRE(result.has_value());
+        // single-query search: GetDim() is the actual result count, not k.
+        REQUIRE(result.value()->GetDim() >= 1);
+        const auto* result_ids = result.value()->GetIds();
+        int64_t result_dim = result.value()->GetDim();
+        for (int64_t k = 0; k < result_dim; ++k) {
+            REQUIRE(result_ids[k] != 0);
+        }
+    }
+
+    SECTION("fp16 PiPNN self-search returns correct ID") {
+        auto idx = vsag::Factory::CreateIndex("pyramid", param);
+        REQUIRE(idx.has_value());
+        REQUIRE(idx.value()->Build(make_ds(0, COUNT, true)).has_value());
+
+        const std::string search = R"({"pyramid": {"ef_search": 100}})";
+        // Querying a point with itself as fp16 input: self should be nearest L2 neighbor.
+        auto half_q = make_ds(0, 1, true);
+        auto r1 = idx.value()->KnnSearch(half_q, 1, search);
+        REQUIRE(r1.has_value());
+        REQUIRE(r1.value()->GetDim() == 1);
+        REQUIRE(r1.value()->GetIds()[0] == ids[0]);
+    }
+}
+
+TEST_CASE("Pyramid PiPNN accepts fp16 and bf16 input", "[ft][pyramid][fp16][bf16][half_input]") {
+    const bool bf16 = GENERATE(false, true);
+    const std::string dtype = bf16 ? "bfloat16" : "float16";
+    const std::string quantization = bf16 ? "bf16" : "fp16";
+    CAPTURE(dtype);
+    SECTION("PiPNN builds and searches with half input") {
+        HalfInputFixture data(bf16);
+        const auto param = HalfPyramidParam(dtype, quantization, "pipnn");
+        auto index = MakeHalfIndex(param);
+        auto ds = data.Dataset(0, BUILD_COUNT);
+        REQUIRE(index->Build(ds).has_value());
+        auto query = data.Dataset(0, 1);
+        auto knn = index->KnnSearch(query, TOPK, SEARCH_PARAM);
+        REQUIRE(knn.has_value());
+        // single-query KnnSearch: GetDim() is the actual result count
+        REQUIRE(knn.value()->GetDim() >= 1);
+    }
+}
+
+TEST_CASE("Pyramid half input rejects missing vectors",
           "[ft][pyramid][fp16][bf16][half_input][negative]") {
     const bool bf16 = GENERATE(false, true);
     const std::string dtype = bf16 ? "bfloat16" : "float16";
     const std::string quantization = bf16 ? "bf16" : "fp16";
     CAPTURE(dtype);
-    SECTION("PiPNN requires float32") {
-        const auto param = HalfPyramidParam(dtype, quantization, "pipnn");
-        auto made = Factory::CreateIndex("pyramid", param);
-        REQUIRE_FALSE(made.has_value());
-        INFO("Pyramid factory error: " << made.error().message);
-        REQUIRE(made.error().type == ErrorType::INVALID_ARGUMENT);
-        REQUIRE(made.error().message.find("PiPNN") != std::string::npos);
-    }
     SECTION("Missing half buffer is rejected") {
         HalfInputFixture data(bf16);
         auto index = MakeHalfIndex(HalfPyramidParam(dtype, quantization));
-        // A float32 buffer is not a substitute for the declared half input.
         REQUIRE(index->Build(data.Dataset(0, BUILD_COUNT)).has_value());
         auto missing = data.Dataset(0, 1, false);
         auto knn = index->KnnSearch(missing, TOPK, SEARCH_PARAM);
