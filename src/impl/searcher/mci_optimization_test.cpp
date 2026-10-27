@@ -568,8 +568,10 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
             class NestedFilter : public Filter {
             public:
                 mutable std::function<void()> on_check;
+                mutable uint32_t checks{0};
                 bool
                 CheckValid(int64_t /*id*/) const override {
+                    ++checks;
                     if (on_check) {
                         auto callback = std::exchange(on_check, nullptr);
                         callback();
@@ -579,8 +581,10 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
             };
             auto inner_filter = std::make_shared<NestedFilter>();
             inner_params.deleted_ids_filter = inner_filter;
+            uint32_t nested_calls = 0;
             std::function<void(uint32_t)> run_nested;
             run_nested = [&](uint32_t levels) {
+                ++nested_calls;
                 if (levels > 1) {
                     inner_filter->on_check = [&, levels] { run_nested(levels - 1); };
                 } else if (nested_throws) {
@@ -598,6 +602,8 @@ TEST_CASE("MCI rejects each fallback ID once and isolates nested traversal scrat
             } else {
                 run_nested(nested_depth);
             }
+            REQUIRE(nested_calls == nested_depth);
+            REQUIRE(inner_filter->checks == nested_depth);
             nested = true;
         };
         SearchStatistics stats;

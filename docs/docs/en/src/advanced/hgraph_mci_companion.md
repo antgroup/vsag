@@ -553,9 +553,11 @@ removed, and already sorted input avoids another sort. A worker reuses its tempo
 without sharing it with concurrent or nested queries. Traversal epoch marks and packed member
 buffers also belong to separate scratch slots at each nesting depth. A worker retains at most
 two scratch objects after the outermost query returns; deeper temporary slots are released
-only after all active views have expired. Callback-only filters
-remember rejected IDs so overlapping cliques evaluate each point's predicate at most once.
-This preparation remains inside query time. A nested public search installs its own
+only after all active views have expired. During clique traversal, callback-only filters
+remember accepted and rejected IDs so overlapping cliques do not repeat their predicate calls.
+The packed path can skip the user predicate using the already prepared complete valid set.
+This bound excludes predicate calls during seed collection or source preparation and assumes
+that the predicate is stable throughout the query. This preparation remains inside query time. A nested public search installs its own
 `search_no_lock` setting (default `false`) and restores the outer policy when it returns.
 Callbacks remain subject to the outer request's exclusion of mutation and destruction.
 

@@ -17,7 +17,6 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -65,9 +64,10 @@ struct MCIEpochMarks {
 
     void
     Set(InnerIdType id) {
-        // Both node and clique callers validate the logical domain before marking.
-        assert(id < domain);
-        marks[id] = tag;
+        // Callers validate the domain too; keep writes safe in every build configuration.
+        if (id < domain) {
+            marks[id] = tag;
+        }
     }
 };
 
