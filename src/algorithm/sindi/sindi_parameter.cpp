@@ -301,6 +301,30 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     } else {
         n_candidate = DEFAULT_N_CANDIDATE;
     }
+    window_parallelism = 1;
+    if (search_json.Contains("window_parallelism")) {
+        const auto threads = search_json["window_parallelism"].GetInt();
+        CHECK_ARGUMENT(threads >= 1, "window_parallelism must be in [1, 16]");
+        CHECK_ARGUMENT(threads <= 16, "window_parallelism must be in [1, 16]");
+        window_parallelism = threads;
+    }
+    filter_callback_limit_weight = 1.0F;
+    if (search_json.Contains("filter_callback_limit_weight")) {
+        filter_callback_limit_weight = search_json["filter_callback_limit_weight"].GetFloat();
+        const auto minimum_weight = 1.0F / static_cast<float>(window_parallelism);
+        CHECK_ARGUMENT(
+            filter_callback_limit_weight >= minimum_weight and filter_callback_limit_weight <= 1.0F,
+            fmt::format("filter_callback_limit_weight must be in [{}, 1] for "
+                        "window_parallelism {}",
+                        minimum_weight,
+                        window_parallelism));
+    }
+    worker_n_candidate = 0;
+    if (search_json.Contains("worker_n_candidate")) {
+        const auto candidates = search_json["worker_n_candidate"].GetInt();
+        CHECK_ARGUMENT(candidates > 0, "worker_n_candidate must be positive");
+        worker_n_candidate = candidates;
+    }
 
     if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
         logger::warn(
@@ -315,6 +339,11 @@ SINDISearchParameter::ToJson() const {
     json[INDEX_SINDI].SetJson(JsonType());
     json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
     json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
+    if (worker_n_candidate != 0) {
+        json[INDEX_SINDI]["worker_n_candidate"].SetInt(worker_n_candidate);
+    }
+    json[INDEX_SINDI]["window_parallelism"].SetInt(window_parallelism);
+    json[INDEX_SINDI]["filter_callback_limit_weight"].SetFloat(filter_callback_limit_weight);
     json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);

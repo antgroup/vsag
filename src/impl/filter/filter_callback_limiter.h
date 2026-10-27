@@ -16,11 +16,45 @@
 
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <utility>
 
 #include "vsag/filter.h"
 
 namespace vsag {
+
+// A search may share one user filter between window workers. Filter does not promise that
+// CheckValid is thread-safe, so serialize calls within that search.
+class SynchronizedFilter final : public Filter {
+public:
+    explicit SynchronizedFilter(FilterPtr filter) : filter_(std::move(filter)) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return filter_->CheckValid(id);
+    }
+
+    [[nodiscard]] float
+    ValidRatio() const override {
+        return filter_->ValidRatio();
+    }
+
+    [[nodiscard]] Distribution
+    FilterDistribution() const override {
+        return filter_->FilterDistribution();
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        filter_->GetValidIds(valid_ids, count);
+    }
+
+private:
+    FilterPtr filter_;
+    mutable std::mutex mutex_;
+};
 
 class FilterCallbackLimiter : public Filter {
 public:

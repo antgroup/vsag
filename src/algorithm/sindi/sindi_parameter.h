@@ -100,7 +100,10 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
+    uint32_t worker_n_candidate{0};
+    uint32_t window_parallelism{1};
     uint64_t filter_callback_limit{0};
+    float filter_callback_limit_weight{1.0F};
 
     // data cell
     float query_prune_ratio{0};

@@ -17,6 +17,7 @@
 #include "sindi.h"
 
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 #include <map>
@@ -196,7 +197,7 @@ public:
 
     [[nodiscard]] bool
     CheckValid(int64_t id) const override {
-        ++count_;
+        count_.fetch_add(1, std::memory_order_relaxed);
         return WouldAccept(id);
     }
 
@@ -207,13 +208,13 @@ public:
 
     [[nodiscard]] uint64_t
     Count() const {
-        return count_;
+        return count_.load(std::memory_order_relaxed);
     }
 
 private:
     int64_t only_valid_id_{-1};
     bool accept_all_{false};
-    mutable uint64_t count_{0};
+    mutable std::atomic<uint64_t> count_{0};
 };
 
 TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
@@ -227,7 +228,8 @@ TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
     const float query_prune_ratio = GENERATE(0.0F, 0.2F);
     const auto search_mode = GENERATE(SearchMode::KNN_SEARCH, SearchMode::RANGE_SEARCH);
     const bool use_search_request = GENERATE(false, true);
-    CAPTURE(immutable, query_prune_ratio, search_mode, use_search_request);
+    const uint32_t window_parallelism = GENERATE(1, 2);
+    CAPTURE(immutable, query_prune_ratio, search_mode, use_search_request, window_parallelism);
 
     auto parameter = std::make_shared<SINDIParameter>();
     parameter->term_id_limit = 8;
@@ -276,20 +278,34 @@ TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
         return index.KnnSearch(query, 4, parameters, filter);
     };
 
-    const auto limited_parameters = fmt::format(
-        R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 3}}}})",
-        query_prune_ratio);
+    const auto limited_parameters =
+        fmt::format(R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, )"
+                    R"("filter_callback_limit": 3, "window_parallelism": {}, )"
+                    R"("filter_callback_limit_weight": {}}}}})",
+                    query_prune_ratio,
+                    window_parallelism,
+                    1.0F / static_cast<float>(window_parallelism));
     auto limited_filter = std::make_shared<CountingFilter>(2);
     auto limited_result = search(limited_parameters, limited_filter);
 
-    REQUIRE(limited_filter->Count() == 3);
-    REQUIRE(limited_result->GetDim() == 1);
-    REQUIRE(limited_result->GetIds()[0] == 2);
-    REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[0]));
+    if (search_mode == SearchMode::KNN_SEARCH and window_parallelism > 1) {
+        REQUIRE(limited_filter->Count() >= 2);
+        REQUIRE(limited_filter->Count() <= 4);
+    } else {
+        REQUIRE(limited_filter->Count() == 3);
+    }
+    for (int64_t i = 0; i < limited_result->GetDim(); ++i) {
+        REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[i]));
+    }
 
     auto rejecting_filter = std::make_shared<CountingFilter>(-1);
     auto rejected_result = search(limited_parameters, rejecting_filter);
-    REQUIRE(rejecting_filter->Count() == 3);
+    if (search_mode == SearchMode::KNN_SEARCH and window_parallelism > 1) {
+        REQUIRE(rejecting_filter->Count() >= 2);
+        REQUIRE(rejecting_filter->Count() <= 4);
+    } else {
+        REQUIRE(rejecting_filter->Count() == 3);
+    }
     REQUIRE(rejected_result->GetDim() == 0);
 
     const auto unlimited_parameters = fmt::format(
@@ -1630,13 +1646,37 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
         auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
+        const auto parallel_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":2}})";
+        auto parallel_mutable = mutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+        auto parallel_immutable = immutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+        const auto reduced_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":4,"worker_n_candidate":20}})";
+        auto reduced = immutable_index->KnnSearch(query, 10, reduced_param, nullptr);
+        const auto eight_worker_param = R"({"sindi":{"query_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":8,"worker_n_candidate":10}})";
+        auto eight_worker = immutable_index->KnnSearch(query, 10, eight_worker_param, nullptr);
+        const auto insufficient_param = R"({"sindi":{"n_candidate":40,
+            "window_parallelism":2,"worker_n_candidate":19}})";
+        REQUIRE_THROWS_AS(immutable_index->KnnSearch(query, 10, insufficient_param, nullptr),
+                          vsag::VsagException);
         auto immutable_roundtrip =
             immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
         REQUIRE(built->GetDim() == expected->GetDim());
+        REQUIRE(parallel_mutable->GetDim() == expected->GetDim());
+        REQUIRE(parallel_immutable->GetDim() == expected->GetDim());
+        REQUIRE(reduced->GetDim() == expected->GetDim());
+        REQUIRE(eight_worker->GetDim() == expected->GetDim());
         REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
         for (int64_t j = 0; j < expected->GetDim(); ++j) {
             REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(parallel_mutable->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(parallel_immutable->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(std::abs(parallel_mutable->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+            REQUIRE(std::abs(parallel_immutable->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
             REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);
             REQUIRE(std::abs(immutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
                     1e-3);

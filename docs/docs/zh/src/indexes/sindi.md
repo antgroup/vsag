@@ -230,7 +230,10 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
-| `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
+| `window_parallelism` | int | `1` | window 搜索线程数，取值为 `1` 至 `16`。worker 复用线程池，并在本地任务完成后窃取其他 worker 尚未处理的 window。合并后的堆在重排前最多保留 `n_candidate` 个候选。此值大于 `1` 时，KNN 搜索忽略 `timeout_ms`；带过滤器或回调次数限制的 KNN 查询也可并行，带推理追踪的查询仍使用单线程。 |
+| `worker_n_candidate` | int | `n_candidate` | 每线程候选堆容量；省略时继承最终有效候选数。显式设置时须为正数，并满足 `worker_n_candidate × window_parallelism ≥` 最终候选数。例如 `n_candidate=500`、`window_parallelism=2`、`worker_n_candidate=300` 合法。减少此值时，如果高分候选集中在部分 worker，召回率可能下降；总容量满足约束也不保证保留全局排名靠前的所有候选。 |
+| `filter_callback_limit` | uint64 | `0` | 用户 `Filter::CheckValid` 回调次数上限；`0` 表示不限制，删除 ID 过滤器等内部检查不计数。串行 KNN 和范围检索在整个请求上应用该上限；并行 KNN 为每个 worker 分配独立预算，因此默认总回调次数最多可达 `filter_callback_limit × window_parallelism`。常规 API 和 `SearchWithRequest` 均适用。 |
+| `filter_callback_limit_weight` | float | `1.0` | 并行 KNN 中每个 worker 回调预算的权重，取值范围为 `[1 / window_parallelism, 1]`；每个 worker 最多执行 `ceil(filter_callback_limit × filter_callback_limit_weight)` 次回调。降低该值可用轻量召回损失换取 CPU 计算量下降。串行 KNN 和范围检索不受此参数影响。 |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
