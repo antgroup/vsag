@@ -231,6 +231,7 @@ public:
      */
     uint64_t
     GetMemoryUsage() {
+        std::shared_lock<std::shared_mutex> rlock(delete_ids_mutex_);
         return sizeof(LabelTable) + label_table_.capacity() * sizeof(LabelType) +
                label_remap_.GetMemoryUsage() + deleted_ids_.size() * sizeof(InnerIdType) * 2;
     }
