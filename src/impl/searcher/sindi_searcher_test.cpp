@@ -77,6 +77,37 @@ public:
     }
 };
 
+// A caller-supplied pool opts into identity without inheriting DefaultThreadPool.
+class IdentifiedCustomPool final : public ThreadPool, public ThreadPoolWorkerIdentity {
+public:
+    std::atomic<uint32_t> enqueues{0};
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        enqueues.fetch_add(1);
+        return pool_.Enqueue(std::move(task));
+    }
+    bool
+    IsCurrentThread() const override {
+        return pool_.IsCurrentThread();
+    }
+    void
+    WaitUntilEmpty() override {
+        pool_.WaitUntilEmpty();
+    }
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        pool_.SetQueueSizeLimit(limit);
+    }
+    void
+    SetPoolSize(uint64_t limit) override {
+        pool_.SetPoolSize(limit);
+    }
+
+private:
+    DefaultThreadPool pool_{4};
+};
+
 // Models a pool whose workers are occupied by queries. The test can release queued
 // work after a timeout, so the old blocking-join bug fails without hanging the suite.
 class DeferredPool final : public ThreadPool {
@@ -85,9 +116,23 @@ public:
     Enqueue(std::function<void()> task) override {
         auto packaged = std::make_shared<std::packaged_task<void()>>(std::move(task));
         auto future = packaged->get_future();
-        std::lock_guard<std::mutex> lock(mutex_);
-        tasks_.emplace_back([packaged]() { (*packaged)(); });
+        std::unique_lock<std::mutex> lock(mutex_);
+        if (recovery_mode_) {
+            lock.unlock();
+            (*packaged)();
+        } else {
+            tasks_.emplace_back([packaged]() { (*packaged)(); });
+        }
         return future;
+    }
+
+    void
+    RecoverQueuedWork() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            recovery_mode_ = true;
+        }
+        WaitUntilEmpty();
     }
 
     bool
@@ -119,6 +164,7 @@ public:
 
 private:
     std::mutex mutex_;
+    bool recovery_mode_{false};
     std::deque<std::function<void()>> tasks_;
 };
 // Actual default-pool workers run the queries. Inner submissions remain recoverable
@@ -141,7 +187,7 @@ public:
 
     void
     RecoverQueuedWork() {
-        deferred_.WaitUntilEmpty();
+        deferred_.RecoverQueuedWork();
     }
 
 private:
@@ -1053,7 +1099,7 @@ TEST_CASE("SINDI nested queries finish with every supplied pool worker occupied"
         for (auto& future : queries) {
             future.get();
         }
-        pool->RecoverQueuedWork();
+        INFO("all nested queries must finish without recovery");
         REQUIRE(completed);
         for (const auto& result : results) {
             REQUIRE(result->GetDim() == 2);
@@ -1133,8 +1179,10 @@ TEST_CASE("SINDI inline window workers preserve reduced candidate budgets", "[ut
             }
         });
         const auto completed = future.wait_for(std::chrono::seconds(5));
-        deferred->WaitUntilEmpty();
-        nested->RecoverQueuedWork();
+        if (completed != std::future_status::ready) {
+            deferred->RecoverQueuedWork();
+            nested->RecoverQueuedWork();
+        }
         future.get();
         custom_worker.get();
         REQUIRE(completed == std::future_status::ready);
@@ -1144,4 +1192,90 @@ TEST_CASE("SINDI inline window workers preserve reduced candidate budgets", "[ut
             REQUIRE(result->GetDistances()[i] == 1.0F - (39999.0F - static_cast<float>(i)));
         }
     }
+}
+
+TEST_CASE("SINDI custom pool identity enables external dispatch and nested inline work",
+          "[ut][SindiSearcher]") {
+    const bool reorder = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<IdentifiedCustomPool>();
+    auto safe = std::make_shared<SafeThreadPool>(std::make_shared<SafeThreadPool>(pool));
+    REQUIRE_FALSE(safe->RequiresInlineExecution());
+    SafeThreadPool empty(static_cast<ThreadPool*>(nullptr), false);
+    REQUIRE(empty.RequiresInlineExecution());
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.thread_pool_ = safe;
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", reorder},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    uint32_t term = 3;
+    float values[]{1, 2, 3};
+    int64_t labels[]{0, 1, 2};
+    SparseVector vectors[]{{1, &term, values}, {1, &term, values + 1}, {1, &term, values + 2}};
+    auto base = Dataset::Make()->NumElements(3)->Ids(labels)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    const std::string options = R"({"sindi":{"n_candidate":20,"window_parallelism":4}})";
+    for (const bool request_api : {false, true}) {
+        auto search = [&]() {
+            if (request_api) {
+                SearchRequest request;
+                request.query_ = query;
+                request.topk_ = 2;
+                request.params_str_ = options;
+                return index.SearchWithRequest(request);
+            }
+            return index.KnnSearch(query, 2, options, nullptr);
+        };
+        const auto before = pool->enqueues.load();
+        const auto external = search();
+        REQUIRE(pool->enqueues.load() > before);
+        const auto after_external = pool->enqueues.load();
+        std::promise<DatasetPtr> nested_result;
+        auto result_future = nested_result.get_future();
+        auto nested = pool->Enqueue([&]() {
+            try {
+                if (not safe->RequiresInlineExecution()) {
+                    throw std::runtime_error("custom pool worker identity was lost");
+                }
+                nested_result.set_value(search());
+            } catch (...) {
+                nested_result.set_exception(std::current_exception());
+            }
+        });
+        nested.get();
+        auto result = result_future.get();
+        REQUIRE(pool->enqueues.load() == after_external + 1);
+        REQUIRE(result->GetDim() == external->GetDim());
+        REQUIRE(result->GetIds()[0] == 2);
+        REQUIRE(result->GetIds()[1] == 1);
+    }
+}
+
+TEST_CASE("SINDI deferred pool recovery also releases later query stages", "[ut][SindiSearcher]") {
+    DeferredPool pool;
+    std::promise<void> first_stage;
+    auto first_ready = first_stage.get_future();
+    auto query = std::async(std::launch::async, [&]() {
+        auto first = pool.Enqueue([]() {});
+        first_stage.set_value();
+        first.get();
+        pool.Enqueue([]() {}).get();
+    });
+    first_ready.get();
+    pool.RecoverQueuedWork();
+    const auto completed = query.wait_for(std::chrono::seconds(5));
+    if (completed != std::future_status::ready) {
+        pool.RecoverQueuedWork();
+    }
+    query.get();
+    REQUIRE(completed == std::future_status::ready);
 }

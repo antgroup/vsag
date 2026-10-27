@@ -75,9 +75,6 @@ auto result = index->KnnSearch(
 | `doc_prune_ratio` | float | `0.0` | 构建阶段按文档丢弃权重最低词项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | `Build` 时每个窗口内各 term 永久裁剪的低权重 postings 比例，范围 `[0, 1)`，默认关闭。 |
 | `term_retain_threshold` | integer | `0` | 构建时每个 term 的 postings 数量上限，平均分配到各窗口；`0` 表示不限制。 |
-
-执行选项统一由 `SINDISearchParameter` 解析并序列化，分析器重建查询参数时会保留调度、重排和统计配置。
-
 | `use_quantization` | bool 或 string | `false` | `false` 存 FP32，`true` 存 SQ8，`"fp16"` 存 FP16 |
 | `use_reorder` | bool | `false` | 是否保留一份正排存储，在 SINDI 粗排后对候选做精排 |
 | `rerank_type` | string | `"fp32"` | `use_reorder` 开启时使用的正排存储类型。`fp32` 保留精确值；`fp16` 以半精度保存、以 FP32 打分；`dmq8` 使用压缩的 8-bit DMQ 编码 |
@@ -243,7 +240,7 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 
 FP32/FP16 稀疏 KNN 重排自动按候选数量静态分批，并行度跟随 `window_parallelism`，最多不超过候选数。调用线程也参与计算，并复用同一查询线程池；各 worker 将距离写入独立候选位置，等待完成后按原候选顺序选择全局 top-k。单 worker 使用一次批量调用。推理查询、DMQ8 和范围搜索保持逐候选重排。库内距离计数与结果统计始终开启。
 
-查询如果已在同一个外部默认线程池的 worker 中执行，其逻辑任务改为内联执行，避免嵌套等待死锁。无法识别 worker 身份的自定义线程池也以内联方式执行查询任务；从外部默认线程池以外发起的调用仍可并行。索引自建的备用线程池最多使用 16 个线程，并以报告的硬件并发数为上限，至少使用 1 个线程。
+查询如果已在同一个外部默认线程池的 worker 中执行，其逻辑任务改为内联执行，避免嵌套等待死锁。自定义线程池可额外实现 `ThreadPoolWorkerIdentity::IsCurrentThread()`，使外部调用并行、池内 worker 调用内联。未实现此能力的已有自定义线程池以内联方式执行查询任务；从可识别线程池以外发起的调用仍可并行。索引自建的备用线程池最多使用 16 个线程，并以报告的硬件并发数为上限，至少使用 1 个线程。
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 

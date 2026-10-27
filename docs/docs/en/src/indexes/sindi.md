@@ -81,9 +81,6 @@ and `metric_type` **must** be `"ip"`.
 | `doc_prune_ratio` | float | `0.0` | Fraction of lowest-weight terms dropped per doc at build time (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of lowest-weight postings permanently removed per term per window during `Build`; `[0, 1)`, disabled by default. |
 | `term_retain_threshold` | integer | `0` | Build-time posting cap per term, divided across windows; `0` disables the cap. |
-
-Execution settings are parsed and serialized with `SINDISearchParameter`, so analysis searches retain the requested scheduler, rerank and statistics options.
-
 | `use_quantization` | bool or string | `false` | `false` stores FP32 values, `true` stores SQ8 values, and `"fp16"` stores FP16 values. |
 | `use_reorder` | bool | `false` | Keep a forward store and rescore candidates after coarse SINDI scoring. |
 | `rerank_type` | string | `"fp32"` | Forward-store type used when `use_reorder` is enabled. `fp32` keeps exact values, `fp16` stores half-precision values while scoring in FP32, and `dmq8` stores compressed 8-bit DMQ codes. |
@@ -269,7 +266,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 FP32/FP16 sparse KNN reranking automatically uses count-based static batches with the same parallelism as `window_parallelism` (capped by the candidate count). The caller participates using the same query thread pool; each worker writes distances at independent candidate positions, and final top-k selection follows the original candidate order. A single worker processes one batch. Reasoning queries, DMQ8 and range search retain scalar reranking. Library distance counters and result statistics remain enabled.
 
-When a query runs inside the same supplied default thread pool, its logical workers execute inline to avoid nested waits. Custom pools without worker-identity support also execute query work inline. Calls from outside a supplied default pool remain parallel. The index-owned fallback pool uses at most 16 threads and is capped by the reported hardware concurrency, with at least one thread.
+When a query runs inside the same supplied default thread pool, its logical workers execute inline to avoid nested waits. Custom pools can additionally implement `ThreadPoolWorkerIdentity::IsCurrentThread()` to enable parallel calls from external threads and inline calls from their own workers. Legacy custom pools without this capability execute query work inline. Calls from outside an identified pool remain parallel. The index-owned fallback pool uses at most 16 threads and is capped by the reported hardware concurrency, with at least one thread.
 
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.

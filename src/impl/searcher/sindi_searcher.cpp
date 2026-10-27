@@ -46,6 +46,8 @@ struct alignas(64) AtomicRange {
     uint64_t end{0};
 };
 
+// bounds starts with count-based cuts and bounds.front() == 0; all cuts, including
+// bounds.back() == count, are output. Zero total cost preserves the count-based cuts.
 template <typename Prefix>
 void
 partition_by_prefix(std::vector<uint64_t>& bounds, uint64_t count, const Prefix& prefix) {
@@ -85,10 +87,9 @@ void
 run_query_workers(uint32_t count,
                   const SafeThreadPoolPtr& pool,
                   const Work& work,
+                  bool inline_execution,
                   bool caller_participates = true) {
-    // External pools do not expose a general worker-identity API. Known default pools
-    // can detect nested queries; unrecognized custom pools conservatively execute inline.
-    if (pool == nullptr or pool->RequiresInlineExecution()) {
+    if (inline_execution) {
         std::exception_ptr error;
         for (uint32_t me = 0; me < count; ++me) {
             try {
@@ -327,6 +328,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
     }
     const auto count =
         static_cast<uint32_t>(std::min<uint64_t>(pool == nullptr ? 1 : workers, ids.size()));
+    const bool inline_execution = count == 1 or pool == nullptr or pool->RequiresInlineExecution();
     const bool atomic = scheduler != SindiRerankScheduler::COUNT_STATIC and count > 1;
     const bool weighted = scheduler == SindiRerankScheduler::NNZ_ATOMIC and count > 1;
     const uint64_t estimated_count = weighted or stage_profile ? ids.size() : 0;
@@ -338,27 +340,31 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
     }
     if (weighted or stage_profile) {
         const auto begin = stage_profile ? Clock::now() : Clock::time_point{};
-        run_query_workers(count, pool, [&](uint32_t me) {
-            const auto worker_begin = stage_profile ? Clock::now() : Clock::time_point{};
-            const auto first = ids.size() * me / count;
-            const auto last = ids.size() * (me + 1) / count;
-            uint64_t total = 0;
-            for (uint64_t i = first; i < last; ++i) {
-                // Sparse FP32/FP16 codes start with uint32_t NNZ; RAII releases copied codes.
-                const auto codes = datacell.AcquireCodesById(ids[i]);
-                uint32_t nonzeros = 0;
-                std::memcpy(&nonzeros, codes.Data(), sizeof(nonzeros));
-                costs[i] = nonzeros;
-                local_prefix[i] = total;
-                total += nonzeros;
-            }
-            block_offsets[me + 1] = total;
-            if (stage_profile) {
-                profile.workers[me].cost_estimation_us = elapsed_us(worker_begin);
-                profile.workers[me].cost_start_delay_us =
-                    std::chrono::duration<double, std::micro>(worker_begin - begin).count();
-            }
-        });
+        run_query_workers(
+            count,
+            pool,
+            [&](uint32_t me) {
+                const auto worker_begin = stage_profile ? Clock::now() : Clock::time_point{};
+                const auto first = ids.size() * me / count;
+                const auto last = ids.size() * (me + 1) / count;
+                uint64_t total = 0;
+                for (uint64_t i = first; i < last; ++i) {
+                    // Sparse FP32/FP16 codes start with uint32_t NNZ; RAII releases copied codes.
+                    const auto codes = datacell.AcquireCodesById(ids[i]);
+                    uint32_t nonzeros = 0;
+                    std::memcpy(&nonzeros, codes.Data(), sizeof(nonzeros));
+                    costs[i] = nonzeros;
+                    local_prefix[i] = total;
+                    total += nonzeros;
+                }
+                block_offsets[me + 1] = total;
+                if (stage_profile) {
+                    profile.workers[me].cost_estimation_us = elapsed_us(worker_begin);
+                    profile.workers[me].cost_start_delay_us =
+                        std::chrono::duration<double, std::micro>(worker_begin - begin).count();
+                }
+            },
+            inline_execution);
         if (stage_profile) {
             // Critical-path wall time includes dispatch and joining the parallel estimation.
             profile.cost_estimation_us = elapsed_us(begin);
@@ -455,7 +461,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
             profile.workers[me] = local;
         }
     };
-    run_query_workers(count, pool, run);
+    run_query_workers(count, pool, run, inline_execution);
     if (stage_profile) {
         profile.dispatch_join_us = elapsed_us(dispatch_begin);
     }
@@ -486,7 +492,8 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
                              SindiWindowSearchProfile& profile,
                              MaxHeap& heap) {
     const auto count = static_cast<uint32_t>(req.search.parallel_search_thread_count);
-    const bool inline_execution = req.pool == nullptr or req.pool->RequiresInlineExecution();
+    const bool inline_execution =
+        count == 1 or req.pool == nullptr or req.pool->RequiresInlineExecution();
     const bool deque_mode = options.scheduler == SindiWindowScheduler::COUNT_DEQUE;
     const bool weighted = options.scheduler == SindiWindowScheduler::COST_ATOMIC;
     profile.ran = true;
@@ -509,18 +516,18 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
     auto bounds = Partition(costs, count, weighted);
     std::vector<SindiWindowHeap> heaps;
     heaps.reserve(count);
-    auto ranges = std::make_unique<AtomicRange[]>(deque_mode ? 0 : count);
+    auto ranges = std::make_unique<AtomicRange[]>(deque_mode or inline_execution ? 0 : count);
     std::vector<std::unique_ptr<WindowQueue>> queues;
-    if (deque_mode) {
+    if (deque_mode and not inline_execution) {
         queues.reserve(count);
     }
     for (uint32_t i = 0; i < count; ++i) {
         heaps.emplace_back(req.allocator);
-        if (not deque_mode) {
+        if (not deque_mode and not inline_execution) {
             ranges[i].next.store(bounds[i], std::memory_order_relaxed);
             ranges[i].end = bounds[i + 1];
         }
-        if (deque_mode) {
+        if (deque_mode and not inline_execution) {
             queues.emplace_back(std::make_unique<WindowQueue>());
             for (auto pos = bounds[i]; pos < bounds[i + 1]; ++pos) {
                 queues.back()->windows.push_back(req.windows[pos]);
@@ -554,6 +561,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         param.ef = req.worker_candidates;
         uint32_t range_offset = 0;
         uint64_t claimed_pos = 0;
+        auto local_cursor = bounds[me];
         auto pop = [&](uint32_t victim, uint32_t& window) {
             if (options.profile and victim != me) {
                 // Count every probe, including empty or contended victims.
@@ -592,7 +600,12 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
                 // Sequential logical workers must keep their partition budgets separate.
                 // Otherwise worker zero steals every window into one reduced candidate heap.
                 victim = me;
-                return pop(me, window);
+                if (local_cursor >= bounds[me + 1]) {
+                    return false;
+                }
+                claimed_pos = local_cursor++;
+                window = req.windows[claimed_pos];
+                return true;
             }
             if (deque_mode) {
                 for (uint32_t offset = 0; offset < count; ++offset) {
@@ -651,7 +664,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
             profile.workers[me] = local;
         }
     };
-    run_query_workers(count, req.pool, run, false);
+    run_query_workers(count, req.pool, run, inline_execution, false);
     if (options.profile) {
         profile.dispatch_join_us = elapsed_us(dispatch_start);
     }

@@ -22,6 +22,24 @@
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
+namespace {
+uint32_t
+parse_positive_worker_count(const JsonType& value, uint32_t maximum, const std::string& name) {
+    CHECK_ARGUMENT(value.IsNumberInteger(), name + " must be an integer");
+    uint64_t count = 0;
+    if (value.IsNumberUnsigned()) {
+        count = value.GetUint64();
+    } else {
+        const auto signed_count = value.GetInt();
+        CHECK_ARGUMENT(signed_count > 0, name + " must be positive");
+        count = static_cast<uint64_t>(signed_count);
+    }
+    CHECK_ARGUMENT(count > 0, name + " must be positive");
+    CHECK_ARGUMENT(count <= maximum, fmt::format("{} must be in [1, {}]", name, maximum));
+    return static_cast<uint32_t>(count);
+}
+}  // namespace
+
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
     switch (type) {
@@ -305,19 +323,15 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     }
     window_parallelism = 1;
     if (search_json.Contains("window_parallelism")) {
-        const auto threads = search_json["window_parallelism"].GetInt();
-        CHECK_ARGUMENT(threads >= 1, "window_parallelism must be in [1, 16]");
-        CHECK_ARGUMENT(threads <= 16, "window_parallelism must be in [1, 16]");
-        window_parallelism = threads;
+        window_parallelism = parse_positive_worker_count(
+            search_json["window_parallelism"], 16, "window_parallelism");
     }
     execution_options.rerank_parallelism = window_parallelism;
     worker_n_candidate = 0;
     if (search_json.Contains("worker_n_candidate")) {
-        const auto candidates = search_json["worker_n_candidate"].GetInt();
-        CHECK_ARGUMENT(candidates > 0, "worker_n_candidate must be positive");
-        CHECK_ARGUMENT(candidates <= std::numeric_limits<uint32_t>::max(),
-                       "worker_n_candidate must not exceed UINT32_MAX");
-        worker_n_candidate = static_cast<uint32_t>(candidates);
+        worker_n_candidate = parse_positive_worker_count(search_json["worker_n_candidate"],
+                                                         std::numeric_limits<uint32_t>::max(),
+                                                         "worker_n_candidate");
     }
 
     if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {

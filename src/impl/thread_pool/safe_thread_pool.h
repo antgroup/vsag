@@ -86,11 +86,14 @@ public:
     // and joining on such a pool can deadlock, including when a bounded queue is full.
     bool
     RequiresInlineExecution() const {
-        if (const auto* pool = dynamic_cast<const DefaultThreadPool*>(pool_)) {
-            return pool->IsCurrentThread();
+        if (pool_ == nullptr) {
+            return true;
         }
         if (const auto* pool = dynamic_cast<const SafeThreadPool*>(pool_)) {
             return pool->RequiresInlineExecution();
+        }
+        if (const auto* identity = dynamic_cast<const ThreadPoolWorkerIdentity*>(pool_)) {
+            return identity->IsCurrentThread();
         }
         return true;
     }

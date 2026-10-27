@@ -24,7 +24,7 @@
 
 namespace vsag {
 
-class DefaultThreadPool : public ThreadPool {
+class DefaultThreadPool : public ThreadPool, public ThreadPoolWorkerIdentity {
 public:
     explicit DefaultThreadPool(std::uint64_t threads);
 
@@ -32,7 +32,7 @@ public:
     Enqueue(std::function<void(void)> task) override;
 
     bool
-    IsCurrentThread() const;
+    IsCurrentThread() const override;
 
     void
     WaitUntilEmpty() override;

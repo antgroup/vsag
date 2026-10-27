@@ -495,3 +495,38 @@ TEST_CASE("SINDI build term prune parameters", "[ut][SINDIParameter]") {
         REQUIRE_THROWS(SINDI::CheckAndMappingExternalParam(JsonType::Parse(invalid), common));
     }
 }
+
+TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIParameter]") {
+    for (const auto* key : {"window_parallelism", "worker_n_candidate"}) {
+        for (const auto* value : {"1.5",
+                                  "1.0",
+                                  "1e100",
+                                  "\"2\"",
+                                  "true",
+                                  "null",
+                                  "[]",
+                                  "{}",
+                                  "-1",
+                                  "0",
+                                  "-9223372036854775808",
+                                  "9223372036854775807",
+                                  "9223372036854775808",
+                                  "18446744073709551615",
+                                  "18446744073709551616"}) {
+            CAPTURE(key, value);
+            SINDISearchParameter parameter;
+            REQUIRE_THROWS_AS(parameter.FromJson(JsonType::Parse(std::string("{\"sindi\":{\"") +
+                                                                 key + "\":" + value + "}}")),
+                              VsagException);
+        }
+        auto json = JsonType::Parse("{\"sindi\":{}}");
+        json["sindi"][key].SetInt(1);
+        SINDISearchParameter parameter;
+        REQUIRE_NOTHROW(parameter.FromJson(json));
+    }
+    SINDISearchParameter maximum;
+    REQUIRE_NOTHROW(maximum.FromJson(
+        JsonType::Parse(R"({"sindi":{"window_parallelism":16,"worker_n_candidate":4294967295}})")));
+    REQUIRE(maximum.window_parallelism == 16);
+    REQUIRE(maximum.worker_n_candidate == std::numeric_limits<uint32_t>::max());
+}
