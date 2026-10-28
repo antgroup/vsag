@@ -1,0 +1,16 @@
+{
+  "bytes": 14998754,
+  "sha256": "5e09f0d7d2de90d7029cd47f3df64cba2501164c46edb91db4ecb647d0c0782a",
+  "members": 345,
+  "audit": "PASS",
+  "parent": "71357024f693b67ea9fc0c44d961e79a94b9f034",
+  "pure_processes": 36,
+  "mixed_processes": 6,
+  "diagnostic_processes": 9,
+  "mixed_mutation_calls": 450000,
+  "mixed_query_calls": 450000,
+  "save_load_pairs": 600,
+  "exact_r2_graphs": true,
+  "production_unchanged": true,
+  "quality_threshold": null
+}

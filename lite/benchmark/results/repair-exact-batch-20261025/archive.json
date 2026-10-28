@@ -1,0 +1,55 @@
+{
+  "bytes": 66128,
+  "sha256": "7f204c1f9ea89eac4d00f3c45d2183e979cd5e98f5e7dbea7db7b9f41a88bf9b",
+  "members": 136,
+  "audit": "PASS",
+  "parent": "ccf82521f309df70ff2430ab283153f9cc8d4b09",
+  "pure_processes": 18,
+  "mutation_calls": 750000,
+  "numerical_bit_checks_per_config": 4352,
+  "release_tests": 5,
+  "sanitizer_tests": 5,
+  "wide_mutation_modes": 3,
+  "all_final_graphs_exact_r2": true,
+  "mixed_measured": false,
+  "production_unchanged": true,
+  "quality_threshold": null,
+  "summary": {
+    "update": {
+      "wall": {
+        "r2": 7.843172999,
+        "cache": 7.812856075
+      },
+      "cpu": {
+        "r2": 7.842944000000001,
+        "cache": 7.81262
+      },
+      "change_percent": -0.3865390193977025,
+      "wins": 1
+    },
+    "replace": {
+      "wall": {
+        "r2": 12.046939792,
+        "cache": 11.899776296
+      },
+      "cpu": {
+        "r2": 12.04656,
+        "cache": 11.899455
+      },
+      "change_percent": -1.2215840581997872,
+      "wins": 3
+    },
+    "reinsert": {
+      "wall": {
+        "r2": 12.951521373,
+        "cache": 12.951807144
+      },
+      "cpu": {
+        "r2": 12.95112,
+        "cache": 12.951375999999998
+      },
+      "change_percent": 0.0022064666518328835,
+      "wins": 2
+    }
+  }
+}

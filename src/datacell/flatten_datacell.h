@@ -429,6 +429,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               const InnerIdType* idx,
                                               InnerIdType id_count,
                                               QueryContext* ctx) {
+    if (id_count == 0) {
+        return;
+    }
+
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
 
     const auto total_count = this->TotalCount();
