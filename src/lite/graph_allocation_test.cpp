@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vsag/lite/index.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <exception>
 #include <iostream>
@@ -12,6 +13,9 @@
 #include "lite/rabitq_snapshot.h"
 #endif
 static long remaining = -1;
+static bool measure_allocations = false;
+static uint64_t allocated_bytes = 0;
+static uint64_t largest_allocation = 0;
 void*
 operator new(std::size_t n) {
     if (remaining >= 0 && remaining-- == 0) {
@@ -19,6 +23,10 @@ operator new(std::size_t n) {
         throw std::bad_alloc();
     }
     if (void* p = std::malloc(n != 0U ? n : 1)) {
+        if (measure_allocations) {
+            allocated_bytes += n;
+            largest_allocation = std::max(largest_allocation, static_cast<uint64_t>(n));
+        }
         return p;
     }
     throw std::bad_alloc();
@@ -106,18 +114,18 @@ check_reverse_mutation_allocation(int operation, uint64_t count = 16, bool rever
         replacement[d] = std::cos(static_cast<float>(d) * 0.31F);
     }
     int problems = 0;
-    for (int policy = 0; policy < 6; ++policy) {
+    for (int policy = 0; policy < (operation >= 2 ? 8 : 6); ++policy) {
         codec::MutableGraphState initial(
             model, codes, graph, ids, operation >= 2 ? 6 : 4, 16, false, reverse);
         initial.ConfigureIncomingProtection(policy == 0
                                                 ? codec::IncomingProtection::NONE
                                                 : (policy == 1 ? codec::IncomingProtection::RECOUNT
                                                                : codec::IncomingProtection::CACHED),
-                                            true,
-                                            true,
-                                            true,
+                                            policy < 6,
+                                            policy < 6,
+                                            policy < 6,
                                             policy >= 4);
-        if ((policy == 3 or policy == 5) and
+        if ((policy == 3 or policy == 5 or policy == 7) and
             not initial.UpdateTransactional(0,
                                             codec::prepare_encoding(model, replacement.data()))) {
             return 1;
@@ -230,6 +238,89 @@ check_reverse_mutation_allocation(int operation, uint64_t count = 16, bool rever
     }
     return problems;
 }
+
+int
+check_cold_remove_allocations() {
+    namespace codec = vsag::lite::detail::rabitq;
+    constexpr uint64_t count = 1024;
+    constexpr uint64_t dim = 17;
+    std::vector<float> base(count * dim);
+    std::vector<int64_t> ids(count);
+    codec::GraphTopology graph;
+    graph.offsets.push_back(0);
+    for (uint64_t row = 0; row < count; ++row) {
+        ids[row] = static_cast<int64_t>(row);
+        for (uint64_t d = 0; d < dim; ++d) {
+            base[row * dim + d] = std::sin(static_cast<float>(row * 7 + d) * 0.17F);
+        }
+        for (const uint64_t step : {uint64_t{1}, uint64_t{3}, uint64_t{7}}) {
+            graph.neighbors.push_back((row + step) % count);
+        }
+        graph.offsets.push_back(graph.neighbors.size());
+    }
+    const auto model = codec::train(base, count, dim, 47);
+    codec::EncodedRecords codes(dim);
+    for (uint64_t row = 0; row < count; ++row) {
+        codes.Append(codec::encode(model, base.data() + row * dim));
+    }
+    codec::MutableGraphState initial(model, codes, graph, ids, 6, 16, false, true);
+    int problems = 0;
+    for (const bool loaded : {false, true}) {
+        auto state = initial;
+        if (loaded) {
+            std::stringstream snapshot;
+            codec::save_mutable_snapshot(snapshot, state);
+            state = codec::load_mutable_snapshot(snapshot, true);
+        }
+        state.ConfigureIncomingProtection(
+            codec::IncomingProtection::CACHED, false, false, false, true);
+        auto golden = state;
+        for (uint64_t step = 0; step < 8; ++step) {
+            const uint64_t slot =
+                step % 3 == 0 ? state.Size() / 2 : (step % 3 == 1 ? state.Size() - 1 : 0);
+            const int64_t id = state.GetIds()[slot];
+            allocated_bytes = 0;
+            largest_allocation = 0;
+            measure_allocations = true;
+            const bool removed = state.RemoveTransactional(id);
+            measure_allocations = false;
+            const auto bytes = allocated_bytes;
+            const auto largest = largest_allocation;
+            // A full adjacency-vector copy alone requests Size()*sizeof(vector).
+            // This bounded-degree fixture needs only local journal/repair rows.
+            const uint64_t full_copy_request = (state.Size() + 1) * sizeof(std::vector<uint64_t>);
+            const bool expected_removed = golden.Remove(id);
+            if (not removed or largest >= full_copy_request or not expected_removed) {
+                ++problems;
+            }
+            state.Validate();
+            std::ostringstream actual_snapshot;
+            std::ostringstream golden_snapshot;
+            codec::save_mutable_snapshot(actual_snapshot, state);
+            codec::save_mutable_snapshot(golden_snapshot, golden);
+            if (actual_snapshot.str() != golden_snapshot.str() or
+                state.IncomingCountRebuilds() != 0) {
+                ++problems;
+            }
+            const auto actual = state.Search(base.data(), 10);
+            const auto expected = golden.Search(base.data(), 10);
+            if (actual.neighbors.size() != expected.neighbors.size()) {
+                ++problems;
+            } else {
+                for (uint64_t i = 0; i < actual.neighbors.size(); ++i) {
+                    if (actual.neighbors[i].id != expected.neighbors[i].id or
+                        actual.neighbors[i].distance != expected.neighbors[i].distance) {
+                        ++problems;
+                    }
+                }
+            }
+            std::cout << "COLD_REMOVE loaded=" << loaded << " step=" << step << " bytes=" << bytes
+                      << " largest=" << largest << " full_copy_request=" << full_copy_request
+                      << " cumulative_problems=" << problems << "\n";
+        }
+    }
+    return problems;
+}
 #endif
 
 int
@@ -277,6 +368,7 @@ main() {
         problems += check_reverse_mutation_allocation(3);
         problems += check_reverse_mutation_allocation(3, 1);
         problems += check_reverse_mutation_allocation(0, 16, false);
+        problems += check_cold_remove_allocations();
         problems += check_reverse_mutation_allocation(1, 16, false);
         problems += check_reverse_mutation_allocation(2, 16, false);
     } catch (const std::exception& error) {
@@ -290,7 +382,7 @@ main() {
 #endif
     constexpr int modes =
 #if defined(VSAG_LITE_HAS_RABITQ_BACKEND)
-        3;
+        4;
 #else
         2;
 #endif
@@ -309,7 +401,7 @@ main() {
                         return 2;
                     }
                 }
-                const auto storage = mode == 2 ? vsag::lite::VectorStorage::RABITQ8
+                const auto storage = mode >= 2 ? vsag::lite::VectorStorage::RABITQ8
                                                : (mode != 0 ? vsag::lite::VectorStorage::FP16
                                                             : vsag::lite::VectorStorage::FP32);
                 if (op != 3 and not index->BuildGraph(storage, 3, 16)) {
@@ -322,6 +414,14 @@ main() {
                     if (not index->Update(0, warm, 2)) {
                         return 4;
                     }
+                }
+                if (mode == 3 and op != 3) {
+                    std::istringstream snapshot(save(*index));
+                    auto loaded = vsag::lite::Index::Load(snapshot);
+                    if (not loaded) {
+                        return 5;
+                    }
+                    index = std::move(*loaded);
                 }
                 const auto before = save(*index);
                 bool failed = false;
@@ -366,7 +466,7 @@ main() {
                     if (not retried) {
                         ++invalid;
                     }
-                    if (mode == 2 and op != 3 and retried) {
+                    if (mode >= 2 and op != 3 and retried) {
                         const float continued[2] = {-6, 3};
                         if (not index->Update(1, continued, 2)) {
                             ++invalid;

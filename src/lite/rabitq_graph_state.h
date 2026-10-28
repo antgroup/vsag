@@ -1210,8 +1210,10 @@ public:
             return false;
         }
         codec_require(active_journal_ == nullptr, "nested graph remove transaction");
+        // Only removal protection can initialize the cold cache during Remove.
+        // Without it, the local journal preserves rollback without a full-state copy.
         if (use_incoming_adjacency_ and incoming_protection_ == IncomingProtection::CACHED and
-            not incoming_counts_valid_) {
+            protect_removed_incoming_ and not incoming_counts_valid_) {
             auto next = *this;
             const bool removed = next.Remove(id);
             *this = std::move(next);

@@ -226,6 +226,65 @@ TEST_CASE("Lite FP16 VectorAt uses caller-owned scratch", "[lite-graph]") {
     require_incoming_matches(**graph);
 }
 
+TEST_CASE("Lite filtered graph ties use external IDs before top-k eviction", "[lite-graph]") {
+    const std::array<float, 2> vector{1, 2};
+    for (const auto storage : {vsag::lite::VectorStorage::FP32, vsag::lite::VectorStorage::FP16}) {
+        for (const bool negative_id : {false, true}) {
+            auto created = vsag::lite::Index::Create(2);
+            REQUIRE(created);
+            auto index = std::move(*created);
+            std::vector<int64_t> ids{30, 20, negative_id ? -10 : 10};
+            for (const int64_t id : ids) {
+                REQUIRE(index->Add(id, vector.data(), 2));
+            }
+            REQUIRE(index->BuildGraph(storage, 2, 8));
+            for (uint64_t phase = 0; phase < 4; ++phase) {
+                INFO("storage=" << static_cast<int>(storage) << " phase=" << phase
+                                << " negative_id=" << negative_id);
+                if (phase == 2) {
+                    REQUIRE(index->Remove(30));
+                    REQUIRE(index->Add(5, vector.data(), 2));
+                    ids.erase(std::find(ids.begin(), ids.end(), 30));
+                    ids.push_back(5);
+                } else if (phase != 0) {
+                    std::stringstream snapshot;
+                    REQUIRE(index->Save(snapshot));
+                    auto loaded = vsag::lite::Index::Load(snapshot);
+                    REQUIRE(loaded);
+                    index = std::move(*loaded);
+                }
+                auto ordered = ids;
+                std::sort(ordered.begin(), ordered.end());
+                auto selected = ordered;
+                selected.erase(std::remove(selected.begin(), selected.end(), 20), selected.end());
+                for (uint64_t k = 1; k <= ids.size(); ++k) {
+                    const auto unfiltered = index->Search(vector.data(), 2, k);
+                    const auto allowed =
+                        index->Search(vector.data(), 2, k, [](int64_t /*unused*/) { return true; });
+                    const auto filtered =
+                        index->Search(vector.data(), 2, k, [](int64_t id) { return id != 20; });
+                    REQUIRE(unfiltered);
+                    REQUIRE(allowed);
+                    REQUIRE(filtered);
+                    REQUIRE(unfiltered->size() == k);
+                    REQUIRE(allowed->size() == k);
+                    REQUIRE(filtered->size() ==
+                            std::min(k, static_cast<uint64_t>(selected.size())));
+                    for (uint64_t i = 0; i < k; ++i) {
+                        REQUIRE((*unfiltered)[i].id == ordered[i]);
+                        REQUIRE((*allowed)[i].id == ordered[i]);
+                        REQUIRE((*allowed)[i].distance == 0.0F);
+                    }
+                    for (uint64_t i = 0; i < filtered->size(); ++i) {
+                        REQUIRE((*filtered)[i].id == selected[i]);
+                        REQUIRE((*filtered)[i].distance == 0.0F);
+                    }
+                }
+            }
+        }
+    }
+}
+
 TEST_CASE("Lite graph filter traverses rejected IDs and survives snapshot load", "[lite-graph]") {
     auto created = vsag::lite::Index::Create(2);
     REQUIRE(created);

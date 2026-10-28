@@ -472,10 +472,14 @@ public:
             if (k == 0) {
                 return std::vector<Neighbor>{};
             }
+            const auto rank = [this](const Candidate& left, const Candidate& right) {
+                return left.distance < right.distance or
+                       (left.distance == right.distance and IdAt(left.slot) < IdAt(right.slot));
+            };
             const uint64_t ef = std::min(Size(), std::max(k, budget));
             // With closer as Compare, top() is the farthest candidate and pop() evicts it.
             QueryHeap<Candidate, Closer> best;
-            std::priority_queue<Candidate, std::vector<Candidate>, Closer> accepted;
+            std::priority_queue<Candidate, std::vector<Candidate>, decltype(rank)> accepted(rank);
             std::priority_queue<Candidate, std::vector<Candidate>, Farther> candidates;
             std::vector<uint8_t> visited(Size(), 0);
             std::vector<uint16_t> encoded_query;
@@ -539,10 +543,6 @@ public:
             std::vector<Neighbor> result;
             if (filter == nullptr) {
                 auto values = best.TakeData();
-                const auto rank = [this](const Candidate& left, const Candidate& right) {
-                    return left.distance < right.distance or
-                           (left.distance == right.distance and IdAt(left.slot) < IdAt(right.slot));
-                };
                 const uint64_t count = std::min(k, static_cast<uint64_t>(values.size()));
                 const auto end = values.begin() + static_cast<std::ptrdiff_t>(count);
                 if (count < values.size()) {
