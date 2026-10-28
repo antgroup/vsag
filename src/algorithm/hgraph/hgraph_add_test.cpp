@@ -606,6 +606,9 @@ TEST_CASE("HGraph code compaction preserves coverage when a later move throws",
 
 TEST_CASE("HGraph Tune and brute force search finish concurrently",
           "[ut][hgraph][hgraph_tune_review]") {
+    // Keep repeated two-vector rebuilds from zero-filling 128 MiB per Tune call.
+    // The deadline should detect lock-order regressions, not allocator throughput.
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
     auto parameters = MakeFp32HGraphJson(false);
     parameters["store_raw_vector"].SetBool(true);
     auto index = MakeHGraphIndex(parameters, MakeCommonParam(4));

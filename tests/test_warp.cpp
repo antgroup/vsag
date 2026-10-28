@@ -24,6 +24,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "data_type.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "framework/test_budget_context.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
 #include "framework/test_logger.h"
@@ -57,7 +58,8 @@ public:
 
     static TestDatasetPool pool;
 
-    static std::vector<int> dims;
+    static std::vector<int>
+    GetDims();
 
     constexpr static uint64_t base_count = 1000;
 
@@ -69,7 +71,35 @@ public:
 };
 
 TestDatasetPool WarpTestIndex::pool{};
-std::vector<int> WarpTestIndex::dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
+std::vector<int>
+WarpTestIndex::GetDims() {
+    const auto identity = budget::CurrentCaseIdentity(__FILE__);
+    auto policy = budget::CurrentPolicy();
+    const auto seed = budget::CaseSeed(identity.name, policy.seed);
+    const auto desired = fixtures::get_common_used_dims(1, static_cast<int>(seed % 1000)).front();
+    std::vector<std::vector<budget::RunSpec>> candidates;
+    for (const uint64_t limit : {8, 32, 64, 128, 256, 512, 1536}) {
+        budget::Workload work;
+        work.dim = std::min<uint64_t>(desired, limit);
+        work.num = base_count;
+        work.min_num = base_count;
+        work.query_num = 100;
+        work.metric = "ip";
+        work.build_runs = 1;
+        work.search_runs = identity.name.find("Mark Remove") != std::string::npos ? 5 : 6;
+        work.search_candidates = base_count;
+        work.oracle_runs = 1;
+        work.serialize_runs = identity.name.find("Serialize") != std::string::npos ? 3 : 0;
+        work.update_num = base_count;
+        // The fixture creates up to five vectors per document and query: MaxSim can
+        // require 25 dense distance evaluations. Keep this conservative multiplier.
+        work.repetitions = 25;
+        candidates.push_back({{"multi/ip/fp32", work}});
+    }
+    const auto plan = budget::PlanCase(identity, policy, candidates);
+    plan.Log(std::cout);
+    return {static_cast<int>(plan.Runs().front().workload.dim)};
+}
 
 std::string
 WarpTestIndex::GenerateWarpBuildParametersString(const std::string& metric_type,
@@ -110,13 +140,13 @@ TEST_CASE("WARP analysis preserves its public index type", "[ft][warp][analysis]
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Add Test", "[ft][warp]") {
-    auto metric_type = GENERATE("ip");
-    std::string base_quantization_str = GENERATE("fp32");
+    const std::string metric_type = "ip";
+    const std::string base_quantization_str = "fp32";
     WarpParam warp_param;
     warp_param.base_quantization_type = base_quantization_str;
     const std::string name = "warp";
     auto search_param = GenerateWarpSearchParametersString();
-    for (auto& dim : dims) {
+    for (auto dim : GetDims()) {
         INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         auto param = GenerateWarpBuildParametersString(metric_type, dim, warp_param);
         auto index = TestFactory(name, param, true);
@@ -133,19 +163,20 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex,
                              "Warp Serialize File",
                              "[ft][warp][serialization]") {
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
-    auto metric_type = GENERATE("ip");
-    std::string base_quantization_str = GENERATE("fp32");
+    constexpr auto size = 1024 * 1024 * 2;
+    const std::string metric_type = "ip";
+    const std::string base_quantization_str = "fp32";
     WarpParam warp_param;
     warp_param.base_quantization_type = base_quantization_str;
     const std::string name = "warp";
     auto search_param = GenerateWarpSearchParametersString();
-    for (auto& dim : dims) {
+    for (auto dim : GetDims()) {
         INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         vsag::Options::Instance().set_block_size_limit(size);
         auto param = GenerateWarpBuildParametersString(metric_type, dim, warp_param);
         auto index = TestFactory(name, param, true);
-        SECTION("serialize empty index") {
+        {
+            INFO("serialize empty index");
             auto index2 = TestFactory(name, param, true);
             auto serialize_binary = index->Serialize();
             REQUIRE(serialize_binary.has_value());
@@ -155,15 +186,18 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex,
         auto dataset =
             pool.GetDatasetAndCreate(dim, base_count, metric_type, false, 0.8, 0, 16, "multi");
         TestBuildIndex(index, dataset, true);
-        SECTION("serialize/deserialize by binary") {
+        {
+            INFO("serialize/deserialize by binary");
             auto index2 = TestFactory(name, param, true);
             TestSerializeBinarySet(index, index2, dataset, search_param, true);
         }
-        SECTION("serialize/deserialize by readerset") {
+        {
+            INFO("serialize/deserialize by readerset");
             auto index2 = TestFactory(name, param, true);
             TestSerializeReaderSet(index, index2, dataset, search_param, name, true);
         }
-        SECTION("serialize/deserialize by file") {
+        {
+            INFO("serialize/deserialize by file");
             auto index2 = TestFactory(name, param, true);
             TestSerializeFile(index, index2, dataset, search_param, true);
         }
@@ -186,13 +220,13 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp IP Multiple Dims", "
 }
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::WarpTestIndex, "Warp Mark Remove", "[ft][remove][warp]") {
-    auto metric_type = GENERATE("ip");
-    std::string base_quantization_str = GENERATE("fp32");
+    const std::string metric_type = "ip";
+    const std::string base_quantization_str = "fp32";
     WarpParam warp_param;
     warp_param.base_quantization_type = base_quantization_str;
     const std::string name = "warp";
     auto search_param = GenerateWarpSearchParametersString();
-    for (auto& dim : dims) {
+    for (auto dim : GetDims()) {
         INFO(fmt::format("metric_type={}, dim={}", metric_type, dim));
         auto param = GenerateWarpBuildParametersString(metric_type, dim, warp_param);
         auto index = TestFactory(name, param, true);
