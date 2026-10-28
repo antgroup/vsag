@@ -1284,10 +1284,11 @@ TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][Si
     const bool reorder = GENERATE(false, true);
     const bool immutable = GENERATE(false, true);
     const bool multiple_windows = GENERATE(false, true);
+    const auto candidates = GENERATE(5, 20);
     const auto* scheduler = GENERATE("count_deque", "count_atomic", "cost_atomic");
     // External default pool, legacy custom pool, and same-pool nested query.
     const auto pool_mode = GENERATE(0, 1, 2);
-    CAPTURE(reorder, immutable, multiple_windows, scheduler, pool_mode);
+    CAPTURE(reorder, immutable, multiple_windows, candidates, scheduler, pool_mode);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto external = std::make_shared<DefaultThreadPool>(4);
     auto legacy = std::make_shared<DeferredPool>();
@@ -1350,7 +1351,7 @@ TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][Si
         // request must still return ten results even if only one worker finds matches.
         for (const auto workers : {1, 4}) {
             const auto options = nlohmann::json{{"sindi",
-                                                 {{"n_candidate", 20},
+                                                 {{"n_candidate", candidates},
                                                   {"window_parallelism", workers},
                                                   {"worker_n_candidate", workers == 1 ? 20 : 5},
                                                   {"query_prune_ratio", 0},
@@ -1382,6 +1383,12 @@ TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][Si
             }
             CAPTURE(request_api, workers);
             REQUIRE(result->GetDim() == 10);
+            // use_reorder is an index setting: verify the selected runtime path,
+            // including effective ef >= top-k when n_candidate is below top-k.
+            const auto statistics = nlohmann::json::parse(result->GetStatistics());
+            const auto rerank_evaluations =
+                statistics.at("distance_evaluations_by_phase").at("rerank").get<uint64_t>();
+            REQUIRE((rerank_evaluations > 0) == reorder);
             for (int64_t i = 0; i < 10; ++i) {
                 REQUIRE(result->GetIds()[i] == static_cast<int64_t>(count) - 1 - i);
                 REQUIRE(result->GetDistances()[i] == static_cast<float>(i - 19));
