@@ -11,8 +11,7 @@ HGraph 可以选择构建一个 MCI（Maximal Clique Index）挂件，用于带�
 ## 构建配置
 
 MCI 构建参数直接放在 `index_param` 下，不再使用嵌套对象。满足以下任一条件即
-启用挂件：`use_mci` 为 true，或出现 `mci_mcs`、`mci_clique_max`、`mci_alpha`、
-`mci_knng_source` 中任意一个。`mci_knng_source` 用于
+启用挂件：`use_mci` 为 true，或出现任意 MCI 构建参数。`mci_knng_source` 用于
 选择构团所需 KNN 图的来源：可以从已经构建好的 HGraph bottom graph 派生，也可以
 单独构建一张 ODescent 图。
 
@@ -114,8 +113,7 @@ ground truth 和其他配置，每次只调整一项，同时比较查询质量�
 }
 ```
 
-`use_mci` 在搜索时默认为 true，可以设为 false 来仅对本次查询关闭原有 MCI 路径。
-下文的混合遍历使用独立的启用开关。
+`use_mci` 在搜索时默认为 true，可以设为 false 来仅对本次查询关闭 MCI。
 `hgraph_valid_ratio_threshold` 是搜索路由阈值：`ValidRatio()` 低于该阈值时走 MCI，
 否则走 HGraph。默认值是 `0.05`。
 
@@ -123,24 +121,42 @@ seed 数量按 `ceil(sqrt(当前向量总数) * mci_seed_ratio)` 计算，并且
 `mci_seed_ratio` 默认值为 `0.1`，必须是有限的非负数。最终 seed 数量不会超过
 满足过滤条件的点数。
 
-MCI 路径要求使用 bitset 过滤器，或通过 `GetValidIds()` 提供非空有效 ID 列表的
-自定义 `Filter`，并提供合理的 `ValidRatio()`。仅有函数回调的过滤器回退到 HGraph。
-采样只解析选中的标签，不会为过期或重复 ID 补充 seed；若没有可用 seed，则回退到 HGraph。
+当该目标不超过 `mci_seed_max_count`、也不超过向量总数时，`mci_seed_coverage` 会把
+seed 数量提高到 `ceil(mci_seed_coverage * 合法点数)`；否则覆盖项整体丢弃，而不是
+截断。`mci_seed_coverage` 默认 `1.0`，`mci_seed_max_count` 默认 `32768`（`0` 表示
+不限）。seed 数量不会低于 1，所以播种无法被完全关闭——把两项都设为 `0` 只会留下
+一个 seed。
+
+正因为覆盖项是整体丢弃而不是钳制，当合法集超过 `mci_seed_max_count` 时
+`mci_seed_coverage` 就不起作用了：这类宽过滤查询的 seed 数量会静默退回到
+`ceil(sqrt(N) * mci_seed_ratio)` 这个下限。想扩大“精确播种”的适用范围就要调大
+上限，代价是更长的播种阶段。默认值 `32768` 让枚举本身在绝对量级上仍然便宜——
+32768 个 inner id 是 128 KiB，可以留在 cache 里——所以饱和跳过依然划算，而不会把
+宽谓词变成接近全扫描规模的播种阶段。
+
+对于向量非连续存储的纯 MCI 路由，如果已确认有序种子列表覆盖全部合法点，就可以直接
+通过现有的批量距离后端评分，省去访问标记初始化和展开队列维护。该路径要求静态 CSR、
+完整合法 bitmap、没有超时设置且无需重新验证可变谓词，并在使用前校验 ID 和固定的
+删除集合读视图；其他查询继续使用原有遍历。结果堆仍保留 `max(k, ef_search)` 个点，
+以保持已有的重排语义。该优化仅减少执行开销，不改变种子预算、距离精度或索引格式。
+
+MCI 挂件依赖过滤器提供合理的 `ValidRatio()`。bitset 和函数过滤器也可以
+使用，但自定义 `Filter` 能给搜索规划提供更准确的选择率信息。
 
 ## 动态邻居遍历
 
-`use_hybrid_traversal` 默认为 `false`。启用后，在同一次遍历中处理每个展开节点的
-两类邻居：先计算稀疏 HGraph 邻居的距离并加入候选堆，保持图的连通性；团成员则
-先判断过滤条件，再计算距离，并受每次节点展开的虚拟开销预算约束。
+`use_hybrid_traversal`（默认 `false`）把上面的“二选一”路由换成一次遍历：对每个
+被展开的向量，在同一趟里同时处理它的两个邻居来源——
 
-NaN 距离不会进入结果集；对应节点使用确定的遍历优先级，
-以便继续访问通过这些节点可达的有限距离邻居。
+- 先按距离优先处理 HGraph 稀疏邻居，并把它们压入候选堆，这样无论选择率多低，
+  搜索子图都保持连通；
+- 再按谓词优先处理同一向量的团成员，这部分由一个虚拟开销预算提前截断。
 
-当 `considered * (hybrid_filter_cost_ratio + local_selectivity) >= hybrid_vob` 时，
-停止当前节点的团遍历。`local_selectivity` 是本次展开中已考虑团成员的过滤命中率，
-`hybrid_filter_cost_ratio` 是单次过滤相对于单次距离计算的开销比。`hybrid_vob`
-以距离计算开销为单位，默认 `0.0`（不提前停止）；开销比默认 `1.0`。
-两个参数都必须是有限的非负数。
+当 `considered * (hybrid_filter_cost_ratio + local_selectivity)` 达到 `hybrid_vob`
+时，团部分停止。其中 `hybrid_filter_cost_ratio` 是 `O_filter / O_dist`（一次谓词
+过滤相对于一次距离计算的代价），`local_selectivity` 是当前邻居遍历中谓词的实时
+命中率。`hybrid_vob` 非正时关闭提前停止。这两个参数默认值分别是 `0.0` 和 `1.0`，
+`hybrid_vob` 的单位是 `O_dist`。
 
 ```json
 {
@@ -154,26 +170,13 @@ NaN 距离不会进入结果集；对应节点使用确定的遍历优先级，
 }
 ```
 
-混合遍历复用 MCI 的有效 ID 和 bitset 采样器。seed 预算下限为
-`max(1, ceil(sqrt(N) * mci_seed_ratio))`。仅当覆盖目标
-`ceil(mci_seed_coverage * valid_count)` 不超过 N 且满足 `mci_seed_max_count`
-上限时，才用该目标提高预算。超出上限时直接放弃覆盖项，而非截断到上限。
-覆盖比例默认 `1.0`，上限默认 `32768`（`0` 表示无限制）；两者必须非负，覆盖比例
-还必须有限。ratio 和 coverage 都为零时仍保留一个 seed。这两个新参数只影响混合
-遍历，原有 MCI 路径的 seed 预算保持不变。
-
-当有效 ID 列表证明 seed 已覆盖全部有效点时，直接从 seed 返回结果并跳过展开。
-这对遍历使用的距离是精确的；量化编码仍有其通常的近似误差和重排行为。bitset
-采样器无法证明穷尽性，因此不会跳过展开。没有可用 seed 列表的过滤器从粗搜索入口开始。
-
-混合遍历独立于搜索参数 `use_mci`。当前节点数没有可用挂件、范围搜索或存在属性
-过滤执行器时，回退到已有路径。启用的暴力搜索阈值优先于混合遍历。
-此 `1.0` 回移保留单查询接口，不引入 main 的批量搜索 API。
-
-查询结果的 `GetStatistics()` 通过 `mci_hybrid_route`（运行混合遍历时为 `"hybrid"`）、
+遍历的 seed 来自谓词的合法集，与 MCI 路由使用完全相同的预算公式和采样器，因此两条
+路线的对比不会被 seed 策略干扰。当该预算最终覆盖了全部合法点时，所有合法距离都已
+算出，遍历直接由 seed 给出答案；此时跳过展开是因为它可证明是多余的，而不是近似。
+`GetStatistics()` 通过 `mci_hybrid_route`（遍历实际运行时为 `"hybrid"`）、
 `hybrid_seed_budget`、`hybrid_seeded_entries`、`hybrid_expansion_skipped`、
-`hybrid_expanded_nodes`、`hybrid_mci_members_considered`、`hybrid_dist_computations`
-及 `hybrid_mci_stopped_early` 报告行为。
+`hybrid_expanded_nodes`、`hybrid_mci_members_considered`、
+`hybrid_dist_computations` 和 `hybrid_mci_stopped_early` 报告这些行为。
 
 ## 代码入口与维护
 
@@ -182,7 +185,7 @@ NaN 距离不会进入结果集；对应节点使用确定的遍历优先级，
 | 文件 | 重点入口 / 职责 |
 | --- | --- |
 | `include/vsag/index.h`、`src/index/index_impl.h` | 公共 Build/Add/Remove/Search 接口及错误包装 |
-| `src/algorithm/hgraph/hgraph_build.cpp` | `Add`：先插入 HGraph，再维护成功插入点的 MCI |
+| `src/algorithm/hgraph/hgraph_build.cpp` | `Add` → `add_impl`：先插入 HGraph，再维护成功插入点的 MCI |
 | `src/algorithm/hgraph/hgraph_mci.cpp` | 全量构团；`search_mci_knn`、`incremental_update_mci_clique`、`repair_mci_clique`、`force_remove_with_mci`、`maybe_compact_mci` |
 | `src/algorithm/hgraph/hgraph_modify.cpp` | Remove 模式分流、图边修补、尾部 ID 搬移、存储缩容 |
 | `src/datacell/clique_datacell.{h,cpp}` | 两向 CSR、三种 delta、删除快照、团废弃、节点重映射和 Flush |
@@ -207,7 +210,8 @@ NaN 距离不会进入结果集；对应节点使用确定的遍历优先级，
 
 ### 1.2 ADD 与删除修复的共用流程
 
-1. ADD 先完成 HGraph 插入，再逐个维护成功插入点。候选来自 `search_mci_knn`，内部调用
+1. ADD 先完成 HGraph 插入，再按插入顺序逐行维护成功插入点的 MCI：每行立即更新挂件，
+   然后才处理下一行（每行仍按下面 2–3 步的规则处理）。候选来自 `search_mci_knn`，内部调用
    HGraph `KnnSearch`，显式设置 `use_mci=false`；不是通过 MCI 搜候选。
 2. 目标邻居数为 `min(mci_mcs, visible_total - 1)`。内部检索 ef 为 `max(query_k, 100)`；
    剔除自身、删除点及可见范围外点，不足时可扩大请求数量。这里不使用性能测试的 ef=320。
@@ -352,8 +356,13 @@ Remove 使用外部标签，不接受把内部槽位当成标签；物理删除�
 ## Add、删除、序列化和统计
 
 通过扁平构建参数启用 MCI 后，`HGraph::Add()` 先完成 HGraph 插入批次，
-再逐个更新成功插入点的 MCI。它会先尝试加入合适的已有团；
+再更新成功插入点的 MCI。它会先尝试加入合适的已有团；
 如果去重邻居度数仍不足，则继续为新点创建增量团。
+
+这一批次的 MCI 维护是逐行串行进行的：`HGraph::Add()` 按插入顺序遍历成功插入的行，
+对每一行调用 `incremental_update_mci_clique`（随后 `maybe_compact_mci`），然后才处理下一行。
+1.0 上没有分块规划阶段、没有跨行共享的冻结只读视图，也没有并行计划合并，因此维护顺序就是
+插入顺序。不同线程数仍可能得到不同的候选 KNN 集合，因为候选检索本身由 HGraph 构建线程并发执行。
 
 建议先用 `Build()` 构建初始索引，再通过增量添加路径追加向量。
 空索引上的 `Add()` 可以触发构建，但不建议用大量小批 Add 替代全量 Build。
@@ -427,9 +436,6 @@ Add/MARK_REMOVE 期间 MCI 可能暂时不可用，并发查询仍按已有语�
 团数据会作为 HGraph 索引的一部分序列化。加载 HGraph 索引时，
 MCI 挂件会自动恢复。
 
-此 `1.0` 回移在增量修改后的加载中恢复物理节点数、删除掩码及可查询的 MCI 状态，
-使用现有的顺序序列化接口。
-
 `GetStats()` 会包含以下 MCI 质量字段：
 
 - `mci_has_index`
@@ -448,14 +454,6 @@ MCI 挂件会自动恢复。
 
 最小构建和过滤搜索流程见
 [`examples/cpp/324_feature_hgraph_mci_companion.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/324_feature_hgraph_mci_companion.cpp)。
-
-## 可选过滤位图
-
-自定义过滤器可通过 `GetValidBitmap(uint64_t* size)` 提供按标签索引的逐字节位图，
-零表示过滤掉该标签，任意非零值表示保留。位图须在整个搜索期间保持有效且不变，
-并与 `CheckValid()` 的结果一致。仅当所有有效标签均等于对应内部 ID，且位图覆盖
-整个索引时，MCI 才使用此优化；否则继续调用 `CheckValid()`。现有过滤器无需修改。
-搜索统计项 `mci_bitmap_fast_path` 表示是否使用了位图。浮点和量化 MCI 搜索均支持此优化。
 
 ## 评测说明
 
@@ -484,9 +482,87 @@ QPS 是多线程吞吐，`1000 / QPS` 不是单请求延迟；当前 CSV 不含�
 ## 回归测试与边界
 
 ```bash
-make debug VSAG_ENABLE_TESTS=ON COMPILE_JOBS=4
-build/tests/unittests '[mci],[LabelTable]'
+make debug VSAG_ENABLE_TESTS=ON COMPILE_JOBS=12
+build/tests/unittests '[mci],[LabelTable],RaBitQSplitDataCell serialize and methods'
 ```
 
-以上命令选择修改和存储相关的定向回归。更全面的并发、序列化兼容性、平台验证及
-要求的覆盖率门槛仍需单独验证；定向测试通过不能证明生产就绪。
+文档编写前验证：C++ 定向测试 38 个用例、3,294 条断言通过；脚本测试 10+1+3 项通过，
+其中两个集成测试当时使用 Debug 基准程序作正确性验证。未完成全量 lint、全量测试和 90% 覆盖率验证。
+review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数据集加载复测、ABI、序列化兼容
+及更全面的并发修改仍需独立验证；不能把定向测试当作生产就绪证明。
+
+## 压缩过滤位图与按点限制团激活
+
+以下参数位于搜索 JSON 的 `hgraph` 对象内，作用于分流后的 MCI 路径。
+它们不改变稀疏图搜索或 `use_hybrid_traversal=true` 的联合展开算法。
+
+| 搜索参数 | 默认值 | 含义 |
+| --- | --- | --- |
+| `mci_packed_filter` | `true` | 从完整的合法 inner ID 或身份映射下的字节位图构造查询私有的单比特位图。静态 CSR 支持运行时选择 AVX512／AVX2 和标量回退，保留成员顺序；没有完整来源时沿用原谓词检查。 |
+| `mci_batch_distance` | `true` | 每批最多对 64 个首次访问的合法点调用距离接口；选择下一父节点和检查收敛前提交剩余批次。FP32 内核可能选择不同的严格等距 ID。 |
+| `mci_activation_cap` | `0` | 每个展开点只考虑其存储顺序中的前若干条团归属，0 表示不限。已经访问过的团仍占用前缀。这会改变搜索图，可能降低召回。 |
+| `mci_hops_limit` | `4294967295` | 独立于旧 HGraph `hops_limit` 的深度限制：种子深度为 1，孩子深度为父节点加 1；达到限制的点已经打分，但不继续展开。 |
+| `mci_expansion_idle_window` | `0` | 连续若干父节点没有成功插入新候选时结束，0 为关闭。判断的是候选队列，不只是最终 top-k 结果堆。 |
+| `search_no_lock` | `false` | 同步查询期间跳过索引读锁。调用者必须排除一切索引修改和销毁；查询内部 `parallelism` 必须为 1，可运行多条独立并发查询。共享可变查询池仍保留同步。MCI 无锁路径要求已经压实的静态 CSR，存在待合并 delta／墓碑时拒绝执行。 |
+
+关闭压缩位图和距离合批，保持激活上限为零、深度与收敛参数为默认值，可关闭这些优化。
+分流 MCI 与联合 Hybrid 使用相同的 coverage 种子预算；种子已经计算全部合法点时，
+直接跳过团展开和 packed bitmap 构造。
+
+完整 ID 集合的准备只在验证标签为身份映射后直接转换，其余情况仍查询反向映射表。
+未知标签和已删除标签被排除，重复 ID 被去重，已排序的输入无需再次排序。
+工作线程复用临时缓冲区，同时保证并发及嵌套查询不会覆盖彼此的数据。
+遍历的 epoch 标记和压缩成员缓冲区也按嵌套深度使用独立缓存槽。最外层查询返回后，
+每个工作线程最多保留两个缓存对象；更深层的临时槽在全部活动视图结束后释放。
+团遍历中，只有回调来源的过滤器会记录已判定的 ID（包括拒绝点），重叠团不会重复执行同一点的过滤回调。
+压缩位图路径可根据已准备的完整合法集合省略用户回调。这里不统计种子收集或合法集合准备阶段的判定次数，
+并要求过滤谓词在一次查询期间保持不变。若查询过程中成员资格发生变化，结果可能与前后任一版本的过滤集合都不一致。
+这些准备工作仍计入查询时间。
+可变索引的有锁查询在计算新访问点的距离前，会按当前标签重新检查过滤条件，避免标签重命名绕过谓词。
+距离读取等其他公共索引操作也会在入口恢复默认锁策略。
+嵌套的公共同步搜索在 API 入口先恢复默认加锁；HGraph 再应用本请求自己的 `search_no_lock` 设置（默认 `false`），
+其他后端不会继承外层 HGraph 的无锁选择。
+返回或异常退出后恢复外层策略。
+回调也必须遵守外层查询禁止修改和销毁索引的约定。
+
+要获得有用的团激活顺序，在构建的 `index_param` 中设置
+`"mci_clique_activation_order": true`，默认关闭。排序先贪心选择对该点既有输入 KNN
+候选带来最多新增覆盖的团，再按近边密度排列剩余团。归属不超过 32 个团的点保持原顺序。
+该过程不新增距离计算，直接重排现有“点→团”CSR，使用当前 MCI 格式序列化，
+无需额外 sidecar 或持久化的归属副本；它与全局团 ID 重排序是两项不同的操作。
+
+对于开启排序的新建静态索引，激活上限至少为 `max(32, 输入 KNN 行宽)` 时，能保留原团已经
+表示的全部输入 KNN 边，包含未重排的短行。这不保证保留过滤后所需的更远邻居，也不保证过滤召回。旧索引不排序仍可使用，
+但限制的是它原有的存储顺序，而非有意义的激活优先级。建议在开启排序的索引上调节非零上限并重新验证召回。
+这是位置前缀，不是新增团的配额：前缀中的团若都已访问，该父节点就不会展开新团。
+上面的 KNN 边性质描述的是截断后存储图的覆盖，不保证每个父节点能新增多少工作，也不保证召回。
+增量修改和压实保留归属关系，却可能改变优先级；
+需要完整重建才能恢复构建时的贪心顺序，并重新验证召回，不能假设 flush 会恢复排序。
+
+例如，采用少量种子的纯 MCI 查询可以配置为：
+
+```json
+{
+  "hgraph": {
+    "ef_search": 80,
+    "use_mci": true,
+    "use_hybrid_traversal": false,
+    "hgraph_valid_ratio_threshold": 1.0,
+    "mci_seed_ratio": 0.05,
+    "mci_seed_coverage": 0,
+    "mci_activation_cap": 128,
+    "mci_hops_limit": 9,
+    "mci_expansion_idle_window": 0,
+    "mci_packed_filter": true,
+    "mci_batch_distance": true,
+    "search_no_lock": true,
+    "parallelism": 1
+  }
+}
+```
+
+以上只是工作量控制的示例，不是跨数据集通用的召回参数。应在验证集标定 cap、种子预算和 ef。
+压缩位图与合批降低执行开销，团激活、深度和收敛限制还会以召回为代价减少搜索工作。
+
+有锁与无锁的分流 MCI 都在 HGraph 导航前先尝试执行；成功时不会计算无用的导航距离，也不申请
+HGraph 访问列表。MCI 不可用时仍正常回退到图导航与搜索。

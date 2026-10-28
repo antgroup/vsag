@@ -56,6 +56,7 @@ struct CliqueDataCellSearchView {
     const InnerIdType* maxcs{nullptr};
     const InnerIdType* p_node_to_cid{nullptr};
     const InnerIdType* node_to_cids{nullptr};
+    bool static_csr{false};
     uint64_t total_clique_count{0};
     uint64_t base_clique_count{0};
     uint64_t base_node_count{0};

@@ -468,6 +468,12 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             },
         },
         {
+            "mci_clique_activation_order",
+            {
+                "mci_clique_activation_order",
+            },
+        },
+        {
             HGRAPH_MCI_MCS,
             {
                 HGRAPH_MCI_MCS,

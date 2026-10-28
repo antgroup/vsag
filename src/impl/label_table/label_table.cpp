@@ -15,6 +15,8 @@
 
 #include "label_table.h"
 
+#include "utils/search_lock.h"
+
 namespace vsag {
 
 class RemoveListFilter : public Filter {
@@ -24,9 +26,11 @@ public:
         : Filter(), remove_ids_(remove_ids), delete_ids_mutex_(delete_ids_mutex) {
     }
 
+    // With search_no_lock the caller guarantees that no mutation runs concurrently, so the
+    // deleted-id set is a stable snapshot for the whole query.
     [[nodiscard]] bool
     CheckValid(int64_t inner_id) const override {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         return remove_ids_.count(inner_id) == 0;
     }
 
@@ -56,7 +60,7 @@ private:
 
 FilterPtr
 LabelTable::GetDeletedIdsReadView() const {
-    std::shared_lock guard(delete_ids_mutex_);
+    auto guard = make_search_read_lock(delete_ids_mutex_);
     if (deleted_ids_.empty()) {
         return nullptr;
     }
@@ -118,7 +122,7 @@ LabelTable::CheckLabel(LabelType label) const {
         inner_id = result - label_table_.begin();
     }
     {
-        std::shared_lock rlock(this->delete_ids_mutex_);
+        auto rlock = make_search_read_lock(this->delete_ids_mutex_);
         if (this->deleted_ids_.count(inner_id) > 0) {
             return false;
         }
@@ -156,7 +160,7 @@ LabelTable::TryGetIdByLabel(LabelType label, bool return_even_removed) const noe
         return {false, 0};
     }
     if (not return_even_removed) {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         if (this->deleted_ids_.count(id) > 0) {
             return {false, 0};
         }
