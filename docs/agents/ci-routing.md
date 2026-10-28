@@ -129,3 +129,24 @@ operation; this change does not bypass it.
 Validate the reporter offline with `python3 -m unittest tests/scripts/test_team_timing.py`.
 
 Only the final Team Summary job publishes Markdown; execution jobs retain their diagnostic artifacts. The stage budget table stays expanded, with job/step timings, compiler cache and shard details under closed `<details>` sections in a fixed order. Budget usage is green at or below 90%, yellow above 90% through 100%, and red above 100%, using colored icons and text rather than custom CSS. Red remains advisory and never changes the PR gate.
+
+## Community failure propagation
+
+Community and standalone Python jobs use the pytest process exit status, including
+pipeline failures, as their result. Logs are uploaded even when pytest fails;
+matching words such as `passed` in a log never overrides a nonzero exit status.
+Community changed-source lint passes the generated pattern through a quoted
+environment variable, and manual dispatch defaults its comparison branch to `main`.
+
+Community and standalone compatibility jobs use
+`scripts/ci/download_compatibility_inputs.py` to download into a new job-local
+directory. The helper reads all release asset pages, checks the exact selected
+`.index`/`.bin`/`.json` inventory and file sizes, verifies GitHub-provided SHA-256
+digests when present, and rejects release inventory changes during download.
+Older assets without an API digest still receive inventory and size checks;
+this is not a cryptographic integrity guarantee for those assets. Download
+failures are fatal. The compatibility tool then validates and tests the input
+set; Team's separately verified read-only snapshot remains unchanged.
+
+Regression coverage is included in
+`python3 -m unittest tests/scripts/test_dependency_workflows.py`.

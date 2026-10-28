@@ -212,9 +212,9 @@ HGraphParameter::FromJson(const JsonType& json) {
         this->use_conjugate_graph = json[PARAMETER_USE_CONJUGATE_GRAPH].GetBool();
     }
     const bool has_mci_parameter =
-        json.Contains(HGRAPH_MCI_MCS) or json.Contains(HGRAPH_MCI_CLIQUE_MAX) or
-        json.Contains(HGRAPH_MCI_ALPHA) or json.Contains(HGRAPH_MCI_KNNG_SOURCE) or
-        json.Contains(HGRAPH_MCI_KNNG_PATH_KEY) or
+        json.Contains("mci_clique_activation_order") or json.Contains(HGRAPH_MCI_MCS) or
+        json.Contains(HGRAPH_MCI_CLIQUE_MAX) or json.Contains(HGRAPH_MCI_ALPHA) or
+        json.Contains(HGRAPH_MCI_KNNG_SOURCE) or json.Contains(HGRAPH_MCI_KNNG_PATH_KEY) or
         json.Contains(HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY) or
         json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY) or
         json.Contains(HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY) or
@@ -225,6 +225,10 @@ HGraphParameter::FromJson(const JsonType& json) {
     this->mci_parameters.enabled =
         has_mci_parameter or (json.Contains(HGRAPH_USE_MCI) and json[HGRAPH_USE_MCI].GetBool());
     if (this->mci_parameters.enabled) {
+        if (json.Contains("mci_clique_activation_order")) {
+            this->mci_parameters.clique_activation_order =
+                json["mci_clique_activation_order"].GetBool();
+        }
         if (json.Contains(HGRAPH_MCI_MCS)) {
             const auto mci_mcs = json[HGRAPH_MCI_MCS].GetInt();
             CHECK_ARGUMENT(mci_mcs > 0, "hgraph mci_mcs must be positive");
@@ -388,6 +392,7 @@ HGraphParameter::ToJson() const {
     json[HGRAPH_PERSIST_SOURCE_ID_KEY].SetBool(this->persist_source_id);
     json[PARAMETER_USE_CONJUGATE_GRAPH].SetBool(this->use_conjugate_graph);
     if (this->mci_parameters.enabled) {
+        json["mci_clique_activation_order"].SetBool(this->mci_parameters.clique_activation_order);
         json[HGRAPH_USE_MCI].SetBool(true);
         json[HGRAPH_MCI_MCS].SetInt(static_cast<int64_t>(this->mci_parameters.mcs));
         json[HGRAPH_MCI_CLIQUE_MAX].SetInt(static_cast<int64_t>(this->mci_parameters.clique_max));
@@ -465,6 +470,7 @@ HGraphParameter::CheckCompatibility(const ParamPtr& other) const {
         return false;
     }
     CHECK_FIELD_EQ(*this, *p, mci_parameters.enabled);
+    CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_activation_order);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.mcs);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.clique_max);
     CHECK_FIELD_EQ(*this, *p, mci_parameters.alpha);
@@ -525,6 +531,41 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_USE_HYBRID_TRAVERSAL)) {
         obj.use_hybrid_traversal = params[INDEX_TYPE_HGRAPH][HGRAPH_USE_HYBRID_TRAVERSAL].GetBool();
+    }
+    const auto& hgraph = params[INDEX_TYPE_HGRAPH];
+    auto parse_bool = [&](const char* key, bool& value) {
+        if (hgraph.Contains(key)) {
+            CHECK_ARGUMENT(hgraph[key].IsBool(), fmt::format("{} must be boolean", key));
+            value = hgraph[key].GetBool();
+        }
+    };
+    auto parse_uint = [&](const char* key, uint32_t& value) {
+        if (hgraph.Contains(key)) {
+            CHECK_ARGUMENT(hgraph[key].IsNumberInteger(), fmt::format("{} must be integer", key));
+            if (hgraph[key].IsNumberUnsigned()) {
+                CHECK_ARGUMENT(hgraph[key].GetUint64() <= UINT32_MAX,
+                               fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(hgraph[key].GetUint64());
+            } else {
+                const auto parsed = hgraph[key].GetInt();
+                const bool valid_budget =
+                    parsed >= 0 and static_cast<uint64_t>(parsed) <= UINT32_MAX;
+                CHECK_ARGUMENT(valid_budget, fmt::format("{} exceeds uint32 range", key));
+                value = static_cast<uint32_t>(parsed);
+            }
+        }
+    };
+    parse_bool("search_no_lock", obj.search_no_lock);
+    parse_bool("mci_packed_filter", obj.mci_packed_filter);
+    parse_bool("mci_batch_distance", obj.mci_batch_distance);
+    parse_uint("mci_activation_cap", obj.mci_activation_cap);
+    parse_uint("mci_hops_limit", obj.mci_hops_limit);
+    uint32_t idle = 0;
+    parse_uint("mci_expansion_idle_window", idle);
+    obj.mci_expansion_idle_window = idle;
+    if (obj.search_no_lock) {
+        CHECK_ARGUMENT(obj.parallel_search_thread_count == 1,
+                       "search_no_lock requires parallelism=1 (concurrent queries are supported)");
     }
     auto parse_hybrid_cost = [&](const char* key, double& target, const char* name) {
         if (not params[INDEX_TYPE_HGRAPH].Contains(key)) {

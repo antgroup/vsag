@@ -144,6 +144,14 @@ enumeration cheap in absolute terms -- 32768 inner ids are 128 KiB and therefore
 so the saturated skip stays a win instead of turning a wide predicate into a scan-sized seed
 phase.
 
+For the pure MCI route with non-contiguous vector storage, a certified complete, sorted seed
+list can be scored directly through the existing batched distance backend, without initializing
+visited marks or maintaining an expansion queue. This shortcut requires static CSR, a complete
+valid bitmap, no timeout and no mutable-predicate revalidation; it validates IDs and the pinned
+deletion view before use. Other queries retain ordinary traversal. The result heap still keeps
+`max(k, ef_search)` entries so existing reorder behavior is preserved. This changes execution
+overhead, not the seed budget, distance precision or serialized index.
+
 The companion needs a `Filter` object with a meaningful `ValidRatio()` hint. Bitset and
 function filters are accepted, but a custom `Filter` gives the search planner better
 selectivity information.
@@ -527,3 +535,93 @@ correctness. Review follow-up adds reverse-edge restoration and reload-mutation 
 Full lint, full tests, and >=90% coverage verification are outstanding. Large-dataset snapshot reuse,
 ABI, serialization compatibility, and broader concurrent mutation require separate validation;
 targeted passes are not proof of production readiness.
+
+## Packed filtering and bounded clique activation
+
+The routed MCI search supports the following options inside the `hgraph` search object.
+They do not change the sparse-graph or `use_hybrid_traversal=true` expansion algorithm.
+
+| Search parameter | Default | Meaning |
+| --- | --- | --- |
+| `mci_packed_filter` | `true` | Build a query-private one-bit predicate from complete mapped valid IDs, or an identity-mapped byte bitmap. Static CSR members use runtime-dispatched AVX512/AVX2, with a portable scalar fallback. Member order is preserved. When no complete source is available, use the existing predicate checks. |
+| `mci_batch_distance` | `true` | Score up to 64 newly visited legal points per datacell call. Submit the final batch before selecting another parent or checking convergence. FP32 kernels can choose different IDs among exactly tied distances. |
+| `mci_activation_cap` | `0` | Maximum number of outgoing clique incidences considered for each expanded point. Zero means all incidences. Already visited cliques still consume this prefix. This changes the explored graph and can lower recall. |
+| `mci_hops_limit` | `4294967295` | Depth limit independent of the legacy HGraph `hops_limit`. Seeds have depth 1; a child has its parent's depth plus 1. Points at the limit are scored but not expanded. |
+| `mci_expansion_idle_window` | `0` | Stop after this many expanded parents insert no new candidates. Zero disables this heuristic. It monitors the bounded candidate queue, not only the final top-k results. |
+| `search_no_lock` | `false` | Skip index reader locks for a synchronous query. The caller must exclude ALL index mutation and destruction. Query-internal `parallelism` must be 1; independent concurrent queries are allowed. Shared mutable query pools retain synchronization. An unlocked MCI query requires a compact static CSR and rejects pending delta/tombstone state. |
+
+Setting both packed filtering and batching to `false`, leaving the activation cap at zero,
+and leaving the new depth/convergence options at their defaults disables these optimizations.
+The coverage seed budget is applied to routed MCI as well as joint Hybrid. When the seed
+phase has scored the complete valid set, it skips clique expansion and packed-bitmap construction.
+
+Complete-ID preparation uses direct conversion only after validating identity label mapping;
+other labels still use the reverse map. Unknown/deleted labels are excluded, duplicates are
+removed, and already sorted input avoids another sort. A worker reuses its temporary buffer
+without sharing it with concurrent or nested queries. Traversal epoch marks and packed member
+buffers also belong to separate scratch slots at each nesting depth. A worker retains at most
+two scratch objects after the outermost query returns; deeper temporary slots are released
+only after all active views have expired. During clique traversal, callback-only filters
+remember accepted and rejected IDs so overlapping cliques do not repeat their predicate calls.
+The packed path can skip the user predicate using the already prepared complete valid set.
+This bound excludes predicate calls during seed collection or source preparation and assumes
+that the predicate is stable throughout the query. If membership changes mid-query, results
+need not match either predicate generation. This preparation remains inside query time.
+For a locked query on a mutable index, prepared membership is rechecked against the current
+label before a newly visited point is scored; cached membership alone cannot bypass the predicate.
+Public distance reads and other index operations also reset the default policy at their boundary.
+Nested public synchronous searches first restore default locking at the API boundary;
+HGraph then installs its own `search_no_lock` setting (default `false`). Other backends
+therefore do not inherit an outer HGraph opt-in. Each continuation-session `Next` also installs
+its own call's policy. Return or exception restores the outer policy.
+Callbacks remain subject to the outer request's exclusion of mutation and destruction.
+
+For useful activation priorities, build with `"mci_clique_activation_order": true` in
+`index_param`. This is off by default. It greedily ranks each point's incident cliques by
+new coverage of that point's existing input KNN candidates, then orders the tail by near-edge
+density. Rows of at most 32 incidences retain their original order. There are no new distance
+calculations. This option reorders the existing point-to-clique CSR in place and serialization
+preserves that order using the current MCI format; no external sidecar or extra persistent
+incidence array is needed. It is independent of any global clique-ID reordering.
+
+For a fresh build with activation ordering, a cap of at least `max(32, input KNN row width)`
+preserves all *already represented input KNN* edges (including the unchanged short rows). This does not preserve every farther edge needed after
+filtering, and it is not a filtered-recall guarantee. An old index without ranking still works,
+but a cap then uses its existing storage order, rather than a useful activation priority.
+Tune nonzero caps with a ranked build and revalidate recall. This is a positional prefix,
+not a quota of new cliques: if its entries were already visited, this parent expands no
+new clique. The KNN-edge property above describes the stored truncated graph, not a
+minimum amount of new work or a recall guarantee for each expanded parent.
+Incremental changes and compaction preserve
+memberships, but can change these priorities; rebuild to restore the full-build greedy order
+and revalidate recall. Do not assume that flushing after mutation restores the ranked order.
+
+For example, a small-seed pure MCI query can use:
+
+```json
+{
+  "hgraph": {
+    "ef_search": 80,
+    "use_mci": true,
+    "use_hybrid_traversal": false,
+    "hgraph_valid_ratio_threshold": 1.0,
+    "mci_seed_ratio": 0.05,
+    "mci_seed_coverage": 0,
+    "mci_activation_cap": 128,
+    "mci_hops_limit": 9,
+    "mci_expansion_idle_window": 0,
+    "mci_packed_filter": true,
+    "mci_batch_distance": true,
+    "search_no_lock": true,
+    "parallelism": 1
+  }
+}
+```
+
+These are example effort controls, not dataset-independent recommended recall settings.
+Calibrate the cap, seed budget and ef on validation queries. Packed filtering and batching
+reduce execution cost; activation, depth and idle limits additionally trade search work for recall.
+
+A routed MCI query is attempted before HGraph navigation under either lock policy. If it succeeds,
+no unused route-graph distances or HGraph visited-list acquisition are performed;
+an unavailable MCI path still falls back to the normal graph route.
