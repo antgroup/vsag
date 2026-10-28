@@ -30,6 +30,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
+#include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -329,6 +330,9 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
     const auto count =
         static_cast<uint32_t>(std::min<uint64_t>(pool == nullptr ? 1 : workers, ids.size()));
     const bool inline_execution = count == 1 or pool == nullptr or pool->RequiresInlineExecution();
+    const auto scratch_allocator =
+        inline_execution ? std::shared_ptr<Allocator>{} : SafeAllocator::FactoryDefaultAllocator();
+    auto* worker_allocator = inline_execution ? allocator : scratch_allocator.get();
     const bool atomic = scheduler != SindiRerankScheduler::COUNT_STATIC and count > 1;
     const bool weighted = scheduler == SindiRerankScheduler::NNZ_ATOMIC and count > 1;
     const uint64_t estimated_count = weighted or stage_profile ? ids.size() : 0;
@@ -416,7 +420,7 @@ SindiSearcher::RerankDistances(FlattenInterface& datacell,
         SindiRerankWorkerProfile local =
             stage_profile ? profile.workers[me] : SindiRerankWorkerProfile{};
         auto computer = datacell.FactoryComputer(&query);
-        QueryContext context{.alloc = allocator,
+        QueryContext context{.alloc = worker_allocator,
                              .stats = statistics != nullptr ? local_statistics[me].get() : nullptr,
                              .distance_phase = DistanceEvaluationPhase::RERANK};
         if (not atomic) {
@@ -498,6 +502,11 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
     // retain at least top-k even when the requested per-worker budget is smaller.
     const auto worker_candidates = std::max(
         req.worker_candidates, static_cast<uint64_t>(std::max<int64_t>(0, req.search.topk)));
+    // Request allocators may be unsynchronized arenas owned by the caller. Keep
+    // worker scratch (including cloned-computer storage and heaps) independent.
+    const auto scratch_allocator =
+        inline_execution ? std::shared_ptr<Allocator>{} : SafeAllocator::FactoryDefaultAllocator();
+    auto* worker_allocator = inline_execution ? req.allocator : scratch_allocator.get();
     const bool deque_mode = options.scheduler == SindiWindowScheduler::COUNT_DEQUE;
     const bool weighted = options.scheduler == SindiWindowScheduler::COST_ATOMIC;
     profile.ran = true;
@@ -526,7 +535,7 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
         queues.reserve(count);
     }
     for (uint32_t i = 0; i < count; ++i) {
-        heaps.emplace_back(req.allocator);
+        heaps.emplace_back(worker_allocator);
         if (not deque_mode and not inline_execution) {
             ranges[i].next.store(bounds[i], std::memory_order_relaxed);
             ranges[i].end = bounds[i + 1];
@@ -558,9 +567,9 @@ SindiSearcher::SearchWindows(const SindiWindowSearchRequest& req,
             local.start_delay_us =
                 std::chrono::duration<double, std::micro>(start - dispatch_start).count();
         }
-        auto computer = std::make_shared<SparseTermComputer>(*req.computer);
-        Vector<float> dists(req.window_size, 0.0F, req.allocator);
-        SindiQueryContext context(req.allocator);
+        auto computer = std::make_shared<SparseTermComputer>(*req.computer, worker_allocator);
+        Vector<float> dists(req.window_size, 0.0F, worker_allocator);
+        SindiQueryContext context(worker_allocator);
         auto param = req.search;
         param.ef = worker_candidates;
         uint32_t range_offset = 0;

@@ -62,6 +62,60 @@ public:
     }
 };
 
+// Detect violations without making the regression itself race in an unsafe arena.
+class ObservedQueryAllocator final : public Allocator {
+public:
+    explicit ObservedQueryAllocator(std::function<void()> first_allocation = {})
+        : first_allocation_(std::move(first_allocation)) {
+    }
+    std::atomic<uint64_t> off_thread_calls{0};
+    std::atomic<uint64_t> allocations{0};
+
+    std::string
+    Name() override {
+        return "ObservedQueryAllocator";
+    }
+    void*
+    Allocate(uint64_t size) override {
+        Observe();
+        if (first_.exchange(false) and first_allocation_) {
+            first_allocation_();
+        }
+        allocations.fetch_add(1);
+        return backing_->Allocate(size);
+    }
+    void*
+    Reallocate(void* ptr, uint64_t size) override {
+        Observe();
+        return backing_->Reallocate(ptr, size);
+    }
+    void
+    Deallocate(void* ptr) override {
+        Observe();
+        backing_->Deallocate(ptr);
+    }
+
+private:
+    void
+    Observe() {
+        if (std::this_thread::get_id() != owner_) {
+            off_thread_calls.fetch_add(1);
+        }
+    }
+    const std::thread::id owner_{std::this_thread::get_id()};
+    std::shared_ptr<Allocator> backing_{SafeAllocator::FactoryDefaultAllocator()};
+    std::function<void()> first_allocation_;
+    std::atomic<bool> first_{true};
+};
+
+class AcceptAllSindiFilter final : public Filter {
+public:
+    bool
+    CheckValid(int64_t) const override {
+        return true;
+    }
+};
+
 class RejectingPool final : public DefaultThreadPool {
 public:
     RejectingPool() : DefaultThreadPool(4) {
@@ -77,8 +131,8 @@ public:
     }
 };
 
-// A caller-supplied pool opts into identity without inheriting DefaultThreadPool.
-class IdentifiedCustomPool final : public ThreadPool, public ThreadPoolWorkerIdentity {
+// Caller-owned pool that must never receive internal index-query tasks.
+class SuppliedSindiPool final : public ThreadPool {
 public:
     std::atomic<uint32_t> enqueues{0};
 
@@ -86,10 +140,6 @@ public:
     Enqueue(std::function<void()> task) override {
         enqueues.fetch_add(1);
         return pool_.Enqueue(std::move(task));
-    }
-    bool
-    IsCurrentThread() const override {
-        return pool_.IsCurrentThread();
     }
     void
     WaitUntilEmpty() override {
@@ -1110,7 +1160,8 @@ TEST_CASE("SINDI nested queries finish with every supplied pool worker occupied"
     }
 }
 
-TEST_CASE("SINDI inline window workers preserve reduced candidate budgets", "[ut][SindiSearcher]") {
+TEST_CASE("SINDI queries from nested and legacy pools preserve reduced candidate budgets",
+          "[ut][SindiSearcher]") {
     const bool reorder = GENERATE(false, true);
     const bool immutable = GENERATE(false, true);
     const bool custom_pool = GENERATE(false, true);
@@ -1194,13 +1245,11 @@ TEST_CASE("SINDI inline window workers preserve reduced candidate budgets", "[ut
     }
 }
 
-TEST_CASE("SINDI custom pool identity enables external dispatch and nested inline work",
-          "[ut][SindiSearcher]") {
+TEST_CASE("SINDI query workers are isolated from supplied custom pools", "[ut][SindiSearcher]") {
     const bool reorder = GENERATE(false, true);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
-    auto pool = std::make_shared<IdentifiedCustomPool>();
+    auto pool = std::make_shared<SuppliedSindiPool>();
     auto safe = std::make_shared<SafeThreadPool>(std::make_shared<SafeThreadPool>(pool));
-    REQUIRE_FALSE(safe->RequiresInlineExecution());
     SafeThreadPool empty(static_cast<ThreadPool*>(nullptr), false);
     REQUIRE(empty.RequiresInlineExecution());
     IndexCommonParam common;
@@ -1237,15 +1286,12 @@ TEST_CASE("SINDI custom pool identity enables external dispatch and nested inlin
         };
         const auto before = pool->enqueues.load();
         const auto external = search();
-        REQUIRE(pool->enqueues.load() > before);
+        REQUIRE(pool->enqueues.load() == before);
         const auto after_external = pool->enqueues.load();
         std::promise<DatasetPtr> nested_result;
         auto result_future = nested_result.get_future();
         auto nested = pool->Enqueue([&]() {
             try {
-                if (not safe->RequiresInlineExecution()) {
-                    throw std::runtime_error("custom pool worker identity was lost");
-                }
                 nested_result.set_value(search());
             } catch (...) {
                 nested_result.set_exception(std::current_exception());
@@ -1388,11 +1434,170 @@ TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][Si
             const auto statistics = nlohmann::json::parse(result->GetStatistics());
             const auto rerank_evaluations =
                 statistics.at("distance_evaluations_by_phase").at("rerank").get<uint64_t>();
-            REQUIRE((rerank_evaluations > 0) == reorder);
+            if (reorder) {
+                REQUIRE(rerank_evaluations >= static_cast<uint64_t>(result->GetDim()));
+            } else {
+                REQUIRE(rerank_evaluations == 0);
+            }
             for (int64_t i = 0; i < 10; ++i) {
                 REQUIRE(result->GetIds()[i] == static_cast<int64_t>(count) - 1 - i);
                 REQUIRE(result->GetDistances()[i] == static_cast<float>(i - 19));
             }
         }
     }
+}
+
+TEST_CASE("SINDI confines request allocator calls to the caller",
+          "[ut][SindiSearcher][SindiSearcherSafety]") {
+    const auto* rerank = GENERATE("none", "fp32", "fp16");
+    const bool immutable = GENERATE(false, true);
+    const auto* scheduler = GENERATE("count_deque", "count_atomic", "cost_atomic");
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<DefaultThreadPool>(4);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.thread_pool_ = std::make_shared<SafeThreadPool>(pool);
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    auto parameter = std::make_shared<SINDIParameter>();
+    const bool reorder = std::string(rerank) != "none";
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", reorder},
+        {"rerank_type", reorder ? rerank : "fp32"},
+        {"immutable", immutable},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    std::vector<int64_t> labels(40020);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::vector<float> values(labels.size());
+    std::vector<SparseVector> vectors(labels.size());
+    uint32_t term = 3;
+    for (uint64_t i = 0; i < labels.size(); ++i) {
+        values[i] = 1.0F + static_cast<float>(i % 20) * 0.5F;
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make()
+                    ->NumElements(labels.size())
+                    ->Ids(labels.data())
+                    ->SparseVectors(vectors.data())
+                    ->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    float query_value = 1;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto options = nlohmann::json{{"sindi",
+                                         {{"n_candidate", 500},
+                                          {"worker_n_candidate", 500},
+                                          {"window_parallelism", 4},
+                                          {"window_scheduler", scheduler}}}}
+                             .dump();
+    for (const bool request_api : {false, true}) {
+        CAPTURE(rerank, immutable, scheduler, request_api);
+        ObservedQueryAllocator arena;
+        DatasetPtr result;
+        if (request_api) {
+            SearchRequest request;
+            request.query_ = query;
+            request.topk_ = 10;
+            request.params_str_ = options;
+            request.search_allocator_ = &arena;
+            result = index.SearchWithRequest(request);
+        } else {
+            result = index.KnnSearch(query, 10, options, nullptr, &arena);
+        }
+        REQUIRE(result->GetDim() == 10);
+        REQUIRE(arena.allocations.load() > 0);
+        result.reset();
+        REQUIRE(arena.off_thread_calls.load() == 0);
+    }
+}
+
+TEST_CASE("SINDI queries finish while supplied pool writer waits for index lock",
+          "[ut][SindiSearcher][SindiSearcherSafety]") {
+    // Windows only, windows plus rerank, and filtered serial windows plus parallel rerank.
+    const auto mode = GENERATE(0, 1, 2);
+    const bool remove = GENERATE(false, true);
+    const bool request_api = GENERATE(false, true);
+    CAPTURE(mode, remove, request_api);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto pool = std::make_shared<RecoverableDefaultPool>(1);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.thread_pool_ = std::make_shared<SafeThreadPool>(pool);
+    common.dim_ = 2;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(nlohmann::json{
+        {"term_id_limit", 16},
+        {"window_size", 10000},
+        {"use_quantization", false},
+        {"use_reorder", mode != 0},
+        {"remap_term_ids", true},
+        {"doc_prune_ratio", 0}}.dump()));
+    SINDI index(parameter, common);
+    uint32_t term = 3;
+    float values[]{1, 2, 3, 4};
+    int64_t labels[]{0, 1, 2, 3};
+    SparseVector vectors[]{
+        {1, &term, values}, {1, &term, values + 1}, {1, &term, values + 2}, {1, &term, values + 3}};
+    auto base = Dataset::Make()->NumElements(3)->Ids(labels)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(index.Build(base).empty());
+    auto appended =
+        Dataset::Make()->NumElements(1)->Ids(labels + 3)->SparseVectors(vectors + 3)->Owner(false);
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    const std::string options = R"({"sindi":{"n_candidate":20,"window_parallelism":4}})";
+    std::promise<void> paused;
+    auto pause_entered = paused.get_future();
+    std::promise<void> release;
+    auto resume = release.get_future().share();
+    ObservedQueryAllocator arena([&]() {
+        paused.set_value();
+        resume.wait();
+    });
+    FilterPtr filter = mode == 2 ? std::make_shared<AcceptAllSindiFilter>() : nullptr;
+    auto search = std::async(std::launch::async, [&]() {
+        if (request_api) {
+            SearchRequest request;
+            request.query_ = query;
+            request.topk_ = 2;
+            request.params_str_ = options;
+            request.search_allocator_ = &arena;
+            request.enable_filter_ = filter != nullptr;
+            request.filter_ = filter;
+            return index.SearchWithRequest(request);
+        }
+        return index.KnnSearch(query, 2, options, filter, &arena);
+    });
+    const auto query_locked = pause_entered.wait_for(std::chrono::seconds(5));
+    std::promise<void> writer_started;
+    auto writer_entered = writer_started.get_future();
+    auto writer = pool->RunQuery([&]() {
+        writer_started.set_value();
+        if (remove) {
+            index.Remove({2}, RemoveMode::MARK_REMOVE);
+        } else {
+            index.Add(appended);
+        }
+    });
+    const auto writer_running = writer_entered.wait_for(std::chrono::seconds(5));
+    release.set_value();
+    const auto completed = search.wait_for(std::chrono::seconds(5));
+    if (completed != std::future_status::ready) {
+        // Recover queued query workers only on failure, so the suite can report a
+        // lock/pool cycle instead of hanging forever. Later stages are recoverable too.
+        pool->RecoverQueuedWork();
+    }
+    auto result = search.get();
+    writer.get();
+    REQUIRE(query_locked == std::future_status::ready);
+    REQUIRE(writer_running == std::future_status::ready);
+    REQUIRE(completed == std::future_status::ready);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 2);
+    REQUIRE(result->GetIds()[1] == 1);
+    const auto after = index.KnnSearch(query, 2, options, nullptr);
+    REQUIRE(after->GetIds()[0] == (remove ? 1 : 3));
 }

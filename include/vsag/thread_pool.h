@@ -72,21 +72,4 @@ public:
     Enqueue(std::function<void(void)> task) = 0;
 };
 
-/**
- * Optional worker-identity capability for caller-supplied thread pools.
- *
- * A pool may inherit this interface in addition to ThreadPool to allow parallel
- * query dispatch from external threads. Queries already running on that pool
- * execute inline to avoid nested waits. Pools without this capability use the
- * conservative inline path. The existing ThreadPool virtual interface is unchanged.
- */
-class ThreadPoolWorkerIdentity {
-public:
-    virtual ~ThreadPoolWorkerIdentity() = default;
-
-    /** Return true while the calling thread is executing work on this pool. */
-    virtual bool
-    IsCurrentThread() const = 0;
-};
-
 }  // namespace vsag

@@ -266,7 +266,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 FP32/FP16 sparse KNN reranking automatically uses count-based static batches with the same parallelism as `window_parallelism` (capped by the candidate count). The caller participates using the same query thread pool; each worker writes distances at independent candidate positions, and final top-k selection follows the original candidate order. A single worker processes one batch. Reasoning queries, DMQ8 and range search retain scalar reranking. Library distance counters and result statistics remain enabled.
 
-When a query runs inside the same supplied default thread pool, its logical workers execute inline to avoid nested waits. Custom pools can additionally implement `ThreadPoolWorkerIdentity::IsCurrentThread()` to enable parallel calls from external threads and inline calls from their own workers. Legacy custom pools without this capability execute query work inline. Calls from outside an identified pool remain parallel. The index-owned fallback pool uses at most 16 threads and is capped by the reported hardware concurrency, with at least one thread.
+Parallel windows and reranking share one lazy index-owned query pool, capped at 16 threads and reported hardware concurrency (at least one). Query tasks are isolated from caller-supplied pools: those pools may contain writers waiting for the read lock held by the query. Parallel workers use thread-safe default scratch allocation for computers, score buffers, contexts and local heaps; request-allocator calls and final result allocation stay on the calling thread.
 
 After combining the ratio and threshold limits, SINDI scans at least one posting from every
 non-empty term list.

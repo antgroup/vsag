@@ -913,13 +913,14 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     const bool can_parallel_windows =
         mode == KNN_SEARCH and inner_param.parallel_search_thread_count > 1 and
         filter == nullptr and reasoning_ctx == nullptr and filter_callback_remaining == nullptr;
-    auto search_thread_pool = thread_pool_;
+    // A caller-supplied pool may contain an Add/Remove task waiting for the read
+    // lock held by this query. Query workers must never queue behind that writer.
+    SafeThreadPoolPtr search_thread_pool;
     const bool batch_rerank =
         use_reorder_ and mode == KNN_SEARCH and reasoning_ctx == nullptr and
         rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 and
         (window_options.rerank_batch or window_options.rerank_parallelism > 1);
-    if ((can_parallel_windows or (batch_rerank and window_options.rerank_parallelism > 1)) and
-        search_thread_pool == nullptr) {
+    if (can_parallel_windows or (batch_rerank and window_options.rerank_parallelism > 1)) {
         std::call_once(search_thread_pool_once_, [this]() {
             const auto workers = std::min<uint64_t>(
                 SINDI_SEARCH_THREAD_POOL_SIZE, std::max(1U, std::thread::hardware_concurrency()));
