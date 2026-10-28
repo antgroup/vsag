@@ -163,7 +163,7 @@ jobs:
       - name: Get changed source files
         id: changed-srcs
         env:
-          BASE_BRANCH: ${{ github.base_ref }}
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
         run: |
           git fetch origin "$BASE_BRANCH" --depth=1
           if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
@@ -174,8 +174,10 @@ jobs:
       - name: Run Lint
         id: changed_source_lint
         if: steps.changed-srcs.outputs.pattern != ''
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 "$LINT_PATTERN"
       - name: Verify changed-source lint execution
         if: always() && steps.changed-srcs.outcome == 'success'
         env:
@@ -382,6 +384,7 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-22.04
     env:
+      COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
       image: vsaglib/vsag:ci-x86-openblas
@@ -407,18 +410,13 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Download Compatibility Indexes from Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release download compatibility-indexes \
-            --repo antgroup/vsag \
-            --dir /tmp \
-            --pattern "*.index" \
-            --pattern "*.bin" \
-            --pattern "*.json" \
-            || echo "Warning: Failed to download compatibility indexes"
-      - uses: actions/checkout@v4
+        run: python3 scripts/ci/download_compatibility_inputs.py --directory "$COMPATIBILITY_INDEX_DIR"
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Build
@@ -453,29 +451,11 @@ jobs:
           pip3 install ./wheelhouse/*.whl
           pip3 install numpy pyjson pytest
       - name: Run Python Test
+        shell: bash
         run: |
+          set -euo pipefail
           cd ./tests/python/
-          echo "=== Running pytest with detailed output ==="
           python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-          echo "=== Test execution completed ==="
-        continue-on-error: true
-      - name: Analyze Test Results
-        run: |
-          cd ./tests/python/
-          echo "=== Analyzing test results ==="
-          if grep -q "FAILED\|ERROR" test-output.log; then
-            echo "❌ Some tests failed!"
-            echo "=== Failed tests summary ==="
-            grep -A 5 "FAILED\|ERROR" test-output.log || true
-            exit 1
-          elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
-            PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
-            echo "✅ All tests passed! ($PASSED tests)"
-          else
-            echo "⚠️ Could not determine test results"
-            cat test-output.log
-            exit 1
-          fi
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5
