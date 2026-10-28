@@ -38,6 +38,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
@@ -170,6 +171,10 @@ HGraph::Build(const DatasetPtr& data) {
                             "HGraph PiPNN does not support build_with_cache");
     }
     if (using_build_cache) {
+        CHECK_ARGUMENT(
+            not adaptive_pruning_.enabled,
+            "adaptive_pruning does not yet support building from imported cache; disable "
+            "adaptive_pruning or build without importing a cache");
         this->check_fused_mutation_supported("Build with imported cache");
         if (this->using_dedup_storage()) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
@@ -321,9 +326,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         batch_insert_flatten_codes(temporary_sq8_build_data);
         temporary_codes_batched = true;
     }
-    // Every code page of the batch is written at this point (or by the per-row loop below when
-    // rows were skipped), so the batch can be published exactly like a sequence of Add() calls.
-    this->PublishThroughTotalCount();
+    if (not this->using_dedup_storage()) {
+        this->PublishThroughTotalCount();
+    }
     Vector<std::pair<InnerIdType, int64_t>> deferred_code_ids(allocator_);
     Vector<const float*> pipnn_vectors(allocator_);
     if (use_pipnn) {
@@ -341,7 +346,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
-        } else if (not persistent_codes_batched) {
+        } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
             this->insert_persistent_codes(get_data(data, i), inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
@@ -398,6 +403,20 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     if (need_sq8_build_data) {
         build_data = raw_vector_ != nullptr ? raw_vector_ : temporary_sq8_build_data;
     }
+    auto materialize_storage = [this, data, &inner_ids, &valid_indices]() {
+        materialize_pipnn_storage(
+            inner_ids,
+            valid_indices,
+            bottom_graph_,
+            *code_slot_map_,
+            allocator_,
+            thread_pool_.get(),
+            build_thread_count_,
+            [this](CodeSlotIdType capacity) { this->ensure_physical_code_capacity(capacity); },
+            [this, data](int64_t row, CodeSlotIdType slot) {
+                this->insert_persistent_codes_to_slot(get_data(data, row), slot);
+            });
+    };
     if (use_pipnn) {
         PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
                                         static_cast<uint64_t>(this->dim_),
@@ -406,6 +425,9 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
         pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        if (this->using_dedup_storage() and not defer_persistent_codes) {
+            materialize_storage();
+        }
         if (this->support_duplicate_) {
             entry_point_id_ = bottom_graph_->GetGroupId(entry_point_id_);
             for (auto& route_graph_id : route_graph_ids) {
@@ -448,7 +470,11 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         sparse_odescent_builder.SaveGraph(graph);
         this->route_graphs_.emplace_back(graph);
     }
-    if (use_pipnn and entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
+    // The level walk above is the only place that selects an entry point, and a fixed-seed
+    // sampler can draw level zero for every node (the standard library maps the draws to
+    // uniforms). Fall back to the first inserted id, a node of the bottom graph just saved.
+    // The guard preserves a higher-level entry point and keeps front() safe for an empty batch.
+    if (entry_point_id_ == INVALID_ENTRY_POINT and not inner_ids.empty()) {
         entry_point_id_ = inner_ids.front();
     }
 
@@ -458,13 +484,19 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (this->rabitq_fused_datacell_ == nullptr) {
             this->train_codes_with_dataset(this->sample_train_dataset(data));
         }
-        if (all_rows_are_valid) {
+        if (this->using_dedup_storage()) {
+            materialize_storage();
+        } else if (all_rows_are_valid) {
             batch_insert_persistent_codes();
         } else {
             for (const auto& [inner_id, local_idx] : deferred_code_ids) {
                 this->insert_persistent_codes(get_data(data, local_idx), inner_id);
             }
         }
+    }
+    if (this->using_dedup_storage()) {
+        // All logical IDs now have complete codes and a published slot mapping.
+        this->PublishThroughTotalCount();
     }
     return failed_ids;
 }
@@ -713,6 +745,15 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             inner_id = this->get_unique_inner_ids(1).at(0);
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
+            }
+            // Fused storage rejects Tune and its optimized writer bypasses normal insertion.
+            if (not this->using_dedup_storage() and this->rabitq_fused_datacell_ == nullptr) {
+                std::unique_lock codes_lock(this->persistent_codes_mutex_);
+                this->pending_code_writes_[inner_id] = BASE_CODE |
+                                                       (has_precise_reorder() ? PRECISE_CODE : 0) |
+                                                       (raw_vector_ != nullptr ? RAW_CODE : 0);
+            }
+            if (inner_id >= total_count_) {
                 ++total_count_;
                 // Deliberately NOT published here: this only reserves the id. The node
                 // becomes visible when insert_one_logical_point has written both its codes
@@ -855,10 +896,23 @@ HGraph::insert_persistent_codes(const void* data,
 }
 
 void
+HGraph::finish_code_write(InnerIdType inner_id, uint8_t code) {
+    auto it = this->pending_code_writes_.find(inner_id);
+    if (it != this->pending_code_writes_.end()) {
+        it.value() &= ~code;
+        if (it->second == 0) {
+            this->pending_code_writes_.erase(it);
+        }
+    }
+}
+
+void
 HGraph::insert_persistent_codes_unlocked(const void* data,
                                          InnerIdType inner_id,
                                          const RaBitQFusedCodeView* preencoded) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
+    this->finish_code_write(inner_id,
+                            BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (preencoded != nullptr) {
         // InsertVector above advances the flatten count; fused storage owns the actual bytes.
         this->rabitq_fused_datacell_->SetNodeCodes(inner_id,
@@ -871,9 +925,12 @@ HGraph::insert_persistent_codes_unlocked(const void* data,
     }
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id,
+                                PRECISE_CODE | (raw_vector_ == high_precise_codes_ ? RAW_CODE : 0));
     }
     if (create_new_raw_vector_) {
         raw_vector_->InsertVector(data, inner_id);
+        this->finish_code_write(inner_id, RAW_CODE);
     }
 }
 void
@@ -1169,7 +1226,8 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                                      flatten_codes,
                                      neighbors_mutex_,
                                      allocator_,
-                                     alpha_);
+                                     alpha_,
+                                     &adaptive_pruning_);
         return;
     }
     bottom_graph_->InsertNeighborsById(inner_id, Vector<InnerIdType>(allocator_));

@@ -268,6 +268,7 @@ Thrive together in VSAG community with users and developers from all around the 
 
 - **Optimized Index Types**
   - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
+    Supports opt-in [adaptive neighbor pruning](docs/docs/en/src/indexes/adaptive_pruning.md) for NSW/L2 construction.
   - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
     and automatically converts to HGraph after a configurable threshold. Deletes in the flat
     phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
@@ -453,6 +454,13 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/dasurax">
+                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
+                    <br />
+                    <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/jingyueob">
                     <img src="https://avatars.githubusercontent.com/u/212298588?v=4" width="100" alt="jingyueob"/>
                     <br />
@@ -466,6 +474,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Wen Huanzhi</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/xfmeng17">
                     <img src="https://avatars.githubusercontent.com/u/32661584?v=4" width="100" alt="xfmeng17"/>
@@ -473,8 +483,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>XFMENG17</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/antfin-oss">
                     <img src="https://avatars.githubusercontent.com/u/48939886?v=4" width="100" alt="antfin-oss"/>
@@ -490,17 +498,17 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/thlurte">
+                    <img src="https://avatars.githubusercontent.com/u/86393801?v=4" width="100" alt="thlurte"/>
+                    <br />
+                    <sub><b>Adheeb Ahmed</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/Danbaiwq">
                     <img src="https://avatars.githubusercontent.com/u/212493818?v=4" width="100" alt="Danbaiwq"/>
                     <br />
                     <sub><b>Danbaiwq</b></sub>
-                </a>
-            </td>
-            <td align="center">
-                <a href="https://github.com/dasurax">
-                    <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
-                    <br />
-                    <sub><b>dasurax</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -510,6 +518,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Siyang Tang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/HeHuMing">
                     <img src="https://avatars.githubusercontent.com/u/223064905?v=4" width="100" alt="HeHuMing"/>
@@ -517,8 +527,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>HuMing He</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/jiacai2050">
                     <img src="https://avatars.githubusercontent.com/u/3848910?v=4" width="100" alt="jiacai2050"/>
@@ -554,6 +562,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>seuclkzsd</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/CharlesXu-HQ">
                     <img src="https://avatars.githubusercontent.com/u/109326548?v=4" width="100" alt="CharlesXu-HQ"/>
@@ -561,8 +571,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Charles xu</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/cubicc">
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
@@ -598,6 +606,8 @@ VSAG referenced the following works during its implementation:
                     <sub><b>liric24</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100" alt="mingyu-hkustgz"/>
@@ -605,8 +615,6 @@ VSAG referenced the following works during its implementation:
                     <sub><b>Mingyu Yang</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/mukejane">
                     <img src="https://avatars.githubusercontent.com/u/272978297?v=4" width="100" alt="mukejane"/>
@@ -636,17 +644,19 @@ VSAG referenced the following works during its implementation:
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/thlurte">
-                    <img src="https://avatars.githubusercontent.com/u/86393801?v=4" width="100" alt="thlurte"/>
-                    <br />
-                    <sub><b>Adheeb Ahmed</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/wellkilo">
                     <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
                     <br />
                     <sub><b>He Dong</b></sub>
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td align="center">
+                <a href="https://github.com/ykindred">
+                    <img src="https://avatars.githubusercontent.com/u/216521501?v=4" width="100" alt="ykindred"/>
+                    <br />
+                    <sub><b>ykindred</b></sub>
                 </a>
             </td>
         </tr>

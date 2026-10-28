@@ -10,6 +10,19 @@ HGraph 都是推荐的默认索引。
 - 源码：`src/algorithm/hgraph.{h,cpp}`
 - 示例：[`examples/cpp/103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp)
 
+## 磁盘读缓存示例
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+使用 1,000 个 64 维向量，基础 SQ8 编码存于内存，精排 FP32 编码存于磁盘（`async_io`）。
+示例设置 `build_by_base: true`，让构图读取内存中的基础编码，避免在这个小型用法示例中反复填充磁盘读缓存。
+这会改变构图所用的量化编码，因此该示例不是召回率基准，也不演示使用精排编码构图。
+
+读缓存保持启用，预算为 131,072 字节（一个 128-KiB 页）；256,000 字节的 FP32 数据跨越两页。
+示例序列化为 `BinarySet` 后恢复新索引，并检查恢复后的元素数量、top-10 结果形状、ID 范围及距离是否有限。
+请在新的工作目录中使用可写文件路径运行。写入和持久化行为保持不变。
+专门的 AsyncIO 测试覆盖单页缓存的淘汰与重新加载、写入失效及无效读取；
+HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
+
 ## 工作原理
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
@@ -84,7 +97,7 @@ auto result = index->KnnSearch(
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
-| `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |
 | `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
@@ -113,8 +126,8 @@ auto result = index->KnnSearch(
 [PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
 HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
-存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建和向量存储去重
-暂不支持 PiPNN。上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
+上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
 现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
 
 `build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
@@ -136,8 +149,13 @@ PiPNN，并通过查询验证每一份生成的图。
 ### 向量存储去重
 
 同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
-同一个物理编码槽位，但仍保留各自的标签。该选项目前仅支持使用 `graph_type: "nsw"` 的
-稠密向量 HGraph 索引；`graph_type: "odescent"` 和 `graph_type: "pipnn"` 不支持。
+同一个物理编码槽位，但仍保留各自的标签。该选项支持使用 `graph_type: "nsw"` 或 `"pipnn"` 的
+稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
+
+PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每个代表向量只编码一次，
+各 label 的属性和 extra_info 仍独立保存，也可同时启用动态 alpha。
+`duplicate_distance_threshold` 不参与 PiPNN 批量分组；后续增量 `Add` 沿用现有的
+距离阈值或编码判重规则。量化器仍使用原有训练样本进行训练。
 
 启用存储去重后，暂不支持以下操作和配置：
 
@@ -385,3 +403,58 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 - [图索引增强](../advanced/enhance_graph.md)
 - [优化器](../advanced/optimizer.md)
 - [序列化格式](../advanced/serialization.md)
+
+## 实验性自适应剪枝
+
+完整规则、几何示例与相关研究见[自适应剪枝算法文档](adaptive_pruning.md)。
+
+参数平铺在 `index_param` 下，`adaptive_pruning` 是布尔开关；旧实验版嵌套对象和已删除的 `fill_rejected` 参数会报错。使用旧实验格式的索引需重新构建。
+
+`index_param.adaptive_pruning` 为 NSW **底层新节点正向选边**启用多轮 L2 剪枝，默认关闭。
+普通 `Build`、并行插入、`Add` 以及 NSW 优化构建（包括 RaBitQ split/fused）共用该选择器。
+设置 `adaptive_pruning_apply_to_reverse: true` 后，底层已满的反向邻居表也使用自适应剪枝。
+邻居表未满时仍直接追加新节点；已满时以被更新的旧节点为中心，将旧邻居与新节点合并为候选，
+在原有节点锁内使用相同的 alpha 和步长策略完成选边和写回。
+上层和更新/细化仍使用固定 alpha。启用时仍拒绝 ODescent、导入缓存后的构建、IP/cosine
+以及 `adaptive_pruning_apply_to_upper: true`。
+
+将以下字段放在 `index_param` 内。这是 GIST 参考实验配置，不按维度自动设置，也不代表已验证性能收益：
+
+```json
+{
+    "alpha": 1.06,
+    "graph_type": "nsw",
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": false,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | 启用自适应选择器 |
+| `adaptive_pruning_adjust_step` | `0.06` | alpha 调整步长 δ |
+| `adaptive_pruning_apply_to_reverse` | `false` | 对已满的底层反向邻居表启用自适应剪枝；需同时 `adaptive_pruning: true` |
+| `adaptive_pruning_apply_to_upper` | `false` | 预留；启用时不支持 `true` |
+
+基准值沿用已有 `alpha`。启用时要求 alpha 和 δ 有限，δ 非负，`alpha - 2*δ > 0`，
+且 `alpha + 3*δ` 有限。距离来自原有建图距离提供器，必须为有限、非负的 L2 值；
+此开关不改变建图量化器。
+
+候选按 `(距离, 内部 ID)` 排序、去重并删除自环。若已选 s 满足
+`alpha * d(s,c) < d(center,c)`，则拒绝候选 c。第一轮接受数达到图的实际最大度 K 时停止，保留未扫描尾部。
+
+- 接受集合 A 不满 K：保留 A，以 `alpha + k*δ` 重扫拒绝集合。
+  `K/|A| > 3` 取 k=3，`1.5 < K/|A| <= 3` 取 k=2，其余取 k=1。
+  不追加仍被拒绝的候选，允许邻接表不足 K。
+- A 达到 K：清空 A，以 `alpha - k*δ` 重扫完整排序候选（含原尾部）。
+  以第一轮拒绝集合 B 计算：`|B|/K >= 5` 取 k=0，`2.5 <= |B|/K < 5` 取 k=1，其余取 k=2。
+  若仍不满 K，以基准 alpha 重扫新的拒绝集合；此分支不无条件补边。
+- δ=0：只执行一次基准扫描，不补边。关闭功能时保留 legacy 的全部规则，
+  包括候选不足 K 时直接返回的短路，因此两者不等价。
+
+临时数据和可选统计仅属于单次调用；不增加全局计数或修改图锁协议。
+序列化保存该配置。加载时 adaptive_pruning 必须相同；启用时还要求 alpha、步长和作用范围一致，
+否则兼容性检查失败。没有该字段的旧索引按关闭处理。
+

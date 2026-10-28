@@ -17,6 +17,7 @@
 
 #include "index_common_param.h"
 #include "sparse_graph_datacell_parameter.h"
+#include "utils/search_lock.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -109,7 +110,7 @@ SparseGraphDataCell::InsertNeighborsById(InnerIdType id, const Vector<InnerIdTyp
 
 uint32_t
 SparseGraphDataCell::GetNeighborSize(InnerIdType id) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
         return iter->second->size();
@@ -118,7 +119,7 @@ SparseGraphDataCell::GetNeighborSize(InnerIdType id) const {
 }
 void
 SparseGraphDataCell::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     auto iter = this->neighbors_.find(id);
     if (iter != this->neighbors_.end()) {
         const auto& ngbrs = iter->second;
@@ -203,7 +204,7 @@ SparseGraphDataCell::Resize(InnerIdType new_size){};
 
 bool
 SparseGraphDataCell::CheckIdExists(InnerIdType id) const {
-    std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+    auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
     return this->neighbors_.find(id) != this->neighbors_.end();
 }
 
@@ -313,7 +314,7 @@ SparseGraphDataCell::Move(InnerIdType from, InnerIdType to) {
     }
 
     {
-        std::shared_lock<std::shared_mutex> rlock(this->neighbors_map_mutex_);
+        auto rlock = make_search_read_lock(this->neighbors_map_mutex_);
         if (neighbors_.count(from) == 0) {
             return;
         }

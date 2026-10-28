@@ -209,10 +209,14 @@ base 值为 `0` 的文档在不提供时间 selector 时仍可检索，仅按 ho
 精确的逐文档 day 与可选 host 检查。时间、host、删除标记和用户 `Filter` 使用 AND 语义。插入失败
 或跳过的文档可能让相邻逻辑分区共享同一个物理 window，精确 day 检查会保证边界结果正确。
 
-带时间的索引为 build-once。mutable 索引可以通过 `Build()` 或空索引上的第一次 `Add()` 提供
-`publish_time_stamp`，但之后的每次 `Add()` 都会被拒绝。仅使用 host 的 mutable 索引仍保留原有
-增量 `Add()` 能力。发布时间过滤支持 mutable、immutable 以及 `use_reorder` 的任意设置，仅作用于
-KNN，并由普通与 streaming 序列化共同保存；恢复后的 mutable 时间索引仍保持 build-once。
+mutable 时间索引支持增量 `Add()`。初次 `Build()` 或空索引上的第一次 `Add()` 必须提供每个向量的
+`publish_time_stamp`；后续每批 `Add()` 也必须提供，并保持是否提供 host metadata 的模式一致。
+每批数据各自按时间排序并追加为一个连续 ID 段；不同批次的日期可以重叠，因此可以补录旧日期。
+每个段内的无时间文档位于末尾，查询会逐段选择匹配分区。没有时间 metadata 的已有索引不能通过
+`Add()` 转为时间索引。发布时间过滤仅作用于 KNN，由普通与 streaming 序列化共同保存；恢复后的
+mutable 时间索引仍可继续 `Add()`。immutable 和 DMQ8 重排运行态仍不支持增量写入。
+大量小批次 `Add()` 会形成较多时间段，时间查询需检查更多段目录；可行时宜批量写入。
+新的时间元数据使用 v2 格式：当前版本可读取 v1 快照，旧版本不能读取新写出的 v2 快照。
 
 不提供时间 selector 时会扫描全部时间分区与无时间分区；仅提供 host 时会从每个分区选择该 host。
 精确时间过滤会关闭所选 window 的 term 级 posting 剪枝，因此时间查询可能比仅 host 查询扫描更多

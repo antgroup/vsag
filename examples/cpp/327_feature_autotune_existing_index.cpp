@@ -58,6 +58,8 @@ main() {
                             ->Ids(ground_truth_ids.data())
                             ->Owner(false);
 
+    // Keep insertion order stable for this tiny recall=1 demonstration. Parallel graph
+    // construction can produce a graph where none of these search candidates is feasible.
     const std::string create_params = R"(
         {
             "dim": 4,
@@ -66,7 +68,8 @@ main() {
             "index_param": {
                 "base_quantization_type": "fp32",
                 "max_degree": 8,
-                "ef_construction": 40
+                "ef_construction": 40,
+                "build_thread_count": 1
             }
         })";
     auto created = vsag::Factory::CreateIndex("hgraph", create_params);

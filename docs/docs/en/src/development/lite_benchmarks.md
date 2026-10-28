@@ -3,12 +3,12 @@
 [Start here: requirements, reports, commands and limitations](../../../../../lite/benchmark/ACCEPTANCE.md).
 [详细综合验收报告：三数据集、Full对照、CRUD、CPU、优化及限制](../../../../../lite/benchmark/ACCEPTANCE_REPORT.md).
 
-- Functionality/architecture/regressions: PR #2904; this integration includes `cba3406`.
+- Functionality/architecture/regressions: PR #2904; this integration includes rebased `65d8912` on mainline `49f5e8b`.
   Historical measurements retain their own recorded feature/source versions.
 - Benchmark and audit tools: `lite/benchmark/`; `ENABLE_BENCHMARKS` defaults OFF.
 - [GIST 100-round resident validation](../../../../../lite/benchmark/results/extended-resident-gist-20261020/): fivefold fixed-round extension, not hours-long endurance.
 
-- [Current-source native Full/O3 and runtime-package results](../../../../../lite/benchmark/results/current-full-package-20261020/): all three datasets, complete positive/negative cells; not same-quality or hours-long endurance.
+- [Source-pinned native Full/O3 and runtime-package results](../../../../../lite/benchmark/results/current-full-package-20261020/): all three datasets, complete positive/negative cells; not same-quality or hours-long endurance.
 - [Historical raw files and SHA256 manifest](../../../../../lite/benchmark/RAW_MANIFEST.json): immutable snapshot `800a822`.
 - [Preserved full historical runner guide](https://github.com/nw9663644-eng/vsag/blob/800a82232da3a91dfc90229c3a8fdbf4fa9b428a/lite/benchmark/README.md).
 
@@ -25,6 +25,19 @@ E1/E9 are preserved through [the history index](../../../../../lite/benchmark/HI
 and original server evidence remain intact. New performance output goes to a
 fresh external directory and must record source/configuration/input identities.
 The current integration does not retrospectively rerun or relabel old experiments.
+
+## Integration update: 2026-10-28
+
+The integration follows #2904 `65d89129ec9986ae75557af40bd4fad5af456251`
+on mainline `49f5e8bb8059036b19cd43f14b406263e498f498`. Shared CI routing
+and production sources follow that feature commit; the benchmark option, Lite CI
+audit steps, tools and published raw archives remain intact. No new private
+optimization candidate is enabled or published by this synchronization.
+
+E10/E11/E12 retain their recorded `cba3406` source and library identities.
+In particular, E11 is not a new-mainline Full comparison. Integration tests and
+archive re-verification do not update historical timings, package sizes, peak
+memory or recall. Existing quality and measurement limitations still apply.
 
 ## Document roles
 

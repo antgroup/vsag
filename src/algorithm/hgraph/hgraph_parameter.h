@@ -21,6 +21,7 @@
 #include "../index_search_parameter.h"
 #include "../inner_index_parameter.h"
 #include "data_type.h"
+#include "impl/adaptive_pruning.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/pointer_define.h"
@@ -38,6 +39,7 @@ DEFINE_POINTER(HGraphParameter);
 struct HGraphMCIParameters {
     bool enabled{false};
     uint64_t mcs{200};
+    bool clique_activation_order{false};
     // Minimum size of a maximal clique the full build must keep; the clique itself is stored in
     // full, so this is a lower bound and not a cap.
     uint64_t clique_max{50};
@@ -96,6 +98,7 @@ public:
     uint64_t ef_construction{400};
     uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
     float alpha{1.0F};
+    AdaptivePruningParameter adaptive_pruning;
 
     bool support_duplicate{false};
     bool deduplicate_storage{false};
@@ -138,6 +141,13 @@ public:
     // expressed in units of O_dist.
     double hybrid_filter_cost_ratio{1.0};
     bool use_conjugate_graph_search{true};
+    // Static-query optimizations. A positive activation cap changes the search graph.
+    bool search_no_lock{false};
+    bool mci_packed_filter{true};
+    bool mci_batch_distance{true};
+    uint32_t mci_activation_cap{0};
+    uint32_t mci_hops_limit{std::numeric_limits<uint32_t>::max()};
+    uint64_t mci_expansion_idle_window{0};
     float mci_seed_ratio{0.1F};
     // Seed budget is `max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid))`
     // whenever the coverage part fits into `mci_seed_max_count` (0 = unlimited) and does not

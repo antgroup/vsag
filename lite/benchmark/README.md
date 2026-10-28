@@ -23,3 +23,7 @@ replay guards are intentional; do not remove them to claim latest-source results
 Read the guides before running Full/package/quality replay: they require explicit
 matching source/dependency/archive prerequisites. Raw audit PASS is not a quality
 threshold, a cold-I/O result, same-quality superiority or complete project acceptance.
+
+The 2026-10-28 integration follows rebased #2904 `65d8912` and its mainline/CI.
+See the guides for source boundaries; historical measurements and published raw
+archives are unchanged, and no new private optimization candidate is included.

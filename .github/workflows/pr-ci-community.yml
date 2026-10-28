@@ -1,0 +1,486 @@
+name: Community CI
+
+on:
+  workflow_call:
+    inputs:
+      team-linux:
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      cpp: ${{ steps.changes.outputs.cpp }}
+      cmake: ${{ steps.changes.outputs.cmake }}
+      coverage: ${{ steps.changes.outputs.coverage }}
+      python: ${{ steps.changes.outputs.python }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            cpp:
+              - 'src/**'
+              - 'include/**'
+              - 'tests/**'
+              - 'tools/**'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'extern/**'
+              - 'cmake/**'
+              - 'examples/cpp/**'
+              - '.github/actions/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+              - '.clang-tidy'
+              - '.clang-format'
+            cmake:
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
+            coverage:
+              - '.github/codecov.yml'
+              - '.github/workflows/coverage.yml'
+              - '.github/workflows/pr-simd-coverage.yml'
+              - '.github/workflows/pr-ci.yml'
+              - '.github/workflows/pr-ci-community.yml'
+              - '.github/workflows/pr-ci-team.yml'
+              - 'CMakeLists.txt'
+              - 'Makefile'
+              - 'cmake/**'
+              - 'scripts/coverage/**'
+              - 'scripts/testing/test_parallel_bg.sh'
+              - 'src/**/CMakeLists.txt'
+              - 'tests/CMakeLists.txt'
+              - 'tests/scripts/coverage_diagnostics_test.py'
+              - 'tests/scripts/simd_coverage_test.py'
+            python:
+              - 'python/**'
+              - 'python_bindings/**'
+              - 'tests/python/**'
+              - '.github/workflows/**'
+              - 'scripts/**'
+
+  format:
+    name: Format Check
+    needs: changes
+    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Install Clang format
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format-15
+          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          clang-format --version
+      - name: Run Clang format check
+        run: ./scripts/format/check_format.sh
+
+  coverage-config:
+    name: Coverage Configuration
+    needs: changes
+    if: needs.changes.outputs.coverage == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test coverage configuration
+        run: |
+          python3 -m unittest tests/scripts/coverage_diagnostics_test.py
+          python3 -m unittest tests/scripts/simd_coverage_test.py
+          bash -n scripts/coverage/run_simd_coverage.sh
+          bash -n scripts/coverage/collect_cpp_coverage.sh
+          bash -n scripts/coverage/check_cov.sh
+          bash -n scripts/testing/test_parallel_bg.sh
+
+  build-asan-x86:
+    name: ASan Build X86
+    needs: [changes, format]
+    if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
+    runs-on: ubuntu-22.04
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+    steps:
+      - name: Free Disk Space
+        run: sudo rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Trust exact workspace for Git tooling
+        run: ./scripts/ci/configure-git-safe-directory.sh
+      - name: Test CI helper scripts
+        run: |
+          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
+          python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
+          python3 -m unittest tests/scripts/test_collect_build_metrics.py
+          python3 -m unittest tests/scripts/test_dependency_workflows.py
+      - name: Prepare Host
+        run: |
+          sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
+          sudo apt-get install -y ccache clang-tidy-15 time
+          ninja --version
+          cmake --version
+          g++ --version
+      - name: Prepare FetchContent Sources
+        uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: "true"
+          include-tools: "true"
+      - name: Restore ExternalProject Archives
+        uses: actions/cache/restore@v4
+        with:
+          path: .ci-downloads
+          key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+          restore-keys: |
+            external-${{ runner.os }}-${{ runner.arch }}-
+      - name: Make Asan
+        # The source-build OpenBLAS path remains covered by daily_test.yml.
+        run: |
+          export CMAKE_GENERATOR="Ninja"
+          export CMAKE_EXPORT_COMPILE_COMMANDS=ON
+          export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
+          export VSAG_ENABLE_EXAMPLES=ON
+          export VSAG_ENABLE_TOOLS=ON
+          # Reset counters, not cached objects. ccache uses its default directory
+          # on this disposable GitHub-hosted VM; no compiler cache is restored or saved.
+          ccache --zero-stats
+          /usr/bin/time -p make asan COMPILE_JOBS=3
+      - name: Show compiler cache diagnostics
+        if: always()
+        run: |
+          ccache --show-stats --verbose || ccache --show-stats || true
+          ccache --print-stats || true
+      - name: Get changed source files
+        id: changed-srcs
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: |
+          git fetch origin "$BASE_BRANCH" --depth=1
+          if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
+            echo "Failed to build changed-source lint filter" >&2
+            exit 1
+          fi
+          echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
+      - name: Run Lint
+        id: changed_source_lint
+        if: steps.changed-srcs.outputs.pattern != ''
+        run: |
+          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 '${{ steps.changed-srcs.outputs.pattern }}'
+      - name: Verify changed-source lint execution
+        if: always() && steps.changed-srcs.outcome == 'success'
+        env:
+          LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
+          LINT_OUTCOME: ${{ steps.changed_source_lint.outcome }}
+        run: |
+          if [ -n "$LINT_PATTERN" ] && [ "$LINT_OUTCOME" != "success" ]; then
+            echo "Changed sources were found, but lint outcome was: $LINT_OUTCOME" >&2
+            exit 1
+          fi
+      - name: Clean
+        run: |
+          find ./build -type f -name "*.o" -exec rm -f {} +
+          find ./build -type f -name "*.cpp" -exec rm -f {} +
+          find ./build -type f -name "*.a" -exec rm -f {} +
+          rm -rf ./build/hdf5
+      - name: Save Build
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./build
+          name: build-x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  build-asan-macos-arm64:
+    name: ASan Build macOS arm64
+    needs: [changes, format]
+    if: needs.changes.outputs.cpp == 'true'
+    runs-on: macos-15
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: bash ./scripts/deps/install_deps.sh
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      - name: Show Toolchain
+        run: |
+          clang++ --version
+          cmake --version
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Asan
+        run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+
+  build-python-x86:
+    name: Python Build X86
+    needs: [changes, format]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Load Cache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          max-size: "2G"
+          save: ${{ github.event_name != 'pull_request' }}
+          key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+      - name: Make Python Wheel
+        run: |
+          sudo apt update
+          sudo apt install -y python3-venv
+          export CMAKE_GENERATOR="Ninja"
+          export VSAG_USE_SYSTEM_DEPS=AUTO
+          export CIBW_ENVIRONMENT="${CIBW_ENVIRONMENT:+$CIBW_ENVIRONMENT }VSAG_USE_SYSTEM_DEPS=AUTO"
+          make pyvsag
+      - name: Save Wheel
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./wheelhouse
+          name: wheelhouse-x86-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 1
+          overwrite: 'true'
+
+  test-asan-x86-unittests:
+    name: Test X86 Unittests
+    needs: [changes, build-asan-x86]
+    if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Unittests
+        run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
+          echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/unittests ./build/tools/eval/eval_dataset_test \
+            ./build/tools/autotune/autotune_test
+          ./scripts/testing/test_parallel_by_name.sh unittests
+          ./build/tools/eval/eval_dataset_test -d yes
+          ./build/tools/autotune/autotune_test -d yes
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-x86-unittests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-asan-x86-functests:
+    name: Test X86 Functests
+    needs: [changes, build-asan-x86]
+    if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
+    runs-on: ubuntu-22.04
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Functests
+        run: |
+          echo leak:libomp.so > omp.supp
+          echo leak:libgomp.so >> omp.supp
+          export LSAN_OPTIONS=suppressions=omp.supp
+          chmod +x ./build/tests/functests
+          ./scripts/testing/test_parallel_by_name.sh functests
+          chmod +x ./build/tests/eval_monitor_test
+          ./build/tests/eval_monitor_test -d yes
+      - name: Upload Log
+        uses: actions/upload-artifact@v5
+        with:
+          path: ./log
+          name: log-x86-functests-${{ github.run_id }}
+          compression-level: 1
+          retention-days: 3
+          overwrite: 'true'
+
+  test-example-x86:
+    name: Test Example X86
+    needs: [changes, build-asan-x86]
+    if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
+    runs-on: ubuntu-22.04
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Run Examples
+        shell: bash
+        run: |
+          export LD_LIBRARY_PATH="$PWD/build/src:$PWD/build/tools/autotune"
+          cd ./build/examples/cpp
+          for example in ./*; do
+            filename=$(basename "$example")
+            if [[ $filename =~ ^[0-9]{3} ]]; then
+              chmod +x $example
+              echo "Run $example"
+              $example
+            fi
+          done
+
+  compatibility:
+    name: Check Compatibility
+    needs: [changes, build-asan-x86]
+    if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
+    runs-on: ubuntu-22.04
+    env:
+      LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - name: Install GitHub CLI
+        env:
+          GH_VERSION: 2.75.0
+          GH_SHA256: 98f910f4cde42a345e241f867f42b2229dda60267d7f87a56d283842519a4cb7
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            version_output=$(gh --version)
+            printf '%s\n' "$version_output"
+            test "$(printf '%s\n' "$version_output" | awk 'NR == 1 {print $3}')" = "$GH_VERSION"
+            exit 0
+          fi
+          wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          printf '%s  %s\n' "$GH_SHA256" /tmp/gh.tar.gz | sha256sum -c -
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
+      - name: Download Compatibility Indexes from Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --dir /tmp \
+            --pattern "*.index" \
+            --pattern "*.bin" \
+            --pattern "*.json" \
+            || echo "Warning: Failed to download compatibility indexes"
+      - uses: actions/checkout@v4
+      - name: Clean Env
+        run: rm -rf ./build
+      - name: Download Build
+        uses: actions/download-artifact@v5
+        with:
+          name: build-x86-${{ github.run_id }}
+          path: ./build
+      - name: Fix Permissions
+        run: chmod +x ./build/tools/check_compatibility/check_compatibility
+      - name: Run Check Compatibility
+        run: BUILD_DIR=./build bash ./scripts/check_compatibility.sh
+
+  test-python-x86:
+    name: Test Python X86
+    needs: [changes, build-python-x86]
+    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - name: Prepare Env
+        run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+      - name: Download Wheel
+        uses: actions/download-artifact@v5
+        with:
+          name: wheelhouse-x86-${{ github.run_id }}
+          path: ./wheelhouse
+      - name: Install Python Wheel
+        run: |
+          pip3 uninstall pyvsag -y
+          pip3 install ./wheelhouse/*.whl
+          pip3 install numpy pyjson pytest
+      - name: Run Python Test
+        run: |
+          cd ./tests/python/
+          echo "=== Running pytest with detailed output ==="
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+          echo "=== Test execution completed ==="
+        continue-on-error: true
+      - name: Analyze Test Results
+        run: |
+          cd ./tests/python/
+          echo "=== Analyzing test results ==="
+          if grep -q "FAILED\|ERROR" test-output.log; then
+            echo "❌ Some tests failed!"
+            echo "=== Failed tests summary ==="
+            grep -A 5 "FAILED\|ERROR" test-output.log || true
+            exit 1
+          elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
+            PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
+            echo "✅ All tests passed! ($PASSED tests)"
+          else
+            echo "⚠️ Could not determine test results"
+            cat test-output.log
+            exit 1
+          fi
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pytest-logs-x86-${{ github.run_id }}
+          path: ./tests/python/test-output.log
+          retention-days: 30
+          if-no-files-found: ignore

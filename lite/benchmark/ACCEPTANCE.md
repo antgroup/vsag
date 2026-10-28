@@ -23,9 +23,14 @@ not an algorithm optimization, a durability guarantee or a completed stability v
 ## Scope and source identity
 
 PR #2904 owns the supported functionality, architecture, API, regressions and CI.
-The current integration depends on #2904 feature commit
-`cba340660f2ea479b316d7b73a27f34186b8a1d9`; its production sources and public
-headers match that feature dependency. The earlier integration
+The current integration includes rebased #2904 feature commit
+`65d89129ec9986ae75557af40bd4fad5af456251` on mainline
+`49f5e8bb8059036b19cd43f14b406263e498f498`; its production sources, public
+headers and shared CI routing match that feature dependency. The benchmark-only
+build and Lite CI audit additions are retained. Previous integration
+`cba340660f2ea479b316d7b73a27f34186b8a1d9` remains the measured source for
+E10/E11/E12, including the native Full comparison; those numbers are not a rerun
+of the rebased integration. The earlier integration
 `74a9420c771e75dea5e56324775d8db5d1472459` remains a historical measurement
 identity, not the current integration baseline. No rejected graph
 policy is enabled by this benchmark integration. `ENABLE_BENCHMARKS` defaults OFF.

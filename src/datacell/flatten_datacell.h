@@ -379,9 +379,27 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
             }
             return;
         }
-        auto dim = quantizer_->GetDim();
+        // The quantizer API type-erases input through float*, but source rows retain
+        // their original dtype (and sparse rows are SparseVector records).
+        const auto dim = quantizer_->GetDim();
+        uint64_t source_stride = dim * sizeof(float);
+        switch (common_param_.data_type_) {
+            case DataTypes::DATA_TYPE_INT8:
+                source_stride = dim * sizeof(int8_t);
+                break;
+            case DataTypes::DATA_TYPE_FP16:
+            case DataTypes::DATA_TYPE_BF16:
+                source_stride = dim * sizeof(uint16_t);
+                break;
+            case DataTypes::DATA_TYPE_SPARSE:
+                source_stride = sizeof(SparseVector);
+                break;
+            case DataTypes::DATA_TYPE_FLOAT:
+                break;
+        }
         for (int64_t i = 0; i < count; ++i) {
-            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx_vec[i]);
+            this->InsertVector(static_cast<const uint8_t*>(vectors) + source_stride * i,
+                               idx_vec[i]);
         }
     }
 }
