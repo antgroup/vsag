@@ -16,6 +16,8 @@ jobs:
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
       image: vsaglib/vsag:ci-x86-openblas
+    env:
+      COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
     steps:
       - name: Install GitHub CLI
         env:
@@ -30,18 +32,13 @@ jobs:
           install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
           rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
           gh --version
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - name: Download Compatibility Indexes from Release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release download compatibility-indexes \
-            --repo antgroup/vsag \
-            --dir /tmp \
-            --pattern "*.index" \
-            --pattern "*.bin" \
-            --pattern "*.json" \
-            || echo "Warning: Failed to download compatibility indexes"
-      - uses: actions/checkout@v4
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/download_compatibility_inputs.py --directory "$COMPATIBILITY_INDEX_DIR"
       - name: Compile Check Compatibility Tools
         run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make release VSAG_ENABLE_TOOLS=ON
       - name: Run Check Compatibility

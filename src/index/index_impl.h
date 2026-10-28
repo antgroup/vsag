@@ -27,6 +27,7 @@
 #include "index_common_param.h"
 #include "query_context.h"
 #include "search_metrics_internal.h"
+#include "utils/search_lock.h"
 #include "utils/search_threshold.h"
 #include "vsag/index.h"
 namespace vsag {
@@ -65,6 +66,7 @@ public:
     }
 
     ~IndexImpl() override {
+        const SearchLockScope public_search_scope(false);
         this->inner_index_.reset();
     }
 
@@ -100,9 +102,12 @@ public:
         return std::vector<int64_t>();      \
     }
 
+    // Every public operation owns its locking policy, including reads and mutation of another
+    // index from a search callback. Only a search backend may explicitly opt into lock elision.
 public:
     tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("add");
         CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->Add(base));
@@ -110,6 +115,7 @@ public:
 
     std::string
     AnalyzeIndexBySearch(const SearchRequest& request) override {
+        const SearchLockScope public_search_scope(false);
         if (not CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "index does not support search analysis");
@@ -119,6 +125,7 @@ public:
 
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("build");
         CHECK_NONEMPTY_DATASET(base);
         SAFE_CALL(return this->inner_index_->Build(base));
@@ -126,6 +133,7 @@ public:
 
     tl::expected<bool, Error>
     Tune(const std::string& parameters, bool disable_future_tuning = false) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("tune");
         SAFE_CALL(return this->inner_index_->Tune(parameters, disable_future_tuning));
     }
@@ -134,6 +142,7 @@ public:
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(
             return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
     }
@@ -142,6 +151,7 @@ public:
     CalcDistanceById(const float* vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(
             return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
     }
@@ -152,6 +162,7 @@ public:
                       int64_t count,
                       bool calculate_precise_distance = true,
                       int64_t topk = -1) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
@@ -162,22 +173,26 @@ public:
                       int64_t count,
                       bool calculate_precise_distance = true,
                       int64_t topk = -1) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->CalcDistancesById(
             query, ids, count, calculate_precise_distance, topk));
     }
 
     [[nodiscard]] bool
     CheckFeature(IndexFeature feature) const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->CheckFeature(feature);
     }
 
     [[nodiscard]] bool
     CheckIdExist(int64_t id) const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->CheckIdExist(id);
     }
 
     tl::expected<IndexPtr, Error>
     Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
         IndexCommonParam common_param = this->common_param_;
         if (allocator != nullptr) {
             common_param.allocator_ = allocator;
@@ -191,52 +206,61 @@ public:
 
     tl::expected<Checkpoint, Error>
     ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("continue build");
         SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
     }
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(binary_set));
     }
 
     tl::expected<void, Error>
     Deserialize(const ReaderSet& reader_set) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(reader_set));
     }
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->Deserialize(in_stream));
     }
 
     tl::expected<void, Error>
     ParallelDeserialize(DeserializeReader& reader) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->ParallelDeserialize(reader));
     }
 
     tl::expected<void, Error>
     DeserializeStreaming(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_DESERIALIZE_EMPTY_INDEX;
         SAFE_CALL(this->inner_index_->DeserializeStreaming(in_stream));
     }
 
     [[nodiscard]] uint64_t
     EstimateMemory(uint64_t num_elements) const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->EstimateMemory(num_elements);
     }
 
     tl::expected<DatasetPtr, Error>
     ExportIDs() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->ExportIDs());
     }
 
     tl::expected<IndexPtr, Error>
     ExportModel() const override {
+        const SearchLockScope public_search_scope(false);
         auto model_value = this->export_model_inner();
         if (not model_value.has_value()) {
             LOG_ERROR_AND_RETURNS(model_value.error().type, model_value.error().message);
@@ -246,21 +270,25 @@ public:
 
     tl::expected<void, Error>
     ExportCache(std::ostream& out_stream) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->ExportCache(out_stream));
     }
 
     tl::expected<void, Error>
     ImportCache(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->ImportCache(in_stream));
     }
 
     tl::expected<void, Error>
     RebuildIVFBucketGraphs() override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("rebuild bucket graphs");
         SAFE_CALL(this->inner_index_->RebuildBucketGraphs());
     }
     tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
     };
 
@@ -268,56 +296,67 @@ public:
     GetDataByIdsWithFlag(const int64_t* ids,
                          int64_t count,
                          uint64_t selected_data_flag) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->GetDataByIdsWithFlag(ids, count, selected_data_flag));
     };
 
     tl::expected<std::vector<IndexDetailInfo>, Error>
     GetIndexDetailInfos() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->GetIndexDetailInfos());
     }
 
     tl::expected<DetailDataPtr, Error>
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->GetDetailDataByName(name, info));
     }
 
     [[nodiscard]] uint64_t
     EstimateBuildMemory(uint64_t num_elements) const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->EstimateBuildMemory(num_elements);
     }
 
     virtual tl::expected<void, Error>
     GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->GetExtraInfoByIds(ids, count, extra_infos));
     };
 
     IndexType
     GetIndexType() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetIndexType();
     }
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetMemoryUsage();
     }
 
     [[nodiscard]] std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetMemoryUsageDetail();
     }
 
     tl::expected<std::pair<int64_t, int64_t>, Error>
     GetMinAndMaxId() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
     }
 
     [[nodiscard]] int64_t
     GetNumElements() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetNumElements();
     }
 
     [[nodiscard]] int64_t
     GetNumberRemoved() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetNumberRemoved();
     }
 
@@ -325,6 +364,7 @@ public:
     GetRawVectorByIds(const int64_t* ids,
                       int64_t count,
                       Allocator* specified_allocator) const override {
+        const SearchLockScope public_search_scope(false);
         if (not CheckFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
             return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                         "index no support to get raw vector by ids"));
@@ -334,6 +374,7 @@ public:
 
     [[nodiscard]] std::string
     GetStats() const override {
+        const SearchLockScope public_search_scope(false);
         if (not CheckFeature(IndexFeature::SUPPORT_GET_STATS)) {
             throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                 "index does not support static analysis");
@@ -346,6 +387,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -360,6 +402,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -374,6 +417,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -385,6 +429,7 @@ public:
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(search_param.parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -412,6 +457,7 @@ public:
               const FilterPtr& filter,
               IteratorContext*& iter_ctx,
               bool is_last_filter) const override {
+        const SearchLockScope public_search_scope(false);
         auto threshold_validation = ValidateThresholdParameters(parameters);
         if (not threshold_validation.has_value()) {
             return tl::unexpected(threshold_validation.error());
@@ -430,6 +476,7 @@ public:
                         const std::string& parameters,
                         const FilterPtr& filter,
                         Allocator* allocator) const override {
+        const SearchLockScope public_search_scope(false);
         // InnerIndexInterface stores a raw allocator; retain common resources too.
         // Destruction order releases the backend before its allocator/thread pool.
         struct SessionOwner {
@@ -446,6 +493,7 @@ public:
 
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("merge");
         SAFE_CALL(this->inner_index_->Merge(merge_units));
     }
@@ -454,6 +502,7 @@ public:
     Pretrain(const std::vector<int64_t>& base_tag_ids,
              uint32_t k,
              const std::string& parameters) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("pretrain");
         SAFE_CALL(return this->inner_index_->Pretrain(base_tag_ids, k, parameters));
     }
@@ -463,6 +512,7 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("feedback");
         if (query->GetNumElements() == 0) {
             return 0;
@@ -475,6 +525,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
@@ -486,6 +537,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -498,6 +550,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -510,6 +563,7 @@ public:
                 const std::string& parameters,
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         CHECK_QUERY_RETURN_EMPTY_DATASET(query);
         CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
         SAFE_CALL(return this->inner_index_->RangeSearch(
@@ -518,37 +572,44 @@ public:
 
     tl::expected<uint32_t, Error>
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("remove");
         SAFE_CALL(return this->inner_index_->Remove(ids, mode));
     }
 
     [[nodiscard]] tl::expected<BinarySet, Error>
     Serialize() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->inner_index_->Serialize());
     }
 
     [[nodiscard]] tl::expected<void, Error>
     Serialize(WriteFuncType write_func) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->Serialize(write_func));
     }
 
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->Serialize(out_stream));
     }
 
     tl::expected<void, Error>
     Serialize(SerializeWriter& writer, uint64_t chunk_size) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->Serialize(writer, chunk_size));
     }
 
     tl::expected<void, Error>
     SerializeStreaming(std::ostream& out_stream) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->SerializeStreaming(out_stream));
     }
 
     [[nodiscard]] tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const override {
+        const SearchLockScope public_search_scope(false);
         bool want_statistics = true;
         std::optional<SearchRequest> normalized_request;
         std::optional<nlohmann::json> parsed_params;
@@ -702,11 +763,13 @@ public:
 
     tl::expected<void, Error>
     SetImmutable() override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->inner_index_->SetImmutable());
     }
 
     tl::expected<void, Error>
     Train(const DatasetPtr& data) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("train");
         if (data->GetNumElements() != 0) {
             SAFE_CALL(this->inner_index_->Train(data));
@@ -716,6 +779,7 @@ public:
 
     virtual tl::expected<void, Error>
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("update attribute");
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs));
     }
@@ -724,12 +788,14 @@ public:
     UpdateAttribute(int64_t id,
                     const AttributeSet& new_attrs,
                     const AttributeSet& origin_attrs) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("update attribute with origin attributes");
         SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs, origin_attrs));
     }
 
     virtual tl::expected<bool, Error>
     UpdateExtraInfo(const DatasetPtr& new_base) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("update extra info");
         if (new_base->GetNumElements() == 0) {
             return false;
@@ -739,12 +805,14 @@ public:
 
     tl::expected<bool, Error>
     UpdateId(int64_t old_id, int64_t new_id) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("update id");
         SAFE_CALL(return this->inner_index_->UpdateId(old_id, new_id));
     }
 
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
+        const SearchLockScope public_search_scope(false);
         CHECK_IMMUTABLE_INDEX("update vector");
         if (new_base->GetNumElements() == 0) {
             return false;
@@ -765,6 +833,7 @@ public:
 
     [[nodiscard]] const AttrTypeSchema*
     GetAttrTypeSchema() const override {
+        const SearchLockScope public_search_scope(false);
         return this->inner_index_->GetAttrTypeSchema();
     }
 

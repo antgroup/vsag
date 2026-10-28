@@ -491,3 +491,7 @@ search 候选变化。
 两个 typed 调用仅在请求非法或执行失败时返回 `tl::unexpected<Error>`。如果评测正常完成但
 没有候选满足全部约束，则返回 `status=TuneStatus::NO_FEASIBLE_CANDIDATE` 和结构化
 `best_effort`；该状态下推荐字段无效。
+
+`327_feature_autotune_existing_index` 示例使用 `build_thread_count=1` 构建小规模 HGraph，
+以保持插入顺序稳定，同时保留 recall 1.0 的约束。并行构建可能改变图的连通性；
+仅增大 `ef_search` 并不能保证已有图能够满足召回率约束。

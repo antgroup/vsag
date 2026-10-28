@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "url": "https://github.com/antgroup/vsag/actions/runs/40171699713/attempts/2",
+  "head_sha": "ecd3ad4c1bd3486b135b36bb6012aaba778b965b",
+  "test_sha": "95bab8e63b4c2bd523e4ed9a4fab140b09aa727a",
+  "original_team_with_cleanup_seconds": 753.991,
+  "stages": {
+    "build": 343,
+    "parallel": 330,
+    "handoff": 17,
+    "total": 690
+  },
+  "budgets": {
+    "build": 420,
+    "parallel": 420,
+    "handoff": 60,
+    "total": 900
+  },
+  "shard_execution": [
+    240.676,
+    245.575,
+    256.068,
+    259.898
+  ],
+  "jobs": {
+    "Team ASan Build": 343.0,
+    "Team Format and Helper Checks": 70.0,
+    "Team Test shard 1": 315.0,
+    "Team Test shard 0": 309.0,
+    "Team Test shard 2": 322.0,
+    "Team Index Compatibility": 138.0,
+    "Team Test shard 3": 328.0
+  },
+  "job_budgets": {
+    "Team ASan Build": 420,
+    "Team Format and Helper Checks": 120,
+    "Team Test shard 1": 420,
+    "Team Test shard 0": 420,
+    "Team Test shard 2": 420,
+    "Team Index Compatibility": 180,
+    "Team Test shard 3": 420
+  },
+  "steps": {
+    "Team ASan Build": {
+      "Set up job": 3.0,
+      "Initialize containers": 62.0,
+      "Prepare writable job home": 1.0,
+      "Run actions/checkout@v4": 4.0,
+      "Check non-root runner prerequisites": 1.0,
+      "Prepare shared build and execution identity": 1.0,
+      "Publish exact-commit source for this run": 1.0,
+      "Restore a private compiler cache": 5.0,
+      "Build ASan with 24 compile jobs": 222.0,
+      "Record compiler cache statistics": 1.0,
+      "Find changed source files": 3.0,
+      "Prepare inventory runtime": 1.0,
+      "Publish test inventory and shard plan": 16.0,
+      "Upload small test plan": 6.0,
+      "Upload build diagnostics": 6.0,
+      "Post Run actions/checkout@v4": 1.0,
+      "Stop containers": 0.0,
+      "Complete job": 0.0
+    },
+    "Team Format and Helper Checks": {
+      "Set up job": 1.0,
+      "Initialize containers": 21.0,
+      "Prepare writable check home": 1.0,
+      "Run actions/checkout@v4": 2.0,
+      "Check hosted prerequisites": 0.0,
+      "Format and helper checks": 40.0,
+      "Post Run actions/checkout@v4": 1.0,
+      "Stop containers": 0.0,
+      "Complete job": 0.0
+    },
+    "Team Test shard 1": {
+      "Set up job": 2.0,
+      "Initialize containers": 39.0,
+      "Prepare writable job home": 1.0,
+      "Verify read-only artifacts and execution identity": 1.0,
+      "Prepare runtime environment": 0.0,
+      "Run Catch2 shard and assigned examples": 250.0,
+      "Record additional check outcomes": 0.0,
+      "Upload small test results": 7.0,
+      "Upload test diagnostics": 6.0,
+      "Stop containers": 0.0,
+      "Complete job": 0.0
+    },
+    "Team Test shard 0": {
+      "Set up job": 3.0,
+      "Initialize containers": 35.0,
+      "Prepare writable job home": 1.0,
+      "Verify read-only artifacts and execution identity": 2.0,
+      "Prepare runtime environment": 0.0,
+      "Run Catch2 shard and assigned examples": 245.0,
+      "Record additional check outcomes": 1.0,
+      "Upload small test results": 6.0,
+      "Upload test diagnostics": 6.0,
+      "Stop containers": 1.0,
+      "Complete job": 0.0
+    },
+    "Team Test shard 2": {
+      "Set up job": 2.0,
+      "Initialize containers": 36.0,
+      "Prepare writable job home": 1.0,
+      "Verify read-only artifacts and execution identity": 1.0,
+      "Prepare runtime environment": 1.0,
+      "Run Catch2 shard and assigned examples": 259.0,
+      "Record additional check outcomes": 1.0,
+      "Upload small test results": 7.0,
+      "Upload test diagnostics": 6.0,
+      "Stop containers": 0.0,
+      "Complete job": 0.0
+    },
+    "Team Index Compatibility": {
+      "Set up job": 3.0,
+      "Initialize containers": 42.0,
+      "Prepare writable job home": 1.0,
+      "Verify compatibility artifacts and execution identity": 2.0,
+      "Prepare compatibility runtime environment": 1.0,
+      "Check index compatibility": 69.0,
+      "Record compatibility outcome": 1.0,
+      "Upload small compatibility result": 6.0,
+      "Upload compatibility diagnostics": 6.0,
+      "Stop containers": 0.0,
+      "Complete job": 0.0
+    },
+    "Team Test shard 3": {
+      "Set up job": 3.0,
+      "Initialize containers": 35.0,
+      "Prepare writable job home": 1.0,
+      "Verify read-only artifacts and execution identity": 1.0,
+      "Prepare runtime environment": 1.0,
+      "Run Catch2 shard and assigned examples": 264.0,
+      "Record additional check outcomes": 1.0,
+      "Upload small test results": 6.0,
+      "Upload test diagnostics": 6.0,
+      "Stop containers": 0.0,
+      "Complete job": 1.0
+    }
+  }
+}

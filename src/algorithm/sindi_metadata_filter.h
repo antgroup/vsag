@@ -198,13 +198,13 @@ inline constexpr const char* SINDI_PUBLISH_TIME_BEGIN_METADATA_NAME = "publish_t
 inline constexpr const char* SINDI_PUBLISH_TIME_END_METADATA_NAME = "publish_time_stamp_end";
 inline constexpr const char* SINDI_TIME_METADATA_FORMAT_VERSION_KEY =
     "sindi_time_metadata_format_version";
-inline constexpr uint32_t SINDI_TIME_METADATA_FORMAT_VERSION = 1;
+inline constexpr uint32_t SINDI_TIME_METADATA_FORMAT_VERSION = 2;
 inline constexpr int32_t SINDI_MISSING_EPOCH_DAY = -1;
 inline constexpr int64_t SINDI_SECONDS_PER_DAY = 86400;
 
 inline bool
 IsSupportedSindiTimeMetadataVersion(int64_t version) {
-    return version == SINDI_TIME_METADATA_FORMAT_VERSION;
+    return version == 1 or version == SINDI_TIME_METADATA_FORMAT_VERSION;
 }
 
 class SindiTimeBuildPlan {
@@ -214,6 +214,11 @@ public:
     [[nodiscard]] bool
     Enabled() const {
         return enabled_;
+    }
+
+    [[nodiscard]] bool
+    HasHostMetadata() const {
+        return has_host_metadata_;
     }
 
     [[nodiscard]] uint32_t
@@ -259,7 +264,7 @@ public:
     PrepareBuild(const DatasetPtr& base, uint32_t window_size) const;
 
     void
-    CommitBuild(SindiTimeBuildPlan&& plan, uint64_t element_count);
+    CommitBuild(SindiTimeBuildPlan&& plan, uint32_t first_inner_id, uint32_t end_inner_id);
 
     void
     Clear();
@@ -267,6 +272,11 @@ public:
     [[nodiscard]] bool
     HasMetadata() const {
         return not partitions_.empty();
+    }
+
+    [[nodiscard]] bool
+    HasHostMetadata() const {
+        return has_host_metadata_;
     }
 
     [[nodiscard]] uint64_t
@@ -314,6 +324,11 @@ private:
         Vector<uint32_t> host_offsets;
     };
 
+    struct Segment {
+        uint32_t first_partition{0};
+        uint32_t end_partition{0};
+    };
+
     [[nodiscard]] FilterPtr
     create_filter(const SindiTimeSearchRoute& route, FilterPtr filter) const;
 
@@ -322,6 +337,7 @@ private:
     SindiHostDictionary host_dictionary_;
     Vector<int32_t> document_days_;
     Vector<Partition> partitions_;
+    Vector<Segment> segments_;
 };
 
 class SindiMetadataBuildPlan {

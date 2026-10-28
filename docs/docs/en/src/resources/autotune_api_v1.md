@@ -516,3 +516,8 @@ Both typed calls return `tl::unexpected<Error>` only for invalid requests and ex
 If evaluation completes but no candidate satisfies every constraint, they return a result with
 `status=TuneStatus::NO_FEASIBLE_CANDIDATE` and structured `best_effort`; recommendation fields are
 invalid in that state.
+
+The `327_feature_autotune_existing_index` example builds its tiny HGraph with
+`build_thread_count=1` to keep insertion order stable while requiring recall 1.0.
+Parallel construction can change graph connectivity; increasing `ef_search` alone
+does not guarantee that an existing graph can satisfy a recall constraint.

@@ -46,10 +46,12 @@ constexpr const char* kSearch =
 
 vsag::IndexPtr
 MakeSessionIndex(bool populate = true) {
+    // These lifecycle tests require full pages from the one-dimensional fixture.
+    // Parallel insertion can leave a smaller reachable component in the bottom graph.
     auto created = vsag::Factory::CreateIndex("hgraph", R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
-        "ef_construction":128,"use_reorder":false}
+        "ef_construction":128,"use_reorder":false,"build_thread_count":1}
     })");
     REQUIRE(created.has_value());
     auto index = created.value();
@@ -302,6 +304,8 @@ TEST_CASE("HGraph search session deeply copies query before first Next",
         auto expected = control.value()->Next(kBatch);
         REQUIRE(actual.has_value());
         REQUIRE(expected.has_value());
+        INFO("batch=" << batch << ", control page size=" << expected.value()->GetDim()
+                      << ", session has more=" << session->HasMore());
         REQUIRE(actual.value()->GetDim() == kBatch);
         RequireSamePage(actual.value(), expected.value());
     }

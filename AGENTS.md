@@ -79,6 +79,7 @@ Full build and environment details: [`docs/agents/build-and-test.md`](docs/agent
 | C++ style, layout, common patterns, testing | [`docs/agents/coding-standards.md`](docs/agents/coding-standards.md) |
 | Branching, fork-first PR pushes, commits, DCO, `Assisted-by`, PR labels, doc sync | [`docs/agents/contribution-workflow.md`](docs/agents/contribution-workflow.md) |
 | Drafting & submitting GitHub issues (`/create-issue`) | [`docs/agents/filing-issues.md`](docs/agents/filing-issues.md) |
+| Community/team CI routing, activation, rollback | [`docs/agents/ci-routing.md`](docs/agents/ci-routing.md) |
 | Repository / docs map | [`docs/agents/docs-map.md`](docs/agents/docs-map.md) |
 
 ## How To Research The Project
