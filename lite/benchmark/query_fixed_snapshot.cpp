@@ -115,7 +115,8 @@ run(int argc, char** argv) {
     const uint64_t n = end - begin;
     std::vector<double> latencies(n);
     std::vector<std::vector<Neighbor>> neighbors(n);
-    rusage before{}, after{};
+    rusage before{};
+    rusage after{};
     for (uint64_t pass = 0; pass < 2; ++pass) {
         if (pass == 1) {
             require(getrusage(RUSAGE_SELF, &before) == 0, "resource capture failed");
@@ -149,7 +150,8 @@ run(int argc, char** argv) {
         }
     }
     require(getrusage(RUSAGE_SELF, &after) == 0, "resource capture failed");
-    std::ofstream samples(output + ".queries.csv"), results(output + ".neighbors.csv");
+    std::ofstream samples(output + ".queries.csv");
+    std::ofstream results(output + ".neighbors.csv");
     require(static_cast<bool>(samples) and static_cast<bool>(results), "output open failed");
     samples << "query,latency_us\n" << std::setprecision(17);
     results << "query,rank,id,distance\n" << std::hexfloat;

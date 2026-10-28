@@ -40,7 +40,7 @@ read_records(const std::string& path, int32_t expected_dim) {
     require(static_cast<bool>(input), "input open failed");
     const auto position = input.tellg();
     require(position > 0 and expected_dim > 0, "invalid input file length or dimension");
-    const uint64_t size = static_cast<uint64_t>(position);
+    const auto size = static_cast<uint64_t>(position);
     const uint64_t record_bytes = sizeof(int32_t) + sizeof(T) * static_cast<uint64_t>(expected_dim);
     require(size % record_bytes == 0, "invalid input file length");
     const uint64_t count = size / record_bytes;
