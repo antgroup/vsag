@@ -128,7 +128,7 @@ public:
         std::vector<DistanceHeap::DistanceRecord> temp2(size);
 
         const auto* data = heap.GetData();
-        memcpy(temp2.data(), data, size * sizeof(DistanceHeap::DistanceRecord));
+        std::copy_n(data, size, temp2.begin());
         std::sort(temp2.begin(), temp2.end(), [](const auto& a, const auto& b) {
             return a.first < b.first;
         });

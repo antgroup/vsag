@@ -28,6 +28,7 @@
 #include <thread>
 
 #include "allocator/memory_record_allocator.h"
+#include "framework/test_budget_context.h"
 #include "functest.h"
 #include "simd/fp32_simd.h"
 #include "storage/serialization_tags.h"
@@ -109,21 +110,135 @@ const std::vector<std::pair<std::string, float>> IVFTestIndex::all_test_cases = 
     {"pqfs,fp16", 0.82},
 };
 
+static uint64_t
+IVFBudgetTrainingIterations(const std::string& name,
+                            const std::string& train_type,
+                            const std::string& quantizer) {
+    // GNO-IMI always trains four 20-centroid partitions with 30 iterations, even
+    // when the sampled train_type is random. The caller's 300-centroid envelope
+    // bounds their combined 80 centroids. Single-level IVF defaults to 25.
+    uint64_t iterations = name.find("GNO-IMI") != std::string::npos ? 30
+                          : train_type == "kmeans"                  ? 25
+                                                                    : 1;
+    // PQ and PQFS independently train their codebooks with the default 25
+    // iterations, including when the IVF partition uses random training.
+    if (quantizer.rfind("pq", 0) == 0) {
+        iterations += 25;
+    }
+    return iterations;
+}
+
 IVFResourcePtr
 IVFTestIndex::GetResource(bool sample) {
+    const auto identity = budget::CurrentCaseIdentity(__FILE__);
+    auto policy = budget::CurrentPolicy(!sample);
+    const auto seed = budget::CaseSeed(identity.name, policy.seed);
     auto resource = std::make_shared<IVFTestResource>();
-    if (sample) {
-        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999), 257);
-        resource->test_cases = fixtures::RandomSelect(IVFTestIndex::all_test_cases, 3);
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
-        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
-        resource->base_count = IVFTestIndex::base_count;
+    const auto selected = budget::ShuffledIndices(all_test_cases.size(), seed);
+    for (uint64_t i = 0; i < (sample ? 3 : all_test_cases.size()); ++i) {
+        resource->test_cases.push_back(all_test_cases[selected[i]]);
+    }
+    const std::vector<std::string> metrics{"ip", "l2", "cosine"};
+    const auto selected_metrics = budget::ShuffledIndices(metrics.size(), seed + 1);
+    for (uint64_t i = 0; i < (sample ? 1 : 2); ++i) {
+        resource->metric_types.push_back(metrics[selected_metrics[i]]);
+    }
+    resource->train_types = {budget::SampleInclusive(seed + 2, 0, 1) ? "kmeans" : "random"};
+    resource->base_count = base_count * (sample ? 1 : 3);
+
+    // Select coverage before choosing its legal scale. These helpers override the common
+    // quantizer matrix; budget the matrix they actually execute, rather than unused draws.
+    auto quantizers = resource->test_cases;
+    const auto& name = identity.name;
+    if (name == "IVF GetStatus") {
+        resource->train_types = {"kmeans"};
+    }
+    if (name.find("IVF Build with Residual") != std::string::npos) {
+        quantizers = {{"fp32", 0.90F},
+                      {"bf16", 0.88F},
+                      {"fp16", 0.88F},
+                      {"sq8", 0.84F},
+                      {"pq,fp32", 0.82F},
+                      {"pqfs,fp32", 0.82F}};
+    } else if (name.find("Search Disable Reorder") != std::string::npos) {
+        quantizers = {{"sq4_uniform,fp32", 0.89F}};
+    } else if (name.find("Large K") != std::string::npos ||
+               name.find("With Attribute") != std::string::npos) {
+        quantizers = {{"fp32", 0.75F}};
+    }
+    if (name.find("GNO-IMI Build with Residual") != std::string::npos) {
+        quantizers.erase(
+            std::remove_if(quantizers.begin(),
+                           quantizers.end(),
+                           [](const auto& item) { return item.first == "sq8_uniform,fp32"; }),
+            quantizers.end());
+    }
+    const uint64_t num = name.find("Large K") != std::string::npos           ? 3000
+                         : name.find("Estimate Memory") != std::string::npos ? 1000
+                                                                             : resource->base_count;
+    const auto desired_dims =
+        sample ? fixtures::get_common_used_dims(1, static_cast<int>(seed % 1000), 257)
+               : fixtures::get_index_test_dims(3, static_cast<int>(seed % 1000));
+    std::vector<std::vector<budget::RunSpec>> candidates;
+    for (const uint64_t dimension_limit : {8, 32, 64, 128, 256, 1536}) {
+        std::vector<budget::RunSpec> runs;
+        for (const auto& metric : resource->metric_types) {
+            for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+                for (const auto& [quantizer, recall] : quantizers) {
+                    budget::Workload work;
+                    work.dim = std::min<uint64_t>(desired_dims[d], dimension_limit);
+                    work.num = num;
+                    work.query_num = 100;
+                    work.train_num = num;
+                    work.metric = metric;
+                    work.quantizer = quantizer;
+                    work.min_num = num;  // Keep cluster/training and large-k boundary sizes.
+                    work.train_runs = name.find("Estimate Memory") != std::string::npos ? 2 : 1;
+                    work.train_iterations =
+                        IVFBudgetTrainingIterations(name, resource->train_types.front(), quantizer);
+                    work.train_centroids = name.find("Large K") != std::string::npos ? 1000 : 300;
+                    work.build_runs = 2;
+                    work.build_candidates = work.train_centroids;
+                    // A conservative complete-helper envelope, including TestGeneral,
+                    // serialized copies, search parallelism and generator re-entry.
+                    work.search_runs = 48;
+                    work.search_candidates = num;
+                    work.oracle_runs = 1;
+                    work.serialize_runs = 6;
+                    work.update_num = num;
+                    work.repetitions = name.find("With Attribute") != std::string::npos ||
+                                               name.find("Search Overtime") != std::string::npos
+                                           ? 2
+                                           : 1;
+                    runs.push_back({metric + "/" + std::to_string(d) + "/" + quantizer, work});
+                }
+            }
+        }
+        candidates.push_back(std::move(runs));
+    }
+    // Fixed whole-matrix ceilings also fit the smallest legal dimension for every
+    // required quantizer/metric combination, including independent PQ training.
+    if (!sample) {
+        policy.cap_points = 400000000000ULL;
+    } else if (name.find("Search Overtime") != std::string::npos) {
+        policy.cap_points = 8400000000ULL;
+    } else if (name.find("Estimate Memory") != std::string::npos) {
+        policy.cap_points = 7600000000ULL;
+    } else if (name.find("IVF Build with Residual") != std::string::npos) {
+        policy.cap_points = 4500000000ULL;
+    } else if (name.find("GNO-IMI") != std::string::npos) {
+        policy.cap_points = 4400000000ULL;
+    } else if (name.find("Search Disable Reorder") != std::string::npos ||
+               name.find("Large K") != std::string::npos ||
+               name.find("With Attribute") != std::string::npos) {
+        policy.cap_points = 4000000000ULL;
     } else {
-        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
-        resource->test_cases = IVFTestIndex::all_test_cases;
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
-        resource->train_types = fixtures::RandomSelect<std::string>({"kmeans", "random"}, 1);
-        resource->base_count = IVFTestIndex::base_count * 3;
+        policy.cap_points = 4200000000ULL;
+    }
+    const auto plan = budget::PlanCase(identity, policy, candidates);
+    plan.Log(std::cout);
+    for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+        resource->dims.push_back(static_cast<int>(plan.Runs()[d * quantizers.size()].workload.dim));
     }
     return resource;
 }
@@ -1015,7 +1130,7 @@ template <typename Fn>
 void
 RunWithGeneratedBlockSizeLimit(Fn&& fn) {
     const auto origin_size = vsag::Options::Instance().block_size_limit();
-    const auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     vsag::Options::Instance().set_block_size_limit(size);
     fn();
     vsag::Options::Instance().set_block_size_limit(origin_size);
@@ -1077,6 +1192,19 @@ ForEachIVFCase(const fixtures::IVFResourcePtr& resource, const Cases& test_cases
         auto resource = fixtures::IVFTestIndex::GetResource(false); \
         helper(resource);                                           \
     }
+
+TEST_CASE("IVF budget includes partition and independent PQ training iterations",
+          "[ft][ivf][test_budget][pr]") {
+    using fixtures::IVFBudgetTrainingIterations;
+    REQUIRE(IVFBudgetTrainingIterations("IVF Build", "kmeans", "fp32") == 25);
+    REQUIRE(IVFBudgetTrainingIterations("IVF Build", "random", "fp32") == 1);
+    for (const auto* quantizer : {"pq,fp32", "pqfs,fp16"}) {
+        REQUIRE(IVFBudgetTrainingIterations("IVF Build", "kmeans", quantizer) == 50);
+        REQUIRE(IVFBudgetTrainingIterations("IVF Build", "random", quantizer) == 26);
+        REQUIRE(IVFBudgetTrainingIterations("IVF GNO-IMI Build", "random", quantizer) == 55);
+    }
+    REQUIRE(IVFBudgetTrainingIterations("IVF GNO-IMI Build", "random", "fp32") == 30);
+}
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
                              "IVF Factory Test With Exceptions",
@@ -1437,7 +1565,7 @@ static void
 TestIVFSearchOvertime(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     constexpr static const char* search_param_tmp2 = R"(
         {{
             "ivf": {{
@@ -1496,7 +1624,7 @@ static void
 TestIVFSearchDisableReorder(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     constexpr static const char* search_param_tmp_disable_reorder = R"(
         {{
             "ivf": {{
@@ -1564,7 +1692,7 @@ static void
 TestIVFBuildWithLargeK(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.75},
     };
@@ -1634,7 +1762,7 @@ static void
 TestIVFWithAttr(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     bool use_attribute_filter = true;
     std::vector<std::pair<std::string, float>> tmp_test_cases = {
         {"fp32", 0.75},
@@ -1700,7 +1828,7 @@ static void
 TestIVFExportModel(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -1958,7 +2086,7 @@ static void
 TestIVFClone(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -2002,7 +2130,7 @@ TestIVFRandomAllocator(const fixtures::IVFResourcePtr& resource) {
     INFO(fmt::format("allocator_seed: {}", allocator_seed));
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -2047,7 +2175,7 @@ static void
 TestIVFEstimateMemoryAndGetMemoryUsage(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     uint64_t estimate_count = 1000;
 
     for (auto metric_type : resource->metric_types) {
@@ -2098,7 +2226,7 @@ static void
 TestIVFBuildMultiBucketsPerData(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -2145,7 +2273,7 @@ static void
 TestIVFGNOIMIBuild(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto train_type : resource->train_types) {
@@ -2187,7 +2315,7 @@ static void
 TestIVFGNOIMIBuildWithResidual(const fixtures::IVFResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    constexpr auto size = 1024 * 1024 * 2;
 
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
@@ -4078,6 +4206,81 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
 
     auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, params, true);
     fixtures::TestIndex::TestSerializeBinarySet(index, restored, dataset, search_param, true);
+}
+
+TEST_CASE("IVF SAQ build add and serialization preserve search results", "[ft][ivf][SAQ]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t base_count = 640;
+    constexpr int64_t initial_count = 512;
+    constexpr int64_t k = 8;
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const bool use_residual = GENERATE(false, true);
+    INFO("metric=" << metric << ", use_residual=" << use_residual);
+    auto params = nlohmann::json::parse(R"({
+        "dtype": "float32",
+        "dim": 64,
+        "index_param": {
+            "base_quantization_type": "saq",
+            "saq_avg_bits": 4,
+            "saq_random_rotation": true,
+            "buckets_count": 4,
+            "ivf_train_type": "random",
+            "train_sample_count": 512,
+            "use_reorder": false,
+            "thread_count": 1
+        }
+    })");
+    params["metric_type"] = metric;
+    params["index_param"]["use_residual"] = use_residual;
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    auto initial = vsag::Dataset::Make()
+                       ->NumElements(initial_count)
+                       ->Dim(dim)
+                       ->Ids(dataset->base_->GetIds())
+                       ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                       ->Owner(false);
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(base_count - initial_count)
+                     ->Dim(dim)
+                     ->Ids(dataset->base_->GetIds() + initial_count)
+                     ->Float32Vectors(dataset->base_->GetFloat32Vectors() + initial_count * dim)
+                     ->Owner(false);
+    auto created = vsag::Factory::CreateIndex("ivf", params.dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    auto built = index->Build(initial);
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    auto inserted = index->Add(added);
+    REQUIRE(inserted.has_value());
+    REQUIRE(inserted.value().empty());
+    REQUIRE(index->GetNumElements() == base_count);
+
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto restored_result = vsag::Factory::CreateIndex("ivf", params.dump());
+    REQUIRE(restored_result.has_value());
+    auto restored = restored_result.value();
+    REQUIRE(restored->Deserialize(binary.value()).has_value());
+    REQUIRE(restored->GetNumElements() == base_count);
+
+    constexpr auto search_param = R"({"ivf":{"scan_buckets_count":4}})";
+    for (int64_t query_id = 0; query_id < 3; ++query_id) {
+        auto query = fixtures::get_one_query(dataset->query_, query_id);
+        auto before = index->KnnSearch(query, k, search_param);
+        auto after = restored->KnnSearch(query, k, search_param);
+        REQUIRE(before.has_value());
+        REQUIRE(after.has_value());
+        REQUIRE(before.value()->GetDim() == k);
+        REQUIRE(after.value()->GetDim() == k);
+        for (int64_t i = 0; i < k; ++i) {
+            REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+            REQUIRE(std::isfinite(before.value()->GetDistances()[i]));
+            REQUIRE(std::isfinite(after.value()->GetDistances()[i]));
+            REQUIRE(std::abs(after.value()->GetDistances()[i] -
+                             before.value()->GetDistances()[i]) <= 1e-6F);
+        }
+    }
 }
 
 TEST_CASE("IVF dense native distance contract", "[distance_contract]") {

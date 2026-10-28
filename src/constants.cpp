@@ -135,6 +135,9 @@ const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
 const char* const RABITQ_USE_FHT = "rabitq_use_fht";
 const char* const FAST_ENCODE_RABITQ = "fast_encode_rabitq";
 const char* const FAST_ENCODE_RABITQ_ROUNDS = "fast_encode_rabitq_rounds";
+const char* const SAQ_AVG_BITS = "saq_avg_bits";
+const char* const SAQ_SEGMENT_COUNT = "saq_segment_count";
+const char* const SAQ_RANDOM_ROTATION = "saq_random_rotation";
 const char* const INDEX_TQ_CHAIN = "tq_chain";
 const char* const INDEX_MRLE_DIM = "mrle_dim";
 
@@ -181,6 +184,7 @@ const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
 const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE = "raw_vector_enable_read_cache";
 const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE = "raw_vector_cache_total_size";
 const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
+const char* const HGRAPH_PRECISE_USER_DEFINED_IO = "precise_user_defined_io";
 const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
 const char* const HGRAPH_PRECISE_DIRECT_READ = "precise_direct_read";
 const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";

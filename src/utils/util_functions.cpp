@@ -15,6 +15,7 @@
 
 #include "util_functions.h"
 
+#include <cstring>
 #include <iomanip>
 #include <limits>
 #include <random>

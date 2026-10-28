@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.18)
+project(lite_consumer LANGUAGES CXX)
+find_package(vsag-lite CONFIG REQUIRED)
+add_executable(lite_example main.cpp)
+target_link_libraries(lite_example PRIVATE vsag::lite)

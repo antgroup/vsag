@@ -76,7 +76,7 @@ MMapRegion::MMapRegion(std::string filename, Allocator* allocator)
     }
 
     try {
-        struct stat file_stat {};
+        struct stat file_stat{};
         if (fstat(fd_, &file_stat) != 0) {
             throw_system_error("fstat", filepath_);
         }

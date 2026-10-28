@@ -884,7 +884,7 @@ TEST_CASE("SINDIV2 publish time and host filtering routes and serializes",
 
     if (not parameter->immutable) {
         int64_t added_label = 50;
-        int64_t added_timestamp = 30 * day;
+        int64_t added_timestamp = day;
         std::string added_host = "host-b";
         SparseVector added_vector{1, &term, values.data()};
         auto timed_add = Dataset::Make()
@@ -900,12 +900,13 @@ TEST_CASE("SINDIV2 publish time and host filtering routes and serializes",
                                ->Ids(&added_label)
                                ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
                                ->Owner(false);
-        REQUIRE_THROWS_WITH(index.Add(timed_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI time-aware index does not support incremental Add"));
+        REQUIRE(index.Add(timed_add).empty());
+        auto added_query = query->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &added_timestamp);
+        REQUIRE(index.KnnSearch(added_query, 3, search_parameters, nullptr)->GetIds()[0] ==
+                added_label);
         REQUIRE_THROWS_WITH(index.Add(untimed_add),
                             Catch::Matchers::ContainsSubstring(
-                                "SINDI time-aware index does not support incremental Add"));
+                                "SINDI time-aware Add requires publish_time_stamp metadata"));
     }
 }
 

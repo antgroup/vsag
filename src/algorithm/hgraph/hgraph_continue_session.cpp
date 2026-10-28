@@ -25,6 +25,7 @@
 #include "algorithm/hgraph/hgraph_continue_session_routing.h"
 #include "impl/query_computer_pool.h"
 #include "impl/searcher/searcher_utils.h"
+#include "utils/search_lock.h"
 #include "utils/search_threshold.h"
 #include "vsag_exception.h"
 
@@ -245,6 +246,7 @@ HGraphContinueSession::Next(const SearchSessionNextOptions& options) {
 
 tl::expected<DatasetPtr, Error>
 HGraphContinueSession::NextImpl(const SearchSessionNextOptions& options, uint64_t minimum_effort) {
+    const SearchLockScope public_search_scope(false);
     const auto max_candidates = options.max_candidates;
     std::optional<ValidatedParameters> validated;
     // Validation has no traversal side effects and must not close a valid session.
@@ -281,6 +283,7 @@ HGraphContinueSession::NextImpl(const SearchSessionNextOptions& options, uint64_
                 Error(ErrorType::INTERNAL_ERROR, "session parameters were not validated"));
         }
         const auto& params = validated->search;
+        const SearchLockScope search_lock_scope(params.search_no_lock);
         state.effort = std::max(minimum_effort, static_cast<uint64_t>(params.ef_search));
         state.threshold = validated->threshold;
         // Replace with a successful construction so the old wrapper lives until swap.

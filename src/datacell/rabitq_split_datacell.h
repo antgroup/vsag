@@ -30,6 +30,7 @@
 #include "common.h"
 #include "flatten_interface.h"
 #include "flatten_optimized_build_interface.h"
+#include "flatten_pairwise_distance_interface.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "inner_string_params.h"
@@ -245,6 +246,7 @@ template <MetricType metric,
           typename QuantizerT = RaBitQuantizer<metric>>
 class RaBitQSplitDataCell : public FlattenInterface,
                             public FlattenOptimizedBuildInterface,
+                            public FlattenPairwiseDistanceInterface,
                             public RaBitQSplitResidualOriginalQueryInterface,
                             public RaBitQSplitDataCellInterface {
 public:
@@ -264,6 +266,68 @@ public:
         ByteBuffer scalar_code_;
         uint64_t code_sum_{0};
     };
+
+    class PairwiseDistanceComputer final : public FlattenPairwiseDistanceComputer {
+    public:
+        explicit PairwiseDistanceComputer(RaBitQSplitDataCell& source)
+            : source_(source),
+              codes_(source.allocator_),
+              packed_code_(source.code_size_, source.allocator_) {
+        }
+
+        float
+        Compute(InnerIdType id1, InnerIdType id2, QueryContext* ctx = nullptr) override {
+            // Keep both entries alive if fetching the second ID evicts the first one.
+            const auto left = acquire(id1);
+            const auto right = acquire(id2);
+            const float distance =
+                source_.bottom_quantizer().ComputeScalarCodesDistance(left->scalar_code_.data,
+                                                                      left->code_sum_,
+                                                                      right->scalar_code_.data,
+                                                                      right->code_sum_);
+            source_.add_distance_evaluations(ctx, 1);
+            return distance;
+        }
+
+    private:
+        std::shared_ptr<OptimizedBuildComputer>
+        acquire(InnerIdType id) {
+            const auto found = codes_.find(id);
+            if (found != codes_.end()) {
+                return found->second;
+            }
+            auto code = std::make_shared<OptimizedBuildComputer>(
+                source_.bottom_quantizer().GetScalarCodeSize(), source_.allocator_);
+            CHECK_ARGUMENT(source_.GetCodesById(id, packed_code_.data),
+                           "failed to read split RaBitQ pairwise code");
+            code->code_sum_ = source_.bottom_quantizer().UnpackScalarCode(packed_code_.data,
+                                                                          code->scalar_code_.data);
+            if (codes_.size() == CACHE_CAPACITY) {
+                codes_.erase(order_[next_]);
+            }
+            codes_.emplace(id, code);
+            order_[next_] = id;
+            next_ = (next_ + 1) % CACHE_CAPACITY;
+            return code;
+        }
+
+        // Bound auxiliary memory independently of the index size. FIFO eviction keeps the
+        // cache local to one search/connection, without retaining stale codes across Add calls.
+        static constexpr uint64_t CACHE_CAPACITY = 512;
+        RaBitQSplitDataCell& source_;
+        UnorderedMap<InnerIdType, std::shared_ptr<OptimizedBuildComputer>> codes_;
+        ByteBuffer packed_code_;
+        std::array<InnerIdType, CACHE_CAPACITY> order_{};
+        uint64_t next_{0};
+    };
+
+    std::unique_ptr<FlattenPairwiseDistanceComputer>
+    FactoryPairwiseDistanceComputer() override {
+        if (this->optimized_build_active_ or this->fused_code_storage_ != nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<PairwiseDistanceComputer>(*this);
+    }
 
     class FusedComputer final : public ComputerInterface {
     public:

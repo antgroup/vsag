@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "impl/transform/transformer_headers.h"
+#include "quantization/caq_encoder.h"
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/pqfs_simd.h"
@@ -102,9 +103,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     original_dim_ = dim;
     if (0 < pca_dim_ and pca_dim_ < dim) {
         if (use_mrq_) {
-            pca_.reset(new PCATransformer(allocator, dim, dim));
+            pca_ = std::make_shared<PCATransformer>(allocator, dim, dim);
         } else {
-            pca_.reset(new PCATransformer(allocator, dim, pca_dim_));
+            pca_ = std::make_shared<PCATransformer>(allocator, dim, pca_dim_);
         }
         this->dim_ = pca_dim_;
     } else {
@@ -131,9 +132,9 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     // random orthogonal matrix
     use_fht_ = use_fht;
     if (use_fht_) {
-        rom_.reset(new FhtKacRotator(allocator, this->dim_));
+        rom_ = std::make_shared<FhtKacRotator>(allocator, this->dim_);
     } else {
-        rom_.reset(new RandomOrthogonalMatrix(allocator, this->dim_));
+        rom_ = std::make_shared<RandomOrthogonalMatrix>(allocator, this->dim_);
     }
     // distance function related variable
     inv_sqrt_d_ = 1.0F / sqrt(this->dim_);
@@ -155,7 +156,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
     }
 
     // base code layout
-    uint64_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(float));
+    uint64_t align_size = std::max({sizeof(error_type), sizeof(norm_type), sizeof(float)});
 
     uint64_t code_original_size = (this->dim_ + 7) / 8;
     code_original_size *= num_bits_per_dim_base_;
@@ -237,7 +238,7 @@ RaBitQuantizer<metric>::RaBitQuantizer(int dim,
         offset_one_bit_error_ = this->code_size_;
         this->code_size_ += ((sizeof(error_type) + align_size - 1) / align_size) * align_size;
     }
-    RefreshSplitLayout(support_split_code_storage);
+    refresh_split_layout(support_split_code_storage);
 }
 
 template <MetricType metric>
@@ -350,9 +351,9 @@ ip_obar_q(float ip_yu_q, float q_prime_sum, float y_norm, int B) {
 
 template <MetricType metric>
 typename RaBitQuantizer<metric>::norm_type
-RaBitQuantizer<metric>::ComputeScalarCodeNorm(const uint8_t* scalar_codes,
-                                              uint32_t code_bits,
-                                              uint32_t dropped_bits) const {
+RaBitQuantizer<metric>::compute_scalar_code_norm(const uint8_t* scalar_codes,
+                                                 uint32_t code_bits,
+                                                 uint32_t dropped_bits) const {
     if (code_bits == 0) {
         return 1.0F;
     }
@@ -374,8 +375,8 @@ RaBitQuantizer<metric>::ComputeScalarCodeNorm(const uint8_t* scalar_codes,
 
 template <MetricType metric>
 typename RaBitQuantizer<metric>::norm_type
-RaBitQuantizer<metric>::ComputeFilterCodeNorm(const uint8_t* filter_code,
-                                              uint32_t filter_bits) const {
+RaBitQuantizer<metric>::compute_filter_code_norm(const uint8_t* filter_code,
+                                                 uint32_t filter_bits) const {
     if (filter_bits == 0) {
         return 1.0F;
     }
@@ -719,104 +720,14 @@ RaBitQuantizer<metric>::EncodeExtendRaBitQ(const float* o_prime,
 template <MetricType metric>
 void
 RaBitQuantizer<metric>::FastEncodeRaBitQ(const float* o_prime, uint8_t* code, float& y_norm) const {
-    // CAQ starts from an LVQ grid and improves cosine alignment with coordinate adjustment.
-    // Each coordinate moves by at most one level per round, keeping the complexity O(rounds * D).
-    constexpr double adjustment_epsilon = 1e-8;
-    const uint32_t code_max = (1U << num_bits_per_dim_base_) - 1U;
-    const double center = 0.5 * static_cast<double>(code_max);
-
-    double max_abs = 0.0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        max_abs = std::max(max_abs, std::fabs(static_cast<double>(o_prime[d])));
-    }
-
-    if (max_abs <= 0.0) {
-        std::fill_n(code, this->dim_, static_cast<uint8_t>(code_max / 2U));
-        y_norm = 1.0F;
-        return;
-    }
-
-    const double delta = 2.0 * max_abs / static_cast<double>(code_max + 1U);
-    const double inv_delta = 1.0 / delta;
-    double ip = 0.0;
-    double norm_sqr = 0.0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        const double scaled = (static_cast<double>(o_prime[d]) + max_abs) * inv_delta;
-        auto quantized = static_cast<int64_t>(std::floor(scaled));
-        quantized = std::clamp<int64_t>(quantized, 0, code_max);
-        code[d] = static_cast<uint8_t>(quantized);
-
-        const double centered = static_cast<double>(quantized) - center;
-        ip += static_cast<double>(o_prime[d]) * centered;
-        norm_sqr += centered * centered;
-    }
-
-    auto alignment_score = [](double inner_product, double squared_norm) {
-        return squared_norm > 0.0 ? inner_product * inner_product / squared_norm : 0.0;
-    };
-
-    for (uint64_t round = 0; round < fast_encode_rabitq_rounds_; ++round) {
-        bool adjusted = false;
-        for (uint64_t d = 0; d < this->dim_; ++d) {
-            const int32_t current_code = code[d];
-            const double current_value = static_cast<double>(current_code) - center;
-            int32_t best_code = current_code;
-            double best_ip = ip;
-            double best_norm_sqr = norm_sqr;
-            double best_score = alignment_score(ip, norm_sqr);
-
-            for (int32_t direction = -1; direction <= 1; direction += 2) {
-                const int32_t candidate_code = current_code + direction;
-                if (candidate_code < 0 or candidate_code > static_cast<int32_t>(code_max)) {
-                    continue;
-                }
-
-                const double candidate_ip =
-                    ip + static_cast<double>(direction) * static_cast<double>(o_prime[d]);
-                if (candidate_ip < 0.0) {
-                    continue;
-                }
-                const double candidate_norm_sqr =
-                    norm_sqr + 2.0 * current_value * static_cast<double>(direction) + 1.0;
-                const double candidate_score = alignment_score(candidate_ip, candidate_norm_sqr);
-                const double tolerance = adjustment_epsilon * std::max(1.0, std::fabs(best_score));
-                if (candidate_score > best_score + tolerance) {
-                    best_code = candidate_code;
-                    best_ip = candidate_ip;
-                    best_norm_sqr = candidate_norm_sqr;
-                    best_score = candidate_score;
-                }
-            }
-
-            if (best_code != current_code) {
-                code[d] = static_cast<uint8_t>(best_code);
-                ip = best_ip;
-                norm_sqr = best_norm_sqr;
-                adjusted = true;
-            }
-        }
-
-        if (not adjusted) {
-            break;
-        }
-    }
-
-    norm_sqr = 0.0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        const double centered = static_cast<double>(code[d]) - center;
-        norm_sqr += centered * centered;
-    }
-
-    y_norm = static_cast<float>(std::sqrt(norm_sqr));
-    if (not std::isfinite(y_norm) or y_norm <= 0.0F) {
-        y_norm = 1.0F;
-    }
+    y_norm = CodeAdjustmentQuantize(
+        o_prime, this->dim_, num_bits_per_dim_base_, code, fast_encode_rabitq_rounds_);
 }
 
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) const {
-    return EncodeOneInternal(data, codes, nullptr, nullptr);
+    return encode_one_internal(data, codes, nullptr, nullptr);
 }
 
 template <MetricType metric>
@@ -827,15 +738,20 @@ RaBitQuantizer<metric>::EncodeOneToScalarCode(const float* data,
     if (not SupportScalarCodeBuild()) {
         return false;
     }
-    return EncodeOneInternal(data, nullptr, scalar_code, &code_sum);
+    return encode_one_internal(data, nullptr, scalar_code, &code_sum);
 }
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::EncodeOneInternal(const float* data,
-                                          uint8_t* codes,
-                                          uint8_t* build_scalar_code,
-                                          uint64_t* code_sum) const {
+RaBitQuantizer<metric>::encode_one_internal(const float* data,
+                                            uint8_t* codes,
+                                            uint8_t* build_scalar_code,
+                                            uint64_t* code_sum) const {
+    // Multi-bit scalar encoding may omit the packed output, but one-bit encoding cannot.
+    if (data == nullptr or (codes == nullptr and build_scalar_code == nullptr) or
+        (num_bits_per_dim_base_ == 1 and codes == nullptr)) {
+        return false;
+    }
     Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
     Vector<float> transformed_data(this->dim_, 0, this->allocator_);
     Vector<float> normed_data(this->dim_, 0, this->allocator_);
@@ -919,7 +835,7 @@ RaBitQuantizer<metric>::EncodeOneInternal(const float* data,
 
         if (SupportSplitCodeStorage()) {
             const norm_type filter_norm_code =
-                ComputeScalarCodeNorm(scalar_code, FilterBits(), ReorderBits());
+                compute_scalar_code_norm(scalar_code, FilterBits(), ReorderBits());
             error_type filter_error =
                 ip_obar_q(filter_ip, query_sum, filter_norm_code, FilterBits());
             filter_error = std::fabs(filter_error);
@@ -969,9 +885,14 @@ RaBitQuantizer<metric>::EncodeOneInternal(const float* data,
 template <MetricType metric>
 bool
 RaBitQuantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t count) {
+    if (count != 0 and (data == nullptr or codes == nullptr)) {
+        return false;
+    }
     for (uint64_t i = 0; i < count; ++i) {
         // TODO(ZXY): use batch optimize
-        this->EncodeOneImpl(data + i * this->original_dim_, codes + i * this->code_size_);
+        if (not this->EncodeOneImpl(data + i * this->original_dim_, codes + i * this->code_size_)) {
+            return false;
+        }
     }
     return true;
 }
@@ -1051,13 +972,13 @@ recover_dist_between_sq4u_and_fp32(uint32_t ip_bq_1_4,
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::AlignCodeField(uint64_t size) const {
-    uint64_t align_size = std::max(std::max(sizeof(error_type), sizeof(norm_type)), sizeof(float));
+    uint64_t align_size = std::max({sizeof(error_type), sizeof(norm_type), sizeof(float)});
     return ((size + align_size - 1) / align_size) * align_size;
 }
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::RefreshSplitLayout(bool is_split) {
+RaBitQuantizer<metric>::refresh_split_layout(bool is_split) {
     SplitLayout layout;
     layout.is_split = is_split;
     layout.filter_bits = layout.is_split ? num_bits_per_dim_filter_ : 1;
@@ -1196,7 +1117,7 @@ RaBitQuantizer<metric>::PackScalarCodeToSplitCode(const uint8_t* scalar_code,
         one_bit_code + OneBitRecordNormOffset(), scalar_metadata(offset_norm_), sizeof(norm_type));
     if (HasMultiBitFilter()) {
         const norm_type filter_norm_code =
-            ComputeScalarCodeNorm(scalar_code, FilterBits(), ReorderBits());
+            compute_scalar_code_norm(scalar_code, FilterBits(), ReorderBits());
         memcpy(one_bit_code + OneBitRecordNormCodeOffset(),
                &filter_norm_code,
                sizeof(filter_norm_code));
@@ -1226,7 +1147,7 @@ RaBitQuantizer<metric>::PackScalarCodeToSplitCode(const uint8_t* scalar_code,
 
 template <MetricType metric>
 uint64_t
-RaBitQuantizer<metric>::UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const {
+RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar_code) const {
     memset(scalar_code, 0, GetScalarCodeSize());
     const uint64_t plane_bytes = PlaneBytes();
     const auto* planes = codes + offset_code_;
@@ -1368,7 +1289,7 @@ RaBitQuantizer<metric>::SplitCode(const uint8_t* full_code,
     memcpy(one_bit_code, full_code + offset_code_, filter_planes_size);
     memcpy(one_bit_code + OneBitRecordNormOffset(), full_code + offset_norm_, sizeof(norm_type));
     if (HasMultiBitFilter()) {
-        const norm_type filter_norm_code = ComputeFilterCodeNorm(one_bit_code, FilterBits());
+        const norm_type filter_norm_code = compute_filter_code_norm(one_bit_code, FilterBits());
         memcpy(one_bit_code + OneBitRecordNormCodeOffset(), &filter_norm_code, sizeof(norm_type));
     }
     if (pca_dim_ != original_dim_ && use_mrq_) {
@@ -1436,12 +1357,12 @@ RaBitQuantizer<metric>::GetFastScan32HighAccLookupSize() const {
 template <MetricType metric>
 uint64_t
 RaBitQuantizer<metric>::GetFastScan32BlockSize() const {
-    return GetFastScan32Layout().BlockSize();
+    return get_fast_scan32_layout().BlockSize();
 }
 
 template <MetricType metric>
 typename RaBitQuantizer<metric>::FastScan32Layout
-RaBitQuantizer<metric>::GetFastScan32Layout() const {
+RaBitQuantizer<metric>::get_fast_scan32_layout() const {
     return FastScan32Layout{FilterPlanesSize() * FASTSCAN_BATCH_SIZE,
                             OneBitRecordNormOffset(),
                             GetOneBitCodeSize() - OneBitRecordNormOffset()};
@@ -1449,10 +1370,10 @@ RaBitQuantizer<metric>::GetFastScan32Layout() const {
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::ComputeFastScan32ResidualFactors(const uint8_t* one_bit_code,
-                                                         const float* transformed_centroid,
-                                                         float& f_add,
-                                                         float& f_scale) const {
+RaBitQuantizer<metric>::compute_fast_scan32_residual_factors(const uint8_t* one_bit_code,
+                                                             const float* transformed_centroid,
+                                                             float& f_add,
+                                                             float& f_scale) const {
     float base_norm = 0.0F;
     float filter_error = 0.0F;
     memcpy(&base_norm, one_bit_code + OneBitRecordNormOffset(), sizeof(base_norm));
@@ -1511,7 +1432,7 @@ RaBitQuantizer<metric>::PackageFastScan32(const uint8_t* one_bit_codes,
                                                      26, 3,  19, 11, 27, 4,  20, 12, 28, 5,  21,
                                                      13, 29, 6,  22, 14, 30, 7,  23, 15, 31};
     const uint64_t group_count = FilterPlanesSize() * 2;
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     memset(block, 0, GetFastScan32BlockSize());
 
     for (uint64_t group = 0; group < group_count; ++group) {
@@ -1550,11 +1471,11 @@ RaBitQuantizer<metric>::PackageFastScan32Residual(const uint8_t* one_bit_codes,
                                                   uint8_t* block) const {
     CHECK_ARGUMENT(transformed_centroid != nullptr, "residual centroid is required");
     this->PackageFastScan32(one_bit_codes, valid_size, block);
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     for (uint64_t i = 0; i < valid_size; ++i) {
         float f_add = 0.0F;
         float f_scale = 0.0F;
-        this->ComputeFastScan32ResidualFactors(
+        this->compute_fast_scan32_residual_factors(
             one_bit_codes + i * GetOneBitCodeSize(), transformed_centroid, f_add, f_scale);
         memcpy(block + layout.ResidualAddOffset() + i * sizeof(float), &f_add, sizeof(f_add));
         memcpy(block + layout.ResidualScaleOffset() + i * sizeof(float), &f_scale, sizeof(f_scale));
@@ -1581,7 +1502,7 @@ RaBitQuantizer<metric>::SetFastScan32Code(const uint8_t* one_bit_code,
         packed_byte = static_cast<uint8_t>((packed_byte & ~(0x0FU << shift)) | (nibble << shift));
     }
 
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     for (uint64_t field_offset = 0; field_offset < layout.metadata_record_size;
          field_offset += sizeof(float)) {
         memcpy(block + layout.MetadataFieldOffset(layout.metadata_record_offset + field_offset) +
@@ -1601,8 +1522,8 @@ RaBitQuantizer<metric>::SetFastScan32ResidualCode(const uint8_t* one_bit_code,
     this->SetFastScan32Code(one_bit_code, index_in_block, block);
     float f_add = 0.0F;
     float f_scale = 0.0F;
-    this->ComputeFastScan32ResidualFactors(one_bit_code, transformed_centroid, f_add, f_scale);
-    const auto layout = GetFastScan32Layout();
+    this->compute_fast_scan32_residual_factors(one_bit_code, transformed_centroid, f_add, f_scale);
+    const auto layout = get_fast_scan32_layout();
     memcpy(
         block + layout.ResidualAddOffset() + index_in_block * sizeof(float), &f_add, sizeof(f_add));
     memcpy(block + layout.ResidualScaleOffset() + index_in_block * sizeof(float),
@@ -1630,7 +1551,7 @@ RaBitQuantizer<metric>::UnpackFastScan32Code(const uint8_t* block,
         one_bit_code[group >> 1] |= static_cast<uint8_t>(nibble << ((group & 1U) * 4U));
     }
 
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     for (uint64_t field_offset = 0; field_offset < layout.metadata_record_size;
          field_offset += sizeof(float)) {
         memcpy(one_bit_code + layout.metadata_record_offset + field_offset,
@@ -1720,16 +1641,17 @@ RaBitQuantizer<metric>::PrepareFastScan32HighAccQuery(Computer<RaBitQuantizer>& 
 
 template <MetricType metric>
 void
-RaBitQuantizer<metric>::ComputeDistsWithFastScan32LookupSums(Computer<RaBitQuantizer>& computer,
-                                                             const uint8_t* block,
-                                                             const float* lookup_sums,
-                                                             float query_sum,
-                                                             float* dists,
-                                                             bool* computed,
-                                                             uint64_t valid_size,
-                                                             float runtime_rabitq_error_rate,
-                                                             float* lower_bounds,
-                                                             float* filter_inner_products) const {
+RaBitQuantizer<metric>::compute_dists_with_fast_scan32_lookup_sums(
+    Computer<RaBitQuantizer>& computer,
+    const uint8_t* block,
+    const float* lookup_sums,
+    float query_sum,
+    float* dists,
+    bool* computed,
+    uint64_t valid_size,
+    float runtime_rabitq_error_rate,
+    float* lower_bounds,
+    float* filter_inner_products) const {
     const auto* query = computer.buf_;
     const norm_type query_norm = *((norm_type*)(query + query_offset_norm_));
     norm_type query_raw_norm = 0.0F;
@@ -1741,7 +1663,7 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32LookupSums(Computer<RaBitQuant
                                              ? *(norm_type*)(query + query_offset_mrq_norm_)
                                              : 0.0F;
 
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     for (uint64_t i = 0; i < valid_size; ++i) {
         computed[i] = false;
         dists[i] = std::numeric_limits<float>::max();
@@ -1859,7 +1781,7 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32HighAccBatch(Computer<RaBitQua
     const uint64_t packed_size_per_plane = PlaneBytes() * FASTSCAN_BATCH_SIZE;
     const uint8_t* low_lookup_table = lookup_table;
     const uint8_t* high_lookup_table = lookup_table + GetFastScan32LookupSize();
-    const uint64_t block_size = GetFastScan32Layout().BlockSize();
+    const uint64_t block_size = get_fast_scan32_layout().BlockSize();
     const uint64_t block_count = (total_size + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
     for (uint64_t block_index = 0; block_index < block_count; ++block_index) {
         const uint64_t begin = block_index * FASTSCAN_BATCH_SIZE;
@@ -1888,7 +1810,7 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32HighAccBatch(Computer<RaBitQua
         }
 
         bool computed[FASTSCAN_BATCH_SIZE] = {};
-        this->ComputeDistsWithFastScan32LookupSums(
+        this->compute_dists_with_fast_scan32_lookup_sums(
             computer,
             block,
             lookup_sums,
@@ -1933,7 +1855,7 @@ RaBitQuantizer<metric>::ComputeDistsWithFastScan32SharedResidualHighAccBatch(
     const uint64_t low_lookup_size = GetFastScan32LookupSize();
     const uint8_t* low_lookup_table = lookup_table;
     const uint8_t* high_lookup_table = lookup_table + low_lookup_size;
-    const auto layout = GetFastScan32Layout();
+    const auto layout = get_fast_scan32_layout();
     const uint64_t block_size = layout.BlockSize();
     const uint64_t block_count = (total_size + FASTSCAN_BATCH_SIZE - 1) / FASTSCAN_BATCH_SIZE;
     float query_norm = 0.0F;
@@ -2011,7 +1933,7 @@ RaBitQuantizer<metric>::RecoverFastScan32OriginalQueryFilterInnerProduct(
     if (FilterBits() == 1) {
         result = 0.5F * (shared_filter_inner_product / inv_sqrt_d_ + query_sum);
     } else {
-        const auto layout = GetFastScan32Layout();
+        const auto layout = get_fast_scan32_layout();
         float filter_norm_code = 0.0F;
         memcpy(&filter_norm_code,
                block + layout.MetadataFieldOffset(OneBitRecordNormCodeOffset()) +
@@ -2773,13 +2695,13 @@ RaBitQuantizer<metric>::ComputeDistWithSplitCodeAndFilterInnerProduct(
 
     const float supplement_inner_product = RaBitQFloatSupplementCodeIP(
         reinterpret_cast<const float*>(computer.buf_), supplement_code, this->dim_, ReorderBits());
-    return this->FinalizeSplitCodeDistanceWithFilterInnerProduct(
+    return this->finalize_split_code_distance_with_filter_inner_product(
         computer, supplement_code, filter_inner_product, supplement_inner_product, dists);
 }
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::FinalizeSplitCodeDistanceWithFilterInnerProduct(
+RaBitQuantizer<metric>::finalize_split_code_distance_with_filter_inner_product(
     Computer<RaBitQuantizer>& computer,
     const uint8_t* supplement_code,
     float filter_inner_product,
@@ -3235,8 +3157,8 @@ RaBitQuantizer<metric>::ComputeImpl(const uint8_t* codes1, const uint8_t* codes2
     Vector<uint8_t> scalar_code2(this->allocator_);
     scalar_code1.resize(GetScalarCodeSize());
     scalar_code2.resize(GetScalarCodeSize());
-    const uint64_t code_sum1 = UnpackScalarCode(codes1, scalar_code1.data());
-    const uint64_t code_sum2 = UnpackScalarCode(codes2, scalar_code2.data());
+    const uint64_t code_sum1 = unpack_scalar_code(codes1, scalar_code1.data());
+    const uint64_t code_sum2 = unpack_scalar_code(codes2, scalar_code2.data());
     return ComputeScalarCodesDistance(
         scalar_code1.data(), code_sum1, scalar_code2.data(), code_sum2);
 }
@@ -4269,7 +4191,7 @@ RaBitQuantizer<metric>::ComputeFusedPairL2Difference(const uint8_t* one_bit_code
 
 template <MetricType metric>
 bool
-RaBitQuantizer<metric>::ComputeFusedExactCenteredFilterIP(
+RaBitQuantizer<metric>::compute_fused_exact_centered_filter_ip(
     const float* transformed_query,
     const uint8_t* one_bit_code,
     float* centered_filter_inner_product) const {
@@ -4351,7 +4273,8 @@ RaBitQuantizer<metric>::ComputeFusedAffineFilter(const float* transformed_query,
             query_delta * static_cast<float>(raw_ip) + query_vl * static_cast<float>(base_sum);
         filter_ip = uncentered_filter_ip - 0.5F * query_sum;
         filter_precision = RaBitQFusedIPPrecision::APPROXIMATE;
-    } else if (not ComputeFusedExactCenteredFilterIP(transformed_query, one_bit_code, &filter_ip)) {
+    } else if (not compute_fused_exact_centered_filter_ip(
+                   transformed_query, one_bit_code, &filter_ip)) {
         return false;
     }
 
@@ -4447,7 +4370,8 @@ RaBitQuantizer<metric>::ComputeFusedAffineFullDirect(const float* transformed_qu
                                                      const uint8_t* supplement_code,
                                                      float* distance) const {
     float exact_filter_ip = 0.0F;
-    if (not ComputeFusedExactCenteredFilterIP(transformed_query, one_bit_code, &exact_filter_ip)) {
+    if (not compute_fused_exact_centered_filter_ip(
+            transformed_query, one_bit_code, &exact_filter_ip)) {
         return false;
     }
     return ComputeFusedAffineFullWithFilterIP(transformed_query,
@@ -4575,10 +4499,10 @@ RaBitQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
     if (pca_dim_ != this->original_dim_) {
         this->pca_->Deserialize(reader);
     }
-    RefreshSplitLayout(RaBitQuantizerParameter::IsSplitVersion(rabitq_version_) &&
-                       num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1 &&
-                       num_bits_per_dim_filter_ >= 1 &&
-                       num_bits_per_dim_filter_ <= num_bits_per_dim_base_);
+    refresh_split_layout(RaBitQuantizerParameter::IsSplitVersion(rabitq_version_) &&
+                         num_bits_per_dim_query_ == 32 && num_bits_per_dim_base_ >= 1 &&
+                         num_bits_per_dim_filter_ >= 1 &&
+                         num_bits_per_dim_filter_ <= num_bits_per_dim_base_);
 }
 
 TEMPLATE_QUANTIZER(RaBitQuantizer)

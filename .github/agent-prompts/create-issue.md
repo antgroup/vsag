@@ -182,7 +182,7 @@ the `path:line` in `src/`.
 
 ### Example 4 — build error question
 
-User intent: "make release fails on macOS 13 with clang-format-15 not found".
+User intent: "make release fails on macOS 13 with clang-format-20 not found".
 
 Confirm the user actually wants `question` (not `bug`). Then use
 `question.yml`. Encourage Discussions if the answer is likely already

@@ -31,7 +31,7 @@ public:
     }
 
 public:
-    explicit SafeAllocator(Allocator* raw_allocator) : SafeAllocator(raw_allocator, false){};
+    explicit SafeAllocator(Allocator* raw_allocator) : SafeAllocator(raw_allocator, false) {};
 
     explicit SafeAllocator(Allocator* raw_allocator, bool owned)
         : raw_allocator_(raw_allocator), owned_(owned) {

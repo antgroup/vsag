@@ -58,7 +58,8 @@ public:
     FlattenCodesLease&
     operator=(FlattenCodesLease&& other) noexcept;
 
-    [[nodiscard]] explicit operator bool() const {
+    [[nodiscard]] explicit
+    operator bool() const {
         return data_ != nullptr;
     }
 

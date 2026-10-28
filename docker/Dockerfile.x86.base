@@ -14,15 +14,25 @@
 #     `update-ci-image` runs, smaller registry footprint after dedup);
 #   * make it trivial to add a third backend (e.g. AOCL/ARMPL) later.
 
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
-# update and install basic deps
-RUN apt update && apt install -y wget gpg sudo
-
-# install build tools
-RUN apt install -y git g++ cmake ninja-build gdb ccache build-essential lcov gfortran
-RUN apt install -y clang-15 clangd-15 clang-format-15 clang-tidy-15 python3-pip time
-RUN ln -s /usr/bin/clang-format-15 /usr/bin/clang-format
+# Use the same GCC 13 / LLVM 20 setup as hosted CI and local Ubuntu builds.
+COPY scripts/deps/install_toolchain_ubuntu.sh /tmp/install-toolchain.sh
+ENV CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 FC=/usr/bin/gfortran-13
+# Keep GCC 11's ASan runtime and the pre-t64 libaio name for main's Ubuntu 22.04 artifacts.
+# Install and clean together so package lists are absent from the toolchain layer.
+RUN DEBIAN_FRONTEND=noninteractive bash /tmp/install-toolchain.sh \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y wget sudo git cmake ninja-build gdb ccache build-essential \
+        lcov python3-pip python3-venv time python3-dev libomp-20-dev libaio-dev \
+        libcurl4-openssl-dev liburing-dev libasan6 \
+    && test "$("$CC" -dumpversion | cut -d. -f1)" = 13 \
+    && test "$("$CXX" -dumpversion | cut -d. -f1)" = 13 \
+    && test -e /usr/lib/x86_64-linux-gnu/libasan.so.6 \
+    && test -e /usr/lib/x86_64-linux-gnu/libaio.so.1t64 \
+    && ln -s libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 \
+    && test -e /usr/lib/x86_64-linux-gnu/libaio.so.1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/install-toolchain.sh
 
 # Pin the x86 GitHub CLI used by compatibility checks; no credentials enter the image.
 RUN set -eu; \
@@ -38,6 +48,3 @@ RUN set -eu; \
     test "$(gh --version | head -1 | awk '{print $3}')" = "$gh_version"; \
     cd /; \
     rm -rf "$download_dir"
-
-# install vsag deps (everything except a BLAS backend)
-RUN apt install -y python3-dev libomp-15-dev libaio-dev libcurl4-openssl-dev liburing-dev

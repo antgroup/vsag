@@ -261,9 +261,8 @@ class ComparisonTest(unittest.TestCase):
             self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
 
     def test_workflow_triggers_for_build_inputs_but_not_unrelated_paths(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
-        path_block = workflow.split("    paths:\n", 1)[1].split("\npermissions:", 1)[0]
-        patterns = re.findall(r"^      - '([^']+)'$", path_block, re.MULTILINE)
+        workflow = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        patterns = json.loads((ROOT / "scripts/ci/checks_paths.json").read_text())["simd"]
 
         def triggers(path):
             # The workflow uses literal paths, ** and **/ only. The latter
@@ -287,9 +286,11 @@ class ComparisonTest(unittest.TestCase):
             "tests/fixtures/framework/CMakeLists.txt",
             "extern/catch2/catch2.cmake", "extern/antlr4/antlr4.cmake",
             ".github/actions/prepare-fetchcontent/action.yml",
-            ".github/workflows/pr-simd-coverage.yml",
+            ".github/workflows/pr-ci.yml",
+            ".github/workflows/pr-ci-community.yml",
             "scripts/coverage/verify_cpp_coverage.py",
             "tests/scripts/simd_coverage_test.py",
+            "tests/scripts/pr_simd_merge_base_test.py",
         ):
             with self.subTest(path=path):
                 self.assertTrue(triggers(path))
@@ -303,18 +304,115 @@ class ComparisonTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(triggers(path))
 
-    def test_workflow_has_no_privileged_pr_or_cache_upload_path(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
+    def assert_simd_workflow_unprivileged(self, source):
+        # Keep the actual trigger/permissions header; only unrelated jobs are
+        # excluded because Community legitimately caches other build products.
+        header = source.split("\njobs:", 1)[0]
+        job = re.search(r"(?ms)^  simd-coverage:\n.*?(?=^  [\w-]+:\n|\Z)", source)
+        self.assertIsNotNone(job)
+        workflow = header + "\n" + job.group()
+        self.assertNotRegex(workflow, r"(?m)^\s*(?:contents|id-token):\s*write\b")
+        self.assertNotRegex(workflow, r"(?m)^\s*permissions:\s*write-all\b")
         for forbidden in ("pull_request_target", "workflow_run", "secrets.", "actions/cache",
                           "ccache-action", "codecov-action", "id-token: write"):
             self.assertNotIn(forbidden, workflow)
         for required in ("contents: read", "persist-credentials: false", "timeout-minutes: 90",
-                         "github.event.pull_request.base.sha", "github.sha"):
+                         "github.event.pull_request.head.sha", "github.sha",
+                         'rev-parse --verify "${HEAD_SHA}^1"',
+                         'rev-parse --verify "${HEAD_SHA}^2"',
+                         'git -c safe.directory="$(pwd -P)"'):
             self.assertIn(required, workflow)
+    def test_workflow_has_no_privileged_pr_or_cache_upload_path(self):
+        workflow = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        self.assert_simd_workflow_unprivileged(workflow)
         runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
         self.assertIn("COMPILE_JOBS=4", runner)
         self.assertIn("timeout 15m", runner)
         self.assertNotIn("--allow-running-no-tests", runner)
+
+    def test_module_build_preserves_coverage_configuration(self):
+        args = ["make", "-n", "COMPILE_JOBS=4", "CMAKE_GENERATOR=Ninja"]
+        full = subprocess.check_output(args + ["cov"], cwd=ROOT, text=True).splitlines()
+        scoped = subprocess.check_output(
+            args + ["-f", "Makefile", "-f", "scripts/coverage/simd_coverage.mk", "cov-simd"],
+            cwd=ROOT, text=True).splitlines()
+        self.assertEqual(full[0], scoped[0].split(" -DCMAKE_PROJECT_VSAG_INCLUDE=", 1)[0])
+        self.assertIn("simd_coverage.cmake", scoped[0])
+        self.assertEqual(len(scoped), 2)
+        self.assertIn("--target unittests_simd --parallel 4", scoped[1])
+        self.assertNotIn("--target", full[1])
+        runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
+        self.assertIn("timeout 15m ./build/tests/unittests_simd '[simd]~[!benchmark]' --rng-seed 424242 --order lex", runner)
+        self.assertIn('export CCACHE_DISABLE=1', runner)
+
+    def test_simd_tags_outside_module_remain_in_coverage_target(self):
+        outside = set()
+        for directory in (ROOT / "src", ROOT / "tests"):
+            for source in directory.rglob("*.cpp"):
+                relative = source.relative_to(ROOT).as_posix()
+                if "[simd]" in source.read_text() and not relative.startswith("src/simd/"):
+                    outside.add(relative)
+        self.assertEqual(outside, {
+            "src/quantization/scalar_quantization/local_scalar_quantizer_test.cpp"})
+        overlay = (ROOT / "scripts/coverage/simd_coverage.cmake").read_text()
+        for relative in outside:
+            self.assertIn(relative, overlay)
+        self.assertIn('add_library (vsag_simd_coverage_reference OBJECT "${local_sq_tests}")', overlay)
+        self.assertIn('target_link_libraries (vsag_simd_coverage_reference PRIVATE unittest_deps)', overlay)
+
+    def test_cmake_overlay_completes_only_the_scoped_target(self):
+        overlay = ROOT / "scripts/coverage/simd_coverage.cmake"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.cpp").write_text("int main() { return 0; }\n")
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.19)\nproject(VSAG LANGUAGES CXX)\n"
+                "add_executable(unittests_simd main.cpp)\n"
+                "add_executable(unittests main.cpp)\n"
+                "add_library(unittest_deps INTERFACE)\n"
+                "add_library(coverage_config INTERFACE)\n"
+                "target_compile_options(coverage_config INTERFACE --coverage)\n"
+                "target_link_libraries(unittests_simd PRIVATE coverage_config)\n"
+                'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/scoped.txt" '
+                'CONTENT "$<TARGET_PROPERTY:unittests_simd,SOURCES>")\n'
+                'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/full.txt" '
+                'CONTENT "$<TARGET_PROPERTY:unittests,SOURCES>")\n')
+            local_sq = root / "src/quantization/scalar_quantization/local_scalar_quantizer_test.cpp"
+            for has_local_sq in (False, True):
+                if has_local_sq:
+                    local_sq.parent.mkdir(parents=True)
+                    local_sq.write_text("// fixture\n")
+                build = root / str(has_local_sq)
+                result = subprocess.run(
+                    ["cmake", "-S", str(root), "-B", str(build),
+                     "-DCMAKE_PROJECT_VSAG_INCLUDE=" + str(overlay),
+                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
+                    text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                sources = (build / "scoped.txt").read_text().split(";")
+                self.assertIn(str(ROOT / "scripts/coverage/simd_coverage_init.cpp"), sources)
+                self.assertEqual(any("local_scalar_quantizer_test.cpp.o" in source for source in sources), has_local_sq)
+                self.assertEqual((build / "full.txt").read_text(), "main.cpp")
+                commands = json.loads((build / "compile_commands.json").read_text())
+                if has_local_sq:
+                    reference = [row for row in commands if row["file"] == str(local_sq)]
+                    self.assertEqual(len(reference), 1)
+                    self.assertNotIn("--coverage", reference[0]["command"])
+
+    def test_security_guard_rejects_real_permission_mutations(self):
+        source = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        mutations = [
+            source.replace("  contents: read", "  contents: write", 1),
+            source.replace("permissions:\n", "permissions:\n  id-token: write\n", 1),
+            source.replace("permissions:\n  contents: read\n  pull-requests: read", "permissions: write-all", 1),
+            source.replace("  simd-coverage:\n", "  simd-coverage:\n    permissions:\n      contents: write\n", 1),
+            source.replace("  simd-coverage:\n", "  simd-coverage:\n    permissions:\n      id-token: write\n", 1),
+        ]
+        for index, mutated in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.assertNotEqual(mutated, source)
+                with self.assertRaises(AssertionError):
+                    self.assert_simd_workflow_unprivileged(mutated)
 
     def test_runner_compares_distinct_revisions_with_container_ownership(self):
         # Exercise real Git/worktrees, metadata, instrumentation verification and
@@ -330,23 +428,30 @@ class ComparisonTest(unittest.TestCase):
             scripts = root / "scripts/coverage"
             scripts.mkdir(parents=True)
             for name in ("run_simd_coverage.sh", "compare_simd_coverage.py",
-                         "verify_cpp_coverage.py"):
+                         "verify_cpp_coverage.py", "simd_coverage.mk", "simd_coverage.cmake", "simd_coverage_init.cpp"):
                 shutil.copyfile(ROOT / "scripts/coverage" / name, scripts / name)
             source = root / SOURCE
             source.parent.mkdir(parents=True)
             source.write_text("before\n")
-            (root / "Makefile").write_text("cov:\n\tpython3 fixture.py\n")
+            (root / "Makefile").write_text("DEBUG_BUILD_DIR=./build/\ncov:\n\tpython3 fixture.py\n")
             (root / "fixture.py").write_text(
                 "import json\nfrom pathlib import Path\n"
                 "root = Path.cwd()\n"
                 "assert not (root / 'build').exists()\n"
                 "(root / 'build/tests').mkdir(parents=True)\n"
-                "binary = root / 'build/tests/unittests'\n"
+                "binary = root / 'build/tests/unittests_simd'\n"
                 "binary.write_text('#!/bin/sh\\ngit rev-parse --verify HEAD\\n')\n"
                 "binary.chmod(0o755)\n"
                 "(root / 'build/compile_commands.json').write_text(json.dumps([\n"
                 f"    {{'file': '{SOURCE}', 'directory': str(root),\n"
                 "     'arguments': ['c++', '--coverage']}] ))\n")
+            tools = root / "fixture-bin"
+            tools.mkdir()
+            cmake = tools / "cmake"
+            cmake.write_text("#!/bin/sh\ncase \"$*\" in\n"
+                             "  *--build*) [ \"$*\" = \"--build ./build/ --target unittests_simd --parallel 4\" ] || exit 91; python3 fixture.py ;;\n"
+                             "esac\n")
+            cmake.chmod(0o755)
             (scripts / "collect_cpp_coverage.sh").write_text(
                 "mkdir coverage\n"
                 f"printf 'SF:{SOURCE}\\nDA:1,1\\nend_of_record\\n' > coverage/coverage.info\n")
@@ -357,7 +462,8 @@ class ComparisonTest(unittest.TestCase):
             git("add", ".")
             git("commit", "-qm", "head")
             head = git("rev-parse", "HEAD")
-            env = dict(os.environ, GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
+            env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                       GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
                        GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory",
                        GIT_CONFIG_VALUE_0="")
             untrusted = subprocess.run(["git", "diff", "--quiet", base, head, "--", "extern"],

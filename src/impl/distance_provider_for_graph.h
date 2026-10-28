@@ -20,6 +20,7 @@
 
 #include "basic_types.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/flatten_pairwise_distance_interface.h"
 #include "quantization/computer.h"
 #include "query_context.h"
 #include "vsag_exception.h"
@@ -68,16 +69,14 @@ public:
     }
 
     [[nodiscard]] virtual bool
-    IsValid(InnerIdType) const {
+    IsValid(InnerIdType /*id*/) const {
         return true;
     }
 };
 
 class FlattenDistanceProvider final : public DistanceProviderForGraph {
 public:
-    FlattenDistanceProvider(FlattenInterfacePtr flatten, ComputerInterfacePtr computer)
-        : flatten_(std::move(flatten)), computer_(std::move(computer)) {
-    }
+    FlattenDistanceProvider(FlattenInterfacePtr flatten, ComputerInterfacePtr computer);
 
     [[nodiscard]] float
     QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override {
@@ -95,12 +94,12 @@ public:
     }
 
     [[nodiscard]] float
-    PairwiseDistance(InnerIdType id1, InnerIdType id2, const ComputerInterfacePtr&) const override {
-        return flatten_->ComputePairVectors(id1, id2);
-    }
+    PairwiseDistance(InnerIdType id1,
+                     InnerIdType id2,
+                     const ComputerInterfacePtr& /*computer*/) const override;
 
     [[nodiscard]] ComputerInterfacePtr
-    FactoryComputerById(InnerIdType) const override {
+    FactoryComputerById(InnerIdType /*id*/) const override {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "FlattenDistanceProvider cannot create a computer by vector ID");
     }
@@ -113,13 +112,13 @@ public:
 private:
     FlattenInterfacePtr flatten_;
     ComputerInterfacePtr computer_;
+    mutable std::unique_ptr<FlattenPairwiseDistanceComputer> pairwise_computer_;
+    mutable bool pairwise_initialized_{false};
 };
 
 class FlattenIdDistanceProvider final : public DistanceProviderForGraph {
 public:
-    FlattenIdDistanceProvider(FlattenInterfacePtr flatten, InnerIdType query_id)
-        : flatten_(std::move(flatten)), query_id_(query_id) {
-    }
+    FlattenIdDistanceProvider(FlattenInterfacePtr flatten, InnerIdType query_id);
 
     [[nodiscard]] float
     QueryDistance(InnerIdType id, QueryContext* ctx = nullptr) const override;
@@ -144,6 +143,7 @@ public:
 private:
     FlattenInterfacePtr flatten_;
     InnerIdType query_id_;
+    std::unique_ptr<FlattenPairwiseDistanceComputer> pairwise_computer_;
 };
 
 class BucketDistanceProvider final : public DistanceProviderForGraph {

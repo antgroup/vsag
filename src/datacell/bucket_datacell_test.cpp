@@ -41,6 +41,33 @@ using namespace vsag;
 
 namespace {
 
+class BoundedBucketAllocator : public DefaultAllocator {
+public:
+    void*
+    Allocate(uint64_t size) override {
+        check_size(size);
+        return DefaultAllocator::Allocate(size);
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t size) override {
+        check_size(size);
+        return DefaultAllocator::Reallocate(pointer, size);
+    }
+
+    uint64_t limit{std::numeric_limits<uint64_t>::max()};
+    uint64_t rejected{0};
+
+private:
+    void
+    check_size(uint64_t size) {
+        if (size > limit) {
+            ++rejected;
+            throw std::bad_alloc();
+        }
+    }
+};
+
 class FixedCentroidPartitionStrategy : public IVFPartitionStrategy {
 public:
     FixedCentroidPartitionStrategy(const IndexCommonParam& common_param,
@@ -194,7 +221,7 @@ namespace vsag {
 class BucketInterfaceTest {
 public:
     BucketInterfaceTest(BucketInterfacePtr bucket, MetricType metric)
-        : bucket_(std::move(bucket)), metric_(metric){};
+        : bucket_(std::move(bucket)), metric_(metric) {};
 
     void
     BasicTest(int64_t dim, uint64_t base_count, float error = 1e-5f);
@@ -2288,6 +2315,62 @@ TEST_CASE("RaBitQ split bucket keeps only canonical packed filter codes",
             0.02F * std::max({1.0F, std::abs(merged_candidate), std::abs(merged_expected)}));
 }
 
+TEST_CASE("BucketDataCell supports SAQ", "[ut][BucketDataCell][SAQ]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 64;
+    constexpr uint64_t base_count = 24;
+    constexpr BucketIdType bucket_count = 3;
+    auto vectors = fixtures::generate_vectors(base_count, dim);
+    auto queries = fixtures::generate_vectors(1, dim, 2026);
+
+    constexpr const char* param_str = R"(
+        {
+            "io_params": {
+                "type": "memory_io"
+            },
+            "quantization_params": {
+                "type": "saq",
+                "saq_avg_bits": 4,
+                "saq_random_rotation": false
+            },
+            "buckets_count": 3
+        }
+        )";
+
+    MetricType metrics[3] = {
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_COSINE, MetricType::METRIC_TYPE_IP};
+    for (auto metric : metrics) {
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(JsonType::Parse(param_str));
+
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = metric;
+
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        REQUIRE(bucket != nullptr);
+        REQUIRE(bucket->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SAQ);
+        REQUIRE_THROWS_AS(bucket->Train(vectors.data(), 1), VsagException);
+        bucket->Train(vectors.data(), base_count);
+        for (uint64_t i = 0; i < base_count; ++i) {
+            const auto bucket_id = static_cast<BucketIdType>(i % bucket_count);
+            bucket->InsertVector(vectors.data() + i * dim, bucket_id, static_cast<InnerIdType>(i));
+        }
+
+        auto computer = bucket->FactoryComputer(queries.data());
+        for (BucketIdType bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+            const auto bucket_size = bucket->GetBucketSize(bucket_id);
+            std::vector<float> distances(bucket_size);
+            bucket->ScanBucketById(distances.data(), computer, bucket_id);
+            for (InnerIdType offset = 0; offset < bucket_size; ++offset) {
+                REQUIRE(std::isfinite(distances[offset]));
+                REQUIRE(std::isfinite(bucket->QueryOneById(computer, bucket_id, offset)));
+            }
+        }
+    }
+}
+
 TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 16;
@@ -2506,5 +2589,143 @@ TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {
         REQUIRE(dst->GetInnerIds(bucket_id)[0] == 10);
         REQUIRE(dst->GetInnerIds(bucket_id)[1] == 30);
         REQUIRE(dst->GetInnerIds(bucket_id)[2] == 25);
+    }
+}
+
+TEST_CASE("RaBitQ split bucket validates loaded code IDs before allocating locations",
+          "[ut][BucketDataCell][rabitq_split][inner_id_validation]") {
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType upper_id = 31;
+    constexpr InnerIdType empty_id = std::numeric_limits<InnerIdType>::max();
+    const bool use_residual = GENERATE(false, true);
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    auto vectors = fixtures::generate_vectors(64, dim, false, 3229);
+    auto make_bucket = [&]() {
+        auto json = JsonType::Parse(R"({
+            "io_params": {"type": "memory_io"},
+            "quantization_params": {
+                "type": "rabitq", "rabitq_version": "split",
+                "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 8,
+                "rabitq_bits_per_dim_filter": 2
+            },
+            "buckets_count": 2
+        })");
+        json["use_residual"].SetBool(use_residual);
+        auto param = std::make_shared<BucketDataCellParameter>();
+        param->FromJson(json);
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.dim_ = dim;
+        common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        bucket->SetStrategy(std::make_shared<FixedCentroidPartitionStrategy>(common_param, 2));
+        return bucket;
+    };
+    auto bucket = make_bucket();
+    bucket->Train(vectors.data(), 64);
+    // A sparse code range, offset holes, and relocation tombstones are all valid.
+    bucket->InsertVectorWithOffset(vectors.data(), 0, upper_id, 2);
+    bucket->InsertVector(vectors.data() + dim, 0, 0);
+    bucket->InsertVector(vectors.data() + dim, 1, 0);
+    REQUIRE(bucket->GetInnerIds(0)[0] == empty_id);
+    REQUIRE(bucket->GetInnerIds(0)[1] == empty_id);
+    REQUIRE(bucket->GetInnerIds(0)[2] == upper_id);
+    REQUIRE(bucket->GetInnerIds(0)[3] == empty_id);
+    auto computer = bucket->FactoryComputer(vectors.data());
+    const float expected = bucket->QueryOneById(computer, 0, 2);
+    REQUIRE(std::isfinite(expected));
+
+    std::string bytes;
+    uint64_t ids_cursor = 0;
+    uint64_t ids_size = 0;
+    // Locate the exact serialized vector through its source buffer, avoiding format offsets.
+    WriteFuncStreamWriter writer(
+        [&](uint64_t cursor, uint64_t size, void* data) {
+            if (data == bucket->GetInnerIds(0)) {
+                ids_cursor = cursor;
+                ids_size = size;
+            }
+            bytes.append(static_cast<const char*>(data), size);
+        },
+        0);
+    bucket->Serialize(writer);
+    REQUIRE(ids_cursor > 0);
+    REQUIRE(ids_size == 4 * sizeof(InnerIdType));
+    // Ample space for this tiny index, but never permit a huge locations allocation.
+    allocator->limit = 16ULL * 1024 * 1024;
+
+    auto load = [&](const BucketInterfacePtr& restored, const std::string& payload) {
+        std::stringstream stream(payload);
+        IOStreamReader reader(stream);
+        restored->Deserialize(reader);
+        restored->FinalizeLoad();
+    };
+    auto require_invalid_id = [&](auto&& action) {
+        try {
+            action();
+            FAIL("invalid code ID was accepted");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(error.what()) == "invalid inner id for RaBitQ split bucket");
+        }
+        REQUIRE(allocator->rejected == 0);
+    };
+
+    SECTION("sparse upper boundary and empty entries roundtrip and remain writable") {
+        auto restored = make_bucket();
+        load(restored, bytes);
+        for (BucketIdType id = 0; id < 2; ++id) {
+            REQUIRE(restored->GetBucketSize(id) == bucket->GetBucketSize(id));
+            for (InnerIdType offset = 0; offset < bucket->GetBucketSize(id); ++offset) {
+                REQUIRE(restored->GetInnerIds(id)[offset] == bucket->GetInnerIds(id)[offset]);
+            }
+        }
+        auto restored_computer = restored->FactoryComputer(vectors.data());
+        REQUIRE(restored->QueryOneById(restored_computer, 0, 2) == expected);
+        InnerIdType id = upper_id;
+        float distance = 0;
+        restored->QueryWithDistanceHintByInnerId(&distance, nullptr, restored_computer, &id, 1);
+        REQUIRE(distance == expected);
+        restored->InsertVector(vectors.data(), 1, upper_id);
+        REQUIRE(restored->GetInnerIds(0)[2] == empty_id);
+        restored->InsertVector(vectors.data() + 2 * dim, 0, upper_id + 1);
+        REQUIRE(std::isfinite(restored->QueryOneById(restored_computer, 0, 4)));
+        std::stringstream stream;
+        IOStreamWriter second_writer(stream);
+        restored->Serialize(second_writer);
+        auto reloaded = make_bucket();
+        load(reloaded, stream.str());
+        REQUIRE(reloaded->GetInnerIds(0)[2] == empty_id);
+        REQUIRE(reloaded->GetInnerIds(0)[4] == upper_id + 1);
+        REQUIRE(allocator->rejected == 0);
+    }
+
+    SECTION("corrupt IDs fail immediately after reading the vector") {
+        const auto invalid_id = GENERATE(
+            InnerIdType{32}, InnerIdType{1U << 20}, std::numeric_limits<InnerIdType>::max() - 1);
+        CAPTURE(invalid_id, use_residual);
+        auto corrupted = bytes;
+        std::memcpy(corrupted.data() + ids_cursor + 2 * sizeof(InnerIdType),
+                    &invalid_id,
+                    sizeof(invalid_id));
+        auto restored = make_bucket();
+        require_invalid_id([&]() { load(restored, corrupted); });
+        // No packed blocks or residual data are needed to detect the bad ID.
+        corrupted.resize(ids_cursor + ids_size);
+        auto truncated = make_bucket();
+        require_invalid_id([&]() { load(truncated, corrupted); });
+        // A subsequent complete load still replaces the failed load's bucket contents.
+        load(restored, bytes);
+        REQUIRE(restored->GetInnerIds(0)[2] == upper_id);
+    }
+
+    SECTION("rebuilding after merge defensively rejects an invalid in-memory ID") {
+        // The non-residual merge reaches rebuild_locations without querying code IDs.
+        if (not use_residual) {
+            auto source = make_bucket();
+            bucket->ExportModel(source);
+            bucket->GetInnerIds(0)[2] = empty_id - 1;
+            require_invalid_id([&]() { bucket->MergeOther(source, 0); });
+        }
     }
 }

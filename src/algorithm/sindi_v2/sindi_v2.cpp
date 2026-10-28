@@ -1395,7 +1395,7 @@ SINDIV2::SearchWithRequest(const SearchRequest& request) const {
     const bool is_range = request.mode_ == SearchMode::RANGE_SEARCH;
     const bool filter_enabled = request.enable_filter_ && request.filter_ != nullptr;
 
-    this->ValidateSearchRequest(request, is_range);
+    SINDIV2::ValidateSearchRequest(request, is_range);
     const auto sparse_query = request.query_->GetSparseVectors()[0];
 
     std::shared_lock swr_lock(this->global_mutex_);
@@ -2208,7 +2208,8 @@ SINDIV2::GetSparseVectorByInnerId(InnerIdType inner_id,
     std::shared_lock rlock(this->global_mutex_);
 
     if (use_reorder_) {
-        return this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
+        this->rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
+        return;
     }
     term_datacell_->GetSparseVector(inner_id, data, specified_allocator);
 

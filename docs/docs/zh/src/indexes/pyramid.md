@@ -116,7 +116,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
 | `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
@@ -134,6 +134,8 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；过小叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 在 L2 批量构图时使用与 HGraph 共享的 PiPNN 动态 alpha 选择器 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | PiPNN 选择器的 alpha 调整步长 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
@@ -141,6 +143,9 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
+| `saq_avg_bits` | float | `4.0` | SAQ 每维平均记录位预算，范围 `[1, 8]` |
+| `saq_segment_count` | int | `0` | SAQ 分段数；`0` 表示动态选择边界 |
+| `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
 | `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
 | `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |
@@ -158,6 +163,28 @@ PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"c
 `pipnn_*` 参数在整个 Pyramid 索引中共享；hierarchy 对象仍可分别覆盖
 `max_degree` 和 `alpha`，PiPNN 构建该 hierarchy 时会使用这些覆盖值。
 `ef_construction` 不调节 PiPNN。
+
+### PiPNN 动态 alpha 剪枝
+
+在 `index_param` 下设置以下字段，即可启用 HGraph PiPNN 使用的最终候选池剪枝策略：
+
+```json
+{
+    "graph_type": "pipnn",
+    "alpha": 1.2,
+    "pipnn_adaptive_pruning": true,
+    "pipnn_adaptive_pruning_adjust_step": 0.06
+}
+```
+
+该策略要求 `metric_type: "l2"`，作用于所有批量构建的路径图及根节点路由图。
+各 hierarchy 使用自己的有效 `alpha` 和度数上限，动态策略和步长全局共享。
+增量 `Add` 沿用现有 NSW 插入策略。另一个开关 `adaptive_pruning` 控制 NSW，使用 PiPNN 时应保持关闭。
+
+启用时要求 `alpha` 有限且不小于 1，步长有限且非负，`alpha - 2*step > 0`，且
+`alpha + 3*step` 有限。零步长保持固定 alpha 的 PiPNN 选边结果。
+加载已启用策略的索引时，策略、基础 alpha、步长和 hierarchy 配置必须匹配；
+旧索引缺少这些字段时默认关闭。改变已有索引的策略需要重建。
 
 ### RaBitQ split 配置
 

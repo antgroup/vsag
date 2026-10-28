@@ -136,6 +136,11 @@ CreateTimeMetadataPayload(uint32_t version,
     StreamWriter::WriteObj(writer, uint32_t{1});
     StreamWriter::WriteVector(writer, std::vector<uint32_t>{});
     StreamWriter::WriteVector(writer, std::vector<uint32_t>{});
+    if (version == SINDI_TIME_METADATA_FORMAT_VERSION) {
+        StreamWriter::WriteObj(writer, uint64_t{1});
+        StreamWriter::WriteObj(writer, uint32_t{0});
+        StreamWriter::WriteObj(writer, uint32_t{1});
+    }
     return stream.str();
 }
 
@@ -277,18 +282,37 @@ TEST_CASE("SINDI publish time and host filters route and serialize",
                                ->Ids(&added_label)
                                ->StringMetadata(SINDI_HOST_METADATA_NAME, &added_host)
                                ->Owner(false);
-        REQUIRE_THROWS_WITH(index->Add(timed_add),
-                            Catch::Matchers::ContainsSubstring(
-                                "SINDI time-aware index does not support incremental Add"));
+        REQUIRE(index->Add(timed_add).empty());
+        auto added_query =
+            data.Query()->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &added_timestamp);
+        REQUIRE(index->KnnSearch(added_query, 3, kSindiSearchParameters, nullptr)->GetIds()[0] ==
+                added_label);
         REQUIRE_THROWS_WITH(index->Add(untimed_add),
                             Catch::Matchers::ContainsSubstring(
-                                "SINDI time-aware index does not support incremental Add"));
+                                "SINDI time-aware Add requires publish_time_stamp metadata"));
 
         SINDI time_unaware_index(CreateSindiParameter(false, false), common_param);
         REQUIRE(time_unaware_index.Build(data.Base()) == std::vector<int64_t>{40});
         REQUIRE_THROWS_WITH(time_unaware_index.Add(timed_add),
                             Catch::Matchers::ContainsSubstring(
                                 "SINDI cannot add time metadata after existing documents"));
+    }
+}
+
+TEST_CASE("SINDI time Add rejects cumulative document overflow",
+          "[ut][SINDI][metadata_filter][time_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SindiMetadataFilter filter(allocator.get());
+    std::array<int64_t, 2> timestamps = {SINDI_SECONDS_PER_DAY, 2 * SINDI_SECONDS_PER_DAY};
+    auto batch = Dataset::Make()
+                     ->NumElements(timestamps.size())
+                     ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, timestamps.data())
+                     ->Owner(false);
+    constexpr auto max_documents = static_cast<uint64_t>(std::numeric_limits<uint32_t>::max());
+    for (const auto current_count : {max_documents - 1, max_documents}) {
+        REQUIRE_THROWS_WITH(filter.PrepareBuild(batch, current_count, 2),
+                            Catch::Matchers::ContainsSubstring(
+                                "SINDI time-filtered build exceeds uint32_t document capacity"));
     }
 }
 
@@ -368,6 +392,103 @@ TEST_CASE("SINDI publish time validates query and base values",
         data.Base()->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, timestamps.data())));
 }
 
+TEST_CASE("SINDI time Add routes backfilled dates across segments",
+          "[ut][SINDI][metadata_filter][time_filter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    SmallSindiDataset data(0);
+    const auto day = SINDI_SECONDS_PER_DAY;
+    std::array<int64_t, 4> initial_times = {0, 5 * day, 10 * day, 20 * day};
+    std::array<std::string, 4> initial_hosts = {"a", "a", "b", "a"};
+    SINDI index(CreateSindiParameter(false, false), common_param);
+    auto base = data.Base()
+                    ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, initial_times.data())
+                    ->StringMetadata(SINDI_HOST_METADATA_NAME, initial_hosts.data());
+    REQUIRE(index.Build(base) == std::vector<int64_t>{40});
+
+    auto add_one = [&](int64_t label, int64_t timestamp, std::string& host) {
+        auto vector = data.sparse_vectors[0];
+        auto batch = Dataset::Make()
+                         ->NumElements(1)
+                         ->SparseVectors(&vector)
+                         ->Ids(&label)
+                         ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &timestamp)
+                         ->StringMetadata(SINDI_HOST_METADATA_NAME, &host)
+                         ->Owner(false);
+        REQUIRE(index.Add(batch).empty());
+    };
+    std::string host_a = "a";
+    std::string host_b = "b";
+    add_one(50, day, host_b);
+    add_one(60, 0, host_a);
+    add_one(70, 10 * day, host_a);
+    std::array<int64_t, 2> mixed_labels = {10, 75};
+    std::array<int64_t, 2> mixed_times = {3 * day, 2 * day};
+    std::array<std::string, 2> mixed_hosts = {host_a, host_b};
+    std::array<SparseVector, 2> mixed_vectors = {data.sparse_vectors[0], data.sparse_vectors[0]};
+    auto mixed_batch = Dataset::Make()
+                           ->NumElements(2)
+                           ->SparseVectors(mixed_vectors.data())
+                           ->Ids(mixed_labels.data())
+                           ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, mixed_times.data())
+                           ->StringMetadata(SINDI_HOST_METADATA_NAME, mixed_hosts.data())
+                           ->Owner(false);
+    REQUIRE(index.Add(mixed_batch) == std::vector<int64_t>{10});
+    int64_t missing_host_label = 90;
+    int64_t missing_host_time = day;
+    auto missing_host_vector = data.sparse_vectors[0];
+    auto missing_host = Dataset::Make()
+                            ->NumElements(1)
+                            ->SparseVectors(&missing_host_vector)
+                            ->Ids(&missing_host_label)
+                            ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &missing_host_time)
+                            ->Owner(false);
+    REQUIRE_THROWS_WITH(index.Add(missing_host),
+                        Catch::Matchers::ContainsSubstring(
+                            "SINDI incremental Add must preserve host metadata mode"));
+    constexpr auto search_parameters = R"({"sindi":{"n_candidate":20}})";
+
+    auto check_day = [&](SINDI& target, int64_t timestamp, const std::set<int64_t>& expected) {
+        auto query = data.Query()->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &timestamp);
+        auto result = target.KnnSearch(query, 10, search_parameters, nullptr);
+        REQUIRE(std::set<int64_t>(result->GetIds(), result->GetIds() + result->GetDim()) ==
+                expected);
+    };
+    check_day(index, day, {50});
+    check_day(index, 2 * day, {75});
+    check_day(index, 10 * day, {20, 70});
+    auto host_query = data.Query()->StringMetadata(SINDI_HOST_METADATA_NAME, &host_a);
+    auto host_result = index.KnnSearch(host_query, 10, search_parameters, nullptr);
+    REQUIRE(
+        (std::set<int64_t>(host_result->GetIds(), host_result->GetIds() + host_result->GetDim()) ==
+         std::set<int64_t>{10, 30, 60, 70}));
+
+    SINDI restored(CreateSindiParameter(false, false), common_param);
+    test_serializion(index, restored);
+    check_day(restored, day, {50});
+    check_day(restored, 2 * day, {75});
+    check_day(restored, 10 * day, {20, 70});
+    auto stream = std::stringstream{};
+    index.SerializeStreaming(stream);
+    SINDI streaming_restored(CreateSindiParameter(false, false), common_param);
+    streaming_restored.DeserializeStreaming(stream);
+    check_day(streaming_restored, day, {50});
+    auto next_time = 2 * day;
+    auto vector = data.sparse_vectors[0];
+    int64_t next_label = 80;
+    auto next = Dataset::Make()
+                    ->NumElements(1)
+                    ->SparseVectors(&vector)
+                    ->Ids(&next_label)
+                    ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &next_time)
+                    ->StringMetadata(SINDI_HOST_METADATA_NAME, &host_a)
+                    ->Owner(false);
+    REQUIRE(streaming_restored.Add(next).empty());
+    check_day(streaming_restored, next_time, {75, 80});
+}
+
 TEST_CASE("SINDI time partitions tolerate failed documents at logical boundaries",
           "[ut][SINDI][metadata_filter][time_filter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -387,7 +508,7 @@ TEST_CASE("SINDI time partitions tolerate failed documents at logical boundaries
     plan.RecordSuccess(2);
     plan.RecordSuccess(3);
     plan.RecordSuccess(4);
-    filter.CommitBuild(std::move(plan), 4);
+    filter.CommitBuild(std::move(plan), 0, 4);
 
     int64_t query_time = 3 * SINDI_SECONDS_PER_DAY;
     auto query = Dataset::Make()
@@ -433,7 +554,7 @@ TEST_CASE("SINDI adjacent time partitions can share a UTC day",
     for (uint32_t position = 0; position < timestamps.size(); ++position) {
         plan.RecordSuccess(position);
     }
-    filter.CommitBuild(std::move(plan), timestamps.size());
+    filter.CommitBuild(std::move(plan), 0, static_cast<uint32_t>(timestamps.size()));
 
     int64_t query_time = SINDI_SECONDS_PER_DAY;
     auto query = Dataset::Make()
@@ -456,6 +577,23 @@ TEST_CASE("SINDI adjacent time partitions can share a UTC day",
 TEST_CASE("SINDI time metadata validates serialized ranges",
           "[ut][SINDI][metadata_filter][time_filter][serialization]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    {
+        auto payload = CreateTimeMetadataPayload(1, 1, 1, 1);
+        std::stringstream stream(payload);
+        IOStreamReader reader(stream);
+        SindiTimeFilter filter(allocator.get());
+        REQUIRE_NOTHROW(filter.Deserialize(reader, 1));
+        int64_t backfilled_time = 2 * SINDI_SECONDS_PER_DAY;
+        auto batch = Dataset::Make()
+                         ->NumElements(1)
+                         ->Int64Metadata(SINDI_PUBLISH_TIME_METADATA_NAME, &backfilled_time)
+                         ->Owner(false);
+        auto plan = filter.PrepareBuild(batch, 2);
+        plan.RecordSuccess(0);
+        filter.CommitBuild(std::move(plan), 1, 2);
+        auto route = filter.Classify(batch, 2);
+        REQUIRE(route.inner_ranges == std::vector<std::pair<uint32_t, uint32_t>>{{1, 2}});
+    }
     {
         auto payload = CreateTimeMetadataPayload(SINDI_TIME_METADATA_FORMAT_VERSION, 1, 1, 1);
         std::stringstream stream(payload);
