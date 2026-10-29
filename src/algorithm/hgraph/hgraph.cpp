@@ -26,6 +26,7 @@
 #include "analyzer/analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
+#include "datacell/code_slot_flatten_adapter.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "dataset_impl.h"
@@ -46,6 +47,29 @@
 namespace vsag {
 
 class HGraphAnalyzer;
+
+std::pair<InnerIdType, CodeSlotIdType>
+HGraph::GetCodeStorageCounts() const {
+    if (this->code_slot_map_ == nullptr) {
+        auto count = static_cast<InnerIdType>(this->total_count_.load());
+        return {count, count};
+    }
+    return {this->code_slot_map_->PublishedLogicalCount(), this->code_slot_map_->PhysicalCount()};
+}
+
+std::shared_lock<std::shared_mutex>
+HGraph::acquire_global_read_lock() const {
+    if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
+        return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+    }
+    std::scoped_lock resize_lock(this->physical_code_resize_mutex_);
+    return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+}
+
+bool
+HGraph::using_dedup_storage() const {
+    return support_duplicate_ and deduplicate_storage_;
+}
 
 HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
     : InnerIndexInterface(hgraph_param, common_param),
