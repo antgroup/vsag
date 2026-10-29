@@ -92,5 +92,3 @@ jobs:
           else
             gh pr edit "$pr_number" --title "$title" --body ""
           fi
-
-          gh pr edit "$pr_number" --add-label kind/documentation --add-label version/1.0
