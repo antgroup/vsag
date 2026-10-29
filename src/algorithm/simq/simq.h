@@ -201,6 +201,9 @@ private:
 
     double split_delay_seconds_{0.0};
 
+    bool support_duplicate_{false};
+    bool deduplicate_storage_{false};
+
     float init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};

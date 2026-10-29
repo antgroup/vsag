@@ -130,9 +130,14 @@ read_dist_cmp(const DatasetPtr& result_ds) {
 // Both HGraphs own independent quantizer models. Only decoded vectors cross
 // graph boundaries; encoded pair distances always use the document model.
 JsonType
-simq_graph_parameters(const std::string& quantization, int64_t threads) {
+simq_graph_parameters(const std::string& quantization,
+                      int64_t threads,
+                      bool support_duplicate,
+                      bool deduplicate_storage) {
     auto param = JsonType::Parse(
         R"({"max_degree":32,"ef_construction":50,"use_reorder":false,"build_by_base":true})");
+    param["support_duplicate"].SetBool(support_duplicate);
+    param["deduplicate_storage"].SetBool(deduplicate_storage);
     param["base_quantization_type"].SetString(quantization);
     param["build_thread_count"].SetInt(threads);
     return param;
@@ -248,7 +253,11 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
     cp.dim_ = dim;
 
     auto param = HGraph::CheckAndMappingExternalParam(
-        simq_graph_parameters(quantization_, build_thread_count_), cp);
+        simq_graph_parameters(quantization_,
+                              build_thread_count_,
+                              false,
+                              false),  // clustering-internal HGraph: duplicates never suppressed
+        cp);
     hgraph_ = std::make_shared<HGraph>(param, cp);
     std::vector<uint64_t> center_ids_u64(center_ids.begin(), center_ids.end());
     insert_simq_representatives(hgraph_, center_ids_u64, codes_, storage_, dim);
@@ -499,6 +508,8 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     default_coarse_k_ = param->coarse_k;
     default_rerank_k_ = param->rerank_k;
     split_delay_seconds_ = param->split_delay_seconds;
+    support_duplicate_ = param->support_duplicate;
+    deduplicate_storage_ = param->deduplicate_storage;
     this->has_raw_vector_ = true;
 }
 
@@ -720,9 +731,14 @@ SIMQ::build_rep_hgraph(const uint8_t* token_codes, int64_t dim) {
     IndexCommonParam cp = common_param_;
     cp.metric_ = MetricType::METRIC_TYPE_IP;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    cp.repr_ = RecordRepr::DENSE;
     cp.dim_ = dim;
     auto param = HGraph::CheckAndMappingExternalParam(
-        simq_graph_parameters(quantization_type_, static_cast<int64_t>(build_thread_count_)), cp);
+        simq_graph_parameters(quantization_type_,
+                              static_cast<int64_t>(build_thread_count_),
+                              support_duplicate_,
+                              deduplicate_storage_),
+        cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
     constexpr uint64_t batch_limit = 4096;
     for (uint64_t offset = 0; offset < representatives.size(); offset += batch_limit) {
@@ -1682,10 +1698,13 @@ SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
     cp.metric_ = MetricType::METRIC_TYPE_IP;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim_;
+    cp.repr_ = RecordRepr::DENSE;
 
     auto param = HGraph::CheckAndMappingExternalParam(
         simq_graph_parameters(representative_quantization_type_,
-                              static_cast<int64_t>(build_thread_count_)),
+                              static_cast<int64_t>(build_thread_count_),
+                              support_duplicate_,
+                              deduplicate_storage_),
         cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
@@ -1789,6 +1808,16 @@ SIMQ::Deserialize(StreamReader& reader) {
         random_seed_ = tmp_param.random_seed;
         init_cluster_ratio_ = tmp_param.init_cluster_ratio;
         split_delay_seconds_ = tmp_param.split_delay_seconds;
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(not tmp_param.deduplicate_storage or tmp_param.support_duplicate,
+                       "SIMQ deserialize deduplicate_storage requires support_duplicate");
+        support_duplicate_ = tmp_param.support_duplicate;
+        deduplicate_storage_ = tmp_param.deduplicate_storage;
+        auto simq_param = std::dynamic_pointer_cast<SIMQParameter>(this->create_param_ptr_);
+        if (simq_param) {
+            simq_param->support_duplicate = tmp_param.support_duplicate;
+            simq_param->deduplicate_storage = tmp_param.deduplicate_storage;
+        }
     }
 
     uint64_t total_count_val = 0;
@@ -2012,7 +2041,8 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
                    key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
                    key == "rerank_k" || key == "quantization_type" ||
-                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds") {
+                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds" ||
+                   key == "support_duplicate" || key == "deduplicate_storage") {
             inner_json[key].SetJson(value);
         } else {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
