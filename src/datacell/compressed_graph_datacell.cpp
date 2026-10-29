@@ -120,15 +120,21 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     uint64_t vertex_num;
     StreamReader::ReadObj(reader, vertex_num);
-    if (vertex_num < this->TotalCount()) {
+    if (vertex_num < this->TotalCount() || vertex_num != this->max_capacity_ ||
+        vertex_num > neighbor_sets_.max_size()) {
         throw VsagException(ErrorType::INVALID_BINARY,
-                            "compressed graph vertex count is smaller than total count");
+                            "compressed graph vertex count does not match capacity");
     }
-    Resize(vertex_num);
+    // Every vertex needs at least its one-byte adjacency header.
+    reader.ValidateCount(vertex_num, sizeof(uint8_t));
+    Resize(static_cast<InnerIdType>(vertex_num));
     for (uint64_t id = 0; id < vertex_num; ++id) {
         uint8_t num_elements = 0;
         StreamReader::ReadObj(reader, num_elements);
         if (num_elements > 0) {
+            if (this->neighbor_sets_[id]) {
+                this->neighbor_sets_[id]->Clear(allocator_);
+            }
             this->neighbor_sets_[id] = std::make_unique<EliasFanoEncoder>();
             EliasFanoEncoder& encoder = *this->neighbor_sets_[id];
             encoder.num_elements = num_elements;
@@ -136,6 +142,8 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
             StreamReader::ReadObj(reader, encoder.low_bits_size);
             StreamReader::ReadObj(reader, encoder.high_bits_size);
 
+            reader.ValidateCount(uint64_t{encoder.low_bits_size} + encoder.high_bits_size,
+                                 sizeof(uint64_t));
             encoder.bits = static_cast<uint64_t*>(allocator_->Allocate(
                 (encoder.low_bits_size + encoder.high_bits_size) * sizeof(uint64_t)));
             for (uint64_t j = 0; j < encoder.low_bits_size + encoder.high_bits_size; j++) {

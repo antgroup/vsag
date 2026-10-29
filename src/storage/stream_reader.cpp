@@ -349,11 +349,16 @@ SliceStreamReader::SliceStreamReader(StreamReader* reader, uint64_t length)
 }
 
 void
-BoundedForwardReader::Read(char* data, uint64_t size) {
+BoundedForwardReader::ValidateReadSize(uint64_t size) const {
     if (cursor_ > length_ || size > length_ - cursor_) {
         throw vsag::VsagException(vsag::ErrorType::READ_ERROR,
                                   "BoundedForwardReader: read exceeds block boundary");
     }
+}
+
+void
+BoundedForwardReader::Read(char* data, uint64_t size) {
+    ValidateReadSize(size);
     reader_impl_->Read(data, size);
     cursor_ += size;
 }

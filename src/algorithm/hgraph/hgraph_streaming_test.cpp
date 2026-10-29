@@ -7,6 +7,11 @@
 #include <sstream>
 #include <vector>
 
+#include "attr/attr_type_schema.h"
+#include "attr/multi_bitset_manager.h"
+#include "datacell/attribute_bucket_inverted_datacell.h"
+#include "impl/bitset/fast_bitset.h"
+#include "impl/bitset/sparse_bitset.h"
 #include "storage/serialization.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
@@ -183,6 +188,150 @@ TEST_CASE("HGraph streaming rejects corrupted counts before large allocation",
     auto result = restored.value()->DeserializeStreaming(input);
     REQUIRE_FALSE(result.has_value());
     REQUIRE(result.error().type != ErrorType::NO_ENOUGH_MEMORY);
+    REQUIRE(allocator.largest_request <= allocator.limit);
+}
+
+}  // namespace vsag
+
+namespace vsag {
+
+TEST_CASE("Attribute scalar counts are bounded before allocation",
+          "[ut][streaming_serialization][count_safety]") {
+    const auto component = GENERATE(0, 1, 2, 3, 4, 5);
+    test::GuardedAllocator allocator;
+    std::stringstream bytes;
+    IOStreamWriter writer(bytes);
+    const uint64_t oversized = uint64_t{1} << 29;
+    if (component == 1 || component == 3) {
+        // Empty schema, or empty bitset id map, preceding the next count.
+        StreamWriter::WriteObj(writer, uint64_t{0});
+    }
+    if (component == 4) {
+        StreamWriter::WriteObj(writer, false);
+    }
+    StreamWriter::WriteObj(writer, component == 4 ? uint64_t{1024} : oversized);
+    IOStreamReader source(bytes);
+    BoundedForwardReader reader(&source, bytes.str().size());
+    allocator.largest_request = 0;
+    if (component == 0) {
+        AttrTypeSchema schema(&allocator);
+        REQUIRE_THROWS_AS(schema.Deserialize(reader), VsagException);
+    } else if (component == 1) {
+        AttributeBucketInvertedDataCell index(&allocator);
+        REQUIRE_THROWS_AS(index.Deserialize(reader), VsagException);
+    } else if (component == 2 || component == 3) {
+        MultiBitsetManager manager(&allocator);
+        allocator.largest_request = 0;
+        REQUIRE_THROWS_AS(manager.Deserialize(reader), VsagException);
+    } else if (component == 4) {
+        FastBitset bits(&allocator);
+        REQUIRE_THROWS_AS(bits.Deserialize(reader), VsagException);
+    } else {
+        SparseBitset bits;
+        REQUIRE_THROWS_AS(bits.Deserialize(reader), VsagException);
+    }
+    REQUIRE(allocator.largest_request == 0);
+}
+
+TEST_CASE("HGraph streaming bounds compressed graph and attribute counts",
+          "[ut][hgraph][streaming_serialization][count_safety]") {
+    const auto corruption = GENERATE(0, 1, 2, 3, 4);
+    const bool repair_crc = GENERATE(false, true);
+    const auto parameters = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":16,
+        "index_param":{"base_quantization_type":"sq8", "use_attribute_filter":true,
+                       "graph_storage_type":"compressed", "build_thread_count":1,
+                       "max_degree":8, "ef_construction":32}
+    })";
+    constexpr uint64_t count = 16;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * 16);
+    std::vector<AttributeSet> attributes(count);
+    std::vector<AttributeValue<std::string>> values(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        values[i].name_ = "group";
+        values[i].GetValue() = {"allowed"};
+        attributes[i].attrs_.push_back(&values[i]);
+        for (uint64_t j = 0; j < 16; ++j) {
+            vectors[i * 16 + j] = static_cast<float>(i + j);
+        }
+    }
+    auto data = Dataset::Make();
+    data->NumElements(count)
+        ->Dim(16)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->AttributeSets(attributes.data())
+        ->Owner(false);
+    auto index = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(data).has_value());
+    std::stringstream output;
+    REQUIRE(index.value()->SerializeStreaming(output).has_value());
+    auto bytes = output.str();
+    // A normal compressed graph must still round trip and preserve neighbors.
+    test::GuardedAllocator normal_allocator;
+    normal_allocator.limit = std::numeric_limits<uint64_t>::max();
+    auto normal = Factory::CreateIndex("hgraph", parameters, &normal_allocator);
+    REQUIRE(normal.has_value());
+    std::istringstream normal_input(bytes);
+    REQUIRE(normal.value()->DeserializeStreaming(normal_input).has_value());
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(16)->Float32Vectors(vectors.data())->Owner(false);
+    auto expected = index.value()->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+    auto actual = normal.value()->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(expected.has_value());
+    REQUIRE(actual.has_value());
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+    }
+    const auto block =
+        test::FindStreamingBlock(bytes,
+                                 corruption == 4 ? StreamSerializationTag::ATTRIBUTE_FILTER
+                                                 : StreamSerializationTag::BOTTOM_GRAPH);
+    if (corruption == 0) {
+        // max_capacity is uint32_t; total_count is also uint32_t.
+        auto capacity = test::ReadStreamingObj<uint32_t>(bytes, block.payload_offset + 4);
+        test::WriteStreamingObj(bytes, block.payload_offset + 4, capacity ^ (uint32_t{1} << 29));
+    } else if (corruption == 1) {
+        const uint32_t oversized = uint32_t{1} << 29;
+        test::WriteStreamingObj(bytes, block.payload_offset + 4, oversized);
+        test::WriteStreamingObj(bytes, block.payload_offset + 12, uint64_t{oversized});
+    } else if (corruption == 2) {
+        // Keep only the graph header and vertex count: no per-vertex headers remain.
+        constexpr uint64_t keep = 20;
+        bytes.erase(block.payload_offset + keep, block.payload_size - keep);
+        test::WriteStreamingObj(bytes, block.header_offset + 16, keep);
+    } else if (corruption == 3) {
+        // Keep the first nonempty encoder header but truncate its bit arrays.
+        uint64_t cursor = block.payload_offset + 20;
+        while (test::ReadStreamingObj<uint8_t>(bytes, cursor) == 0) {
+            ++cursor;
+        }
+        const auto keep = cursor + 4 - block.payload_offset;
+        bytes.erase(block.payload_offset + keep, block.payload_size - keep);
+        test::WriteStreamingObj(bytes, block.header_offset + 16, keep);
+    } else {
+        test::WriteStreamingObj(bytes, block.payload_offset, uint64_t{1} << 29);
+    }
+    if (repair_crc) {
+        const auto size = test::ReadStreamingObj<uint64_t>(bytes, block.header_offset + 16);
+        const auto crc = StreamHeader::CalculateChecksum(
+            std::string_view(bytes.data() + block.payload_offset, size));
+        test::WriteStreamingObj(bytes, block.header_offset + 24, crc);
+    }
+    test::GuardedAllocator allocator;
+    allocator.limit = std::numeric_limits<uint64_t>::max();
+    auto restored = Factory::CreateIndex("hgraph", parameters, &allocator);
+    REQUIRE(restored.has_value());
+    // Code storage legitimately reserves a 128 MiB block even for this tiny index.
+    // Corruption must not request more than the measured valid-load maximum.
+    allocator.limit = normal_allocator.largest_request;
+    CAPTURE(corruption, repair_crc, allocator.limit);
+    allocator.largest_request = 0;
+    std::istringstream input(bytes);
+    REQUIRE_FALSE(restored.value()->DeserializeStreaming(input).has_value());
     REQUIRE(allocator.largest_request <= allocator.limit);
 }
 

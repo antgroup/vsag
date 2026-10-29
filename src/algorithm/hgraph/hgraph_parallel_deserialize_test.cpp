@@ -1023,3 +1023,37 @@ TEST_CASE("HGraph ParallelDeserialize Rejects Non-Empty Index",
     REQUIRE(result.error().type == vsag::ErrorType::INDEX_NOT_EMPTY);
     REQUIRE(non_empty->GetNumElements() == data.count);
 }
+
+TEST_CASE("HGraph compressed parallel load bounds source string extents",
+          "[ut][hgraph][parallel_deserialize][count_safety]") {
+    auto data = MakeTestData(16, 32);
+    std::vector<std::string> sources(data.count, "source");
+    auto dataset = MakeDataset(data);
+    dataset->SourceID(sources.data());
+    auto params = MakeHGraphJson();
+    params["persist_source_id"].SetBool(true);
+    auto index = MakeHGraphIndex(MakeCommonParam(data.dim), params);
+    REQUIRE(index->Build(dataset).has_value());
+    FrameSerializeWriter writer;
+    REQUIRE(index->Serialize(writer, 4096).has_value());
+    // Label table is the first whole compressed frame. Skip its test-codec header,
+    // labels, remap pairs, source IO type and source count to reach the first string.
+    auto read_count = [&](uint64_t offset) {
+        uint64_t value = 0;
+        REQUIRE(offset + sizeof(value) <= writer.buffer_.size());
+        std::memcpy(&value, writer.buffer_.data() + offset, sizeof(value));
+        return value;
+    };
+    uint64_t offset = sizeof(uint64_t);
+    const auto labels = read_count(offset);
+    offset += sizeof(uint64_t) + labels * sizeof(vsag::LabelType);
+    const auto remap = read_count(offset);
+    offset += sizeof(uint64_t) + remap * (sizeof(vsag::LabelType) + sizeof(vsag::InnerIdType));
+    offset += 2 * sizeof(uint64_t);
+    REQUIRE(read_count(offset) == sources.front().size());
+    const uint64_t oversized = uint64_t{1} << 29;
+    std::memcpy(writer.buffer_.data() + offset, &oversized, sizeof(oversized));
+    FrameMemoryReader reader(writer.buffer_);
+    auto loaded = MakeHGraphIndex(MakeCommonParam(data.dim, MakeThreadPool(4)), params);
+    REQUIRE_FALSE(loaded->ParallelDeserialize(reader).has_value());
+}

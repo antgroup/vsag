@@ -206,6 +206,8 @@ AttributeBucketInvertedDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader
     AttributeInvertedInterface::Deserialize(reader);
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    // A field has a string length and nine value-map counts, even when empty.
+    reader->ValidateCount(size, 10 * sizeof(uint64_t));
     this->field_2_value_map_.reserve(size);
     for (uint64_t i = 0; i < size; i++) {
         auto term = StreamReader::ReadString(reader);

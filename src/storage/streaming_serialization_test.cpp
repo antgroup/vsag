@@ -586,7 +586,13 @@ TEST_CASE("Forward byte IO validates extents before resizing storage",
     allocator.limit = 2 * 1024 * 1024;
     vsag::MemoryIO io(&allocator);
     allocator.largest_request = 0;
+    const bool bounded_forward = GENERATE(false, true);
     auto read = [&] {
+        if (bounded_forward) {
+            vsag::BoundedForwardReader block(&reader, payload.size());
+            io.Deserialize(block);
+            return;
+        }
         vsag::ReadForwardBlockPayload(
             reader, header, [&](vsag::StreamReader& block) { io.Deserialize(block); });
     };

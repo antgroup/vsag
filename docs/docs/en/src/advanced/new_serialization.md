@@ -173,7 +173,11 @@ buffers or temporary files. Skipped bytes are included in incremental checksum v
 unconsumed suffix is drained with an 8 KiB buffer after component deserialization succeeds.
 Serialized vector counts, string lengths, and byte-storage extents are checked against the
 remaining block bytes before allocation. Label counts are also bounded by the recorded index
-capacity, and label-remap counts cannot exceed the label-table size.
+capacity, and label-remap counts cannot exceed the label-table size. Compressed-graph vertex
+counts must match capacity and fit their per-vertex headers; encoder arrays and attribute schema,
+field-map, bitset-map, and bitset payload counts are bounded before allocation as well. These
+checks also apply to bounded readers used for compressed parallel loads. String lengths must
+fit the platform container limits before conversion to the allocation size.
 Checksum validation may finish after component state has changed. If `DeserializeStreaming`
 fails, discard the target index; it must not be queried or reused. Other index types still use
 their existing block readers.

@@ -235,6 +235,7 @@ FastBitset::Deserialize(StreamReader& reader) {
                                 ", max words: " + std::to_string(max_byte_words));
     }
 
+    reader.ValidateCount(size, sizeof(uint64_t));
     std::unique_ptr<uint64_t[]> new_data;
     if (size > 0) {
         new_data.reset(new uint64_t[size]);

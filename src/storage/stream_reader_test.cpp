@@ -17,6 +17,7 @@
 #include "stream_reader.h"
 
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <sstream>
 
@@ -320,4 +321,30 @@ TEST_CASE("SliceStreamReader", "[ut][stream_reader]") {
     reader_slice.Read(read_buffer3, 24);
     // std::cout << std::string(read_buffer3, 24) << std::endl;
     REQUIRE(check_func(read_buffer3, '3', 24));
+}
+
+TEST_CASE("BoundedForwardReader rejects allocating extents before reading",
+          "[ut][stream_reader][count_safety]") {
+    const uint64_t oversized = uint64_t{1} << 29;
+    std::string bytes(sizeof(oversized), '\0');
+    std::memcpy(bytes.data(), &oversized, sizeof(oversized));
+    std::istringstream input(bytes);
+    vsag::IOStreamReader source(input);
+    vsag::BoundedForwardReader reader(&source, bytes.size());
+    std::vector<uint64_t> values;
+    REQUIRE_THROWS_AS(vsag::StreamReader::ReadVector(reader, values), vsag::VsagException);
+    REQUIRE(values.empty());
+    REQUIRE(reader.GetCursor() == sizeof(oversized));
+}
+
+TEST_CASE("String lengths exceeding container size fail before reading",
+          "[ut][stream_reader][count_safety]") {
+    const uint64_t oversized = std::numeric_limits<uint64_t>::max();
+    std::string bytes(sizeof(oversized), '\0');
+    std::memcpy(bytes.data(), &oversized, sizeof(oversized));
+    std::istringstream input(bytes);
+    vsag::IOStreamReader reader(input);
+    // An unbounded reader exercises the container bound independently of the payload bound.
+    REQUIRE_THROWS_AS(vsag::StreamReader::ReadString(reader), vsag::VsagException);
+    REQUIRE(reader.GetCursor() == sizeof(oversized));
 }

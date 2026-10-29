@@ -43,9 +43,12 @@ public:
         uint64_t length = 0;
         StreamReader::ReadObj(reader, length);
         reader.ValidateCount(length, sizeof(char));
-        std::vector<char> buffer(length);
+        if (length > std::vector<char>().max_size() || length > std::string().max_size()) {
+            throw VsagException(ErrorType::INVALID_BINARY, "serialized string is too large");
+        }
+        std::vector<char> buffer(static_cast<std::size_t>(length));
         reader.Read(buffer.data(), length);
-        return {buffer.data(), length};
+        return {buffer.data(), static_cast<std::size_t>(length)};
     }
 
     template <typename T>
@@ -286,6 +289,9 @@ private:
 
 class BoundedForwardReader : public StreamReader {
 public:
+    void
+    ValidateReadSize(uint64_t size) const override;
+
     void
     Read(char* data, uint64_t size) override;
 
