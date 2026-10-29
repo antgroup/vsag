@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -24,11 +25,13 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/immutable_sindi_term_datacell.h"
 #include "datacell/mutable_sindi_term_datacell.h"
+#include "impl/searcher/sindi_search_options.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
 
 class ReasoningContext;
+struct SindiWindowSearchProfile;
 
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
@@ -197,7 +200,10 @@ private:
                 ReasoningContext* reasoning_ctx = nullptr,
                 SearchStatistics* statistics = nullptr,
                 const uint64_t* filter_callback_remaining = nullptr,
-                const SindiMetadataSearchRoute& metadata_route = {}) const;
+                const SindiMetadataSearchRoute& metadata_route = {},
+                uint64_t worker_n_candidate = 0,
+                const SindiSearchOptions& window_options = {},
+                SindiWindowSearchProfile* window_profile = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
@@ -213,6 +219,9 @@ private:
      */
     std::pair<int64_t, int64_t>
     get_min_max_window_id(const FilterPtr& filter) const;
+
+    mutable std::once_flag search_thread_pool_once_;
+    mutable SafeThreadPoolPtr search_thread_pool_{nullptr};
 
     MetadataPtr
     collect_streaming_header() const override;
