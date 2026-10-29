@@ -59,6 +59,10 @@ public:
         if (size == 0) {
             return;
         }
+        if (data == nullptr) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "forward block reader requires a non-null destination");
+        }
         source_.Read(data, size);
         checksum_ = StreamHeader::UpdateChecksum(checksum_, std::string_view(data, size));
         cursor_ += size;

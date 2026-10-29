@@ -5,6 +5,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 #include <vector>
 
 #include "attr/attr_type_schema.h"
@@ -80,11 +81,21 @@ TEST_CASE("HGraph forward block entry points", "[ut][hgraph][streaming_serializa
             test::FindStreamingBlock(bytes, StreamSerializationTag::HIGH_PRECISION_CODES);
         auto payload =
             std::make_shared<std::string>(bytes.substr(block.payload_offset, block.payload_size));
-        auto external = Factory::CreateReadFuncReader(
-            [payload](uint64_t offset, uint64_t length, void* dest) {
+        auto read_payload = [payload](uint64_t offset, uint64_t length, void* dest) {
+            if (offset > payload->size() || length > payload->size() - offset) {
+                throw std::out_of_range("precise payload read exceeds boundary");
+            }
+            if (length > 0) {
                 std::memcpy(dest, payload->data() + offset, length);
-            },
-            payload->size());
+            }
+        };
+        char value;
+        REQUIRE_THROWS_AS(read_payload(payload->size(), 1, &value), std::out_of_range);
+        REQUIRE_THROWS_AS(read_payload(payload->size() + 1, 0, &value), std::out_of_range);
+        REQUIRE_THROWS_AS(read_payload(1, std::numeric_limits<uint64_t>::max(), &value),
+                          std::out_of_range);
+        REQUIRE_NOTHROW(read_payload(payload->size(), 0, nullptr));
+        auto external = Factory::CreateReadFuncReader(read_payload, payload->size());
         load_parameters.Set("precise_io_type", "reader_io").SetReader("precise_reader", external);
     }
     std::istringstream load_input(bytes);

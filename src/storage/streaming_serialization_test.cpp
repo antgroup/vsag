@@ -114,6 +114,18 @@ TEST_CASE("Forward block reader rejects invalid input without unwinding drains",
         }));
         REQUIRE(reader.GetCursor() == 0);
     }
+    SECTION("null destination is rejected before touching the source") {
+        vsag::ReadForwardBlockPayload(reader, header, [&](vsag::StreamReader& block) {
+            REQUIRE_THROWS_AS(block.Read(nullptr, 1), vsag::VsagException);
+            REQUIRE(block.GetCursor() == 0);
+            REQUIRE(reader.GetCursor() == 0);
+            block.Read(nullptr, 0);
+            char payload[3];
+            block.Read(payload, sizeof(payload));
+            REQUIRE(std::string(payload, sizeof(payload)) == "abc");
+        });
+        REQUIRE(reader.GetCursor() == 3);
+    }
     SECTION("callback exception does not drain") {
         REQUIRE_THROWS_WITH(
             vsag::ReadForwardBlockPayload(reader,

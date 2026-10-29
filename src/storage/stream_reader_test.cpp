@@ -56,15 +56,24 @@ public:
 
     pos_type
     seekpos(pos_type position, std::ios_base::openmode mode) override {
+        if (reject_next_restore) {
+            reject_next_restore = false;
+            return pos_type(off_type(-1));
+        }
         if (reject_restore) {
             return pos_type(off_type(-1));
         }
-        return std::stringbuf::seekpos(position, mode);
+        const auto restored = std::stringbuf::seekpos(position, mode);
+        if (restored != pos_type(off_type(-1))) {
+            at_end = false;
+        }
+        return restored;
     }
 
     uint64_t bytes_read{0};
     bool reject_seek{false};
     bool reject_restore{false};
+    bool reject_next_restore{false};
     bool reject_end_position{false};
     bool at_end{false};
 };
@@ -144,6 +153,42 @@ TEST_CASE("IOStreamReader Skip reports stream errors", "[ut][stream_reader]") {
         REQUIRE_THROWS_AS(reader.Skip(1), VsagException);
     }
     REQUIRE(buffer.bytes_read == 0);
+}
+
+TEST_CASE("IOStreamReader failed construction restores usable stream state",
+          "[ut][stream_reader]") {
+    CountingStreamBuffer buffer("payload");
+    std::istream input(&buffer);
+    input.seekg(2);
+    const auto exceptions = GENERATE(std::ios::goodbit, std::ios::failbit | std::ios::badbit);
+    input.exceptions(exceptions);
+    SECTION("end seek fails") {
+        buffer.reject_seek = true;
+    }
+    SECTION("end position is unavailable after repositioning") {
+        buffer.reject_end_position = true;
+    }
+    SECTION("first restore attempt fails") {
+        buffer.reject_next_restore = true;
+    }
+    REQUIRE_THROWS(IOStreamReader(input));
+    REQUIRE(input.rdstate() == std::ios::goodbit);
+    REQUIRE(input.exceptions() == exceptions);
+    REQUIRE(input.tellg() == std::streampos(2));
+    REQUIRE(buffer.bytes_read == 0);
+    char value;
+    input.get(value);
+    REQUIRE(value == 'y');
+}
+
+TEST_CASE("IOStreamReader failed construction preserves initial error flags",
+          "[ut][stream_reader]") {
+    std::istringstream input("payload");
+    const auto state = GENERATE(std::ios::failbit, std::ios::eofbit, std::ios::badbit);
+    input.setstate(state);
+    REQUIRE_THROWS_AS(IOStreamReader(input), VsagException);
+    REQUIRE(input.rdstate() == state);
+    REQUIRE(input.exceptions() == std::ios::goodbit);
 }
 
 }  // namespace vsag

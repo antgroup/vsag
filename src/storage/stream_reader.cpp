@@ -138,23 +138,43 @@ IOStreamReader::GetCursor() const {
 }
 
 IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
-    const auto cur_pos = istream.tellg();
-    if (cur_pos == std::streampos(-1)) {
-        throw VsagException(ErrorType::READ_ERROR,
-                            "IOStreamReader: cannot determine initial cursor");
+    const auto original_state = istream.rdstate();
+    auto cur_pos = std::streampos(-1);
+    try {
+        cur_pos = istream.tellg();
+        if (cur_pos == std::streampos(-1)) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "IOStreamReader: cannot determine initial cursor");
+        }
+        istream.seekg(0, std::ios::end);
+        const auto end_pos = istream.tellg();
+        if (end_pos == std::streampos(-1) || end_pos < cur_pos) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "IOStreamReader: cannot determine stream boundary");
+        }
+        istream.seekg(cur_pos);
+        if (istream.fail()) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "IOStreamReader: cannot restore initial cursor");
+        }
+        end_cursor_ = static_cast<uint64_t>(end_pos);
+        length_ = static_cast<uint64_t>(end_pos - cur_pos);
+    } catch (...) {
+        // Best effort: a stream buffer that rejects restoring its cursor cannot be repaired here.
+        // Preserve the original failure even when restoration itself throws.
+        const auto exceptions = istream.exceptions();
+        try {
+            istream.exceptions(std::ios::goodbit);
+            istream.clear();
+            if (cur_pos != std::streampos(-1)) {
+                istream.seekg(cur_pos);
+            }
+            istream.clear(original_state);
+            istream.exceptions(exceptions);
+        } catch (...) {
+        }
+        throw;
     }
-    istream.seekg(0, std::ios::end);
-    const auto end_pos = istream.tellg();
-    if (end_pos == std::streampos(-1) || end_pos < cur_pos) {
-        throw VsagException(ErrorType::READ_ERROR,
-                            "IOStreamReader: cannot determine stream boundary");
-    }
-    istream.seekg(cur_pos);
-    if (istream.fail()) {
-        throw VsagException(ErrorType::READ_ERROR, "IOStreamReader: cannot restore initial cursor");
-    }
-    end_cursor_ = static_cast<uint64_t>(end_pos);
-    length_ = static_cast<uint64_t>(end_pos - cur_pos);
 }
 
 IOStreamReader::~IOStreamReader() {
