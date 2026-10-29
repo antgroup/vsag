@@ -1052,7 +1052,10 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
 }
 
 void
-HGraph::cal_memory_usage() {
+HGraph::cal_memory_usage() const {
+    // Read the version before walking the components, so a mutation that lands mid-walk stays
+    // unaccounted and simply forces one more recalculation on the next query.
+    const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
@@ -1062,7 +1065,7 @@ HGraph::cal_memory_usage() {
         memory += this->code_slot_map_->GetMemoryUsage();
     }
     memory += this->bottom_graph_->GetMemoryUsage();
-    for (auto& graph : this->route_graphs_) {
+    for (const auto& graph : this->route_graphs_) {
         memory += graph->GetMemoryUsage();
     }
     if (has_precise_reorder()) {
@@ -1079,13 +1082,62 @@ HGraph::cal_memory_usage() {
     if (this->mci_cliques_ != nullptr) {
         memory += this->mci_cliques_->GetMemoryUsage();
     }
+    // Keep the conjugate-graph lock until the publish below. Feedback() patches the cached counter
+    // with fetch_add instead of bumping the version (tests/test_hgraph.cpp pins that exact-delta
+    // contract), and it takes conjugate_graph_mutex_ and then memory_usage_mutex_ in this same
+    // order. Releasing the graph lock before the store would let its delta be overwritten by a
+    // total computed before the edge landed, with no later invalidation left to repair it.
+    std::shared_lock<std::shared_mutex> conjugate_lock(this->conjugate_graph_mutex_,
+                                                       std::defer_lock);
     if (this->conjugate_graph_ != nullptr) {
-        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        conjugate_lock.lock();
         memory += this->conjugate_graph_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);
+    // A concurrent walk that sampled a younger version may have published already; never
+    // downgrade the accounting to an older snapshot.
+    if (version < this->memory_usage_accounted_version_.load(std::memory_order_acquire)) {
+        return;
+    }
     this->current_memory_usage_.store(memory);
+    this->memory_usage_accounted_version_.store(version, std::memory_order_release);
+}
+
+void
+HGraph::mark_memory_usage_dirty() const {
+    this->memory_usage_version_.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t
+HGraph::GetMemoryUsage() const {
+    const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
+                       this->memory_usage_version_.load(std::memory_order_acquire);
+    if (not stale) {
+        return InnerIndexInterface::GetMemoryUsage();
+    }
+    // The breakdown dereferences component containers that mutating paths replace or grow, so it
+    // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
+    // busy mutation simply leaves the cached value in place, which keeps the getter free of any
+    // lock-ordering hazard (the mutating paths do not agree on one) and avoids stalling a caller
+    // that polls the counter. label_lookup_mutex_ is not needed: LabelTable::GetMemoryUsage()
+    // serialises its own storage against reallocation and remap mutations.
+    std::shared_lock<std::shared_mutex> force_remove_lock(this->force_remove_mutex_,
+                                                          std::defer_lock);
+    std::shared_lock<std::shared_mutex> global_lock(this->global_mutex_, std::defer_lock);
+    const bool force_remove_needed =
+        not this->immutable_.load(std::memory_order_acquire) and this->support_force_remove();
+    if ((not force_remove_needed or force_remove_lock.try_lock()) and global_lock.try_lock()) {
+        // Readiness is only meaningful under the structural lock: resize(), Merge() and
+        // SetImmutable() replace these pointers while holding global_mutex_ exclusively, so
+        // comparing them with nullptr outside it would itself be a data race.
+        if (this->neighbors_mutex_ != nullptr and this->pool_ != nullptr and
+            this->label_table_ != nullptr and this->basic_flatten_codes_ != nullptr and
+            this->bottom_graph_ != nullptr) {
+            this->cal_memory_usage();
+        }
+    }
+    return InnerIndexInterface::GetMemoryUsage();
 }
 
 }  // namespace vsag
