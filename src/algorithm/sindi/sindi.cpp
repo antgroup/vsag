@@ -1214,14 +1214,6 @@ SINDI::RangeSearch(const DatasetPtr& query,
         inner_param.time_cost->SetThreshold(search_param.timeout_ms);
     }
 
-    auto filter_callback_remaining =
-        filter != nullptr and search_param.filter_callback_limit > 0
-            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
-            : nullptr;
-    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
-    inner_param.is_inner_id_allowed = this->create_search_filter(
-        create_filter_callback_limiter(filter, filter_callback_remaining));
-
     SearchStatistics statistics;
     auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
     SparseVector effective_query = sparse_query;
@@ -1238,6 +1230,15 @@ SINDI::RangeSearch(const DatasetPtr& query,
             return result;
         }
     }
+
+    // Empty remapped queries do not need a callback budget or search filter.
+    auto filter_callback_remaining =
+        filter != nullptr and search_param.filter_callback_limit > 0
+            ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
+            : nullptr;
+    const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
+    inner_param.is_inner_id_allowed = this->create_search_filter(
+        create_filter_callback_limiter(filter, filter_callback_remaining));
 
     auto computer = std::make_shared<SparseTermComputer>(
         effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
