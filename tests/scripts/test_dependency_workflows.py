@@ -74,9 +74,12 @@ class DependencyWorkflowTest(unittest.TestCase):
 
 
 class TsanCleanupTest(unittest.TestCase):
+    workflow_name = "tsan_build_and_test.yml"
+    job_name = "build_tsan"
+
     def cleanup_script(self, sandbox: Path) -> str:
-        workflow = ROOT / ".github/workflows/tsan_build_and_test.yml"
-        build = job_text(workflow, "build_tsan")
+        workflow = ROOT / ".github/workflows" / self.workflow_name
+        build = job_text(workflow, self.job_name)
         self.assertIn("        - /opt:/useless\n", build)
         match = re.search(
             r"(?ms)^      - name: Free Disk Space\n        run: \|\n"
@@ -191,6 +194,16 @@ class TsanCleanupTest(unittest.TestCase):
                 self.assertIn("(before cleanup)", before)
                 self.assertEqual(before.count(f"node --version exit={status}"), 1)
                 self.assertEqual(after.count(f"node --version exit={status}"), 1)
+
+
+class SimdBuildCleanupTest(TsanCleanupTest):
+    workflow_name = "asan_with_simd_option.yml"
+    job_name = "build_asan_simd"
+
+
+class SimdTestCleanupTest(TsanCleanupTest):
+    workflow_name = "asan_with_simd_option.yml"
+    job_name = "test_asan_simd"
 
 
 if __name__ == "__main__":
