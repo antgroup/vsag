@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -213,12 +214,13 @@ public:
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
-        if (this->max_capacity_ > deserialize_capacity_limit_) {
+        if (this->uses_dense_capacity() && this->max_capacity_ > deserialize_capacity_limit_) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 "serialized graph capacity exceeds index capacity");
         }
         if (duplicate_tracker_) {
-            duplicate_tracker_->DeserializeBounded(reader, this->max_capacity_);
+            duplicate_tracker_->DeserializeBounded(
+                reader, std::min(this->max_capacity_, deserialize_capacity_limit_));
         }
     }
 
@@ -333,6 +335,13 @@ private:
     InnerIdType deserialize_capacity_limit_{std::numeric_limits<InnerIdType>::max()};
 
 protected:
+    // Dense graph storage can allocate from max_capacity_ without reading that many bytes.
+    // Sparse graphs instead allocate rows/neighbors from counts checked by the block reader.
+    [[nodiscard]] virtual bool
+    uses_dense_capacity() const {
+        return true;
+    }
+
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
     std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 };

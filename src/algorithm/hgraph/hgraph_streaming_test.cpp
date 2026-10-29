@@ -419,3 +419,82 @@ TEST_CASE("HGraph streaming bounds dense duplicate capacity before allocation",
 }
 
 }  // namespace vsag
+
+namespace vsag {
+
+TEST_CASE("HGraph streaming restores sparse routes after force removal",
+          "[ut][hgraph][streaming_serialization][sparse_route_shrink]") {
+    const char* const parameters = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":16,
+        "index_param":{"base_quantization_type":"sq8", "support_force_remove":true,
+                       "build_thread_count":1, "max_degree":8, "ef_construction":32}
+    })";
+    constexpr uint64_t count = 256;
+    constexpr uint64_t retained = 128;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * 16);
+    for (uint64_t i = 0; i < count; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint64_t j = 0; j < 16; ++j) {
+            vectors[i * 16 + j] = static_cast<float>(i + j);
+        }
+    }
+    auto data = Dataset::Make();
+    data->NumElements(count)
+        ->Dim(16)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto index = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(data).has_value());
+    // Remove high labels, retaining lower route nodes while compacting the last IDs.
+    std::vector<int64_t> removed(ids.begin() + retained, ids.end());
+    auto removal = index.value()->Remove(removed, RemoveMode::FORCE_REMOVE);
+    REQUIRE(removal.has_value());
+    REQUIRE(removal.value() == removed.size());
+    REQUIRE(index.value()->GetNumElements() == retained);
+    std::stringstream output;
+    REQUIRE(index.value()->SerializeStreaming(output).has_value());
+    const auto bytes = output.str();
+    const auto bottom = test::FindStreamingBlock(bytes, StreamSerializationTag::BOTTOM_GRAPH);
+    REQUIRE(test::ReadStreamingObj<uint32_t>(bytes, bottom.payload_offset + 4) == retained);
+    const auto routes = test::FindStreamingBlock(bytes, StreamSerializationTag::ROUTE_GRAPHS);
+    REQUIRE(routes.payload_size > 0);
+    // This is the writer's historical sparse capacity, not a corrupted artifact.
+    REQUIRE(test::ReadStreamingObj<uint32_t>(bytes, routes.payload_offset + 4) > retained);
+
+    auto restored = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(restored.has_value());
+    std::istringstream input(bytes);
+    auto deserialized = restored.value()->DeserializeStreaming(input);
+    if (!deserialized.has_value()) {
+        INFO(deserialized.error().message);
+        CHECK(deserialized.has_value());
+    }
+    std::istringstream load_input(bytes);
+    auto loaded = Index::Load(load_input, LoadParameters{});
+    if (!loaded.has_value()) {
+        INFO(loaded.error().message);
+        CHECK(loaded.has_value());
+    }
+    if (!deserialized.has_value() || !loaded.has_value()) {
+        return;
+    }
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(16)->Float32Vectors(vectors.data() + (count - 1) * 16)->Owner(false);
+    auto expected = index.value()->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(expected.has_value());
+    for (const auto& candidate : {restored.value(), loaded.value()}) {
+        REQUIRE(candidate->GetNumElements() == retained);
+        auto actual = candidate->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+        REQUIRE(actual.has_value());
+        REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+        for (int64_t i = 0; i < expected.value()->GetDim(); ++i) {
+            REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+            REQUIRE(actual.value()->GetDistances()[i] == expected.value()->GetDistances()[i]);
+        }
+    }
+}
+
+}  // namespace vsag
