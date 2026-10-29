@@ -47,9 +47,7 @@ The VSAG algorithm SINDI for sparse vector search achieves a breakthrough in per
 ### sparse-full-inner-product
 ![](./docs/sparse-full_10_ip.png)
 
-The VSAG algorithm achieves a significant boost of efficiency and outperforms the previous **state-of-the-art (SOTA)** by a clear margin. Specifically, VSAG's QPS exceeds that of the previous SOTA algorithm, Glass, by over 100%, and the baseline algorithm, HNSWLIB, by over 300% according to the ann-benchmark result on the GIST dataset at 90% recall.
-The test in [ann-benchmarks](https://ann-benchmarks.com/) is running on an r6i.16xlarge machine on AWS with `--parallelism 31`, single-CPU, and hyperthreading disabled.
-The result is as follows:
+The VSAG algorithm achieves a significant boost of efficiency and outperforms the previous **state-of-the-art (SOTA)** by a clear margin. Specifically, VSAG's QPS exceeds that of the previous SOTA algorithm, Glass, by over 100%, and the baseline algorithm, HNSWLIB, by over 300% according to the ann-benchmark result on the GIST dataset at 90% recall. The test in [ann-benchmarks](https://ann-benchmarks.com/) is running on an r6i.16xlarge machine on AWS with `--parallelism 31`, single-CPU, and hyperthreading disabled. The result is as follows:
 
 ### gist-960-euclidean
 ![](./docs/gist-960-euclidean_10_euclidean.png)
@@ -174,9 +172,7 @@ for (let i = 0; i < 10; i++) {
 
 ### Integrate with CMake
 
-If you have already installed vsag (e.g. `cmake --install build-release` or via a
-distribution package), the recommended path is to use the shipped CMake package
-config and the imported `vsag::vsag` target:
+If you have already installed vsag (e.g. `cmake --install build-release` or via a distribution package), the recommended path is to use the shipped CMake package config and the imported `vsag::vsag` target:
 
 ```cmake
 # CMakeLists.txt
@@ -192,8 +188,7 @@ add_executable (vsag-cmake-example src/main.cpp)
 target_link_libraries (vsag-cmake-example PRIVATE vsag::vsag)
 ```
 
-Point CMake at the install prefix via `-DCMAKE_PREFIX_PATH=/path/to/install` if
-vsag is not in a system location.
+Point CMake at the install prefix via `-DCMAKE_PREFIX_PATH=/path/to/install` if vsag is not in a system location.
 
 Alternatively, to fetch and build vsag from source as part of your project:
 
@@ -243,14 +238,9 @@ Please read the [DEVELOPMENT](./DEVELOPMENT.md) guide for instructions on how to
 If your system uses VSAG, then feel free to make a pull request to add it to the list.
 
 ## How to Contribute
-Although VSAG is initially developed by the Vector Database Team at Ant Group, it's the work of
-the [community](https://github.com/antgroup/vsag/graphs/contributors), and contributions are always welcome!
-See [CONTRIBUTING](./CONTRIBUTING.md) for ways to get started.
+Although VSAG is initially developed by the Vector Database Team at Ant Group, it's the work of the [community](https://github.com/antgroup/vsag/graphs/contributors), and contributions are always welcome! See [CONTRIBUTING](./CONTRIBUTING.md) for ways to get started.
 
-Need help filing an issue? Run `/create-issue` inside Claude Code, OpenCode or
-Codex, or use the [`tools/issue-helper/`](./tools/issue-helper/README.md)
-shell wrapper. The drafting rules live in
-[`.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md`](./.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md).
+Need help filing an issue? Run `/create-issue` inside Claude Code, OpenCode or Codex, or use the [`tools/issue-helper/`](./tools/issue-helper/README.md) shell wrapper. The drafting rules live in [`.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md`](./.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md).
 
 ## Community
 ![Discord](https://img.shields.io/discord/1298249687836393523?logo=discord&label=Discord)
@@ -260,54 +250,62 @@ Thrive together in VSAG community with users and developers from all around the 
 - Discuss at [discord](https://discord.com/invite/JyDmUzuhrp).
 - Follow us on [Weixin Official Accounts](./docs/weixin-qr.jpg)（微信公众平台）to get the latest news.
 
-## Roadmap v1.0 (ETA Mar. 2026)
-- **Versatile Data Type Support**
-  - **FP32 Vectors**: For standard, high-precision retrieval scenarios.
-  - **INT8, BF16, FP16 Vectors**: Natively support quantized embedding models to reduce memory footprint.
-  - **Sparse Vectors**: To enhance text retrieval capabilities.
+## Roadmap v1.2 (ETA Dec. 2026)
 
-- **Optimized Index Types**
-  - **HGraph (Graph Index)**: For scenarios demanding high recall and low latency.
-    Supports opt-in [adaptive neighbor pruning](docs/docs/en/src/indexes/adaptive_pruning.md) for NSW/L2 construction.
-  - **LazyHGraph (Adaptive Graph Index)**: Uses exact BruteForce for small FP32 datasets
-    and automatically converts to HGraph after a configurable threshold. Deletes in the flat
-    phase physically remove vectors and shrink storage instead of leaving tombstones. Vector
-    updates use the same public API in both flat and graph phases.
-  - **IVF (Inverted File Index)**: Optimized for large-scale search (high `k`) and batch queries.
-  - **SINDI (Sparse Inverted Non-redundant Distance Index)**: Optimized sparse vector index.
-  - **SINDI_V2**: Optimized sparse vector index supporting both in-memory and disk-based I/O.
+- **Adaptive and Concurrent Search**
+  - **Elastic `ef_search`**: Adapt search effort to individual queries to balance recall and latency.
+  - **Multi-Core Search Scalability**: Improve concurrent search throughput through better cache utilization, memory access, and NUMA awareness.
 
-- **Advanced Quantization Methods**
-  - **RaBitQ (BQ)**: Extreme compression for minimal memory usage.
-  - **PQ (Product Quantization)**: Flexible compression for tuning the memory-recall trade-off.
-  - **SQ4 & SQ8 (Scalar Quantization)**: Balanced performance with minimal recall loss for memory and speed gains.
+- **Unified Indexing and Hybrid Retrieval**
+  - **HGraph v2**: Integrate capabilities from LazyHGraph, MCI, and Pyramid into a unified index with comprehensive filtering and search optimizations.
+  - **Dense–Sparse Hybrid Search**: Support retrieval that combines dense and sparse similarity with configurable query-time weights.
+  - **SINDI_V2**: Complete the sparse-vector index introduced in v1.1 as a work in progress, with optimized in-memory and disk-based search.
+  - **Hamming Distance**: Enable similarity search over binary vectors.
+  - **Grouped Retrieval**: Support multiple vectors per entity with collapsed and expanded search results.
 
-- **Cross-Platform CPU Optimizations**
-  - **x86_64**: `SSE`, `AVX`, `AVX2`, `AVX512`, `AMX`.
-  - **ARM**: `Neon`, `SVE`.
-  - **Optional Libraries**: Supports `Intel-MKL` and `OpenBLAS` for accelerated matrix multiplication.
+- **Faster Index Construction and Balanced Partitioning**
+  - **GPU-Accelerated HGraph Construction**: Accelerate graph building with GPU computation.
+  - **Random Projection Tree Partitioning**: Provide balanced, reproducible partitions for clustering and parallel index construction.
+  - **Balanced K-Means**: Add capacity-constrained clustering to produce balanced IVF partitions.
+  - **Efficient Graph Merging and Reuse**: Reuse existing graph structures during index merging and parameter tuning to reduce construction costs.
 
-- **Granular Resource Management**
-  - **Memory Isolation**: Per-index memory allocators for tenant-level memory management.
-  - **CPU Control**: Supports custom thread pools to scale ingestion and search throughput.
+- **Advanced Quantization**
+  - **SAQ Quantization**: Introduce code adjustment and dimension segmentation for improved quantization efficiency and accuracy.
+  - **Multi-Centroid Residual RaBitQ**: Improve compression quality by quantizing residuals around multiple centroids.
+  - **Efficient Scalar Quantization**: Optimize local SQ4/SQ8 computation and reduce redundant storage between search and reranking.
+
+- **Index Diagnostics and Capacity Planning**
+  - **New Index Diagnostics**: Expand index inspection and query analysis to help identify index-quality and search-performance bottlenecks.
+  - **Dataset Profiling and Visualization**: Analyze vector distributions, sparsity, clustering structure, and distance characteristics.
+  - **HGraph Build Memory Estimator**: Estimate peak construction memory before starting an index build.
+  - **Pip-Installable Analysis Tools**: Make index diagnostics available through `pyvsag` without requiring a source build.
+
+- **Lightweight Deployment and Storage Integration**
+  - **VSAG Lite**: Provide a lightweight variant with essential indexing, search, update, and persistence capabilities for resource-constrained deployments.
+  - **Pluggable Storage I/O**: Extend custom reader and writer support for external storage integration.
+  - **Lower Memory Footprint**: Reduce redundant storage in immutable indexes and improve binary distribution packaging.
+
+- **Python and RAG Ecosystem**
+  - **LangChain Integration**: Provide a `pyvsag` VectorStore adapter for document retrieval and RAG workflows.
+  - **Sparse Input Helpers**: Simplify conversion from named term-weight mappings to SINDI-compatible sparse vectors.
 
 ## Our Publications
 
 1. Elastic Index Selection for Label-Hybrid AKNN Search [_VLDB_, 2026]  
    **Mingyu Yang**, Wenxuan Xia, Wentao Li, Raymond Chi-Wing Wong, Wei Wang  
-   [PDF](https://arxiv.org/pdf/2505.03212) | [DOI](https://doi.org/10.14778/3785297.3785304)
+   [PDF](https://www.vldb.org/pvldb/vol19/p617-yang.pdf) | [DOI](https://doi.org/10.14778/3785297.3785304)
 
 2. FGIM: a Fast Graph-based Indexes Merging Framework for Approximate Nearest Neighbor Search [_SIGMOD_, 2026]  
    **Zekai Wu, Jiabao Jin**, Peng Cheng, **Xiaoyao Zhong**, Lei Chen, Yongxin Tong, **Zhitao Shen**, Jingkuan Song, Heng Tao Shen, Xuemin Lin  
-   [PDF](https://arxiv.org/pdf/2603.21710) | [DOI](https://doi.org/10.1145/3786651)
+   [PDF](https://dl.acm.org/doi/pdf/10.1145/3786651) | [DOI](https://doi.org/10.1145/3786651)
 
 3. SINDI: an Efficient Index for Approximate Maximum Inner Product Search on Sparse Vectors [_ICDE_, 2026]  
    **Ruoxuan Li, Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, Wangze Ni, Lei Chen, **Zhitao Shen, Wei Jia, Xiangyu Wang**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
-   [PDF](https://arxiv.org/pdf/2509.08395)
+   [PDF](https://arxiv.org/pdf/2509.08395) | [DOI](https://doi.org/10.1109/ICDE65706.2026.00208)
 
 4. Quantization Meets Projection: A Happy Marriage for Approximate k-Nearest Neighbor Search [_VLDB_, 2026]  
    **Mingyu Yang**, Liuchang Jing, Wentao Li, Wei Wang  
-   [PDF](https://arxiv.org/pdf/2411.06158)
+   [PDF](https://www.vldb.org/pvldb/vol19/p1240-yang.pdf) | [DOI](https://doi.org/10.14778/3797919.3797931)
 
 5. VSAG: An Optimized Search Framework for Graph-based Approximate Nearest Neighbor Search [_VLDB (industry)_, 2025]  
    **Xiaoyao Zhong, Haotian Li, Jiabao Jin, Mingyu Yang, Deming Chu, Xiangyu Wang, Zhitao Shen, Wei Jia**, George Gu, Yi Xie, Xuemin Lin, Heng Tao Shen, Jingkuan Song, Peng Cheng  
@@ -319,22 +317,56 @@ Thrive together in VSAG community with users and developers from all around the 
 
 7. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [_TKDE_] \
    **Xiaoyao Zhong, Jiabao Jin**, Peng Cheng, **Mingyu Yang**, Lei Chen, Haoyang Li, **Zhitao Shen**, Xuemin Lin, Heng Tao Shen, Jingkuan Song  
-   [PDF](https://ieeexplore.ieee.org/document/11663430)
+   [PDF](https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=11663430) | [DOI](https://doi.org/10.1109/TKDE.2026.3726767)
 
 ## Reference
-VSAG referenced the following works during its implementation:
-1. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search [_SIGMOD_, 2024]  
-  Jianyang Gao, Cheng Long  
-   [PDF](https://dl.acm.org/doi/pdf/10.1145/3654970) | [DOI](https://doi.org/10.1145/3654970) | [CODE](https://github.com/VectorDB-NTU/RaBitQ-Library)
 
+VSAG draws on the following works for graph construction, vector quantization, filtered search, and integer compression:
 
-2. Quasi-succinct Indices [_WSDM_, 2013]  
-  Sebastiano Vigna  
-   [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
+1. Efficient and Robust Approximate Nearest Neighbor Search Using Hierarchical Navigable Small World Graphs [_TPAMI_, 2020] \
+   Yu. A. Malkov, D. A. Yashunin \
+   Hierarchical graph construction and search in HGraph. \
+   [PDF](https://arxiv.org/pdf/1603.09320) | [DOI](https://doi.org/10.1109/TPAMI.2018.2889473)
+
+2. Efficient K-Nearest Neighbor Graph Construction for Generic Similarity Measures [_WWW_, 2011] \
+   Wei Dong, Moses Charikar, Kai Li \
+   NN-Descent neighbor refinement underlying the ODescent graph builder. \
+   [PDF](https://www.cs.princeton.edu/cass/papers/www11.pdf) | [DOI](https://doi.org/10.1145/1963405.1963487)
 
 3. PiPNN: Ultra-Scalable Graph-Based Nearest Neighbor Indexing [_arXiv_, 2026] \
-  Tobias Rubel, Richard Wen, Laxman Dhulipala, Lars Gottesbüren, Rajesh Jayaram, Jakub Łącki \
+   Tobias Rubel, Richard Wen, Laxman Dhulipala, Lars Gottesbüren, Rajesh Jayaram, Jakub Łącki \
+   Parallel graph construction in the PiPNN builder used by HGraph and Pyramid. \
    [PDF](https://arxiv.org/pdf/2602.21247) | [CODE](https://github.com/ParAlg/PiPNN)
+
+4. Product Quantization for Nearest Neighbor Search [_TPAMI_, 2011] \
+   Hervé Jégou, Matthijs Douze, Cordelia Schmid \
+   Subspace codebooks and lookup-table distance computation in the product quantizer. \
+   [PDF](https://inria.hal.science/inria-00514462v2/file/jegou_pq_postprint.pdf) | [DOI](https://doi.org/10.1109/TPAMI.2010.57)
+
+5. RaBitQ: Quantizing High-Dimensional Vectors with a Theoretical Error Bound for Approximate Nearest Neighbor Search [_SIGMOD_, 2024] \
+   Jianyang Gao, Cheng Long \
+   Randomized binary quantization and distance estimation in the RaBitQ quantizer. \
+   [PDF](https://dl.acm.org/doi/pdf/10.1145/3654970) | [DOI](https://doi.org/10.1145/3654970) | [CODE](https://github.com/VectorDB-NTU/RaBitQ-Library)
+
+6. Practical and Asymptotically Optimal Quantization of High-Dimensional Vectors in Euclidean Space for Approximate Nearest Neighbor Search [_SIGMOD_, 2025] \
+   Jianyang Gao, Yutong Gou, Yuexuan Xu, Yongyi Yang, Cheng Long, Raymond Chi-Wing Wong \
+   Multi-bit quantization in the extended RaBitQ implementation. \
+   [PDF](https://arxiv.org/pdf/2409.09913) | [DOI](https://doi.org/10.1145/3725413)
+
+7. SAQ: Pushing the Limits of Vector Quantization through Code Adjustment and Dimension Segmentation [_SIGMOD_, 2026] \
+   Hui Li, Shiyuan Deng, Xiao Yan, Xiangyu Zhi, James Cheng \
+   Code adjustment for the optional fast encoding path in the RaBitQ quantizer. \
+   [PDF](https://arxiv.org/pdf/2509.12086) | [DOI](https://doi.org/10.1145/3769824)
+
+8. MCI: A Maximal Clique Index for Efficient Arbitrary-Filtered Approximate Nearest Neighbor Search [_arXiv_, 2026] \
+   Xiaowei Ye, Rong-Hua Li, Guoren Wang, Kaiwen Xue, Daiyin Wang, Xubin Li \
+   Clique-based indexing and filtered search in HGraph's MCI mode. \
+   [PDF](https://arxiv.org/pdf/2604.22171)
+
+9. Quasi-succinct Indices [_WSDM_, 2013] \
+   Sebastiano Vigna \
+   Elias–Fano integer encoding in the compression implementation. \
+   [PDF](https://dl.acm.org/doi/pdf/10.1145/2433396.2433409) | [DOI](https://doi.org/10.1145/2433396.2433409)
 
 ## Contributors
 
