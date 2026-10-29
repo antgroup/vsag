@@ -83,7 +83,7 @@ jobs:
       - name: Format and helper checks
         run: |
           ./scripts/format/check_format.sh
-          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest discover -s scripts/linters -p 'test_*.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
           python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
           python3 -m unittest tests/scripts/test_collect_build_metrics.py
@@ -139,6 +139,12 @@ jobs:
           test -x /usr/bin/time
           command -v ccache
           ./scripts/ci/configure-git-safe-directory.sh
+      - name: Find changed source files
+        id: changed-srcs
+        env:
+          LINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 scripts/linters/prepare_lint_base.py
       - name: Prepare shared build and execution identity
         run: |
           mkdir -p ci-logs
@@ -211,14 +217,6 @@ jobs:
         run: |
           ccache --show-stats --verbose > ci-logs/ccache.txt
           ccache --print-stats > ci-logs/ccache-stats.tsv
-      - name: Find changed source files
-        id: changed-srcs
-        env:
-          BASE_BRANCH: ${{ github.base_ref || 'main' }}
-        run: |
-          git fetch origin "$BASE_BRANCH" --depth=1
-          pattern=$(python3 scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH")
-          echo "pattern=$pattern" >> "$GITHUB_OUTPUT"
       - name: Lint changed sources
         if: steps.changed-srcs.outputs.pattern != ''
         env:

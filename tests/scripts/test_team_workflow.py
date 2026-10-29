@@ -82,37 +82,13 @@ class TeamWorkflowTest(unittest.TestCase):
                   for name in ('context.json', 'inventory.json', 'plan.json', 'source.json')}
         (meta / 'complete.json').write_text(json.dumps(values))
 
-    def test_changed_source_filter_failure_stops_before_publishing_output(self):
+    def test_lint_base_precedes_build_and_uses_event_sha(self):
         build = job(TEAM, 'build')
-        self.assertIn('    defaults:\n      run:\n        shell: bash\n', build)
         body = step(TEAM, 'Find changed source files')
-        script = textwrap.dedent(body.split('        run: |\n', 1)[1])
-        cases = (
-            ('fetch failure', 23, "print('unexpected')", 23, None),
-            ('filter failure with stdout', 0, "print('partial'); raise SystemExit(17)", 17, None),
-            ('filter syntax error', 0, "def broken(", 1, None),
-            ('no changed source', 0, "print('')", 0, 'pattern=\n'),
-            ('changed source', 0, "print('^src/example[.]cpp$')", 0, 'pattern=^src/example[.]cpp$\n'),
-        )
-        for name, fetch_exit, source, expected_exit, expected_output in cases:
-            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary)
-                helper = root / 'scripts/linters/changed_source_filter.py'
-                helper.parent.mkdir(parents=True)
-                helper.write_text(source + '\n')
-                output = root / 'step-output'
-                shell = root / 'step.sh'
-                shell.write_text('git() { return "$FETCH_EXIT"; }\n' + script)
-                result = subprocess.run(
-                    ['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', str(shell)],
-                    cwd=root, env=dict(os.environ, BASE_BRANCH='main', FETCH_EXIT=str(fetch_exit),
-                                       GITHUB_OUTPUT=str(output)),
-                    capture_output=True, text=True)
-                self.assertEqual(result.returncode, expected_exit, result.stdout + result.stderr)
-                if expected_output is None:
-                    self.assertFalse(output.exists(), 'A failed filter must not publish an empty pattern')
-                else:
-                    self.assertEqual(output.read_text(), expected_output)
+        self.assertIn('LINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}', body)
+        self.assertIn('python3 scripts/linters/prepare_lint_base.py', body)
+        self.assertLess(build.index('Find changed source files'), build.index('make asan'))
+        self.assertNotIn('git fetch', build)
 
     def inventory_preflight_fixture(self, root, between_listings=False):
         helper = root / 'scripts/testing/team_test_shards.py'
@@ -519,7 +495,7 @@ class TeamWorkflowTest(unittest.TestCase):
                        'test_team_cache.py', 'test_team_source.py', 'test_compatibility_inputs.py',
                        'test_compatibility_cache.py'):
             self.assertIn('python3 -m unittest tests/scripts/' + script, body)
-        self.assertIn("unittest discover -s scripts/linters -p 'test_changed_source_filter.py'", body)
+        self.assertIn("unittest discover -s scripts/linters -p 'test_*.py'", body)
         self.assertIn('needs: changes', job(TEAM, 'build'))
         self.assertNotIn('needs: [changes, checks]', job(TEAM, 'build'))
         self.assertIn('needs: [changes, checks, build, tests, compatibility]', job(TEAM, 'summary'))
