@@ -216,6 +216,77 @@ private:
     mutable uint64_t count_{0};
 };
 
+TEST_CASE("SINDI Range Remap Filter Callback Lifetime", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const uint64_t callback_limit = GENERATE(0, 5);
+    CAPTURE(immutable, callback_limit);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->remap_term_ids = true;
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 1000;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    auto filter = std::make_shared<CountingFilter>(-1, true);
+    const auto parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 8, "query_prune_ratio": 0.0,
+            "filter_callback_limit": {}}}}})",
+        callback_limit);
+    uint32_t unknown_term = 2000;
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &unknown_term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    // Alternate empty and normal queries to check that each search owns a fresh budget.
+    for (uint64_t iteration = 0; iteration < 2; ++iteration) {
+        const auto before = filter->Count();
+        query_vector.ids_ = &unknown_term;
+        auto empty = index.RangeSearch(query, 0.0F, parameters, filter, 8);
+        REQUIRE(empty->GetDim() == 0);
+        REQUIRE(filter->Count() == before);
+        REQUIRE(filter.use_count() == 1);
+        REQUIRE_FALSE(empty->GetStatistics().empty());
+
+        query_vector.ids_ = &term;
+        auto result = index.RangeSearch(query, 0.0F, parameters, filter, 8);
+        const auto expected_count = callback_limit == 0 ? count : callback_limit;
+        REQUIRE(filter->Count() - before == expected_count);
+        REQUIRE(result->GetDim() == expected_count);
+        REQUIRE(filter.use_count() == 1);
+        std::set<int64_t> result_ids;
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            REQUIRE(result->GetIds()[i] >= 0);
+            REQUIRE(result->GetIds()[i] < count);
+            REQUIRE(result->GetDistances()[i] == 0.0F);
+            result_ids.insert(result->GetIds()[i]);
+        }
+        REQUIRE(result_ids.size() == expected_count);
+    }
+}
+
 TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common_param;
