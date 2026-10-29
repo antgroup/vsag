@@ -35,6 +35,7 @@
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "type_helpers.h"
+#include "utils/lock_strategy.h"
 #include "utils/pointer_define.h"
 #include "vsag/allocator.h"
 #include "vsag/constants.h"
@@ -619,6 +620,14 @@ public:
     uint32_t prefetch_stride_code_{1};
     uint32_t prefetch_depth_code_{1};
     DistanceEvaluationBackend backend_{DistanceEvaluationBackend::UNKNOWN};
+
+    // Internal build-only protocol. Updates hold the same node lock exclusively;
+    // the owner excludes graph structure changes while vector readers run.
+    virtual void
+    SetExternalReadMutexArray(MutexArrayPtr /*mutexes*/) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "external vector read locks are not supported by this datacell");
+    }
 };
 
 inline FlattenCodesLease::~FlattenCodesLease() {
