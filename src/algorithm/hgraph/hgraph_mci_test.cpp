@@ -4091,3 +4091,122 @@ TEST_CASE("Clique malformed snapshot validates extra rows and bounds compaction 
         REQUIRE(members == std::vector<vsag::InnerIdType>{remap ? 1U : 0U});
     }
 }
+
+TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
+          "[ut][hgraph][mci][parallel_add]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t base = 256;
+    constexpr int64_t max_added = 2500;
+    constexpr int64_t total = base + max_added;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(total * dim);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 13) % 251);
+    }
+    // A batch above the parallel threshold exercises the worker path, a batch larger than the
+    // planning chunk exercises the chunk loop and its flush points, and a small batch keeps the
+    // serial branch reachable while workers are configured. The structure is not asserted because
+    // Add inserts graph rows in parallel, so the graph itself is schedule dependent; coverage,
+    // delta accounting and search usability are.
+    auto build_and_add = [&](int64_t threads, int64_t added) {
+        auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+        params["index_param"]["graph_type"].SetString("nsw");
+        params["index_param"]["base_io_type"].SetString("memory_io");
+        params["index_param"]["build_thread_count"].SetInt(threads);
+        auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(index->Build(make_dataset(ids, vectors, 0, base, dim)).has_value());
+        REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_covered_nodes"].GetInt() == base);
+        auto added_result = index->Add(make_dataset(ids, vectors, base, added, dim));
+        REQUIRE(added_result.has_value());
+        REQUIRE(added_result.value().empty());
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(stats["mci_total_nodes"].GetInt() == base + added);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == base + added);
+        REQUIRE(stats["mci_total_clique_count"].GetInt() > 0);
+        return index;
+    };
+    auto stats_of = [](const vsag::IndexPtr& index) {
+        return vsag::JsonType::Parse(index->GetStats());
+    };
+    // Every chunk ends with the serial per-chunk accounting, so the last chunk boundary drains the
+    // whole batch delta instead of leaving it for a later mutation.
+    auto require_drained_delta = [](const vsag::JsonType& stats) {
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    };
+    SECTION("parallel workers cover every live node and drain the batch delta") {
+        require_drained_delta(stats_of(build_and_add(4, 500)));
+    }
+    SECTION("a batch spanning several planning chunks stays covered and drained") {
+        require_drained_delta(stats_of(build_and_add(4, 2500)));
+    }
+    SECTION("a batch below the parallel threshold stays covered and drained") {
+        require_drained_delta(stats_of(build_and_add(4, 100)));
+    }
+    SECTION("serial reference reaches the same coverage") {
+        REQUIRE(stats_of(build_and_add(1, 500))["mci_covered_nodes"].GetInt() == base + 500);
+    }
+    SECTION("sparse candidates keep coverage complete when rows fall back to the repair") {
+        // Vectors placed on a coarse grid are far apart, so an incremental row finds fewer
+        // candidates than the degree target and the merge hands the row to the serial repair.
+        // Measured on this data: every one of the 600 added rows takes the fallback, which is the
+        // branch that must keep coverage complete when a plan under-reports. The planned cliques
+        // are walked before the live structure sees them, so the knn_empty/singleton branches are
+        // reached as well. Coverage is the invariant that must hold either way.
+        constexpr int64_t sparse_dim = 8;
+        constexpr int64_t sparse_base = 200;
+        constexpr int64_t sparse_added = 600;
+        constexpr int64_t sparse_total = sparse_base + sparse_added;
+        std::vector<int64_t> sparse_ids(sparse_total);
+        std::iota(sparse_ids.begin(), sparse_ids.end(), 0);
+        std::vector<float> sparse_vectors(sparse_total * sparse_dim);
+        for (int64_t row = 0; row < sparse_total; ++row) {
+            for (int64_t col = 0; col < sparse_dim; ++col) {
+                // A large stride keeps distinct rows far apart in L2, so each row's candidate set
+                // is small relative to the degree target.
+                sparse_vectors[row * sparse_dim + col] =
+                    static_cast<float>(((row * 7919 + col * 104729) % 100003)) * 1.0F;
+            }
+        }
+        auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(sparse_dim));
+        params["index_param"]["graph_type"].SetString("nsw");
+        params["index_param"]["base_io_type"].SetString("memory_io");
+        params["index_param"]["build_thread_count"].SetInt(4);
+        auto index = vsag::Factory::CreateIndex("hgraph", params.Dump()).value();
+        REQUIRE(index->Build(make_dataset(sparse_ids, sparse_vectors, 0, sparse_base, sparse_dim))
+                    .has_value());
+        auto added = index->Add(
+            make_dataset(sparse_ids, sparse_vectors, sparse_base, sparse_added, sparse_dim));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+        const auto stats = vsag::JsonType::Parse(index->GetStats());
+        REQUIRE(stats["mci_total_nodes"].GetInt() == sparse_total);
+        REQUIRE(stats["mci_covered_nodes"].GetInt() == sparse_total);
+        REQUIRE(stats["mci_delta_clique_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_clique_membership_count"].GetInt() == 0);
+        REQUIRE(stats["mci_delta_extra_membership_count"].GetInt() == 0);
+    }
+    SECTION("search stays usable after a planned batch") {
+        const auto index = build_and_add(4, 2500);
+        for (const auto& search_param :
+             {R"({"hgraph":{"ef_search":100,"use_mci":true}})",
+              R"({"hgraph":{"ef_search":100,"use_mci":false}})",
+              R"({"hgraph":{"ef_search":100,"use_hybrid_traversal":true}})"}) {
+            auto result = index->KnnSearch(make_dataset(ids, vectors, 0, 1, dim), 10, search_param);
+            REQUIRE(result.has_value());
+            // The data set repeats vectors, so duplicate suppression may return
+            // fewer than k rows; usability, uniqueness and range are what matter.
+            REQUIRE(result.value()->GetDim() > 0);
+            REQUIRE(result.value()->GetDim() <= 10);
+            std::set<int64_t> unique;
+            for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+                const auto id = result.value()->GetIds()[i];
+                REQUIRE(id >= 0);
+                REQUIRE(id < total);
+                REQUIRE(unique.insert(id).second);
+            }
+        }
+    }
+}

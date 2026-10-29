@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <functional>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -48,6 +49,7 @@
 #include "vsag/index_features.h"
 
 namespace vsag {
+class MciIncrementalAddExecutor;
 class IteratorFilterContext;
 
 /**
@@ -65,6 +67,7 @@ public:
 
     friend class HGraphAnalyzer;
     friend struct HGraphMCITestAccess;
+    friend class MciIncrementalAddExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
@@ -654,6 +657,55 @@ private:
 
     void
     build_mci_clique_index(const void* vectors = nullptr);
+
+    void
+    mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
+                          InnerIdType node_id,
+                          Vector<InnerIdType>& clique_ids) const;
+
+    void
+    mci_read_clique_members(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType clique_id,
+                            Vector<InnerIdType>& members) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_clique_member_count(const std::shared_lock<std::shared_mutex>* view,
+                                 InnerIdType clique_id) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_logical_clique_count(const std::shared_lock<std::shared_mutex>* view) const;
+
+    /// Contiguous FP32 rows for lock-free L2 pair distances, or nullptr when the companion codes
+    /// or the metric require the codec pair API. Both paths return the identical L2 value.
+    [[nodiscard]] const float*
+    mci_contiguous_l2_vectors(uint64_t* row_stride) const;
+
+    /// Candidate cliques worth joining for one seed, ordered by overlapping members. Shared by the
+    /// serial update (which appends to them) and the planning pass (which only records them).
+    void
+    collect_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                             const Vector<InnerIdType>& knn_ids,
+                             Vector<std::pair<uint64_t, InnerIdType>>& targets) const;
+
+    /// Walk collected JOIN targets in gain order. With apply set they are appended to the live
+    /// structure; otherwise the walk only counts the neighbors a plan would gain.
+    void
+    apply_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                           InnerIdType new_inner_id,
+                           const Vector<std::pair<uint64_t, InnerIdType>>& targets,
+                           uint64_t degree_target,
+                           UnorderedSet<InnerIdType>& neighbors,
+                           bool apply);
+
+    /// Local MCE around a seed with the full-build expansion rules. `view` selects the companion
+    /// state and `emit` receives every produced clique in global inner IDs, so the caller decides
+    /// whether it is written to the cell or recorded in a plan.
+    void
+    build_local_mci_cliques(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t visible_total,
+                            const std::function<void(const Vector<InnerIdType>&)>& emit);
 
     /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
     /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.

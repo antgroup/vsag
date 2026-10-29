@@ -26,7 +26,8 @@
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"          // IWYU pragma: keep
+#include "hgraph_mci_add.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -597,14 +598,8 @@ HGraph::Add(const DatasetPtr& data) {
             force_remove_rlock.unlock();
         }
         if (had_mci_clique_index) {
-            logger::info("hgraph mci incremental add started, added={}", inner_ids.size());
-            for (const auto& [inner_id, local_idx] : inner_ids) {
-                this->incremental_update_mci_clique(inner_id, get_data(data, local_idx));
-                this->maybe_compact_mci(1);
-            }
+            MciIncrementalAddExecutor(*this).Run(inner_ids, data);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            logger::info("hgraph mci incremental add finished, total={}",
-                         this->total_count_.load());
         } else {
             const void* vectors = nullptr;
             if (mci_start_total == 0 and failed_ids.empty()) {

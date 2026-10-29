@@ -374,6 +374,35 @@ CliqueDataCell::GetCliqueMemberCount(InnerIdType clique_id) const {
     return count;
 }
 
+std::shared_lock<std::shared_mutex>
+CliqueDataCell::AcquireReadLock() const {
+    return std::shared_lock<std::shared_mutex>(mutex_);
+}
+
+void
+CliqueDataCell::CollectNodeCliqueIdsUnlocked(InnerIdType node_id,
+                                             Vector<InnerIdType>& clique_ids) const {
+    collect_node_clique_ids_unlocked(node_id, clique_ids);
+}
+
+void
+CliqueDataCell::GetCliqueMembersUnlocked(InnerIdType clique_id,
+                                         Vector<InnerIdType>& members) const {
+    get_clique_members_unlocked(clique_id, members);
+}
+
+uint64_t
+CliqueDataCell::GetCliqueMemberCountUnlocked(InnerIdType clique_id) const {
+    uint64_t count = 0;
+    for_each_live_member_unlocked(clique_id, [&](InnerIdType, bool) { ++count; });
+    return count;
+}
+
+uint64_t
+CliqueDataCell::TotalLogicalCliqueCountUnlocked() const {
+    return total_logical_clique_count_unlocked();
+}
+
 bool
 CliqueDataCell::AppendNodeToClique(InnerIdType node_id,
                                    InnerIdType clique_id,
