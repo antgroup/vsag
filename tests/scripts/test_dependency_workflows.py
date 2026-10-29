@@ -242,7 +242,7 @@ class FailurePropagationTest(unittest.TestCase):
         import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
         body = job_text(ROOT / '.github/workflows/pr-ci-community.yml', 'build-asan-x86')
-        self.assertIn("BASE_BRANCH: ${{ github.base_ref || 'main' }}", body)
+        self.assertIn("LINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}", body)
         lint = step(body, 'Run Lint')
         script = textwrap.dedent(lint.split('run: |\n', 1)[1])
         self.assertNotIn('${{', script)

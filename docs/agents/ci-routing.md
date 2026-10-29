@@ -150,3 +150,24 @@ set; Team's separately verified read-only snapshot remains unchanged.
 
 Regression coverage is included in
 `python3 -m unittest tests/scripts/test_dependency_workflows.py`.
+
+## Preparing the lint base
+
+Team and Community prepare the lint comparison immediately after checkout and
+workspace prerequisites, before compiling. `scripts/linters/prepare_lint_base.py`
+fetches the exact PR event base SHA, verifies it is that commit, and computes the
+changed-source filter before publishing step outputs. Lint consumes the saved
+filter after compilation without another network request. A failed fetch or diff
+never becomes a successful empty filter. Manual dispatch resolves canonical
+checkout origin's `main` once and then pins that SHA; PR events never fall back
+to a moving branch when their base SHA is absent.
+
+Recognized transient transport errors and process timeouts get at most four
+attempts, each bounded to 60 seconds, with 2/5/10-second backoff plus up to one
+second of jitter. Authentication, missing refs and unrecognized failures stop
+immediately. Diagnostics identify the operation, attempt, duration and error
+class without printing potentially credential-bearing transport output. No
+compiler work is started until preparation succeeds. Lint file-selection policy
+and build configuration are unchanged by this network hardening.
+
+Regression checks: `python3 -m unittest discover -s scripts/linters -p 'test_*.py'`.
