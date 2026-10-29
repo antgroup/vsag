@@ -23,6 +23,7 @@
 namespace vsag {
 
 class HGraph;
+struct MergeUnit;
 class SearchStatistics;
 
 struct FGIMNeighbor {
@@ -35,20 +36,85 @@ struct FGIMNeighbor {
 using FGIMNeighborList = std::vector<FGIMNeighbor>;
 using FGIMKnnGraph = std::vector<FGIMNeighborList>;
 
+struct FGIMRefinementStatistics {
+    uint64_t iterations{0};
+    uint64_t distance_evaluations{0};
+    uint64_t new_new_pairs{0};
+    uint64_t new_old_pairs{0};
+    uint64_t same_source_pairs_skipped{0};
+    uint64_t neighbor_updates{0};
+    uint64_t indegree_repairs{0};
+};
+
+// Optional internal diagnostics; normal public Merge does not collect search counters.
+// Counts cover the three FGIM stages, not upper rebuild or external query evaluation.
+struct FGIMMergeStatistics {
+    double initial_seconds{0};
+    double refinement_seconds{0};
+    double reconstruction_seconds{0};
+    double storage_seconds{0};
+    double bottom_write_seconds{0};
+    double upper_seconds{0};
+    uint64_t initial_distance_evaluations{0};
+    FGIMRefinementStatistics refinement;
+    uint64_t reconstruction_distance_evaluations{0};
+};
+
+// All stages borrow non-empty, disjoint source HGraphs with successful Builds.
+// Sources must remain alive and unchanged during each call. Only float32/L2/fp32
+// without deletion, duplicate grouping, or deduplicate storage is supported.
 class HGraphFGIM {
     friend class HGraphFGIMTestAccessor;
 
 public:
-    // Sources are non-owning, non-empty, disjoint HGraphs with successful Builds.
-    // No concurrent mutation is allowed. Only float32/L2/fp32 without deletion
-    // or duplicate grouping/deduplicate storage is supported. Result rows use merged internal IDs.
+    static void
+    Merge(HGraph& destination,
+          const std::vector<MergeUnit>& merge_units,
+          uint64_t max_iterations,
+          FGIMMergeStatistics* statistics = nullptr);
+
+    // Rebuild route graphs with the existing HGraph insertion primitives.
+    static void
+    RebuildUpperLayers(HGraph& destination);
+
+    // Algorithm 5. Input rows are not modified; output rows remain distance-sorted.
     static FGIMKnnGraph
-    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs, uint64_t k);
+    KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
+                 const FGIMKnnGraph& graph,
+                 uint64_t k,
+                 uint64_t* distance_evaluations = nullptr);
+
+    // Destination vectors and labels must already occupy the merged internal ID space.
+    // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
+    static void
+    WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
+    // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
+    // Each stage validates its inputs so it can also be called independently.
+    // A zero iteration budget validates the graph but leaves it unchanged.
+    static FGIMRefinementStatistics
+    RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
+                   FGIMKnnGraph& graph,
+                   uint64_t k,
+                   uint64_t max_iterations);
+
+    // Result rows use merged internal IDs.
+    static FGIMKnnGraph
+    BuildInitialKnnGraph(const Vector<const HGraph*>& source_graphs,
+                         uint64_t k,
+                         uint64_t* distance_evaluations = nullptr);
 
 private:
+    // Shared checks also apply to an empty destination.
+    static void
+    ValidateStorage(const HGraph& index);
+
+    static void
+    ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count);
+
     // Internal-only search, not a public index API. The caller must validate the target
     // as FGIM-compatible and provide at least target.dim_ floats in query.
-    // CrossQuery does not repeat full source validation.
+    // CrossQuery does not repeat full source validation. NaNs are omitted;
+    // callers must reject non-finite returned distances, including infinity.
     // Optional statistics are for diagnostics; normal FGIM runs do not collect them.
     static FGIMNeighborList
     CrossQuery(const HGraph& target,
