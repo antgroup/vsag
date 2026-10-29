@@ -16,6 +16,7 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -191,12 +192,31 @@ public:
                             "GraphInterface does not support DeserializeTail");
     }
 
+    // Bound implicit allocations by the enclosing index, rather than by the graph's own
+    // untrusted serialized capacity. Deserialization already requires exclusive access.
+    void
+    DeserializeBounded(StreamReader& reader, InnerIdType max_capacity) {
+        const auto previous_limit = deserialize_capacity_limit_;
+        deserialize_capacity_limit_ = max_capacity;
+        try {
+            this->Deserialize(reader);
+        } catch (...) {
+            deserialize_capacity_limit_ = previous_limit;
+            throw;
+        }
+        deserialize_capacity_limit_ = previous_limit;
+    }
+
     virtual void
     Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
+        if (this->max_capacity_ > deserialize_capacity_limit_) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "serialized graph capacity exceeds index capacity");
+        }
         if (duplicate_tracker_) {
             duplicate_tracker_->DeserializeBounded(reader, this->max_capacity_);
         }
@@ -308,6 +328,9 @@ public:
 
     std::atomic<InnerIdType> total_count_{0};
     Allocator* allocator_{nullptr};
+
+private:
+    InnerIdType deserialize_capacity_limit_{std::numeric_limits<InnerIdType>::max()};
 
 protected:
     DuplicateTrackerPtr duplicate_tracker_{nullptr};

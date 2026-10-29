@@ -835,7 +835,7 @@ HGraph::read_streaming_body(StreamReader& reader,
                 break;
             case StreamSerializationTag::BOTTOM_GRAPH:
                 ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
-                    this->bottom_graph_->Deserialize(block);
+                    this->bottom_graph_->DeserializeBounded(block, this->max_capacity_.load());
                 });
                 loaded_bottom_graph = true;
                 break;
@@ -879,7 +879,7 @@ HGraph::read_streaming_body(StreamReader& reader,
             case StreamSerializationTag::ROUTE_GRAPHS:
                 ReadForwardBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     for (auto& route_graph : this->route_graphs_) {
-                        route_graph->Deserialize(block);
+                        route_graph->DeserializeBounded(block, this->max_capacity_.load());
                     }
                 });
                 loaded_route_graphs = true;

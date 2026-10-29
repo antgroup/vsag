@@ -91,7 +91,9 @@ deserialize_map(StreamReader& reader,
         StreamReader::ReadObj(reader, key);
         auto manager = std::make_unique<MultiBitsetManager>(allocator, 1, type);
         manager->Deserialize(reader);
-        map[key] = manager.release();
+        auto& slot = map[key];
+        delete slot;
+        slot = manager.release();
     }
 }
 
@@ -112,7 +114,9 @@ AttrValueMap::Deserialize(StreamReader& reader) {
         key = StreamReader::ReadString(reader);
         auto manager = std::make_unique<MultiBitsetManager>(allocator_, 1, bitset_type_);
         manager->Deserialize(reader);
-        string_to_bitset_[key] = manager.release();
+        auto& slot = string_to_bitset_[key];
+        delete slot;
+        slot = manager.release();
     }
 }
 

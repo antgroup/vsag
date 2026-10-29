@@ -347,3 +347,75 @@ TEST_CASE("HGraph streaming bounds compressed graph and attribute counts",
 }
 
 }  // namespace vsag
+
+namespace vsag {
+
+TEST_CASE("HGraph streaming bounds dense duplicate capacity before allocation",
+          "[ut][hgraph][streaming_serialization][count_safety]") {
+    const bool repair_crc = GENERATE(false, true);
+    const auto parameters = R"({
+        "dtype":"float32", "metric_type":"l2", "dim":16,
+        "index_param":{"base_quantization_type":"sq8", "support_duplicate":true,
+                       "build_thread_count":1, "max_degree":8, "ef_construction":32}
+    })";
+    constexpr uint64_t count = 16;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * 16);
+    for (uint64_t i = 0; i < count; ++i) {
+        ids[i] = static_cast<int64_t>(i);
+        for (uint64_t j = 0; j < 16; ++j) {
+            vectors[i * 16 + j] = static_cast<float>(i + j);
+        }
+    }
+    auto data = Dataset::Make();
+    data->NumElements(count)
+        ->Dim(16)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto index = Factory::CreateIndex("hgraph", parameters);
+    REQUIRE(index.has_value());
+    REQUIRE(index.value()->Build(data).has_value());
+    std::stringstream output;
+    REQUIRE(index.value()->SerializeStreaming(output).has_value());
+    auto bytes = output.str();
+    test::GuardedAllocator normal_allocator;
+    normal_allocator.limit = std::numeric_limits<uint64_t>::max();
+    auto normal = Factory::CreateIndex("hgraph", parameters, &normal_allocator);
+    REQUIRE(normal.has_value());
+    std::istringstream normal_input(bytes);
+    REQUIRE(normal.value()->DeserializeStreaming(normal_input).has_value());
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(16)->Float32Vectors(vectors.data())->Owner(false);
+    auto expected = index.value()->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+    auto actual = normal.value()->KnnSearch(query, 5, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(expected.has_value());
+    REQUIRE(actual.has_value());
+    for (uint64_t i = 0; i < 5; ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+    }
+    const auto block = test::FindStreamingBlock(bytes, StreamSerializationTag::BOTTOM_GRAPH);
+    constexpr uint32_t oversized = uint32_t{1} << 29;
+    // Graph header: uint32 total/capacity/degree; tracker: uint64 groups/size.
+    test::WriteStreamingObj(bytes, block.payload_offset + 4, oversized);
+    test::WriteStreamingObj(bytes, block.payload_offset + 20, uint64_t{oversized});
+    if (repair_crc) {
+        const auto crc = StreamHeader::CalculateChecksum(
+            std::string_view(bytes.data() + block.payload_offset, block.payload_size));
+        test::WriteStreamingObj(bytes, block.header_offset + 24, crc);
+    }
+    test::GuardedAllocator allocator;
+    allocator.limit = std::numeric_limits<uint64_t>::max();
+    auto restored = Factory::CreateIndex("hgraph", parameters, &allocator);
+    REQUIRE(restored.has_value());
+    // Refuse the claimed 2 GiB before touching memory; allow every valid-load request.
+    allocator.limit = normal_allocator.largest_request;
+    allocator.largest_request = 0;
+    std::istringstream input(bytes);
+    auto result = restored.value()->DeserializeStreaming(input);
+    REQUIRE_FALSE(result.has_value());
+    CHECK(result.error().type == ErrorType::INVALID_BINARY);
+    REQUIRE(allocator.largest_request <= allocator.limit);
+}
+
+}  // namespace vsag
