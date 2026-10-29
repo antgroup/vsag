@@ -615,7 +615,8 @@ HGraph::Add(const DatasetPtr& data) {
             this->remove_from_mci(removed);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
         }
-        this->cal_memory_usage();
+        // A per-element Add must not pay the O(total) breakdown; GetMemoryUsage() recalculates.
+        this->mark_memory_usage_dirty();
     }
     return failed_ids;
 }
