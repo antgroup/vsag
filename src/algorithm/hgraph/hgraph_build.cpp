@@ -1341,6 +1341,9 @@ HGraph::resize(uint64_t new_size) {
             this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
         }
         if (not this->using_dedup_storage()) {
+            // Serialise with insert_persistent_codes so resize cannot reallocate the
+            // flatten storage while a concurrent InsertVector is writing into it.
+            std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
             this->basic_flatten_codes_->Resize(new_size_power_2);
             if (has_precise_reorder()) {
                 this->high_precise_codes_->Resize(new_size_power_2);

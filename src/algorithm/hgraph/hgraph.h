@@ -1258,7 +1258,9 @@ private:
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    mutable std::shared_mutex global_mutex_;  // guards total_count_, entry_point_id_
+    // HGraph::resize takes global_mutex_ before persistent_codes_mutex_; code writers
+    // must never acquire global_mutex_ while holding persistent_codes_mutex_.
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
     enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
