@@ -23,6 +23,7 @@
 #include "common.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
+#include "utils/search_lock.h"
 
 namespace vsag {
 namespace {
@@ -154,7 +155,7 @@ CliqueDataCell::RemapNodes(const Vector<InnerIdType>& old_to_new, uint64_t total
 
 Vector<InnerIdType>
 CliqueDataCell::GetInactiveNodeIds() const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     Vector<InnerIdType> ids(allocator_);
     ids.reserve(inactive_node_count_);
     for (uint64_t id = 0; id < inactive_nodes_.size(); ++id) {
@@ -284,7 +285,7 @@ void
 CliqueDataCell::MarkAvailable(uint64_t total) {
     // Structural writes have finished under the exclusive lock. Pin only for validation;
     // publishing the atomic is safe alongside readers and does not mutate CSR/delta storage.
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     CHECK_ARGUMENT(delta_node_to_cids_.size() == total,
                    "cannot publish an incomplete MCI companion");
     available_total_.store(total, std::memory_order_release);
@@ -292,7 +293,7 @@ CliqueDataCell::MarkAvailable(uint64_t total) {
 
 bool
 CliqueDataCell::HasCliqueIndex(uint64_t total) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     if (available_total_.load(std::memory_order_acquire) != total or
         p_maxc_.size() != total_clique_count_ + 1 or p_node_to_cid_.size() > total + 1 or
         delta_node_to_cids_.size() != total) {
@@ -303,7 +304,7 @@ CliqueDataCell::HasCliqueIndex(uint64_t total) const {
 
 uint64_t
 CliqueDataCell::TotalLogicalCliqueCount() const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     return total_logical_clique_count_unlocked();
 }
 
@@ -350,7 +351,7 @@ CliqueDataCell::collect_node_clique_ids_unlocked(InnerIdType node_id,
 
 void
 CliqueDataCell::CollectNodeCliqueIds(InnerIdType node_id, Vector<InnerIdType>& clique_ids) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     collect_node_clique_ids_unlocked(node_id, clique_ids);
 }
 
@@ -362,13 +363,13 @@ CliqueDataCell::get_clique_members_unlocked(InnerIdType clique_id,
 
 void
 CliqueDataCell::GetCliqueMembers(InnerIdType clique_id, Vector<InnerIdType>& members) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     get_clique_members_unlocked(clique_id, members);
 }
 
 uint64_t
 CliqueDataCell::GetCliqueMemberCount(InnerIdType clique_id) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     uint64_t count = 0;
     for_each_live_member_unlocked(clique_id, [&](InnerIdType, bool) { ++count; });
     return count;
@@ -450,7 +451,7 @@ MCIDeleteSnapshot
 CliqueDataCell::PrepareDelete(const Vector<InnerIdType>& node_ids,
                               uint64_t clique_size_threshold,
                               uint64_t node_mct_threshold) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     MCIDeleteSnapshot snapshot(allocator_);
     UnorderedSet<InnerIdType> deleting(allocator_);
     deleting.reserve(node_ids.size());
@@ -537,7 +538,7 @@ CliqueDataCell::CommitDelete(const Vector<InnerIdType>& node_ids,
 
 void
 CliqueDataCell::Serialize(StreamWriter& writer) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     StreamWriter::WriteVector(writer, p_maxc_);
     StreamWriter::WriteVector(writer, maxcs_);
     StreamWriter::WriteVector(writer, p_node_to_cid_);
@@ -618,7 +619,7 @@ CliqueDataCell::Deserialize(StreamReader& reader,
 
 uint64_t
 CliqueDataCell::GetMemoryUsage() const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     return sizeof(CliqueDataCell) + p_maxc_.capacity() * sizeof(InnerIdType) +
            maxcs_.capacity() * sizeof(InnerIdType) +
            p_node_to_cid_.capacity() * sizeof(InnerIdType) +
@@ -630,10 +631,20 @@ CliqueDataCell::GetMemoryUsage() const {
 
 bool
 CliqueDataCell::TryGetSearchView(uint64_t total, CliqueDataCellSearchView& view) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     if (available_total_.load(std::memory_order_acquire) != total or active_clique_count_ == 0 or
         delta_node_to_cids_.size() != total or inactive_nodes_.size() != total) {
         return false;
+    }
+    // These counters are mutated only through the write path that also republishes
+    // available_total_. An unlocked search is valid only on an immutable snapshot, so no
+    // concurrent writer exists; the check below enforces the compact-CSR precondition.
+    view.static_csr =
+        not needs_compaction_ and inactive_node_count_ == 0 and retired_clique_count_ == 0;
+    if (SearchLockScope::IsNoLock()) {
+        CHECK_ARGUMENT(
+            view.static_csr,
+            "unlocked MCI search requires a compact immutable CSR; rebuild after mutation");
     }
     view.p_maxc = p_maxc_.data();
     view.maxcs = maxcs_.data();
@@ -654,7 +665,7 @@ CliqueDataCell::TryGetSearchView(uint64_t total, CliqueDataCellSearchView& view)
 
 CliqueDataCellStats
 CliqueDataCell::CollectStats(uint64_t total) const {
-    std::shared_lock<std::shared_mutex> lock(mutex_);
+    auto lock = make_search_read_lock(mutex_);
     CliqueDataCellStats stats;
     stats.total_nodes = total;
     stats.base_clique_count = total_clique_count_;

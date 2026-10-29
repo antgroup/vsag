@@ -40,6 +40,7 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "index_impl.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/window_result_queue.h"
 #include "vsag/binaryset.h"
@@ -78,32 +79,38 @@ public:
 public:
     tl::expected<std::vector<int64_t>, Error>
     Build(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->build(base));
     }
 
     IndexType
     GetIndexType() const override {
+        const SearchLockScope public_search_scope(false);
         return IndexType::HNSW;
     }
 
     tl::expected<std::vector<int64_t>, Error>
     Add(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->add(base));
     }
 
     tl::expected<uint32_t, Error>
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
+        const SearchLockScope public_search_scope(false);
         // TODO(LHT): HNSW only support MARK_DELETE mode
         SAFE_CALL(return this->remove(ids));
     }
 
     tl::expected<bool, Error>
     UpdateId(int64_t old_id, int64_t new_id) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->update_id(old_id, new_id));
     }
 
     tl::expected<bool, Error>
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->update_vector(id, new_base, force_update));
     }
 
@@ -112,6 +119,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const std::function<bool(int64_t)>& filter) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->knn_search_internal(query, k, parameters, filter));
     }
 
@@ -120,6 +128,7 @@ public:
               int64_t k,
               const std::string& parameters,
               BitsetPtr invalid = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->knn_search_internal(query, k, parameters, invalid));
     }
 
@@ -128,6 +137,7 @@ public:
               int64_t k,
               const std::string& parameters,
               const FilterPtr& filter) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->knn_search(query, k, parameters, filter));
     }
 
@@ -138,12 +148,14 @@ public:
               const FilterPtr& filter,
               vsag::IteratorContext*& filter_ctx,
               bool is_last_search) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->knn_search(
             query, k, parameters, filter, nullptr, &filter_ctx, is_last_search));
     }
 
     tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        const SearchLockScope public_search_scope(false);
         if (search_param.is_iter_filter) {
             SAFE_CALL(return this->knn_search(query,
                                               k,
@@ -163,6 +175,7 @@ public:
                 float radius,
                 const std::string& parameters,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->range_search_internal(
             query, radius, parameters, (BitsetPtr) nullptr, limited_size));
     }
@@ -173,6 +186,7 @@ public:
                 const std::string& parameters,
                 const std::function<bool(int64_t)>& filter,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(
             return this->range_search_internal(query, radius, parameters, filter, limited_size));
     }
@@ -183,6 +197,7 @@ public:
                 const std::string& parameters,
                 BitsetPtr invalid,
                 int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(
             return this->range_search_internal(query, radius, parameters, invalid, limited_size));
     }
@@ -192,6 +207,7 @@ public:
              int64_t k,
              const std::string& parameters,
              int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->feedback(query, k, parameters, global_optimum_tag_id));
     };
 
@@ -199,6 +215,7 @@ public:
     Pretrain(const std::vector<int64_t>& base_tag_ids,
              uint32_t k,
              const std::string& parameters) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->pretrain(base_tag_ids, k, parameters));
     };
 
@@ -206,6 +223,7 @@ public:
     CalcDistanceById(const float* vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->calc_distance_by_id(vector, id));
     };
 
@@ -214,16 +232,19 @@ public:
                     const int64_t* ids,
                     int64_t count,
                     bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->calc_distance_by_id(vector, ids, count));
     };
 
     virtual tl::expected<std::pair<int64_t, int64_t>, Error>
     GetMinAndMaxId() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->get_min_and_max_id());
     };
 
     tl::expected<DetailDataPtr, Error>
     GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->get_detail_data_by_name(name, info));
     }
 
@@ -231,39 +252,46 @@ public:
     GetRawVectorByIds(const int64_t* ids,
                       int64_t count,
                       Allocator* specified_allocator = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->get_vectors_by_id(ids, count, specified_allocator));
     }
 
 public:
     tl::expected<BinarySet, Error>
     Serialize() const override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->serialize());
     }
 
     tl::expected<void, Error>
     Deserialize(const BinarySet& binary_set) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->deserialize(binary_set));
     }
 
     tl::expected<void, Error>
     Deserialize(const ReaderSet& reader_set) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->deserialize(reader_set));
     }
 
 public:
     tl::expected<void, Error>
     Serialize(std::ostream& out_stream) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->serialize(out_stream));
     }
 
     tl::expected<void, Error>
     Deserialize(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->deserialize(in_stream));
     }
 
 public:
     tl::expected<void, Error>
     Merge(const std::vector<MergeUnit>& merge_units) override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(return this->merge(merge_units));
     }
 
@@ -295,26 +323,31 @@ public:
 
     [[nodiscard]] bool
     CheckIdExist(int64_t id) const override {
+        const SearchLockScope public_search_scope(false);
         return this->check_id_exist(id);
     }
 
     int64_t
     GetNumberRemoved() const override {
+        const SearchLockScope public_search_scope(false);
         return this->get_num_removed_elements();
     }
 
     int64_t
     GetNumElements() const override {
+        const SearchLockScope public_search_scope(false);
         return this->get_num_elements();
     }
 
     uint64_t
     GetMemoryUsage() const override {
+        const SearchLockScope public_search_scope(false);
         return this->get_memory_usage();
     }
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override {
+        const SearchLockScope public_search_scope(false);
         return this->estimate_memory(num_elements);
     }
 
@@ -340,6 +373,7 @@ public:
 
     tl::expected<void, Error>
     SetImmutable() override {
+        const SearchLockScope public_search_scope(false);
         SAFE_CALL(this->set_immutable());
     }
 

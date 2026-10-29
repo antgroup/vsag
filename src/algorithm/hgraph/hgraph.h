@@ -42,6 +42,7 @@
 #include "index_feature_list.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"

@@ -31,6 +31,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/pointer_define.h"
+#include "utils/search_lock.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -93,7 +94,7 @@ public:
      */
     bool
     IsRemoved(InnerIdType id) {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         return deleted_ids_.count(id) != 0;
     }
 
@@ -266,7 +267,7 @@ public:
      */
     FilterPtr
     GetDeletedIdsFilter() {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         if (deleted_ids_.empty()) {
             return nullptr;
         }
@@ -283,7 +284,7 @@ public:
 
     std::vector<InnerIdType>
     GetDeletedIds(InnerIdType max_count) {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         if (deleted_ids_.empty()) {
             return {};
         }
@@ -294,14 +295,14 @@ public:
 
     std::vector<InnerIdType>
     GetAllDeletedIds() {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         return std::vector<InnerIdType>(deleted_ids_.begin(), deleted_ids_.end());
     }
 
     // Return an owned snapshot directly in the caller's allocator, without an intermediate copy.
     Vector<InnerIdType>
     GetAllDeletedIds(Allocator* allocator) const {
-        std::shared_lock rlock(delete_ids_mutex_);
+        auto rlock = make_search_read_lock(delete_ids_mutex_);
         return {deleted_ids_.begin(), deleted_ids_.end(), allocator};
     }
 

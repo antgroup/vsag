@@ -15,6 +15,8 @@
 
 #include "lock_strategy.h"
 
+#include "utils/search_lock.h"
+
 namespace vsag {
 
 PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
@@ -28,14 +30,21 @@ PointsMutex::PointsMutex(uint32_t element_num, Allocator* allocator)
 
 void
 PointsMutex::SharedLock(uint32_t i) {
-    neighbors_mutex_[i]->lock_shared();
+    if (not SearchLockScope::IsNoLock()) {
+        neighbors_mutex_[i]->lock_shared();
+    }
 }
 
 void
 PointsMutex::SharedUnlock(uint32_t i) {
-    neighbors_mutex_[i]->unlock_shared();
+    if (not SearchLockScope::IsNoLock()) {
+        neighbors_mutex_[i]->unlock_shared();
+    }
 }
 
+// Exclusive locks are intentionally not suppressed by the no-lock policy: elision applies
+// only to read-only traversal, under the documented contract that an unlocked search excludes
+// all mutation (and therefore all exclusive lock acquisition).
 void
 PointsMutex::Lock(uint32_t i) {
     neighbors_mutex_[i]->lock();
