@@ -17,6 +17,7 @@
 #include "half_precision_quantizer_parameter.h"
 #include "scalar_quantizer_parameter.h"
 #include "sq4_local_quantizer_parameter.h"
+#include "sq4_local_shared_quantizer_parameter.h"
 #include "sq4_uniform_quantizer_parameter.h"
 #include "sq8_local_quantizer_parameter.h"
 #include "sq8_uniform_quantizer_parameter.h"

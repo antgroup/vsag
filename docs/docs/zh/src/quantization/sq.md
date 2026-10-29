@@ -138,4 +138,15 @@ HGraph 向这些存储传入原始向量，由量化器负责 cosine 归一化�
 
 新类型需要支持它们的读取版本。记录及元数据沿用原生二进制序列化约定，不引入跨字节序格式。加载校验维度、度量和记录长度。HGraph 序列化保留基础及精排存储，包括 RaBitQ 加任一 local 量化器。Tune 可从保留的原始数据或 FP32 编码生成这些存储；仅有有损 local 编码时不能执行后续改变精度的 Tune。原有 `ignore_reorder`、`reorder_source` 及 Tune 限制保持不变。
 
-本次变更未开展大规模召回率或吞吐基准测试。
+### 共用编码的 local SQ4 粗排与 SQ8 精排
+
+HGraph 可在同一份 local SQ8 编码上做 SQ4 粗排和 SQ8 精排。设置 `base_quantization_type: "sq4_local_shared"`、`precise_quantization_type: "sq8_local"`、`use_reorder: true`。仅支持稠密 float32 的 L2、IP、cosine；不能搭配其他精排量化器或从基础存储精排。此共享视图不支持 Tune。
+
+```json
+{"dtype":"float32","metric_type":"l2","dim":128,
+ "index_param":{"base_quantization_type":"sq4_local_shared",
+                "precise_quantization_type":"sq8_local","use_reorder":true,
+                "max_degree":32,"ef_construction":300}}
+```
+
+每个向量仅保存一条 `dim + 8` 字节的 SQ8 local 记录。粗排将每个 8-bit 编码换算为 `floor((code8 + 8) / 17)`，等价于对 `code8 / 17` 四舍五入；精排直接使用原始字节。粗排使用同一个最小值与 17 倍 SQ8 步长重建向量。这样省去独立 SQ4 记录，但粗排解码需要额外计算。浮点舍入可能使临界值附近的编码与独立 `sq4_local` 有差异。
