@@ -1,0 +1,128 @@
+# Random Projection Tree Partitioning
+
+`vsag::rpt_partition` splits a set of dense vectors into **near-uniform partitions** using a
+random projection tree (RPT). It is a standalone utility: it does not build an index and does not
+retain the input data. Typical uses are sharding a large collection before building per-shard
+indexes, balancing parallel build jobs, or producing locality-preserving buckets for downstream
+algorithms.
+
+Compared with random bucketing or sorting on a single dimension, an RPT keeps nearby vectors in
+the same partition far more often while still producing partitions of almost identical size.
+
+## Distance Space
+
+The locality behavior assumes Euclidean geometry. The function computes projections using inner
+products with random directions and does not normalize the input vectors. If the partitions will
+be used for cosine similarity, L2-normalize every input vector before calling `rpt_partition`.
+For unit-normalized vectors, cosine similarity and Euclidean distance induce the same neighborhood
+ordering.
+
+## API Overview
+
+```cpp
+struct RPTPartitionParams {
+    uint64_t bucket_size{1000};  // target bucket size L
+    uint64_t max_depth{64};      // upper bound on the tree depth
+    uint64_t seed{0};            // random seed
+};
+
+tl::expected<std::vector<std::vector<int64_t>>, Error>
+rpt_partition(uint64_t d, uint64_t n, const float* x, const RPTPartitionParams& params);
+```
+
+Declarations live in
+[`include/vsag/utils.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/utils.h).
+
+| Parameter | Description |
+| --- | --- |
+| `d` | Dimensionality of the vectors. Must be positive. |
+| `n` | Number of vectors. `n == 0` returns an empty result. |
+| `x` | Row-major array of `n * d` floats. Owned by the caller; neither modified nor retained. |
+| `params.bucket_size` | Target bucket size `L`. Every partition holds at most `L` vectors. Must be positive. |
+| `params.max_depth` | Safety bound on recursion depth. When `0`, projection splits are disabled and the input IDs are returned in contiguous, size-balanced chunks; locality is not guaranteed. At a positive depth limit, remaining vectors are split into nearly equal chunks in the current permutation order. |
+| `params.seed` | Random seed. The same input, parameters, and seed always yield the same partitions. Node directions are derived from the seed and node position; use a different seed for an independent partition. |
+
+The result is one `std::vector<int64_t>` per partition, holding the row indices into `x`.
+
+Callers that need the returned partition memory to be tracked by a VSAG allocator can use the
+five-argument overload with an `Allocator*`. It returns `RPTPartitionResult`, whose outer and
+inner vectors use the supplied allocator. The allocator must remain alive until the result is
+destroyed. The four-argument overload above remains available and returns standard-library
+vectors.
+
+## Size Guarantees
+
+For `n > 0`, given `n` vectors and bucket size `L`, let `K = ceil(n / L)`. The output always
+satisfies:
+
+- exactly `K` partitions are produced;
+- every partition holds either `floor(n / K)` or `ceil(n / K)` vectors.
+
+The first two guarantees hold by construction and do not depend on the data distribution or on
+the seed. They imply that every partition holds at most `L` vectors. When `n >= L`, they also
+imply that every partition holds at least `floor(L / 2)` vectors and that the largest partition
+is at most twice the size of the smallest one.
+
+## How It Works
+
+At each node, this implementation draws a random projection direction and assigns the node the
+number of leaves `k = ceil(n_node / L)` it must produce. With `n_node = q * k + r`, the node is
+cut so that the left child receives `ceil(k / 2)` leaves and
+`q * ceil(k / 2) + min(r, ceil(k / 2))` vectors. The cut rank is therefore chosen to balance the
+target leaf counts; it is generally not the projection median, and no additional random threshold
+offset is used. The cut position is found with `std::nth_element` on the projection values; ties
+are broken by vector id, so duplicated vectors and constant projections are handled without
+special cases. Vectors whose projection is `NaN` are ranked last.
+
+The size guarantees above follow from this construction. Locality behavior is an empirical
+property of the random projection directions and the input data; it does not claim the theoretical
+guarantees of other RPT variants that use a randomly perturbed projection threshold.
+
+Each node draws its projection direction from a generator seeded by a hash of the user seed and
+the node position, so the output is independent of the traversal order. Consequently, node
+directions are deterministic for a given seed and tree shape. Changing only the input size or
+bucket size does not provide an independent random partition; use a different seed when an
+independent partition is required.
+
+When `max_depth == 0`, no projection split is performed: the initial ID order is divided into
+contiguous, size-balanced ranges. The size guarantees still hold, but locality is not guaranteed.
+
+Memory overhead beyond the input is one id permutation (`n * 4` bytes), one projection buffer
+(`n * 4` bytes) and one direction vector (`d * 4` bytes). No vector data is copied.
+
+## Example
+
+```cpp
+#include <vsag/vsag.h>
+
+vsag::RPTPartitionParams params;
+params.bucket_size = 1000;
+params.seed = 42;
+
+auto result = vsag::rpt_partition(dim, num_vectors, datas.data(), params);
+if (not result.has_value()) {
+    std::cerr << result.error().message << std::endl;
+    return -1;
+}
+for (const auto& partition : result.value()) {
+    // partition holds the row indices of one bucket
+}
+```
+
+A complete program is available at
+[`examples/cpp/601_utils_rpt_partition.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/601_utils_rpt_partition.cpp).
+
+## Errors
+
+| Condition | Result |
+| --- | --- |
+| `d == 0` | `INVALID_ARGUMENT` |
+| `params.bucket_size == 0` | `INVALID_ARGUMENT` |
+| `x == nullptr` and `n > 0` | `INVALID_ARGUMENT` |
+| `n` larger than `2^32 - 1` | `INVALID_ARGUMENT` |
+
+## Benchmark Input
+
+The `rpt_bench` option `--bucket_sizes` accepts a comma-separated list of decimal integers in
+`[1, UINT64_MAX]`, with whitespace allowed around each number. Empty or malformed entries are
+rejected before loading the dataset; the error identifies `--bucket_sizes` and the offending entry.
