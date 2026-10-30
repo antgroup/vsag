@@ -2476,6 +2476,83 @@ private:
 };
 }  // namespace
 
+TEST_CASE("Pyramid cold and warm encoding submit tasks only for supported stores",
+          "[ut][pyramid][pyramid_build_cache][warm_encode][cold_encode]") {
+    // Cross the 4096-vector batch boundary. Flat-only nodes avoid graph construction;
+    // cold Add still submits one hierarchy-insertion task per vector, accounted for below.
+    constexpr int64_t count = 4097;
+    const auto mode =
+        GENERATE(std::string("fp32"), std::string("split_rabitq"), std::string("mrle_fp32"));
+    const auto warm = GENERATE(false, true);
+    CAPTURE(mode, warm);
+    auto pool = std::make_shared<PyramidSearchPool>(4);
+    auto target = MakePyramidIndex(count + 1,
+                                   4,
+                                   false,
+                                   mode == "split_rabitq",
+                                   false,
+                                   mode == "mrle_fp32",
+                                   false,
+                                   false,
+                                   false,
+                                   std::make_shared<vsag::SafeThreadPool>(pool));
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "leaf"), sources(count);
+    vsag::PyramidBuildCache cache(target.allocator.get());
+    auto& graph = cache.CreateGraphCache("default", "leaf");
+    for (int64_t i = 0; i < count; ++i) {
+        sources[i] = "warm-encode-" + std::to_string(i);
+        graph.source_ids_.push_back(sources[i]);
+    }
+    vsag::Vector<vsag::InnerIdType> neighbors(target.allocator.get());
+    neighbors.push_back(0);
+    graph.neighbors_.emplace(sources.front(), std::move(neighbors));
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    cache.Serialize(writer);
+    if (warm) {
+        target.index->ImportCache(stream);
+    }
+    auto dataset = MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count);
+    dataset->SourceID(sources.data());
+    REQUIRE(target.index->Build(dataset).empty());
+    REQUIRE(target.index->GetNumElements() == count);
+    const auto stats = vsag::JsonType::Parse(target.index->GetStats());
+    // Cache statistics distinguish warm reuse from cold Build even without graph nodes.
+    if (warm) {
+        REQUIRE(stats["build_cache_hit_rate"].GetFloat() >= 0.0F);
+    } else {
+        REQUIRE(stats["build_cache_hit_rate"]["skipped_reason"].GetString() ==
+                "index was not built from an imported cache");
+    }
+    // Both encoding and Finalize use the supplied pool. Warm encoding submits two batches
+    // per supported store; split RaBitQ additionally submits four finalization workers.
+    // Cold NSW Build uses Add/encode_add_batch: four fused encoding workers for supported
+    // stores, plus four finalization workers only for split RaBitQ. TQ/MRLE has no optimized
+    // session and makes that entire cold encode serial, including its retained FP32 raw store.
+    const auto memory = target.index->GetMemoryUsageDetail();
+    CHECK(memory.count("raw_vector") == (mode == "mrle_fp32" ? 1 : 0));
+    CHECK(memory.count("precise_codes") == 0);
+    // add_to_hierarchy/run_parallel_insertions submits count tasks even for flat nodes.
+    const uint64_t cold_insert_tasks = count;
+    const uint64_t cold_encode_tasks = mode == "mrle_fp32" ? 0 : 4;
+    const uint64_t finalize_tasks = mode == "split_rabitq" ? 4 : 0;
+    const uint64_t expected_tasks =
+        warm ? 2 + finalize_tasks : cold_insert_tasks + cold_encode_tasks + finalize_tasks;
+    CHECK(pool->submitted.load() == expected_tasks);
+    CHECK(pool->running.load() == 0);
+    // Check both batches and the tail via the public distance API after finalization.
+    for (const auto id : {int64_t{0}, int64_t{4095}, int64_t{4096}}) {
+        const auto distance =
+            target.index->CalcDistanceById(vectors.data() + id * PYRAMID_TEST_DIM, id, true);
+        CHECK(std::isfinite(distance));
+        CHECK(distance == Catch::Approx(0.0F).margin(0.01F));
+    }
+}
+
 TEST_CASE("Pyramid limits node tasks to request parallelism", "[ut][pyramid][parallel][bounded]") {
     const auto threads = GENERATE(1, 2, 4, 8, 32);
     const auto parallelism = GENERATE(1, 2, 4, 8);
