@@ -1198,13 +1198,12 @@ TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",
 }
 
 TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
-          "[ut][hgraph][duplicate][parallel][resize]") {
+          "[ut][hgraph][duplicate][parallel][resize][review_round3]") {
     BlockSizeLimitGuard default_block_size(512 * 1024);
     constexpr int64_t dim = 128;
     constexpr int64_t base_count = 500;
     constexpr uint64_t search_threads = 8;
     constexpr uint64_t resize_threads = 32;
-    constexpr vsag::InnerIdType required_capacity = 513;
     BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
 
     auto common_param = MakeCommonParam(dim);
@@ -1222,6 +1221,13 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
 
     auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
     REQUIRE(hgraph != nullptr);
+
+    // Total index memory bounds the physical FP32 reservation from above. Add a margin
+    // larger than the query scratch pools, instead of relying on the resize-bit default.
+    constexpr uint64_t bytes_per_code = dim * sizeof(float);
+    const auto memory_before = index->GetMemoryUsage();
+    const auto required_capacity =
+        static_cast<vsag::InnerIdType>(memory_before / bytes_per_code + 1024);
 
     std::vector<float> query_vector(dim, 0.0F);
     auto query = MakeFloatQuery(query_vector, dim);
@@ -1278,6 +1284,7 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
         resizer.get();
     }
     REQUIRE(all_resizers_finished);
+    REQUIRE(index->GetMemoryUsage() >= static_cast<uint64_t>(required_capacity) * bytes_per_code);
 }
 
 TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates searchable",
@@ -1475,4 +1482,48 @@ TEST_CASE("HGraph dedup update cannot overwrite a newly published duplicate",
         std::async(std::launch::async, [&]() { hgraph->ensure_physical_code_capacity(4096); });
     REQUIRE(index->UpdateVector(10, MakeFloatDataset(changed, seed_ids, 2, 1), false).has_value());
     resize.get();
+}
+
+TEST_CASE("HGraph first PiPNN Add hides its graph until all storage is published",
+          "[ut][hgraph][pipnn][duplicate][concurrent][review_round3]") {
+    BlockSizeLimitGuard blocks(512ULL * 1024);
+    constexpr int64_t dim = 2;
+    constexpr int64_t count = 64;
+    auto common = MakeCommonParam(dim);
+    auto pool = std::make_shared<PausedAddPool>();
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto parameter = MakeFp32HGraphJson(true, 4);
+    parameter["graph_type"].SetString("pipnn");
+    auto index = MakeHGraphIndex(parameter, common);
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i * dim] = static_cast<float>(i);
+        ids[i] = 100 + i;
+    }
+    auto reached = pool->Reached();
+    pool->Arm();
+    auto add = std::async(std::launch::async,
+                          [&]() { return index->Add(MakeFloatDataset(vectors, ids, dim, count)); });
+    const auto paused = reached.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    const auto reserved = index->GetNumElements();
+    std::vector<float> query_vector{0, 0};
+    auto query = MakeFloatQuery(query_vector, dim);
+    const std::string params =
+        R"({"hgraph":{"ef_search":128,"skip_ratio":0,"brute_force_threshold":0.0}})";
+    auto knn = index->KnnSearch(query, 10, params);
+    auto range = index->RangeSearch(query, 0.01F, params);
+    pool->Release();
+    auto added = add.get();
+    REQUIRE(paused);
+    REQUIRE(reserved == count);
+    REQUIRE(knn.has_value());
+    REQUIRE(range.has_value());
+    REQUIRE(knn.value()->GetDim() == 0);
+    REQUIRE(range.value()->GetDim() == 0);
+    REQUIRE(added.has_value());
+    auto ready = index->KnnSearch(query, 10, params);
+    REQUIRE(ready.has_value());
+    REQUIRE(ResultContainsId(ready.value(), 100));
+    RequireRangeContains(index, query, {100}, 1, 0.01F, params);
 }

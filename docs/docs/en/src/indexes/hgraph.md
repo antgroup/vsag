@@ -149,10 +149,12 @@ is enabled:
 `UpdateVector` is supported only for IDs whose vector storage is not shared with another
 duplicate-group member.
 
-With storage deduplication, the initial `Add` batch excludes overlapping `Add` calls while
-temporary build codes are in use. Later `Add` batches may overlap; `UpdateVector` excludes all
-deduplicated `Add` probes and publications while checking and overwriting storage. Workers
-within a batch still run in parallel. Concurrent searches skip logical IDs whose code slots are not yet published.
+With storage deduplication, the initial `Add` batch excludes overlapping `Add` calls while temporary
+build codes are in use. Later `Add` batches may overlap; `UpdateVector` excludes all deduplicated
+`Add` probes and publications while checking and overwriting storage. Workers within a batch still
+run in parallel. Concurrent searches skip logical IDs whose code slots are not yet published. During
+the first PiPNN `Add`, searches see an empty index until the complete graph and storage are
+published.
 
 Current serialization and streaming serialization are supported.
 

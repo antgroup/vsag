@@ -789,6 +789,8 @@ private:
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};
+    // Initial PiPNN Add is queryable only after its graph and shared codes are complete.
+    std::atomic<bool> pipnn_initial_add_pending_{false};
 
     std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity

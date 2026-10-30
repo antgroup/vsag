@@ -663,7 +663,19 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
             storage_write = std::unique_lock<std::shared_mutex>(index_.storage_mutation_mutex_);
         }
         if (index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN and index_.total_count_.load() == 0) {
-            return index_.Build(data);
+            const bool hide_build = index_.using_dedup_storage();
+            if (hide_build) {
+                index_.pipnn_initial_add_pending_.store(true, std::memory_order_release);
+                // Drain queries that entered before the flag was raised. Later queries
+                // check it again after taking the read lock and cannot observe construction.
+                std::scoped_lock lock(index_.global_mutex_);
+            }
+            auto failed_ids = index_.Build(data);
+            // On failure, partial construction remains hidden instead of exposing unbound slots.
+            if (hide_build) {
+                index_.pipnn_initial_add_pending_.store(false, std::memory_order_release);
+            }
+            return failed_ids;
         }
         if (not index_.using_dedup_storage()) {
             if (storage_read.owns_lock()) {
