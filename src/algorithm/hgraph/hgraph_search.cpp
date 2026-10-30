@@ -110,7 +110,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
         params.ef_search >= 1,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
-    if (this->storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire)) {
+    if (this->storage_state_->IsInitialAddHidden()) {
         return make_empty_dataset_with_stats();
     }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
@@ -125,7 +125,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     }
     // Pair with the initial-build writer barrier: a query that missed the early check
     // must not read an entry point or route vector while they are being constructed.
-    if (this->storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire)) {
+    if (this->storage_state_->IsInitialAddHidden()) {
         return make_empty_dataset_with_stats();
     }
     k = std::min(k, GetNumElements());
@@ -449,7 +449,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         params.ef_search >= 1,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
-    if (this->storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire)) {
+    if (this->storage_state_->IsInitialAddHidden()) {
         return make_empty_dataset_with_stats();
     }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
@@ -464,7 +464,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
     // Pair with the initial-build writer barrier: a query that missed the early check
     // must not read an entry point or route vector while they are being constructed.
-    if (this->storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire)) {
+    if (this->storage_state_->IsInitialAddHidden()) {
         return make_empty_dataset_with_stats();
     }
     k = std::min(k, GetNumElements());

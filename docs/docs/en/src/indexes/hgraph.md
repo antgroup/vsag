@@ -153,8 +153,11 @@ With storage deduplication, the initial `Add` batch excludes overlapping `Add` c
 build codes are in use. Later `Add` batches may overlap; `UpdateVector` excludes all deduplicated
 `Add` probes and publications while checking and overwriting storage. Workers within a batch still
 run in parallel. Concurrent searches skip logical IDs whose code slots are not yet published. During
-the first PiPNN `Add`, searches see an empty index until the complete graph and storage are
-published.
+the first PiPNN `Add` with storage deduplication, external searches see an empty index until
+construction finishes, including the MCI companion when enabled. Internal MCI candidate queries
+can read the completed graph and codes during that final stage. Failures before ID reservation
+allow a valid retry. If construction fails after IDs are reserved, recreate the index; partial
+storage stays hidden and subsequent `Add` reports an error.
 
 Current serialization and streaming serialization are supported.
 

@@ -34,6 +34,33 @@ public:
           deduplicate_storage_(enabled) {
     }
 
+    // Only MCI candidate callbacks enter this scope, after graph/code construction.
+    // The bypass belongs to one index on one worker; external readers remain hidden.
+    class InternalSearchScope {
+    public:
+        explicit InternalSearchScope(const StorageState& state)
+            : previous_(internal_search_state_) {
+            internal_search_state_ = &state;
+        }
+
+        ~InternalSearchScope() {
+            internal_search_state_ = previous_;
+        }
+
+        InternalSearchScope(const InternalSearchScope&) = delete;
+        InternalSearchScope&
+        operator=(const InternalSearchScope&) = delete;
+
+    private:
+        const StorageState* previous_;
+    };
+
+    [[nodiscard]] bool
+    IsInitialAddHidden() const {
+        return pipnn_initial_add_pending_.load(std::memory_order_acquire) and
+               internal_search_state_ != this;
+    }
+
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     AcquireReadLock(std::shared_mutex& global_mutex) const {
         if (not physical_code_resize_pending_.load(std::memory_order_acquire)) {
@@ -59,6 +86,9 @@ public:
     std::atomic<bool> pipnn_initial_add_pending_{false};
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};
     const bool deduplicate_storage_;
+
+private:
+    inline static thread_local const StorageState* internal_search_state_ = nullptr;
 };
 
 }  // namespace vsag

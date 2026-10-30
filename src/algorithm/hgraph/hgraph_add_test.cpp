@@ -15,9 +15,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <future>
 #include <initializer_list>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -161,7 +163,8 @@ RequireRangeContains(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index
 // Pause a worker only after Add has reserved its entire batch and prepared temporary codes.
 class PausedAddPool : public vsag::ThreadPool {
 public:
-    PausedAddPool() : pool_(4), resume_(resume_promise_.get_future().share()) {
+    explicit PausedAddPool(bool fail = false)
+        : pool_(4), resume_(resume_promise_.get_future().share()), fail_(fail) {
     }
 
     ~PausedAddPool() override {
@@ -192,6 +195,9 @@ public:
             if (pause) {
                 reached_.set_value();
                 resume_.wait();
+                if (fail_) {
+                    throw std::runtime_error("injected PiPNN worker failure");
+                }
             }
             task();
         });
@@ -219,6 +225,29 @@ private:
     std::promise<void> reached_;
     std::atomic<bool> armed_{false};
     std::atomic<bool> released_{false};
+    const bool fail_;
+};
+
+// Pause a candidate query after its internal visibility scope is entered.
+class PausedMCISearchHGraph : public vsag::HGraph {
+public:
+    using vsag::HGraph::HGraph;
+
+    vsag::DatasetPtr
+    KnnSearch(const vsag::DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const vsag::FilterPtr& filter) const override {
+        if (first_search_.exchange(false)) {
+            on_first_search();
+        }
+        return vsag::HGraph::KnnSearch(query, k, parameters, filter);
+    }
+
+    std::function<void()> on_first_search;
+
+private:
+    mutable std::atomic<bool> first_search_{true};
 };
 
 class PausedUpdateAllocator : public vsag::Allocator {
@@ -1551,4 +1580,116 @@ TEST_CASE("HGraph first PiPNN Add hides its graph until all storage is published
     REQUIRE(ready.has_value());
     REQUIRE(ResultContainsId(ready.value(), 100));
     RequireRangeContains(index, query, {100}, 1, 0.01F, params);
+}
+
+TEST_CASE("PiPNN initial Add validation failure allows a valid retry",
+          "[ut][hgraph][pipnn][duplicate][review_round4]") {
+    const bool retry_with_build = GENERATE(false, true);
+    constexpr int64_t dim = 2;
+    constexpr int64_t count = 16;
+    auto parameter = MakeFp32HGraphJson();
+    parameter["graph_type"].SetString("pipnn");
+    auto index = MakeHGraphIndex(parameter, MakeCommonParam(dim));
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i * dim] = static_cast<float>(i);
+        ids[i] = 100 + i;
+    }
+    auto invalid = MakeFloatDataset(vectors, ids, dim + 1, 1);
+    REQUIRE_FALSE(index->Add(invalid).has_value());
+    REQUIRE(index->GetNumElements() == 0);
+    auto valid = MakeFloatDataset(vectors, ids, dim, count);
+    const auto result = retry_with_build ? index->Build(valid) : index->Add(valid);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    auto query = MakeFloatQuery(vectors, dim);
+    const auto found = index->KnnSearch(query, 4, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 4);
+    REQUIRE(ResultContainsId(found.value(), 100));
+    RequireRangeContains(index, query, {100}, 1);
+}
+
+TEST_CASE("PiPNN failed partial initial Add remains hidden and rejects later Add",
+          "[ut][hgraph][pipnn][duplicate][review_round4]") {
+    constexpr int64_t dim = 2;
+    constexpr int64_t count = 32;
+    auto common = MakeCommonParam(dim);
+    auto pool = std::make_shared<PausedAddPool>(true);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto parameter = MakeFp32HGraphJson(true, 4);
+    parameter["graph_type"].SetString("pipnn");
+    auto index = MakeHGraphIndex(parameter, common);
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i * dim] = static_cast<float>(i);
+        ids[i] = 100 + i;
+    }
+    auto dataset = MakeFloatDataset(vectors, ids, dim, count);
+    pool->Arm();
+    pool->Release();
+    REQUIRE_FALSE(index->Add(dataset).has_value());
+    REQUIRE(index->GetNumElements() == count);
+    auto query = MakeFloatQuery(vectors, dim);
+    const auto found = index->KnnSearch(query, 4, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 0);
+    const auto retry = index->Add(dataset);
+    REQUIRE_FALSE(retry.has_value());
+    REQUIRE(retry.error().message.find("recreate") != std::string::npos);
+    RequireRangeContains(index, query, {}, 0);
+}
+
+TEST_CASE("PiPNN initial Add builds connected MCI cliques with storage deduplication",
+          "[ut][hgraph][pipnn][duplicate][mci][review_round4]") {
+    const int64_t threads = GENERATE(1, 4);
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 32;
+    auto parameter = MakeFp32HGraphJson(true, threads);
+    parameter["graph_type"].SetString("pipnn");
+    parameter["mci_mcs"].SetInt(16);
+    parameter["mci_clique_max"].SetInt(8);
+    parameter["mci_knng_source"].SetString("hgraph");
+    auto common = MakeCommonParam(dim, threads);
+    PausedMCISearchHGraph index(vsag::HGraph::CheckAndMappingExternalParam(parameter, common),
+                                common);
+    std::promise<void> reached;
+    auto candidate_started = reached.get_future();
+    std::promise<void> resume;
+    const auto resumed = resume.get_future().share();
+    index.on_first_search = [&]() {
+        reached.set_value();
+        resumed.wait();
+    };
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i * dim + i] = 1.0F;
+        ids[i] = 100 + i;
+    }
+    auto add = std::async(std::launch::async,
+                          [&]() { return index.Add(MakeFloatDataset(vectors, ids, dim, count)); });
+    const auto paused =
+        candidate_started.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    auto query = MakeFloatQuery(vectors, dim);
+    const std::string search_params = R"({"hgraph":{"ef_search":64,"use_mci":false}})";
+    const auto hidden_knn = index.KnnSearch(query, 8, search_params, nullptr);
+    const auto hidden_range = index.RangeSearch(query, 0.01F, search_params, nullptr);
+    resume.set_value();
+    const auto added = add.get();
+    REQUIRE(paused);
+    REQUIRE(added.empty());
+    REQUIRE(hidden_knn->GetDim() == 0);
+    REQUIRE(hidden_range->GetDim() == 0);
+    const auto stats = vsag::JsonType::Parse(index.GetStats());
+    INFO(stats.Dump());
+    REQUIRE(stats["mci_has_index"].GetBool());
+    REQUIRE(stats["mci_covered_nodes"].GetInt() == count);
+    REQUIRE(stats["mci_max_clique_size"].GetInt() > 1);
+    const auto found =
+        index.KnnSearch(query, 8, R"({"hgraph":{"ef_search":64,"use_mci":true}})", nullptr);
+    REQUIRE(found->GetDim() == 8);
+    REQUIRE(ResultContainsId(found, 100));
 }

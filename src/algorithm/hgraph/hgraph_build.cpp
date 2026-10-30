@@ -669,6 +669,12 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
             storage_write =
                 std::unique_lock<std::shared_mutex>(index_.storage_state_->storage_mutation_mutex_);
         }
+        if (index_.storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire) and
+            index_.total_count_.load() != 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "initial PiPNN Add failed after reserving IDs; recreate the index "
+                                "before adding more vectors");
+        }
         if (index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN and index_.total_count_.load() == 0) {
             const bool hide_build = index_.storage_state_->deduplicate_storage_;
             if (hide_build) {
@@ -678,13 +684,22 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
                 // check it again after taking the read lock and cannot observe construction.
                 std::scoped_lock lock(index_.global_mutex_);
             }
-            auto failed_ids = index_.Build(data);
-            // On failure, partial construction remains hidden instead of exposing unbound slots.
-            if (hide_build) {
-                index_.storage_state_->pipnn_initial_add_pending_.store(false,
-                                                                        std::memory_order_release);
+            try {
+                auto failed_ids = index_.Build(data);
+                if (hide_build) {
+                    index_.storage_state_->pipnn_initial_add_pending_.store(
+                        false, std::memory_order_release);
+                }
+                return failed_ids;
+            } catch (...) {
+                // Validation/training failures before ID reservation can be retried. Once
+                // IDs exist, storage may be incomplete: keep it hidden and reject later Add.
+                if (hide_build and index_.total_count_.load() == 0) {
+                    index_.storage_state_->pipnn_initial_add_pending_.store(
+                        false, std::memory_order_release);
+                }
+                throw;
             }
-            return failed_ids;
         }
         if (not index_.storage_state_->deduplicate_storage_) {
             if (storage_read.owns_lock()) {
