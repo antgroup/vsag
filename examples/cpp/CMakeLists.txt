@@ -188,3 +188,6 @@ target_link_libraries(332_feature_search_session vsag)
 
 add_executable(327_feature_search_reasoning 327_feature_search_reasoning.cpp)
 target_link_libraries(327_feature_search_reasoning vsag)
+
+add_executable(200_user_defined_io 200_user_defined_io.cpp)
+target_link_libraries(200_user_defined_io vsag)

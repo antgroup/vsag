@@ -42,6 +42,7 @@
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "typing.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
@@ -56,6 +57,28 @@ HGraph::check_fused_mutation_supported(std::string_view operation) const {
     if (this->rabitq_fused_datacell_ != nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             fmt::format("fused RaBitQ HGraph does not support {}", operation));
+    }
+}
+
+void
+HGraph::check_user_defined_precise_io_supported(std::string_view operation) const {
+    // Cloning or exporting a model re-creates datacells from the same IO parameters, which
+    // for user-defined IO re-binds this index's Reader/Writer pair into the copy: the copy
+    // would share (Clone) or resize (ExportModel + build) the source backing store. Reject
+    // until user-defined storage can supply independent bytes for lifecycle copies.
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr) {
+        const auto hgraph_param =
+            std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        if (hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+            std::dynamic_pointer_cast<UserDefinedIOParameter>(
+                hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                fmt::format(
+                    "user_defined_io precise codes do not support {}: the bound Reader/Writer "
+                    "pair would be shared with the copy",
+                    operation));
+        }
     }
 }
 
@@ -602,6 +625,7 @@ HGraph::GetMinAndMaxId() const {
 InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
     this->check_fused_mutation_supported("ExportModel");
+    this->check_user_defined_precise_io_supported("ExportModel");
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
     if (has_precise_reorder()) {
@@ -613,6 +637,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
 InnerIndexPtr
 HGraph::Clone(const IndexCommonParam& param) {
     this->check_fused_mutation_supported("Clone");
+    this->check_user_defined_precise_io_supported("Clone");
     return InnerIndexInterface::Clone(param);
 }
 
@@ -764,7 +789,15 @@ void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
-    if (has_precise_reorder()) {
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool user_defined_precise_io =
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr;
+    // Deserialize has already written precise codes into the bound writable pair. Only
+    // reader_io datacells need to attach to the serialized input reader here; replacing
+    // the user-defined pair with a ReaderIOParameter would fail after loading the data.
+    if (has_precise_reorder() and not user_defined_precise_io) {
         high_precise_codes_->InitIO(reader_param);
     }
     basic_flatten_codes_->InitIO(reader_param);
