@@ -28,3 +28,12 @@ set (SEARCHER_SRC
 
 add_library (searcher OBJECT ${SEARCHER_SRC})
 target_link_libraries (searcher PRIVATE coverage_config vsag_src_common)
+
+# mci_packed_filter.h compiles its kernels with target attributes, which bypass the global
+# distribution flags, so forward the build's SIMD choices explicitly.
+if (DIST_CONTAINS_AVX512)
+    target_compile_definitions (searcher PRIVATE VSAG_MCI_FILTER_AVX512=1)
+endif ()
+if (DIST_CONTAINS_AVX2)
+    target_compile_definitions (searcher PRIVATE VSAG_MCI_FILTER_AVX2=1)
+endif ()

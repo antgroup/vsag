@@ -48,6 +48,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
@@ -120,6 +121,10 @@ public:
 
     std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override;
+
+    /// Cached counter, recalculated on demand once a mutation has invalidated it.
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -482,9 +487,16 @@ private:
     void
     init_resize_bit_and_reorder();
 
-    /// Compute memory usage breakdown and cache the result.
+    /// Compute the memory usage breakdown and cache the result. Records the mutation version it
+    /// observed so a mutation racing with this snapshot is not silently swallowed.
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
+
+    /// Invalidate the cached counter instead of recomputing it. The per-element Add/Remove paths
+    /// call this so they do not pay the O(total) breakdown; the next GetMemoryUsage() recalculates
+    /// it. Paths that already hold the mutation locks may keep calling cal_memory_usage() eagerly.
+    void
+    mark_memory_usage_dirty() const;
 
     /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
@@ -780,6 +792,14 @@ private:
 
     std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
     std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
+
+    /// Memory-usage cache bookkeeping. A mutation either invalidates the counter by bumping the
+    /// version (the per-element Add/Remove paths) or recomputes it eagerly while it already holds
+    /// the mutation locks (build, resize, deserialize); the cached counter is re-derived only when
+    /// GetMemoryUsage() observes a version it has not accounted for yet. Keep the two counters on
+    /// separate cache lines: every mutation writes the first while every query reads the second.
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_version_{1};
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_accounted_version_{0};
 
     uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2(resize batch size)
 

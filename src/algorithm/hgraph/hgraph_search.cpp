@@ -22,6 +22,7 @@
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 
 namespace vsag {
@@ -102,6 +103,7 @@ HGraph::KnnSearch(const DatasetPtr& query,
     this->validate_knn_args(query, k);
 
     auto params = HGraphSearchParameters::FromJson(parameters);
+    const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     CHECK_ARGUMENT(  // NOLINT
         params.ef_search >= 1,
@@ -111,9 +113,11 @@ HGraph::KnnSearch(const DatasetPtr& query,
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
-            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+            force_remove_rlock = make_search_read_lock(this->force_remove_mutex_);
         }
-        shared_lock = this->acquire_global_read_lock();
+        if (not SearchLockScope::IsNoLock()) {
+            shared_lock = this->acquire_global_read_lock();
+        }
     }
     k = std::min(k, GetNumElements());
 
@@ -424,6 +428,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
+    const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
 
     CHECK_ARGUMENT(  // NOLINT
@@ -434,9 +439,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
-            force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+            force_remove_rlock = make_search_read_lock(this->force_remove_mutex_);
         }
-        shared_lock = this->acquire_global_read_lock();
+        if (not SearchLockScope::IsNoLock()) {
+            shared_lock = this->acquire_global_read_lock();
+        }
     }
     k = std::min(k, GetNumElements());
 
@@ -486,16 +493,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         return make_empty_dataset_with_stats();
     }
 
-    auto vt = this->pool_->TakeOne();
-
+    std::shared_ptr<VisitedList> vt;
     const auto* raw_query = get_data(query);
-    for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
-        auto result = this->search_one_graph(
-            raw_query, this->route_graphs_[i], this->basic_flatten_codes_, search_param, vt, &ctx);
-        if (not result->Empty()) {
-            search_param.ep = result->Top().second;
-        }
-    }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
 
@@ -585,12 +584,50 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     DistHeapPtr search_result;
     bool brute_force_used = false;
     MCIHybridSearchResult mci_result(params, ft);
+    // MCI collects its own filter-derived seeds and never reads the HGraph entry point.
+    // Try it before the route-graph navigation; an unavailable route still navigates.
+    const bool brute_force_route = params.brute_force_threshold > 0.0F and
+                                   mci_result.valid_ratio <= params.brute_force_threshold;
+    bool mci_tried = false;
+    if (not params.use_hybrid_traversal and not brute_force_route) {
+        mci_tried = true;
+        mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+    }
+    // Per-query entry point search through hierarchical graphs. Routing keeps its own greedy
+    // parameters (single nearest neighbor, no filter) so the final search configuration never
+    // changes the upper-layer walk; only the resulting entry point is propagated. A successful
+    // routed MCI query needs no navigation and takes no visited list.
+    if (mci_result.route != "mci") {
+        // Route navigation keeps the pre-MCI greedy policy: a single nearest neighbor per
+        // layer, KNN mode, no filter, one routing thread. The remaining fields keep the
+        // InnerSearchParam defaults, exactly as before the MCI early route.
+        InnerSearchParam ep_search_param;
+        ep_search_param.ep = search_param.ep;
+        ep_search_param.topk = 1;
+        ep_search_param.ef = 1;
+        ep_search_param.is_inner_id_allowed = nullptr;
+        ep_search_param.search_mode = KNN_SEARCH;
+        ep_search_param.parallel_search_thread_count = 1;
+        ep_search_param.enable_reorder = true;
+        vt = this->pool_->TakeOne();
+        for (auto i = static_cast<int64_t>(this->route_graphs_.size() - 1); i >= 0; --i) {
+            auto result = this->search_one_graph(raw_query,
+                                                 this->route_graphs_[i],
+                                                 this->basic_flatten_codes_,
+                                                 ep_search_param,
+                                                 vt,
+                                                 &ctx);
+            if (not result->Empty()) {
+                ep_search_param.ep = result->Top().second;
+            }
+        }
+        search_param.ep = ep_search_param.ep;
+    }
     const bool hybrid_available =
         params.use_hybrid_traversal and not is_range and search_param.executors.empty() and
         search_param.ep != INVALID_ENTRY_POINT and this->mci_parameters_.enabled and
         this->mci_cliques_ != nullptr and this->mci_cliques_->HasCliqueIndex(hybrid_total_count);
-    if (params.brute_force_threshold > 0.0F and
-        mci_result.valid_ratio <= params.brute_force_threshold) {
+    if (brute_force_route) {
         if (is_range) {
             search_result = this->brute_force_search<InnerSearchMode::RANGE_SEARCH>(
                 raw_query, ft, request.limited_size_, request.radius_, &ctx);
@@ -634,7 +671,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         mci_result.hybrid_seed_budget = hybrid_seed_budget;
         search_result = std::move(mci_result.result);
     } else {
-        mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+        if (not mci_tried) {
+            mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
+        }
         if (mci_result.route == "mci") {
             search_result = std::move(mci_result.result);
         } else {
@@ -648,7 +687,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         }
     }
 
-    this->pool_->ReturnOne(vt);
+    if (vt != nullptr) {
+        this->pool_->ReturnOne(vt);
+    }
 
     // Reorder
     if (mci_result.route != "mci" and not brute_force_used and use_reorder_ and
