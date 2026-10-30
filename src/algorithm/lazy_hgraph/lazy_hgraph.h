@@ -68,6 +68,11 @@ public:
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
 
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
     DatasetPtr
     CalcDistancesById(const float* query,
                       const int64_t* ids,

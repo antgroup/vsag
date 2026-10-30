@@ -39,6 +39,8 @@
 #include "inner_string_params.h"
 #include "io/common/io_parameter.h"
 #include "search_metrics_internal.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -124,10 +126,15 @@ BruteForce::train_multi_vector(const DatasetPtr& data) {
 
 void
 BruteForce::Train(const DatasetPtr& data) {
+    CHECK_ARGUMENT(data != nullptr, "training dataset cannot be null");
     if (is_multi_vector_) {
         this->train_multi_vector(data);
     } else {
-        this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        CHECK_ARGUMENT(data->GetDim() == dim_, "training dimension must match index");
+        CHECK_ARGUMENT(data->GetNumElements() >= 0, "training count cannot be negative");
+        const auto* vectors = get_data(data);
+        CHECK_ARGUMENT(vectors != nullptr, "training vectors cannot be null");
+        this->inner_codes_->Train(vectors, data->GetNumElements());
     }
 }
 
@@ -217,6 +224,10 @@ BruteForce::add_multi_vector(const DatasetPtr& data) {
 
 std::vector<int64_t>
 BruteForce::Add(const DatasetPtr& data) {
+    CHECK_ARGUMENT(data != nullptr, "base dataset cannot be null");
+    CHECK_ARGUMENT(data->GetNumElements() >= 0, "base count cannot be negative");
+    const bool valid_ids = data->GetIds() != nullptr or data->GetNumElements() == 0;
+    CHECK_ARGUMENT(valid_ids, "base ids cannot be null");
     if (is_multi_vector_) {
         return this->add_multi_vector(data);
     }
@@ -225,7 +236,7 @@ BruteForce::Add(const DatasetPtr& data) {
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(get_data(data) != nullptr, "base vectors cannot be null");
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -234,7 +245,7 @@ BruteForce::Add(const DatasetPtr& data) {
         }
     }
 
-    auto add_func = [&](const float* data,
+    auto add_func = [&](const void* vec,
                         const int64_t label,
                         const AttributeSet* attr,
                         const char* extra_info) -> std::optional<int64_t> {
@@ -246,14 +257,13 @@ BruteForce::Add(const DatasetPtr& data) {
             std::lock_guard lock(this->add_mutex_);
             this->extra_infos_->InsertExtraInfo(extra_info, slot.value());
         }
-        this->add_one(data, slot.value());
+        this->add_one(vec, slot.value());
         return std::nullopt;
     };
 
     std::vector<std::future<std::optional<int64_t>>> futures;
     const auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
     const auto* extra_info = data->GetExtraInfos();
     const auto extra_info_size = data->GetExtraInfoSize();
@@ -273,15 +283,12 @@ BruteForce::Add(const DatasetPtr& data) {
         }
         const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
         if (this->thread_pool_ != nullptr) {
-            auto future = this->thread_pool_->GeneralEnqueue(add_func,
-                                                             vectors + j * dim_,
-                                                             label,
-                                                             attrs == nullptr ? nullptr : attrs + j,
-                                                             ei_ptr);
+            auto future = this->thread_pool_->GeneralEnqueue(
+                add_func, get_data(data, j), label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res = add_func(
-                    vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
+                    get_data(data, j), label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
@@ -328,16 +335,15 @@ BruteForce::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
         }
 
         const auto last_inner_id = static_cast<InnerIdType>(current_total - 1);
-        Vector<float> data(allocator_);
-        if (inner_id < last_inner_id) {
-            data.resize(dim_);
-            GetVectorByInnerId(last_inner_id, data.data());
-        }
         bool was_mark_removed = this->label_table_->IsRemoved(inner_id);
+        if (inner_id < last_inner_id) {
+            // Acquiring a cross-block record can allocate and throw. Move the encoded bytes
+            // before committing label removal so a failed acquisition leaves the index intact.
+            this->inner_codes_->Move(last_inner_id, inner_id);
+        }
         this->label_table_->ForceRemove(label, inner_id);
 
         if (inner_id < last_inner_id) {
-            this->inner_codes_->InsertVector(data.data(), inner_id);
             this->label_table_->Move(last_inner_id, inner_id);
             if (this->extra_infos_ != nullptr) {
                 this->extra_infos_->Move(last_inner_id, inner_id);
@@ -697,18 +703,24 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
-    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    const auto* native_query = get_data(query);
+    CHECK_ARGUMENT(native_query != nullptr, "query representation must match index dtype");
+    return this->inner_codes_->FactoryComputer(native_query);
 }
 
 float
 BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
-    if (not is_multi_vector_) {
-        return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
-    }
     CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
     CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    if (not is_multi_vector_) {
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+        const auto* native_query = get_data(query);
+        CHECK_ARGUMENT(native_query != nullptr,
+                       "distance query representation must match index dtype");
+        return calc_native_distance_by_id(native_query, id);
+    }
     CHECK_ARGUMENT(query->GetMultiVectorDim() == dim_, "query multi-vector dimension mismatch");
     const auto* vectors = query->GetMultiVectors();
     CHECK_ARGUMENT(vectors != nullptr, "query must contain multi-vectors");
@@ -732,7 +744,14 @@ BruteForce::CalcDistanceById(const float* vector,
                              int64_t id,
                              bool calculate_precise_distance) const {
     CHECK_ARGUMENT(not is_multi_vector_, "multi-vector distance requires a Dataset query");
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 BruteForce distance requires a native Dataset query");
     CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+    return calc_native_distance_by_id(vector, id);
+}
+
+float
+BruteForce::calc_native_distance_by_id(const void* vector, int64_t id) const {
     // ForceRemove can move the last vector into this slot. Keep label mapping and code
     // storage stable through Query, using deadlock-safe acquisition as in the native path.
     std::shared_lock global_lock(global_mutex_, std::defer_lock);
@@ -1250,6 +1269,11 @@ build_default_brute_force_param(const JsonType& external_param, bool warp) {
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
+    const bool supported_dtype = common_param.data_type_ == DataTypes::DATA_TYPE_FLOAT ||
+                                 common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                 common_param.data_type_ == DataTypes::DATA_TYPE_BF16;
+    CHECK_ARGUMENT(supported_dtype,
+                   "BruteForce only supports dense float32, float16 and bfloat16 datatypes");
     // Detect if this is a WARP (multi-vector) index request
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
 
@@ -1378,7 +1402,7 @@ BruteForce::shrink_to_fit() {
 }
 
 void
-BruteForce::add_one(const float* data, InnerIdType inner_id) {
+BruteForce::add_one(const void* data, InnerIdType inner_id) {
     this->inner_codes_->InsertVector(data, inner_id);
 }
 
@@ -1400,7 +1424,7 @@ BruteForce::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
     } else {
         Vector<uint8_t> codes(inner_codes_->code_size_, allocator_);
         inner_codes_->GetCodesById(inner_id, codes.data());
-        inner_codes_->Decode(codes.data(), data);
+        inner_codes_->DecodeToFloat(codes.data(), data);
     }
 }
 
@@ -1411,14 +1435,16 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
     auto base_dim = new_base->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(new_base->GetNumElements() == 1, "update requires exactly one vector");
+    const auto* update_ptr = get_data(new_base);
+    CHECK_ARGUMENT(update_ptr != nullptr, "update vectors cannot be null");
 
     std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
     std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
     std::lock(add_lock, label_lock);
     std::unique_lock global_lock(this->global_mutex_);
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
-    return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
+    return this->inner_codes_->UpdateVector(update_ptr, inner_id);
 }
 
 void

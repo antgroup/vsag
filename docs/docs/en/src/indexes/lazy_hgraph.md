@@ -64,9 +64,7 @@ provided as `index_param`.
 | `transition_threshold` | uint64 | `1000` | Number of vectors at which LazyHGraph converts from the flat phase to HGraph. Must be positive. |
 | `hgraph` | object | `{}` | HGraph build parameters used after transition. See [HGraph](hgraph.md#build-parameters). |
 
-LazyHGraph only supports top-level `dtype: "float32"`. The flat phase is fixed
-to FP32 BruteForce storage and does not accept separate flat quantization
-parameters.
+LazyHGraph supports top-level `dtype: "float32"`, `"float16"`, and `"bfloat16"` in both phases and across transition. FP32 uses `Dataset::Float32Vectors`; native FP16/BF16 `uint16_t` buffers share `Dataset::Float16Vectors`, interpreted by dtype. Queries must match the configured input dtype. The flat phase uses FP32 BruteForce storage independently of input dtype and does not accept separate flat quantization parameters. Transition exports float32 data and reconstructs native input for HGraph, requiring temporary conversion buffers.
 
 ## Search parameters
 

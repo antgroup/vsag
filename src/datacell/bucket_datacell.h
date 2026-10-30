@@ -21,12 +21,15 @@
 #include <type_traits>
 
 #include "bucket_interface.h"
+#include "data_type.h"
 #include "impl/inner_search_param.h"
 #include "io/container/io_array.h"
 #include "io/read_cache/lru_page_cache.h"
 #include "io/read_cache/page.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "quantization/product_quantization/pq_fastscan_quantizer.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "simd/fp32_simd.h"
 #include "utils/byte_buffer.h"
 #include "utils/timer.h"
@@ -311,6 +314,7 @@ private:
 
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
 
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     uint64_t input_dim_{0};
 
     static constexpr InnerIdType EMPTY_INNER_ID = std::numeric_limits<InnerIdType>::max();
@@ -342,9 +346,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::BucketDataCell(const QuantizerParamPtr& quant
       allocator_(common_param.allocator_.get()),
       residual_bias_(bucket_count, Vector<float>(allocator_), allocator_),
       metric_(common_param.metric_),
+      data_type_(common_param.data_type_),
       input_dim_(common_param.dim_) {
     this->bucket_count_ = bucket_count;
-    this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
+    // Bucket encoding and residual arithmetic always pass float32 to quantizers.
+    auto quantizer_common = common_param;
+    quantizer_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, quantizer_common);
     this->code_size_ = quantizer_->GetCodeSize();
     this->use_residual_ = use_residual;
     this->backend_ =
@@ -623,6 +631,21 @@ BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
 template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
+    Vector<float> input_buffer(allocator_);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16) {
+        CHECK_ARGUMENT(data != nullptr, "bucket training vectors cannot be null");
+        CHECK_ARGUMENT(input_dim_ > 0 and count <= std::numeric_limits<uint64_t>::max() /
+                                                       sizeof(float) / input_dim_,
+                       "invalid bucket training size");
+        input_buffer.resize(count * input_dim_);
+        const auto* half_data = static_cast<const uint16_t*>(data);
+        for (uint64_t i = 0; i < input_buffer.size(); ++i) {
+            input_buffer[i] = data_type_ == DataTypes::DATA_TYPE_FP16
+                                  ? generic::FP16ToFloat(half_data[i])
+                                  : generic::BF16ToFloat(half_data[i]);
+        }
+        data = input_buffer.data();
+    }
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
@@ -653,7 +676,25 @@ BucketDataCell<QuantTmpl, IOTmpl>::encode_vector(const void* vector,
                                                  BucketIdType bucket_id,
                                                  uint8_t* codes,
                                                  float& res_score) {
-    auto vector_ptr = static_cast<const float*>(vector);
+    const float* vector_ptr;
+    Vector<float> fp32_scratch(this->allocator_);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16) {
+        fp32_scratch.resize(input_dim_);
+        const auto* src = static_cast<const uint16_t*>(vector);
+        for (uint64_t i = 0; i < input_dim_; ++i) {
+            fp32_scratch[i] = generic::FP16ToFloat(src[i]);
+        }
+        vector_ptr = fp32_scratch.data();
+    } else if (data_type_ == DataTypes::DATA_TYPE_BF16) {
+        fp32_scratch.resize(input_dim_);
+        const auto* src = static_cast<const uint16_t*>(vector);
+        for (uint64_t i = 0; i < input_dim_; ++i) {
+            fp32_scratch[i] = generic::BF16ToFloat(src[i]);
+        }
+        vector_ptr = fp32_scratch.data();
+    } else {
+        vector_ptr = static_cast<const float*>(vector);
+    }
     res_score = 0.0F;
     if (not use_residual_) {
         this->quantizer_->EncodeOne(vector_ptr, codes);
@@ -788,7 +829,12 @@ BucketDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
         order[position] = static_cast<InnerIdType>(i);
     }
 
-    const auto* float_vectors = static_cast<const float*>(vectors);
+    uint64_t source_stride = input_dim_ * sizeof(float);
+    if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
+        source_stride = input_dim_ * sizeof(uint16_t);
+    } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+        source_stride = input_dim_ * sizeof(int8_t);
+    }
     for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
         const auto bucket_insert_count = bucket_counts[bucket_id];
         if (bucket_insert_count == 0) {
@@ -808,7 +854,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
             const auto position = group_begin + local_index;
             const auto input_index = order[position];
             float residual_score = 0.0F;
-            encode_vector(float_vectors + input_index * input_dim_,
+            encode_vector(static_cast<const uint8_t*>(vectors) + input_index * source_stride,
                           static_cast<BucketIdType>(bucket_id),
                           codes.data + local_index * static_cast<uint64_t>(code_size_),
                           residual_score);

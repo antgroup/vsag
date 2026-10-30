@@ -44,6 +44,7 @@ BucketInterfacePtr
 MakeBucketDataCellInstance(const BucketDataCellParamPtr& param,
                            const IndexCommonParam& common_param) {
     std::string quantization_string = param->quantizer_parameter->GetTypeName();
+
     if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
         return MakeBucketDataCellInstance<SQ8Quantizer<metric>, IOTemp>(param, common_param);
     }

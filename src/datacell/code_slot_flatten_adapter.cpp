@@ -196,6 +196,11 @@ public:
     }
 
     bool
+    DecodeToFloat(const uint8_t* codes, float* vector) override {
+        return base_->DecodeToFloat(codes, vector);
+    }
+
+    bool
     Encode(const float* vector, uint8_t* codes) override {
         return base_->Encode(vector, codes);
     }

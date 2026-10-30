@@ -154,20 +154,31 @@ IVF::Train(const DatasetPtr& data) {
         return;
     }
 
-    int64_t total_elements = data->GetNumElements();
-    int64_t dim = data->GetDim();
-    DatasetPtr train_data =
-        vsag::sample_train_data(data, total_elements, dim, train_sample_count_, allocator_);
-    int64_t sample_count = train_data->GetNumElements();
-
+    Vector<float> training_scratch(this->allocator_);
+    DatasetPtr full_train_data;
+    DatasetPtr train_data;
+    if (precise_bucket_ != nullptr or reorder_codes_ != nullptr) {
+        // Precise quantizers must see all vectors, independently of the clustering sample.
+        // Convert native half input only once, then sample the converted float32 dataset.
+        full_train_data = this->float_dataset(data, training_scratch);
+        train_data = vsag::sample_train_data(full_train_data,
+                                             full_train_data->GetNumElements(),
+                                             full_train_data->GetDim(),
+                                             train_sample_count_,
+                                             allocator_);
+    } else {
+        train_data = this->float_dataset(data, training_scratch, train_sample_count_);
+    }
+    const auto sample_count = train_data->GetNumElements();
+    const auto* vectors = train_data->GetFloat32Vectors();
     partition_strategy_->Train(train_data);
-
-    const auto* data_ptr = train_data->GetFloat32Vectors();
-    this->bucket_->Train(data_ptr, sample_count);
+    this->bucket_->Train(vectors, sample_count);
     if (precise_bucket_ != nullptr) {
-        this->precise_bucket_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        this->precise_bucket_->Train(full_train_data->GetFloat32Vectors(),
+                                     full_train_data->GetNumElements());
     } else if (reorder_codes_ != nullptr) {
-        this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        this->reorder_codes_->Train(full_train_data->GetFloat32Vectors(),
+                                    full_train_data->GetNumElements());
     }
     this->is_trained_ = true;
 }
@@ -179,6 +190,9 @@ IVF::Add(const DatasetPtr& base) {
 
 std::vector<int64_t>
 IVF::add(const DatasetPtr& base, bool try_optimized_build) {
+    Vector<float> input_scratch(this->allocator_);
+    auto float_base = this->float_dataset(base, input_scratch);
+    CHECK_ARGUMENT(base->GetIds() != nullptr, "IVF base ids cannot be null");
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -189,7 +203,7 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     }
     auto num_element = base->GetNumElements();
     const auto* ids = base->GetIds();
-    const auto* vectors = base->GetFloat32Vectors();
+    const auto* vectors = float_base->GetFloat32Vectors();
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
@@ -216,8 +230,7 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
             }
         }
         if (reorder_codes_ != nullptr) {
-            this->reorder_codes_->BatchInsertVector(base->GetFloat32Vectors(),
-                                                    base->GetNumElements());
+            this->reorder_codes_->BatchInsertVector(vectors, num_element);
         }
         for (int64_t i = 0; i < num_element; ++i) {
             this->label_table_->Insert(i + total_elements_, ids[i]);
@@ -262,7 +275,7 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
 
     auto add_func = [&](int64_t i) -> void {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
-            const auto* data_ptr = vectors + i * dim_;
+            const auto* data_ptr = vectors + i * this->dim_;
             auto idx = i * buckets_per_data_ + j;
             auto posting_id = static_cast<InnerIdType>(idx + current_num * buckets_per_data_);
             InnerIdType offset_id;
@@ -545,10 +558,6 @@ IVF::RebuildBucketGraphs() {
         throw VsagException(
             ErrorType::UNSUPPORTED_INDEX_OPERATION,
             "RebuildIVFBucketGraphs: index was not configured with graph_build_threshold > 0");
-    }
-    if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "RebuildIVFBucketGraphs: only supports float32 data type");
     }
 
     // Build new graphs in temp storage first (exception safety)

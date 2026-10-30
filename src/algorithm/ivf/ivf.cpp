@@ -22,6 +22,7 @@
 #include <exception>
 #include <limits>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <random>
 #include <set>
 #include <unordered_map>
@@ -43,6 +44,8 @@
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "query_context.h"
 #include "rabitq_split_bucket_searcher.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/stream_writer.h"
 #include "utils/float_utils.h"
 #include "utils/util_functions.h"
@@ -404,13 +407,65 @@ IVF::CheckAndMappingExternalParam(const JsonType& external_param,
     return ivf_parameter;
 }
 
+DatasetPtr
+IVF::float_dataset(const DatasetPtr& data, Vector<float>& scratch, int64_t sample_count) const {
+    CHECK_ARGUMENT(data != nullptr, "IVF dataset cannot be null");
+    const auto count = data->GetNumElements();
+    const auto dim = data->GetDim();
+    const bool valid_dimension = dim > 0 and dim == this->dim_;
+    CHECK_ARGUMENT(valid_dimension, "IVF dataset dimension must match index");
+    const bool valid_count =
+        count > 0 and
+        static_cast<uint64_t>(count) <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) /
+                                            sizeof(float) / static_cast<uint64_t>(dim);
+    CHECK_ARGUMENT(valid_count, "invalid IVF dataset element count");
+    if (this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "IVF float32 vectors cannot be null");
+        return sample_count >= 0 ? sample_train_data(data, count, dim, sample_count, allocator_)
+                                 : data;
+    }
+    const auto* input = data->GetFloat16Vectors();
+    CHECK_ARGUMENT(input != nullptr, "IVF float16/bfloat16 vectors cannot be null");
+    const auto selected_count =
+        sample_count >= 0 ? std::min(count, std::max(int64_t{512}, sample_count)) : count;
+    Vector<int64_t> selected(allocator_);
+    if (selected_count < count) {
+        selected.resize(selected_count);
+        std::iota(selected.begin(), selected.end(), 0);
+        std::mt19937_64 generator(std::random_device{}());
+        for (int64_t i = selected_count; i < count; ++i) {
+            std::uniform_int_distribution<int64_t> distribution(0, i);
+            const auto slot = distribution(generator);
+            if (slot < selected_count) {
+                selected[slot] = i;
+            }
+        }
+    }
+    scratch.resize(selected_count * dim);
+    for (int64_t i = 0; i < selected_count; ++i) {
+        const auto* source = input + (selected.empty() ? i : selected[i]) * dim;
+        for (int64_t j = 0; j < dim; ++j) {
+            scratch[i * dim + j] = this->data_type_ == DataTypes::DATA_TYPE_FP16
+                                       ? generic::FP16ToFloat(source[j])
+                                       : generic::BF16ToFloat(source[j]);
+        }
+    }
+    return Dataset::Make()
+        ->NumElements(selected_count)
+        ->Dim(dim)
+        ->Float32Vectors(scratch.data())
+        ->Owner(false);
+}
+
 IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     : InnerIndexInterface(param, common_param),
       buckets_per_data_(param->buckets_per_data),
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
       common_param_(common_param) {
-    this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
+    auto storage_common = common_param;
+    storage_common.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, storage_common);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");
     }
@@ -428,7 +483,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
     }
 
     // Create modified common_param with the initialized thread_pool_
-    IndexCommonParam modified_common_param = common_param;
+    IndexCommonParam modified_common_param = storage_common;
     modified_common_param.thread_pool_ = this->thread_pool_;
 
     if (param->ivf_partition_strategy_parameter->partition_strategy_type ==
@@ -843,7 +898,11 @@ IVF::AnalyzeIndexBySearch(const SearchRequest& request) {
     CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
     CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
     JsonType stats;
+    Vector<float> query_scratch(this->allocator_);
     auto querys = request.query_;
+    if (querys->GetFloat16Vectors() != nullptr or querys->GetFloat32Vectors() == nullptr) {
+        querys = this->float_dataset(querys, query_scratch);
+    }
     CHECK_ARGUMENT(querys->GetNumElements() > 0, "analysis query must contain at least one vector");
     CHECK_ARGUMENT(querys->GetFloat32Vectors() != nullptr,
                    "IVF analysis requires float32 query vectors");

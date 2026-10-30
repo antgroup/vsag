@@ -118,6 +118,17 @@ public:
         return cast().DecodeOneImpl(codes, data);
     }
 
+    /** @brief Decode storage reconstruction directly to float32, independent of input dtype. */
+    bool
+    DecodeOneToFloat(const uint8_t* codes, float* data) {
+        return cast().DecodeOneToFloatImpl(codes, data);
+    }
+
+    bool
+    DecodeOneToFloatImpl(const uint8_t* codes, float* data) {
+        return cast().DecodeOneImpl(codes, data);
+    }
+
     /**
      * @brief Decodes multiple encoded codes back into their original data representations.
      *

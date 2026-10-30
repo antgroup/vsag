@@ -586,6 +586,29 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
+    Vector<float> query_scratch(this->allocator_);
+    // Float32 queries remain valid for raw-float callers such as quantizer analysis.
+    auto float_query = request.query_;
+    CHECK_ARGUMENT(float_query != nullptr, "IVF query cannot be null");
+    if (float_query->GetFloat16Vectors() != nullptr or
+        float_query->GetFloat32Vectors() == nullptr) {
+        float_query = this->float_dataset(float_query, query_scratch);
+    } else {
+        const bool valid_dimension = float_query->GetDim() == this->dim_ and this->dim_ > 0;
+        CHECK_ARGUMENT(valid_dimension, "IVF query dimension must match index");
+        const bool valid_count = float_query->GetNumElements() > 0 and
+                                 static_cast<uint64_t>(float_query->GetNumElements()) <=
+                                     static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) /
+                                         sizeof(float) / static_cast<uint64_t>(this->dim_);
+        CHECK_ARGUMENT(valid_count, "invalid IVF query element count");
+    }
+    auto float_request = request;
+    float_request.query_ = float_query;
+    return this->search_float_request(float_request);
+}
+
+DatasetPtr
+IVF::search_float_request(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
@@ -710,7 +733,7 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 json["ivf"]["parallelism"].SetInt64(1);
             }
             one_request.params_str_ = json.Dump();
-            auto one_result = this->SearchWithRequest(one_request);
+            auto one_result = this->search_float_request(one_request);
             const auto count = std::min(request.topk_, one_result->GetDim());
             if (count > 0) {
                 std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);

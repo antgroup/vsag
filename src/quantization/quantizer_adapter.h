@@ -51,6 +51,11 @@ public:
     DecodeOneImpl(const uint8_t* codes, float* data);
 
     bool
+    DecodeOneToFloatImpl(const uint8_t* codes, float* data) {
+        return inner_quantizer_->DecodeOneToFloat(codes, data);
+    }
+
+    bool
     DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count);
 
     float

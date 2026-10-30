@@ -179,6 +179,13 @@ public:
     GetMemoryUsage() const override;
 
 private:
+    // Native datasets are converted once; routing and storage below this boundary use float32.
+    DatasetPtr
+    float_dataset(const DatasetPtr& data, Vector<float>& scratch, int64_t sample_count = -1) const;
+
+    DatasetPtr
+    search_float_request(const SearchRequest& request) const;
+
     std::vector<int64_t>
     add(const DatasetPtr& base, bool try_optimized_build);
 

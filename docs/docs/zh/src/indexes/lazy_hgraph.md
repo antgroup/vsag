@@ -59,8 +59,7 @@ LazyHGraph 的构建参数放在顶层 `lazy_hgraph` 对象中。为了兼容通
 | `transition_threshold` | uint64 | `1000` | 从 flat 阶段转换到 HGraph 的向量数量阈值，必须为正数。 |
 | `hgraph` | object | `{}` | 转换后内部 HGraph 使用的构建参数。见 [HGraph](hgraph.md#构建参数)。 |
 
-LazyHGraph 只支持顶层 `dtype: "float32"`。flat 阶段固定使用 FP32 BruteForce
-存储，不接受单独的 flat 量化参数。
+LazyHGraph 在两个阶段及转换过程中均支持顶层 `dtype: "float32"`、`"float16"` 和 `"bfloat16"`。FP32 使用 `Dataset::Float32Vectors`；FP16/BF16 原生 `uint16_t` 缓冲区共用 `Dataset::Float16Vectors`，由 dtype 决定解释方式。查询必须匹配配置的输入 dtype。flat 阶段独立于输入 dtype，固定使用 FP32 BruteForce 存储，不接受单独的 flat 量化参数。阶段转换会导出 float32 数据并重建 HGraph 所需的原生输入，需要临时转换缓冲区。
 
 ## 搜索参数
 

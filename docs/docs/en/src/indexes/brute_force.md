@@ -56,9 +56,9 @@ A full runnable program is at
 
 ## Input data type
 
-The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors only. At runtime, supply vectors via `Dataset::Float32Vectors`. At index creation, set `dtype` to `"float32"`; `dtype: "int8"` is not supported when creating a BruteForce index.
+The public dense `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths support `dtype: "float32"`, `"float16"`, and `"bfloat16"`. Supply FP32 through `Dataset::Float32Vectors`; both native half formats use `uint16_t` values through `Dataset::Float16Vectors`, interpreted according to `dtype`. Query and update buffers must match the configured dtype. Use the Dataset overload for half-precision distance queries. `dtype: "int8"` remains unsupported.
 
-The `base_quantization_type` parameter controls the index's internal encoding and storage, not the input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16 input.
+`base_quantization_type` independently controls storage encoding: selecting `fp16` or `bf16` storage does not change the configured input dtype.
 
 ## Build parameters
 

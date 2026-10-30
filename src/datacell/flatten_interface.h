@@ -459,6 +459,12 @@ public:
     virtual bool
     Decode(const uint8_t* codes, float* vector) = 0;
 
+    // Unlike Decode, output is always float32 rather than the native input dtype.
+    virtual bool
+    DecodeToFloat(const uint8_t* codes, float* vector) {
+        return this->Decode(codes, vector);
+    }
+
     virtual bool
     Encode(const float* vector, uint8_t* codes) = 0;
 

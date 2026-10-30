@@ -23,6 +23,8 @@
 #include "algorithm/hgraph/hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "unittest.h"
 #include "vsag/factory.h"
 #include "vsag/index_features.h"
@@ -721,4 +723,84 @@ TEST_CASE("LazyHGraph supports concurrent search during transition", "[ut][lazy_
     REQUIRE_FALSE(failed.load(std::memory_order_acquire));
     REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
     REQUIRE(index->CheckIdExist(2000));
+}
+
+TEST_CASE("LazyHGraph half transition preserves native distances and metadata",
+          "[ut][lazy_hgraph][fp16_bf16]") {
+    const auto dtype = GENERATE(vsag::DataTypes::DATA_TYPE_FP16, vsag::DataTypes::DATA_TYPE_BF16);
+    auto common_param = MakeCommonParam(1);
+    common_param.data_type_ = dtype;
+    auto external_param = MakeLazyParam(4);
+    external_param["hgraph"]["store_raw_vector"].SetBool(true);
+    auto param = vsag::LazyHGraph::CheckAndMappingExternalParam(external_param, common_param);
+    auto index = std::make_shared<vsag::LazyHGraph>(param, common_param);
+    index->InitFeatures();
+
+    std::vector<int64_t> ids{10, 11, 12, 13, 14};
+    std::vector<char> tags{'a', 'b', 'c', 'd', 'e'};
+    std::vector<float> values(5 * DIM);
+    std::vector<uint16_t> native(5 * DIM);
+    for (int64_t row = 0; row < 5; ++row) {
+        for (int64_t d = 0; d < DIM; ++d) {
+            const auto offset = row * DIM + d;
+            // Exactly representable values include zero and both signs.
+            values[offset] = static_cast<float>(row) + static_cast<float>(d) * 0.25F - 2.0F;
+            native[offset] = dtype == vsag::DataTypes::DATA_TYPE_FP16
+                                 ? vsag::generic::FloatToFP16(values[offset])
+                                 : vsag::generic::FloatToBF16(values[offset]);
+        }
+    }
+    auto make_data = [&](int64_t row, int64_t count) {
+        return vsag::Dataset::Make()
+            ->NumElements(count)
+            ->Dim(DIM)
+            ->Ids(ids.data() + row)
+            ->Float16Vectors(native.data() + row * DIM)
+            ->ExtraInfos(tags.data() + row)
+            ->ExtraInfoSize(1)
+            ->Owner(false);
+    };
+    // Both representations may be present: a half index must select the native one.
+    std::vector<float> unrelated(DIM, 1000.0F);
+    auto query = make_data(2, 1);
+    query->Float32Vectors(unrelated.data());
+    REQUIRE(index->Add(make_data(0, 3)).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::FLAT);
+    auto verify = [&](const std::vector<int64_t>& rows) {
+        for (const auto row : rows) {
+            const auto id = ids[row];
+            const auto expected = L2(values.data() + 2 * DIM, values.data() + row * DIM);
+            const auto actual = index->CalcDistanceById(query, id);
+            CAPTURE(static_cast<int>(dtype),
+                    static_cast<int>(index->GetPhase()),
+                    row,
+                    id,
+                    actual,
+                    expected);
+            REQUIRE(std::abs(actual - expected) < 1e-5F);
+            auto exported = index->GetDataByIds(&id, 1);
+            REQUIRE(exported->GetExtraInfos()[0] == tags[row]);
+            for (int64_t d = 0; d < DIM; ++d) {
+                REQUIRE(exported->GetFloat32Vectors()[d] == values[row * DIM + d]);
+            }
+        }
+        auto result = index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":40}})", nullptr);
+        REQUIRE(result->GetIds()[0] == 12);
+        REQUIRE(std::abs(result->GetDistances()[0]) < 1e-5F);
+        auto range = index->RangeSearch(query, 0.01F, R"({"hgraph":{"ef_search":40}})", nullptr);
+        REQUIRE(range->GetDim() == 1);
+        REQUIRE(range->GetIds()[0] == 12);
+        REQUIRE_THROWS(index->CalcDistanceById(unrelated.data(), 12));
+    };
+    verify({0, 1, 2});
+    // Removing a non-last row moves a native code before transition.
+    REQUIRE(index->Remove({10}, vsag::RemoveMode::FORCE_REMOVE) == 1);
+    verify({1, 2});
+    REQUIRE(index->Add(make_data(3, 2)).empty());
+    REQUIRE(index->GetPhase() == vsag::LazyHGraph::Phase::GRAPH);
+    REQUIRE_FALSE(index->CheckIdExist(10));
+    verify({1, 2, 3, 4});
+    // This path decodes and compares native data internally, unlike float32 export.
+    REQUIRE(index->UpdateVector(12, make_data(2, 1), false));
+    verify({1, 2, 3, 4});
 }

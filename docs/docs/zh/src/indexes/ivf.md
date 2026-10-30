@@ -61,7 +61,7 @@ auto result = index->KnnSearch(
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add` 和检索路径接收通过 `Dataset::Float32Vectors` 提供的 FP32 向量，`dtype` 应设为 `"float32"`。`base_quantization_type` 选择的是内部编码和存储，不会使 API 接受 FP16/BF16 输入。创建 IVF 索引时不支持 `dtype: "int8"`。
+公开的 `Build`、`Add` 和检索路径支持 `dtype: "float32"`、`"float16"` 和 `"bfloat16"`。FP32 使用 `Dataset::Float32Vectors`；FP16/BF16 原生 `uint16_t` 数据共用 `Dataset::Float16Vectors` API，由 `dtype` 决定解释方式。`base_quantization_type` 独立选择存储编码。IVF 在入口将半精度输入转换为 float32 供路由和存储处理，会增加转换时间与临时内存。未启用精排时，训练只转换采样行；启用 `use_reorder: true` 时，会将整个半精度数据集一次性转换为 float32，让精排量化器使用全量数据训练（`flat` 和 `bucket` 布局均如此），而聚类和粗量化器训练仍使用采样数据，因此需要容纳全量数据的 float32 临时缓冲区。这并非零拷贝路径。不支持 `dtype: "int8"`。
 
 ## 构建参数
 

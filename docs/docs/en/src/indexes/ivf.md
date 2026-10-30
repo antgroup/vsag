@@ -66,7 +66,7 @@ auto result = index->KnnSearch(
 
 ## Input data type
 
-The public `Build`, `Add`, and search paths currently accept FP32 vectors supplied with `Dataset::Float32Vectors`; set `dtype` to `"float32"`. `base_quantization_type` selects internal encoding and storage and does not enable FP16/BF16 input. `dtype: "int8"` is not supported when creating an IVF index.
+The public `Build`, `Add`, and search paths support `dtype: "float32"`, `"float16"`, and `"bfloat16"`. Supply FP32 values through `Dataset::Float32Vectors`; supply native FP16/BF16 `uint16_t` values through the shared `Dataset::Float16Vectors` API, with `dtype` selecting their interpretation. `base_quantization_type` independently selects storage encoding. IVF converts half inputs to float32 at its boundary for routing and storage processing, adding conversion time and temporary memory. Training without reordering converts only sampled rows; with `use_reorder: true`, it converts the entire half dataset once so the precise quantizer trains on all rows (for both `flat` and `bucket` layouts), while clustering and coarse quantizer training still use a sample. This requires a full-dataset float32 temporary buffer. This is not a zero-copy path. `dtype: "int8"` is unsupported.
 
 ## Build parameters
 

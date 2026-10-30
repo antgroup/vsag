@@ -52,9 +52,9 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径仅接受 FP32 向量。运行时通过 `Dataset::Float32Vectors` 传入向量；创建索引时 `dtype` 应设为 `"float32"`，不支持 `dtype: "int8"`。
+公开的稠密 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径支持 `dtype: "float32"`、`"float16"` 和 `"bfloat16"`。FP32 使用 `Dataset::Float32Vectors`；两种原生半精度格式均通过 `Dataset::Float16Vectors` 传入 `uint16_t` 数据，由 `dtype` 决定解释方式。查询与更新缓冲区必须匹配配置的 dtype；半精度距离查询使用 Dataset 重载。不支持 `dtype: "int8"`。
 
-`base_quantization_type` 描述的是索引内部编码和存储，而非输入类型。选择内部 `fp16`、`bf16` 等量化器不会使 API 接受 FP16/BF16 输入。
+`base_quantization_type` 独立控制存储编码，选择 `fp16` 或 `bf16` 存储不会改变配置的输入 dtype。
 
 ## 构建参数
 
