@@ -27,7 +27,8 @@
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "dataset_impl.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"
+#include "hgraph_storage_state.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -314,7 +315,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
     if (this->has_loaded_cache()) {
-        if (this->using_dedup_storage()) {
+        if (this->storage_state_->deduplicate_storage_) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "HGraph deduplicate_storage does not support build_with_cache");
         }
@@ -454,8 +455,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     // When every row passed validation, valid_indices is the identity mapping 0..total-1
     // and the batched insertion paths below can use it directly as inner id -> row index.
     // If any row was filtered, those paths are skipped and we fall back to per-row inserts.
-    const bool all_rows_are_valid =
-        valid_indices.size() == static_cast<uint64_t>(total) and not this->using_dedup_storage();
+    const bool all_rows_are_valid = valid_indices.size() == static_cast<uint64_t>(total) and
+                                    not this->storage_state_->deduplicate_storage_;
     // Every caller below is guarded by `all_rows_are_valid`, which is exactly the
     // condition that makes inner_ids cover all `total` rows. Assert the invariant so
     // that relaxing that guard cannot silently read past inner_ids.
@@ -511,7 +512,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
-        } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
+        } else if (not persistent_codes_batched and
+                   not this->storage_state_->deduplicate_storage_) {
             this->insert_persistent_codes(get_data(data, i), inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
@@ -555,13 +557,15 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             inner_ids,
             valid_indices,
             bottom_graph_,
-            *code_slot_map_,
+            *storage_state_->code_slot_map_,
             allocator_,
             thread_pool_.get(),
             build_thread_count_,
-            [this](CodeSlotIdType capacity) { this->ensure_physical_code_capacity(capacity); },
+            [this](CodeSlotIdType capacity) {
+                this->storage_state_->EnsurePhysicalCapacity(*this, capacity);
+            },
             [this, data](int64_t row, CodeSlotIdType slot) {
-                this->insert_persistent_codes_to_slot(get_data(data, row), slot);
+                StorageState::InsertCodes(*this, get_data(data, row), slot);
             });
     };
     if (use_pipnn) {
@@ -572,7 +576,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
         pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
-        if (this->using_dedup_storage() and not defer_persistent_codes) {
+        if (this->storage_state_->deduplicate_storage_ and not defer_persistent_codes) {
             materialize_storage();
         }
         if (this->support_duplicate_) {
@@ -637,7 +641,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         // train_codes_with_dataset(sample_train_dataset(data)); 1.0 has no
         // fused RaBitQ datacell, so no extra branch is needed here.
         this->Train(data);
-        if (this->using_dedup_storage()) {
+        if (this->storage_state_->deduplicate_storage_) {
             materialize_storage();
         } else if (all_rows_are_valid) {
             batch_insert_persistent_codes();
@@ -656,16 +660,20 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
     // UpdateVector must exclude all probes/publications while checking and changing a slot.
     std::shared_lock<std::shared_mutex> storage_read;
     std::unique_lock<std::shared_mutex> storage_write;
-    if (index_.using_dedup_storage() or index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        storage_read = std::shared_lock<std::shared_mutex>(index_.storage_mutation_mutex_);
+    if (index_.storage_state_->deduplicate_storage_ or
+        index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        storage_read =
+            std::shared_lock<std::shared_mutex>(index_.storage_state_->storage_mutation_mutex_);
         if (index_.total_count_.load() == 0) {
             storage_read.unlock();
-            storage_write = std::unique_lock<std::shared_mutex>(index_.storage_mutation_mutex_);
+            storage_write =
+                std::unique_lock<std::shared_mutex>(index_.storage_state_->storage_mutation_mutex_);
         }
         if (index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN and index_.total_count_.load() == 0) {
-            const bool hide_build = index_.using_dedup_storage();
+            const bool hide_build = index_.storage_state_->deduplicate_storage_;
             if (hide_build) {
-                index_.pipnn_initial_add_pending_.store(true, std::memory_order_release);
+                index_.storage_state_->pipnn_initial_add_pending_.store(true,
+                                                                        std::memory_order_release);
                 // Drain queries that entered before the flag was raised. Later queries
                 // check it again after taking the read lock and cannot observe construction.
                 std::scoped_lock lock(index_.global_mutex_);
@@ -673,11 +681,12 @@ HGraph::AddImpl::Run(const DatasetPtr& data) {
             auto failed_ids = index_.Build(data);
             // On failure, partial construction remains hidden instead of exposing unbound slots.
             if (hide_build) {
-                index_.pipnn_initial_add_pending_.store(false, std::memory_order_release);
+                index_.storage_state_->pipnn_initial_add_pending_.store(false,
+                                                                        std::memory_order_release);
             }
             return failed_ids;
         }
-        if (not index_.using_dedup_storage()) {
+        if (not index_.storage_state_->deduplicate_storage_) {
             if (storage_read.owns_lock()) {
                 storage_read.unlock();
             }
@@ -753,7 +762,7 @@ HGraph::AddImpl::validate_add_data(const DatasetPtr& data) const {
 HGraph::AddImpl::add_context
 HGraph::AddImpl::prepare_add_context(const DatasetPtr& data) {
     add_context context;
-    context.use_dedup_storage = index_.using_dedup_storage();
+    context.use_dedup_storage = index_.storage_state_->deduplicate_storage_;
     context.need_temporary_sq8_build_data =
         need_temporary_sq8_build_data(index_.basic_flatten_codes_, index_.has_precise_reorder());
     context.use_parallel_add = index_.thread_pool_ != nullptr;
@@ -937,13 +946,13 @@ HGraph::insert_persistent_codes(const void* data, InnerIdType inner_id) {
 }
 
 void
-HGraph::insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id) {
-    InsertVectorToCodeSlot(this->basic_flatten_codes_, data, code_slot_id);
-    if (has_precise_reorder()) {
-        InsertVectorToCodeSlot(this->high_precise_codes_, data, code_slot_id);
+HGraph::StorageState::InsertCodes(HGraph& index, const void* data, CodeSlotIdType code_slot_id) {
+    InsertVectorToCodeSlot(index.basic_flatten_codes_, data, code_slot_id);
+    if (index.has_precise_reorder()) {
+        InsertVectorToCodeSlot(index.high_precise_codes_, data, code_slot_id);
     }
-    if (create_new_raw_vector_) {
-        InsertVectorToCodeSlot(this->raw_vector_, data, code_slot_id);
+    if (index.create_new_raw_vector_) {
+        InsertVectorToCodeSlot(index.raw_vector_, data, code_slot_id);
     }
 }
 
@@ -973,7 +982,7 @@ HGraph::AddImpl::insert_one_logical_point(const void* data,
         add_lock.unlock();
     }
 
-    auto rlock = index_.acquire_global_read_lock();
+    auto rlock = index_.storage_state_->AcquireReadLock(index_.global_mutex_);
 
     auto param = make_search_param();
     auto probe = this->probe_graph_for_add(data, level, inner_id, param, context.graph_read_codes);
@@ -1007,8 +1016,8 @@ HGraph::AddImpl::publish_duplicate_storage_if_needed(InnerIdType group_id,
                                                      InnerIdType duplicate_id,
                                                      const add_context& context) {
     if (context.use_dedup_storage) {
-        auto code_slot_id = index_.code_slot_map_->Resolve(group_id);
-        index_.code_slot_map_->PublishSlot(duplicate_id, code_slot_id);
+        auto code_slot_id = index_.storage_state_->code_slot_map_->Resolve(group_id);
+        index_.storage_state_->code_slot_map_->PublishSlot(duplicate_id, code_slot_id);
     }
 }
 
@@ -1033,10 +1042,10 @@ HGraph::AddImpl::publish_unique_storage_if_needed(const void* data,
     if (not context.use_dedup_storage) {
         return;
     }
-    auto code_slot_id = index_.code_slot_map_->AllocateSlot();
-    index_.ensure_physical_code_capacity_unlocked(code_slot_id + 1);
-    index_.insert_persistent_codes_to_slot(data, code_slot_id);
-    index_.code_slot_map_->PublishSlot(inner_id, code_slot_id);
+    auto code_slot_id = index_.storage_state_->code_slot_map_->AllocateSlot();
+    index_.storage_state_->EnsurePhysicalCapacityUnlocked(index_, code_slot_id + 1);
+    StorageState::InsertCodes(index_, data, code_slot_id);
+    index_.storage_state_->code_slot_map_->PublishSlot(inner_id, code_slot_id);
 }
 
 void
@@ -1047,14 +1056,15 @@ HGraph::AddImpl::publish_unique_storage_if_needed(const void* data,
     if (not context.use_dedup_storage) {
         return;
     }
-    auto code_slot_id = index_.code_slot_map_->AllocateSlot();
-    if (index_.physical_code_capacity_.load(std::memory_order_acquire) < code_slot_id + 1) {
+    auto code_slot_id = index_.storage_state_->code_slot_map_->AllocateSlot();
+    if (index_.storage_state_->physical_code_capacity_.load(std::memory_order_acquire) <
+        code_slot_id + 1) {
         read_lock.unlock();
-        index_.ensure_physical_code_capacity(code_slot_id + 1);
+        index_.storage_state_->EnsurePhysicalCapacity(index_, code_slot_id + 1);
         read_lock.lock();
     }
-    index_.insert_persistent_codes_to_slot(data, code_slot_id);
-    index_.code_slot_map_->PublishSlot(inner_id, code_slot_id);
+    StorageState::InsertCodes(index_, data, code_slot_id);
+    index_.storage_state_->code_slot_map_->PublishSlot(inner_id, code_slot_id);
 }
 
 bool
@@ -1130,8 +1140,9 @@ HGraph::AddImpl::probe_graph_for_add(const void* data,
     param.topk = static_cast<int64_t>(index_.ef_construct_);
     if (index_.support_duplicate_) {
         param.find_duplicate = true;
-        param.duplicate_query_id =
-            index_.using_dedup_storage() ? std::numeric_limits<InnerIdType>::max() : inner_id;
+        param.duplicate_query_id = index_.storage_state_->deduplicate_storage_
+                                       ? std::numeric_limits<InnerIdType>::max()
+                                       : inner_id;
         param.duplicate_distance_threshold = index_.duplicate_distance_threshold_;
     }
 
@@ -1224,10 +1235,10 @@ HGraph::AddImpl::publish_unique_to_route_graphs(const void* data,
 }
 
 void
-HGraph::ensure_physical_code_capacity(CodeSlotIdType required_capacity) {
+HGraph::StorageState::EnsurePhysicalCapacity(HGraph& index, CodeSlotIdType required_capacity) {
     // Capacity is atomic. The resize mutex serializes growers; the exclusive global lock
     // below excludes graph/code readers before any physical flatten is resized.
-    if (not this->using_dedup_storage()) {
+    if (not this->deduplicate_storage_) {
         return;
     }
     if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
@@ -1244,13 +1255,14 @@ HGraph::ensure_physical_code_capacity(CodeSlotIdType required_capacity) {
             pending.store(false, std::memory_order_release);
         }
     } pending_reset{this->physical_code_resize_pending_};
-    std::scoped_lock lock(this->global_mutex_);
-    this->ensure_physical_code_capacity_unlocked(required_capacity);
+    std::scoped_lock lock(index.global_mutex_);
+    this->EnsurePhysicalCapacityUnlocked(index, required_capacity);
 }
 
 void
-HGraph::ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity) {
-    if (not this->using_dedup_storage()) {
+HGraph::StorageState::EnsurePhysicalCapacityUnlocked(HGraph& index,
+                                                     CodeSlotIdType required_capacity) {
+    if (not this->deduplicate_storage_) {
         return;
     }
     if (this->physical_code_capacity_.load(std::memory_order_acquire) >= required_capacity) {
@@ -1258,16 +1270,16 @@ HGraph::ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity)
     }
 
     auto new_capacity = static_cast<InnerIdType>(
-        next_multiple_of_power_of_two(required_capacity, this->resize_increase_count_bit_));
-    GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->Resize(new_capacity);
-    if (has_precise_reorder()) {
-        GetCodeSlotPhysicalFlatten(this->high_precise_codes_)->Resize(new_capacity);
+        next_multiple_of_power_of_two(required_capacity, index.resize_increase_count_bit_));
+    GetCodeSlotPhysicalFlatten(index.basic_flatten_codes_)->Resize(new_capacity);
+    if (index.has_precise_reorder()) {
+        GetCodeSlotPhysicalFlatten(index.high_precise_codes_)->Resize(new_capacity);
     }
-    if (create_new_raw_vector_) {
-        GetCodeSlotPhysicalFlatten(this->raw_vector_)->Resize(new_capacity);
+    if (index.create_new_raw_vector_) {
+        GetCodeSlotPhysicalFlatten(index.raw_vector_)->Resize(new_capacity);
     }
     this->physical_code_capacity_.store(new_capacity, std::memory_order_release);
-    this->cal_memory_usage();
+    index.cal_memory_usage();
 }
 
 void
@@ -1292,10 +1304,11 @@ HGraph::resize(uint64_t new_size) {
         pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size_power_2, allocator_);
         this->label_table_->Resize(new_size_power_2);
         bottom_graph_->Resize(new_size_power_2);
-        if (this->using_dedup_storage()) {
-            this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
+        if (this->storage_state_->deduplicate_storage_) {
+            this->storage_state_->code_slot_map_->ReserveLogicalSize(
+                static_cast<InnerIdType>(new_size_power_2));
         }
-        if (not this->using_dedup_storage()) {
+        if (not this->storage_state_->deduplicate_storage_) {
             this->basic_flatten_codes_->Resize(new_size_power_2);
             if (has_precise_reorder()) {
                 this->high_precise_codes_->Resize(new_size_power_2);
@@ -1303,8 +1316,8 @@ HGraph::resize(uint64_t new_size) {
             if (create_new_raw_vector_) {
                 this->raw_vector_->Resize(new_size_power_2);
             }
-            this->physical_code_capacity_.store(static_cast<InnerIdType>(new_size_power_2),
-                                                std::memory_order_release);
+            this->storage_state_->physical_code_capacity_.store(
+                static_cast<InnerIdType>(new_size_power_2), std::memory_order_release);
         }
         if (this->extra_infos_ != nullptr) {
             this->extra_infos_->Resize(new_size_power_2);
@@ -1322,7 +1335,7 @@ HGraph::InitFeatures() {
         IndexFeature::SUPPORT_BUILD_WITH_MULTI_THREAD,
         IndexFeature::SUPPORT_ADD_AFTER_BUILD,
     });
-    if (not this->using_dedup_storage()) {
+    if (not this->storage_state_->deduplicate_storage_) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_MERGE_INDEX);
     }
     // search

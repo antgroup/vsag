@@ -25,6 +25,7 @@
 
 #include "datacell/dense_duplicate_tracker.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "framework/hgraph_storage.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -84,11 +85,7 @@ make_data(std::vector<float>& vectors, std::vector<int64_t>& labels, int64_t dim
 
 void
 require_counts(const std::shared_ptr<Index>& index, uint32_t logical, uint32_t physical) {
-    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
-    REQUIRE(hgraph != nullptr);
-    REQUIRE(index->GetNumElements() == logical);
-    REQUIRE(hgraph->GetCodeStorageCounts() ==
-            std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{logical, physical});
+    fixtures::require_code_storage_counts(index, logical, physical);
 }
 
 void

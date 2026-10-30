@@ -23,6 +23,7 @@
 #include <tuple>
 #include <vector>
 
+#include "framework/hgraph_storage.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -605,8 +606,7 @@ TEST_CASE("HGraph deduplicate_storage keeps physical flatten capacity slot-based
     REQUIRE(dedup_build.value().empty());
     auto dedup_hgraph = std::dynamic_pointer_cast<vsag::HGraph>(dedup_index->GetInnerIndex());
     REQUIRE(dedup_hgraph != nullptr);
-    REQUIRE(dedup_hgraph->GetCodeStorageCounts() ==
-            std::pair<vsag::InnerIdType, vsag::CodeSlotIdType>{count, 1});
+    fixtures::require_code_storage_counts(dedup_index, count, 1);
 
     auto old_storage_index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
     auto old_storage_build = old_storage_index->Build(base);
@@ -1197,7 +1197,7 @@ TEST_CASE("HGraph deduplicate_storage batch Add supports internal parallel add",
     RequireRangeContains(index, unique_query, {104}, 1);
 }
 
-TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
+TEST_CASE("HGraph deduplicate_storage physical growth stays searchable during concurrent Add",
           "[ut][hgraph][duplicate][parallel][resize][review_round3]") {
     BlockSizeLimitGuard default_block_size(512 * 1024);
     constexpr int64_t dim = 128;
@@ -1219,13 +1219,10 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
     auto base = MakeFloatDataset(vectors, ids, dim, base_count);
     REQUIRE(index->Build(base).has_value());
 
-    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
-    REQUIRE(hgraph != nullptr);
-
-    // Total index memory bounds the physical FP32 reservation from above. Add a margin
-    // larger than the query scratch pools, instead of relying on the resize-bit default.
+    // The public storage breakdown bounds the current physical reservation. Grow through
+    // actual Add calls, while readers run, without exposing implementation-only resize hooks.
     constexpr uint64_t bytes_per_code = dim * sizeof(float);
-    const auto memory_before = index->GetMemoryUsage();
+    const auto memory_before = index->GetMemoryUsageDetail().at("basic_flatten_codes");
     const auto required_capacity =
         static_cast<vsag::InnerIdType>(memory_before / bytes_per_code + 1024);
 
@@ -1243,6 +1240,8 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
                 if (not result.has_value()) {
                     return false;
                 }
+                // Leave room for Add's global writer lock between overlapping searches.
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
             return true;
         }));
@@ -1253,15 +1252,26 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
 
     std::atomic<uint64_t> resizers_ready{0};
     std::atomic<bool> start_resizing{false};
-    std::vector<std::future<void>> resizers;
+    const uint64_t rows_per_batch =
+        (required_capacity - base_count + resize_threads - 1) / resize_threads;
+    std::vector<std::future<bool>> resizers;
     resizers.reserve(resize_threads);
     for (uint64_t i = 0; i < resize_threads; ++i) {
-        resizers.emplace_back(std::async(std::launch::async, [&]() {
+        resizers.emplace_back(std::async(std::launch::async, [&, i]() {
             resizers_ready.fetch_add(1, std::memory_order_release);
             while (not start_resizing.load(std::memory_order_acquire)) {
                 std::this_thread::yield();
             }
-            hgraph->ensure_physical_code_capacity(required_capacity);
+            std::vector<float> added(rows_per_batch * dim, 0.0F);
+            std::vector<int64_t> added_ids(rows_per_batch);
+            for (uint64_t row = 0; row < rows_per_batch; ++row) {
+                const auto offset = i * rows_per_batch + row;
+                added[row * dim] = static_cast<float>(base_count + offset);
+                added_ids[row] = static_cast<int64_t>(10000 + offset);
+            }
+            const auto result = index->Add(
+                MakeFloatDataset(added, added_ids, dim, static_cast<int64_t>(rows_per_batch)));
+            return result.has_value() and result.value().empty();
         }));
     }
     while (resizers_ready.load(std::memory_order_acquire) < resize_threads) {
@@ -1271,7 +1281,7 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
 
     bool all_resizers_finished = true;
     for (auto& resizer : resizers) {
-        if (resizer.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+        if (resizer.wait_for(std::chrono::seconds(30)) != std::future_status::ready) {
             all_resizers_finished = false;
             break;
         }
@@ -1281,10 +1291,12 @@ TEST_CASE("HGraph deduplicate_storage physical growth is single-flight",
         REQUIRE(searcher.get());
     }
     for (auto& resizer : resizers) {
-        resizer.get();
+        REQUIRE(resizer.get());
     }
     REQUIRE(all_resizers_finished);
-    REQUIRE(index->GetMemoryUsage() >= static_cast<uint64_t>(required_capacity) * bytes_per_code);
+    REQUIRE(index->GetNumElements() == base_count + resize_threads * rows_per_batch);
+    REQUIRE(index->GetMemoryUsageDetail().at("basic_flatten_codes") >=
+            static_cast<uint64_t>(required_capacity) * bytes_per_code);
 }
 
 TEST_CASE("HGraph deduplicate_storage concurrent Add keeps visible duplicates searchable",
@@ -1477,11 +1489,24 @@ TEST_CASE("HGraph dedup update cannot overwrite a newly published duplicate",
     REQUIRE(distance.value() == 0.0F);
 
     // Exercise validation without holding the label lock while crossing the resize gate.
-    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
-    auto resize =
-        std::async(std::launch::async, [&]() { hgraph->ensure_physical_code_capacity(4096); });
+    constexpr uint64_t bytes_per_code = 2 * sizeof(float);
+    const uint64_t grow_count =
+        index->GetMemoryUsageDetail().at("basic_flatten_codes") / bytes_per_code + 32;
+    std::vector<float> growth_vectors(grow_count * 2, 0.0F);
+    std::vector<int64_t> growth_ids(grow_count);
+    for (uint64_t i = 0; i < grow_count; ++i) {
+        growth_vectors[i * 2] = static_cast<float>(100 + i);
+        growth_ids[i] = static_cast<int64_t>(10000 + i);
+    }
+    auto resize = std::async(std::launch::async, [&]() {
+        return index->Add(
+            MakeFloatDataset(growth_vectors, growth_ids, 2, static_cast<int64_t>(grow_count)));
+    });
     REQUIRE(index->UpdateVector(10, MakeFloatDataset(changed, seed_ids, 2, 1), false).has_value());
-    resize.get();
+    const auto growth_result = resize.get();
+    REQUIRE(growth_result.has_value());
+    REQUIRE(growth_result.value().empty());
+    REQUIRE(index->GetMemoryUsageDetail().at("basic_flatten_codes") >= grow_count * bytes_per_code);
 }
 
 TEST_CASE("HGraph first PiPNN Add hides its graph until all storage is published",

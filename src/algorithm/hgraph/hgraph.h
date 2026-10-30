@@ -28,7 +28,6 @@
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/clique_datacell.h"
-#include "datacell/code_slot_map.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
@@ -79,7 +78,7 @@ public:
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
         : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
 
-    ~HGraph() override = default;
+    ~HGraph() override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
@@ -143,9 +142,6 @@ public:
     GetNumberRemoved() const override {
         return delete_count_;
     }
-
-    [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
-    GetCodeStorageCounts() const;
 
     std::string
     GetStats() const override;
@@ -324,18 +320,6 @@ public:
     void
     insert_persistent_codes(const void* data, InnerIdType inner_id);
 
-    /// Write codes to a physical code slot when deduplicated storage is enabled.
-    void
-    insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
-
-    /// Ensure physical code storage can hold required_capacity physical slots.
-    void
-    ensure_physical_code_capacity(CodeSlotIdType required_capacity);
-
-    /// Ensure physical code storage while global_mutex_ unique lock is already held.
-    void
-    ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
-
     /// Grow internal storage to at least new_size capacity.
     void
     resize(uint64_t new_size);
@@ -369,9 +353,6 @@ public:
                      DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
 private:
-    [[nodiscard]] std::shared_lock<std::shared_mutex>
-    acquire_global_read_lock() const;
-
     MetadataPtr
     collect_streaming_header() const override;
 
@@ -395,6 +376,7 @@ private:
     deserialize_label_info_streaming(StreamReader& reader) const;
 
     class AddImpl;
+    class StorageState;
 
     // since v0.15: serialize basic index metadata to JSON.
     JsonType
@@ -509,10 +491,6 @@ private:
     support_force_remove() const {
         return support_force_remove_;
     }
-
-    /// True when duplicate logical ids share physical vector storage slots.
-    [[nodiscard]] bool
-    using_dedup_storage() const;
 
     /// Return the flatten used for reorder (base or high-precision).
     [[nodiscard]] FlattenInterfacePtr
@@ -736,7 +714,7 @@ private:
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
     FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
-    std::shared_ptr<CodeSlotMap> code_slot_map_{nullptr};
+    std::unique_ptr<StorageState> storage_state_;
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
@@ -781,19 +759,12 @@ private:
     // pinning codes exclusively to shrink. The release is required because repair enters public
     // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
     // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
-    mutable std::mutex mci_mutation_mutex_;             // serializes MCI Add, Remove and compaction
-    mutable std::shared_mutex storage_mutation_mutex_;  // excludes initial Add and dedup updates
-    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
-    // Single-flights physical code growth before taking the global writer lock.
-    mutable std::mutex physical_code_resize_mutex_;
-    std::atomic<bool> physical_code_resize_pending_{false};
-    // Initial PiPNN Add is queryable only after its graph and shared codes are complete.
-    std::atomic<bool> pipnn_initial_add_pending_{false};
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
 
-    std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
-    std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
+    std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
 
     /// Memory-usage cache bookkeeping. A mutation either invalidates the counter by bumping the
     /// version (the per-element Add/Remove paths) or recomputes it eagerly while it already holds
@@ -819,7 +790,6 @@ private:
     bool use_old_serial_format_{false};  // true when deserialized from legacy format
 
     bool support_duplicate_{false};             // allow duplicate external ids
-    bool deduplicate_storage_{false};           // share duplicate vector storage slots
     bool support_force_remove_{false};          // enable physical deletion
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 
