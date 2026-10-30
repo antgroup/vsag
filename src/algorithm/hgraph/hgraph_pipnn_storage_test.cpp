@@ -590,3 +590,32 @@ TEST_CASE("PiPNN mmap storage supports parallel representative writes and Add",
     require_counts(index, 257, 129);
     require_labels(index, added.data(), dim, {1000});
 }
+
+TEST_CASE("PiPNN builds split RaBitQ after cloning an empty deduplicated index",
+          "[ut][hgraph][pipnn][pipnn_storage][review_round5]") {
+    SmallStorageBlocks blocks;
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 64;
+    auto parameter = make_parameters();
+    parameter["build_thread_count"].SetInt(4);
+    parameter["base_quantization_type"].SetString("rabitq");
+    parameter["base_io_type"].SetString("memory_io");
+    parameter["base_supplement_io_type"].SetString("memory_io");
+    parameter["rabitq_bits_per_dim_base"].SetInt(3);
+    auto empty = std::make_shared<Index>(parameter, make_common(dim, 4));
+    const auto copy = empty->Clone();
+    REQUIRE(copy.has_value());
+    auto index = std::dynamic_pointer_cast<Index>(copy.value());
+    REQUIRE(index != nullptr);
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        vectors[i * dim + i] = 1.0F;
+        labels[i] = 100 + i;
+    }
+    const auto built = index->Build(make_data(vectors, labels, dim));
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    require_counts(index, count, count);
+    require_labels(index, vectors.data(), dim, {100});
+}

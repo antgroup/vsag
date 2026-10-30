@@ -588,3 +588,70 @@ TEST_CASE("RaBitQSplitDataCell hybrid IO (1bit in memory, supplement on disk)",
         }
     }
 }
+
+TEST_CASE("RaBitQ split deserialization clamps empty backing capacity",
+          "[ut][FlattenDataCell][RaBitQSplitDataCell][review_round5]") {
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "codes_type":"rabitq_split",
+        "io_params":{"type":"memory_io"},
+        "quantization_params":{"type":"rabitq","rabitq_bits_per_dim_base":3}
+    })"));
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 64;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto empty = FlattenInterface::MakeInstance(param, common);
+    auto restored = FlattenInterface::MakeInstance(param, common);
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    empty->Serialize(writer);
+    stream.seekg(0);
+    IOStreamReader reader(stream);
+    restored->Deserialize(reader);
+    REQUIRE(restored->max_capacity_ == 0);
+    constexpr InnerIdType count = 64;
+    restored->Resize(count);
+    auto vectors = fixtures::generate_vectors(count, common.dim_);
+    restored->Train(vectors.data(), count);
+    restored->BatchInsertVector(vectors.data(), count);
+    REQUIRE(restored->TotalCount() == count);
+}
+
+TEST_CASE("Flatten models export into MemoryIO temporary storage",
+          "[ut][FlattenDataCell][RaBitQSplitDataCell][review_round5]") {
+    const bool split = GENERATE(false, true);
+    auto json = JsonType::Parse(R"({
+        "io_params":{"type":"block_memory_io"},
+        "quantization_params":{"type":"sq8"}
+    })");
+    if (split) {
+        json["codes_type"].SetString("rabitq_split");
+        json["quantization_params"]["type"].SetString("rabitq");
+        json["quantization_params"]["rabitq_bits_per_dim_base"].SetInt(3);
+    }
+    auto source_param = std::make_shared<FlattenDataCellParameter>();
+    source_param->FromJson(json);
+    json["io_params"]["type"].SetString("memory_io");
+    auto target_param = std::make_shared<FlattenDataCellParameter>();
+    target_param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 32;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto source = FlattenInterface::MakeInstance(source_param, common);
+    auto target = FlattenInterface::MakeInstance(target_param, common);
+    constexpr InnerIdType count = 64;
+    auto vectors = fixtures::generate_vectors(count, common.dim_);
+    source->Train(vectors.data(), count);
+    REQUIRE_NOTHROW(source->ExportModel(target));
+    REQUIRE(source->code_size_ == target->code_size_);
+    std::vector<uint8_t> expected(source->code_size_);
+    std::vector<uint8_t> actual(target->code_size_);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto* vector = vectors.data() + static_cast<uint64_t>(id) * common.dim_;
+        REQUIRE(source->Encode(vector, expected.data()));
+        REQUIRE(target->Encode(vector, actual.data()));
+        REQUIRE(actual == expected);
+    }
+}

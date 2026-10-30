@@ -1639,6 +1639,9 @@ TEST_CASE("PiPNN failed partial initial Add remains hidden and rejects later Add
     const auto retry = index->Add(dataset);
     REQUIRE_FALSE(retry.has_value());
     REQUIRE(retry.error().message.find("recreate") != std::string::npos);
+    const auto update = index->UpdateVector(100, MakeFloatDataset(vectors, ids, dim, 1), true);
+    REQUIRE_FALSE(update.has_value());
+    REQUIRE(update.error().message.find("recreate") != std::string::npos);
     RequireRangeContains(index, query, {}, 0);
 }
 
@@ -1692,4 +1695,25 @@ TEST_CASE("PiPNN initial Add builds connected MCI cliques with storage deduplica
         index.KnnSearch(query, 8, R"({"hgraph":{"ef_search":64,"use_mci":true}})", nullptr);
     REQUIRE(found->GetDim() == 8);
     REQUIRE(ResultContainsId(found, 100));
+}
+
+TEST_CASE("HGraph temporary duplicate codes reuse a pretrained persistent SQ8 model",
+          "[ut][hgraph][duplicate][review_round5]") {
+    auto parameter = MakeFp32HGraphJson();
+    parameter["base_quantization_type"].SetString("sq8");
+    parameter["base_io_type"].SetString(GENERATE("memory_io", "block_memory_io"));
+    auto index = MakeHGraphIndex(parameter, MakeCommonParam(1));
+    std::vector<float> training{0.0F, 1.0F};
+    std::vector<int64_t> training_ids{1, 2};
+    REQUIRE(index->Train(MakeFloatDataset(training, training_ids, 1, 2)).has_value());
+    std::vector<float> vectors{0.0F, 0.5F, 1.0F, 1000.0F};
+    std::vector<int64_t> ids{100, 101, 102, 103};
+    const auto added = index->Add(MakeFloatDataset(vectors, ids, 1, 4));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    fixtures::require_code_storage_counts(index, 4, 3);
+    const float query = 0.5F;
+    const auto distance = index->CalcDistanceById(&query, 101, false);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() < 0.001F);
 }

@@ -751,6 +751,10 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
                                                      std::defer_lock);
     if (this->storage_state_->deduplicate_storage_) {
         storage_lock.lock();
+        CHECK_ARGUMENT(
+            not this->storage_state_->pipnn_initial_add_pending_.load(std::memory_order_acquire),
+            "initial PiPNN Add failed after reserving IDs; recreate the index before updating "
+            "vectors");
     }
     // check if id exists and get copied base data
     uint32_t inner_id = 0;

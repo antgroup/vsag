@@ -877,8 +877,9 @@ HGraph::AddImpl::prepare_graph_read_codes(const DatasetPtr& data, add_context& c
                                         static_cast<int64_t>(index_.extra_info_size_),
                                         index_.thread_pool_,
                                         index_.allocator_);
-        context.graph_read_codes->Train(index_.get_data(context.train_data),
-                                        context.train_data->GetNumElements());
+        // Reuse the persistent model, including prior Train/ExportModel state. Training
+        // independently can change duplicate equality (or randomized PQ codebooks).
+        index_.basic_flatten_codes_->ExportModel(context.graph_read_codes);
     }
 }
 

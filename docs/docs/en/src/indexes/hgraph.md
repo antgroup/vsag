@@ -157,7 +157,7 @@ the first PiPNN `Add` with storage deduplication, external searches see an empty
 construction finishes, including the MCI companion when enabled. Internal MCI candidate queries
 can read the completed graph and codes during that final stage. Failures before ID reservation
 allow a valid retry. If construction fails after IDs are reserved, recreate the index; partial
-storage stays hidden and subsequent `Add` reports an error.
+storage stays hidden and subsequent `Add` or `UpdateVector` reports an error.
 
 Current serialization and streaming serialization are supported.
 

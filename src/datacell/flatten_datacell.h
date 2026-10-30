@@ -110,11 +110,17 @@ public:
         ss.seekg(0, std::ios::beg);
         IOStreamReader reader(ss);
         auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
-        if (ptr == nullptr) {
+        if (ptr != nullptr) {
+            ptr->quantizer_->Deserialize(reader);
+            return;
+        }
+        // Temporary logical-ID build codes use MemoryIO regardless of persistent IO.
+        auto memory_ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, MemoryIO>>(other);
+        if (memory_ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's flatten datacell failed");
         }
-        ptr->quantizer_->Deserialize(reader);
+        memory_ptr->quantizer_->Deserialize(reader);
     }
 
     void
