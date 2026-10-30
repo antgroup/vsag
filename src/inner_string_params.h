@@ -188,6 +188,8 @@ const char* const IVF_ENABLE_GPU_BUILD_KEY = "enable_gpu_build";
 const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
 const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
 const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
+const char* const IVF_SEARCH_PARAM_ENABLE_GPU_SEARCH = "enable_gpu_search";
+const char* const IVF_SEARCH_PARAM_GPU_MIN_BATCH = "gpu_min_batch";
 const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
 
 const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";

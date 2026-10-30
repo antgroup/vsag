@@ -36,6 +36,28 @@ CudaDeviceScope::CudaDeviceScope(int32_t /*device_id*/) {
 
 CudaDeviceScope::~CudaDeviceScope() = default;
 
+std::shared_ptr<CudaRabitqIndex>
+CudaCreateRabitqIndex(const CudaRabitqBuildData& /*data*/, uint64_t /*budget_bytes*/) {
+    return nullptr;
+}
+
+bool
+CudaSearchRabitq(const std::shared_ptr<CudaRabitqIndex>& /*index*/,
+                 const float* /*normalized_queries*/,
+                 const float* /*query_norms*/,
+                 const float* /*query_sums*/,
+                 const int32_t* /*bucket_ids*/,
+                 const float* /*query_bucket_norm_sqrs*/,
+                 uint64_t /*query_count*/,
+                 uint32_t /*nprobe*/,
+                 uint32_t /*candidate_count*/,
+                 uint32_t /*topk*/,
+                 uint64_t* /*inner_ids*/,
+                 float* /*distances*/,
+                 uint64_t /*budget_bytes*/) {
+    return false;
+}
+
 bool
 CudaAssignNearest(const float* /*query*/,
                   uint64_t /*query_count*/,
@@ -58,6 +80,19 @@ CudaKMeansPlusPlusInit(const float* /*datas*/,
                        float* /*centroids_out*/,
                        uint64_t /*budget_bytes*/,
                        uint64_t /*min_work*/) {
+    return false;
+}
+
+bool
+CudaSelectNearestCentroids(const float* /*query*/,
+                           uint64_t /*query_count*/,
+                           const float* /*centroids*/,
+                           uint64_t /*centroid_count*/,
+                           int32_t /*dim*/,
+                           uint32_t /*select_count*/,
+                           int32_t* /*labels*/,
+                           uint64_t /*budget_bytes*/,
+                           uint64_t /*min_query_count*/) {
     return false;
 }
 

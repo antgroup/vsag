@@ -22,6 +22,7 @@
 #include "bucket_interface.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface.h"
+#include "gpu/cuda_backend.h"
 #include "hash_types.h"
 #include "utils/byte_buffer.h"
 
@@ -167,6 +168,18 @@ public:
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
+
+    bool
+    GpuBatchSearch(const float* queries,
+                   uint64_t query_count,
+                   const int32_t* bucket_ids,
+                   uint32_t nprobe,
+                   uint32_t candidate_count,
+                   uint32_t topk,
+                   uint64_t* inner_ids,
+                   float* distances,
+                   int32_t device_id,
+                   uint64_t memory_budget);
 
 private:
     enum class FilterInnerProductMode : uint8_t {
@@ -342,6 +355,9 @@ private:
     [[nodiscard]] bool
     packed_filter_codes_complete(BucketIdType bucket_id) const;
 
+    std::shared_ptr<gpu::CudaRabitqIndex>
+    build_gpu_index(uint64_t budget_bytes);
+
     void
     serialize_packed_filter_codes(StreamWriter& writer) const;
 
@@ -371,6 +387,10 @@ private:
     uint64_t fastscan_block_size_{0};
     mutable Vector<std::shared_mutex> bucket_mutexes_;
     Vector<uint64_t> bucket_versions_;
+    std::atomic<uint64_t> gpu_index_epoch_{1};
+    mutable uint64_t cached_gpu_index_epoch_{0};
+    mutable std::mutex gpu_index_mutex_;
+    mutable std::shared_ptr<gpu::CudaRabitqIndex> gpu_index_{nullptr};
     Vector<uint64_t> locations_;
     mutable std::mutex locations_mutex_;
     std::mutex codes_insert_mutex_;

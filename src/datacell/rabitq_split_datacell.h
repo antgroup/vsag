@@ -118,6 +118,19 @@ struct RaBitQFusedTraversalQuery {
     bool filter_inner_product_is_exact{false};
 };
 
+struct RaBitQGpuLayout {
+    uint64_t dim{0};
+    uint64_t plane_bytes{0};
+    uint64_t one_bit_code_size{0};
+    uint64_t supplement_code_size{0};
+    uint64_t one_bit_norm_code_offset{0};
+    uint64_t supplement_norm_code_offset{0};
+    uint64_t supplement_norm_offset{0};
+    uint64_t supplement_error_offset{0};
+    uint32_t filter_bits{0};
+    uint32_t supplement_bits{0};
+};
+
 class RaBitQSplitDataCellInterface {
 public:
     virtual ~RaBitQSplitDataCellInterface() = default;
@@ -145,6 +158,18 @@ public:
 
     virtual bool
     CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const = 0;
+
+    virtual bool
+    CopySupplementCode(InnerIdType id, uint8_t* supplement_code) const = 0;
+
+    virtual bool
+    GetGpuLayout(RaBitQGpuLayout* layout) const = 0;
+
+    virtual bool
+    PrepareGpuResidualQuery(const float* transformed_query,
+                            float* normalized_query,
+                            float* query_norm,
+                            float* query_sum) const = 0;
 
     virtual bool
     DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation = true) const = 0;
@@ -2012,6 +2037,53 @@ public:
         }
         return this->x_bit_layout_->Read(id, one_bit_code) and
                this->supplement_layout_->Read(id, supplement_code);
+    }
+
+    bool
+    CopySupplementCode(InnerIdType id, uint8_t* supplement_code) const override {
+        if (this->optimized_build_active_ or supplement_code == nullptr) {
+            return false;
+        }
+        if (fused_code_storage_ != nullptr) {
+            RaBitQFusedCodeView view;
+            if (not fused_code_storage_->GetFusedCodeView(id, view)) {
+                return false;
+            }
+            std::memcpy(supplement_code, view.supplement_code, supplement_code_size_);
+            return true;
+        }
+        return this->supplement_layout_->Read(id, supplement_code);
+    }
+
+    bool
+    GetGpuLayout(RaBitQGpuLayout* layout) const override {
+        if (layout == nullptr) {
+            return false;
+        }
+        const auto& quantizer = this->bottom_quantizer();
+        *layout = RaBitQGpuLayout{static_cast<uint64_t>(quantizer.GetDim()),
+                                  quantizer.PlaneBytes(),
+                                  one_bit_code_size_,
+                                  supplement_code_size_,
+                                  quantizer.OneBitRecordNormCodeOffset(),
+                                  quantizer.SupplementNormCodeOffset(),
+                                  quantizer.SupplementNormOffset(),
+                                  quantizer.SupplementErrorOffset(),
+                                  quantizer.FilterBits(),
+                                  quantizer.ReorderBits()};
+        return true;
+    }
+
+    bool
+    PrepareGpuResidualQuery(const float* transformed_query,
+                            float* normalized_query,
+                            float* query_norm,
+                            float* query_sum) const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            return this->bottom_quantizer().PrepareGpuResidualQuery(
+                transformed_query, normalized_query, query_norm, query_sum);
+        }
+        return false;
     }
 
     bool
