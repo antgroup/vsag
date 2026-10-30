@@ -687,22 +687,22 @@ TEST_CASE("Pyramid query analyzer honors paths and removals", "[ut][pyramid][ana
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {10.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      1.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      100.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F};
+    std::array<float, PYRAMID_TEST_DIM * 4> vectors = {10.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       1.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       100.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F};
     std::array<int64_t, 4> ids = {101, 102, 201, 202};
     std::array<std::string, 4> paths = {"root/a/leaf", "root/a/leaf", "root/b/leaf", "root/b/leaf"};
     auto base = vsag::Dataset::Make()
@@ -714,7 +714,7 @@ TEST_CASE("Pyramid query analyzer honors paths and removals", "[ut][pyramid][ana
                     ->Owner(false);
     REQUIRE(index->Build(base).empty());
 
-    std::array<float, PYRAMID_TEST_DIM* 2> query_vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> query_vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 100.0F, 0.0F, 0.0F, 0.0F};
     std::array<std::string, 2> query_paths = {"root/a/leaf", "root/b/leaf"};
     auto query = vsag::Dataset::Make()
@@ -760,22 +760,22 @@ TEST_CASE("Pyramid query analyzer includes graph duplicates in path ground truth
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      9.0F,
-                                                      8.0F,
-                                                      7.0F,
-                                                      6.0F};
+    std::array<float, PYRAMID_TEST_DIM * 4> vectors = {1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       9.0F,
+                                                       8.0F,
+                                                       7.0F,
+                                                       6.0F};
     std::array<int64_t, 4> ids = {100, 101, 102, 103};
     std::array<std::string, 4> paths = {"tenant", "tenant", "tenant", "tenant"};
     auto base = vsag::Dataset::Make()
@@ -817,7 +817,7 @@ TEST_CASE("Pyramid query analyzer supports a built root without query paths",
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
     std::array<int64_t, 2> ids = {100, 101};
     std::array<std::string, 2> paths = {"", ""};
@@ -850,7 +850,7 @@ TEST_CASE("Pyramid query analyzer selects an available ground truth code source"
     const bool store_raw_vector = GENERATE(false, true);
     CAPTURE(store_raw_vector);
     constexpr int64_t dim = 4;
-    std::array<float, dim* 3> vectors = {
+    std::array<float, dim * 3> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 0.123456F, 0.234567F, 0.345678F, 0.456789F, 1.0F, 1.0F, 1.0F, 1.0F};
     std::array<int64_t, 3> ids = {10, 11, 12};
     std::array<std::string, 3> paths = {"leaf", "leaf", "leaf"};
@@ -974,7 +974,7 @@ TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
           "[ut][pyramid][reasoning]") {
     auto test_index = MakePyramidIndex(100);
     const auto& index = test_index.index;
-    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
     std::array<int64_t, 2> ids = {100, 101};
     std::array<std::string, 2> paths = {"tenant", "tenant"};
@@ -1188,7 +1188,7 @@ TEST_CASE("Pyramid reports statistics for flat and graph leaves", "[ut][pyramid]
 TEST_CASE("Pyramid exposes stored raw vectors", "[ut][pyramid][raw_vector]") {
     constexpr int64_t count = 3;
     const auto graph_type = GENERATE("nsw", "odescent");
-    std::array<float, count* PYRAMID_TEST_DIM> vectors = {
+    std::array<float, count * PYRAMID_TEST_DIM> vectors = {
         0.123456F,
         0.234567F,
         0.345678F,

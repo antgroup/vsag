@@ -10,7 +10,7 @@ on:
 jobs:
   build_python_wheel_x86:
     name: Python Wheel Build X86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: python_build_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -46,7 +46,7 @@ jobs:
 
   build_python_wheel_aarch64:
     name: Python Wheel Build Aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     concurrency:
       group: python_build_aarch64-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -79,13 +79,16 @@ jobs:
   test_python_x86:
     name: Test Python X86
     needs: build_python_wheel_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
     
       - name: Prepare Env
@@ -119,13 +122,16 @@ jobs:
   test_python_aarch64:
     name: Test Python Aarch64
     needs: build_python_wheel_aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     concurrency:
       group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
@@ -158,7 +164,7 @@ jobs:
   clean_up:
     name: Clean Up
     needs: [ test_python_x86, test_python_aarch64 ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up

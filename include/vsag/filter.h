@@ -107,4 +107,4 @@ public:
     }
 };
 
-};  // namespace vsag
+}  // namespace vsag

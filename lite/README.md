@@ -27,7 +27,7 @@ atomic file replacement, SQ8, mmap or same-instance concurrent access is promise
 - [RaBitQ implementation and limits](../docs/docs/en/src/development/lite_rabitq_design.md)
 
 `tools/check_tidy.py` checks configured Lite translation units and private/public
-headers using clang-tidy15. `tools/collect_coverage.py` unions production Lite
+headers using clang-tidy20. `tools/collect_coverage.py` unions production Lite
 source/header executable lines across instrumented tests and enforces 90%; it
 does not measure Full or branch coverage. See `.github/workflows/lite.yml` for
 default-OFF, ON, sanitizer and coverage CI matrices. Benchmark reports,

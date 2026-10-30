@@ -167,30 +167,30 @@ public:
 
 private:
     void
-    InitIO(const IOParamPtr& io_param);
+    init_io(const IOParamPtr& io_param);
 
     const TermBuffer*
-    GetTermBufferNoLock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
+    get_term_buffer_no_lock(uint32_t term_id, const QueryTermBuffers& query_term_buffers) const;
 
     bool
-    InsertHeapByWindowKnn(float* dists,
-                          uint32_t window_id,
-                          const SparseTermComputerPtr& computer,
-                          MaxHeap& heap,
-                          const InnerSearchParam& param,
-                          uint32_t offset_id,
-                          bool with_filter,
-                          const QueryTermBuffers& query_term_buffers,
-                          const uint64_t* filter_callback_remaining) const;
+    insert_heap_by_window_knn(float* dists,
+                              uint32_t window_id,
+                              const SparseTermComputerPtr& computer,
+                              MaxHeap& heap,
+                              const InnerSearchParam& param,
+                              uint32_t offset_id,
+                              bool with_filter,
+                              const QueryTermBuffers& query_term_buffers,
+                              const uint64_t* filter_callback_remaining) const;
 
     bool
-    InsertHeapByDistsKnn(float* dists,
-                         uint32_t dists_size,
-                         MaxHeap& heap,
-                         const InnerSearchParam& param,
-                         uint32_t offset_id,
-                         bool with_filter,
-                         const uint64_t* filter_callback_remaining) const;
+    insert_heap_by_dists_knn(float* dists,
+                             uint32_t dists_size,
+                             MaxHeap& heap,
+                             const InnerSearchParam& param,
+                             uint32_t offset_id,
+                             bool with_filter,
+                             const uint64_t* filter_callback_remaining) const;
 
     template <InnerSearchMode mode, InnerSearchType type>
     bool
@@ -240,10 +240,10 @@ private:
                       ReasoningContext* reasoning_ctx = nullptr) const;
 
     void
-    ValidateBoundLayout(uint64_t payload_size) const;
+    validate_bound_layout(uint64_t payload_size) const;
 
     void
-    ValidateBoundPayloads() const;
+    validate_bound_payloads() const;
 
 private:
     uint32_t term_id_limit_{0};

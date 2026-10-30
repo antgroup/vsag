@@ -806,7 +806,7 @@ private:
             }
             incoming_.shrink_to_fit();
             ++incoming_compactions_;
-        } catch (const std::bad_alloc&) {
+        } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
             // Capacity recovery is best-effort and must not make a successful Remove fail.
         }
     }

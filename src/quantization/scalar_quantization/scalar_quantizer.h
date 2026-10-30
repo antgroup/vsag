@@ -94,7 +94,7 @@ public:
 
 private:
     bool
-    EncodeOneWithScratch(const float* data, uint8_t* codes, float* normalized) const;
+    encode_one_with_scratch(const float* data, uint8_t* codes, float* normalized) const;
 
     std::vector<float> lower_bound_{};
     std::vector<float> diff_{};

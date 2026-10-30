@@ -27,7 +27,7 @@ env:
 jobs:
   changes:
     name: Detect Team Linux Changes
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       cpp: ${{ steps.changes.outputs.cpp }}
     steps:
@@ -58,7 +58,7 @@ jobs:
     name: Team Format and Helper Checks
     needs: changes
     if: needs.changes.outputs.cpp == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     container:
@@ -79,7 +79,9 @@ jobs:
         run: |
           ./scripts/ci/configure-git-safe-directory.sh
           test "$(git rev-parse HEAD)" = "$TEAM_TEST_SHA"
-          test "$(clang-format-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
+          test "$(gcc -dumpversion | cut -d. -f1)" = 13
+          test "$(g++ -dumpversion | cut -d. -f1)" = 13
+          test "$(clang-format-20 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 20
       - name: Format and helper checks
         run: |
           ./scripts/format/check_format.sh
@@ -88,6 +90,7 @@ jobs:
           python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
           python3 -m unittest tests/scripts/test_collect_build_metrics.py
           python3 -m unittest tests/scripts/test_dependency_workflows.py
+          python3 -m unittest tests/scripts/test_toolchain_compatibility.py
           python3 -m unittest tests/scripts/test_team_test_shards.py
           python3 -m unittest tests/scripts/test_team_mixed.py
           python3 -m unittest tests/scripts/test_team_workflow.py
@@ -133,8 +136,10 @@ jobs:
           # Deployment enforces credentials, mount ownership and authorization.
           # This checks consistency, not the complete isolation boundary.
           test ! -e /var/run/secrets/kubernetes.io/serviceaccount/token
-          test "$(clang-tidy-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
-          test "$(clang-format-15 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 15
+          test "$(clang-tidy-20 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 20
+          test "$(gcc -dumpversion | cut -d. -f1)" = 13
+          test "$(g++ -dumpversion | cut -d. -f1)" = 13
+          test "$(clang-format-20 --version | sed -n 's/.*version \([0-9]*\).*/\1/p' | head -1)" = 20
           test "$(gh --version | head -1 | awk '{print $3}')" = 2.75.0
           test -x /usr/bin/time
           command -v ccache
@@ -222,8 +227,9 @@ jobs:
         env:
           LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color \
-            -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 "$LINT_PATTERN"
+          source_filter=$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$")')
+          ./scripts/linters/run-clang-tidy-20.sh -p build/ -use-color \
+            -source-filter "$source_filter" -j 4 "$LINT_PATTERN"
       - name: Prepare inventory runtime
         run: |
           printf 'leak:libomp.so\nleak:libgomp.so\n' > "$RUNNER_TEMP/omp.supp"
@@ -564,7 +570,7 @@ jobs:
       actions: read
     if: always()
     needs: [changes, checks, build, tests, compatibility]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       CHANGE_RESULT: ${{ needs.changes.result }}
       CPP_CHANGED: ${{ needs.changes.outputs.cpp }}

@@ -1103,12 +1103,12 @@ TEST_CASE("SINDI nested queries finish with every supplied pool worker occupied"
     // Nested SafeThreadPool wrappers must preserve the underlying pool identity.
     common.thread_pool_ = std::make_shared<SafeThreadPool>(std::make_shared<SafeThreadPool>(pool));
     auto parameter = std::make_shared<SINDIParameter>();
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", reorder},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", reorder},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     uint32_t term = 3;
     float values[]{1, 2, 3};
@@ -1176,13 +1176,13 @@ TEST_CASE("SINDI queries from nested and legacy pools preserve reduced candidate
     common.thread_pool_ = custom_pool ? std::make_shared<SafeThreadPool>(deferred)
                                       : std::make_shared<SafeThreadPool>(nested);
     auto parameter = std::make_shared<SINDIParameter>();
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", reorder},
-        {"immutable", immutable},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", reorder},
+                                                       {"immutable", immutable},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     std::vector<int64_t> labels(40000);
     std::iota(labels.begin(), labels.end(), 0);
@@ -1258,12 +1258,12 @@ TEST_CASE("SINDI query workers are isolated from supplied custom pools", "[ut][S
     common.metric_ = MetricType::METRIC_TYPE_IP;
     common.thread_pool_ = safe;
     auto parameter = std::make_shared<SINDIParameter>();
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", reorder},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", reorder},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     uint32_t term = 3;
     float values[]{1, 2, 3};
@@ -1351,13 +1351,13 @@ TEST_CASE("SINDI concentrated matching windows retain requested top-k", "[ut][Si
     }
     common.thread_pool_ = std::make_shared<SafeThreadPool>(selected);
     auto parameter = std::make_shared<SINDIParameter>();
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", reorder},
-        {"immutable", immutable},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", reorder},
+                                                       {"immutable", immutable},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     const uint64_t unmatched = multiple_windows ? 30000 : 0;
     const auto count = unmatched + 20;
@@ -1461,14 +1461,14 @@ TEST_CASE("SINDI confines request allocator calls to the caller",
     common.metric_ = MetricType::METRIC_TYPE_IP;
     auto parameter = std::make_shared<SINDIParameter>();
     const bool reorder = std::string(rerank) != "none";
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", reorder},
-        {"rerank_type", reorder ? rerank : "fp32"},
-        {"immutable", immutable},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", reorder},
+                                                       {"rerank_type", reorder ? rerank : "fp32"},
+                                                       {"immutable", immutable},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     std::vector<int64_t> labels(40020);
     std::iota(labels.begin(), labels.end(), 0);
@@ -1530,13 +1530,13 @@ TEST_CASE("SINDI queries finish while supplied pool writer waits for index lock"
     common.dim_ = 2;
     common.metric_ = MetricType::METRIC_TYPE_IP;
     auto parameter = std::make_shared<SINDIParameter>();
-    parameter->FromJson(JsonType::Parse(nlohmann::json{
-        {"term_id_limit", 16},
-        {"window_size", 10000},
-        {"use_quantization", false},
-        {"use_reorder", mode != 0},
-        {"remap_term_ids", true},
-        {"doc_prune_ratio", 0}}.dump()));
+    parameter->FromJson(JsonType::Parse(nlohmann::json{{"term_id_limit", 16},
+                                                       {"window_size", 10000},
+                                                       {"use_quantization", false},
+                                                       {"use_reorder", mode != 0},
+                                                       {"remap_term_ids", true},
+                                                       {"doc_prune_ratio", 0}}
+                                            .dump()));
     SINDI index(parameter, common);
     uint32_t term = 3;
     float values[]{1, 2, 3, 4};

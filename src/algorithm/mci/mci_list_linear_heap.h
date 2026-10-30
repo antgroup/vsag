@@ -22,7 +22,7 @@ public:
     uint32_t min_key;  // possible min key
 
     uint32_t* keys = nullptr;  // keys of vertices
-        // keys[i] > key_cap if vertex i is not in the data structure
+    // keys[i] > key_cap if vertex i is not in the data structure
 
     uint32_t* heads = nullptr;  // head of doubly-linked list for a specific weight
     uint32_t* pres = nullptr;   // pre for doubly-linked list

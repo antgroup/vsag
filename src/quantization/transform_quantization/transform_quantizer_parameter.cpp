@@ -25,7 +25,7 @@ TransformQuantizerParameter::CreateDefault(const std::string& chain) {
     auto chain_items = SplitString(chain);
     CHECK_ARGUMENT(chain_items.size() > 1,
                    "tq_chain must contain at least one transformer and one quantizer");
-    const auto bottom_type = chain_items.back();
+    const auto& bottom_type = chain_items.back();
     auto json = QuantizerParameter::CreateDefault(bottom_type)->ToJson();
     const auto transformer_json = VectorTransformerParameter().ToJson();
     json[INPUT_DIM_KEY].SetJson(transformer_json[INPUT_DIM_KEY]);

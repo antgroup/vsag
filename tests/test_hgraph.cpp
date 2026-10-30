@@ -2589,8 +2589,8 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
     req_no_reasoning.expected_labels_ = {};
 
     for (uint64_t i = 0; i < warmup_rounds; ++i) {
-        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-        index->SearchWithRequest(req_no_reasoning);
+        REQUIRE(index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr)).has_value());
+        REQUIRE(index->SearchWithRequest(req_no_reasoning).has_value());
     }
 
     auto measure = [&](const auto& search) {
@@ -5665,7 +5665,7 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)",
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                index.value()->CalcDistanceById(query.data(), 0);
+                (void)index.value()->CalcDistanceById(query.data(), 0);
                 cal_count.fetch_add(1, std::memory_order_relaxed);
             }
         });

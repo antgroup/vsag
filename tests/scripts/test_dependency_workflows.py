@@ -219,6 +219,30 @@ class SimdTestCleanupTest(TsanCleanupTest):
 
 
 class FailurePropagationTest(unittest.TestCase):
+    def test_tsan_keeps_vsag_concurrency_and_propagates_sanitizer_failures(self):
+        from tests.scripts.test_build_benchmark_workflow import step
+        body = job_text(ROOT / '.github/workflows/tsan_build_and_test.yml', 'test_tsan')
+        run = step(body, 'Run TSAN tests')
+        self.assertIn('OPENBLAS_NUM_THREADS: "1"', run)
+        script = textwrap.dedent(run.split('run: |\n', 1)[1])
+        self.assertIn('"[concurrent]~[daily]"', script)
+        self.assertNotIn('race:libopenblas', script)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'build/tests/functests'
+            binary.parent.mkdir(parents=True)
+            binary.write_text(
+                '#!/bin/sh\n'
+                'test "$OPENBLAS_NUM_THREADS" = 1 || exit 99\n'
+                'test "$1" = "[concurrent]~[daily]" || exit 98\n'
+                'exit "$TEST_TSAN_EXIT"\n')
+            for code in [0, 66]:
+                result = subprocess.run(
+                    ['bash', '-e', '-c', script], cwd=root,
+                    env=dict(os.environ, OPENBLAS_NUM_THREADS='1', TEST_TSAN_EXIT=str(code)),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, code, result.stderr)
+
     def test_pytest_exit_status_wins_over_success_looking_log(self):
         import os
         import subprocess
@@ -261,7 +285,7 @@ class FailurePropagationTest(unittest.TestCase):
         self.assertNotIn('${{', script)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'scripts/linters').mkdir(parents=True)
-            runner=root/'scripts/linters/run-clang-tidy-15.sh'
+            runner=root/'scripts/linters/run-clang-tidy-20.sh'
             runner.write_text('#!/bin/bash\nprintf "%s\\n" "${@: -1}"\n');runner.chmod(0o755)
             pattern="src/it's $(touch injected).cpp$"
             result=subprocess.run(['bash','-c',script],cwd=root,env=dict(os.environ,LINT_PATTERN=pattern),capture_output=True,text=True)

@@ -161,7 +161,7 @@ public:
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
-        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
+        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param) {};
 
     ~Pyramid() override = default;
 

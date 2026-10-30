@@ -15,8 +15,10 @@ def main():
                       if '/src/lite/' in Path(entry['file']).as_posix()})
     if not sources:
         parser.error('No configured Lite translation units found')
-    subprocess.run(['clang-tidy-15', *sources, '-p', str(args.build),
-                    '--header-filter=.*/(src/lite|include/vsag/lite)/.*'], check=True)
+    subprocess.run(['clang-tidy-20', *sources, '-p', str(args.build),
+                    '--header-filter=.*/(src/lite|include/vsag/lite)/.*',
+                    # Catch2 deliberately combines values in its Flags bitmask enum.
+                    '--checks=-clang-analyzer-optin.core.EnumCastOutOfRange'], check=True)
 
 
 if __name__ == '__main__':

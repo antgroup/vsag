@@ -41,7 +41,7 @@ public:
 
 protected:
     explicit GraphInterfaceParameter(GraphStorageTypes graph_type)
-        : graph_storage_type_(graph_type){};
+        : graph_storage_type_(graph_type) {};
 };
 
 }  // namespace vsag

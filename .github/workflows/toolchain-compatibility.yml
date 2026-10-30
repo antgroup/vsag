@@ -1,0 +1,112 @@
+name: C++ toolchain compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch, tag, or commit SHA to validate'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Release source ref to validate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  installed-client:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc13, clang20]
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Install toolchain and dependencies
+        run: sudo env VSAG_INSTALL_INTEL_MKL=OFF bash scripts/deps/install_deps_ubuntu.sh
+      - name: Build C++20 library and run existing tests
+        shell: bash
+        env:
+          COMPILER: ${{ matrix.compiler }}
+          ABI: ${{ matrix.abi }}
+        run: |
+          case "$COMPILER" in
+            gcc13) cc=gcc-13; cxx=g++-13 ;;
+            clang20) cc=clang-20; cxx=clang++-20 ;;
+            *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+          esac
+          make test COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+          python3 scripts/ci/check-cxx-standards.py build
+          make release COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+          python3 scripts/ci/check-cxx-standards.py build-release
+          cmake --install build-release --prefix "$RUNNER_TEMP/vsag-install"
+      - name: Compile installed headers and run C++17 client
+        env:
+          COMPILER: ${{ matrix.compiler }}
+          ABI: ${{ matrix.abi }}
+        run: |
+          case "$COMPILER" in
+            gcc13) export CXX=g++-13 ;;
+            clang20) export CXX=clang++-20 ;;
+            *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+          esac
+          bash scripts/release/check_compatibility.sh "$RUNNER_TEMP/vsag-install" "$ABI" "$RUNNER_TEMP/compatibility-reports"
+      - name: Retain compatibility evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compatibility-${{ matrix.compiler }}-abi${{ matrix.abi }}
+          path: ${{ runner.temp }}/compatibility-reports
+
+  source-baseline:
+    # Compatibility probe only; regular development/CI images remain on GCC 13.
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc9, clang13]
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - name: Install retained source-baseline compilers
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            gcc-9 g++-9 clang-13 gfortran gfortran-9 cmake ninja-build make git \
+            ca-certificates libaio-dev libopenblas-dev liblapacke-dev libomp-13-dev
+      - name: Build C++20 library with the older compiler
+        shell: bash
+        env:
+          COMPILER: ${{ matrix.compiler }}
+          ABI: ${{ matrix.abi }}
+        run: |
+          case "$COMPILER" in
+            gcc9) cc=gcc-9; cxx=g++-9 ;;
+            clang13) cc=clang-13; cxx=clang++-13 ;;
+            *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+          esac
+          "$cxx" --version
+          make debug COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+          cmake --install build --prefix /tmp/vsag-baseline
+      - name: Validate older C++17 client
+        shell: bash
+        env:
+          COMPILER: ${{ matrix.compiler }}
+          ABI: ${{ matrix.abi }}
+        run: |
+          case "$COMPILER" in
+            gcc9) export CXX=g++-9 ;;
+            clang13) export CXX=clang++-13 ;;
+            *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+          esac
+          bash scripts/release/check_compatibility.sh /tmp/vsag-baseline "$ABI"

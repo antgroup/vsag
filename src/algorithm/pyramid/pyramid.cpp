@@ -687,13 +687,14 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     } else {
         const auto insert_codes = [&](const FlattenInterfacePtr& codes) {
             if (data_num == input_count) {
-                ParallelBatchInsertVector(
-                    codes,
-                    static_cast<InnerIdType>(data_num),
-                    nullptr,
-                    this->thread_pool_.get(),
-                    this->build_thread_count_,
-                    [=](InnerIdType begin) { return element_ptr(data_vectors, begin); });
+                ParallelBatchInsertVector(codes,
+                                          static_cast<InnerIdType>(data_num),
+                                          nullptr,
+                                          this->thread_pool_.get(),
+                                          this->build_thread_count_,
+                                          [this, data_vectors](InnerIdType begin) {
+                                              return element_ptr(data_vectors, begin);
+                                          });
                 return;
             }
             for (InnerIdType inner_id = 0; inner_id < data_num; ++inner_id) {
@@ -3790,7 +3791,7 @@ Pyramid::build_with_cache(const DatasetPtr& base) {
             nullptr,
             supports_parallel_encode(codes) ? this->thread_pool_.get() : nullptr,
             this->build_thread_count_,
-            [=](InnerIdType begin) { return element_ptr(data_vectors, begin); });
+            [this, data_vectors](InnerIdType begin) { return element_ptr(data_vectors, begin); });
     };
     // ParallelBatchInsertVector joins all accepted tasks before propagating failures.
     insert_codes(base_codes_);

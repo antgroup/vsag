@@ -72,15 +72,16 @@ jobs:
     name: Format Check
     needs: changes
     if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Clang format
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-15
-          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          sudo bash scripts/deps/install_toolchain_ubuntu.sh
+          sudo apt-get install -y clang-format-20
+          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
           clang-format --version
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh
@@ -89,7 +90,7 @@ jobs:
     name: Coverage Configuration
     needs: changes
     if: needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Test coverage configuration
@@ -105,7 +106,7 @@ jobs:
     name: ASan Build X86
     needs: [changes, format]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -130,10 +131,11 @@ jobs:
           python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
           python3 -m unittest tests/scripts/test_collect_build_metrics.py
           python3 -m unittest tests/scripts/test_dependency_workflows.py
+          python3 -m unittest tests/scripts/test_toolchain_compatibility.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y ccache clang-tidy-15 time
+          sudo apt-get install -y ccache clang-tidy-20 time
           ninja --version
           cmake --version
           g++ --version
@@ -172,7 +174,8 @@ jobs:
         env:
           LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 "$LINT_PATTERN"
+          source_filter=$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$")')
+          ./scripts/linters/run-clang-tidy-20.sh -p build/ -use-color -source-filter "$source_filter" -j 4 "$LINT_PATTERN"
       - name: Verify changed-source lint execution
         if: always() && steps.changed-srcs.outcome == 'success'
         env:
@@ -229,7 +232,7 @@ jobs:
     name: Python Build X86
     needs: [changes, format]
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
@@ -263,7 +266,7 @@ jobs:
     name: Test X86 Unittests
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -303,7 +306,7 @@ jobs:
     name: Test X86 Functests
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
@@ -343,7 +346,7 @@ jobs:
     name: Test Example X86
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
@@ -377,7 +380,7 @@ jobs:
     name: Check Compatibility
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
@@ -428,10 +431,13 @@ jobs:
     name: Test Python X86
     needs: [changes, build-python-x86]
     if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh

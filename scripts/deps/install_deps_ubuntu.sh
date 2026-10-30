@@ -1,15 +1,17 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+bash "$(dirname -- "${BASH_SOURCE[0]}")/install_toolchain_ubuntu.sh"
+
 arch=$(uname -m)
 common_pkgs=(
     ccache
     cmake
-    g++
-    gcc
-    gfortran
     lcov
     libaio-dev
     libcurl4-openssl-dev
     liblapacke-dev
-    libomp-15-dev
+    libomp-20-dev
     libopenblas-dev
     liburing-dev
     make

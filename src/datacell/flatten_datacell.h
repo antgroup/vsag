@@ -356,7 +356,9 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
                          allocator_);
         quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
-        { cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel); }
+        {
+            cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel);
+        }
         layout_->WriteRange(cur_count, codes.data, count);
         std::atomic_thread_fence(std::memory_order_release);
     } else {

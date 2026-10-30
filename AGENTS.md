@@ -14,7 +14,7 @@ Node.js/TypeScript bindings provided by `vsag`.
 ## Hard Constraints (must hold every change)
 
 - **Tool versions are fixed:** `clang-format` and `clang-tidy` **must be
-  version 15 exactly**. Newer versions are not acceptable; CI enforces this.
+  version 20 exactly**. Newer versions are not acceptable; CI enforces this.
 - **Formatting:** C++ source and header files use 4-space indentation and a
   100-character line limit; Markdown and other non-C++ text files have no line
   width limit. Use the `.cpp` (not `.cc`) suffix, and ensure every committed

@@ -47,7 +47,7 @@ public:
      * @param offset The physical offset of the area.
      * @param size The size of the area in bytes.
      */
-    explicit NonContinuousArea(uint64_t offset, uint64_t size) : offset(offset), size(size){};
+    explicit NonContinuousArea(uint64_t offset, uint64_t size) : offset(offset), size(size) {};
 };
 
 /**

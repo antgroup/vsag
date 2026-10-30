@@ -15,7 +15,7 @@
 
 #include "memmove_heap.h"
 
-#include <cstring>
+#include <algorithm>
 namespace vsag {
 template <bool max_heap, bool fixed_size>
 MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max_size)
@@ -37,10 +37,10 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
                                         record,
                                         CompareType()) -
                        this->ordered_buffer_.begin();
-            // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-            memmove(ordered_buffer_.data() + pos + 1,
-                    ordered_buffer_.data() + pos,
-                    (max_size_ - pos) * sizeof(DistanceRecord));
+            // std::pair is not trivially copyable; shift constructed records by assignment.
+            std::move_backward(ordered_buffer_.begin() + pos,
+                               ordered_buffer_.begin() + max_size_,
+                               ordered_buffer_.begin() + max_size_ + 1);
             ordered_buffer_[pos] = record;
             this->cur_size_++;
             if (this->Size() > this->max_size_) {
@@ -58,14 +58,13 @@ MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
         // stale tail beyond cur_size_. Reuse that slot instead of emplace_back,
         // which both bounds the buffer growth and keeps the upper_bound above
         // (which searches only [begin, begin + cur_size_)) consistent with the
-        // memmove size below.
+        // shift range below.
         if (static_cast<int64_t>(ordered_buffer_.size()) <= cur_size_) {
             ordered_buffer_.emplace_back(record);
         }
-        // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
-        memmove(ordered_buffer_.data() + pos + 1,
-                ordered_buffer_.data() + pos,
-                (cur_size_ - pos) * sizeof(DistanceRecord));
+        std::move_backward(ordered_buffer_.begin() + pos,
+                           ordered_buffer_.begin() + cur_size_,
+                           ordered_buffer_.begin() + cur_size_ + 1);
         ordered_buffer_[pos] = record;
         cur_size_++;
     }

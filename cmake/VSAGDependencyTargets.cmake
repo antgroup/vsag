@@ -35,3 +35,14 @@ endif ()
 if (TARGET vsag_roaring_headers)
     target_link_libraries (vsag_src_common INTERFACE vsag_roaring_headers)
 endif ()
+
+# fmt 10.x's consteval parser rejects FMT_STRING with recent Clang string-literal
+# provenance rules. Keep the pinned dependency and use its supported override;
+# this stays on build-tree dependencies and never reaches installed public APIs.
+# https://github.com/fmtlib/fmt/issues/4807
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND TARGET fmt)
+    get_target_property (_fmt_version fmt VERSION)
+    if (_fmt_version VERSION_LESS 11)
+        target_compile_definitions (fmt PUBLIC FMT_CONSTEVAL=constexpr)
+    endif ()
+endif ()

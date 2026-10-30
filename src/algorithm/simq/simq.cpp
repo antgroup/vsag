@@ -1105,7 +1105,7 @@ SIMQ::prepare_and_execute_splits(std::vector<SplitTask>& tasks) {
     representative_codes_.resize(static_cast<uint64_t>(num_clusters_ + new_cluster_count) *
                                  mv_codes_->GetQuantizerCodeSize());
     for (int64_t i = 0; i < new_cluster_count; ++i) {
-        cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
+        cluster_lists_.emplace_back(allocator_);
         cluster_token_counts_.push_back(0);
     }
 

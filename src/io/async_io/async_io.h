@@ -72,15 +72,16 @@ private:
                 "libaio is unavailable, async_io is using its buffered compatibility backend");
         });
 #endif
-        return FileOpenOptions {
-            path, true,
+        return FileOpenOptions{path,
+                               true,
 #if HAVE_LIBAIO
-                true, true,
+                               true,
+                               true,
 #else
-                false, false,
+                               false,
+                               false,
 #endif
-                ownership
-        };
+                               ownership};
     }
 
     [[nodiscard]] static std::string

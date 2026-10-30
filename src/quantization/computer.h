@@ -37,7 +37,7 @@ template <typename T>
 class Computer : public ComputerInterface {
 public:
     explicit Computer(const T* quantizer, Allocator* allocator)
-        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator){};
+        : quantizer_(quantizer), allocator_(allocator), raw_query_(allocator) {};
 
     ~Computer() override {
         if (quantizer_) {

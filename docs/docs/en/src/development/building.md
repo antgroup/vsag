@@ -30,7 +30,7 @@ the sum of simultaneously resident build processes.
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
 - **Ninja**: preferred when available; Unix Makefiles are used as the fallback
-- **clang-format / clang-tidy**: exactly version 15 (enforced)
+- **clang-format / clang-tidy**: exactly version 20 (enforced)
 - Optional: HDF5 (for `tools/eval/eval_performance`), libaio (for the `async_io` data-cell backend),
   liburing (for `uring_io` on Linux), Intel MKL.
 
@@ -223,3 +223,20 @@ An unset path preserves existing behavior; an explicitly empty or unreadable pat
 
 You can increase `COMPILE_JOBS` if your machine has enough memory, but the default is conservative
 to avoid out-of-memory failures in CI runners.
+
+## C++ standard and compiler validation
+
+Full VSAG CPU implementation targets require C++20; installed public headers and the `vsag::vsag` target support C++17 clients. CUDA translation units, Node.js bindings, and standalone Lite stay on C++17. Linux development uses GCC 13 as the primary compiler and Clang 20 as the second compiler. Use separate build directories:
+
+```bash
+make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"
+make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"
+```
+
+The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
+
+The development toolchain versions are not minimum consumer compiler requirements. The existing GCC 9.4.0 / Clang 13.0.0 source baseline remains a compatibility validation target. C++20 mode here describes the standard used to build this library, not full support for every C++20 feature in those older compilers.
+
+When enabling CUDA, choose a host compiler supported by the installed CUDA toolkit independently of the CPU compiler. CMake defaults `CMAKE_CUDA_HOST_COMPILER` to the CPU compiler; override it with `EXTRA_DEFINED="-DENABLE_CUDA=ON -DCMAKE_CUDA_HOST_COMPILER=/path/to/toolkit-supported-g++"` when that pair is unsupported. C++17 CUDA mode does not change nvcc's host-compiler support. CUDA builds still require validation with the actual toolkit; the CPU-only checks do not verify them.
+
+Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.

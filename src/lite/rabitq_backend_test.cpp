@@ -1567,6 +1567,7 @@ TEST_CASE("RaBitQ maintenance Batch4 preserves scalar candidate order and distan
         const float sum = std::accumulate(query.begin(), query.end(), 0.0F);
         for (uint64_t length = 0; length <= count; ++length) {
             std::vector<codec::Candidate> batch;
+            batch.reserve(length);
             for (uint64_t i = 0; i < length; ++i) {
                 batch.push_back({count - 1 - i, -1.0F});
             }

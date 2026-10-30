@@ -57,14 +57,8 @@ if (DIST_CONTAINS_AVX2)
 endif ()
 
 set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
-check_cxx_compiler_flag("-mavx512pf" COMPILER_SUPPORTS_AVX512PF)
-check_cxx_compiler_flag("-mavx512er" COMPILER_SUPPORTS_AVX512ER)
-if (COMPILER_SUPPORTS_AVX512PF)
-    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512pf")
-endif ()
-if (COMPILER_SUPPORTS_AVX512ER)
-    set(AVX512_FLAGS "${AVX512_FLAGS} -mavx512er")
-endif ()
+# AVX512PF/ER are unused and unsupported by Clang 20. Keep GCC compilation
+# commands compatible with clang-tidy as well as the actual SIMD kernels.
 
 if (DIST_CONTAINS_AVX512)
     set_source_files_properties (

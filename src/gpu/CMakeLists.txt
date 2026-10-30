@@ -19,11 +19,11 @@ if (ENABLE_CUDA)
         cuda_seed.cu
         cuda_accumulate.cu)
     # The tree's C/C++ flags are language-scoped and do not reach nvcc; the
-    # host pass follows the tree's C++ standard, and everything else is
+    # CUDA stays on C++17 independently of CPU C++20; everything else is
     # CMake's per-configuration CUDA default.
     set_target_properties (vsag_gpu PROPERTIES
         CUDA_ARCHITECTURES "${VSAG_CUDA_ARCHITECTURES}"
-        CUDA_STANDARD ${CMAKE_CXX_STANDARD}
+        CUDA_STANDARD 17
         CUDA_STANDARD_REQUIRED ON)
     # Private: no other translation unit needs the macro or the toolkit's
     # headers. Everything from the toolkit is linked statically, so a build with

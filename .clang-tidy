@@ -14,6 +14,7 @@
 # limitations under the License.
 
 # Disabled checks and reasons:
+#   -performance-enum-size : preserve public and serialized enum representations
 #   -clang-analyzer-deadcode.DeadStores        : value stored but never read (too noisy)
 #   -clang-diagnostic-deprecated-builtins      : deprecated builtins required for toolchain/platform compatibility
 #   -bugprone-easily-swappable-parameters      : too many false positives in current codebase
@@ -23,6 +24,15 @@
 #   -readability-magic-numbers                 : too noisy for numeric-heavy vector index code
 #   -readability-function-cognitive-complexity : enable after fix all
 #   -readability-redundant-access-specifiers   : keep repeated public:/protected:/private: as visual separators between method groups
+# C++20 library rewrites are a separate migration; shared headers still support C++17.
+#   -modernize-use-ranges
+#   -modernize-use-integer-sign-comparison
+#   -modernize-use-designated-initializers
+#   -readability-container-contains
+#   -readability-math-missing-parentheses : defer repository-wide arithmetic style churn
+#   -readability-redundant-casting : fixed-width/ABI casts may differ across platforms
+#   -readability-avoid-nested-conditional-operator : compact numeric dispatch is intentional
+#   -readability-use-std-min-max : preserve existing floating-point NaN comparisons
 Checks: >
   -*,
   bugprone-*,
@@ -34,10 +44,19 @@ Checks: >
   modernize-*,
   -modernize-use-trailing-return-type,
   -modernize-avoid-c-arrays,
+  -modernize-use-ranges,
+  -modernize-use-integer-sign-comparison,
+  -modernize-use-designated-initializers,
   openmp-*,
   performance-*,
+  -performance-enum-size,
   readability-*,
   -readability-identifier-length,
+  -readability-container-contains,
+  -readability-math-missing-parentheses,
+  -readability-redundant-casting,
+  -readability-avoid-nested-conditional-operator,
+  -readability-use-std-min-max,
   -readability-magic-numbers,
   -readability-function-cognitive-complexity,
   -readability-redundant-access-specifiers
@@ -45,7 +64,6 @@ Checks: >
 
 HeaderFilterRegex: ''
 WarningsAsErrors: "*"
-AnalyzeTemporaryDtors: true
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,               value: lower_case }

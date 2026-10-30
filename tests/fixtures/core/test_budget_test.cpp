@@ -183,9 +183,8 @@ TestOverflow() {
     auto overflow = first;
     overflow.workload.num = std::numeric_limits<uint64_t>::max();
     overflow.workload.dim = 2;
-    CheckThrows<std::overflow_error>([&] {
-        PlanCase(Identity(), Policy{}, {{first}, {overflow}});
-    });
+    CheckThrows<std::overflow_error>(
+        [&] { PlanCase(Identity(), Policy{}, {{first}, {overflow}}); });
 }
 
 void

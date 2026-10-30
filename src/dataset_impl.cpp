@@ -725,10 +725,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
         }                                                                                        \
         auto ptr = const_cast<TYPE>(std::get<const TYPE>(iter->second));                         \
         this->SETTER_FUNC(allocate_and_copy(other->Get##SETTER_FUNC(),                           \
-                                            new_num_elements*(MULTIPLIER),                       \
+                                            new_num_elements * (MULTIPLIER),                     \
                                             this->allocator_,                                    \
                                             ptr,                                                 \
-                                            old_num_elements*(MULTIPLIER)));                     \
+                                            old_num_elements * (MULTIPLIER)));                   \
     }
 
 DatasetPtr
@@ -1085,6 +1085,8 @@ DatasetImpl::Append(const DatasetPtr& other) {
                                             return replaced_strings.count(paths) != 0;
                                         }),
                          retired_paths_.end());
+    // Only deallocation happens here; pointer iteration order does not affect results.
+    // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
     for (const auto* values : replaced_strings) {
         delete[] values;
     }

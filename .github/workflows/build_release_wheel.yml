@@ -42,25 +42,25 @@ jobs:
             {"python-version": "3.10", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp310-*"},
             {"python-version": "3.9", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp39-*"},
             {"python-version": "3.8", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp38-*"},
-            {"python-version": "3.14", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp314-*"},
-            {"python-version": "3.13", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp313-*"},
-            {"python-version": "3.12", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp312-*"},
-            {"python-version": "3.11", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp311-*"},
-            {"python-version": "3.10", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp310-*"},
-            {"python-version": "3.9", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp39-*"},
-            {"python-version": "3.8", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp38-*"}
+            {"python-version": "3.14", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp314-*"},
+            {"python-version": "3.13", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp313-*"},
+            {"python-version": "3.12", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp312-*"},
+            {"python-version": "3.11", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp311-*"},
+            {"python-version": "3.10", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp310-*"},
+            {"python-version": "3.9", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp39-*"},
+            {"python-version": "3.8", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp38-*"}
           ]'
 
           # --- Legacy: Python 3.7 (cibuildwheel 2.x, since 3.x dropped <3.8) ---
           full_legacy_matrix='[
             {"python-version": "3.7", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp37-*"},
-            {"python-version": "3.7", "arch": "aarch64", "runner": "ubuntu-22.04-arm", "cibw-build-id": "cp37-*"}
+            {"python-version": "3.7", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp37-*"}
           ]'
 
           # --- Python 3.6 (cibuildwheel 2.11.x) ---
           full_py36_matrix='[
             {"arch": "x86_64", "runner": "ubuntu-latest"},
-            {"arch": "aarch64", "runner": "ubuntu-22.04-arm"}
+            {"arch": "aarch64", "runner": "ubuntu-24.04-arm"}
           ]'
 
           # --- Filter logic ---
