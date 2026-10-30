@@ -56,6 +56,9 @@ public:
                  InnerIdType count,
                  CodeSlotIdType* code_slot_ids) const;
 
+    [[nodiscard]] bool
+    IsPublished(InnerIdType inner_id) const;
+
     void
     ReserveLogicalSize(InnerIdType new_size);
 

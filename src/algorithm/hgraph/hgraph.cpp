@@ -754,6 +754,12 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     if (this->support_force_remove()) {
         force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
     }
+    // Serialize the singleton check and overwrite with dedup probing/publication in Add.
+    std::unique_lock<std::shared_mutex> storage_lock(this->storage_mutation_mutex_,
+                                                     std::defer_lock);
+    if (this->using_dedup_storage()) {
+        storage_lock.lock();
+    }
     // check if id exists and get copied base data
     uint32_t inner_id = 0;
     {
@@ -767,8 +773,6 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
 
     if (not force_update) {
-        std::shared_lock label_lock(this->label_lookup_mutex_);
-
         // 1. check whether vectors are same
         Vector<int8_t> base_data(data_size, allocator_);
         GetVectorByInnerId(inner_id, (float*)base_data.data());
@@ -789,9 +793,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
+                int64_t neighbor_label;
+                {
+                    std::shared_lock label_lock(this->label_lookup_mutex_);
+                    neighbor_label = this->label_table_->GetLabelById(neighbor_inner_id);
+                }
                 neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec), neighbor_label);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

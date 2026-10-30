@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "datacell/dense_duplicate_tracker.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "hgraph.h"
 #include "impl/allocator/safe_allocator.h"
@@ -434,4 +435,70 @@ TEST_CASE("PiPNN footer restore grows every physical flatten before Add",
                 extended.data() + extended_header + sizeof(vsag::InnerIdType),
                 sizeof(restored_capacity));
     REQUIRE(restored_capacity >= original_capacity);
+}
+
+TEST_CASE("PiPNN materialization enumerates a large duplicate ring once",
+          "[ut][hgraph][pipnn_storage][review_storage]") {
+    class CountingTracker : public vsag::DenseDuplicateTracker {
+    public:
+        explicit CountingTracker(vsag::Allocator* allocator) : DenseDuplicateTracker(allocator) {
+        }
+
+        vsag::InnerIdType
+        GetGroupId(vsag::InnerIdType id) const override {
+            if (++group_calls > 2) {
+                throw std::runtime_error("duplicate ring repeatedly scanned");
+            }
+            return DenseDuplicateTracker::GetGroupId(id);
+        }
+
+        std::vector<vsag::InnerIdType>
+        GetDuplicateIds(vsag::InnerIdType id) const override {
+            ++member_calls;
+            return DenseDuplicateTracker::GetDuplicateIds(id);
+        }
+
+        mutable uint64_t group_calls{0};
+        mutable uint64_t member_calls{0};
+    };
+
+    constexpr uint32_t count = 100000;
+    auto common = make_common(2);
+    auto tracker = std::make_shared<CountingTracker>(common.allocator_.get());
+    tracker->Resize(count);
+    for (uint32_t i = 1; i < count; ++i) {
+        tracker->SetDuplicateId(0, i);
+    }
+    auto param = std::make_shared<vsag::GraphDataCellParameter>();
+    param->io_parameter_ = std::make_shared<vsag::MemoryIOParameter>();
+    param->max_degree_ = 8;
+    auto graph = vsag::GraphInterface::MakeInstance(param, common);
+    graph->SetDuplicateTracker(tracker);
+    vsag::Vector<vsag::InnerIdType> ids(count, common.allocator_.get());
+    vsag::Vector<int64_t> rows(count, common.allocator_.get());
+    std::iota(ids.begin(), ids.end(), 0);
+    std::iota(rows.begin(), rows.end(), 0);
+    vsag::CodeSlotMap slots(common.allocator_.get());
+    slots.ReserveLogicalSize(count);
+    uint64_t encoded = 0;
+    vsag::materialize_pipnn_storage(
+        ids,
+        rows,
+        graph,
+        slots,
+        common.allocator_.get(),
+        common.thread_pool_.get(),
+        1,
+        [](vsag::CodeSlotIdType capacity) { REQUIRE(capacity == 1); },
+        [&](int64_t row, vsag::CodeSlotIdType slot) {
+            REQUIRE(row == 0);
+            REQUIRE(slot == 0);
+            ++encoded;
+        });
+    REQUIRE(encoded == 1);
+    REQUIRE(tracker->group_calls == 1);
+    REQUIRE(tracker->member_calls == 1);
+    REQUIRE(slots.PhysicalCount() == 1);
+    REQUIRE(slots.PublishedLogicalCount() == count);
+    REQUIRE(slots.Resolve(count - 1) == 0);
 }

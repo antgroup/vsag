@@ -363,11 +363,14 @@ HGraph::brute_force_search(const void* query,
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
     Vector<float> batch_dists(brute_force_batch_size, alloc);
 
+    const auto* slot_map = this->using_dedup_storage() ? this->code_slot_map_.get() : nullptr;
     InnerIdType cursor = 0;
     while (cursor < total) {
         InnerIdType batch_count = 0;
         while (cursor < total && batch_count < brute_force_batch_size) {
-            if (filter == nullptr || filter->CheckValid(cursor)) {
+            // total_count_ includes reservations made before a parallel Add publishes codes.
+            if ((slot_map == nullptr or slot_map->IsPublished(cursor)) and
+                (filter == nullptr || filter->CheckValid(cursor))) {
                 batch_ids[batch_count++] = cursor;
             }
             ++cursor;

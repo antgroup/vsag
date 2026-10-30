@@ -48,11 +48,30 @@ materialize_pipnn_storage(const Vector<InnerIdType>& inner_ids,
         CodeSlotIdType slot;
         int64_t row;
     };
+    const auto unassigned = std::numeric_limits<uint64_t>::max();
+    UnorderedMap<InnerIdType, uint64_t> row_by_id(allocator);
+    row_by_id.reserve(inner_ids.size());
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        row_by_id.emplace(inner_ids[i], i);
+    }
+    Vector<uint64_t> group_rows(inner_ids.size(), unassigned, allocator);
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        if (group_rows[i] != unassigned) {
+            continue;
+        }
+        const auto group = graph->GetGroupId(inner_ids[i]);
+        const auto group_row = row_by_id.at(group);
+        group_rows[group_row] = group_row;
+        for (auto member : graph->GetDuplicateIds(group)) {
+            if (auto found = row_by_id.find(member); found != row_by_id.end()) {
+                group_rows[found->second] = group_row;
+            }
+        }
+    }
     Vector<representative_row> representatives(allocator);
     for (uint64_t i = 0; i < inner_ids.size(); ++i) {
-        const auto id = inner_ids[i];
-        if (graph->GetGroupId(id) == id) {
-            representatives.push_back({id, 0, valid_indices[i]});
+        if (group_rows[i] == i) {
+            representatives.push_back({inner_ids[i], 0, valid_indices[i]});
         }
     }
     // The caller excludes concurrent slot allocators. Encode into provisional slots so failure
@@ -107,10 +126,9 @@ materialize_pipnn_storage(const Vector<InnerIdType>& inner_ids,
     for (const auto& representative : representatives) {
         slot_map.PublishSlot(representative.inner_id, slot_map.AllocateSlot());
     }
-    for (auto id : inner_ids) {
-        const auto group = graph->GetGroupId(id);
-        if (group != id) {
-            slot_map.PublishSlot(id, slot_map.Resolve(group));
+    for (uint64_t i = 0; i < inner_ids.size(); ++i) {
+        if (group_rows[i] != i) {
+            slot_map.PublishSlot(inner_ids[i], slot_map.Resolve(inner_ids[group_rows[i]]));
         }
     }
 }

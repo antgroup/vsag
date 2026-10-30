@@ -127,6 +127,12 @@ CodeSlotMap::ResolveBatch(const InnerIdType* inner_ids,
     }
 }
 
+bool
+CodeSlotMap::IsPublished(InnerIdType inner_id) const {
+    return inner_id < logical_capacity_ and
+           inner_to_slot_[inner_id].load(std::memory_order_acquire) != INVALID_CODE_SLOT;
+}
+
 void
 CodeSlotMap::ReserveLogicalSize(InnerIdType new_size) {
     std::unique_lock lock(mutex_);

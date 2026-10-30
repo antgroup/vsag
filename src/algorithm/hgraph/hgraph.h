@@ -781,11 +781,11 @@ private:
     // pinning codes exclusively to shrink. The release is required because repair enters public
     // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
     // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
-    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
-    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
-    mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
-    mutable std::shared_mutex add_mutex_;           // serializes Add() operations
-    mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
+    mutable std::mutex mci_mutation_mutex_;             // serializes MCI Add, Remove and compaction
+    mutable std::shared_mutex storage_mutation_mutex_;  // excludes initial Add and dedup updates
+    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
     // Single-flights physical code growth before taking the global writer lock.
     mutable std::mutex physical_code_resize_mutex_;
     std::atomic<bool> physical_code_resize_pending_{false};

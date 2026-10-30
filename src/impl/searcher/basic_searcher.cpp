@@ -623,10 +623,17 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         } else {
             const bool has_stored_query =
                 inner_search_param.duplicate_query_id < flatten->TotalCount();
+            Vector<uint8_t> query_code(allocator_);
+            bool encoded_query = false;
+            if (not has_stored_query) {
+                query_code.resize(flatten->code_size_);
+                encoded_query =
+                    flatten->Encode(static_cast<const float*>(query), query_code.data());
+            }
             auto matches_query = [&](InnerIdType id) {
                 return has_stored_query
                            ? flatten->CompareVectors(inner_search_param.duplicate_query_id, id)
-                           : flatten->CompareRawVectorWithId(query, id);
+                           : encoded_query and flatten->CompareCodeWithId(query_code.data(), id);
             };
             if (matches_query(min_index)) {
                 inner_search_param.duplicate_id = min_index;

@@ -629,3 +629,48 @@ TEST_CASE("BasicSearcher iterator drain path handles sign and lower_bound correc
 
     delete iter_ctx;
 }
+
+TEST_CASE("BasicSearcher encodes an unstored duplicate probe once",
+          "[ut][BasicSearcher][duplicate][review_storage]") {
+    using Base = FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MemoryIO>;
+    class CountingFlatten : public Base {
+    public:
+        using Base::Base;
+
+        bool
+        Encode(const float* vector, uint8_t* codes) override {
+            ++encodes;
+            return Base::Encode(vector, codes);
+        }
+
+        uint64_t encodes{0};
+    };
+    auto common = IndexCommonParam();
+    common.dim_ = 1;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    auto quantizer =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<CountingFlatten>(quantizer, io, common);
+    float vectors[]{0, 1};
+    flatten->BatchInsertVector(vectors, 2, nullptr);
+    float query = 2;
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {0}});
+    auto pool =
+        std::make_shared<VisitedListPool>(1, common.allocator_.get(), 2, common.allocator_.get());
+    BasicSearcher searcher(common);
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 2;
+    param.find_duplicate = true;
+    param.duplicate_query_id = std::numeric_limits<InnerIdType>::max();
+    auto visited = pool->TakeOne();
+    auto result = searcher.Search(graph, flatten, visited, &query, param, LabelTablePtr{}, nullptr);
+    pool->ReturnOne(visited);
+    REQUIRE(result->Size() == 2);
+    REQUIRE(param.duplicate_id < 0);
+    REQUIRE(flatten->encodes == 1);
+}

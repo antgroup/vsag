@@ -137,12 +137,17 @@ public:
             return false;
         }
 
+        return this->CompareCodeWithId(encoded.data(), id);
+    }
+
+    bool
+    CompareCodeWithId(const uint8_t* encoded, InnerIdType id) const {
         bool need_release = false;
         const auto* codes = this->GetCodesById(id, need_release);
         if (codes == nullptr) {
             return false;
         }
-        bool result = (std::memcmp(encoded.data(), codes, this->code_size_) == 0);
+        bool result = (std::memcmp(encoded, codes, this->code_size_) == 0);
         if (need_release) {
             this->Release(codes);
         }

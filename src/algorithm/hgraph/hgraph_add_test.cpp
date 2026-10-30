@@ -157,6 +157,126 @@ RequireRangeContains(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index
     }
 }
 
+// Pause a worker only after Add has reserved its entire batch and prepared temporary codes.
+class PausedAddPool : public vsag::ThreadPool {
+public:
+    PausedAddPool() : pool_(4), resume_(resume_promise_.get_future().share()) {
+    }
+
+    ~PausedAddPool() override {
+        Release();
+    }
+
+    void
+    Arm() {
+        armed_.store(true);
+    }
+
+    std::future<void>
+    Reached() {
+        return reached_.get_future();
+    }
+
+    void
+    Release() {
+        if (not released_.exchange(true)) {
+            resume_promise_.set_value();
+        }
+    }
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        const auto pause = armed_.exchange(false);
+        return pool_.Enqueue([this, pause, task = std::move(task)]() {
+            if (pause) {
+                reached_.set_value();
+                resume_.wait();
+            }
+            task();
+        });
+    }
+
+    void
+    WaitUntilEmpty() override {
+        pool_.WaitUntilEmpty();
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        pool_.SetQueueSizeLimit(limit);
+    }
+
+    void
+    SetPoolSize(uint64_t count) override {
+        pool_.SetPoolSize(count);
+    }
+
+private:
+    vsag::DefaultThreadPool pool_;
+    std::promise<void> resume_promise_;
+    std::shared_future<void> resume_;
+    std::promise<void> reached_;
+    std::atomic<bool> armed_{false};
+    std::atomic<bool> released_{false};
+};
+
+class PausedUpdateAllocator : public vsag::Allocator {
+public:
+    PausedUpdateAllocator() : resume_(resume_promise_.get_future().share()) {
+    }
+
+    std::string
+    Name() override {
+        return "paused-update";
+    }
+
+    void
+    Arm() {
+        thread_ = std::this_thread::get_id();
+        armed_.store(true);
+    }
+
+    std::future<void>
+    Reached() {
+        return reached_.get_future();
+    }
+
+    void
+    Release() {
+        if (not released_.exchange(true)) {
+            resume_promise_.set_value();
+        }
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        if (armed_.load() and thread_ == std::this_thread::get_id() and armed_.exchange(false)) {
+            reached_.set_value();
+            resume_.wait();
+        }
+        return base_->Allocate(size);
+    }
+
+    void
+    Deallocate(void* ptr) override {
+        base_->Deallocate(ptr);
+    }
+
+    void*
+    Reallocate(void* ptr, uint64_t size) override {
+        return base_->Reallocate(ptr, size);
+    }
+
+private:
+    std::shared_ptr<vsag::Allocator> base_{vsag::SafeAllocator::FactoryDefaultAllocator()};
+    std::thread::id thread_;
+    std::atomic<bool> armed_{false};
+    std::atomic<bool> released_{false};
+    std::promise<void> resume_promise_;
+    std::shared_future<void> resume_;
+    std::promise<void> reached_;
+};
+
 const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
@@ -1265,4 +1385,94 @@ TEST_CASE("HGraph deduplicate_storage rejects unsupported graph type",
     hgraph_json["graph_type"].SetString("odescent");
 
     REQUIRE_THROWS(MakeHGraphIndex(hgraph_json, common_param));
+}
+
+TEST_CASE("HGraph reserved dedup batches stay invisible and first Adds do not overlap",
+          "[ut][hgraph][duplicate][concurrent][review_storage]") {
+    BlockSizeLimitGuard blocks(512ULL * 1024);
+    const bool initially_empty = GENERATE(false, true);
+    auto common = MakeCommonParam(2);
+    auto pool = std::make_shared<PausedAddPool>();
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(true, 4), common);
+    std::vector<float> seed_vectors{0, 0};
+    std::vector<int64_t> seed_ids{10};
+    if (not initially_empty) {
+        REQUIRE(index->Build(MakeFloatDataset(seed_vectors, seed_ids, 2, 1)).has_value());
+    }
+    pool->Arm();
+    auto reached = pool->Reached();
+    std::vector<float> first_vectors{2, 0};
+    std::vector<int64_t> first_ids{20};
+    auto first = std::async(std::launch::async, [&]() {
+        return index->Add(MakeFloatDataset(first_vectors, first_ids, 2, 1));
+    });
+    const auto paused = reached.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    auto query = MakeFloatQuery(seed_vectors, 2);
+    auto knn = index->KnnSearch(query, 10, kBruteForceSearchParams);
+    auto range = index->RangeSearch(query, 100.0F, kBruteForceSearchParams);
+    std::vector<float> second_vectors{4, 0};
+    std::vector<int64_t> second_ids{30};
+    auto second = std::async(std::launch::async, [&]() {
+        return index->Add(MakeFloatDataset(second_vectors, second_ids, 2, 1));
+    });
+    const auto blocked =
+        second.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
+    pool->Release();
+    auto first_result = first.get();
+    auto second_result = second.get();
+    REQUIRE(paused);
+    if (initially_empty) {
+        CHECK(blocked);
+    }
+    REQUIRE(knn.has_value());
+    REQUIRE(range.has_value());
+    REQUIRE(knn.value()->GetDim() == (initially_empty ? 0 : 1));
+    REQUIRE(range.value()->GetDim() == (initially_empty ? 0 : 1));
+    REQUIRE(first_result.has_value());
+    REQUIRE(second_result.has_value());
+    REQUIRE(index->GetNumElements() == (initially_empty ? 2 : 3));
+    RequireRangeContains(
+        index, query, {20, 30}, initially_empty ? 2 : 3, 100.0F, kBruteForceSearchParams);
+}
+
+TEST_CASE("HGraph dedup update cannot overwrite a newly published duplicate",
+          "[ut][hgraph][duplicate][concurrent][review_storage]") {
+    BlockSizeLimitGuard blocks(512ULL * 1024);
+    auto common = MakeCommonParam(2);
+    auto allocator = std::make_shared<PausedUpdateAllocator>();
+    common.allocator_ = allocator;
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(), common);
+    std::vector<float> seed{0, 0};
+    std::vector<int64_t> seed_ids{10};
+    REQUIRE(index->Build(MakeFloatDataset(seed, seed_ids, 2, 1)).has_value());
+    std::vector<float> changed{7, 7};
+    auto reached = allocator->Reached();
+    auto update = std::async(std::launch::async, [&]() {
+        allocator->Arm();
+        return index->UpdateVector(10, MakeFloatDataset(changed, seed_ids, 2, 1), true);
+    });
+    const auto paused = reached.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    std::vector<int64_t> added_ids{20};
+    auto add = std::async(std::launch::async,
+                          [&]() { return index->Add(MakeFloatDataset(seed, added_ids, 2, 1)); });
+    const auto blocked =
+        add.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout;
+    allocator->Release();
+    auto updated = update.get();
+    auto added = add.get();
+    REQUIRE(paused);
+    CHECK(blocked);
+    REQUIRE(updated.has_value());
+    REQUIRE(added.has_value());
+    auto distance = index->CalcDistanceById(seed.data(), 20, false);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == 0.0F);
+
+    // Exercise validation without holding the label lock while crossing the resize gate.
+    auto hgraph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    auto resize =
+        std::async(std::launch::async, [&]() { hgraph->ensure_physical_code_capacity(4096); });
+    REQUIRE(index->UpdateVector(10, MakeFloatDataset(changed, seed_ids, 2, 1), false).has_value());
+    resize.get();
 }

@@ -652,13 +652,26 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
 
 std::vector<int64_t>
 HGraph::AddImpl::Run(const DatasetPtr& data) {
-    // PiPNN builds the whole bottom graph in one shot, so the first Add() on an empty
-    // index must go through Build(); later batches fall through to the normal
-    // incremental path.  The mutex serializes concurrent first batches.
-    if (index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        std::unique_lock<std::mutex> initial_build_lock(index_.pipnn_initial_build_mutex_);
+    // Initial Add owns private temporary codes. Later dedup batches can overlap, but
+    // UpdateVector must exclude all probes/publications while checking and changing a slot.
+    std::shared_lock<std::shared_mutex> storage_read;
+    std::unique_lock<std::shared_mutex> storage_write;
+    if (index_.using_dedup_storage() or index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        storage_read = std::shared_lock<std::shared_mutex>(index_.storage_mutation_mutex_);
         if (index_.total_count_.load() == 0) {
+            storage_read.unlock();
+            storage_write = std::unique_lock<std::shared_mutex>(index_.storage_mutation_mutex_);
+        }
+        if (index_.graph_type_ == GRAPH_TYPE_VALUE_PIPNN and index_.total_count_.load() == 0) {
             return index_.Build(data);
+        }
+        if (not index_.using_dedup_storage()) {
+            if (storage_read.owns_lock()) {
+                storage_read.unlock();
+            }
+            if (storage_write.owns_lock()) {
+                storage_write.unlock();
+            }
         }
     }
     std::unique_lock<std::mutex> mci_mutation_lock(index_.mci_mutation_mutex_, std::defer_lock);
