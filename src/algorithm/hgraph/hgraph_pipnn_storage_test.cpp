@@ -502,3 +502,94 @@ TEST_CASE("PiPNN materialization enumerates a large duplicate ring once",
     REQUIRE(slots.PublishedLogicalCount() == count);
     REQUIRE(slots.Resolve(count - 1) == 0);
 }
+
+TEST_CASE("PiPNN empty footer restore reserves real physical storage before Build",
+          "[ut][hgraph][pipnn][pipnn_storage][review_round2]") {
+    SmallStorageBlocks blocks;
+    constexpr int64_t dim = 64;
+    auto common = make_common(dim, 4);
+    auto parameter = make_parameters();
+    parameter["build_thread_count"].SetInt(4);
+    parameter["base_io_type"].SetString(GENERATE("memory_io", "block_memory_io"));
+    auto empty = std::make_shared<Index>(parameter, common);
+    auto original = std::dynamic_pointer_cast<vsag::HGraph>(empty->GetInnerIndex());
+    auto serialize_footer = [](const std::shared_ptr<vsag::HGraph>& graph) {
+        std::stringstream stream;
+        vsag::IOStreamWriter writer(stream);
+        graph->Serialize(writer);
+        return stream.str();
+    };
+    // Locate the original nonzero capacity header before normalization to zero makes
+    // neighboring zero-filled fields look like additional empty flatten headers.
+    const auto original_bytes = serialize_footer(original);
+    std::vector<uint64_t> headers;
+    constexpr uint32_t code_size = dim * sizeof(float);
+    constexpr uint64_t header_size = 2 * sizeof(vsag::InnerIdType) + sizeof(uint32_t);
+    for (uint64_t offset = 0; offset + header_size <= original_bytes.size(); ++offset) {
+        vsag::InnerIdType count = 0;
+        vsag::InnerIdType capacity = 0;
+        uint32_t stored_code_size = 0;
+        std::memcpy(&count, original_bytes.data() + offset, sizeof(count));
+        std::memcpy(&capacity, original_bytes.data() + offset + sizeof(count), sizeof(capacity));
+        std::memcpy(&stored_code_size,
+                    original_bytes.data() + offset + 2 * sizeof(count),
+                    sizeof(stored_code_size));
+        if (count == 0 and capacity > 0 and stored_code_size == code_size) {
+            headers.push_back(offset);
+        }
+    }
+    REQUIRE(headers.size() == 1);
+    auto restored = std::make_shared<Index>(parameter, common);
+    auto inner = std::dynamic_pointer_cast<vsag::HGraph>(restored->GetInnerIndex());
+    std::stringstream stream(original_bytes);
+    vsag::IOStreamReader reader(stream);
+    REQUIRE_NOTHROW(inner->Deserialize(reader));
+    const auto bytes = serialize_footer(inner);
+    vsag::InnerIdType capacity = 0;
+    REQUIRE(headers.front() + header_size <= bytes.size());
+    std::memcpy(
+        &capacity, bytes.data() + headers.front() + sizeof(vsag::InnerIdType), sizeof(capacity));
+    REQUIRE(capacity == 0);
+    std::vector<float> vectors(64 * dim, 0.0F);
+    std::vector<int64_t> labels(64);
+    std::iota(labels.begin(), labels.end(), 100);
+    for (uint64_t i = 0; i < labels.size(); ++i) {
+        vectors[i * dim] = static_cast<float>(i % 16);
+    }
+    REQUIRE(restored->Build(make_data(vectors, labels, dim)).has_value());
+    require_counts(restored, 64, 16);
+    require_labels(restored, vectors.data(), dim, {100, 116, 132, 148});
+    std::vector<float> added(dim, 0.0F);
+    added[0] = 0.25F;
+    std::vector<int64_t> added_labels{1000};
+    REQUIRE(restored->Add(make_data(added, added_labels, dim)).has_value());
+    require_counts(restored, 65, 17);
+    require_labels(restored, added.data(), dim, {1000});
+}
+
+TEST_CASE("PiPNN mmap storage supports parallel representative writes and Add",
+          "[ut][hgraph][pipnn][pipnn_storage][review_round2]") {
+    fixtures::TempDir dir("pipnn_mmap_storage");
+    constexpr int64_t dim = 64;
+    auto common = make_common(dim, 4);
+    auto parameter = make_parameters();
+    parameter["build_thread_count"].SetInt(4);
+    parameter["base_io_type"].SetString("mmap_io");
+    parameter["base_file_path"].SetString(dir.GenerateRandomFile(false));
+    auto index = std::make_shared<Index>(parameter, common);
+    std::vector<float> vectors(256 * dim, 0.0F);
+    std::vector<int64_t> labels(256);
+    std::iota(labels.begin(), labels.end(), 0);
+    for (uint64_t i = 0; i < labels.size(); ++i) {
+        vectors[i * dim] = static_cast<float>(i % 128);
+    }
+    REQUIRE(index->Build(make_data(vectors, labels, dim)).has_value());
+    require_counts(index, 256, 128);
+    require_labels(index, vectors.data(), dim, {0, 128});
+    std::vector<float> added(dim, 0.0F);
+    added[0] = 0.25F;
+    std::vector<int64_t> added_labels{1000};
+    REQUIRE(index->Add(make_data(added, added_labels, dim)).has_value());
+    require_counts(index, 257, 129);
+    require_labels(index, added.data(), dim, {1000});
+}

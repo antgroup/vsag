@@ -527,6 +527,12 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> r
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+    // Serialized capacity can be only a default (e.g. 800 for a never-written flatten).
+    // Only actual backing bytes can justify skipping a future physical reservation.
+    const uint64_t backed_capacity =
+        this->code_size_ == 0 ? 0 : this->io_->size_ / this->code_size_;
+    this->max_capacity_ =
+        static_cast<InnerIdType>(std::min<uint64_t>(this->max_capacity_, backed_capacity));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
