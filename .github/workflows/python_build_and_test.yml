@@ -98,8 +98,10 @@ jobs:
       - name: Install Python Wheel
         run: |
             pip3 uninstall pyvsag -y
-            pip3 install ./wheelhouse/*.whl
+            wheel=(./wheelhouse/*.whl)
+            pip3 install "${wheel[0]}[langchain]"
             pip3 install numpy pyjson pytest
+            pip3 install "langchain-tests==1.1.9"
       
       - name: Run Python Test
         shell: bash
@@ -107,6 +109,12 @@ jobs:
           set -euo pipefail
           cd ./tests/python/
           python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+      - name: Test LangChain 0.3 compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install 'langchain-core>=0.3.77,<0.4'
+          python3 -m pytest tests/python/test_langchain_vector_store.py -v --tb=short
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5

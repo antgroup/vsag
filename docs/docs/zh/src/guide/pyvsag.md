@@ -116,6 +116,21 @@ removed = index.remove(candidate_ids)
 
 Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回 `-1`，不属于操作失败。
 
+## LangChain 集成
+
+LangChain 支持是可选 extra，`pip install pyvsag` 不会安装它：
+
+```bash
+pip install "pyvsag[langchain]"
+```
+
+```python
+from pyvsag.langchain import VSAGVectorStore
+```
+
+用法、分数语义和已知限制参见 [LangChain 集成](langchain.md)。要求 Python 3.9+
+（这是 LangChain 的要求）以及 `langchain-core>=0.3.77,<2`。
+
 ## 与 C++ 库的关系
 
 `pyvsag` 绑定的是同一份核心 C++ 实现，行为和性能特征与 C++ 版本保持一致。因此：
