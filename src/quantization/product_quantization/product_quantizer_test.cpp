@@ -16,6 +16,9 @@
 #include "product_quantizer.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
+#include <limits>
+#include <sstream>
 #include <vector>
 
 #include "fixtures.h"
@@ -116,5 +119,107 @@ TEST_CASE("ProductQuantizer Serialize and Deserialize", "[ut][ProductQuantizer]"
             TestSerializeAndDeserializeMetricPQ<metrics[1]>(dim, pq_dim, count, error);
             TestSerializeAndDeserializeMetricPQ<metrics[2]>(dim, pq_dim, count, error);
         }
+    }
+}
+
+TEST_CASE("ProductQuantizer Deserialize Rejects Tampered Geometry", "[ut][ProductQuantizer]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 32;
+    constexpr int64_t pq_dim = 8;
+    using QuantizerT = ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>;
+    constexpr uint64_t codebook_len = dim * QuantizerT::CENTROIDS_PER_SUBSPACE;
+
+    QuantizerT original(dim, pq_dim, allocator.get());
+    for (size_t i = 0; i < original.codebooks_.size(); ++i) {
+        original.codebooks_[i] = static_cast<float>(i % 17);
+    }
+    std::stringstream output;
+    IOStreamWriter writer(output);
+    original.Serialize(writer);
+    const auto blob = output.str();
+
+    SECTION("untampered roundtrip") {
+        QuantizerT restored(dim, pq_dim, allocator.get());
+        std::stringstream input(blob);
+        IOStreamReader reader(input);
+        REQUIRE_NOTHROW(restored.Deserialize(reader));
+        std::stringstream roundtrip;
+        IOStreamWriter roundtrip_writer(roundtrip);
+        restored.Serialize(roundtrip_writer);
+        REQUIRE(roundtrip.str() == blob);
+        std::vector<float> query(dim, 1.0F);
+        std::vector<uint8_t> original_codes(pq_dim);
+        std::vector<uint8_t> restored_codes(pq_dim);
+        REQUIRE(original.EncodeOne(query.data(), original_codes.data()));
+        REQUIRE(restored.EncodeOne(query.data(), restored_codes.data()));
+        REQUIRE(restored_codes == original_codes);
+        auto original_computer = original.FactoryComputer();
+        auto restored_computer = restored.FactoryComputer();
+        original.ProcessQuery(query.data(), *original_computer);
+        restored.ProcessQuery(query.data(), *restored_computer);
+        REQUIRE(original.ComputeDist(*original_computer, original_codes.data()) ==
+                restored.ComputeDist(*restored_computer, restored_codes.data()));
+    }
+
+    // Follow the base header's serialized field types to locate the PQ metadata.
+    const size_t pq_offset =
+        sizeof(uint64_t) + sizeof(MetricType) + sizeof(uint64_t) + sizeof(bool);
+    const size_t subspace_offset = pq_offset + sizeof(int64_t);
+    const size_t length_offset = subspace_offset + sizeof(int64_t);
+    REQUIRE(blob.size() == length_offset + sizeof(uint64_t) + codebook_len * sizeof(float));
+    auto reject = [&](size_t offset, auto value) {
+        auto tampered = blob;
+        std::memcpy(tampered.data() + offset, &value, sizeof(value));
+        QuantizerT restored(dim, pq_dim, allocator.get());
+        std::stringstream input(tampered);
+        IOStreamReader reader(input);
+        try {
+            restored.Deserialize(reader);
+            FAIL("malformed PQ metadata was accepted");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_BINARY);
+        }
+        // Reject metadata before reading the codebook payload or changing its storage.
+        REQUIRE(reader.GetCursor() == length_offset + sizeof(uint64_t));
+        REQUIRE(restored.codebooks_.size() == codebook_len);
+        REQUIRE(restored.pq_dim_ == pq_dim);
+        REQUIRE(restored.subspace_dim_ == dim / pq_dim);
+    };
+
+    SECTION("zero pq dimension") {
+        reject(pq_offset, int64_t{0});
+    }
+    SECTION("negative pq dimension") {
+        reject(pq_offset, int64_t{-1});
+    }
+    SECTION("shrunk pq dimension") {
+        reject(pq_offset, pq_dim - 1);
+    }
+    SECTION("oversized pq dimension") {
+        reject(pq_offset, std::numeric_limits<int64_t>::max());
+    }
+    SECTION("zero subspace dimension") {
+        reject(subspace_offset, int64_t{0});
+    }
+    SECTION("negative subspace dimension") {
+        reject(subspace_offset, int64_t{-1});
+    }
+    SECTION("shrunk subspace dimension") {
+        reject(subspace_offset, dim / pq_dim - 1);
+    }
+    SECTION("oversized subspace dimension") {
+        reject(subspace_offset, std::numeric_limits<int64_t>::max());
+    }
+    SECTION("shrunk codebook length") {
+        reject(length_offset, codebook_len / 2);
+    }
+    SECTION("oversized codebook length") {
+        reject(length_offset, std::numeric_limits<uint64_t>::max());
+    }
+    SECTION("shrunk header dimension") {
+        reject(0, uint64_t{dim / 2});
+    }
+    SECTION("oversized header dimension") {
+        reject(0, std::numeric_limits<uint64_t>::max());
     }
 }
