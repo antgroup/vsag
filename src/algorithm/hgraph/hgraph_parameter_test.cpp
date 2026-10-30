@@ -974,3 +974,48 @@ TEST_CASE("HGraph mrle_dim validation rejects out-of-range values", "[ut][HGraph
         REQUIRE(qp[vsag::MRLE_DIM_KEY].GetInt() == 0);
     }
 }
+
+TEST_CASE("HGraph rejects deduplicate_storage without support_duplicate", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": false,
+        "deduplicate_storage": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph rejects deduplicate_storage with force remove", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": true,
+        "deduplicate_storage": true,
+        "support_force_remove": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}

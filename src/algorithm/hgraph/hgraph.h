@@ -15,6 +15,9 @@
 
 #pragma once
 
+#include <atomic>
+#include <memory>
+#include <mutex>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -40,6 +43,8 @@
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
 #include "utils/search_lock.h"
@@ -73,7 +78,7 @@ public:
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
         : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
 
-    ~HGraph() override = default;
+    ~HGraph() override;
 
     std::vector<int64_t>
     Add(const DatasetPtr& data) override;
@@ -311,22 +316,9 @@ public:
     std::vector<int64_t>
     build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
-    /// Insert a single point into the graph(s) at the given level.
-    void
-    add_one_point(const void* data, int level, InnerIdType id);
-
     /// Write codes for inner_id into the persistent flatten storage.
     void
     insert_persistent_codes(const void* data, InnerIdType inner_id);
-
-    /// Insert a single point, optionally also inserting codes.
-    void
-    add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
-
-    /// Core graph insertion: connect the new node and update neighbors.
-    /// Returns true if the entry point was updated.
-    bool
-    graph_add_one(const void* data, int level, InnerIdType inner_id);
 
     /// Grow internal storage to at least new_size capacity.
     void
@@ -382,6 +374,9 @@ private:
 
     void
     deserialize_label_info_streaming(StreamReader& reader) const;
+
+    class AddImpl;
+    class StorageState;
 
     // since v0.15: serialize basic index metadata to JSON.
     JsonType
@@ -719,6 +714,7 @@ private:
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
     FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    std::unique_ptr<StorageState> storage_state_;
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
@@ -764,7 +760,6 @@ private:
     // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
     // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
     mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
-    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
@@ -787,8 +782,7 @@ private:
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;  // search parameter optimizer
 
-    bool create_new_raw_vector_{false};  // whether a separate raw vector exists
-    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};  // temp flatten during build
+    bool create_new_raw_vector_{false};        // whether a separate raw vector exists
     FlattenInterfacePtr raw_vector_{nullptr};  // raw float vectors (for distance calc)
 
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper

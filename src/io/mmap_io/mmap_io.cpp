@@ -134,7 +134,11 @@ MMapIO::WriteImpl(const uint8_t* data, uint64_t size, uint64_t offset) {
         this->mapped_ptr_ = static_cast<uint8_t*>(new_addr);
 #endif
     }
-    this->size_ = std::max(this->size_, new_size);
+    // Reserved disjoint writes must not modify shared metadata. Growth is externally
+    // synchronized by the caller, just like remapping above.
+    if (new_size > this->size_) {
+        this->size_ = new_size;
+    }
     memcpy(this->mapped_ptr_ + offset, data, size);
 }
 

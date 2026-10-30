@@ -76,7 +76,8 @@ auto result = index->KnnSearch(
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
 | `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
 | `build_thread_count` | int | `100` | 构建阶段并发线程数 |
-| `support_duplicate` | bool | `false` | 是否在插入时做重复 ID 检测 |
+| `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
+| `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |
 | `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
 | `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
@@ -96,8 +97,8 @@ auto result = index->KnnSearch(
 [PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
 HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
-存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建和向量存储去重
-暂不支持 PiPNN。上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
+上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
 现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
 
 `build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
@@ -116,6 +117,34 @@ PiPNN 仅适用于 HGraph；Pyramid 索引不支持 `graph_type: "pipnn"`。
 拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
 
 策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
+
+### 向量存储去重
+
+同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
+同一个物理编码槽位，但仍保留各自的标签。该选项支持使用 `graph_type: "nsw"` 或 `"pipnn"` 的
+稠密向量 HGraph 索引；独立的 HNSW 索引以及 `graph_type: "odescent"` 均不支持。
+
+PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每个代表向量只编码一次，
+各 label 的属性和 extra_info 仍独立保存，也可同时启用动态 alpha。
+`duplicate_distance_threshold` 不参与 PiPNN 批量分组；后续增量 `Add` 沿用现有的
+距离阈值或编码判重规则。量化器仍使用原有训练样本进行训练。
+
+启用存储去重后，暂不支持以下操作和配置：
+
+- 强制删除（`support_force_remove: true`）；
+- 调用 `ImportCache()` 后基于缓存加速构建；
+- `Merge`；
+- v0.14 旧版序列化格式。
+
+`UpdateVector` 仅支持尚未与其他重复组成员共享向量存储的 ID。
+
+启用存储去重时，初次 `Add` 使用临时构图编码，期间不会与其他 `Add` 重叠。
+后续 `Add` 批次可以并发执行；`UpdateVector` 在检查和更新存储时，与去重 `Add` 的探测及发布互斥。
+单个批次内仍可并行执行。并发搜索会跳过尚未发布编码槽位的逻辑 ID。 启用存储去重的初次 PiPNN `Add` 期间，外部搜索先返回空结果，待构建完成后再可见（包括已启用的 MCI 伴随索引）。
+MCI 构建阶段的内部候选查询可以读取已完成的图和编码。保留内部 ID 之前的失败支持正常重试；
+若失败时已保留 ID，则需要重新创建索引，未完成的存储保持隐藏，后续 `Add` 或 `UpdateVector` 会返回错误。
+
+当前序列化格式和 streaming serialization 均受支持。
 
 ## 支持的输入数据类型
 

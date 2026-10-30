@@ -18,7 +18,8 @@
 
 #include "attr/argparse.h"
 #include "dataset_impl.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"
+#include "hgraph_storage_state.h"  // IWYU pragma: keep
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/search_reasoning.h"
@@ -109,13 +110,23 @@ HGraph::KnnSearch(const DatasetPtr& query,
         params.ef_search >= 1,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
+    if (this->storage_state_->IsInitialAddHidden()) {
+        return make_empty_dataset_with_stats();
+    }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
             force_remove_rlock = make_search_read_lock(this->force_remove_mutex_);
         }
-        shared_lock = make_search_read_lock(this->global_mutex_);
+        if (not SearchLockScope::IsNoLock()) {
+            shared_lock = this->storage_state_->AcquireReadLock(this->global_mutex_);
+        }
+    }
+    // Pair with the initial-build writer barrier: a query that missed the early check
+    // must not read an entry point or route vector while they are being constructed.
+    if (this->storage_state_->IsInitialAddHidden()) {
+        return make_empty_dataset_with_stats();
     }
     k = std::min(k, GetNumElements());
 
@@ -361,11 +372,16 @@ HGraph::brute_force_search(const void* query,
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
     Vector<float> batch_dists(brute_force_batch_size, alloc);
 
+    const auto* slot_map = this->storage_state_->deduplicate_storage_
+                               ? this->storage_state_->code_slot_map_.get()
+                               : nullptr;
     InnerIdType cursor = 0;
     while (cursor < total) {
         InnerIdType batch_count = 0;
         while (cursor < total && batch_count < brute_force_batch_size) {
-            if (filter == nullptr || filter->CheckValid(cursor)) {
+            // total_count_ includes reservations made before a parallel Add publishes codes.
+            if ((slot_map == nullptr or slot_map->IsPublished(cursor)) and
+                (filter == nullptr || filter->CheckValid(cursor))) {
                 batch_ids[batch_count++] = cursor;
             }
             ++cursor;
@@ -433,13 +449,23 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         params.ef_search >= 1,
         fmt::format("ef_search({}) must be at least 1", params.ef_search));
 
+    if (this->storage_state_->IsInitialAddHidden()) {
+        return make_empty_dataset_with_stats();
+    }
     std::shared_lock<std::shared_mutex> force_remove_rlock;
     std::shared_lock<std::shared_mutex> shared_lock;
     if (!this->immutable_.load(std::memory_order_acquire)) {
         if (this->support_force_remove()) {
             force_remove_rlock = make_search_read_lock(this->force_remove_mutex_);
         }
-        shared_lock = make_search_read_lock(this->global_mutex_);
+        if (not SearchLockScope::IsNoLock()) {
+            shared_lock = this->storage_state_->AcquireReadLock(this->global_mutex_);
+        }
+    }
+    // Pair with the initial-build writer barrier: a query that missed the early check
+    // must not read an entry point or route vector while they are being constructed.
+    if (this->storage_state_->IsInitialAddHidden()) {
+        return make_empty_dataset_with_stats();
     }
     k = std::min(k, GetNumElements());
 

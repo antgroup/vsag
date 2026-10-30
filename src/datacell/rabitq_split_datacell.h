@@ -29,6 +29,7 @@
 #include "io/buffer_io/buffer_io_parameter.h"
 #include "io/common/basic_io.h"
 #include "io/common/io_parameter.h"
+#include "io/memory_io/memory_io.h"
 #include "io/mmap_io/mmap_io_parameter.h"
 #include "quantization/rabitq_quantization/rabitq_quantizer.h"
 #include "query_context.h"
@@ -115,6 +116,11 @@ public:
     void
     Deserialize(lvalue_or_rvalue<StreamReader> reader) {
         io_->Deserialize(reader);
+    }
+
+    [[nodiscard]] uint64_t
+    BackedCapacity() const {
+        return code_size_ == 0 ? 0 : io_->size_ / code_size_;
     }
 
     [[nodiscard]] uint64_t
@@ -503,12 +509,24 @@ public:
         auto ptr =
             std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl>>(
                 other);
-        if (ptr == nullptr) {
+        if (ptr != nullptr) {
+            ptr->ImportQuantizerModel(reader);
+            return;
+        }
+        // Temporary logical-ID build codes use MemoryIO regardless of persistent IO.
+        auto memory_ptr =
+            std::dynamic_pointer_cast<RaBitQSplitDataCell<metric, MemoryIO, MemoryIO>>(other);
+        if (memory_ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's rabitq split datacell failed");
         }
-        ptr->quantizer_->Deserialize(reader);
-        ptr->refresh_code_sizes();
+        memory_ptr->ImportQuantizerModel(reader);
+    }
+
+    void
+    ImportQuantizerModel(StreamReader& reader) {
+        this->quantizer_->Deserialize(reader);
+        this->refresh_code_sizes();
     }
 
     void
@@ -614,6 +632,11 @@ public:
         this->supplement_cell_->Deserialize(reader);
         this->quantizer_->Deserialize(reader);
         this->refresh_code_sizes();
+        // Both split stores must back any capacity cached by HGraph.
+        const auto backed_capacity =
+            std::min(this->x_bit_cell_->BackedCapacity(), this->supplement_cell_->BackedCapacity());
+        this->max_capacity_ =
+            static_cast<InnerIdType>(std::min<uint64_t>(this->max_capacity_, backed_capacity));
     }
 
     void

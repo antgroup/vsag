@@ -110,11 +110,17 @@ public:
         ss.seekg(0, std::ios::beg);
         IOStreamReader reader(ss);
         auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
-        if (ptr == nullptr) {
+        if (ptr != nullptr) {
+            ptr->quantizer_->Deserialize(reader);
+            return;
+        }
+        // Temporary logical-ID build codes use MemoryIO regardless of persistent IO.
+        auto memory_ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, MemoryIO>>(other);
+        if (memory_ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's flatten datacell failed");
         }
-        ptr->quantizer_->Deserialize(reader);
+        memory_ptr->quantizer_->Deserialize(reader);
     }
 
     void
@@ -527,6 +533,12 @@ FlattenDataCell<QuantTmpl, IOTmpl>::Deserialize(lvalue_or_rvalue<StreamReader> r
     FlattenInterface::Deserialize(reader);
     this->io_->Deserialize(reader);
     this->quantizer_->Deserialize(reader);
+    // Serialized capacity can be only a default (e.g. 800 for a never-written flatten).
+    // Only actual backing bytes can justify skipping a future physical reservation.
+    const uint64_t backed_capacity =
+        this->code_size_ == 0 ? 0 : this->io_->size_ / this->code_size_;
+    this->max_capacity_ =
+        static_cast<InnerIdType>(std::min<uint64_t>(this->max_capacity_, backed_capacity));
 }
 
 template <typename QuantTmpl, typename IOTmpl>
