@@ -224,14 +224,41 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
+    uint32_t unrewarded_hops = 0;
+    uint32_t empty_hops = 0;
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
     while (not candidate_set->Empty()) {
         ++hops;
         if (hops >= inner_search_param.hops_limit) {
             break;
         }
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if (-candidate_set->Top().first > lower_bound && top_candidates->Size() >= ef) {
-                break;
+            if (top_candidates->Empty()) {
+                ++empty_hops;
+                if (empty_hops >= max_empty_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(
+                            ReasoningTermination::kEmptyTraversalLimitReached);
+                    }
+                    break;
+                }
+            } else if (-candidate_set->Top().first > lower_bound) {
+                if (top_candidates->Size() >= ef) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+                ++unrewarded_hops;
+                if (unrewarded_hops >= max_unrewarded_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+            } else {
+                unrewarded_hops = 0;
             }
         }
         const auto current_node_pair = candidate_set->Top();
@@ -259,6 +286,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (check_func(id) and
                     is_result_distance_eligible<mode>(dist, inner_search_param)) {
                     top_candidates->Push(dist, id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                     if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
                         if (top_candidates->Size() > ef) {
                             if (reasoning != nullptr) {
@@ -284,6 +313,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 distance_provider.Prefetch(candidate_set->Top().second);
                 if (check_func(id)) {
                     top_candidates->Push(dist, id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(distance_provider.OriginalId(id));  // [reasoning]
                 }
@@ -424,6 +455,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         candidate_set->Push(traversal_priority(dist), ep);
         vl->Set(ep);
     }
+    uint32_t unrewarded_hops = 0;
+    uint32_t empty_hops = 0;
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
 
     while (not candidate_set->Empty()) {
         hops++;
@@ -433,12 +468,31 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         auto current_node_pair = candidate_set->Top();
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_node_pair.first) > lower_bound && top_candidates->Size() >= ef) {
-                if (reasoning != nullptr) {
-                    reasoning->SetTermination(
-                        ReasoningTermination::kLowerBoundReached);  // [reasoning]
+            if (top_candidates->Empty()) {
+                ++empty_hops;
+                if (empty_hops >= max_empty_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(
+                            ReasoningTermination::kEmptyTraversalLimitReached);
+                    }
+                    break;
                 }
-                break;
+            } else if ((-current_node_pair.first) > lower_bound) {
+                if (top_candidates->Size() >= ef) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+                ++unrewarded_hops;
+                if (unrewarded_hops >= max_unrewarded_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+            } else {
+                unrewarded_hops = 0;
             }
         }
         candidate_set->Pop();
@@ -485,6 +539,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 if (is_result_distance_eligible<mode>(dist, inner_search_param) and
                     (not is_id_allowed || is_id_allowed->CheckValid(cur_id))) {
                     top_candidates->Push(dist, cur_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                     if constexpr (mode == KNN_SEARCH) {
                         if (top_candidates->Size() > ef) {
                             const auto evicted = top_candidates->Top();
@@ -522,6 +578,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 flatten->Prefetch(candidate_set->Top().second);
                 if (id_allowed) {
                     top_candidates->Push(dist, cur_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                 }
 
                 if constexpr (mode == KNN_SEARCH) {
@@ -741,6 +799,10 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     }
     candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
+    uint32_t unrewarded_hops = 0;
+    uint32_t empty_hops = 0;
+    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
+    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
 
     while (not candidate_set->Empty()) {
         ++hops;
@@ -767,12 +829,31 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
         }
 
         if constexpr (mode == InnerSearchMode::KNN_SEARCH) {
-            if ((-current_node_pair.first) > lower_bound && top_candidates->Size() >= ef) {
-                if (reasoning != nullptr) {
-                    reasoning->SetTermination(
-                        ReasoningTermination::kLowerBoundReached);  // [reasoning]
+            if (top_candidates->Empty()) {
+                ++empty_hops;
+                if (empty_hops >= max_empty_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(
+                            ReasoningTermination::kEmptyTraversalLimitReached);
+                    }
+                    break;
                 }
-                break;
+            } else if ((-current_node_pair.first) > lower_bound) {
+                if (top_candidates->Size() >= ef) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+                ++unrewarded_hops;
+                if (unrewarded_hops >= max_unrewarded_hops) {
+                    if (reasoning != nullptr) {
+                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                    }
+                    break;
+                }
+            } else {
+                unrewarded_hops = 0;
             }
         }
         candidate_set->Pop();
@@ -832,6 +913,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                         return;
                     }
                     top_candidates->Push(dist, result_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                     if constexpr (mode == KNN_SEARCH) {
                         while (top_candidates->Size() > ef) {
                             if (reasoning != nullptr) {
@@ -867,6 +950,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                 //                flatten->Prefetch(candidate_set->Top().second);
                 if (check_func(cur_id)) {
                     top_candidates->Push(dist, cur_id);
+                    unrewarded_hops = 0;
+                    empty_hops = 0;
                 } else if (reasoning != nullptr) {
                     reasoning->RecordFilterReject(cur_id);  // [reasoning]
                 }
@@ -875,6 +960,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     for (const auto& item : duplicate_ids) {
                         if (check_func(item)) {
                             top_candidates->Push(dist, item);
+                            unrewarded_hops = 0;
+                            empty_hops = 0;
                         }
                     }
                 }
