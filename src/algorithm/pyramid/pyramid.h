@@ -101,9 +101,11 @@ public:
         }
         if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN and
             (common_param.repr_ != RecordRepr::DENSE or
-             common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT)) {
+             (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+              common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+              common_param.data_type_ != DataTypes::DATA_TYPE_BF16))) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "Pyramid PiPNN only supports dense float32 indexes");
+                                "Pyramid PiPNN only supports dense floating-point indexes");
         }
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {

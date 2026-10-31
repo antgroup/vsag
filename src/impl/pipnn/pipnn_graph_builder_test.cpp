@@ -27,12 +27,15 @@
 #include <tuple>
 #include <vector>
 
+#include "data_type.h"
 #include "datacell/graph_interface.h"
 #include "datacell/graph_interface_parameter.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "row_accessor.h"
 #include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "unittest.h"
 
 namespace {
@@ -139,6 +142,107 @@ RequireGraphInvariants(const vsag::GraphInterfacePtr& graph,
             REQUIRE_FALSE(neighbors.empty());
         }
     }
+}
+
+// Build-time comparison: RowAccessor (fp16 on-the-fly conversion) vs legacy
+// Vector<const float*> (pre-converted fp32).  Both paths build from the same
+// fp32-represented vectors so the comparison isolates the conversion overhead.
+
+TEST_CASE("PiPNN RowAccessor perf is comparable to fp32 rows path", "[ut][pipnn][pipnn_perf]") {
+    constexpr uint64_t N = 10000;
+    constexpr uint64_t DIM = 64;
+    constexpr uint64_t MAX_DEGREE = 16;
+    constexpr uint64_t POINTS_PER_LEAF = 128;
+    constexpr uint64_t FANOUT = 8;
+    using Clock = std::chrono::high_resolution_clock;
+
+    std::vector<float> fp32_vecs(N * DIM);
+    std::vector<uint16_t> fp16_vecs(N * DIM);
+    for (uint64_t i = 0; i < N * DIM; ++i) {
+        float v = std::sin(static_cast<float>(i)) * 0.5F + static_cast<float>(i % 997) * 0.0001F;
+        fp32_vecs[i] = v;
+        fp16_vecs[i] = vsag::generic::FloatToFP16(v);
+    }
+
+    auto common = MakeCommonParam(DIM, vsag::MetricType::METRIC_TYPE_L2SQR);
+
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    ids.reserve(N);
+    for (uint64_t i = 0; i < N; ++i) {
+        ids.emplace_back(static_cast<vsag::InnerIdType>(i));
+    }
+
+    vsag::PiPNNGraphBuilderParameter parameter;
+    // max_degree is validated via Validate();
+    parameter.max_leaf_size = POINTS_PER_LEAF;
+    parameter.fanout = {FANOUT, 1};
+    parameter.reservoir_size = 16;
+
+    // Legacy fp32 rows path.
+    auto rows_fp32 = MakeRows(fp32_vecs, ids, DIM, common.allocator_.get());
+    auto graph_fp32 = MakeGraph(common, N, MAX_DEGREE);
+    auto t0 = Clock::now();
+    vsag::PiPNNGraphBuilder(parameter, DIM, common.metric_, common.allocator_.get())
+        .Build(graph_fp32, ids, rows_fp32);
+    auto t1 = Clock::now();
+
+    // RowAccessor fp16.
+    vsag::RowAccessor accessor;
+    accessor.data = fp16_vecs.data();
+    accessor.data_type_ = vsag::DataTypes::DATA_TYPE_FP16;
+    accessor.count_ = N;
+    accessor.dim_ = DIM;
+    auto graph_fp16 = MakeGraph(common, N, MAX_DEGREE);
+    auto t2 = Clock::now();
+    vsag::PiPNNGraphBuilder(parameter, DIM, common.metric_, common.allocator_.get())
+        .Build(graph_fp16, ids, accessor);
+    auto t3 = Clock::now();
+
+    // RowAccessor fp32 for overhead measurement.
+    vsag::RowAccessor accessor_fp32;
+    accessor_fp32.data = fp32_vecs.data();
+    accessor_fp32.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    accessor_fp32.count_ = N;
+    accessor_fp32.dim_ = DIM;
+    auto graph_fp32ra = MakeGraph(common, N, MAX_DEGREE);
+    auto t4 = Clock::now();
+    vsag::PiPNNGraphBuilder(parameter, DIM, common.metric_, common.allocator_.get())
+        .Build(graph_fp32ra, ids, accessor_fp32);
+    auto t5 = Clock::now();
+
+    auto fp32_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    auto fp16_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
+    auto fp32_ra_ms = std::chrono::duration<double, std::milli>(t5 - t4).count();
+
+    WARN("PiPNN build @" << N << "x" << DIM << " fp32-rows=" << fp32_ms << "ms  fp16-ra=" << fp16_ms
+                         << "ms  fp32-ra=" << fp32_ra_ms << "ms");
+
+    // RowAccessor fp32 overhead must be <=15%.
+    auto ra_overhead = fp32_ra_ms / std::max(1.0, fp32_ms);
+    WARN("RowAccessor overhead (fp32): " << ra_overhead << "x");
+    REQUIRE(ra_overhead <= 1.15);
+
+    // fp16 must not exceed 3x.
+    auto fp16_ratio = fp16_ms / std::max(1.0, fp32_ms);
+    WARN("fp16 / fp32 ratio: " << fp16_ratio << "x");
+    REQUIRE(fp16_ratio <= 3.0);
+
+    // fp16 graph: verify every vertex has at least one neighbor.
+    int isolated16 = 0;
+    int isolated32 = 0;
+    for (uint64_t i = 0; i < N; ++i) {
+        vsag::Vector<vsag::InnerIdType> nbr32(common.allocator_.get()),
+            nbr16(common.allocator_.get());
+        graph_fp32->GetNeighbors(static_cast<vsag::InnerIdType>(i), nbr32);
+        graph_fp16->GetNeighbors(static_cast<vsag::InnerIdType>(i), nbr16);
+        REQUIRE(nbr32.size() > 0);
+        REQUIRE(nbr16.size() > 0);
+        isolated16 += nbr16.empty() ? 1 : 0;
+        isolated32 += nbr32.empty() ? 1 : 0;
+    }
+    WARN("fp32 isolated=" << isolated32 << " fp16 isolated=" << isolated16);
+    REQUIRE(isolated32 == 0);
+    REQUIRE(isolated16 == 0);
 }
 
 }  // namespace
@@ -724,4 +828,107 @@ TEST_CASE("PiPNN partition TopK preserves serial and parallel graphs", "[ut][pip
         parallel->GetNeighbors(id, actual);
         REQUIRE(actual == expected);
     }
+}
+
+TEST_CASE("PiPNN half accessor matches represented float rows for subsets",
+          "[ut][pipnn][half_accessor_regression]") {
+    const bool bf16 = GENERATE(false, true);
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    constexpr uint64_t count = 96;
+    constexpr uint64_t dim = 16;
+    auto common = MakeCommonParam(dim, metric);
+    auto source = MakeVectors(count, dim);
+    std::vector<uint16_t> half(count * dim);
+    std::vector<float> represented(count * dim);
+    for (uint64_t i = 0; i < count * dim; ++i) {
+        half[i] =
+            bf16 ? vsag::generic::FloatToBF16(source[i]) : vsag::generic::FloatToFP16(source[i]);
+        represented[i] =
+            bf16 ? vsag::generic::BF16ToFloat(half[i]) : vsag::generic::FP16ToFloat(half[i]);
+    }
+    // Non-contiguous inner IDs and reversed source mapping exercise both mappings.
+    std::vector<uint64_t> remap(count);
+    std::iota(remap.rbegin(), remap.rend(), uint64_t{0});
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    vsag::Vector<const float*> rows(common.allocator_.get());
+    for (uint64_t id = 1; id < count; id += 3) {
+        ids.push_back(static_cast<vsag::InnerIdType>(id));
+        rows.push_back(represented.data() + remap[id] * dim);
+    }
+    vsag::RowAccessor accessor;
+    accessor.data = half.data();
+    accessor.data_type_ = bf16 ? vsag::DataTypes::DATA_TYPE_BF16 : vsag::DataTypes::DATA_TYPE_FP16;
+    accessor.count_ = count;
+    accessor.dim_ = dim;
+    accessor.remap = remap.data();
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.min_leaf_size = 8;
+    parameter.max_leaf_size = 16;
+    parameter.reservoir_size = 16;
+    auto expected = MakeGraph(common, count, 8);
+    auto actual = MakeGraph(common, count, 8);
+    vsag::PiPNNGraphBuilder builder(parameter, dim, metric, common.allocator_.get());
+    builder.Build(expected, ids, rows);
+    builder.Build(actual, ids, accessor);
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> expected_neighbors(common.allocator_.get());
+        vsag::Vector<vsag::InnerIdType> actual_neighbors(common.allocator_.get());
+        expected->GetNeighbors(id, expected_neighbors);
+        actual->GetNeighbors(id, actual_neighbors);
+        REQUIRE(actual_neighbors == expected_neighbors);
+    }
+}
+
+TEST_CASE("PiPNN accessor preserves duplicate groups and validates original IDs",
+          "[ut][pipnn][half_accessor_regression]") {
+    const bool bf16 = GENERATE(false, true);
+    constexpr uint64_t count = 12;
+    constexpr uint64_t dim = 4;
+    auto common = MakeCommonParam(dim, vsag::MetricType::METRIC_TYPE_L2SQR);
+    std::vector<uint16_t> half(count * dim);
+    std::vector<float> represented(count * dim);
+    std::vector<uint64_t> remap(count);
+    std::iota(remap.rbegin(), remap.rend(), uint64_t{0});
+    for (uint64_t id = 0; id < count; ++id) {
+        const float value = (id == 7 || id == 2) ? 1.0F : static_cast<float>(id + 1);
+        for (uint64_t d = 0; d < dim; ++d) {
+            const auto offset = remap[id] * dim + d;
+            half[offset] =
+                bf16 ? vsag::generic::FloatToBF16(value) : vsag::generic::FloatToFP16(value);
+            represented[offset] = value;
+        }
+    }
+    vsag::Vector<vsag::InnerIdType> ids(common.allocator_.get());
+    vsag::Vector<const float*> rows(common.allocator_.get());
+    for (const auto id : {7U, 2U, 9U, 4U}) {
+        ids.push_back(id);
+        rows.push_back(represented.data() + remap[id] * dim);
+    }
+    vsag::RowAccessor accessor;
+    accessor.data = half.data();
+    accessor.data_type_ = bf16 ? vsag::DataTypes::DATA_TYPE_BF16 : vsag::DataTypes::DATA_TYPE_FP16;
+    accessor.count_ = count;
+    accessor.dim_ = dim;
+    accessor.remap = remap.data();
+    vsag::PiPNNGraphBuilderParameter parameter;
+    auto expected = MakeGraph(common, count, 8, true);
+    auto actual = MakeGraph(common, count, 8, true);
+    vsag::PiPNNGraphBuilder builder(
+        parameter, dim, vsag::MetricType::METRIC_TYPE_L2SQR, common.allocator_.get());
+    builder.Build(expected, ids, rows);
+    builder.Build(actual, ids, accessor);
+    REQUIRE(actual->GetGroupId(2) == 2);
+    REQUIRE(actual->GetGroupId(2) == expected->GetGroupId(2));
+    REQUIRE(actual->GetDuplicateIds(7) == expected->GetDuplicateIds(7));
+    REQUIRE(actual->TotalCount() == expected->TotalCount());
+    accessor.count_ = 4;  // Enough rows by count, but not by sparse input IDs.
+    REQUIRE_THROWS(builder.Build(MakeGraph(common, count, 8), ids, accessor));
+    accessor.count_ = count;
+    accessor.dim_ = dim + 1;
+    REQUIRE_THROWS(builder.Build(MakeGraph(common, count, 8), ids, accessor));
+    accessor.dim_ = dim;
+    accessor.data = nullptr;
+    REQUIRE_THROWS(builder.Build(MakeGraph(common, count, 8), ids, accessor));
 }

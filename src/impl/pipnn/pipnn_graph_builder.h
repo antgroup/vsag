@@ -27,6 +27,7 @@ namespace vsag {
 class Allocator;
 class SafeThreadPool;
 DEFINE_POINTER(GraphInterface);
+struct RowAccessor;
 
 /** Internal PiPNN policy shared by indexes that use the batch graph builder. */
 struct PiPNNGraphBuilderParameter {
@@ -57,7 +58,9 @@ struct PiPNNGraphBuilderParameter {
  * Implements the construction approach described in "PiPNN: Ultra-Scalable Graph-Based Nearest
  * Neighbor Indexing" (arXiv:2602.21247).
  *
- * The builder consumes normalized internal IDs and dense, in-memory FP32 codes. It owns only
+ * The builder consumes normalized internal IDs and dense vectors.  When the input is
+ * FP16 or BF16, use the RowAccessor overload; it converts rows on the fly so the
+ * caller does not need a whole-dataset FP32 conversion buffer. It owns only
  * graph construction; labels, source IDs, metadata, route layers, and serialization stay in the
  * index layer.
  */
@@ -74,6 +77,11 @@ public:
     Build(const GraphInterfacePtr& graph,
           const Vector<InnerIdType>& ids_sequence,
           const Vector<const float*>& rows) const;
+
+    void
+    Build(const GraphInterfacePtr& graph,
+          const Vector<InnerIdType>& ids_sequence,
+          const RowAccessor& rows) const;
 
 private:
     PiPNNGraphBuilderParameter parameter_;

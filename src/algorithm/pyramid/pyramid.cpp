@@ -29,6 +29,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "analyzer/analyzer.h"
 #include "analyzer/pyramid_analyzer.h"
+#include "data_type.h"
 #include "datacell/compressed_graph_datacell_parameter.h"
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -40,6 +41,7 @@
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
+#include "impl/pipnn/row_accessor.h"
 #include "impl/pruning_strategy.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "io/common/io_parameter.h"
@@ -47,6 +49,8 @@
 #include "pyramid_fast_build.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "query_context.h"
+#include "simd/bf16_simd.h"
+#include "simd/fp16_simd.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -750,13 +754,28 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
 
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        // PiPNN is restricted to float32 dense input by the constructor, so the
-        // representation-free rows can be handed back as float pointers unchanged.
+        // When input data is fp16 or bf16, use RowAccessor so PiPNN converts rows on
+        // the fly in O(leaf_size * dim) chunks instead of allocating an O(N * dim)
+        // full-dataset fp32 buffer.
+        const bool needs_half_to_float = common_param_.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                         common_param_.data_type_ == DataTypes::DATA_TYPE_BF16;
+        // fp32 path: pre-build Vector<const float*> rows for the legacy Build overload.
         Vector<const float*> rows(allocator_);
         rows.reserve(static_cast<uint64_t>(data_num));
-        for (const auto input_index : input_indices) {
-            rows.emplace_back(static_cast<const float*>(
-                element_ptr(build_vectors == nullptr ? data_vectors : build_vectors, input_index)));
+        // fp16/bf16 path: single RowAccessor into the raw half-precision data.
+        RowAccessor accessor;
+        if (needs_half_to_float) {
+            accessor.data = static_cast<const uint16_t*>(build_vectors == nullptr ? data_vectors
+                                                                                  : build_vectors);
+            accessor.data_type_ = common_param_.data_type_;
+            accessor.count_ = static_cast<uint64_t>(data_num);
+            accessor.dim_ = static_cast<uint64_t>(dim_);
+            accessor.remap = reinterpret_cast<const uint64_t*>(input_indices.data());
+        } else {
+            for (const auto input_index : input_indices) {
+                rows.emplace_back(static_cast<const float*>(element_ptr(
+                    build_vectors == nullptr ? data_vectors : build_vectors, input_index)));
+            }
         }
         for (const auto& [hname, hierarchy] : hierarchies_) {
             auto pipnn_parameter = pipnn_param_;
@@ -769,19 +788,17 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                             this->build_thread_count_);
             GraphBuildFunc build_graph =
                 [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level) {
-                    // `rows` is indexed by compacted inner id while `ids` is this node's own id
-                    // list, which is a strict subset as soon as an element is missing from the
-                    // node. Remap positionally for every level rather than assuming level 0 spans
-                    // the whole [0, data_num) range: the public path API currently requires at
-                    // least one path per element, but that caller-side invariant is not something
-                    // this builder should depend on.
-                    Vector<const float*> node_rows(allocator_);
-                    node_rows.reserve(ids.size());
-                    for (const auto id : ids) {
-                        node_rows.emplace_back(rows[id]);
-                    }
                     graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(graph, ids, node_rows);
+                    if (needs_half_to_float) {
+                        pipnn_builder.Build(graph, ids, accessor);
+                    } else {
+                        Vector<const float*> node_rows(allocator_);
+                        node_rows.reserve(ids.size());
+                        for (const auto id : ids) {
+                            node_rows.emplace_back(rows[id]);
+                        }
+                        pipnn_builder.Build(graph, ids, node_rows);
+                    }
                 };
             hierarchy->root->Build(build_graph);
 
@@ -806,16 +823,23 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 }
                 for (int level = 0; level <= max_route_level; ++level) {
                     Vector<InnerIdType> route_ids(allocator_);
-                    Vector<const float*> route_rows(allocator_);
                     for (InnerIdType id = 0; id < data_num; ++id) {
                         if (route_levels[id] >= level) {
                             route_ids.emplace_back(id);
-                            route_rows.emplace_back(rows[id]);
                         }
                     }
                     auto route_graph = root.make_route_graph();
                     route_graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    if (needs_half_to_float) {
+                        pipnn_builder.Build(route_graph, route_ids, accessor);
+                    } else {
+                        Vector<const float*> route_rows(allocator_);
+                        route_rows.reserve(route_ids.size());
+                        for (const auto id : route_ids) {
+                            route_rows.emplace_back(rows[id]);
+                        }
+                        pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    }
                     root.routing_->graphs.emplace_back(std::move(route_graph));
                 }
             }
@@ -2373,8 +2397,8 @@ Pyramid::Build(const DatasetPtr& base) {
                    "adaptive_pruning does not yet support building from imported cache; disable "
                    "adaptive_pruning or build without importing a cache");
     const auto data_num = base->GetNumElements();
-    if (graph_type_ == GRAPH_TYPE_VALUE_NSW && has_loaded_cache() &&
-        base->GetSourceID() != nullptr) {
+    if ((graph_type_ == GRAPH_TYPE_VALUE_NSW || graph_type_ == GRAPH_TYPE_VALUE_PIPNN) &&
+        has_loaded_cache() && base->GetSourceID() != nullptr) {
         UnorderedSet<std::string> source_ids(allocator_);
         UnorderedSet<LabelType> labels(allocator_);
         source_ids.reserve(data_num);
@@ -3134,6 +3158,7 @@ Pyramid::populate_path_tree(Hierarchy& h,
     const auto* legacy_paths = dataset->GetPaths(hierarchy_name);
     const auto valid_count =
         input_indices == nullptr ? count : static_cast<int64_t>(input_indices->size());
+    bool any_path = false;
     for (InnerIdType inner_id = 0; inner_id < valid_count; ++inner_id) {
         const auto input_index = input_indices == nullptr ? inner_id : input_indices->at(inner_id);
         uint64_t path_count = legacy_paths == nullptr ? 0 : 1;
@@ -3142,10 +3167,21 @@ Pyramid::populate_path_tree(Hierarchy& h,
                 ? GetDatasetPaths(
                       *dataset, hierarchy_name, static_cast<uint64_t>(input_index), path_count)
                 : legacy_paths + input_index;
+        if (path_count > 0) {
+            any_path = true;
+        }
         for (auto* node : collect_path_nodes(h, paths, path_count)) {
             if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), node->level_) ==
                 h.no_build_levels.end()) {
                 node->ids_.push_back(inner_id);
+            }
+        }
+    }
+    if (!any_path && h.root->ids_.empty()) {
+        for (InnerIdType inner_id = 0; inner_id < valid_count; ++inner_id) {
+            if (std::find(h.no_build_levels.begin(), h.no_build_levels.end(), 0) ==
+                h.no_build_levels.end()) {
+                h.root->ids_.push_back(inner_id);
             }
         }
     }
