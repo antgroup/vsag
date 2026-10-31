@@ -967,6 +967,7 @@ TEST_CASE("SIMQ GetStats reports doc vector count distribution", "[simq][stats][
 }
 TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
     const auto quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    CAPTURE(quantization);
     constexpr int64_t dim = 32;
     constexpr int64_t docs = 96;
     constexpr uint32_t tokens = 4;
@@ -1010,6 +1011,11 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
         index->KnnSearch(zero_query, 10, R"({"simq":{"coarse_k":10000,"rerank_k":10000}})");
     REQUIRE(zero_result.has_value());
     REQUIRE(zero_result.value()->GetDim() == 10);
+    const std::vector<int64_t> zero_result_ids(
+        zero_result.value()->GetIds(),
+        zero_result.value()->GetIds() + zero_result.value()->GetDim());
+    CAPTURE(labels, zero_result_ids);
+    CAPTURE(zero_result.value()->GetStatistics());
     std::unordered_set<int64_t> zero_ids;
     for (int64_t i = 0; i < zero_result.value()->GetDim(); ++i) {
         REQUIRE(zero_ids.insert(zero_result.value()->GetIds()[i]).second);
@@ -1019,6 +1025,10 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
     auto result = index->KnnSearch(query, 10, search);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 10);
+    const std::vector<int64_t> result_ids(result.value()->GetIds(),
+                                          result.value()->GetIds() + result.value()->GetDim());
+    CAPTURE(labels, result_ids);
+    CAPTURE(result.value()->GetStatistics());
     std::unordered_set<int64_t> unique;
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(unique.insert(result.value()->GetIds()[i]).second);
@@ -1046,6 +1056,99 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
         found = found or added.value()->GetIds()[i] == labels[docs];
     }
     REQUIRE(found);
+}
+
+TEST_CASE("SIMQ collects each candidate once across zero coarse scores",
+          "[simq][quantized_build][zero_score]") {
+    const auto quantization = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const auto threads = GENERATE(1, 2);
+    const auto query_case = GENERATE(0, 1, 2);
+    CAPTURE(quantization, threads, query_case);
+    constexpr int64_t dim = 32;
+    constexpr int64_t docs = 8;
+    constexpr uint32_t tokens = 4;
+    // Exact basis vectors make zero scores and cancellation independent of RNG,
+    // clustering order, and platform-specific normal_distribution implementations.
+    std::vector<float> values(docs * tokens * dim, 0.0F);
+    std::vector<MultiVector> mvs(docs);
+    std::vector<int64_t> labels(docs);
+    for (int64_t i = 0; i < docs; ++i) {
+        for (uint32_t t = 0; t < tokens; ++t) {
+            values[(i * tokens + t) * dim + i] = 1.0F;
+        }
+        mvs[i] = MultiVector{tokens, values.data() + i * tokens * dim};
+        labels[i] = 1000 + i;
+    }
+    auto data = [&](int64_t start, int64_t count) {
+        return Dataset::Make()
+            ->NumElements(count)
+            ->Dim(dim)
+            ->MultiVectorDim(dim)
+            ->MultiVectors(mvs.data() + start)
+            ->Ids(labels.data() + start)
+            ->Owner(false);
+    };
+    const auto parameters = fmt::format(
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},
+            "index_param":{{"base_io_type":"memory_io","quantization_type":"{}",
+                "init_cluster_ratio":1.0,"max_cluster_size":16,"split_start_idx":8,
+                "build_thread_count":{}}}}})",
+        dim,
+        quantization,
+        threads);
+    auto index = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(index->Build(data(0, docs / 2)).has_value());
+    REQUIRE(index->Add(data(docs / 2, docs / 2)).has_value());
+    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    auto check = [&](const IndexPtr& current) {
+        // A single token is the negative control. Later query tokens must not
+        // register a document again when its running score is zero, including
+        // after cancellation.
+        const std::vector<float> queries[] = {{1.0F}, {0.0F, 1.0F}, {1.0F, -1.0F, 1.0F}};
+        const auto& weights = queries[query_case];
+        CAPTURE(weights);
+        std::vector<float> query_values(weights.size() * dim, 0.0F);
+        for (uint64_t t = 0; t < weights.size(); ++t) {
+            query_values[t * dim] = weights[t];
+        }
+        MultiVector mv{static_cast<uint32_t>(weights.size()), query_values.data()};
+        auto query = Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(dim)
+                         ->MultiVectorDim(dim)
+                         ->MultiVectors(&mv)
+                         ->Owner(false);
+        auto check_result = [&](const DatasetPtr& result) {
+            REQUIRE(result->GetDim() == docs);
+            std::vector<int64_t> ids(result->GetIds(), result->GetIds() + result->GetDim());
+            CAPTURE(labels, ids);
+            CAPTURE(result->GetStatistics());
+            std::unordered_set<int64_t> unique;
+            for (int64_t i = 0; i < docs; ++i) {
+                REQUIRE(unique.insert(ids[i]).second);
+                REQUIRE(std::find(labels.begin(), labels.end(), ids[i]) != labels.end());
+                auto distance = current->CalcDistanceById(query, ids[i]);
+                REQUIRE(distance.has_value());
+                REQUIRE(std::abs(distance.value() - result->GetDistances()[i]) < 1e-5F);
+            }
+            auto stats = JsonType::Parse(result->GetStatistics());
+            REQUIRE(stats["simq_coarse_candidate_count"].GetUint64() == docs);
+        };
+        auto knn = current->KnnSearch(query, docs, search);
+        REQUIRE(knn.has_value());
+        check_result(knn.value());
+        auto range = current->RangeSearch(query, 10.0F, search);
+        REQUIRE(range.has_value());
+        check_result(range.value());
+    };
+    check(index);
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    check(restored);
+    restored->SetImmutable();
+    check(restored);
 }
 
 TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serialization]") {
