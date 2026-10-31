@@ -13,35 +13,77 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <future>
 #include <initializer_list>
+#include <limits>
+#include <memory>
+#include <mutex>
 #include <new>
+#include <numeric>
+#include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <variant>
 #include <vector>
 
+#include "algorithm/build_cache.h"
+#include "allocator/memory_record_allocator.h"
+#include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_datacell.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "datacell/graph_datacell.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "datacell/sparse_graph_datacell.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
+#include "dataset_impl.h"
 #include "hgraph.h"
 #include "hgraph_fast_build.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/heap/standard_heap.h"
+#include "impl/label_table/label_table.h"
+#include "impl/logger/capturing_logger_test.h"
+#include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/hybrid_mci_searcher.h"
+#include "impl/searcher/mci_searcher.h"
+#include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index/index_impl.h"
 #include "index_common_param.h"
+#include "index_feature_list.h"
+#include "io/memory_block_io/memory_block_io.h"
 #include "io/memory_io/memory_io.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "layout/fixed_layout.h"
 #include "quantization/fp32_quantizer.h"
+#include "quantization/scalar_quantization/scalar_quantizer.h"
+#include "quantization/scalar_quantization/sq8_uniform_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization.h"
+#include "storage/stream_reader.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
+#include "utils/filter_search_skip_strategy.h"
+#include "utils/linear_congruential_generator.h"
+#include "utils/visited_list.h"
 #include "vsag/deserialize_reader.h"
+#include "vsag/engine.h"
 #include "vsag/options.h"
 #include "vsag/serialize_writer.h"
 
@@ -66,6 +108,11 @@ public:
     static uint64_t
     PendingCount(const HGraph& graph) {
         return graph.pending_code_writes_.size();
+    }
+
+    static uint64_t
+    PendingBucketCount(const HGraph& graph) {
+        return graph.pending_code_writes_.bucket_count();
     }
 
     static InnerIdType
@@ -95,7 +142,89 @@ public:
 
 }  // namespace vsag
 
+// Expected model availability is classified from the supported test profiles, independently
+// of the production capability result. Unmodeled profiles must exercise the typed fallback.
+#if (defined(_LIBCPP_VERSION) && (_LIBCPP_VERSION == 15007 || _LIBCPP_VERSION == 210106) && \
+     defined(_LIBCPP_ABI_VERSION) && _LIBCPP_ABI_VERSION == 1 &&                            \
+     !defined(_LIBCPP_ABI_OPTIMIZED_FUNCTION)) ||                                           \
+    defined(__GLIBCXX__)
+#define HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE 1
+#else
+#define HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE 0
+#endif
+
+namespace vsag {
+
+// Narrow test access: no estimator breakdown or production byte total is read.
+struct HGraphMemoryEstimateTestAccess {
+    using Worker = HGraph::InsertAddBatchWorker;
+    using WorkContext = HGraph::InsertAddBatchWorkContext;
+    using WorkerBind = decltype(std::bind(std::declval<Worker>()));
+
+    static const HGraphParameter&
+    Parameters(const HGraph& graph) {
+        return static_cast<const HGraphParameter&>(*graph.create_param_ptr_);
+    }
+
+    static uint64_t
+    RetainedFanoutCapacity(const HGraph& graph) {
+        return graph.pipnn_param_.fanout.capacity();
+    }
+
+    static std::default_random_engine
+    Generator(const HGraph& graph) {
+        return graph.level_generator_;
+    }
+
+    static uint64_t
+    InsertWorkerCount(bool has_pool, uint64_t thread_count, uint64_t row_count) {
+        return HGraph::insert_worker_count(has_pool, thread_count, row_count);
+    }
+
+    static double
+    ExchangeLevelMultiplier(HGraph& graph, double value) {
+        return std::exchange(graph.mult_, value);
+    }
+
+    static uint64_t
+    InitialCapacity(const HGraph& graph) {
+        return graph.build_estimate_initial_capacity_;
+    }
+
+    static uint64_t
+    RoundedCapacity(const HGraph& graph, uint64_t count) {
+        return HGraph::build_estimate_checked_capacity(count, graph.resize_increase_count_bit_);
+    }
+
+    static bool
+    LifecycleClean(const HGraph& graph) {
+        return graph.build_estimate_lifecycle_clean_.load(std::memory_order_acquire);
+    }
+
+    static std::array<uint64_t, 4>
+    CacheStorage(const HGraph& graph) {
+        return {graph.cache_->source_ids_.size(),
+                graph.cache_->source_ids_.capacity(),
+                graph.cache_->neighbors_.size(),
+                graph.cache_->neighbors_.bucket_count()};
+    }
+
+    static void
+    SetUnsupportedResizeBit(HGraph& graph) {
+        graph.resize_increase_count_bit_ = 31;
+    }
+
+    static void
+    RunWorkers(SafeThreadPool& pool, uint64_t threads, WorkContext& context) {
+        HGraph::run_insert_add_batch_workers(pool, threads, context);
+    }
+};
+
+}  // namespace vsag
+
 namespace {
+
+constexpr bool EXPECT_MODELED_BUILD_MEMORY = HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE != 0;
 
 class ArmableRejectingThreadPool final : public vsag::ThreadPool {
 public:
@@ -254,7 +383,2115 @@ RequireRangeContains(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index
 const std::string kBruteForceSearchParams =
     R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})";
 
+// This decorator owns its phase accounting; the shared fixture is unchanged.
+class PhaseCountingAllocator : public vsag::Allocator {
+public:
+    struct Snapshot {
+        uint64_t current;
+        uint64_t constructor_peak;
+        uint64_t phase_peak;
+        uint64_t requests;
+    };
+
+    std::string
+    Name() override {
+        return "HGraphPhaseCountingAllocator";
+    }
+
+    void*
+    Allocate(uint64_t bytes) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++requests_;
+        auto* result = backing_.Allocate(bytes);
+        UpdatePeak();
+        return result;
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t bytes) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        ++requests_;
+        auto* result = backing_.Reallocate(pointer, bytes);
+        UpdatePeak();
+        return result;
+    }
+
+    void
+    Deallocate(void* pointer) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        backing_.Deallocate(pointer);
+        UpdatePeak();
+    }
+
+    void
+    BeginBuildPhase() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        constructor_peak_ = backing_.GetMemoryPeak();
+        phase_peak_ = backing_.GetCurrentMemory();
+        armed_ = true;
+    }
+
+    Snapshot
+    Read() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return {backing_.GetCurrentMemory(), constructor_peak_, phase_peak_, requests_};
+    }
+
+private:
+    void
+    UpdatePeak() {
+        if (armed_) {
+            phase_peak_ = std::max(phase_peak_, backing_.GetCurrentMemory());
+        }
+    }
+
+    mutable std::mutex mutex_;
+    fixtures::MemoryRecordAllocator backing_;
+    uint64_t requests_{0};
+    uint64_t constructor_peak_{0};
+    uint64_t phase_peak_{0};
+    bool armed_{false};
+};
+
+vsag::JsonType
+MakeBuildMemoryJson(const std::string& quantizer = "fp32",
+                    uint64_t degree = 8,
+                    uint64_t threads = 1,
+                    uint64_t sample_count = 1537) {
+    auto json = MakeFp32HGraphJson(false, static_cast<int64_t>(threads));
+    json["base_quantization_type"].SetString(quantizer);
+    json["max_degree"].SetUint64(degree);
+    json["ef_construction"].SetUint64(64);
+    json["support_duplicate"].SetBool(false);
+    json["deduplicate_storage"].SetBool(false);
+    json["train_sample_count"].SetUint64(std::max(uint64_t{512}, sample_count));
+    return json;
+}
+
+struct BuildMemoryData {
+    std::vector<float> vectors;
+    std::vector<int64_t> ids;
+    vsag::DatasetPtr dataset;
+
+    BuildMemoryData(uint64_t count, uint64_t dim) : vectors(count * dim), ids(count) {
+        std::iota(ids.begin(), ids.end(), int64_t{0});
+        for (uint64_t row = 0; row < count; ++row) {
+            for (uint64_t col = 0; col < dim; ++col) {
+                const int64_t value =
+                    static_cast<int64_t>((row * row + (row + 1) * (col + 17)) % 1021) - 510;
+                auto& element = vectors[row * dim + col];
+                element = static_cast<float>(value) / 512.0F;
+            }
+        }
+        dataset =
+            MakeFloatDataset(vectors, ids, static_cast<int64_t>(dim), static_cast<int64_t>(count));
+    }
+};
+
+std::shared_ptr<vsag::HGraph>
+InnerHGraph(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index) {
+    auto graph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(graph != nullptr);
+    return graph;
+}
+
+template <typename F>
+void
+RequireEstimateError(F&& operation, vsag::ErrorType expected) {
+    bool caught = false;
+    try {
+        operation();
+    } catch (const vsag::VsagException& exception) {
+        REQUIRE(exception.error_.type == expected);
+        caught = true;
+    }
+    REQUIRE(caught);
+}
+
+void
+RequireUnsupportedBuildEstimate(const vsag::IndexPtr& index) {
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    for (uint64_t count : {uint64_t{0}, uint64_t{7}}) {
+        RequireEstimateError([&] { (void)index->EstimateBuildMemory(count); },
+                             vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+}
+
+// A false runtime capability cannot skip the positive expectation on a modeled profile.
+void
+RequireExpectedBuildMemoryProfile(const vsag::IndexPtr& index) {
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) ==
+            EXPECT_MODELED_BUILD_MEMORY);
+    if constexpr (EXPECT_MODELED_BUILD_MEMORY) {
+        REQUIRE(index->EstimateBuildMemory(0) > 0);
+        REQUIRE(index->EstimateBuildMemory(7) >= index->EstimateMemory(7));
+    } else {
+        RequireUnsupportedBuildEstimate(index);
+    }
+}
+
+// This observing wrapper is used only for dispatch, never the byte matrix.
+class GatedBuildPool : public vsag::ThreadPool {
+public:
+    explicit GatedBuildPool(uint64_t fail_submission = std::numeric_limits<uint64_t>::max())
+        : backend_(std::make_shared<vsag::DefaultThreadPool>(8)),
+          fail_submission_(fail_submission) {
+    }
+
+    ~GatedBuildPool() override {
+        Release();
+        backend_->WaitUntilEmpty();
+    }
+
+    std::future<void>
+    Enqueue(std::function<void()> task) override {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const auto submission = submissions_++;
+            if (submission == fail_submission_) {
+                submission_failed_ = true;
+                changed_.notify_all();
+                throw std::runtime_error("controlled Build submission failure");
+            }
+        }
+        return backend_->Enqueue([this, task = std::move(task)] {
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                ++started_;
+                ++active_;
+                max_active_ = std::max(max_active_, active_);
+                changed_.notify_all();
+                changed_.wait(lock, [this] { return released_; });
+            }
+            try {
+                task();
+            } catch (...) {
+                Finish();
+                throw;
+            }
+            Finish();
+        });
+    }
+
+    bool
+    AwaitStarted(uint64_t count) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return changed_.wait_for(lock, std::chrono::seconds(10), [&] { return started_ >= count; });
+    }
+
+    bool
+    AwaitFinished(uint64_t count) {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return changed_.wait_for(
+            lock, std::chrono::seconds(10), [&] { return finished_ >= count; });
+    }
+
+    bool
+    AwaitSubmissionFailure() {
+        std::unique_lock<std::mutex> lock(mutex_);
+        return changed_.wait_for(
+            lock, std::chrono::seconds(10), [this] { return submission_failed_; });
+    }
+
+    void
+    Release() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        released_ = true;
+        changed_.notify_all();
+    }
+
+    std::array<uint64_t, 3>
+    Counts() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return {submissions_, finished_, max_active_};
+    }
+
+    void
+    WaitUntilEmpty() override {
+        backend_->WaitUntilEmpty();
+    }
+
+    void
+    SetPoolSize(uint64_t limit) override {
+        backend_->SetPoolSize(limit);
+    }
+
+    void
+    SetQueueSizeLimit(uint64_t limit) override {
+        backend_->SetQueueSizeLimit(limit);
+    }
+
+private:
+    void
+    Finish() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        --active_;
+        ++finished_;
+        changed_.notify_all();
+    }
+
+    std::shared_ptr<vsag::DefaultThreadPool> backend_;
+    std::mutex mutex_;
+    std::condition_variable changed_;
+    uint64_t fail_submission_;
+    uint64_t submissions_{0};
+    uint64_t started_{0};
+    uint64_t finished_{0};
+    uint64_t active_{0};
+    uint64_t max_active_{0};
+    bool submission_failed_{false};
+    bool released_{false};
+};
+
+class BuildPoolReleaseGuard {
+public:
+    explicit BuildPoolReleaseGuard(std::shared_ptr<GatedBuildPool> pool) : pool_(std::move(pool)) {
+    }
+    ~BuildPoolReleaseGuard() {
+        pool_->Release();
+    }
+
+private:
+    std::shared_ptr<GatedBuildPool> pool_;
+};
+
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+template <typename T>
+constexpr uint64_t
+TestSharedRequest() {
+#if defined(_LIBCPP_VERSION)
+    return sizeof(std::__shared_ptr_emplace<T, std::allocator<T>>);
+#else
+    return sizeof(std::_Sp_counted_ptr_inplace<T, std::allocator<T>, __gnu_cxx::_S_atomic>);
+#endif
+}
+
+constexpr uint64_t
+TestRoundUp(uint64_t bytes, uint64_t alignment) {
+    return (bytes + alignment - 1) / alignment * alignment;
+}
+
+// Storage bounds, not surrogate implementations of inaccessible production classes.
+// Worker3 checks RemoveListFilter's actual compiler record layout against this bound.
+constexpr uint64_t kFilterAlignment = std::max(alignof(vsag::Filter), alignof(void*));
+constexpr uint64_t kFilterUpperSize = TestRoundUp(
+    TestRoundUp(sizeof(vsag::Filter), alignof(void*)) + 2 * sizeof(void*), kFilterAlignment);
+using RemoveListFilterStorageUpper =
+    typename std::aligned_storage<kFilterUpperSize, kFilterAlignment>::type;
+static_assert(kFilterUpperSize == 24 && kFilterAlignment == 8,
+              "Recheck the actual implementation-local filter record on this target");
+#if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION == 210106
+static_assert(TestSharedRequest<RemoveListFilterStorageUpper>() == 48,
+              "Apple21 actual RemoveListFilter shared allocation is 48 total bytes");
+#elif defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE == 11
+static_assert(TestSharedRequest<RemoveListFilterStorageUpper>() == 40,
+              "GCC11 actual RemoveListFilter shared allocation is 40 total bytes");
+#endif
+
+uint64_t
+TestFunctionTargetUpper(uint64_t capture_bytes, bool nothrow_copy) {
+    static_assert(sizeof(void*) == 8, "The validated layout model is LP64");
+#if defined(_LIBCPP_VERSION)
+    // __function::__base has a vptr; retain all capture padding and final alignment.
+    const auto target = TestRoundUp(sizeof(void*) + capture_bytes, alignof(void*));
+    return target <= 3 * sizeof(void*) && nothrow_copy ? 0 : target;
+#else
+    // These inaccessible captures own shared_ptr/function and are not location-invariant.
+    (void)nothrow_copy;
+    return capture_bytes;
+#endif
+}
+
+template <typename Bound>
+uint64_t
+TestPackagedTaskRequest() {
+    using Task = std::packaged_task<void()>;
+#if defined(_LIBCPP_VERSION)
+    using Callable = std::__packaged_task_func<Bound, std::allocator<Bound>, void()>;
+    using Buffer = typename std::aligned_storage<3 * sizeof(void*)>::type;
+    // This SDK's promise<void> constructor made one 144-byte align-8 request.
+    // get_future made none. The future object is charged separately.
+#if _LIBCPP_VERSION == 210106
+    static_assert(sizeof(std::__assoc_sub_state) == 144, "Apple21 promise state request");
+    static_assert(TestSharedRequest<Task>() == 64, "Apple21 packaged_task shared control");
+#endif
+    return TestSharedRequest<Task>() + sizeof(std::__assoc_sub_state) +
+           (sizeof(Callable) <= sizeof(Buffer) ? 0 : sizeof(Callable));
+#else
+    // allocate_shared<_Task_state> plus new _Result<void>. The separate
+    // promise<void> _State_baseV2 control is not this packaged task.
+    using State = std::__future_base::_Task_state<Bound, std::allocator<int>, void()>;
+    using Control = std::_Sp_counted_ptr_inplace<State, std::allocator<int>, __gnu_cxx::_S_atomic>;
+    return TestSharedRequest<Task>() + sizeof(Control) + sizeof(std::__future_base::_Result<void>);
+#endif
+}
+
+uint64_t
+TestSchedulerTaskRequest() {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    using InnerBind = decltype(std::bind(std::declval<std::function<void()>>()));
+    static_assert(sizeof(Access::Worker) == sizeof(void*), "Audit the real worker capture");
+#if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION == 210106
+    using WorkerCall =
+        std::__packaged_task_func<Access::WorkerBind, std::allocator<Access::WorkerBind>, void()>;
+    using InnerCall = std::__packaged_task_func<InnerBind, std::allocator<InnerBind>, void()>;
+    static_assert(sizeof(WorkerCall) == 24, "Apple21 worker packaged callable fits SBO");
+    static_assert(sizeof(InnerCall) == 48, "Apple21 function bind misses packaged SBO");
+    static_assert(sizeof(std::__function::__func<Access::WorkerBind, void()>) == 24,
+                  "Apple21 __func takes two parameters");
+    static_assert(sizeof(std::__function::__func<InnerBind, void()>) == 48,
+                  "Apple21 function-bind target misses function SBO");
+#elif defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE == 11
+    using WorkerState =
+        std::__future_base::_Task_state<Access::WorkerBind, std::allocator<int>, void()>;
+    using InnerState = std::__future_base::_Task_state<InnerBind, std::allocator<int>, void()>;
+    using WorkerControl =
+        std::_Sp_counted_ptr_inplace<WorkerState, std::allocator<int>, __gnu_cxx::_S_atomic>;
+    using InnerControl =
+        std::_Sp_counted_ptr_inplace<InnerState, std::allocator<int>, __gnu_cxx::_S_atomic>;
+    static_assert(sizeof(WorkerControl) == 72, "GCC11 worker task-state control");
+    static_assert(sizeof(InnerControl) == 96, "GCC11 function-bind task-state control");
+    static_assert(sizeof(std::__future_base::_Result<void>) == 16, "GCC11 void result request");
+#endif
+    // Invocation captures one shared_ptr. The safe wrapper captures one function.
+    // Unnamed enqueue lambdas stay a size bound; their closure types were not dumped.
+    const auto invocation =
+        TestFunctionTargetUpper(sizeof(std::shared_ptr<std::packaged_task<void()>>), true);
+    const auto wrapper = TestFunctionTargetUpper(sizeof(std::function<void()>), false) + invocation;
+    // Both packaged-task layers, both invocation targets, and both wrapper copies (D=1).
+    return TestPackagedTaskRequest<Access::WorkerBind>() + TestPackagedTaskRequest<InnerBind>() +
+           2 * invocation + 2 * wrapper;
+}
+
+uint64_t
+TestBuildQueueRequest(uint64_t workers) {
+    // Occupancy zero is the constructor's empty queue, not a missing deque.
+    // Pinned deque push_back/pop_front source rules, including old/new pointer maps.
+#if defined(_LIBCPP_VERSION)
+    const auto elements_per_block = 4096 / sizeof(std::function<void()>);
+    const auto blocks = (workers + elements_per_block - 1) / elements_per_block + 2;
+    return 4096 * blocks + 2 * sizeof(void*) * std::max(uint64_t{1}, 2 * blocks);
+#else
+    const auto elements_per_block = 512 / sizeof(std::function<void()>);
+    const auto blocks = workers / elements_per_block + 2;
+    return 512 * blocks + 2 * sizeof(void*) * std::max(uint64_t{8}, 4 * blocks + 2);
+#endif
+}
+
+// Doubling std::vector: the realloc that first holds `count` elements keeps the
+// previous buffer. This is that peak, not a 2K reserve past the final capacity.
+uint64_t
+TestDoublingBufferPeak(uint64_t count, uint64_t element) {
+    if (count == 0) {
+        return 0;
+    }
+    uint64_t capacity = 1;
+    while (capacity < count) {
+        REQUIRE(capacity <= std::numeric_limits<uint64_t>::max() / 2);
+        capacity *= 2;
+    }
+    const uint64_t previous = capacity == 1 ? 0 : capacity / 2;
+    return (capacity + previous) * element;
+}
+
+// File-local skip strategies are a Filter base plus either two doubles or one
+// generator and one double. make_unique allocates the larger derived object.
+constexpr uint64_t
+TestSkipStrategyUpper() {
+    constexpr uint64_t alignment =
+        std::max(alignof(vsag::FilterSearchSkipStrategy),
+                 std::max(alignof(vsag::LinearCongruentialGenerator), alignof(double)));
+    constexpr uint64_t base = TestRoundUp(sizeof(vsag::FilterSearchSkipStrategy), alignment);
+    constexpr uint64_t generator =
+        TestRoundUp(sizeof(vsag::LinearCongruentialGenerator), alignment);
+    constexpr uint64_t fields = std::max<uint64_t>(2 * sizeof(double), generator + sizeof(double));
+    return TestRoundUp(base + fields, alignment);
+}
+
+// Retained nodes and bucket pointers for the four keys sample_train_data inserts.
+uint64_t
+TestSampledDatasetMapBytes() {
+    using Value = std::variant<int64_t,
+                               const float*,
+                               const char*,
+                               const int8_t*,
+                               const uint16_t*,
+                               const int64_t*,
+                               const std::string*,
+                               const vsag::SparseVector*,
+                               const vsag::AttributeSet*,
+                               const uint32_t*,
+                               const vsag::MultiVector*,
+                               std::vector<std::vector<std::string>>>;
+    using Map = std::unordered_map<std::string, Value>;
+#if defined(_LIBCPP_VERSION)
+    using Node = std::__hash_node<std::__hash_value_type<std::string, Value>, void*>;
+#else
+    using Node =
+        std::__detail::_Hash_node<std::pair<const std::string, Value>,
+                                  std::__cache_default<std::string, std::hash<std::string>>::value>;
+#endif
+    const char* keys[] = {vsag::NUM_ELEMENTS, vsag::DIM, vsag::FLOAT32_VECTORS, vsag::IDS};
+    Map map;
+    for (const char* key : keys) {
+        REQUIRE(std::string(key).size() <= std::string{}.capacity());
+        map.emplace(key, Value{int64_t{0}});
+    }
+    map[vsag::FLOAT32_VECTORS] = static_cast<const float*>(nullptr);
+    map[vsag::IDS] = static_cast<const int64_t*>(nullptr);
+    REQUIRE(map.size() == 4);
+    return 4 * sizeof(Node) + map.bucket_count() * sizeof(void*);
+}
+
+// Sum the independent standard-allocation bounds without storing a report per contribution.
+class StandardAllocationBytes {
+public:
+    void
+    Add(const std::string& name, uint64_t count, uint64_t bytes) {
+        CAPTURE(name, count, bytes);
+        if (count > 0) {
+            REQUIRE(bytes <= std::numeric_limits<uint64_t>::max() / count);
+        }
+        const auto product = count * bytes;
+        REQUIRE(total_ <= std::numeric_limits<uint64_t>::max() - product);
+        total_ += product;
+    }
+
+    uint64_t
+    Total() const {
+        return total_;
+    }
+
+private:
+    uint64_t total_{0};
+};
+
+void
+AddOwnedString(StandardAllocationBytes& table, const std::string& name, const std::string& value) {
+    // Fresh named string objects on these target libraries use SSO up to empty.capacity().
+    const auto inline_capacity = std::string{}.capacity();
+    const auto heap_bytes = value.capacity() > inline_capacity ? value.capacity() + 1 : 0;
+    table.Add(name, 1, heap_bytes);
+}
+
+template <typename Quantizer, typename QuantizerParameter>
+void
+AddConcreteScalarObjects(StandardAllocationBytes& table) {
+    using Layout = vsag::FixedLayout<vsag::MemoryBlockIO>;
+    using Cell = vsag::FlattenDataCell<Quantizer, Layout>;
+    table.Add("flatten_cell", 1, TestSharedRequest<Cell>());
+    table.Add("quantizer", 1, TestSharedRequest<Quantizer>());
+    table.Add("fixed_layout", 1, TestSharedRequest<Layout>());
+    table.Add("quantizer_parameter", 1, TestSharedRequest<QuantizerParameter>());
+}
+
+template <vsag::MetricType metric>
+uint64_t
+AddMetricScalarObjects(StandardAllocationBytes& table, const std::string& quantizer) {
+    if (quantizer == "fp32") {
+        AddConcreteScalarObjects<vsag::FP32Quantizer<metric>, vsag::FP32QuantizerParameter>(table);
+        return TestSharedRequest<vsag::Computer<vsag::FP32Quantizer<metric>>>();
+    }
+    if (quantizer == "sq8") {
+        AddConcreteScalarObjects<vsag::SQ8Quantizer<metric>, vsag::ScalarQuantizerParameter<8>>(
+            table);
+        return TestSharedRequest<vsag::Computer<vsag::SQ8Quantizer<metric>>>();
+    }
+    REQUIRE(quantizer == "sq8_uniform");
+    AddConcreteScalarObjects<vsag::SQ8UniformQuantizer<metric>, vsag::SQ8UniformQuantizerParameter>(
+        table);
+    return TestSharedRequest<vsag::Computer<vsag::SQ8UniformQuantizer<metric>>>();
+}
+
+StandardAllocationBytes
+IndependentStandardEnvelope(const vsag::HGraph& graph,
+                            const std::string& quantizer,
+                            uint64_t dim,
+                            uint64_t degree,
+                            uint64_t count,
+                            uint64_t sample_cap,
+                            uint64_t threads,
+                            bool has_pool,
+                            vsag::MetricType metric) {
+    using namespace vsag;
+    using Access = HGraphMemoryEstimateTestAccess;
+    const auto& param = Access::Parameters(graph);
+    REQUIRE(param.resize_increase_count_bit == 10);
+    REQUIRE(param.train_sample_count == static_cast<int64_t>(std::max(uint64_t{512}, sample_cap)));
+    const auto initial_capacity = Access::InitialCapacity(graph);
+    const auto capacity = std::max(initial_capacity, TestRoundUp(count, uint64_t{1} << 10));
+    // A supplied pool is caller-owned. The index creates a pool only when build
+    // threads exceed one and the caller passed none.
+    const bool owns_pool = !has_pool && threads > 1;
+    const bool scheduled = has_pool || owns_pool;
+    uint64_t workers = 1;
+    if (count == 0) {
+        workers = 0;
+    } else if (scheduled) {
+        workers = std::min(count, std::max(uint64_t{1}, threads));
+    }
+    const auto sample = std::min(count, std::max(uint64_t{512}, sample_cap));
+    const auto trainer_sample = std::min(sample, uint64_t{100000});
+    StandardAllocationBytes table;
+    table.Add("public_index", 1, TestSharedRequest<IndexImpl<HGraph>>());
+    table.Add("inner_hgraph", 1, TestSharedRequest<HGraph>());
+    table.Add("build_cache", 1, sizeof(BuildCache));
+    table.Add("feature_list_object", 1, sizeof(IndexFeatureList));
+    table.Add("feature_list_data", 1, (INDEX_FEATURE_COUNT + 7) / 8);
+    table.Add("label_table", 1, TestSharedRequest<LabelTable>());
+    table.Add("reverse_map_object", 1, sizeof(PGUnorderedMap<LabelType, InnerIdType>));
+    table.Add("deletion_filter_upper", 1, TestSharedRequest<RemoveListFilterStorageUpper>());
+    table.Add("point_mutex_owner", 1, TestSharedRequest<PointsMutex>());
+    table.Add("basic_searcher", 1, TestSharedRequest<BasicSearcher>());
+    table.Add("mci_searcher", 1, TestSharedRequest<MCISearcher>());
+    table.Add("hybrid_searcher", 1, TestSharedRequest<HybridMCISearcher>());
+    table.Add("parallel_searcher", 1, TestSharedRequest<ParallelSearcher>());
+    table.Add("bottom_graph", 1, TestSharedRequest<GraphDataCell<MemoryBlockIO>>());
+    table.Add("block_io_objects", 2, TestSharedRequest<MemoryBlockIO>());
+    uint64_t computer_bytes = 0;
+    switch (metric) {
+        case MetricType::METRIC_TYPE_L2SQR:
+            computer_bytes =
+                AddMetricScalarObjects<MetricType::METRIC_TYPE_L2SQR>(table, quantizer);
+            break;
+        case MetricType::METRIC_TYPE_IP:
+            computer_bytes = AddMetricScalarObjects<MetricType::METRIC_TYPE_IP>(table, quantizer);
+            break;
+        case MetricType::METRIC_TYPE_COSINE:
+            computer_bytes =
+                AddMetricScalarObjects<MetricType::METRIC_TYPE_COSINE>(table, quantizer);
+            break;
+        default:
+            FAIL("An unlisted metric needs an independent concrete-type table");
+    }
+    table.Add("hgraph_parameters", 1, TestSharedRequest<HGraphParameter>());
+    table.Add("parameter_pipnn_fanout", param.pipnn_param.fanout.capacity(), sizeof(uint64_t));
+    table.Add("hgraph_pipnn_fanout", Access::RetainedFanoutCapacity(graph), sizeof(uint64_t));
+    table.Add("flatten_parameters", 1, TestSharedRequest<FlattenDataCellParameter>());
+    table.Add("graph_parameters", 1, TestSharedRequest<GraphDataCellParameter>());
+    table.Add("route_parameters", 1, TestSharedRequest<SparseGraphDatacellParameter>());
+    table.Add("io_parameters", 2, TestSharedRequest<MemoryBlockIOParameter>());
+    REQUIRE(param.extra_info_param != nullptr);
+    table.Add("extra_info_parameters", 1, TestSharedRequest<ExtraInfoDataCellParameter>());
+    table.Add("extra_info_io_parameters", 1, TestSharedRequest<MemoryBlockIOParameter>());
+    AddOwnedString(table, "param_name", param.name);
+    AddOwnedString(table, "param_graph_type", param.graph_type);
+    AddOwnedString(table, "param_reorder_source", param.reorder_source);
+    AddOwnedString(table, "param_mci_source", param.mci_parameters.knng_source);
+    AddOwnedString(table, "param_mci_path", param.mci_parameters.knng_path);
+    AddOwnedString(table, "flatten_name", param.base_codes_param->name);
+    AddOwnedString(table, "base_io_name", param.base_codes_param->io_parameter->GetTypeName());
+    auto graph_parameter =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(param.bottom_graph_param);
+    REQUIRE(graph_parameter != nullptr);
+    AddOwnedString(table, "graph_io_name", graph_parameter->io_parameter_->GetTypeName());
+    AddOwnedString(table, "extra_io_name", param.extra_info_param->io_parameter->GetTypeName());
+    // Copied graph/MCI names and the scalar quantizer type names are SSO in this configuration.
+    REQUIRE(param.graph_type.size() <= std::string{}.capacity());
+    REQUIRE(param.mci_parameters.knng_source.size() <= std::string{}.capacity());
+    REQUIRE(param.base_codes_param->quantizer_parameter->GetTypeName().size() <=
+            std::string{}.capacity());
+
+    const uint64_t pool_copies = capacity > initial_capacity ? 2 : 1;
+    const uint64_t lists = (count == 0 ? 1 : 16 * std::max(uint64_t{1}, workers)) + pool_copies - 1;
+    table.Add("visited_pool_objects", pool_copies, TestSharedRequest<VisitedListPool>());
+    table.Add(
+        "visited_deque_objects", pool_copies * 16, sizeof(Deque<std::shared_ptr<VisitedList>>));
+    const auto pool_capture = sizeof(VisitedListPool*) + sizeof(uint64_t) + sizeof(Allocator*);
+#if defined(_LIBCPP_VERSION)
+    const auto pool_function = TestRoundUp(sizeof(void*) + pool_capture, alignof(void*));
+#else
+    const auto pool_function = pool_capture;
+#endif
+    table.Add("visited_constructor_function", pool_copies, pool_function);
+    table.Add("visited_list_objects", lists, TestSharedRequest<VisitedList>());
+
+    // Independent replay at the actual degree. Production deliberately replays at degree four.
+    std::array<uint64_t, 64> route_counts{};
+    auto engine = Access::Generator(graph);
+    std::uniform_real_distribution<double> uniform(0.0, 1.0);
+    const auto multiplier = 1.0 / std::log(static_cast<double>(degree));
+    for (uint64_t row = 0; row < count; ++row) {
+        const auto probability = uniform(engine);
+        REQUIRE(probability > 0.0);
+        const auto draw = -std::log(probability) * multiplier;
+        REQUIRE(std::isfinite(draw));
+        REQUIRE(draw >= 0.0);
+        REQUIRE(draw < static_cast<double>(route_counts.size()));
+        for (uint64_t level = 0; level < static_cast<uint64_t>(draw); ++level) {
+            ++route_counts[level];
+        }
+    }
+    for (uint64_t level = 0; level < route_counts.size(); ++level) {
+        if (route_counts[level] == 0) {
+            continue;
+        }
+        const auto suffix = std::to_string(level);
+        table.Add("route_graph_" + suffix, 1, TestSharedRequest<SparseGraphDataCell>());
+        table.Add(
+            "route_vector_headers_" + suffix, route_counts[level], sizeof(Vector<InnerIdType>));
+    }
+    table.Add("retained_sq_arrays", quantizer == "sq8" ? 2 : 0, dim * sizeof(float));
+    table.Add("trainer_sample",
+              count > 0 && quantizer != "fp32" ? 1 : 0,
+              trainer_sample * dim * sizeof(float));
+    table.Add("uniform_training_bounds",
+              count > 0 && quantizer == "sq8_uniform" ? 2 : 0,
+              dim * sizeof(float));
+    uint64_t truncation_bytes = 0;
+    if (count > 0 && quantizer == "sq8") {
+        const auto ignore = std::max<uint64_t>(
+            1, static_cast<uint64_t>(static_cast<double>(trainer_sample - 1) * 0.001));
+        truncation_bytes = 2 * TestDoublingBufferPeak(ignore + 1, sizeof(float));
+    }
+    table.Add("bit8_truncation_heaps", truncation_bytes > 0 ? 1 : 0, truncation_bytes);
+    table.Add("sampled_dataset", sample < count ? 1 : 0, TestSharedRequest<DatasetImpl>());
+    table.Add("sampled_dataset_map",
+              sample < count ? 1 : 0,
+              sample < count ? TestSampledDatasetMapBytes() : 0);
+    // At nested route pruning, five shared objects survive together: the bottom probe heap,
+    // route result, route filtered result, neighbor candidates and nested queue_closest.
+    // Emptying either retained result does not destroy its shared object.
+    table.Add("worker_heap_objects", 5 * workers, TestSharedRequest<StandardHeap<true, false>>());
+    table.Add("worker_computer_objects", workers, computer_bytes);
+    table.Add("skip_strategy_upper", workers, TestSkipStrategyUpper());
+    table.Add("failed_ids", 0, sizeof(int64_t));
+    table.Add("scheduler_chains", scheduled ? workers : 0, TestSchedulerTaskRequest());
+    table.Add("scheduler_futures", scheduled ? workers : 0, sizeof(std::future<void>));
+    table.Add("scheduler_queue", scheduled && workers > 0 ? 1 : 0, TestBuildQueueRequest(workers));
+    uint64_t owned_pool_bytes = 0;
+    if (owns_pool) {
+        const uint64_t started = std::max(threads, Options::Instance().num_threads_building());
+        owned_pool_bytes = TestSharedRequest<SafeThreadPool>() + sizeof(DefaultThreadPool) +
+                           sizeof(progschj::ThreadPool) +
+                           TestDoublingBufferPeak(started, sizeof(std::thread));
+        if (count == 0) {
+            owned_pool_bytes += TestBuildQueueRequest(0);
+        }
+    }
+    table.Add("owned_constructor_pool", owns_pool ? 1 : 0, owned_pool_bytes);
+    return table;
+}
+
+void
+RunBuildMemoryCell(const std::string& quantizer,
+                   uint64_t dim,
+                   uint64_t degree,
+                   bool parallel,
+                   uint64_t count,
+                   uint64_t sample_cap,
+                   bool mixed_labels = false,
+                   vsag::MetricType metric = vsag::MetricType::METRIC_TYPE_L2SQR) {
+    CAPTURE(quantizer, dim, degree, parallel, count, sample_cap, mixed_labels, metric);
+    BuildMemoryData data(count, dim);
+    if (mixed_labels) {
+        for (uint64_t row = 0; row < count; ++row) {
+            data.ids[row] =
+                row % 2 == 0 ? -static_cast<int64_t>(row / 2) - 1 : static_cast<int64_t>(row / 2);
+        }
+        std::reverse(data.ids.begin(), data.ids.end());
+    }
+    auto recorder = std::make_shared<PhaseCountingAllocator>();
+    auto common = MakeCommonParam(static_cast<int64_t>(dim));
+    common.allocator_ = recorder;
+    common.metric_ = metric;
+    if (parallel) {
+        common.thread_pool_ =
+            std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+    }
+    const uint64_t threads = parallel ? 4 : 1;
+    auto index =
+        MakeHGraphIndex(MakeBuildMemoryJson(quantizer, degree, threads, sample_cap), common);
+    const auto standard = IndependentStandardEnvelope(
+        *InnerHGraph(index), quantizer, dim, degree, count, sample_cap, threads, parallel, metric);
+    recorder->BeginBuildPhase();
+    const auto initial = recorder->Read();
+    REQUIRE(initial.current > 0);
+    REQUIRE(initial.phase_peak == initial.current);
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    const auto estimate = index->EstimateBuildMemory(count);
+    const auto steady = index->EstimateMemory(count);
+    REQUIRE(index->EstimateBuildMemory(count) == estimate);
+    REQUIRE(recorder->Read().requests == initial.requests);
+    REQUIRE(recorder->Read().current == initial.current);
+    REQUIRE(recorder->Read().phase_peak == initial.current);
+    const auto built = index->Build(data.dataset);
+    const auto measured = recorder->Read();
+    REQUIRE(built.has_value());
+    REQUIRE(built.value().empty());
+    REQUIRE(index->GetNumElements() == static_cast<int64_t>(count));
+    {
+        // Successful writes clear their markers but retain the batch-sized bucket allocation.
+        const auto graph = InnerHGraph(index);
+        REQUIRE(vsag::HGraphCodeWriteTestAccess::PendingCount(*graph) == 0);
+        REQUIRE(vsag::HGraphCodeWriteTestAccess::PendingBucketCount(*graph) >= 2 * count);
+    }
+    REQUIRE(estimate >= steady);
+    REQUIRE(measured.phase_peak <= std::numeric_limits<uint64_t>::max() - standard.Total());
+    REQUIRE(estimate >= measured.phase_peak + standard.Total());
+    index.reset();
+    REQUIRE(recorder->Read().current == 0);
+}
+
+#endif  // HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+void
+AppendCacheWord(std::string& bytes, uint64_t value) {
+    bytes.append(reinterpret_cast<const char*>(&value), sizeof(value));
+}
+
+class ComponentFaultReader : public vsag::StreamReader, public vsag::DeserializeReader {
+public:
+    explicit ComponentFaultReader(std::string bytes) : bytes_(std::move(bytes)) {
+        vsag::ReadFuncStreamReader footer_reader(
+            [this](uint64_t offset, uint64_t size, void* dest) { Copy(offset, size, dest); },
+            0,
+            bytes_.size());
+        auto footer = vsag::Footer::Parse(footer_reader);
+        REQUIRE(footer != nullptr);
+        body_end_ = bytes_.size() - footer->Length();
+        REQUIRE(body_end_ > 0);
+    }
+
+    uint64_t
+    Size() const override {
+        return bytes_.size();
+    }
+
+    uint64_t
+    Length() override {
+        return bytes_.size();
+    }
+
+    uint64_t
+    GetCursor() const override {
+        return cursor_;
+    }
+
+    void
+    Seek(uint64_t cursor) override {
+        if (cursor > bytes_.size()) {
+            throw vsag::VsagException(vsag::ErrorType::INVALID_BINARY, "controlled seek bounds");
+        }
+        cursor_ = cursor;
+    }
+
+    void
+    Read(char* dest, uint64_t size) override {
+        Read(cursor_, size, dest);
+        cursor_ += size;
+    }
+
+    void
+    Read(uint64_t offset, uint64_t size, void* dest) override {
+        if (size > 0 && offset < body_end_) {
+            component_read_.store(true);
+            throw vsag::VsagException(vsag::ErrorType::INVALID_BINARY,
+                                      "controlled component-body read failure");
+        }
+        Copy(offset, size, dest);
+    }
+
+    bool
+    ReachedComponent() const {
+        return component_read_.load();
+    }
+
+private:
+    void
+    Copy(uint64_t offset, uint64_t size, void* dest) {
+        if (size > bytes_.size() || offset > bytes_.size() - size) {
+            throw vsag::VsagException(vsag::ErrorType::INVALID_BINARY, "controlled read bounds");
+        }
+        if (size > 0) {
+            std::memcpy(dest, bytes_.data() + offset, size);
+        }
+    }
+
+    std::string bytes_;
+    uint64_t cursor_{0};
+    uint64_t body_end_{0};
+    std::atomic<bool> component_read_{false};
+};
+
+struct ControlledRowFailure : public std::exception {
+    explicit ControlledRowFailure(uint64_t row) : row(row) {
+    }
+    const char*
+    what() const noexcept override {
+        return "controlled row failure";
+    }
+    uint64_t row;
+};
+
+struct ControlledRows {
+    ControlledRows() {
+        for (auto& counter : attempts) {
+            counter.store(0);
+        }
+    }
+
+    std::array<std::atomic<uint64_t>, 7> attempts{};
+    std::promise<void> release_low;
+    std::shared_future<void> low_gate{release_low.get_future().share()};
+
+    static void
+    Invoke(void* opaque, uint64_t row) {
+        auto& state = *static_cast<ControlledRows*>(opaque);
+        ++state.attempts[row];
+        if (row == 0) {
+            state.low_gate.wait();
+            throw ControlledRowFailure(0);
+        }
+        if (row == 1) {
+            throw ControlledRowFailure(1);
+        }
+    }
+};
+
 }  // namespace
+
+TEST_CASE("HGraph random level failure preserves existing data and allows retry",
+          "[ut][hgraph][random_level_failure]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const bool existing = GENERATE(false, true);
+    const bool later_draw = GENERATE(false, true);
+    const uint64_t threads = GENERATE(1, 4);
+    {
+        CAPTURE(existing, later_draw, threads);
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), MakeCommonParam(16));
+        BuildMemoryData initial(4, 16);
+        if (existing) {
+            REQUIRE(index->Build(initial.dataset).has_value());
+        }
+        auto graph = InnerHGraph(index);
+        const auto before_count = index->GetNumElements();
+        const auto before_rng = Access::Generator(*graph);
+        uint64_t rows = 7;
+        double injected = std::numeric_limits<double>::infinity();
+        if (later_draw) {
+            // Choose a finite multiplier whose first overflow occurs after a valid draw.
+            auto engine = before_rng;
+            std::uniform_real_distribution<double> distribution(0.0, 1.0);
+            const double first = -std::log(distribution(engine));
+            bool found = false;
+            for (uint64_t row = 1; row < 128; ++row) {
+                const double next = -std::log(distribution(engine));
+                if (next > first) {
+                    injected = (static_cast<double>(std::numeric_limits<int>::max()) + 1.0) /
+                               ((first + next) / 2.0);
+                    rows = row + 1;
+                    found = true;
+                    break;
+                }
+            }
+            REQUIRE(found);
+        }
+        BuildMemoryData addition(rows, 16);
+        for (auto& id : addition.ids) {
+            id += 100;
+        }
+        // Fault injection only: valid public parameters do not produce this multiplier.
+        const auto original = Access::ExchangeLevelMultiplier(*graph, injected);
+        auto failed = existing ? index->Add(addition.dataset) : index->Build(addition.dataset);
+        Access::ExchangeLevelMultiplier(*graph, original);
+        REQUIRE_FALSE(failed.has_value());
+        REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        CHECK(index->GetNumElements() == before_count);
+        CHECK_FALSE(index->CheckIdExist(100));
+        CHECK(Access::Generator(*graph) == before_rng);
+        auto retried = existing ? index->Add(addition.dataset) : index->Build(addition.dataset);
+        REQUIRE(retried.has_value());
+        CHECK(retried->empty());
+        CHECK(index->GetNumElements() == before_count + rows);
+        for (const auto id : addition.ids) {
+            REQUIRE(index->CheckIdExist(id));
+        }
+        if (existing) {
+            for (const auto id : initial.ids) {
+                REQUIRE(index->CheckIdExist(id));
+            }
+        }
+        auto query = vsag::Dataset::Make()->NumElements(1)->Dim(16)->Owner(false)->Float32Vectors(
+            addition.vectors.data());
+        auto result =
+            index->KnnSearch(query,
+                             before_count + rows,
+                             R"({"hgraph":{"ef_search":256,"brute_force_threshold":1.0}})");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == before_count + rows);
+        for (const auto id : addition.ids) {
+            REQUIRE(ResultContainsId(result.value(), id));
+        }
+        if (existing) {
+            for (const auto id : initial.ids) {
+                REQUIRE(ResultContainsId(result.value(), id));
+            }
+        }
+    }
+}
+
+TEST_CASE("HGraph batch and cache builds reject invalid levels before publishing labels",
+          "[ut][hgraph][random_level_failure]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const std::string path = GENERATE("odescent", "pipnn", "cache");
+    CAPTURE(path);
+    auto json = MakeBuildMemoryJson();
+    if (path != "cache") {
+        json["graph_type"].SetString(path);
+    }
+    auto index = MakeHGraphIndex(json, MakeCommonParam(16));
+    BuildMemoryData data(32, 16);
+    std::vector<std::string> source_ids(32);
+    for (uint64_t row = 0; row < source_ids.size(); ++row) {
+        source_ids[row] = std::to_string(row);
+    }
+    if (path == "cache") {
+        data.dataset->SourceID(source_ids.data());
+        auto source = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+        REQUIRE(source->Build(data.dataset).has_value());
+        std::stringstream cache;
+        REQUIRE(source->ExportCache(cache).has_value());
+        cache.seekg(0);
+        REQUIRE(index->ImportCache(cache).has_value());
+    }
+    auto graph = InnerHGraph(index);
+    const auto before_rng = Access::Generator(*graph);
+    const auto original =
+        Access::ExchangeLevelMultiplier(*graph, std::numeric_limits<double>::infinity());
+    auto failed = index->Build(data.dataset);
+    Access::ExchangeLevelMultiplier(*graph, original);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(index->GetNumElements() == 0);
+    REQUIRE(Access::Generator(*graph) == before_rng);
+    for (const auto id : data.ids) {
+        REQUIRE_FALSE(index->CheckIdExist(id));
+    }
+    auto retried = index->Build(data.dataset);
+    REQUIRE(retried.has_value());
+    REQUIRE(retried->empty());
+    REQUIRE(index->GetNumElements() == 32);
+    for (const auto id : data.ids) {
+        REQUIRE(index->CheckIdExist(id));
+    }
+}
+
+// Labels the index held before the operation, from the dataset's own ids.
+static std::unordered_set<int64_t>
+RngPresentLabels(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index,
+                 const vsag::DatasetPtr& dataset) {
+    std::unordered_set<int64_t> present;
+    const auto* labels = dataset->GetIds();
+    for (int64_t row = 0; row < dataset->GetNumElements(); ++row) {
+        if (index->CheckIdExist(labels[row])) {
+            present.insert(labels[row]);
+        }
+    }
+    return present;
+}
+
+// The oracle: one test-local uniform draw per accepted label on the engine copy.
+// A label is accepted when it was absent before the operation and is not repeated inside
+// the batch; failed_ids rows consume no live draw. random_level_draw is not called.
+static void
+RngAdvanceAccepted(std::default_random_engine& engine,
+                   const vsag::DatasetPtr& dataset,
+                   const std::unordered_set<int64_t>& present) {
+    std::unordered_set<int64_t> seen;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    const auto* labels = dataset->GetIds();
+    for (int64_t row = 0; row < dataset->GetNumElements(); ++row) {
+        const bool accepted = present.count(labels[row]) == 0 and seen.insert(labels[row]).second;
+        if (accepted) {
+            (void)distribution(engine);
+        }
+    }
+}
+
+TEST_CASE("HGraph build advances the level generator once per accepted row",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    const uint64_t pool_width = threads == 1 ? 0 : 8;
+    auto index =
+        MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), MakeCommonParam(16, pool_width));
+    BuildMemoryData data(48, 16);
+    for (auto& id : data.ids) {
+        id += 500;
+    }
+    const auto present = RngPresentLabels(index, data.dataset);
+    auto expected = Access::Generator(*InnerHGraph(index));
+    REQUIRE(index->Build(data.dataset).has_value());
+    RngAdvanceAccepted(expected, data.dataset, present);
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph consecutive Adds advance the generator once per accepted row",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), MakeCommonParam(16, 8));
+    BuildMemoryData base(16, 16);
+    REQUIRE(index->Build(base.dataset).has_value());
+    BuildMemoryData first(24, 16);
+    for (auto& id : first.ids) {
+        id += 100;
+    }
+    {
+        const auto present = RngPresentLabels(index, first.dataset);
+        auto expected = Access::Generator(*InnerHGraph(index));
+        REQUIRE(index->Add(first.dataset).has_value());
+        RngAdvanceAccepted(expected, first.dataset, present);
+        CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    }
+    BuildMemoryData second(12, 16);
+    for (auto& id : second.ids) {
+        id += 300;
+    }
+    {
+        const auto present = RngPresentLabels(index, second.dataset);
+        auto expected = Access::Generator(*InnerHGraph(index));
+        REQUIRE(index->Add(second.dataset).has_value());
+        RngAdvanceAccepted(expected, second.dataset, present);
+        CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    }
+}
+
+TEST_CASE("HGraph duplicate and existing labels consume no generator draws",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), MakeCommonParam(16, 8));
+    BuildMemoryData base(16, 16);
+    REQUIRE(index->Build(base.dataset).has_value());
+    BuildMemoryData addition(8, 16);
+    // Existing label 5, in-batch duplicate of the first new label, then fresh labels.
+    addition.ids = {100, 5, 100, 101, 102, 103, 104, 105};
+    addition.dataset = MakeFloatDataset(
+        addition.vectors, addition.ids, 16, static_cast<int64_t>(addition.ids.size()));
+    const auto present = RngPresentLabels(index, addition.dataset);
+    auto expected = Access::Generator(*InnerHGraph(index));
+    REQUIRE(index->Add(addition.dataset).has_value());
+    RngAdvanceAccepted(expected, addition.dataset, present);
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+    for (const auto id : {100, 101, 102, 103, 104, 105}) {
+        CHECK(index->CheckIdExist(id));
+    }
+}
+
+TEST_CASE("HGraph estimate and feature checks leave the generator unchanged",
+          "[ut][hgraph][rng_state]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    const auto before = Access::Generator(*InnerHGraph(index));
+    RequireExpectedBuildMemoryProfile(index);
+    if constexpr (EXPECT_MODELED_BUILD_MEMORY) {
+        (void)index->EstimateBuildMemory(4096);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == before);
+}
+
+// Deterministic fp32 vector for a label, so GetDataByIds can be checked exactly.
+static std::vector<float>
+ConcurrentAddVectorFor(int64_t label, int64_t dim) {
+    std::vector<float> vector(dim);
+    for (int64_t col = 0; col < dim; ++col) {
+        vector[col] = static_cast<float>((label * 131 + col * 17) % 1021) / 1021.0F;
+    }
+    return vector;
+}
+
+static std::vector<float>
+ConcurrentAddVectorsFor(const std::vector<int64_t>& labels, int64_t dim) {
+    std::vector<float> vectors(labels.size() * dim);
+    for (uint64_t row = 0; row < labels.size(); ++row) {
+        const auto value = ConcurrentAddVectorFor(labels[row], dim);
+        std::copy(value.begin(), value.end(), vectors.begin() + row * dim);
+    }
+    return vectors;
+}
+
+static void
+RequireExactLabelVector(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& index,
+                        int64_t label,
+                        int64_t dim) {
+    REQUIRE(index->CheckIdExist(label));
+    auto data = index->GetDataByIds(&label, 1);
+    REQUIRE(data.has_value());
+    const auto expected = ConcurrentAddVectorFor(label, dim);
+    const auto* actual = data.value()->GetFloat32Vectors();
+    REQUIRE(actual != nullptr);
+    for (int64_t col = 0; col < dim; ++col) {
+        REQUIRE(actual[col] == expected[col]);
+    }
+}
+
+TEST_CASE("HGraph concurrent mixed-size Adds preserve every accepted label",
+          "[ut][hgraph][concurrent_add]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    constexpr int64_t dim = 16;
+    // No Resource pool: T1 inserts serially in its caller thread; T4 uses the
+    // constructor-owned internal pool. nullptr does not mean globally serial.
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 8, threads);
+    hgraph_json["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(16));
+
+    std::vector<int64_t> base_ids(100);
+    std::iota(base_ids.begin(), base_ids.end(), int64_t{0});
+    auto base_vectors = ConcurrentAddVectorsFor(base_ids, dim);
+    REQUIRE(index
+                ->Build(MakeFloatDataset(
+                    base_vectors, base_ids, dim, static_cast<int64_t>(base_ids.size())))
+                .has_value());
+    const auto before_rng = Access::Generator(*InnerHGraph(index));
+
+    const auto add_batch = [&](int64_t first_label, uint64_t count) {
+        std::vector<int64_t> ids(count);
+        std::iota(ids.begin(), ids.end(), first_label);
+        auto vectors = ConcurrentAddVectorsFor(ids, dim);
+        return index->Add(MakeFloatDataset(vectors, ids, dim, static_cast<int64_t>(ids.size())));
+    };
+    using AddOutcome = std::pair<bool, std::vector<int64_t>>;
+    std::vector<std::future<AddOutcome>> futures;
+    // One caller adds 5000 rows in five calls of 1000.
+    futures.emplace_back(std::async(std::launch::async, [&]() -> AddOutcome {
+        std::vector<int64_t> failed;
+        for (int64_t call = 0; call < 5; ++call) {
+            auto result = add_batch(1000000 + call * 1000, 1000);
+            if (not result.has_value()) {
+                return {false, failed};
+            }
+            failed.insert(failed.end(), result->begin(), result->end());
+        }
+        return {true, failed};
+    }));
+    // Four callers add 50 batches of 10 each; all label sets disjoint.
+    for (int64_t t = 0; t < 4; ++t) {
+        futures.emplace_back(std::async(std::launch::async, [&, t]() -> AddOutcome {
+            std::vector<int64_t> failed;
+            for (int64_t batch = 0; batch < 50; ++batch) {
+                auto result = add_batch(2000000 + t * 1000000 + batch * 10, 10);
+                if (not result.has_value()) {
+                    return {false, failed};
+                }
+                failed.insert(failed.end(), result->begin(), result->end());
+            }
+            return {true, failed};
+        }));
+    }
+    for (auto& future : futures) {
+        const auto outcome = future.get();
+        REQUIRE(outcome.first);
+        REQUIRE(outcome.second.empty());
+    }
+    const uint64_t submitted = 5000 + 4 * 50 * 10;
+    REQUIRE(index->GetNumElements() == base_ids.size() + submitted);
+    for (const auto label : base_ids) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    for (int64_t label = 1000000; label < 1000000 + 5000; ++label) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    for (int64_t t = 0; t < 4; ++t) {
+        for (int64_t label = 2000000 + t * 1000000; label < 2000000 + t * 1000000 + 500; ++label) {
+            RequireExactLabelVector(index, label, dim);
+        }
+    }
+    // Every submitted label is disjoint, so every row was accepted: exactly one draw each.
+    auto expected = before_rng;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    for (uint64_t accepted = 0; accepted < submitted; ++accepted) {
+        (void)distribution(expected);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph concurrent overlapping Adds keep one ID and exact data per label",
+          "[ut][hgraph][concurrent_add]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const uint64_t threads = GENERATE(1, 4);
+    CAPTURE(threads);
+    constexpr int64_t dim = 16;
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 8, threads);
+    hgraph_json["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(hgraph_json, MakeCommonParam(16));
+
+    // Base labels B0 = {0..49}.
+    std::vector<int64_t> base_ids(50);
+    std::iota(base_ids.begin(), base_ids.end(), int64_t{0});
+    auto base_vectors = ConcurrentAddVectorsFor(base_ids, dim);
+    REQUIRE(index
+                ->Build(MakeFloatDataset(
+                    base_vectors, base_ids, dim, static_cast<int64_t>(base_ids.size())))
+                .has_value());
+    const auto before_rng = Access::Generator(*InnerHGraph(index));
+
+    // Overlapping batches; every occurrence of a label carries the same f(label).
+    // Union of all batches and B0 is exactly {0..119}; new labels beyond B0 are {50..119}.
+    const std::vector<std::vector<int64_t>> batches = {
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.end(), int64_t{30});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.end(), int64_t{50});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(40);
+            std::iota(v.begin(), v.begin() + 20, int64_t{40});
+            std::iota(v.begin() + 20, v.end(), int64_t{100});
+            return v;
+        }(),
+        [] {
+            std::vector<int64_t> v(50);
+            std::iota(v.begin(), v.begin() + 40, int64_t{60});
+            std::iota(v.begin() + 40, v.end(), int64_t{0});
+            return v;
+        }(),
+    };
+    uint64_t submitted = 0;
+    for (const auto& batch : batches) {
+        submitted += batch.size();
+    }
+
+    std::vector<std::future<tl::expected<std::vector<int64_t>, vsag::Error>>> futures;
+    for (const auto& labels : batches) {
+        futures.emplace_back(std::async(std::launch::async, [&]() {
+            auto vectors = ConcurrentAddVectorsFor(labels, dim);
+            auto ids = labels;
+            return index->Add(
+                MakeFloatDataset(vectors, ids, dim, static_cast<int64_t>(ids.size())));
+        }));
+    }
+    uint64_t failed_count = 0;
+    for (auto& future : futures) {
+        const auto result = future.get();
+        REQUIRE(result.has_value());
+        failed_count += result->size();
+    }
+    // |union B0..I4| = 120; accepted = |(union Ii) \ B0| = 70; failed = submitted - 70.
+    REQUIRE(index->GetNumElements() == 120);
+    CHECK(submitted - failed_count == 70);
+    for (int64_t label = 0; label < 120; ++label) {
+        RequireExactLabelVector(index, label, dim);
+    }
+    auto expected = before_rng;
+    std::uniform_real_distribution<double> distribution(0.0, 1.0);
+    for (uint64_t accepted = 0; accepted < submitted - failed_count; ++accepted) {
+        (void)distribution(expected);
+    }
+    CHECK(Access::Generator(*InnerHGraph(index)) == expected);
+}
+
+TEST_CASE("HGraph insert worker count literal bounds", "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    CHECK(Access::InsertWorkerCount(true, 4, 10) == 4);
+    CHECK(Access::InsertWorkerCount(true, 4, 2) == 2);
+    CHECK(Access::InsertWorkerCount(true, 8, 64) == 8);
+    CHECK(Access::InsertWorkerCount(true, 0, 10) == 1);
+    CHECK(Access::InsertWorkerCount(false, 4, 10) == 1);
+    CHECK(Access::InsertWorkerCount(false, 0, 10) == 1);
+    CHECK(Access::InsertWorkerCount(true, 4, 0) == 0);
+    CHECK(Access::InsertWorkerCount(false, 4, 0) == 0);
+    CHECK(Access::InsertWorkerCount(true, 0, 0) == 0);
+}
+
+TEST_CASE("HGraph estimate rejects a bottom degree below the modeled minimum",
+          "[ut][hgraph][estimate_build_memory]") {
+    auto common_param = MakeCommonParam(16);
+    auto hgraph_json = MakeBuildMemoryJson("fp32", 4, 1);
+
+    // The boundary degree itself is still governed by the modeled-profile rules.
+    RequireExpectedBuildMemoryProfile(MakeHGraphIndex(hgraph_json, common_param));
+
+    // Bypassing the public mapping (which enforces degree >= 4) leaves a degree the route
+    // model cannot cover: the flag is not advertised and the estimate is a typed error.
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(hgraph_json, common_param);
+    auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(typed != nullptr);
+    typed->bottom_graph_param->max_degree_ = 3;
+    auto low_degree = std::make_shared<vsag::IndexImpl<vsag::HGraph>>(
+        std::make_shared<vsag::HGraph>(mapped, common_param), common_param);
+    RequireUnsupportedBuildEstimate(low_degree);
+}
+
+TEST_CASE("HGraph build memory validates the profile and reports modeled ownership cells",
+          "[ut][hgraph][estimate_build_memory][estimate_build_memory_matrix]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto profile_index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    RequireExpectedBuildMemoryProfile(profile_index);
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+    uint64_t reported = 0;
+    for (const auto* quantizer : {"fp32", "sq8", "sq8_uniform"}) {
+        for (uint64_t dim : {uint64_t{16}, uint64_t{128}}) {
+            for (uint64_t degree : {uint64_t{8}, uint64_t{32}}) {
+                for (bool parallel : {false, true}) {
+                    {
+                        INFO(quantizer << "/d" << dim << "/M" << degree << "/parallel" << parallel);
+                        RunBuildMemoryCell(quantizer,
+                                           dim,
+                                           degree,
+                                           parallel,
+                                           1537,
+                                           1537,
+                                           false,
+                                           vsag::MetricType::METRIC_TYPE_L2SQR);
+                        ++reported;
+                    }
+                }
+            }
+        }
+    }
+    REQUIRE(reported == 24);
+#endif
+}
+
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+TEST_CASE("HGraph build memory retains zero baseline and does not allocate while estimating",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto recorder = std::make_shared<PhaseCountingAllocator>();
+    auto common = MakeCommonParam(16);
+    common.allocator_ = recorder;
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+    recorder->BeginBuildPhase();
+    const auto before = recorder->Read();
+    REQUIRE(before.current > 0);
+    REQUIRE(before.constructor_peak >= before.current);
+    REQUIRE(index->EstimateMemory(0) == 0);
+    REQUIRE(index->EstimateBuildMemory(0) >= before.current);
+    for (uint64_t count : {uint64_t{0}, uint64_t{1}, uint64_t{1537}, uint64_t{65537}}) {
+        const auto estimate = index->EstimateBuildMemory(count);
+        REQUIRE(estimate >= index->EstimateMemory(count));
+        REQUIRE(index->EstimateBuildMemory(count) == estimate);
+    }
+    const auto after = recorder->Read();
+    REQUIRE(after.requests == before.requests);
+    REQUIRE(after.current == before.current);
+    REQUIRE(after.phase_peak == before.phase_peak);
+    auto empty = vsag::Dataset::Make();
+    REQUIRE(index->Build(empty).has_value());
+    REQUIRE(index->GetNumElements() == 0);
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE(recorder->Read().current == before.current);
+    const auto standard = IndependentStandardEnvelope(
+        *InnerHGraph(index), "fp32", 16, 8, 0, 1537, 1, false, vsag::MetricType::METRIC_TYPE_L2SQR);
+    REQUIRE(index->EstimateBuildMemory(0) >= before.current + standard.Total());
+    index.reset();
+    REQUIRE(recorder->Read().current == 0);
+}
+
+TEST_CASE("HGraph build memory covers sampling and storage boundaries",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    for (uint64_t count : {uint64_t{1},
+                           uint64_t{2},
+                           uint64_t{3},
+                           uint64_t{4},
+                           uint64_t{5},
+                           uint64_t{511},
+                           uint64_t{512},
+                           uint64_t{513},
+                           uint64_t{1023},
+                           uint64_t{1024},
+                           uint64_t{1025},
+                           uint64_t{2048}}) {
+        {
+            INFO("sample-cap-512/N" << count);
+            RunBuildMemoryCell("sq8", 16, 8, false, count, 512);
+        }
+    }
+    // FP32 d=128 crosses a 256-KiB code block at row 513.
+    for (uint64_t count : {uint64_t{511}, uint64_t{512}, uint64_t{513}}) {
+        {
+            INFO("FP32 block crossing/N" << count);
+            RunBuildMemoryCell("fp32", 128, 8, false, count, count);
+        }
+    }
+    for (uint64_t count : {uint64_t{1024}, uint64_t{1025}}) {
+        {
+            INFO("graph block crossing/N" << count);
+            RunBuildMemoryCell("fp32", 16, 32, false, count, count);
+        }
+    }
+    RunBuildMemoryCell("sq8_uniform", 16, 8, false, 513, 512, true);
+}
+
+TEST_CASE("HGraph build memory uses stored blocks and monotone count dimension degree threads",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto common = MakeCommonParam(16);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+    const auto fixed_geometry = index->EstimateBuildMemory(1537);
+    {
+        BlockSizeLimitGuard changed_global(uint64_t{1} << 19);
+        REQUIRE(index->EstimateBuildMemory(1537) >= index->EstimateMemory(1537));
+        // The steady floor reads Options. Restoring it must restore the estimate.
+    }
+    REQUIRE(index->EstimateBuildMemory(1537) == fixed_geometry);
+    auto larger_blocks = [&] {
+        BlockSizeLimitGuard different_geometry(uint64_t{1} << 19);
+        return MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    }();
+    REQUIRE(larger_blocks->EstimateBuildMemory(1) > index->EstimateBuildMemory(1));
+
+    const auto require_monotone = [](std::initializer_list<uint64_t> values, const auto& estimate) {
+        uint64_t previous = 0;
+        for (uint64_t value : values) {
+            const auto current = estimate(value);
+            CAPTURE(value, previous, current);
+            REQUIRE(current >= previous);
+            previous = current;
+        }
+    };
+    auto pool_common = MakeCommonParam(16);
+    pool_common.thread_pool_ =
+        std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+    for (bool parallel : {false, true}) {
+        CAPTURE(parallel);
+        const auto& selected_common = parallel ? pool_common : common;
+        const uint64_t threads = parallel ? 4 : 1;
+        auto candidate = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), selected_common);
+        require_monotone({0, 1, 511, 512, 513, 1023, 1024, 1025, 1537, 2048, 65537},
+                         [&](uint64_t count) { return candidate->EstimateBuildMemory(count); });
+        require_monotone({8, 15, 16, 17, 31, 32, 33, 128}, [&](uint64_t dim) {
+            auto dimensional = selected_common;
+            dimensional.dim_ = static_cast<int64_t>(dim);
+            return MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), dimensional)
+                ->EstimateBuildMemory(1537);
+        });
+        require_monotone({4, 5, 8, 16, 32, 64}, [&](uint64_t degree) {
+            return MakeHGraphIndex(MakeBuildMemoryJson("sq8", degree, threads), selected_common)
+                ->EstimateBuildMemory(1537);
+        });
+        auto fp32 = MakeHGraphIndex(MakeBuildMemoryJson("fp32"), selected_common);
+        for (const auto* quantizer : {"sq8", "sq8_uniform"}) {
+            auto scalar = MakeHGraphIndex(MakeBuildMemoryJson(quantizer), selected_common);
+            REQUIRE(fp32->EstimateBuildMemory(1537) >= scalar->EstimateBuildMemory(1537));
+        }
+    }
+    require_monotone({1, 2, 4, 8}, [&](uint64_t threads) {
+        return MakeHGraphIndex(MakeBuildMemoryJson("sq8", 8, threads), pool_common)
+            ->EstimateBuildMemory(1537);
+    });
+}
+
+#endif  // HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+TEST_CASE("HGraph memory block option rejects zero without changing the limit",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const auto limit = vsag::Options::Instance().block_size_limit();
+    RequireEstimateError([] { vsag::Options::Instance().set_block_size_limit(0); },
+                         vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(vsag::Options::Instance().block_size_limit() == limit);
+}
+
+TEST_CASE("HGraph build memory rejects invalid rounded capacity before replay",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    auto graph = InnerHGraph(index);
+    RequireExpectedBuildMemoryProfile(index);
+    constexpr auto expected_error = EXPECT_MODELED_BUILD_MEMORY
+                                        ? vsag::ErrorType::INVALID_ARGUMENT
+                                        : vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION;
+    constexpr uint64_t last_valid = (uint64_t{1} << 31) - 1024;
+    REQUIRE(vsag::HGraphMemoryEstimateTestAccess::RoundedCapacity(*graph, last_valid) ==
+            last_valid);
+    for (uint64_t count :
+         {last_valid + 1, uint64_t{1} << 31, std::numeric_limits<uint64_t>::max()}) {
+        RequireEstimateError([&] { (void)index->EstimateBuildMemory(count); }, expected_error);
+    }
+    // The capacity guard dominates later N-only arithmetic overflows in this API.
+    // V2's independent steady-estimator arithmetic case remains unchanged below.
+}
+
+TEST_CASE("HGraph build memory rejects unsupported configurations including zero",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    for (const auto* option : {"support_duplicate",
+                               "use_reorder",
+                               "use_elp_optimizer",
+                               "store_raw_vector",
+                               "support_force_remove",
+                               "use_attribute_filter",
+                               "use_conjugate_graph",
+                               "use_mci"}) {
+        DYNAMIC_SECTION(option) {
+            auto json = MakeBuildMemoryJson();
+            json[option].SetBool(true);
+            if (std::string(option) == "use_reorder") {
+                json["precise_quantization_type"].SetString("fp32");
+            }
+            RequireUnsupportedBuildEstimate(MakeHGraphIndex(json, MakeCommonParam(128)));
+        }
+    }
+    // persist_source_id is stored, not rejected. The modeled input is vectors plus
+    // numeric labels and carries no source-ID payload.
+    {
+        auto json = MakeBuildMemoryJson();
+        json["persist_source_id"].SetBool(true);
+        auto indexed = MakeHGraphIndex(json, MakeCommonParam(128));
+        RequireExpectedBuildMemoryProfile(indexed);
+        BuildMemoryData labeled(1, 128);
+        REQUIRE(labeled.dataset->GetSourceID() == nullptr);
+    }
+    for (const auto* quantizer : {"sq4", "rabitq"}) {
+        DYNAMIC_SECTION(quantizer) {
+            RequireUnsupportedBuildEstimate(
+                MakeHGraphIndex(MakeBuildMemoryJson(quantizer), MakeCommonParam(128)));
+        }
+    }
+    for (const auto* graph_type : {"odescent", "pipnn"}) {
+        DYNAMIC_SECTION(graph_type) {
+            auto json = MakeBuildMemoryJson();
+            json["graph_type"].SetString(graph_type);
+            RequireUnsupportedBuildEstimate(MakeHGraphIndex(json, MakeCommonParam(128)));
+        }
+    }
+    auto deduplicated = MakeBuildMemoryJson();
+    deduplicated["support_duplicate"].SetBool(true);
+    deduplicated["deduplicate_storage"].SetBool(true);
+    RequireUnsupportedBuildEstimate(MakeHGraphIndex(deduplicated, MakeCommonParam(128)));
+    auto resize_limit = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    vsag::HGraphMemoryEstimateTestAccess::SetUnsupportedResizeBit(*InnerHGraph(resize_limit));
+    RequireUnsupportedBuildEstimate(resize_limit);
+    auto extra_common = MakeCommonParam(128);
+    extra_common.extra_info_size_ = 8;
+    RequireUnsupportedBuildEstimate(MakeHGraphIndex(MakeBuildMemoryJson(), extra_common));
+    for (const auto* io_slot : {"base_io_type", "graph_io_type"}) {
+        auto memory_io = MakeBuildMemoryJson();
+        memory_io[io_slot].SetString("memory_io");
+        RequireUnsupportedBuildEstimate(MakeHGraphIndex(memory_io, MakeCommonParam(128)));
+    }
+    auto compressed = MakeBuildMemoryJson();
+    compressed["graph_storage_type"].SetString("compressed");
+    RequireUnsupportedBuildEstimate(MakeHGraphIndex(compressed, MakeCommonParam(128)));
+}
+
+TEST_CASE("HGraph build memory rejects nonempty immutable and Tune states",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    SECTION("successful Build changes active capability") {
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+        BuildMemoryData data(3, 16);
+        RequireExpectedBuildMemoryProfile(index);
+        REQUIRE(index->Build(data.dataset).has_value());
+        REQUIRE(index->GetNumElements() == 3);
+        RequireUnsupportedBuildEstimate(index);
+    }
+    SECTION("immutable empty index") {
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+        REQUIRE(index->SetImmutable().has_value());
+        RequireUnsupportedBuildEstimate(index);
+    }
+    SECTION("Tune entry at count zero invalidates the lifecycle") {
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+        REQUIRE(index->GetNumElements() == 0);
+        (void)index->Tune("{}");
+        REQUIRE_FALSE(vsag::HGraphMemoryEstimateTestAccess::LifecycleClean(*InnerHGraph(index)));
+        RequireUnsupportedBuildEstimate(index);
+    }
+}
+
+TEST_CASE("HGraph bounded Build dispatch gates requested workers on a wider pool",
+          "[ut][hgraph][build_dispatch]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    const std::array<std::pair<uint64_t, uint64_t>, 3> cells{{{1, 17}, {4, 17}, {4, 2}}};
+    for (const auto& cell : cells) {
+        const auto threads = cell.first;
+        const auto count = cell.second;
+        DYNAMIC_SECTION("T" << threads << "/N" << count) {
+            auto pool = std::make_shared<GatedBuildPool>();
+            BuildPoolReleaseGuard release(pool);
+            auto common = MakeCommonParam(16);
+            common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+            auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, threads), common);
+            BuildMemoryData data(count, 16);
+            auto build = std::async(std::launch::async, [&] { return index->Build(data.dataset); });
+            const auto workers = std::min(threads, count);
+            const bool gated = pool->AwaitStarted(workers);
+            pool->Release();
+            auto result = build.get();
+            pool->WaitUntilEmpty();
+            REQUIRE(pool->AwaitFinished(workers));
+            REQUIRE(gated);
+            REQUIRE(result.has_value());
+            REQUIRE(result.value().empty());
+            REQUIRE(index->GetNumElements() == static_cast<int64_t>(count));
+            const auto counters = pool->Counts();
+            REQUIRE(counters[0] == workers);
+            REQUIRE(counters[1] == workers);
+            REQUIRE(counters[2] == workers);
+        }
+    }
+}
+
+TEST_CASE("HGraph bounded dispatch drains launched work after enqueue failure",
+          "[ut][hgraph][build_dispatch]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto pool = std::make_shared<GatedBuildPool>(1);
+    BuildPoolReleaseGuard release(pool);
+    auto common = MakeCommonParam(16);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), common);
+    BuildMemoryData data(17, 16);
+    auto build = std::async(std::launch::async, [&] { return index->Build(data.dataset); });
+    const bool gated = pool->AwaitStarted(1);
+    const bool failed_submission = pool->AwaitSubmissionFailure();
+    const bool still_waiting =
+        build.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
+    pool->Release();
+    auto result = build.get();
+    pool->WaitUntilEmpty();
+    REQUIRE(pool->AwaitFinished(1));
+    REQUIRE(gated);
+    REQUIRE(failed_submission);
+    REQUIRE(still_waiting);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(pool->Counts()[0] == 2);
+    REQUIRE(pool->Counts()[1] == 1);
+}
+
+TEST_CASE("HGraph bounded dispatch reports row failures without replacing enqueue failures",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    class ErrorLogger : public vsag::testing::CapturingLogger {
+    public:
+        bool throw_on_error{false};
+
+        void
+        Error(const std::string& message) override {
+            vsag::testing::CapturingLogger::Error(message);
+            if (throw_on_error) {
+                throw std::runtime_error("controlled logger failure");
+            }
+        }
+    };
+    for (bool nonstandard : {false, true}) {
+        for (bool logger_throws : {false, true}) {
+            CAPTURE(nonstandard, logger_throws);
+            ErrorLogger logger;
+            logger.throw_on_error = logger_throws;
+            vsag::testing::ScopedLogger scoped_logger(&logger);
+            struct Rows {
+                std::array<std::atomic<uint64_t>, 7> attempts{};
+                bool nonstandard;
+            } rows{{}, nonstandard};
+            for (auto& attempt : rows.attempts) {
+                attempt.store(0);
+            }
+            Access::WorkContext context;
+            context.row_count = rows.attempts.size();
+            context.row_state = &rows;
+            context.row_function = [](void* opaque, uint64_t row) {
+                auto& state = *static_cast<Rows*>(opaque);
+                ++state.attempts[row];
+                if (row == 0) {
+                    if (state.nonstandard) {
+                        throw uint64_t{42};
+                    }
+                    throw std::runtime_error("controlled row failure");
+                }
+            };
+            auto pool = std::make_shared<GatedBuildPool>(1);
+            BuildPoolReleaseGuard release(pool);
+            vsag::SafeThreadPool safe_pool(pool);
+            auto dispatched =
+                std::async(std::launch::async, [&] { Access::RunWorkers(safe_pool, 4, context); });
+            const bool started = pool->AwaitStarted(1);
+            const bool rejected = pool->AwaitSubmissionFailure();
+            const bool waiting =
+                dispatched.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
+            pool->Release();
+            bool submission_rethrown = false;
+            try {
+                dispatched.get();
+            } catch (const std::runtime_error& error) {
+                REQUIRE(std::string(error.what()) == "controlled Build submission failure");
+                submission_rethrown = true;
+            }
+            pool->WaitUntilEmpty();
+            REQUIRE(started);
+            REQUIRE(rejected);
+            REQUIRE(waiting);
+            REQUIRE(submission_rethrown);
+            for (const auto& attempt : rows.attempts) {
+                REQUIRE(attempt.load() == 1);
+            }
+            REQUIRE(logger.lines.size() == 1);
+            const auto expected = nonstandard ? "unknown exception" : "controlled row failure";
+            REQUIRE(logger.lines.front().find(expected) != std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("HGraph bounded dispatch also applies to unsupported-estimator Add",
+          "[ut][hgraph][build_dispatch]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto pool = std::make_shared<GatedBuildPool>();
+    BuildPoolReleaseGuard release(pool);
+    auto common = MakeCommonParam(16);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto json = MakeBuildMemoryJson("fp32", 8, 4);
+    json["support_duplicate"].SetBool(true);
+    auto index = MakeHGraphIndex(json, common);
+    RequireUnsupportedBuildEstimate(index);
+    BuildMemoryData data(17, 16);
+    auto add = std::async(std::launch::async, [&] { return index->Add(data.dataset); });
+    const bool gated = pool->AwaitStarted(4);
+    pool->Release();
+    auto result = add.get();
+    pool->WaitUntilEmpty();
+    REQUIRE(pool->AwaitFinished(4));
+    REQUIRE(gated);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    REQUIRE(index->GetNumElements() == 17);
+    REQUIRE(pool->Counts()[0] == 4);
+}
+
+TEST_CASE("HGraph build memory notices real cache entries and retained empty cache storage",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    const auto fresh = vsag::HGraphMemoryEstimateTestAccess::CacheStorage(*InnerHGraph(index));
+    REQUIRE(fresh[0] == 0);
+    REQUIRE(fresh[1] == 0);
+    std::string empty_bytes;
+    AppendCacheWord(empty_bytes, 0);
+    std::stringstream empty_first(empty_bytes);
+    REQUIRE(index->ImportCache(empty_first).has_value());
+    RequireExpectedBuildMemoryProfile(index);
+
+    std::string live_bytes;
+    AppendCacheWord(live_bytes, 1);
+    AppendCacheWord(live_bytes, 1);
+    live_bytes += "a";
+    AppendCacheWord(live_bytes, 1);
+    const vsag::InnerIdType id = 0;
+    live_bytes.append(reinterpret_cast<const char*>(&id), sizeof(id));
+    std::stringstream live_cache(live_bytes);
+    REQUIRE(index->ImportCache(live_cache).has_value());
+    const auto loaded = vsag::HGraphMemoryEstimateTestAccess::CacheStorage(*InnerHGraph(index));
+    REQUIRE(loaded[0] == 1);
+    REQUIRE(loaded[2] == 1);
+    REQUIRE(index->GetNumElements() == 0);
+    RequireUnsupportedBuildEstimate(index);
+    std::stringstream empty_again(empty_bytes);
+    REQUIRE(index->ImportCache(empty_again).has_value());
+    const auto retained = vsag::HGraphMemoryEstimateTestAccess::CacheStorage(*InnerHGraph(index));
+    REQUIRE(retained[0] == 0);
+    REQUIRE(retained[2] == 0);
+    REQUIRE(retained[1] > 0);
+    RequireUnsupportedBuildEstimate(index);
+
+    auto failed = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    std::string invalid;
+    AppendCacheWord(invalid, 2);
+    AppendCacheWord(invalid, 1000);
+    invalid.resize(40, '\0');  // Pass count validation, reserve two entries, then fail the string.
+    std::stringstream bad_cache(invalid);
+    REQUIRE_FALSE(failed->ImportCache(bad_cache).has_value());
+    const auto partial = vsag::HGraphMemoryEstimateTestAccess::CacheStorage(*InnerHGraph(failed));
+    REQUIRE(partial[0] == 0);
+    REQUIRE(partial[1] >= 2);
+    RequireUnsupportedBuildEstimate(failed);
+}
+
+TEST_CASE("HGraph build memory lifecycle markers precede Merge and both component load failures",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    auto common = MakeCommonParam(16);
+    common.thread_pool_ =
+        std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(2));
+    auto source = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+    BuildMemoryData data(3, 16);
+    REQUIRE(source->Build(data.dataset).has_value());
+    std::stringstream serialized;
+    REQUIRE(source->Serialize(serialized).has_value());
+    const auto bytes = serialized.str();
+
+    SECTION("sequential component loading reaches the marker before a body-read error") {
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+        auto graph = InnerHGraph(index);
+        ComponentFaultReader reader(bytes);
+        RequireEstimateError([&] { graph->Deserialize(static_cast<vsag::StreamReader&>(reader)); },
+                             vsag::ErrorType::INVALID_BINARY);
+        REQUIRE(reader.ReachedComponent());
+        REQUIRE_FALSE(vsag::HGraphMemoryEstimateTestAccess::LifecycleClean(*graph));
+        RequireUnsupportedBuildEstimate(index);
+    }
+    SECTION("parallel component loading reaches the marker before a body-read error") {
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+        ComponentFaultReader reader(bytes);
+        REQUIRE_FALSE(index->ParallelDeserialize(reader).has_value());
+        REQUIRE(reader.ReachedComponent());
+        REQUIRE_FALSE(vsag::HGraphMemoryEstimateTestAccess::LifecycleClean(*InnerHGraph(index)));
+        RequireUnsupportedBuildEstimate(index);
+    }
+    SECTION("Merge rejects a different duplicate setting after entering the marker") {
+        auto other_json = MakeBuildMemoryJson();
+        other_json["support_duplicate"].SetBool(true);
+        auto other = MakeHGraphIndex(other_json, common);
+        auto index = MakeHGraphIndex(MakeBuildMemoryJson(), common);
+        std::vector<vsag::MergeUnit> units(1);
+        units[0].index = other;
+        REQUIRE_FALSE(index->Merge(units).has_value());
+        REQUIRE(index->GetNumElements() == 0);
+        REQUIRE_FALSE(vsag::HGraphMemoryEstimateTestAccess::LifecycleClean(*InnerHGraph(index)));
+        RequireUnsupportedBuildEstimate(index);
+    }
+}
+
+TEST_CASE("HGraph bounded workers select the lowest row error and attempt every row",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    // Error-recording mutex failures must be allowed to propagate through the worker future.
+    static_assert(!std::is_nothrow_invocable_v<decltype(&Access::WorkContext::RunRows),
+                                               Access::WorkContext&>);
+    ControlledRows rows;
+    Access::WorkContext context;
+    context.row_function = &ControlledRows::Invoke;
+    context.row_state = &rows;
+    context.row_count = rows.attempts.size();
+    auto pool =
+        std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+    auto dispatched =
+        std::async(std::launch::async, [&] { Access::RunWorkers(*pool, 4, context); });
+    // Observe the actual protected error record while row zero is blocked. The timeout is only
+    // a failure exit; ordering is established by the row-one record, not by elapsed time.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    bool higher_recorded_first = false;
+    do {
+        {
+            std::lock_guard<std::mutex> lock(context.error_mutex);
+            higher_recorded_first = context.error_row == 1;
+        }
+        if (!higher_recorded_first) {
+            std::this_thread::yield();
+        }
+    } while (!higher_recorded_first && std::chrono::steady_clock::now() < deadline);
+    rows.release_low.set_value();
+    bool lowest_rethrown = false;
+    try {
+        dispatched.get();
+    } catch (const ControlledRowFailure& error) {
+        REQUIRE(error.row == 0);
+        lowest_rethrown = true;
+    }
+    REQUIRE(higher_recorded_first);
+    REQUIRE(lowest_rethrown);
+    for (const auto& attempts : rows.attempts) {
+        REQUIRE(attempts.load() == 1);
+    }
+}
+
+TEST_CASE("HGraph bounded workers retain non-standard row exceptions and attempt every row",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    struct RowFailure {
+        uint64_t row;
+    };
+    static_assert(not std::is_base_of_v<std::exception, RowFailure>);
+    auto pool =
+        std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+    for (uint64_t threads : {uint64_t{1}, uint64_t{4}}) {
+        CAPTURE(threads);
+        std::array<std::atomic<uint64_t>, 7> attempts{};
+        for (auto& attempt : attempts) {
+            attempt.store(0);
+        }
+        Access::WorkContext context;
+        context.row_count = attempts.size();
+        context.row_state = &attempts;
+        context.row_function = [](void* opaque, uint64_t row) {
+            auto& visited = *static_cast<std::array<std::atomic<uint64_t>, 7>*>(opaque);
+            ++visited[row];
+            if (row == 0 or row == 3) {
+                throw RowFailure{row};
+            }
+        };
+        bool caught = false;
+        try {
+            Access::RunWorkers(*pool, threads, context);
+        } catch (const RowFailure& error) {
+            REQUIRE(error.row == 0);
+            caught = true;
+        }
+        REQUIRE(caught);
+        for (const auto& attempt : attempts) {
+            REQUIRE(attempt.load() == 1);
+        }
+    }
+}
+
+TEST_CASE("HGraph build memory default Engine forwards supported scalar estimates",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    vsag::Engine engine(nullptr);
+    for (const auto* quantizer : {"fp32", "sq8"}) {
+        for (uint64_t threads : {uint64_t{1}, uint64_t{4}}) {
+            vsag::JsonType parameters;
+            parameters["dtype"].SetString("float32");
+            parameters["metric_type"].SetString("l2");
+            parameters["dim"].SetUint64(16);
+            parameters["hgraph"].SetJson(MakeBuildMemoryJson(quantizer, 8, threads, 17));
+            auto created = engine.CreateIndex("hgraph", parameters.Dump());
+            REQUIRE(created.has_value());
+            vsag::IndexPtr index = created.value();
+            RequireExpectedBuildMemoryProfile(index);
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+            const auto steady = index->EstimateMemory(17);
+            REQUIRE(index->EstimateBuildMemory(0) > 0);
+            const auto peak = index->EstimateBuildMemory(17);
+            REQUIRE(peak >= steady);
+#endif
+            BuildMemoryData data(17, 16);
+            auto built = index->Build(data.dataset);
+            REQUIRE(built.has_value());
+            REQUIRE(built.value().empty());
+            REQUIRE(index->GetNumElements() == 17);
+        }
+    }
+}
+
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+TEST_CASE("HGraph build memory covers every advertised dense metric",
+          "[ut][hgraph][estimate_build_memory]") {
+    BlockSizeLimitGuard blocks(uint64_t{1} << 18);
+    for (auto metric : {vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE}) {
+        for (const auto* quantizer : {"fp32", "sq8", "sq8_uniform"}) {
+            RunBuildMemoryCell(quantizer, 16, 8, false, 17, 17, false, metric);
+        }
+    }
+}
+
+#endif  // HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+
+TEST_CASE("HGraph one bounded worker keeps parallel error semantics including T zero",
+          "[ut][hgraph][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    for (uint64_t threads : {uint64_t{0}, uint64_t{1}}) {
+        std::array<uint64_t, 7> attempts{};
+        Access::WorkContext context;
+        context.row_count = attempts.size();
+        context.row_state = &attempts;
+        context.row_function = [](void* opaque, uint64_t row) {
+            auto& visited = *static_cast<std::array<uint64_t, 7>*>(opaque);
+            ++visited[row];
+            if (row == 0) {
+                throw ControlledRowFailure(0);
+            }
+        };
+        auto pool =
+            std::make_shared<vsag::SafeThreadPool>(std::make_shared<vsag::DefaultThreadPool>(8));
+        bool caught = false;
+        try {
+            Access::RunWorkers(*pool, threads, context);
+        } catch (const ControlledRowFailure& error) {
+            REQUIRE(error.row == 0);
+            caught = true;
+        }
+        REQUIRE(caught);
+        for (auto visits : attempts) {
+            REQUIRE(visits == 1);
+        }
+    }
+    auto observing = std::make_shared<GatedBuildPool>();
+    vsag::SafeThreadPool pool(observing);
+    Access::WorkContext empty;
+    REQUIRE_NOTHROW(Access::RunWorkers(pool, 4, empty));
+    REQUIRE(observing->Counts()[0] == 0);
+}
+
+TEST_CASE("HGraph new worker allocation types match the target source rules",
+          "[ut][hgraph][estimate_build_memory][build_dispatch]") {
+    using Access = vsag::HGraphMemoryEstimateTestAccess;
+    using BackendBind = decltype(std::bind(std::declval<std::function<void()>>()));
+    static_assert(sizeof(Access::Worker) == sizeof(void*));
+    static_assert(alignof(Access::Worker) == alignof(void*));
+    static_assert(std::is_nothrow_copy_constructible<Access::Worker>::value);
+#if HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE
+    const auto user_task = TestPackagedTaskRequest<Access::WorkerBind>();
+    const auto backend_task = TestPackagedTaskRequest<BackendBind>();
+    const auto total = TestSchedulerTaskRequest();
+    REQUIRE(user_task >= TestSharedRequest<std::packaged_task<void()>>());
+    REQUIRE(backend_task >= TestSharedRequest<std::packaged_task<void()>>());
+    REQUIRE(total >= user_task + backend_task);
+#else
+    auto index = MakeHGraphIndex(MakeBuildMemoryJson(), MakeCommonParam(16));
+    RequireExpectedBuildMemoryProfile(index);
+#endif
+}
+
+TEST_CASE("HGraph memory estimation checks integer arithmetic",
+          "[ut][hgraph][estimate_memory_arithmetic]") {
+    constexpr uint64_t normal_block_size = uint64_t{1} << 18;
+    BlockSizeLimitGuard normal_block_size_guard(normal_block_size);
+    auto common_param = MakeCommonParam(8);
+    auto index = MakeHGraphIndex(MakeFp32HGraphJson(false), common_param);
+
+    REQUIRE(index->GetNumElements() == 0);
+    REQUIRE(index->EstimateMemory(0) == 0);
+
+    const auto small_estimate = index->EstimateMemory(8192);
+    REQUIRE(small_estimate > 0);
+    {
+        BlockSizeLimitGuard block_size_guard(uint64_t{1} << 19);
+        const auto larger_block_estimate = index->EstimateMemory(8192);
+        REQUIRE(larger_block_estimate > small_estimate);
+        REQUIRE(larger_block_estimate - small_estimate == normal_block_size);
+    }
+    REQUIRE(index->EstimateMemory(uint64_t{1} << 32) > small_estimate);
+
+    uint64_t precision_estimate = 0;
+    {
+        BlockSizeLimitGuard block_size_guard(uint64_t{1} << 53);
+        precision_estimate = index->EstimateMemory(1);
+    }
+    {
+        BlockSizeLimitGuard block_size_guard((uint64_t{1} << 53) + 1);
+        const auto larger_block_estimate = index->EstimateMemory(1);
+        REQUIRE(larger_block_estimate > precision_estimate);
+        REQUIRE(larger_block_estimate - precision_estimate == 2);
+    }
+
+    const auto require_invalid_argument = [&index](uint64_t count) {
+        RequireEstimateError([&] { (void)index->EstimateMemory(count); },
+                             vsag::ErrorType::INVALID_ARGUMENT);
+    };
+
+    // FP32 code bytes overflow before block rounding.
+    require_invalid_argument(uint64_t{1} << 59);
+    {
+        // The FP32 byte product fits, but rounding it to two blocks does not.
+        BlockSizeLimitGuard block_size_guard((uint64_t{1} << 63) + 1);
+        require_invalid_argument((uint64_t{1} << 58) + 1024);
+    }
+    {
+        // Each store fits one block, but their accumulated sum does not.
+        BlockSizeLimitGuard block_size_guard(uint64_t{1} << 63);
+        require_invalid_argument(1);
+    }
+    REQUIRE(index->GetNumElements() == 0);
+}
 
 TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]") {
     auto common_param = MakeCommonParam(8);
