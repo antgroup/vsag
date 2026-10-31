@@ -17,12 +17,14 @@
 #include <cstdint>
 #include <functional>
 #include <istream>
+#include <limits>
 #include <stack>
 #include <vector>
 
 #include "../container_types.h"
 #include "impl/logger/logger.h"
 #include "type_helpers.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -40,32 +42,68 @@ public:
     ReadString(StreamReader& reader) {
         uint64_t length = 0;
         StreamReader::ReadObj(reader, length);
-        std::vector<char> buffer(length);
+        reader.ValidateCount(length, sizeof(char));
+        if (length > std::vector<char>().max_size() || length > std::string().max_size()) {
+            throw VsagException(ErrorType::INVALID_BINARY, "serialized string is too large");
+        }
+        std::vector<char> buffer(static_cast<std::size_t>(length));
         reader.Read(buffer.data(), length);
-        return {buffer.data(), length};
+        return {buffer.data(), static_cast<std::size_t>(length)};
     }
 
     template <typename T>
     static void
-    ReadVector(StreamReader& reader, std::vector<T>& val) {
+    ReadVector(StreamReader& reader,
+               std::vector<T>& val,
+               uint64_t max_count = std::numeric_limits<uint64_t>::max()) {
         uint64_t size;
         ReadObj(reader, size);
+        if (size > max_count || size > val.max_size()) {
+            throw VsagException(ErrorType::INVALID_BINARY, "serialized vector count is too large");
+        }
+        reader.ValidateCount(size, sizeof(T));
         val.resize(size);
         reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
     }
 
     template <typename T>
     static void
-    ReadVector(StreamReader& reader, vsag::Vector<T>& val) {
+    ReadVector(StreamReader& reader,
+               vsag::Vector<T>& val,
+               uint64_t max_count = std::numeric_limits<uint64_t>::max()) {
         uint64_t size;
         ReadObj(reader, size);
+        if (size > max_count || size > val.max_size()) {
+            throw VsagException(ErrorType::INVALID_BINARY, "serialized vector count is too large");
+        }
+        reader.ValidateCount(size, sizeof(T));
         val.resize(size);
         reader.Read(reinterpret_cast<char*>(val.data()), size * sizeof(T));
     }
 
 public:
+    // Validate serialized extents before allocation, rather than waiting for Read(). Readers
+    // without a known boundary retain their existing behavior; bounded wrappers override this.
+    virtual void
+    ValidateReadSize(uint64_t size) const {
+        (void)size;
+    }
+
+    void
+    ValidateCount(uint64_t count, uint64_t element_size) const {
+        if (element_size == 0 || count > std::numeric_limits<uint64_t>::max() / element_size) {
+            throw VsagException(ErrorType::INVALID_BINARY, "serialized count overflows byte size");
+        }
+        this->ValidateReadSize(count * element_size);
+    }
+
     virtual void
     Read(char* data, uint64_t size) = 0;
+
+    // Advance by consuming bytes with a fixed-size buffer by default. Wrappers that validate
+    // consumed bytes must not bypass Read(); random-access sources may optimize cursor advances.
+    virtual void
+    Skip(uint64_t size);
 
     virtual void
     Seek(uint64_t cursor) = 0;
@@ -118,6 +156,9 @@ SkipForward(StreamReader& reader, uint64_t size);
 class ReadFuncStreamReader : public StreamReader {
 public:
     void
+    Skip(uint64_t size) override;
+
+    void
     Read(char* data, uint64_t size) override;
 
     void
@@ -141,6 +182,9 @@ private:
 class IOStreamReader : public StreamReader {
 public:
     void
+    Skip(uint64_t size) override;
+
+    void
     Read(char* data, uint64_t size) override;
 
     void
@@ -156,6 +200,7 @@ public:
 
 private:
     std::istream& istream_;
+    uint64_t end_cursor_{0};
 };
 
 class ForwardStreamReader : public StreamReader {
@@ -182,6 +227,9 @@ private:
 
 class BufferStreamReader : public StreamReader {
 public:
+    void
+    Skip(uint64_t size) override;
+
     [[nodiscard]] uint64_t
     Length() override;
 
@@ -212,6 +260,9 @@ private:
 
 class SliceStreamReader : public StreamReader {
 public:
+    void
+    Skip(uint64_t size) override;
+
     [[nodiscard]] uint64_t
     Length() override;
 
@@ -238,6 +289,9 @@ private:
 
 class BoundedForwardReader : public StreamReader {
 public:
+    void
+    ValidateReadSize(uint64_t size) const override;
+
     void
     Read(char* data, uint64_t size) override;
 

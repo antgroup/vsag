@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <vector>
@@ -191,14 +193,34 @@ public:
                             "GraphInterface does not support DeserializeTail");
     }
 
+    // Bound implicit allocations by the enclosing index, rather than by the graph's own
+    // untrusted serialized capacity. Deserialization already requires exclusive access.
+    void
+    DeserializeBounded(StreamReader& reader, InnerIdType max_capacity) {
+        const auto previous_limit = deserialize_capacity_limit_;
+        deserialize_capacity_limit_ = max_capacity;
+        try {
+            this->Deserialize(reader);
+        } catch (...) {
+            deserialize_capacity_limit_ = previous_limit;
+            throw;
+        }
+        deserialize_capacity_limit_ = previous_limit;
+    }
+
     virtual void
     Deserialize(StreamReader& reader) {
         StreamReader::ReadObj(reader, this->total_count_);
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
+        if (this->uses_dense_capacity() && this->max_capacity_ > deserialize_capacity_limit_) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "serialized graph capacity exceeds index capacity");
+        }
         if (duplicate_tracker_) {
-            duplicate_tracker_->DeserializeBounded(reader, this->max_capacity_);
+            duplicate_tracker_->DeserializeBounded(
+                reader, std::min(this->max_capacity_, deserialize_capacity_limit_));
         }
     }
 
@@ -309,7 +331,17 @@ public:
     std::atomic<InnerIdType> total_count_{0};
     Allocator* allocator_{nullptr};
 
+private:
+    InnerIdType deserialize_capacity_limit_{std::numeric_limits<InnerIdType>::max()};
+
 protected:
+    // Dense graph storage can allocate from max_capacity_ without reading that many bytes.
+    // Sparse graphs instead allocate rows/neighbors from counts checked by the block reader.
+    [[nodiscard]] virtual bool
+    uses_dense_capacity() const {
+        return true;
+    }
+
     DuplicateTrackerPtr duplicate_tracker_{nullptr};
     std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
 };

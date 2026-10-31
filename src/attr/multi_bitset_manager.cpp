@@ -92,12 +92,15 @@ MultiBitsetManager::Serialize(StreamWriter& writer) {
 void
 MultiBitsetManager::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     StreamReader::ReadObj(reader, count_);
+    reader->ValidateCount(count_, sizeof(int16_t));
     this->bitset_map_.resize(count_, -1);
     for (uint64_t i = 0; i < count_; i++) {
         StreamReader::ReadObj(reader, this->bitset_map_[i]);
     }
     uint64_t size;
     StreamReader::ReadObj(reader, size);
+    // Both bitset implementations serialize at least a uint64_t count.
+    reader->ValidateCount(size, sizeof(uint64_t));
     bitsets_.resize(size, nullptr);
     for (uint64_t i = 0; i < size; i++) {
         bitsets_[i] = ComputableBitset::MakeRawInstance(bitset_type_, allocator_);
