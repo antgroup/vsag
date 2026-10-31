@@ -59,6 +59,7 @@
 
 #include "algorithm/simq/simq.h"
 #include "algorithm/simq/simq_utils.h"
+#include "allocator/memory_record_allocator.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
 #include "test_index.h"
@@ -1049,7 +1050,8 @@ TEST_CASE("SIMQ native quantized build lifecycle", "[simq][quantized_build]") {
 }
 
 TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serialization]") {
-    const auto mode = GENERATE("future", "count", "legacy");
+    const auto mode =
+        GENERATE("future", "count", "empty_v1", "metadata_v2", "populated_v2", "legacy");
     const std::string parameters =
         R"({"dtype":"float32","metric_type":"ip","dim":4,"index_param":{"base_io_type":"memory_io","build_thread_count":2,"init_cluster_ratio":1.0}})";
     auto index = Factory::CreateIndex("simq", parameters).value();
@@ -1072,6 +1074,7 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
     REQUIRE(footer != nullptr);
     auto metadata = footer->GetMetadata();
     auto info = metadata->Get("basic_info");
+    REQUIRE(info["simq_format_version"].GetInt() == 1);
     // init ratio1 with two distinct tokens produces two representatives,16B each.
     const uint64_t payload_end = bytes.size() - footer->Length();
     const uint64_t cache_bytes = 2 * 4 * sizeof(float);
@@ -1086,11 +1089,23 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
         stored = std::numeric_limits<uint64_t>::max();
         std::memcpy(bytes.data() + cache_offset, &stored, sizeof(stored));
     }
+    if (std::string(mode) == "empty_v1") {
+        stored = 0;
+        std::memcpy(bytes.data() + cache_offset, &stored, sizeof(stored));
+        bytes.erase(cache_offset + sizeof(stored), cache_bytes);
+    }
+    if (std::string(mode) == "populated_v2") {
+        info["simq_format_version"].SetInt(2);
+    }
+    if (std::string(mode) == "metadata_v2") {
+        info["simq_format_version"].SetInt(2);
+        info.Erase("representative_quantization_type");
+    }
     if (std::string(mode) == "legacy") {
         info["simq_format_version"].SetInt(0);
         bytes.resize(cache_offset);
     } else
-        bytes.resize(payload_end);
+        bytes.resize(payload_end - (std::string(mode) == "empty_v1" ? cache_bytes : 0));
     metadata->Set("basic_info", info);
     std::stringstream rebuilt;
     rebuilt.write(bytes.data(), bytes.size());
@@ -1339,4 +1354,84 @@ TEST_CASE("SIMQ multi-vector duplicate flags and aliases survive two serializati
         REQUIRE(std::abs(result.value()->GetDistances()[0]) < 1e-6F);
         index = restored.value();
     }
+}
+
+TEST_CASE("SIMQ immutable representative release and serving roundtrip", "[simq][immutable]") {
+    const auto quantization = GENERATE("fp32", "sq8_uniform");
+    const auto load_before_transition = GENERATE(false, true);
+    constexpr int64_t dim = 32;
+    constexpr int64_t docs = 32;
+    constexpr uint32_t tokens = 4;
+    std::mt19937 random(424242);
+    std::vector<float> values(docs * tokens * dim);
+    fill_normalized(values.data(), docs * tokens, dim, random);
+    std::vector<MultiVector> mvs(docs);
+    std::vector<int64_t> ids(docs);
+    for (int64_t i = 0; i < docs; ++i) {
+        mvs[i] = MultiVector{tokens, values.data() + i * tokens * dim};
+        ids[i] = 1000 + i;
+    }
+    auto data = Dataset::Make()
+                    ->NumElements(docs)
+                    ->Dim(dim)
+                    ->MultiVectorDim(dim)
+                    ->MultiVectors(mvs.data())
+                    ->Ids(ids.data())
+                    ->Owner(false);
+    auto query = Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->MultiVectorDim(dim)
+                     ->MultiVectors(mvs.data())
+                     ->Owner(false);
+    auto parameters = fmt::format(
+        R"({{"dtype":"float32","metric_type":"ip","dim":{},"index_param":{{"base_io_type":"memory_io","quantization_type":"{}","init_cluster_ratio":0.25,"build_thread_count":2}}}})",
+        dim,
+        quantization);
+    fixtures::MemoryRecordAllocator allocator;
+    auto index = Factory::CreateIndex("simq", parameters, &allocator).value();
+    REQUIRE(index->Build(data).has_value());
+    if (load_before_transition) {
+        auto serial = index->Serialize();
+        REQUIRE(serial.has_value());
+        auto loaded = Factory::CreateIndex("simq", parameters, &allocator).value();
+        REQUIRE(loaded->Deserialize(serial.value()).has_value());
+        index = loaded;
+    }
+    const auto search = R"({"simq":{"coarse_k":10000,"rerank_k":10000}})";
+    auto before = index->KnnSearch(query, 10, search);
+    REQUIRE(before.has_value());
+    auto check_result = [&](const std::shared_ptr<Index>& serving) {
+        auto after = serving->KnnSearch(query, 10, search);
+        REQUIRE(after.has_value());
+        REQUIRE(after.value()->GetDim() == before.value()->GetDim());
+        for (int64_t i = 0; i < before.value()->GetDim(); ++i) {
+            REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+            REQUIRE(after.value()->GetDistances()[i] == before.value()->GetDistances()[i]);
+        }
+        auto added = serving->Add(data);
+        REQUIRE_FALSE(added.has_value());
+        REQUIRE(added.error().type == ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    };
+    const auto memory_before = allocator.GetCurrentMemory();
+    REQUIRE(index->SetImmutable().has_value());
+    // The representative cache has 32 clusters; verify allocated bytes, not GetMemoryUsage.
+    const uint64_t representative_bytes = 32 * dim * (std::string(quantization) == "fp32" ? 4 : 1);
+    REQUIRE(allocator.GetCurrentMemory() + representative_bytes <= memory_before);
+    const auto memory_after = allocator.GetCurrentMemory();
+    REQUIRE(index->SetImmutable().has_value());
+    REQUIRE(allocator.GetCurrentMemory() == memory_after);
+    check_result(index);
+    std::stringstream serialized;
+    REQUIRE(index->Serialize(serialized).has_value());
+    IOStreamReader reader(serialized);
+    auto footer = Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    REQUIRE(footer->GetMetadata()->Get("basic_info")["simq_format_version"].GetInt() == 2);
+    serialized.seekg(0);
+    auto restored = Factory::CreateIndex("simq", parameters).value();
+    REQUIRE(restored->Deserialize(serialized).has_value());
+    check_result(restored);
+    REQUIRE(restored->SetImmutable().has_value());
+    check_result(restored);
 }
