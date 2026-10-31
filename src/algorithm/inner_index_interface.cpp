@@ -816,6 +816,8 @@ InnerIndexInterface::ExportIDs() const {
     // Complete potentially throwing metadata setup before sharing ownership of the IDs.
     result->NumElements(num_element)->Dim(1)->Owner(true, allocator_);
     result->Ids(labels.get());
+    // Ownership has already been transferred to the dataset.
+    // NOLINTNEXTLINE(bugprone-unused-return-value)
     static_cast<void>(labels.release());
     return result;
 }

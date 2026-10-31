@@ -25,7 +25,7 @@ permissions:
 jobs:
   build-test-install:
     name: Lite ${{ matrix.mode }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -37,10 +37,11 @@ jobs:
       - name: Install required tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-15 clang-tidy-15 ninja-build
+          sudo bash scripts/deps/install_toolchain_ubuntu.sh
+          sudo apt-get install -y clang-format-20 clang-tidy-20 ninja-build
       - name: Check all Lite formatting
         run: |
-          clang-format-15 --dry-run --Werror include/vsag/lite/*.h src/lite/*.h src/lite/*.cpp lite/example/*.cpp src/simd/kernels/rabitq_compute.h
+          clang-format-20 --dry-run --Werror include/vsag/lite/*.h src/lite/*.h src/lite/*.cpp lite/example/*.cpp src/simd/kernels/rabitq_compute.h
       - name: Configure
         shell: bash
         env:

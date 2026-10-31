@@ -667,46 +667,46 @@ private:
     };
 
     [[nodiscard]] FastScan32Layout
-    GetFastScan32Layout() const;
+    get_fast_scan32_layout() const;
 
     void
-    ComputeFastScan32ResidualFactors(const uint8_t* one_bit_code,
-                                     const float* transformed_centroid,
-                                     float& f_add,
-                                     float& f_scale) const;
+    compute_fast_scan32_residual_factors(const uint8_t* one_bit_code,
+                                         const float* transformed_centroid,
+                                         float& f_add,
+                                         float& f_scale) const;
 
     void
-    ComputeDistsWithFastScan32LookupSums(Computer<RaBitQuantizer>& computer,
-                                         const uint8_t* block,
-                                         const float* lookup_sums,
-                                         float query_sum,
-                                         float* dists,
-                                         bool* computed,
-                                         uint64_t valid_size,
-                                         float runtime_rabitq_error_rate,
-                                         float* lower_bounds,
-                                         float* filter_inner_products) const;
+    compute_dists_with_fast_scan32_lookup_sums(Computer<RaBitQuantizer>& computer,
+                                               const uint8_t* block,
+                                               const float* lookup_sums,
+                                               float query_sum,
+                                               float* dists,
+                                               bool* computed,
+                                               uint64_t valid_size,
+                                               float runtime_rabitq_error_rate,
+                                               float* lower_bounds,
+                                               float* filter_inner_products) const;
 
     bool
-    FinalizeSplitCodeDistanceWithFilterInnerProduct(Computer<RaBitQuantizer>& computer,
-                                                    const uint8_t* supplement_code,
-                                                    float filter_inner_product,
-                                                    float supplement_inner_product,
-                                                    float* dists) const;
+    finalize_split_code_distance_with_filter_inner_product(Computer<RaBitQuantizer>& computer,
+                                                           const uint8_t* supplement_code,
+                                                           float filter_inner_product,
+                                                           float supplement_inner_product,
+                                                           float* dists) const;
 
     bool
-    ComputeFusedExactCenteredFilterIP(const float* transformed_query,
-                                      const uint8_t* one_bit_code,
-                                      float* centered_filter_inner_product) const;
+    compute_fused_exact_centered_filter_ip(const float* transformed_query,
+                                           const uint8_t* one_bit_code,
+                                           float* centered_filter_inner_product) const;
 
     bool
-    EncodeOneInternal(const float* data,
-                      uint8_t* codes,
-                      uint8_t* scalar_code,
-                      uint64_t* code_sum) const;
+    encode_one_internal(const float* data,
+                        uint8_t* codes,
+                        uint8_t* scalar_code,
+                        uint64_t* code_sum) const;
 
     uint64_t
-    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const;
+    unpack_scalar_code(const uint8_t* codes, uint8_t* scalar_code) const;
 
     struct SplitLayout {
         bool is_split{false};
@@ -740,15 +740,15 @@ private:
     };
 
     void
-    RefreshSplitLayout(bool is_split);
+    refresh_split_layout(bool is_split);
 
     [[nodiscard]] norm_type
-    ComputeScalarCodeNorm(const uint8_t* scalar_codes,
-                          uint32_t code_bits,
-                          uint32_t dropped_bits) const;
+    compute_scalar_code_norm(const uint8_t* scalar_codes,
+                             uint32_t code_bits,
+                             uint32_t dropped_bits) const;
 
     [[nodiscard]] norm_type
-    ComputeFilterCodeNorm(const uint8_t* filter_code, uint32_t filter_bits) const;
+    compute_filter_code_norm(const uint8_t* filter_code, uint32_t filter_bits) const;
 
     // bit related
     uint64_t num_bits_per_dim_query_{32};

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 # disable checks for now. add a check to make clang-tidy exit with 0,
-#  because clang-tidy-15 not support the option "-allow-no-checks"
+#  because the historical clang-tidy version did not support the option "-allow-no-checks"
 Checks: >
     -*,
     readability-identifier-naming,
@@ -22,7 +22,6 @@ Checks: >
 
 HeaderFilterRegex: ''
 WarningsAsErrors: "*"
-AnalyzeTemporaryDtors: true
 
 CheckOptions:
   - { key: readability-identifier-naming.NamespaceCase,               value: lower_case }

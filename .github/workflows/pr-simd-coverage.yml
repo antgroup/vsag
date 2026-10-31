@@ -32,7 +32,7 @@ concurrency:
 jobs:
   simd-coverage:
     name: SIMD scoped coverage (not full project)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
       image: vsaglib/vsag:ci-x86-openblas

@@ -200,7 +200,8 @@ public:
         return *this;
     }
 
-    [[nodiscard]] explicit operator bool() const {
+    [[nodiscard]] explicit
+    operator bool() const {
         return data_ != nullptr;
     }
 

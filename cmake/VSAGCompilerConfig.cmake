@@ -83,12 +83,8 @@ elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     vsag_add_cxx_compile_flag (-stdlib=libstdc++)
 endif ()
 
-set (CMAKE_CXX_STANDARD 17)
-if (NOT APPLE
-    AND CMAKE_CXX_COMPILER_ID MATCHES "Clang"
-    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 17)
-    set (CMAKE_CXX_STANDARD 20)
-endif ()
+# Implementation targets inherit C++20. Public targets advertise only C++17.
+set (CMAKE_CXX_STANDARD 20)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 if (ENABLE_FRAME_POINTER)
@@ -102,10 +98,18 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     vsag_add_compile_flag (-O0)
 elseif (CMAKE_BUILD_TYPE STREQUAL "Release")
     vsag_add_compile_flag (-g)
-    if (APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
         vsag_add_compile_flag (-O3)
+        if (NOT APPLE)
+            # Clang 19+ deprecates -Ofast. Kernels still use infinity sentinels.
+            vsag_add_compile_flag (-ffast-math)
+            vsag_add_compile_flag (-fno-finite-math-only)
+        endif ()
     else ()
-        vsag_add_compile_flag (-Ofast)
+        # GCC must preserve the same NaN/infinity semantics as Clang.
+        vsag_add_compile_flag (-O3)
+        vsag_add_compile_flag (-ffast-math)
+        vsag_add_compile_flag (-fno-finite-math-only)
     endif ()
 elseif (CMAKE_BUILD_TYPE STREQUAL "Sanitize")
     vsag_add_compile_flag (-g)
@@ -169,6 +173,11 @@ if (ENABLE_ASAN)
 endif ()
 
 if (ENABLE_TSAN)
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+        AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 11)
+        # GCC cannot instrument fences. Keep that warning visible without rejecting the build.
+        vsag_add_cxx_compile_flag (-Wno-error=tsan)
+    endif ()
     set (CMAKE_REQUIRED_FLAGS "-fsanitize=thread")
     set (ENV{TSAN_OPTIONS} "report_atomic_races=0")
     foreach (flag -fsanitize=thread -g)

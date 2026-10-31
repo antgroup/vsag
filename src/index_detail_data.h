@@ -31,7 +31,7 @@ public:
     using DataScalarString = std::string;
     using DataScalarBool = bool;
 
-    explicit DetailDataImpl() : DetailData(){};
+    explicit DetailDataImpl() : DetailData() {};
 
     virtual ~DetailDataImpl() = default;
 

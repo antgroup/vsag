@@ -69,6 +69,7 @@ endif ()
 # and after `make install` from a downstream find_package() consumer
 # (INSTALL_INTERFACE).
 foreach (_lib vsag vsag_static)
+    target_compile_features (${_lib} INTERFACE cxx_std_17)
     target_include_directories (${_lib}
         PUBLIC
             $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

@@ -16,7 +16,7 @@ permissions:
 jobs:
   route:
     name: Select CI route
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     outputs:
       team: ${{ steps.route.outputs.team }}
       image: ${{ steps.route.outputs.image }}
@@ -107,7 +107,7 @@ jobs:
 
   routing-tests:
     name: CI Routing Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,7 +141,7 @@ jobs:
     name: PR CI Gate
     if: always()
     needs: [route, routing-tests, community, team]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       ROUTE_RESULT: ${{ needs.route.result }}
       POLICY_TEST_RESULT: ${{ needs.routing-tests.result }}

@@ -670,7 +670,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         ++rabitq_full_count;
         *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
         *full_distance_available = scorer.FullDirect(node, distance);
-        if (not *full_distance_available) {
+        if (not(*full_distance_available)) {
             return false;
         }
         *lower_bound = *distance;

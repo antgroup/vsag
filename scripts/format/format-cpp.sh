@@ -1,34 +1,34 @@
 #!/bin/bash
 
-# VSAG requires clang-format version 15 EXACTLY
+# VSAG requires clang-format version 20 EXACTLY
 # Higher or lower versions may produce different formatting
 
-REQUIRED_VERSION="15"
+REQUIRED_VERSION="20"
 
-# Find clang-format-15 binary: check the suffixed name first, then use
+# Find clang-format-20 binary: check the suffixed name first, then use
 # 'brew --prefix' for dynamic resolution on macOS, and finally fall back
 # to stable Homebrew opt symlinks.
 CLANG_FORMAT=""
-if command -v clang-format-15 &> /dev/null; then
-    CLANG_FORMAT="clang-format-15"
+if command -v clang-format-20 &> /dev/null; then
+    CLANG_FORMAT="clang-format-20"
 elif command -v brew &> /dev/null; then
-    BREW_LLVM_PREFIX=$(brew --prefix llvm@15 2>/dev/null || true)
+    BREW_LLVM_PREFIX=$(brew --prefix llvm@20 2>/dev/null || true)
     if [ -n "$BREW_LLVM_PREFIX" ] && [ -x "$BREW_LLVM_PREFIX/bin/clang-format" ]; then
         CLANG_FORMAT="$BREW_LLVM_PREFIX/bin/clang-format"
     fi
 fi
-if [ -z "$CLANG_FORMAT" ] && [ -x "/opt/homebrew/opt/llvm@15/bin/clang-format" ]; then
-    CLANG_FORMAT="/opt/homebrew/opt/llvm@15/bin/clang-format"
-elif [ -z "$CLANG_FORMAT" ] && [ -x "/usr/local/opt/llvm@15/bin/clang-format" ]; then
-    CLANG_FORMAT="/usr/local/opt/llvm@15/bin/clang-format"
+if [ -z "$CLANG_FORMAT" ] && [ -x "/opt/homebrew/opt/llvm@20/bin/clang-format" ]; then
+    CLANG_FORMAT="/opt/homebrew/opt/llvm@20/bin/clang-format"
+elif [ -z "$CLANG_FORMAT" ] && [ -x "/usr/local/opt/llvm@20/bin/clang-format" ]; then
+    CLANG_FORMAT="/usr/local/opt/llvm@20/bin/clang-format"
 elif [ -z "$CLANG_FORMAT" ] && command -v clang-format &> /dev/null; then
     CLANG_FORMAT="clang-format"
 fi
 
 if [ -z "$CLANG_FORMAT" ]; then
-    echo "ERROR: clang-format (version 15) is not installed!"
-    echo "  Linux:  sudo apt-get install clang-format-15"
-    echo "  macOS:  brew install llvm@15"
+    echo "ERROR: clang-format (version 20) is not installed!"
+    echo "  Linux:  sudo apt-get install clang-format-20"
+    echo "  macOS:  brew install llvm@20"
     exit 1
 fi
 

@@ -6,7 +6,7 @@ VSAG 以 [Google C++ 风格指南](https://google.github.io/styleguide/cppguide.
 - [`.clang-format`](https://github.com/antgroup/vsag/blob/main/.clang-format) 定义自动格式化规则；
 - [`.clang-tidy`](https://github.com/antgroup/vsag/blob/main/.clang-tidy) 定义命名与静态检查规则。
 
-VSAG 严格要求使用 **clang-format 15** 和 **clang-tidy 15**。其他版本可能产生不同的格式化
+VSAG 严格要求使用 **clang-format 20** 和 **clang-tidy 20**。其他版本可能产生不同的格式化
 结果或诊断信息，无法通过 CI。
 
 ## 代码组织
@@ -37,7 +37,7 @@ VSAG 严格要求使用 **clang-format 15** 和 **clang-tidy 15**。其他版本
 | 行尾注释 | 连续成组时自动对齐 |
 | 已有注释文本 | 不自动重新换行 |
 
-例如，clang-format 15 会将类声明格式化为：
+例如，clang-format 20 会将类声明格式化为：
 
 ```cpp
 class Example {
@@ -157,10 +157,10 @@ auto* handle = reinterpret_cast<Handle*>(raw_handle);
 
 ```bash
 # Ubuntu 或 Debian
-sudo apt-get install clang-format-15 clang-tidy-15 clang-tools-15
+sudo apt-get install clang-format-20 clang-tidy-20 clang-tools-20
 
 # macOS
-brew install llvm@15
+brew install llvm@20
 ```
 
 格式化所有项目 C++ 文件并检查修改：
@@ -192,8 +192,8 @@ make test
 
 ## 提交修改前
 
-- 使用 clang-format 15 格式化所有修改过的 C++ 文件；
-- 使用 clang-tidy 15 检查修改过的生产环境源码；
+- 使用 clang-format 20 格式化所有修改过的 C++ 文件；
+- 使用 clang-tidy 20 检查修改过的生产环境源码；
 - 确认命名符合上述规则，尤其是结构体使用 `CamelCase`；
 - 确保每个 `NOLINT` 都指定具体检查，并说明原因；
 - 新功能包含测试，bug 修复包含回归测试；

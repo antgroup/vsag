@@ -454,7 +454,7 @@ BuildMCICliques(const float* vectors,
             if (clique.empty()) {
                 continue;
             }
-            result.push_back(Vector<InnerIdType>(allocator));
+            result.emplace_back(allocator);
             result.back().assign(clique.begin(), clique.end());
         }
     }

@@ -20,6 +20,7 @@
 #define TL_EXPECTED_VERSION_MINOR 1
 #define TL_EXPECTED_VERSION_PATCH 0
 
+#include <cstdint>
 #include <exception>
 #include <functional>
 #include <type_traits>

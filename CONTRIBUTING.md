@@ -84,12 +84,12 @@ And we made the following changes based on the guide:
 
 ### Format code
 
-**Important**: VSAG requires **clang-format version 15 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
+**Important**: VSAG requires **clang-format version 20 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
 
-Install clang-format-15:
+Install clang-format-20:
 ```shell
 # Ubuntu/Debian
-$ sudo apt-get install clang-format-15
+$ sudo apt-get install clang-format-20
 ```
 
 To format the code:
@@ -97,16 +97,16 @@ To format the code:
 $ make fmt
 ```
 
-The format script will automatically verify you're using clang-format-15 and will fail if a different version is detected.
+The format script will automatically verify you're using clang-format-20 and will fail if a different version is detected.
 
 ### Run clang-tidy
 
-**Important**: VSAG requires **clang-tidy version 15 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
+**Important**: VSAG requires **clang-tidy version 20 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
 
-Install clang-tidy-15:
+Install clang-tidy-20:
 ```shell
 # Ubuntu/Debian
-$ sudo apt-get install clang-tidy-15
+$ sudo apt-get install clang-tidy-20
 ```
 
 To run lint checks:
@@ -123,7 +123,7 @@ To apply clang-tidy fixes in place:
 $ make fix-lint
 ```
 
-The lint wrapper will automatically verify you're using clang-tidy-15 and will fail if a different version is detected.
+The lint wrapper will automatically verify you're using clang-tidy-20 and will fail if a different version is detected.
 
 ## Run tests with code coverage
 

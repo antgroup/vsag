@@ -92,7 +92,7 @@ main(int argc, char** argv) {
             not remove.has_value()) { /* remove returns an error */
             std::cerr << "delete vector failed: " << remove.error().message << std::endl;
             exit(-1);
-        } else if (not *remove) { /* id not exists, should NOT happend in this example */
+        } else if (not(*remove)) { /* id not exists, should NOT happend in this example */
             std::cerr << "example error" << std::endl;
             exit(-1);
         } else { /* delete vector success */

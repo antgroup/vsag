@@ -455,11 +455,11 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertIn("module.validate_plan(plan)", step(TEAM, "Verify complete test results"))
         self.assertNotIn("example_shard", TEAM)
         self.assertIn('Lint changed sources', TEAM)
-        self.assertIn('clang-tidy-15', step(TEAM, 'Lint changed sources'))
+        self.assertIn('clang-tidy-20', step(TEAM, 'Lint changed sources'))
 
     def test_summary_downloads_only_small_result_artifacts(self):
         summary = job(TEAM, 'summary')
-        self.assertIn('runs-on: ubuntu-22.04', summary)
+        self.assertIn('runs-on: ubuntu-24.04', summary)
         self.assertIn('team-plan-', summary)
         self.assertIn('pattern: team-results-', summary)
         self.assertNotIn('team-test-diagnostics-', summary)
@@ -475,7 +475,7 @@ class TeamWorkflowTest(unittest.TestCase):
 
     def test_hosted_checks_run_parallel_to_build_with_the_same_image_and_commit(self):
         checks = job(TEAM, 'checks')
-        self.assertIn('runs-on: ubuntu-22.04', checks)
+        self.assertIn('runs-on: ubuntu-24.04', checks)
         self.assertIn('needs: changes', checks)
         self.assertNotIn('needs: build', checks)
         self.assertIn("if: needs.changes.outputs.cpp == 'true'", checks)
@@ -485,7 +485,7 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertIn('permissions:\n      contents: read\n', checks)
         self.assertNotIn('secrets.', checks)
         self.assertNotIn('apt-get', checks)
-        self.assertIn('clang-format-15 --version', checks)
+        self.assertIn('clang-format-20 --version', checks)
         self.assertIn('= "$TEAM_TEST_SHA"', checks)
         body = step(TEAM, 'Format and helper checks')
         self.assertIn('./scripts/format/check_format.sh', body)

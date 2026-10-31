@@ -56,7 +56,7 @@ public:
     explicit SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit SIMQ(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param){};
+        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param) {};
 
     ~SIMQ() override;
 

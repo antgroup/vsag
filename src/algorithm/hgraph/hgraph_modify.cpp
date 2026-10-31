@@ -84,7 +84,8 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
                     throw;
                 }
                 // Deletion has already completed; compaction is best effort when memory is exhausted.
-            } catch (const std::bad_alloc&) {
+            } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+                // Cleanup must preserve the primary result or exception.
                 // SafeAllocator reports failed storage shrinking as std::bad_alloc.
             }
         }

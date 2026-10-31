@@ -92,7 +92,7 @@ Assisted-by: OpenCode:claude-opus-4.7
 ### 编码风格
 
 修改 C++ 代码前，请阅读 [C++ 编码指南](coding_style.md)。其中说明了 VSAG 要求的
-clang-format 15 和 clang-tidy 15 规则、命名约定、诊断抑制方式以及本地检查命令。
+clang-format 20 和 clang-tidy 20 规则、命名约定、诊断抑制方式以及本地检查命令。
 
 ### 本地测试
 

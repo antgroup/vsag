@@ -172,6 +172,8 @@ for (let i = 0; i < 10; i++) {
 
 ### Integrate with CMake
 
+Installed public headers and APIs support C++17 clients. Full VSAG builds its CPU implementation as C++20; development and CI use GCC 13 and Clang 20. The existing source compiler baseline (GCC 9.4.0+ / Clang 13.0.0+) is retained and checked separately. CUDA, Node.js bindings, and standalone Lite remain C++17. Match the package’s `_GLIBCXX_USE_CXX11_ABI` setting when compiling a Linux client.
+
 If you have already installed vsag (e.g. `cmake --install build-release` or via a distribution package), the recommended path is to use the shipped CMake package config and the imported `vsag::vsag` target:
 
 ```cmake
@@ -179,7 +181,7 @@ If you have already installed vsag (e.g. `cmake --install build-release` or via 
 cmake_minimum_required (VERSION 3.18)
 project (myproject CXX)
 
-set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package (vsag CONFIG REQUIRED)
@@ -197,7 +199,7 @@ Alternatively, to fetch and build vsag from source as part of your project:
 cmake_minimum_required (VERSION 3.18)
 project (myproject CXX)
 
-set (CMAKE_CXX_STANDARD 11)
+set (CMAKE_CXX_STANDARD 17)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include (FetchContent)

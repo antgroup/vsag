@@ -92,7 +92,7 @@ get_total_physical_memory(uint64_t& memory_bytes) {
     memory_bytes = value;
     return true;
 #elif defined(__linux__)
-    struct sysinfo memory_info {};
+    struct sysinfo memory_info{};
     if (sysinfo(&memory_info) != 0 or memory_info.totalram == 0 or memory_info.mem_unit == 0) {
         return false;
     }

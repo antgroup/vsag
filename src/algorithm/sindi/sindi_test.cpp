@@ -338,7 +338,8 @@ TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
             request.params_str_ = parameters;
             request.enable_filter_ = true;
             request.filter_ = filter;
-            request.expected_labels_ = {2};
+            // Avoid GCC 13's -O2/ASan stringop-overread false positive for assignment of {2}.
+            request.expected_labels_.push_back(2);
             return index.SearchWithRequest(request);
         }
         if (search_mode == SearchMode::RANGE_SEARCH) {

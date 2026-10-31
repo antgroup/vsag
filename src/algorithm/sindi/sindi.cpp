@@ -2204,7 +2204,8 @@ SINDI::GetSparseVectorByInnerId(InnerIdType inner_id,
                    "immutable SINDI runtime does not support GetSparseVectorByInnerId");
 
     if (use_reorder_) {
-        return rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
+        rerank_flat_->GetSparseVectorByInnerId(inner_id, data, specified_allocator);
+        return;
     }
 
     term_datacell_->GetSparseVector(inner_id, data, specified_allocator);

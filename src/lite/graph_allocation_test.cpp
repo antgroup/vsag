@@ -18,9 +18,12 @@ static uint64_t allocated_bytes = 0;
 static uint64_t largest_allocation = 0;
 void*
 operator new(std::size_t n) {
-    if (remaining >= 0 && remaining-- == 0) {
+    if (remaining == 0) {
         remaining = -1;
         throw std::bad_alloc();
+    }
+    if (remaining > 0) {
+        --remaining;
     }
     if (void* p = std::malloc(n != 0U ? n : 1)) {
         if (measure_allocations) {

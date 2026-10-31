@@ -61,7 +61,7 @@ public:
 
 public:
     virtual void
-    Record(void* input = nullptr){};
+    Record(void* input = nullptr) {};
 
 public:
     std::string name_{};

@@ -629,4 +629,4 @@ public:
     GetSourceID() const = 0;
 };
 
-};  // namespace vsag
+}  // namespace vsag

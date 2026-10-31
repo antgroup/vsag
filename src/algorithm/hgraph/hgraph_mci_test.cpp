@@ -836,7 +836,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         return result.value();
     };
     verify(index, false);
-    REQUIRE(index->Remove({ids[0]}).value() == 1);
+    REQUIRE(index->Remove(ids[0]).value() == 1);
     verify(index, true);
     REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     auto before = verify(index, false);
@@ -852,7 +852,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
         REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
     }
-    REQUIRE(restored.value()->Remove({ids[0]}).value() == 1);
+    REQUIRE(restored.value()->Remove(ids[0]).value() == 1);
     verify(restored.value(), true);
 
     auto concurrent_queries = std::async(std::launch::async, [&]() {
@@ -885,7 +885,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
     });
     // Cross the 100-mutation boundary while queries run.
     for (uint64_t i = 0; i < 60; ++i) {
-        REQUIRE(index->Remove({ids[0]}).value() == 1);
+        REQUIRE(index->Remove(ids[0]).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     }
     const auto concurrent_error = concurrent_queries.get();
@@ -944,7 +944,7 @@ TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][h
     // The ascending brute-force scan has already accepted the first ID when it pauses.
     // Deletion completes before the pending query resumes, even if its initial filter was null.
     const auto status = reached.wait_for(std::chrono::seconds(10));
-    auto removed = index->Remove({ids[0]});
+    auto removed = index->Remove(ids[0]);
     resume.set_value();
     auto result = search.get();
     REQUIRE(status == std::future_status::ready);
@@ -1005,7 +1005,7 @@ TEST_CASE("MCI restored tombstoned padding label permits batch KNN", "[ut][hgrap
     const auto params = json.Dump();
     auto index = vsag::Factory::CreateIndex("hgraph", params).value();
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::MARK_REMOVE).value() == 1);
     auto binary = index->Serialize();
     REQUIRE(binary.has_value());
     auto restored = vsag::Factory::CreateIndex("hgraph", params).value();
@@ -1130,7 +1130,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     REQUIRE(index->GetNumElements() == 44);
     REQUIRE(index->GetNumberRemoved() == 1);
     verify();
-    REQUIRE(index->Remove({ids[2]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+    REQUIRE(index->Remove(ids[2], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
     verify();
     REQUIRE(index->Add(dataset(46, 2)).has_value());
     active.push_back(ids[46]);
@@ -1141,7 +1141,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     stats = vsag::JsonType::Parse(index->GetStats());
     REQUIRE(stats["mci_total_nodes"].GetInt() == 0);
     REQUIRE(stats["mci_inactive_node_count"].GetInt() == 0);
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
     REQUIRE(index->Add(dataset(0, total)).has_value());
     active = ids;
     verify();
@@ -1170,7 +1170,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
         return true;
     });
     for (uint64_t i = 0; i < 8; ++i) {
-        REQUIRE(index->Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         REQUIRE(index->Add(dataset(0, 1)).has_value());
     }
     REQUIRE(concurrent_search.get());
@@ -1256,7 +1256,7 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
 
     SECTION("Entry point replacement skips soft-deleted nodes") {
         REQUIRE(index->Remove({100, 101}).value() == 2);
-        REQUIRE(index->Remove({100}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(100, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         auto result = index->KnnSearch(make_dataset(ids, vectors, 2, 1, 2),
                                        1,
                                        R"({"hgraph":{"ef_search":64,"use_mci":false}})");
@@ -1266,10 +1266,10 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
     }
 
     SECTION("Moving an old tombstone cannot hide the readded live label") {
-        REQUIRE(index->Remove({104}).value() == 1);
+        REQUIRE(index->Remove(104).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 4, 1, 2)).has_value());
         for (auto label : {100, 105, 101}) {
-            REQUIRE(index->Remove({label}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+            REQUIRE(index->Remove(label, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         }
         REQUIRE(index->GetNumElements() == 3);
         REQUIRE(index->GetNumberRemoved() == 1);
@@ -1974,7 +1974,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_base_clique_count"].GetInt() ==
             static_cast<int64_t>(cliques.size()));
     if (scenario == "marked") {
-        REQUIRE(index->Remove({ids[total - 1]}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[total - 1], vsag::RemoveMode::MARK_REMOVE).value() == 1);
     }
     REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
     const auto stats = vsag::JsonType::Parse(index->GetStats());
@@ -3689,7 +3689,7 @@ TEST_CASE("HGraph MCI bitmap remains equivalent after removal readdition and rel
     };
     verify(true, false);  // Warm the identity-mapping cache before changing labels.
     const auto mode = GENERATE(vsag::RemoveMode::MARK_REMOVE, vsag::RemoveMode::FORCE_REMOVE);
-    REQUIRE(index->Remove({0}, mode).value() == 1);
+    REQUIRE(index->Remove(0, mode).value() == 1);
     const bool identity_after_remove = mode == vsag::RemoveMode::MARK_REMOVE;
     verify(identity_after_remove, true);
     reload();

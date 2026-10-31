@@ -156,7 +156,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn('python3 scripts/collect_build_metrics.py', build)
         self.assertNotIn('--clear-ccache', build)
         self.assertIn('ccache --print-stats', build)
-        self.assertIn('clang-tidy-15', step(team, 'Lint changed sources'))
+        self.assertIn('clang-tidy-20', step(team, 'Lint changed sources'))
 
     def test_security_and_isolation(self):
         self.assertIn('permissions:\n  contents: read\n', BENCH)
@@ -164,7 +164,7 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn('pull_request:', BENCH)
         self.assertNotIn('pull_request_target', BENCH)
         self.assertIn("cron: '23 3 * * 1'", BENCH)
-        self.assertIn('runs-on: ubuntu-22.04', BENCH)
+        self.assertIn('runs-on: ubuntu-24.04', BENCH)
         self.assertIn('timeout-minutes: 180', BENCH)
         self.assertIn('group: build-performance-', BENCH)
         self.assertIn('persist-credentials: false', BENCH)

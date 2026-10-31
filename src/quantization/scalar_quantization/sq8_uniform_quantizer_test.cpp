@@ -84,7 +84,7 @@ test_unaligned_sq8_uniform_codes() {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 7;
     SQ8UniformQuantizer<metric> quantizer(dim, allocator.get());
-    const std::array<float, dim* 2> training = {
+    const std::array<float, dim * 2> training = {
         -1.0F, -0.5F, 0.0F, 0.5F, 1.0F, 1.5F, 2.0F, 2.0F, 1.5F, 1.0F, 0.5F, 0.0F, -0.5F, -1.0F};
     REQUIRE(quantizer.Train(training.data(), 2));
 

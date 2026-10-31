@@ -92,6 +92,8 @@ checked_lazy_hgraph_param(const ParamPtr& param) {
 const LazyHGraphParameterPtr&
 checked_lazy_hgraph_param(const LazyHGraphParameterPtr& param) {
     CHECK_ARGUMENT(param != nullptr, "lazy_hgraph parameter must be LazyHGraphParameter");
+    // Constructor callers pass an owned parameter lvalue and consume this reference immediately.
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return param;
 }
 

@@ -63,4 +63,4 @@ public:
     IteratorContext* iter_ctx{nullptr};
 };
 
-};  // namespace vsag
+}  // namespace vsag

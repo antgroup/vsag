@@ -200,7 +200,7 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
 }
 
 void
-SparseGraphDataCell::Resize(InnerIdType new_size){};
+SparseGraphDataCell::Resize(InnerIdType new_size) {};
 
 bool
 SparseGraphDataCell::CheckIdExists(InnerIdType id) const {

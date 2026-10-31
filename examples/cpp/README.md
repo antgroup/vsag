@@ -6,7 +6,7 @@ one, read it top-to-bottom, then adapt it to your data.
 
 ## Prerequisites
 
-- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 15 are
+- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 20 are
   required only for development, not for running these examples).
 - CMake 3.18+.
 - The build prerequisites listed in

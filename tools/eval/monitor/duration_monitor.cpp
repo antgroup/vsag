@@ -37,7 +37,7 @@ DurationMonitor::Start() {
 void
 DurationMonitor::Stop() {
     auto end_time = Clock::now();
-    struct rusage end_usage {};
+    struct rusage end_usage{};
     getrusage(RUSAGE_SELF, &end_usage);
     this->duration_ = std::chrono::duration<double>(end_time - cur_time_).count();
     this->user_cpu_duration_ =

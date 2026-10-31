@@ -34,7 +34,7 @@ workflows:
 jobs:
   pull-request-check:
     machine:
-      image: ubuntu-2204:2025.09.1
+      image: ubuntu-2404:current
     resource_class: large
     steps:
       - checkout
@@ -44,8 +44,9 @@ jobs:
       - run:
           name: prepare_env_and_create_swap_file
           command: |
+            sudo bash scripts/deps/install_toolchain_ubuntu.sh
             sudo apt update
-            sudo apt install -y gfortran python3-dev libomp-15-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
+            sudo apt install -y gfortran python3-dev libomp-20-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
             sudo apt-get install -y libopenblas-dev liblapacke-dev
             sudo dd if=/dev/zero of=.swapfile bs=2M count=2048
             sudo chmod 600 .swapfile
@@ -66,7 +67,7 @@ jobs:
 
   main-branch-check:
     machine:
-      image: ubuntu-2204:2025.09.1
+      image: ubuntu-2404:current
     resource_class: large
     steps:
       - checkout
@@ -76,8 +77,9 @@ jobs:
       - run:
           name: prepare_env_and_create_swap_file
           command: |
+            sudo bash scripts/deps/install_toolchain_ubuntu.sh
             sudo apt update
-            sudo apt install -y gfortran python3-dev libomp-15-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
+            sudo apt install -y gfortran python3-dev libomp-20-dev gcc make cmake g++ lcov libaio-dev libcurl4-openssl-dev ninja-build 
             sudo apt-get install -y libopenblas-dev liblapacke-dev
             sudo dd if=/dev/zero of=.swapfile bs=2M count=2048
             sudo chmod 600 .swapfile

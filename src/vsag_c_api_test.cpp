@@ -131,7 +131,7 @@ TEST_CASE("vsag_c_api basic test", "[vsag_c_api][ut]") {
 
         using SizeFuncType = SizeType (*)();
         SizeFuncType size_func = []() {
-            struct stat st {};
+            struct stat st{};
             stat(path.data(), &st);
             return static_cast<SizeType>(st.st_size);
         };
@@ -671,7 +671,7 @@ TEST_CASE("vsag_c_api serialize and update edge paths", "[vsag_c_api][ut]") {
 
     using SizeFuncType = SizeType (*)();
     SizeFuncType size_func = []() -> SizeType {
-        struct stat st {};
+        struct stat st{};
         REQUIRE(stat(deserialize_read_func_path.data(), &st) == 0);
         return static_cast<SizeType>(st.st_size);
     };

@@ -37,7 +37,7 @@ public:
     explicit SINDIV2(const SINDIV2ParameterPtr& param, const IndexCommonParam& common_param);
 
     SINDIV2(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SINDIV2(std::dynamic_pointer_cast<SINDIV2Parameter>(param), common_param){};
+        : SINDIV2(std::dynamic_pointer_cast<SINDIV2Parameter>(param), common_param) {};
 
     ~SINDIV2() override = default;
 

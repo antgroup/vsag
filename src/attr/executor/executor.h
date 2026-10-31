@@ -48,7 +48,7 @@ public:
     };
 
     virtual void
-    Init(){};
+    Init() {};
 
     virtual Filter*
     Run(BucketIdType bucket_id) = 0;

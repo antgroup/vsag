@@ -471,7 +471,7 @@ run_local_ccr_mce(const Vector<InnerIdType>& local_nodes,
             return false;
         }
 
-        saved_cliques.push_back(Vector<uint64_t>(allocator));
+        saved_cliques.emplace_back(allocator);
         auto& saved = saved_cliques.back();
         saved.reserve(current.size());
         for (auto node : current) {
@@ -1199,7 +1199,7 @@ HGraph::build_mci_clique_index(const void* vectors) {
         if (clique.empty()) {
             return;
         }
-        cliques.push_back(Vector<InnerIdType>(this->allocator_));
+        cliques.emplace_back(this->allocator_);
         cliques.back().assign(clique.begin(), clique.end());
     };
 

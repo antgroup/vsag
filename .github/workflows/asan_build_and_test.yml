@@ -9,7 +9,7 @@ on:
 jobs:
   build_asan_x86:
     name: Asan Build X86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -47,7 +47,7 @@ jobs:
 
   build_asan_aarch64:
     name: Asan Build Aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
       volumes:
@@ -125,7 +125,7 @@ jobs:
   test_asan_x86:
     name: Test X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -166,7 +166,7 @@ jobs:
   test_asan_aarch64:
     name: Test Aarch64
     needs: build_asan_aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
         test_type: [ unittests, functests ]
@@ -246,7 +246,7 @@ jobs:
   test_example_x86:
     name: Test Example X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -280,7 +280,7 @@ jobs:
   test_example_aarch64:
     name: Test Example Aarch64
     needs: build_asan_aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
       volumes:
@@ -319,7 +319,7 @@ jobs:
   clean_up:
     name: Clean Up
     needs: [ test_asan_x86, test_asan_aarch64, test_asan_macos_arm64 ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up

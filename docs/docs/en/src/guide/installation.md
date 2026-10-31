@@ -5,8 +5,8 @@ package (`vsag`).
 
 ## Using Docker (Recommended for Development)
 
-The official development image includes the full toolchain (GCC 9.4+, CMake 3.18+,
-`clang-format`/`clang-tidy` 15, HDF5, etc.):
+The official development image includes the full toolchain (GCC 13, CMake 3.18+,
+`clang-format`/`clang-tidy` 20, HDF5, etc.):
 
 ```bash
 docker pull vsaglib/vsag:ubuntu
@@ -20,7 +20,7 @@ docker run -it --rm -v $(pwd):/work -w /work vsaglib/vsag:ubuntu bash
 - **Operating System**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
 - **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
-- **clang-format / clang-tidy**: exactly version **15** (enforced by `make fmt` / `make lint`)
+- **clang-format / clang-tidy**: exactly version **20** (enforced by `make fmt` / `make lint`)
 
 ### Build
 
@@ -76,3 +76,7 @@ If you build through the project Makefile, the corresponding environment variabl
 `VSAG_ENABLE_INTEL_MKL=ON`, `VSAG_ENABLE_LIBAIO=ON`, `VSAG_ENABLE_TOOLS=ON`, and
 `VSAG_ENABLE_EXAMPLES=ON`. `ENABLE_LIBURING` is currently a direct CMake option; configure it
 with `cmake -S . -B build-release -DENABLE_LIBURING=ON`.
+
+## C++ client compatibility
+
+Full VSAG source builds use C++20 internally; installed public headers and APIs support C++17 clients. CUDA, Node.js bindings and standalone Lite remain C++17. The Ubuntu installer requires Ubuntu 24.04+ for GCC 13 and LLVM 20. Older distributions require a manually prepared toolchain. Prebuilt packages retain their existing glibc baselines; match `_GLIBCXX_USE_CXX11_ABI` to the selected package.

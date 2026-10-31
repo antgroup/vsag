@@ -39,7 +39,8 @@ public:
         if (reusable_) {
             try {
                 pool_->ReturnOne(context_);
-            } catch (...) {
+            } catch (...) {  // NOLINT(bugprone-empty-catch)
+                // Cleanup must preserve the primary result or exception.
             }
         }
     }
