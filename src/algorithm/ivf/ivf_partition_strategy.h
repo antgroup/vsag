@@ -71,9 +71,9 @@ public:
 
     /// Buckets of the vectors written by a Build into an empty index. A strategy that
     /// balances its buckets overrides this; by default every vector goes to its
-    /// nearest buckets, exactly as Add does. `trained_on_datas` tells that the same
-    /// Build has just trained the strategy, which may then reuse what it learned
-    /// about the training vectors.
+    /// nearest buckets, exactly as Add does. `trained_on_datas` tells that the same Build
+    /// has just trained the strategy on exactly these vectors, without drawing a sample,
+    /// so it may reuse what it learned about them.
     virtual Vector<BucketIdType>
     ClassifyDatasForBuild(const void* datas,
                           int64_t count,

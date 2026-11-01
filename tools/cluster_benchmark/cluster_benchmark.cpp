@@ -30,6 +30,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <random>
@@ -568,6 +569,19 @@ main(int argc, char** argv) {
         return 2;
     }
 
+    // Checked before any of them sizes a dataset or divides.
+    for (const char* name : {"--count",
+                             "--dim",
+                             "--clusters",
+                             "--iterations",
+                             "--threads",
+                             "--candidates",
+                             "--queries"}) {
+        if (parser.get<int>(name) <= 0) {
+            std::cerr << name << " must be positive\n";
+            return 2;
+        }
+    }
     const auto count = static_cast<uint64_t>(parser.get<int>("--count"));
     const auto dim = static_cast<uint64_t>(parser.get<int>("--dim"));
     const auto k = static_cast<uint64_t>(parser.get<int>("--clusters"));
@@ -592,7 +606,14 @@ main(int argc, char** argv) {
         std::vector<int> scans;
         std::stringstream scan_list(parser.get<std::string>("--scan"));
         for (std::string item; std::getline(scan_list, item, ',');) {
-            scans.push_back(std::stoi(item));
+            char* end = nullptr;
+            const int64_t scan = std::strtoll(item.c_str(), &end, 10);
+            if (item.empty() or *end != '\0' or scan <= 0 or
+                scan > std::numeric_limits<int>::max()) {
+                std::cerr << "--scan takes positive integers, not '" << item << "'\n";
+                return 2;
+            }
+            scans.push_back(static_cast<int>(scan));
         }
         try {
             return run_ivf(dataset,
@@ -641,7 +662,7 @@ main(int argc, char** argv) {
 
     std::vector<Report> reports;
     for (const auto& vectors : inputs) {
-        if (k == 0 or k > vectors.count) {
+        if (k > vectors.count) {
             std::cerr << "k must be in [1, " << vectors.count << "]\n";
             return 2;
         }

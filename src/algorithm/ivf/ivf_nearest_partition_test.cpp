@@ -897,6 +897,35 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
         REQUIRE(two[2 * i + 1] != two[2 * i]);
     }
 
+    // More copies than buckets: the copies left without a bucket are marked invalid, as
+    // ClassifyDatas marks them, and never name bucket 0.
+    constexpr BucketIdType too_many = bucket_count + 7;
+    auto over = partition.ClassifyDatasForBuild(vec.data(), data_count, too_many, false);
+    REQUIRE(over.size() == data_count * too_many);
+    for (int64_t i = 0; i < data_count; ++i) {
+        const auto* row = over.data() + i * too_many;
+        REQUIRE(row[0] == buckets[i]);
+        std::vector<BucketIdType> valid;
+        for (BucketIdType j = 0; j < too_many; ++j) {
+            if (row[j] != static_cast<BucketIdType>(-1)) {
+                valid.push_back(row[j]);
+            }
+        }
+        REQUIRE(valid.size() == bucket_count);
+        std::sort(valid.begin(), valid.end());
+        REQUIRE(std::adjacent_find(valid.begin(), valid.end()) == valid.end());
+    }
+
+    // A Build into the trained partition may bring fewer vectors than buckets: every
+    // vector then gets a bucket of its own.
+    constexpr int64_t few = 9;
+    const float* distinct_rows = vec.data() + (data_count / 2) * dim;
+    auto own = partition.ClassifyDatasForBuild(distinct_rows, few, 1, false);
+    REQUIRE(own.size() == few);
+    std::vector<BucketIdType> sorted_own(own.begin(), own.end());
+    std::sort(sorted_own.begin(), sorted_own.end());
+    REQUIRE(std::adjacent_find(sorted_own.begin(), sorted_own.end()) == sorted_own.end());
+
     // Vectors added later are routed to their nearest bucket.
     auto routed = partition.ClassifyDatas(vec.data(), data_count, 1, nullptr);
     REQUIRE(routed.size() == data_count);

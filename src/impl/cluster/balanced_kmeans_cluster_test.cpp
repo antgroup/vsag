@@ -182,6 +182,55 @@ optimal_assignment_cost(const std::function<double(uint64_t, uint64_t)>& cost,
     return min_cost_matching(matrix);
 }
 
+/// The cost Assign minimizes under `metric`, computed directly.
+std::function<double(uint64_t, uint64_t)>
+direct_cost(vsag::BalancedAssignMetric metric,
+            const std::vector<float>& datas,
+            const std::vector<float>& centroids,
+            uint64_t dim) {
+    return [metric, &datas, &centroids, dim](uint64_t row, uint64_t cluster) -> double {
+        const float* x = datas.data() + row * dim;
+        const float* c = centroids.data() + cluster * dim;
+        if (metric == vsag::BalancedAssignMetric::L2SQR) {
+            return vsag::FP32ComputeL2Sqr(x, c, dim);
+        }
+        const double dot = vsag::FP32ComputeIP(x, c, dim);
+        if (metric == vsag::BalancedAssignMetric::INNER_PRODUCT) {
+            return 1.0 - dot;
+        }
+        return 1.0 - dot / std::sqrt(static_cast<double>(vsag::FP32ComputeIP(x, x, dim)));
+    };
+}
+
+/// Unit-length rows, as IVF keeps its cosine centroids.
+void
+normalize_rows(std::vector<float>& rows, uint64_t dim) {
+    for (uint64_t row = 0; row < rows.size() / dim; ++row) {
+        float* x = rows.data() + row * dim;
+        const float norm = std::sqrt(vsag::FP32ComputeIP(x, x, dim));
+        for (uint64_t d = 0; d < dim; ++d) {
+            x[d] /= norm;
+        }
+    }
+}
+
+/// How far above the optimum an auction may stop: count * epsilon, and epsilon is
+/// 1e-4 of a cost gap that cannot exceed the range of all costs.
+double
+auction_tolerance(const std::function<double(uint64_t, uint64_t)>& cost,
+                  uint64_t count,
+                  uint64_t k) {
+    double lowest = std::numeric_limits<double>::max();
+    double highest = std::numeric_limits<double>::lowest();
+    for (uint64_t row = 0; row < count; ++row) {
+        for (uint64_t j = 0; j < k; ++j) {
+            lowest = std::min(lowest, cost(row, j));
+            highest = std::max(highest, cost(row, j));
+        }
+    }
+    return 1e-4 * static_cast<double>(count) * (highest - lowest) + 1e-6;
+}
+
 template <typename Func>
 void
 require_invalid_argument(Func&& func) {
@@ -358,26 +407,9 @@ TEST_CASE("BalancedKMeans assignment is optimal for its centroids", "[ut][Balanc
                                  vsag::BalancedAssignMetric::INNER_PRODUCT,
                                  vsag::BalancedAssignMetric::COSINE);
     if (metric == vsag::BalancedAssignMetric::COSINE) {
-        for (uint64_t j = 0; j < k; ++j) {
-            float* c = centroids.data() + j * dim;
-            const float norm = std::sqrt(vsag::FP32ComputeIP(c, c, dim));
-            for (uint64_t d = 0; d < dim; ++d) {
-                c[d] /= norm;
-            }
-        }
+        normalize_rows(centroids, dim);
     }
-    auto cost = [&](uint64_t row, uint64_t cluster) -> double {
-        const float* x = datas.data() + row * dim;
-        const float* c = centroids.data() + cluster * dim;
-        if (metric == vsag::BalancedAssignMetric::L2SQR) {
-            return vsag::FP32ComputeL2Sqr(x, c, dim);
-        }
-        const double dot = vsag::FP32ComputeIP(x, c, dim);
-        if (metric == vsag::BalancedAssignMetric::INNER_PRODUCT) {
-            return 1.0 - dot;
-        }
-        return 1.0 - dot / std::sqrt(static_cast<double>(vsag::FP32ComputeIP(x, x, dim)));
-    };
+    const auto cost = direct_cost(metric, datas, centroids, dim);
 
     vsag::BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator.get());
     double mean_cost = 0.0;
@@ -390,20 +422,88 @@ TEST_CASE("BalancedKMeans assignment is optimal for its centroids", "[ut][Balanc
     }
     REQUIRE(std::abs(total / static_cast<double>(count) - mean_cost) < 1e-9);
     const double optimum = optimal_assignment_cost(cost, count, sizes);
-    // The auction stops within count * epsilon of the optimum, and epsilon is 1e-4 of
-    // a cost gap that cannot exceed the range of all costs.
-    double lowest = std::numeric_limits<double>::max();
-    double highest = std::numeric_limits<double>::lowest();
+    REQUIRE(total >= optimum - 1e-6);
+    REQUIRE(total <= optimum + auction_tolerance(cost, count, k));
+    REQUIRE(cluster.stats_.fallback_assignments == 0);
+}
+
+TEST_CASE("BalancedKMeans Assign gives each vector its own cluster when k > count",
+          "[ut][BalancedKMeansCluster]") {
+    const auto [count, k, candidates, seed] =
+        GENERATE(table<uint64_t, uint32_t, uint32_t, uint32_t>({
+            {5, 8, 16, 11},   // every cluster is a candidate
+            {12, 16, 2, 12},  // two candidates: bounds and re-scoring decide
+            {20, 21, 3, 13},  // one cluster stays empty
+            {1, 4, 1, 14},    // a single vector
+        }));
+    constexpr uint64_t dim = 4;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto datas = uniform_vectors(count, dim, seed);
+    auto centroids = uniform_vectors(k, dim, seed + 100);
+    const auto metric = GENERATE(vsag::BalancedAssignMetric::L2SQR,
+                                 vsag::BalancedAssignMetric::INNER_PRODUCT,
+                                 vsag::BalancedAssignMetric::COSINE);
+    if (metric == vsag::BalancedAssignMetric::COSINE) {
+        normalize_rows(centroids, dim);
+    }
+    const auto cost = direct_cost(metric, datas, centroids, dim);
+
+    vsag::BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator.get());
+    auto labels = cluster.Assign(centroids.data(), k, datas.data(), count, metric, candidates);
+    REQUIRE(labels.size() == count);
+    // floor(count / k) == 0 and ceil(count / k) == 1: no two vectors share a cluster.
+    std::vector<uint64_t> sizes(k, 0);
+    double total = 0.0;
+    for (uint64_t row = 0; row < count; ++row) {
+        const auto label = static_cast<uint64_t>(labels[row]);
+        REQUIRE(label < k);
+        ++sizes[label];
+        REQUIRE(sizes[label] == 1);
+        total += cost(row, label);
+    }
+    // The optimum of the rectangular problem: k - count more rows that cost nothing
+    // anywhere make it a square one.
+    std::vector<std::vector<double>> matrix(k, std::vector<double>(k, 0.0));
     for (uint64_t row = 0; row < count; ++row) {
         for (uint64_t j = 0; j < k; ++j) {
-            lowest = std::min(lowest, cost(row, j));
-            highest = std::max(highest, cost(row, j));
+            matrix[row][j] = cost(row, j);
         }
     }
-    const double tolerance = 1e-4 * static_cast<double>(count) * (highest - lowest) + 1e-6;
+    const double optimum = min_cost_matching(matrix);
     REQUIRE(total >= optimum - 1e-6);
-    REQUIRE(total <= optimum + tolerance);
+    REQUIRE(total <= optimum + auction_tolerance(cost, count, k));
     REQUIRE(cluster.stats_.fallback_assignments == 0);
+}
+
+TEST_CASE("BalancedKMeans Assign settles ties that float rounding splits",
+          "[ut][BalancedKMeansCluster]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    // A vector remembers one cluster and bounds the other, equal one. Before costs were
+    // rounded ahead of ranking, the remembered cost rounded up above that bound, every
+    // vector asked to be scored again until the budget ran out, and none ever bid.
+    SECTION("equal inner-product costs") {
+        // 1 - 1.0 * 0.2 is 0.79999999702 in double and 0.80000001192 in float.
+        const std::vector<float> centroids{0.2F, 0.2F};
+        const std::vector<float> datas{1.0F, 1.0F};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        auto labels = cluster.Assign(
+            centroids.data(), 2, datas.data(), 2, vsag::BalancedAssignMetric::INNER_PRODUCT, 1);
+        require_balanced(labels, 2, 2);
+        REQUIRE(cluster.stats_.fallback_assignments == 0);
+    }
+
+    SECTION("equal squared-L2 costs") {
+        // 0.09 + 0.01 - 2 * 0.03, each term a float, is 0.0400000019 in double and
+        // 0.0400000028 in float: the same split between a vector's two equal clusters.
+        const std::vector<float> centroids{0.1F, 0.1F};
+        const std::vector<float> datas{0.3F, 0.3F};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        auto labels = cluster.Assign(
+            centroids.data(), 2, datas.data(), 2, vsag::BalancedAssignMetric::L2SQR, 1);
+        require_balanced(labels, 2, 2);
+        REQUIRE(cluster.stats_.fallback_assignments == 0);
+    }
 }
 
 TEST_CASE("BalancedKMeans loss does not increase between iterations",
@@ -675,6 +775,20 @@ TEST_CASE("BalancedKMeans rejects invalid arguments", "[ut][BalancedKMeansCluste
     with_nan[13] = std::numeric_limits<float>::quiet_NaN();
     require_invalid_argument([&] { cluster.Run(4, with_nan.data(), count, options); });
 
+    // Finite values whose squared norms overflow float distances are refused, for the
+    // vectors and for the centroids; large values below the limit are accepted.
+    vsag::BalancedKMeansCluster one_dim(1, allocator.get());
+    const std::vector<float> huge{1e20F, 1e20F};
+    const std::vector<float> zeros{0.0F, 0.0F};
+    const auto l2_one = vsag::BalancedAssignMetric::L2SQR;
+    require_invalid_argument([&] { one_dim.Run(1, huge.data(), 2, options); });
+    require_invalid_argument([&] { one_dim.Assign(zeros.data(), 2, huge.data(), 2, l2_one); });
+    require_invalid_argument([&] { one_dim.Assign(huge.data(), 2, zeros.data(), 2, l2_one); });
+    require_invalid_argument(
+        [&] { one_dim.Assign(zeros.data(), 2, huge.data(), 2, l2_one, 16, nullptr, 0.0); });
+    const std::vector<float> large{1e18F, -1e18F};
+    require_balanced(one_dim.Assign(zeros.data(), 2, large.data(), 2, l2_one), 2, 2);
+
     vsag::BalancedKMeansCluster no_dim(0, allocator.get());
     require_invalid_argument([&] { no_dim.Run(4, datas.data(), count, options); });
     require_invalid_argument([&] { vsag::BalancedKMeansCluster missing_allocator(4, nullptr); });
@@ -683,7 +797,7 @@ TEST_CASE("BalancedKMeans rejects invalid arguments", "[ut][BalancedKMeansCluste
     require_invalid_argument([&] { cluster.Assign(nullptr, 4, datas.data(), count, l2); });
     require_invalid_argument([&] { cluster.Assign(datas.data(), 0, datas.data(), count, l2); });
     require_invalid_argument([&] { cluster.Assign(datas.data(), 4, nullptr, count, l2); });
-    require_invalid_argument([&] { cluster.Assign(datas.data(), 4, datas.data(), 3, l2); });
+    require_invalid_argument([&] { cluster.Assign(datas.data(), 4, datas.data(), 0, l2); });
     require_invalid_argument([&] { cluster.Assign(datas.data(), 4, datas.data(), count, l2, 0); });
     require_invalid_argument(
         [&] { cluster.Assign(datas.data(), 4, datas.data(), count, l2, 16, nullptr, -1.0); });
