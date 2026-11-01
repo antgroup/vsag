@@ -51,6 +51,14 @@ public:
                            const InnerSearchParam& param,
                            QueryContext* ctx) override;
 
+    /// With ivf_train_type "balanced_kmeans", every bucket receives floor(count / k) or
+    /// ceil(count / k) of the vectors; otherwise the same as ClassifyDatas.
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType buckets_per_data,
+                          bool trained_on_datas) override;
+
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
 
@@ -109,6 +117,13 @@ private:
     // Copied common param, used to lazily create the routing HGraph when a route-graph-layout
     // index is deserialized by a reader configured with use_route_graph=false.
     IndexCommonParam common_param_;
+
+    // The balanced trainer's assignment of its training vectors under L2, kept only until
+    // the Build that trained it places its vectors. `train_vectors_` identifies those
+    // vectors and is compared, never read.
+    Vector<BucketIdType> train_labels_{allocator_};
+    const float* train_vectors_{nullptr};
+    int64_t train_count_{0};
 };
 
 }  // namespace vsag

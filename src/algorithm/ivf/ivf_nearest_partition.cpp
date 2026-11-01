@@ -31,6 +31,7 @@
 #include "gpu/gpu_plan.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "impl/cluster/balanced_kmeans_cluster.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "query_context.h"
@@ -122,6 +123,28 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 ivf_partition_strategy_param_->GetKMeansIterCount());
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        // The same squared-L2 objective, sample, iteration count and (below) cosine
+        // normalization as the kmeans trainer; only the cluster sizes are constrained.
+        BalancedKMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
+        BalancedKMeansOptions options;
+        options.iterations = ivf_partition_strategy_param_->GetKMeansIterCount();
+        auto labels = cls.Run(static_cast<uint32_t>(this->bucket_count_),
+                              dataset->GetFloat32Vectors(),
+                              static_cast<uint64_t>(dataset->GetNumElements()),
+                              options);
+        memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+        // Under L2 the trainer's last assignment is a balanced assignment to these very
+        // centroids (they are its means), so a Build of the training vectors reuses it.
+        this->train_labels_.clear();
+        this->train_vectors_ = nullptr;
+        this->train_count_ = 0;
+        if (metric_type_ == MetricType::METRIC_TYPE_L2SQR) {
+            this->train_labels_.assign(labels.begin(), labels.end());
+            this->train_vectors_ = dataset->GetFloat32Vectors();
+            this->train_count_ = dataset->GetNumElements();
+        }
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
@@ -187,6 +210,73 @@ IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
     // shape, and the device would prepare the whole centroid set per query. The
     // routing statistics also come only from here.
     return classify_datas_on_host(datas, count, param.scan_bucket_size, ctx);
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
+                                           int64_t count,
+                                           BucketIdType buckets_per_data,
+                                           bool trained_on_datas) {
+    // The cached training assignment serves this call at most.
+    Vector<BucketIdType> trained(allocator_);
+    trained.swap(this->train_labels_);
+    const bool reuse = trained_on_datas and datas == this->train_vectors_ and
+                       count == this->train_count_ and
+                       trained.size() == static_cast<uint64_t>(count);
+    this->train_vectors_ = nullptr;
+    this->train_count_ = 0;
+    if (ivf_partition_strategy_param_->partition_train_type !=
+            IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
+        not this->is_trained_ or count <= 0 or buckets_per_data <= 0) {
+        return this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    }
+    // Scored with the routing key of the metric against the final centroids, which
+    // are unit length for cosine, so that a vector lands in the bucket a query near
+    // it is routed to whenever the capacities allow.
+    auto metric = BalancedAssignMetric::L2SQR;
+    if (metric_type_ == MetricType::METRIC_TYPE_IP) {
+        metric = BalancedAssignMetric::INNER_PRODUCT;
+    } else if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        metric = BalancedAssignMetric::COSINE;
+    }
+    Vector<BucketIdType> labels(allocator_);
+    if (reuse) {
+        labels.swap(trained);
+    } else {
+        const auto dim = static_cast<uint64_t>(this->dim_);
+        Vector<float> centroids(static_cast<uint64_t>(bucket_count_) * dim, allocator_);
+        Vector<float> centroid(dim, allocator_);
+        for (BucketIdType b = 0; b < bucket_count_; ++b) {
+            this->GetCentroid(b, centroid);
+            std::copy(centroid.begin(), centroid.end(), centroids.data() + b * dim);
+        }
+        BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator_, thread_pool_);
+        const auto assigned = cluster.Assign(centroids.data(),
+                                             static_cast<uint32_t>(bucket_count_),
+                                             static_cast<const float*>(datas),
+                                             static_cast<uint64_t>(count),
+                                             metric);
+        labels.assign(assigned.begin(), assigned.end());
+    }
+    if (buckets_per_data == 1) {
+        return labels;
+    }
+    // Further copies of a vector go to its nearest other buckets, as in Add; only the
+    // first copy of every vector is balanced.
+    const auto routed = this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    Vector<BucketIdType> result(static_cast<uint64_t>(count) * buckets_per_data, allocator_);
+    for (int64_t i = 0; i < count; ++i) {
+        auto* out = result.data() + i * buckets_per_data;
+        const auto* nearest = routed.data() + i * buckets_per_data;
+        out[0] = labels[i];
+        BucketIdType filled = 1;
+        for (BucketIdType j = 0; j < buckets_per_data and filled < buckets_per_data; ++j) {
+            if (nearest[j] != labels[i]) {
+                out[filled++] = nearest[j];
+            }
+        }
+    }
+    return result;
 }
 
 /// The build-time assignment, offloaded. Nothing means use the host path: the

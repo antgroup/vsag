@@ -138,9 +138,10 @@ IVF::Build(const DatasetPtr& base) {
         CHECK_ARGUMENT(this->total_elements_ == 0,
                        "graph bucket searcher requires a fresh Build with no prior data");
     }
+    const bool trains_now = not this->is_trained_;
     this->Train(base);
     // TODO(LHT): duplicate
-    auto result = this->add(base, true);
+    auto result = this->add(base, true, trains_now);
     if (graph_build_threshold_ > 0) {
         this->build_bucket_graphs();
     }
@@ -178,7 +179,7 @@ IVF::Add(const DatasetPtr& base) {
 }
 
 std::vector<int64_t>
-IVF::add(const DatasetPtr& base, bool try_optimized_build) {
+IVF::add(const DatasetPtr& base, bool try_optimized_build, bool trained_on_base) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -193,8 +194,17 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     const auto* attr_sets = base->GetAttributeSets();
     const auto* extra_info = base->GetExtraInfos();
     const auto extra_info_size = base->GetExtraInfoSize();
-    auto buckets =
-        partition_strategy_->ClassifyDatas(vectors, num_element, buckets_per_data_, nullptr);
+    bool fresh_build = false;
+    if (try_optimized_build) {
+        std::lock_guard lock(label_lookup_mutex_);
+        fresh_build = this->total_elements_ == 0;
+    }
+    // A Build into an empty index lets the partition place all vectors at once, which
+    // is when a balanced trainer can balance the buckets; Add routes every vector.
+    auto buckets = fresh_build ? partition_strategy_->ClassifyDatasForBuild(
+                                     vectors, num_element, buckets_per_data_, trained_on_base)
+                               : partition_strategy_->ClassifyDatas(
+                                     vectors, num_element, buckets_per_data_, nullptr);
 
     int64_t current_num;
     bool need_cal_memory_usage = false;

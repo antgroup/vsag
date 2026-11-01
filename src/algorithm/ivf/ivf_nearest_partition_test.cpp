@@ -822,3 +822,104 @@ TEST_CASE("IVF Nearest Partition GPU Build Serializes Unchanged", "[ut][IVFNeare
     gpu_param->gpu_min_work_threshold = 0;
     REQUIRE(to_string(*trained) == with_settings);
 }
+
+TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
+          "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 16;
+    constexpr BucketIdType bucket_count = 23;
+    constexpr int64_t data_count = 1000;  // 23 * 43 + 11
+    const auto metric = GENERATE(
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE);
+    const bool use_route_graph = GENERATE(true, false);
+    CAPTURE(static_cast<int>(metric), use_route_graph);
+
+    IndexCommonParam param;
+    param.dim_ = dim;
+    param.metric_ = metric;
+    param.allocator_ = allocator;
+    param.thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
+    auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+    strategy_param->partition_train_type = IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
+    strategy_param->use_route_graph = use_route_graph;
+    strategy_param->kmeans_iter_count = 8;
+    IVFNearestPartition partition(bucket_count, param, strategy_param);
+
+    // A third of the vectors are copies of one vector, which plain k-means keeps together.
+    auto vec = fixtures::generate_vectors(data_count, dim, false, 47);
+    for (int64_t i = 1; i < data_count / 3; ++i) {
+        std::copy_n(vec.data(), dim, vec.data() + i * dim);
+    }
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    partition.Train(dataset);
+    REQUIRE(partition.is_trained_);
+
+    if (metric == MetricType::METRIC_TYPE_COSINE) {
+        // Cosine centroids are normalized exactly as on the kmeans path.
+        Vector<float> centroid(dim, allocator.get());
+        for (BucketIdType b = 0; b < bucket_count; ++b) {
+            partition.GetCentroid(b, centroid);
+            REQUIRE(std::abs(FP32ComputeIP(centroid.data(), centroid.data(), dim) - 1.0F) < 1e-4F);
+        }
+    }
+
+    auto require_balanced = [&](const Vector<BucketIdType>& buckets) {
+        REQUIRE(buckets.size() == data_count);
+        std::vector<int64_t> sizes(bucket_count, 0);
+        for (const auto bucket : buckets) {
+            REQUIRE(bucket >= 0);
+            REQUIRE(bucket < bucket_count);
+            ++sizes[bucket];
+        }
+        int64_t larger = 0;
+        for (const auto size : sizes) {
+            REQUIRE((size == 43 or size == 44));
+            larger += size == 44 ? 1 : 0;
+        }
+        REQUIRE(larger == 11);
+    };
+
+    // The Build that trained on these vectors reuses the trainer's assignment (under
+    // L2) or scores them against the final centroids; both are balanced.
+    require_balanced(partition.ClassifyDatasForBuild(vec.data(), data_count, 1, true));
+
+    // Otherwise the vectors are assigned to the trained centroids afresh.
+    auto buckets = partition.ClassifyDatasForBuild(vec.data(), data_count, 1, false);
+    require_balanced(buckets);
+
+    // With two buckets per vector the first copies are the balanced ones and the second
+    // copies go to another bucket.
+    auto two = partition.ClassifyDatasForBuild(vec.data(), data_count, 2, false);
+    REQUIRE(two.size() == 2 * data_count);
+    for (int64_t i = 0; i < data_count; ++i) {
+        REQUIRE(two[2 * i] == buckets[i]);
+        REQUIRE(two[2 * i + 1] != two[2 * i]);
+    }
+
+    // Vectors added later are routed to their nearest bucket.
+    auto routed = partition.ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    REQUIRE(routed.size() == data_count);
+}
+
+TEST_CASE("IVF Nearest Partition kmeans Build buckets are routed as before",
+          "[ut][IVFNearestPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 16;
+    constexpr BucketIdType bucket_count = 10;
+    constexpr int64_t data_count = 500;
+    IndexCommonParam param;
+    param.dim_ = dim;
+    param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    param.allocator_ = allocator;
+    auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+    strategy_param->partition_train_type = GENERATE(IVFNearestPartitionTrainerType::KMeansTrainer,
+                                                    IVFNearestPartitionTrainerType::RandomTrainer);
+    IVFNearestPartition partition(bucket_count, param, strategy_param);
+    auto vec = fixtures::generate_vectors(data_count, dim, false, 53);
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    partition.Train(dataset);
+    REQUIRE(partition.ClassifyDatasForBuild(vec.data(), data_count, 1, true) ==
+            partition.ClassifyDatas(vec.data(), data_count, 1, nullptr));
+}
