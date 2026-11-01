@@ -4429,3 +4429,52 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF balanced_kmeans builds balanced buckets",
+                             "[ft][ivf][pr]") {
+    constexpr int64_t dim = 32;
+    constexpr int buckets_count = 37;
+    constexpr int64_t base_count = 1000;  // 37 * 27 + 1
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const std::string quantizer = GENERATE("fp32", "sq8");
+    // A sample smaller than the base makes the Build assign every vector to the trained
+    // centroids; the full sample lets it reuse the trainer's own assignment.
+    const int64_t sample_count = GENERATE(512, 1000);
+    CAPTURE(metric, quantizer, sample_count);
+
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        metric, dim, quantizer, buckets_count, "balanced_kmeans", false, 1, false, 1, sample_count);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    // Every bucket holds floor(n / k) or ceil(n / k) vectors.
+    auto stats = nlohmann::json::parse(index->GetStats());
+    REQUIRE(stats["bucket_count"].get<int64_t>() == buckets_count);
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == base_count / buckets_count);
+    REQUIRE(stats["bucket_num"]["max"].get<float>() == base_count / buckets_count + 1);
+
+    // Every vector is reachable: scanning all buckets matches a brute-force search.
+    const auto search_param = fmt::format(fixtures::search_param_tmp, buckets_count);
+    fixtures::IVFTestIndex::TestGeneral(
+        index, dataset, search_param, quantizer == "fp32" ? 0.99F : 0.9F);
+
+    // The trainer is recorded with the index and kept by a round trip.
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    auto restored_stats = nlohmann::json::parse(restored->GetStats());
+    REQUIRE(restored_stats["bucket_num"] == stats["bucket_num"]);
+}
+
+TEST_CASE("IVF rejects unknown trainers", "[ft][ivf][pr]") {
+    auto params = nlohmann::json::parse(fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "fp32", 8, "balanced_kmeans", false, 1, false, 1, 512));
+    params["index_param"]["ivf_train_type"] = "balanced";
+    auto result = vsag::Factory::CreateIndex(fixtures::IVFTestIndex::name, params.dump());
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result.error().message.find("balanced_kmeans") != std::string::npos);
+}
