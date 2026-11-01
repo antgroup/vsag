@@ -184,10 +184,18 @@ jobs:
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: test_aarch64-${{ github.run_id }}
           path: ./build
+      - name: Validate Test Artifact
+        run: |
+          if ! test -s ./build/tests/unittests || ! test -s ./build/tests/functests; then
+            echo "::error::Aarch64 test artifact is incomplete; expected tests/unittests and tests/functests"
+            df -h .
+            find ./build -maxdepth 3 -type f -printf '%P %s bytes\n' 2>/dev/null || true
+            exit 1
+          fi
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
@@ -297,10 +305,18 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: test_aarch64-${{ github.run_id }}
           path: ./build
+      - name: Validate Test Artifact
+        run: |
+          if ! test -s ./build/tests/unittests || ! test -s ./build/tests/functests; then
+            echo "::error::Aarch64 test artifact is incomplete; expected tests/unittests and tests/functests"
+            df -h .
+            find ./build -maxdepth 3 -type f -printf '%P %s bytes\n' 2>/dev/null || true
+            exit 1
+          fi
       - name: Do Test In example
         run: |
           cd ./build/examples/cpp
