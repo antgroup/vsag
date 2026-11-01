@@ -71,7 +71,9 @@ jobs:
   format:
     name: Format Check
     needs: changes
-    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
+    # Team checks run the same full-repository formatter for cpp changes.
+    # Python-only changes still need Community formatting.
+    if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -205,7 +207,7 @@ jobs:
   build-asan-macos-arm64:
     name: ASan Build macOS arm64
     needs: [changes, format]
-    if: needs.changes.outputs.cpp == 'true'
+    if: needs.changes.outputs.cpp == 'true' && !(github.event_name == 'pull_request' && github.base_ref == 'main')
     runs-on: macos-15
     steps:
       - name: Free Disk Space
@@ -231,8 +233,10 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
+    # Temporarily disable Python validation on main PRs until the Python rework lands.
+    # Restore PR validation here and in test-python-x86 after that work.
     needs: [changes, format]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
+    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
@@ -431,7 +435,7 @@ jobs:
   test-python-x86:
     name: Test Python X86
     needs: [changes, build-python-x86]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
+    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
     runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space

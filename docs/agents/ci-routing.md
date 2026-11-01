@@ -188,3 +188,32 @@ The image upgrade can land on main ahead of the C++20 migration. Copy the follow
 These changes build independently of the CMake, source, formatter configuration and release-package changes in the toolchain PR. The existing x86 MKL/OpenBLAS and aarch64 OpenBLAS Dockerfiles inherit the upgraded bases without edits. The manylinux `Dockerfile.dist_*` changes belong to the toolchain/release migration and are not required for this image-only PR.
 
 The image workflow watches both the Dockerfiles and the shared installer. PR events build the complete image chains without pushing; merging the image PR triggers the existing push workflow to publish the tags. After publication, obtain the digest for `ghcr.io/antgroup/vsag:ci-x86-openblas`, verify GCC/G++ 13 and clang-format/clang-tidy 20 in that image, and commit that exact digest to `.github/ci-routing.json` on canonical main. Preserve the existing routing switch unless intentionally changing routing policy. The toolchain PR then needs a new run or **Re-run all jobs** to read the new main configuration and use the new image; rerunning only failed jobs can retain the old image selection.
+
+## Main-target PR check scope
+
+PRs targeting `main` keep the Linux ASan tests, examples, compatibility, changed-source
+lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alternative
+Linux execution paths, not different correctness requirements.
+
+- Python wheel build/test is temporarily disabled for all main-target PRs, including
+  Python changes, while the Python rework is in progress. The existing main-push
+  and manual Python checks remain available. Restore PR validation in both
+  `build-python-x86` and `test-python-x86` after the rework is ready; until then,
+  Python integration regressions may first be detected after merge.
+- macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
+  manual workflows remain unchanged. Platform-specific and race regressions can thus
+  be discovered after merge rather than before it.
+- Community formatting is skipped only when Team is selected and its identical C++
+  change filter selects the full-repository formatting check. Python-only changes
+  retain Community formatting. The final gate still requires the selected formatting
+  check. Version/manual Python builds retain their existing formatting dependency.
+- CircleCI retains a short classification step, then halts redundant tests for a
+  confirmed open main-target PR whose head matches the running commit. No credentials
+  are required. Missing metadata, stale commits, ambiguous target branches or API
+  failures conservatively retain the old build. Thus a lightweight CircleCI job may
+  remain visible; this is not disabling the integration or claiming tests executed.
+
+Version-branch PRs and manual PR-CI dispatch retain the previous scope. Main-push,
+nightly/daily and release workflows are not rescheduled or changed here. No required
+checks or runner deployment settings change. Regression coverage lives in
+`python3 -m unittest tests/scripts/test_dependency_workflows.py`.

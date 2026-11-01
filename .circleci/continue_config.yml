@@ -38,6 +38,9 @@ jobs:
     resource_class: large
     steps:
       - checkout
+      - run:
+          name: Skip redundant main-target PR tests
+          command: python3 scripts/ci/circleci_pr_scope.py
       - restore_cache:
           keys:
             - fork-cache-{{ checksum "CMakeLists.txt" }}-{{ checksum ".circleci/fresh_ci_cache.commit" }}

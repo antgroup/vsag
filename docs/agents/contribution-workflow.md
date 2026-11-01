@@ -27,6 +27,42 @@ last-reviewed: 2026-08-13
   explicitly requires it or the contributor has authorized it.
 - Keep changes scoped and reviewable.
 
+## Required validation before opening or updating a PR
+
+Reducing main-target PR CI does **not** waive contributor-side testing. Before
+opening a PR or pushing a substantive update, agents must run the applicable
+checks moved out of PR CI in a local development environment (an authorized
+remote development machine/container also counts). Do not use production CI
+runner pods as a development environment. Run against the final proposed source;
+repeat affected checks after subsequent changes.
+
+| Removed/reduced PR check | Required pre-submission validation |
+| --- | --- |
+| Python wheel build and tests | For Python/bindings, C++ library/public API, dependencies or packaging/build changes: build a fresh wheel with `make pyvsag PY_VERSION=3.10`, install that wheel in a clean Python 3.10 environment, and run `python -m pytest tests/python -v --tb=short`. Use the dependencies/environment from the maintained Python workflow; an already installed wheel is not validation of the changed source. |
+| TSan | For C++ library, tests or build/dependency changes: run `make tsan`, then the maintained TSan workflow's `Run TSAN tests` command, including `OPENBLAS_NUM_THREADS=1`, its suppression file and `./build/tests/functests "[concurrent]~[daily]"`. Use a separate checkout/build from ASan. A successful build alone is insufficient. |
+| macOS ASan | For C++ or shared build/dependency changes: on macOS arm64 run the maintained workflow's dependency setup and `CMAKE_GENERATOR=Ninja CMAKE_EXPORT_COMPILE_COMMANDS=ON make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3`. Linux compilation does not validate macOS. |
+| CircleCI Linux build/tests | For C++ library/tests or build/dependency changes: run `make test_parallel` with the dependency environment and build options of `.circleci/continue_config.yml`'s `pull-request-check`. Do not reproduce disposable CI swap-file or host-cleanup steps on a shared development host. |
+| Duplicate Community format | Run `./scripts/format/check_format.sh` before submission when code formatting is applicable, even when Team will check it again. |
+
+Pure documentation changes do not require C++ builds. CI/helper-only changes
+require the affected helper regression tests and workflow validation; if they
+also change compiler, dependency, test execution or packaging behavior, run the
+corresponding checks above. Explain applicability in the PR; do not silently
+classify risky changes as unrelated.
+
+Record the tested commit/source revision, platform/toolchain, exact commands and
+outcomes in the PR validation section. Keep full logs locally; do not expose
+private infrastructure paths or credentials. Missing macOS/Python/toolchain
+support is **not** a pass: explicitly report the unvalidated checks and obtain
+maintainer confirmation before submitting without them. Likewise report real
+failures and obtain confirmation for any exception; do not mask failures or
+substitute future main/daily checks for the required pre-submission validation.
+
+The main-target Python PR suspension is temporary; these contributor-side
+requirements apply during it. Restore automated Python PR checks after the
+Python rework is ready. See [CI routing](ci-routing.md#main-target-pr-check-scope)
+and [build/test guidance](build-and-test.md).
+
 ## Commit messages
 
 - Follow Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`,
