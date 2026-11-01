@@ -254,7 +254,8 @@ jobs:
           try:
               # These tools previously ran without a daily filter. Verify equivalence
               # before placing them in the shared non-daily Catch2 inventory.
-              for relative in ('tools/eval/eval_dataset_test', 'tools/autotune/autotune_test', 'tests/eval_monitor_test'):
+              for relative in ('tools/eval/eval_dataset_test', 'tools/autotune/autotune_test',
+                               'tools/profile_dataset/profile_dataset_test', 'tests/eval_monitor_test'):
                   binary = (pathlib.Path('build') / relative).resolve()
                   root = (pathlib.Path('ci-logs/tool-inventory') / relative).resolve()
                   default = module.listing(binary, '', 424242, root / 'default', 60, cancelled)
@@ -274,6 +275,7 @@ jobs:
             --build-root "$TEAM_ARTIFACTS/build" \
             --binary tests/unittests --binary tests/functests \
             --binary tools/eval/eval_dataset_test --binary tools/autotune/autotune_test \
+            --binary tools/profile_dataset/profile_dataset_test \
             --binary tests/eval_monitor_test --seed 424242 \
             --examples-directory examples/cpp \
             --context "$TEAM_ARTIFACTS/meta/context.json" \
