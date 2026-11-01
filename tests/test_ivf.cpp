@@ -4438,8 +4438,8 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     constexpr int64_t base_count = 1000;  // 37 * 27 + 1
     const std::string metric = GENERATE("l2", "ip", "cosine");
     const std::string quantizer = GENERATE("fp32", "sq8");
-    // A sample smaller than the base makes the Build assign every vector to the trained
-    // centroids; the full sample lets it reuse the trainer's own assignment.
+    // Trained on a sample or on the whole base; either way the Build assigns every
+    // vector to the trained centroids under exact sizes.
     const int64_t sample_count = GENERATE(512, 1000);
     CAPTURE(metric, quantizer, sample_count);
 

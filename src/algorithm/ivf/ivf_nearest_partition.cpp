@@ -129,17 +129,13 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         BalancedKMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
         BalancedKMeansOptions options;
         options.iterations = ivf_partition_strategy_param_->GetKMeansIterCount();
-        auto labels = cls.Run(static_cast<uint32_t>(this->bucket_count_),
-                              dataset->GetFloat32Vectors(),
-                              static_cast<uint64_t>(dataset->GetNumElements()),
-                              options);
+        // Only the centroids are kept. The trainer's last assignment produced them but
+        // is not one to them: a Build assigns afresh, as the residual codes do.
+        cls.Run(static_cast<uint32_t>(this->bucket_count_),
+                dataset->GetFloat32Vectors(),
+                static_cast<uint64_t>(dataset->GetNumElements()),
+                options);
         memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
-        // Under L2 the trainer's last assignment is a balanced assignment to these very
-        // centroids (they are its means), so a Build of the training vectors reuses it.
-        this->train_labels_.clear();
-        if (metric_type_ == MetricType::METRIC_TYPE_L2SQR) {
-            this->train_labels_.assign(labels.begin(), labels.end());
-        }
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
@@ -211,23 +207,15 @@ IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
 Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
                                            int64_t count,
-                                           BucketIdType buckets_per_data,
-                                           bool trained_on_datas) {
-    // The cached training assignment serves this call at most.
-    Vector<BucketIdType> trained(allocator_);
-    trained.swap(this->train_labels_);
-    const bool reuse = trained_on_datas and trained.size() == static_cast<uint64_t>(count);
+                                           BucketIdType buckets_per_data) {
     if (ivf_partition_strategy_param_->partition_train_type !=
             IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
         not this->is_trained_ or count <= 0 or buckets_per_data <= 0) {
         return this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
     }
-    Vector<BucketIdType> labels(allocator_);
-    if (reuse) {
-        labels.swap(trained);
-    } else {
-        labels = this->assign_balanced(datas, count);
-    }
+    // The same assignment ClassifyDatasForTrain gives the residual codes: one auction,
+    // deterministic, against the final centroids.
+    auto labels = this->assign_balanced(datas, count);
     if (buckets_per_data == 1) {
         return labels;
     }
