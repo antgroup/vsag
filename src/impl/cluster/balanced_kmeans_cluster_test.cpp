@@ -15,12 +15,19 @@
 #define VSAG_BALANCED_KMEANS_TEST_ACCESS
 #include "balanced_kmeans_cluster.h"
 
+#include <omp.h>
+
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <limits>
+#include <memory>
 #include <random>
+#include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <vector>
 
@@ -504,6 +511,116 @@ TEST_CASE("BalancedKMeans Assign settles ties that float rounding splits",
         require_balanced(labels, 2, 2);
         REQUIRE(cluster.stats_.fallback_assignments == 0);
     }
+}
+
+TEST_CASE("BalancedKMeans bids keep raising prices far above epsilon",
+          "[ut][BalancedKMeansCluster]") {
+    // Both vectors remember only the cluster at 0 and bound the other one by 1e16.
+    // The first bid lifts that price to about 1e16, where adding the initial epsilon
+    // of 0.25 is lost to rounding; such bids no longer raised the price, the two
+    // vectors evicted each other at one price, and the budget ran out.
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const std::vector<float> centroids{0.0F, 1e8F};
+    const std::vector<float> datas{0.0F, 0.0F};
+    vsag::BalancedKMeansCluster cluster(1, allocator.get());
+    auto labels =
+        cluster.Assign(centroids.data(), 2, datas.data(), 2, vsag::BalancedAssignMetric::L2SQR, 1);
+    require_balanced(labels, 2, 2);
+    REQUIRE(cluster.stats_.fallback_assignments == 0);
+}
+
+namespace {
+
+/// Accepts `accept` tasks, runs each on its own thread a little later, and refuses
+/// every task after them.
+class RejectingThreadPool : public vsag::ThreadPool {
+public:
+    explicit RejectingThreadPool(uint64_t accept) : accept_(accept) {
+    }
+
+    ~RejectingThreadPool() override {
+        for (auto& worker : workers_) {
+            worker.join();
+        }
+    }
+
+    RejectingThreadPool(const RejectingThreadPool&) = delete;
+    RejectingThreadPool&
+    operator=(const RejectingThreadPool&) = delete;
+    RejectingThreadPool(RejectingThreadPool&&) = delete;
+    RejectingThreadPool&
+    operator=(RejectingThreadPool&&) = delete;
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        if (workers_.size() == accept_) {
+            throw std::runtime_error("task queue is full");
+        }
+        auto done = std::make_shared<std::promise<void>>();
+        auto future = done->get_future();
+        workers_.emplace_back([task = std::move(task), done]() {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            task();
+            done->set_value();
+        });
+        return future;
+    }
+
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(std::uint64_t /*limit*/) override {
+    }
+
+    void
+    SetPoolSize(std::uint64_t /*limit*/) override {
+    }
+
+private:
+    const uint64_t accept_;
+    std::vector<std::thread> workers_;
+};
+
+}  // namespace
+
+TEST_CASE("BalancedKMeans waits for queued tasks when the pool refuses one",
+          "[ut][BalancedKMeansCluster]") {
+    // Scoring 1000 vectors queues 16 tasks; the third is refused. The two accepted
+    // ones still use the caller's buffers, so the error may only surface after them.
+    constexpr uint64_t dim = 4;
+    constexpr uint64_t count = 1000;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto datas = uniform_vectors(count, dim, 101);
+    auto centroids = uniform_vectors(8, dim, 103);
+    auto pool = std::make_shared<vsag::SafeThreadPool>(new RejectingThreadPool(2), true);
+    vsag::BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator.get(), pool);
+    REQUIRE_THROWS_AS(
+        cluster.Assign(centroids.data(), 8, datas.data(), count, vsag::BalancedAssignMetric::L2SQR),
+        std::runtime_error);
+}
+
+TEST_CASE("BalancedKMeans leaves the caller's OpenMP setting alone",
+          "[ut][BalancedKMeansCluster]") {
+    // With few clusters the centroid update is one task, which runs on the calling
+    // thread; its single-threaded BLAS setting must not outlive it.
+    constexpr uint64_t dim = 8;
+    constexpr uint64_t count = 400;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto datas = uniform_vectors(count, dim, 107);
+    const int saved = omp_get_max_threads();
+    omp_set_num_threads(3);
+    const int before = omp_get_max_threads();
+    vsag::BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator.get());
+    vsag::BalancedKMeansOptions options;
+    options.random_seed = 109;
+    options.iterations = 3;
+    auto labels = cluster.Run(4, datas.data(), count, options);
+    const int after = omp_get_max_threads();
+    omp_set_num_threads(saved);
+    require_balanced(labels, count, 4);
+    REQUIRE(after == before);
 }
 
 TEST_CASE("BalancedKMeans loss does not increase between iterations",
