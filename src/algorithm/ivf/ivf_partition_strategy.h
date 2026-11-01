@@ -69,6 +69,20 @@ public:
         return std::move(ClassifyDatas(datas, count, param.scan_bucket_size, ctx));
     }
 
+    /// Buckets of the vectors written by a Build into an empty index. A strategy that
+    /// balances its buckets overrides this; by default every vector goes to its
+    /// nearest buckets, exactly as Add does. `trained_on_datas` tells that the same
+    /// Build has just trained the strategy, which may then reuse what it learned
+    /// about the training vectors.
+    virtual Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType buckets_per_data,
+                          bool trained_on_datas) {
+        (void)trained_on_datas;
+        return ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    }
+
     virtual void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) = 0;
 

@@ -202,7 +202,7 @@ private:
     search_float_request(const SearchRequest& request, DataTypes query_type) const;
 
     std::vector<int64_t>
-    add(const DatasetPtr& base, bool try_optimized_build);
+    add(const DatasetPtr& base, bool try_optimized_build, bool trained_on_base = false);
 
     /**
      * @brief Parse the JSON search parameter string and populate an
