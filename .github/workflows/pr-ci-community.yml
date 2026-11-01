@@ -131,6 +131,7 @@ jobs:
           python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
           python3 -m unittest tests/scripts/test_collect_build_metrics.py
           python3 -m unittest tests/scripts/test_dependency_workflows.py
+          python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
           python3 -m unittest tests/scripts/test_toolchain_compatibility.py
       - name: Prepare Host
         run: |
