@@ -345,6 +345,10 @@ jobs:
     env:
       HOME: /tmp/ci-home
       LD_LIBRARY_PATH: /__ci/artifacts/build/src:/__ci/artifacts/build/tools/autotune
+      # Temporary: fake-stack checks make repeated graph-fixture shuffles very slow.
+      # TODO: remove after optimizing fixture preparation and validating UAR-on timings.
+      # Keep ASan/UBSan enabled; only stack-use-after-return detection is disabled.
+      ASAN_OPTIONS: detect_stack_use_after_return=0
     steps:
       - name: Prepare writable job home
         run: mkdir -p "$HOME"
