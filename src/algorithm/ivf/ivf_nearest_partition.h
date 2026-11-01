@@ -118,12 +118,10 @@ private:
     // index is deserialized by a reader configured with use_route_graph=false.
     IndexCommonParam common_param_;
 
-    // The balanced trainer's assignment of its training vectors under L2, kept only until
-    // the Build that trained it places its vectors. `train_vectors_` identifies those
-    // vectors and is compared, never read.
+    // The balanced trainer's assignment of its training vectors under L2, kept until the
+    // next ClassifyDatasForBuild, which reuses it when the Build trained on exactly the
+    // vectors it places.
     Vector<BucketIdType> train_labels_{allocator_};
-    const float* train_vectors_{nullptr};
-    int64_t train_count_{0};
 };
 
 }  // namespace vsag
