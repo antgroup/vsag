@@ -77,6 +77,10 @@ constexpr double LATER_BIDS_PER_VECTOR = 32.0;
 constexpr double LATER_RESCORES_PER_VECTOR = 8.0;
 
 constexpr double INF = std::numeric_limits<double>::infinity();
+/// Largest squared norm a vector or centroid may have. ||x - c||^2 is at most
+/// 2 ||x||^2 + 2 ||c||^2 and |<x, c>| at most ||x|| ||c||, so below this every cost,
+/// including the intermediate sums of the GEMM that computes it, is finite in float.
+constexpr double MAX_SQUARED_NORM = static_cast<double>(std::numeric_limits<float>::max()) / 4.0;
 
 /// Runs `func(task)` for every task on the pool and waits for all of them before
 /// rethrowing the first failure, so no task outlives the state it references. A
@@ -115,15 +119,25 @@ check_vectors(const float* datas,
     if (datas == nullptr) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, fmt::format("{} cannot be null", name));
     }
-    const auto values = count * static_cast<uint64_t>(dim);
-    constexpr uint64_t values_per_task = ROWS_PER_REDUCTION * 64;
-    const uint64_t task_count = (values + values_per_task - 1) / values_per_task;
+    const auto width = static_cast<uint64_t>(dim);
+    const uint64_t rows_per_task = std::max<uint64_t>(1, ROWS_PER_REDUCTION * 64 / width);
+    const uint64_t task_count = (count + rows_per_task - 1) / rows_per_task;
     std::atomic<bool> finite{true};
+    std::atomic<bool> bounded{true};
     parallel_for(pool, task_count, [&](uint64_t task) {
-        const uint64_t end = std::min(values, (task + 1) * values_per_task);
-        for (uint64_t i = task * values_per_task; i < end; ++i) {
-            if (not std::isfinite(datas[i])) {
-                finite.store(false, std::memory_order_relaxed);
+        const uint64_t end = std::min(count, (task + 1) * rows_per_task);
+        for (uint64_t row = task * rows_per_task; row < end; ++row) {
+            const float* x = datas + row * width;
+            double squared = 0.0;
+            for (uint64_t d = 0; d < width; ++d) {
+                if (not std::isfinite(x[d])) {
+                    finite.store(false, std::memory_order_relaxed);
+                    return;
+                }
+                squared += static_cast<double>(x[d]) * static_cast<double>(x[d]);
+            }
+            if (squared > MAX_SQUARED_NORM) {
+                bounded.store(false, std::memory_order_relaxed);
                 return;
             }
         }
@@ -131,6 +145,13 @@ check_vectors(const float* datas,
     if (not finite.load()) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("{} must contain only finite values", name));
+    }
+    if (not bounded.load()) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("{} must have squared norms of at most {}, or distances overflow float",
+                        name,
+                        MAX_SQUARED_NORM));
     }
 }
 
@@ -144,9 +165,6 @@ check_problem(uint32_t k, uint64_t count, int32_t dim, uint32_t candidate_count)
     }
     if (count == 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "count must be positive");
-    }
-    if (k > count) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "k cannot be larger than count");
     }
     // Vector ids are kept as 32-bit values next to every candidate.
     if (count > std::numeric_limits<uint32_t>::max()) {
@@ -237,7 +255,7 @@ struct RowLists {
     }
 
     void
-    Offer(uint64_t row, double net, double cost, uint64_t cluster) {
+    Offer(uint64_t row, double net, float cost, uint64_t cluster) {
         double* row_nets = nets.data() + row * keep;
         uint64_t& size = filled[row];
         if (size == keep and not(net < row_nets[keep - 1])) {
@@ -253,7 +271,7 @@ struct RowLists {
             --pos;
         }
         row_nets[pos] = net;
-        row_costs[pos] = static_cast<float>(cost);
+        row_costs[pos] = cost;
         row_ids[pos] = static_cast<uint32_t>(cluster);
         if (size < keep) {
             ++size;
@@ -302,9 +320,14 @@ score_columns(const CostModel& model,
             const float* dots = tile.data() + r * cols;
             for (uint64_t j = 0; j < cols; ++j) {
                 const uint64_t cluster = begin + j;
-                const double cost = bias[r] + static_cast<double>(model.centroid_bias[cluster]) -
-                                    scale[r] * static_cast<double>(dots[j]);
-                lists.Offer(r, cost + prices[cluster], cost, cluster);
+                // Rounded to the float the table keeps before it is ranked, so the
+                // order, the bound on the others and every later comparison see one
+                // value; otherwise a rounded-up cost can sit above the bound of an
+                // equal one, and the vector would be scored again without end.
+                const auto cost =
+                    static_cast<float>(bias[r] + static_cast<double>(model.centroid_bias[cluster]) -
+                                       scale[r] * static_cast<double>(dots[j]));
+                lists.Offer(r, static_cast<double>(cost) + prices[cluster], cost, cluster);
             }
         }
     }
@@ -424,10 +447,13 @@ score_rows(const CostModel& model,
 
 /// Exact capacities: `count % k` clusters hold one vector more than the others. The
 /// extra seats go to the clusters that most vectors prefer at the current prices.
+/// With fewer vectors than clusters every cluster offers one seat and the auction
+/// decides which of them stay empty.
 Vector<uint32_t>
 choose_capacities(const CandidateTable& table, uint64_t count, uint64_t k, Allocator* allocator) {
-    const auto base = static_cast<uint32_t>(count / k);
-    const uint64_t extra = count % k;
+    const bool spare = count < k;
+    const auto base = spare ? 1U : static_cast<uint32_t>(count / k);
+    const uint64_t extra = spare ? 0 : count % k;
     Vector<uint32_t> capacity(k, base, allocator);
     if (extra == 0) {
         return capacity;
@@ -533,8 +559,8 @@ public:
           offset_(capacity.size() + 1, 0, allocator),
           size_(capacity.size(), 0, allocator),
           floor_(floor_prices),
-          bid_(table.bounds.size(), 0.0, allocator),
-          holder_(table.bounds.size(), 0, allocator),
+          bid_(Seats(capacity), 0.0, allocator),
+          holder_(Seats(capacity), 0, allocator),
           owner_(table.bounds.size(), -1, allocator),
           queue_(table.bounds.size() + 1, 0, allocator),
           deferred_(allocator),
@@ -543,6 +569,12 @@ public:
         for (uint64_t j = 0; j < k_; ++j) {
             offset_[j + 1] = offset_[j] + capacity_[j];
         }
+    }
+
+    /// Seats over all clusters: the vector count, or more when some may stay empty.
+    static uint64_t
+    Seats(const Vector<uint32_t>& capacity) {
+        return std::accumulate(capacity.begin(), capacity.end(), uint64_t{0});
     }
 
     /// Bytes this auction holds per vector and per cluster.
@@ -633,7 +665,9 @@ public:
                 best = INF;
                 for (const auto candidate : open) {
                     const double net = exact_cost(row, candidate) + price_of(candidate);
-                    if (net < best) {
+                    // The first open cluster is taken whatever its cost, so a seat is
+                    // always found while vectors are waiting.
+                    if (cluster == k_ or net < best) {
                         best = net;
                         cluster = candidate;
                     }
@@ -965,8 +999,15 @@ solve_assignment(const CostModel& model,
                  const SafeThreadPoolPtr& pool) {
     const double spread = cost_spread(table, labels.size());
     const double epsilon_final = std::max(epsilon_ratio * spread, epsilon_floor(table, prices));
-    const double epsilon_start = warm ? epsilon_final * std::pow(EPSILON_SCALING, WARM_PHASES)
-                                      : COLD_EPSILON_FRACTION * spread;
+    // With spare seats a single phase keeps the clusters nobody bid for at the lowest
+    // price, which the optimality bound of an assignment with empty clusters needs; a
+    // later phase could leave a cluster empty at a raised price.
+    const bool spare = CapacityAuction::Seats(capacity) > labels.size();
+    double epsilon_start = warm ? epsilon_final * std::pow(EPSILON_SCALING, WARM_PHASES)
+                                : COLD_EPSILON_FRACTION * spread;
+    if (spare) {
+        epsilon_start = epsilon_final;
+    }
     CapacityAuction auction(capacity, prices, table, budget, allocator);
     memory = std::max(memory, auction.MemoryUsage());
     auto rescore = [&](const Vector<uint32_t>& rows, const Vector<double>& now) {
@@ -1052,6 +1093,10 @@ BalancedKMeansCluster::Run(uint32_t k,
                            const BalancedKMeansOptions& options,
                            double* err) {
     check_problem(k, count, dim_, options.candidate_count);
+    // Every cluster needs a member for its mean.
+    if (k > count) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "k cannot be larger than count");
+    }
     if (options.iterations <= 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "iterations must be positive");
     }

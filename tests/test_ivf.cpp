@@ -4394,6 +4394,39 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(restored_stats["bucket_num"] == stats["bucket_num"]);
 }
 
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF balanced_kmeans builds fewer vectors than buckets on a model",
+                             "[ft][ivf][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int buckets_count = 64;
+    constexpr int64_t batch_count = 32;
+    const auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", buckets_count, "balanced_kmeans", false, 1, false, 1, 1024);
+    auto train = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, 1024, "l2");
+    auto batch = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, batch_count, "l2");
+    // Fewer vectors than buckets: every vector gets a bucket of its own.
+    auto require_own_buckets = [&](const vsag::IndexPtr& index) {
+        REQUIRE(index->GetNumElements() == batch_count);
+        auto stats = nlohmann::json::parse(index->GetStats());
+        REQUIRE(stats["bucket_num"]["min"].get<float>() == 0);
+        REQUIRE(stats["bucket_num"]["max"].get<float>() == 1);
+    };
+
+    // Trained on many vectors, then built from a small batch.
+    auto trained = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(trained->Train(train->base_).has_value());
+    REQUIRE(trained->Build(batch->base_).has_value());
+    require_own_buckets(trained);
+
+    // A small shard built from an exported model.
+    auto source = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(source->Build(train->base_).has_value());
+    auto model = source->ExportModel();
+    REQUIRE(model.has_value());
+    REQUIRE(model.value()->Build(batch->base_).has_value());
+    require_own_buckets(model.value());
+}
+
 TEST_CASE("IVF rejects unknown trainers", "[ft][ivf][pr]") {
     auto params = nlohmann::json::parse(fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
         "l2", 16, "fp32", 8, "balanced_kmeans", false, 1, false, 1, 512));

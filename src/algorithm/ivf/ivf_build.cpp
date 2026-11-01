@@ -138,10 +138,9 @@ IVF::Build(const DatasetPtr& base) {
         CHECK_ARGUMENT(this->total_elements_ == 0,
                        "graph bucket searcher requires a fresh Build with no prior data");
     }
-    const bool trains_now = not this->is_trained_;
-    this->Train(base);
+    const bool trained_on_base = this->train(base);
     // TODO(LHT): duplicate
-    auto result = this->add(base, true, trains_now);
+    auto result = this->add(base, true, trained_on_base);
     if (graph_build_threshold_ > 0) {
         this->build_bucket_graphs();
     }
@@ -151,8 +150,13 @@ IVF::Build(const DatasetPtr& base) {
 
 void
 IVF::Train(const DatasetPtr& data) {
+    this->train(data);
+}
+
+bool
+IVF::train(const DatasetPtr& data) {
     if (this->is_trained_) {
-        return;
+        return false;
     }
 
     int64_t total_elements = data->GetNumElements();
@@ -171,6 +175,8 @@ IVF::Train(const DatasetPtr& data) {
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
     this->is_trained_ = true;
+    // sample_train_data hands back `data` itself when it draws no sample.
+    return train_data == data;
 }
 
 std::vector<int64_t>

@@ -137,12 +137,8 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
         // Under L2 the trainer's last assignment is a balanced assignment to these very
         // centroids (they are its means), so a Build of the training vectors reuses it.
         this->train_labels_.clear();
-        this->train_vectors_ = nullptr;
-        this->train_count_ = 0;
         if (metric_type_ == MetricType::METRIC_TYPE_L2SQR) {
             this->train_labels_.assign(labels.begin(), labels.end());
-            this->train_vectors_ = dataset->GetFloat32Vectors();
-            this->train_count_ = dataset->GetNumElements();
         }
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
@@ -220,11 +216,7 @@ IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
     // The cached training assignment serves this call at most.
     Vector<BucketIdType> trained(allocator_);
     trained.swap(this->train_labels_);
-    const bool reuse = trained_on_datas and datas == this->train_vectors_ and
-                       count == this->train_count_ and
-                       trained.size() == static_cast<uint64_t>(count);
-    this->train_vectors_ = nullptr;
-    this->train_count_ = 0;
+    const bool reuse = trained_on_datas and trained.size() == static_cast<uint64_t>(count);
     if (ivf_partition_strategy_param_->partition_train_type !=
             IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
         not this->is_trained_ or count <= 0 or buckets_per_data <= 0) {
@@ -262,9 +254,11 @@ IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
         return labels;
     }
     // Further copies of a vector go to its nearest other buckets, as in Add; only the
-    // first copy of every vector is balanced.
+    // first copy of every vector is balanced. A copy the routing leaves without a bucket
+    // stays INVALID_BUCKET_ID, as ClassifyDatas leaves it, rather than naming bucket 0.
     const auto routed = this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
-    Vector<BucketIdType> result(static_cast<uint64_t>(count) * buckets_per_data, allocator_);
+    Vector<BucketIdType> result(
+        static_cast<uint64_t>(count) * buckets_per_data, INVALID_BUCKET_ID, allocator_);
     for (int64_t i = 0; i < count; ++i) {
         auto* out = result.data() + i * buckets_per_data;
         const auto* nearest = routed.data() + i * buckets_per_data;
