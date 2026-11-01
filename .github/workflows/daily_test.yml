@@ -16,14 +16,14 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: daily_build_x86
-      cancel-in-progress: true
+      group: daily_build_x86-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -44,7 +44,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: ./build
-          name: test_x86-${{ github.run_id }}
+          name: daily_test_x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -57,14 +57,14 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: daily_build_aarch
-      cancel-in-progress: true
+      group: daily_build_aarch-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -79,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: ./build/
-          name: test_aarch64-${{ github.run_id }}
+          name: daily_test_aarch64-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -89,8 +89,8 @@ jobs:
     needs: daily_build_asan_x86
     runs-on: ubuntu-24.04
     concurrency:
-      group: daily_test_x86-${{ matrix.test_type }}
-      cancel-in-progress: true
+      group: daily_test_x86-${{ matrix.test_type }}-${{ github.run_id }}
+      cancel-in-progress: false
     strategy:
       matrix:
         test_type: [ unittests, functests ]
@@ -106,13 +106,13 @@ jobs:
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
         uses: actions/download-artifact@v5
         with:
-          name: test_x86-${{ github.run_id }}
+          name: daily_test_x86-${{ github.run_id }}
           path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
@@ -124,7 +124,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: ./log
-          name: log-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          name: daily-log-x86-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -141,20 +141,20 @@ jobs:
       volumes:
         - /opt:/useless
     concurrency:
-      group: daily_test_aarch64-${{ matrix.test_type }}
-      cancel-in-progress: true
+      group: daily_test_aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
         uses: actions/download-artifact@v5
         with:
-          name: test_aarch64-${{ github.run_id }}
+          name: daily_test_aarch64-${{ github.run_id }}
           path: ./build
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
@@ -166,7 +166,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: ./log
-          name: log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          name: daily-log-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -182,7 +182,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: /tmp/clean_up
-          name: test_x86-${{ github.run_id }}
+          name: daily_test_x86-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -190,7 +190,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: /tmp/clean_up
-          name: test_aarch64-${{ github.run_id }}
+          name: daily_test_aarch64-${{ github.run_id }}
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -211,14 +211,14 @@ jobs:
           "generic;-DDISABLE_SSE_FORCE=1",
         ]
     concurrency:
-      group: daily_build_simd-${{ matrix.simd_option }}
-      cancel-in-progress: true
+      group: daily_build_simd-${{ matrix.simd_option }}-${{ github.run_id }}
+      cancel-in-progress: false
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Make Asan
         run: |
           export EXTRA_DEFINED=`echo "${{ matrix.simd_option }}" | awk -F';' '{print $2}'`
@@ -252,8 +252,8 @@ jobs:
           generic
         ]
     concurrency:
-      group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}
-      cancel-in-progress: true
+      group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.run_id }}
+      cancel-in-progress: false
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -263,7 +263,7 @@ jobs:
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: ${{ github.sha }}
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
@@ -306,15 +306,15 @@ jobs:
     name: Daily Build with TSAN
     runs-on: ubuntu-24.04
     concurrency:
-      group: daily_build_tsan_x86
-      cancel-in-progress: true
+      group: daily_build_tsan_x86-${{ github.run_id }}
+      cancel-in-progress: false
     container:
       image: vsaglib/vsag:ci-x86-mkl
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: '0'
-          ref: main
+          ref: ${{ github.sha }}
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -331,7 +331,7 @@ jobs:
         uses: actions/upload-artifact@v5
         with:
           path: ./build
-          name: test_x86-${{ github.run_id }}-tsan
+          name: daily_test_x86-${{ github.run_id }}-tsan
           compression-level: 1
           retention-days: 3
           overwrite: 'true'
@@ -341,8 +341,8 @@ jobs:
     needs: daily_build_tsan
     runs-on: ubuntu-24.04
     concurrency:
-      group: daily_test_tsan_x86
-      cancel-in-progress: true
+      group: daily_test_tsan_x86-${{ github.run_id }}
+      cancel-in-progress: false
     container:
       image: vsaglib/vsag:ci-x86-mkl
     steps:
@@ -352,7 +352,7 @@ jobs:
       - name: Download Test
         uses: actions/download-artifact@v5
         with:
-          name: test_x86-${{ github.run_id }}-tsan
+          name: daily_test_x86-${{ github.run_id }}-tsan
           path: ./build/
       - name: Run TSAN tests
         run: |
@@ -360,3 +360,21 @@ jobs:
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/functests
           ./build/tests/functests "[concurrent]~[pr]"
+
+  full-platform-regression:
+    uses: ./.github/workflows/asan_build_and_test.yml
+    with:
+      full-examples: true
+
+  full-python-regression:
+    uses: ./.github/workflows/python_build_and_test.yml
+
+  full-lint:
+    uses: ./.github/workflows/lint.yml
+
+  full-coverage:
+    uses: ./.github/workflows/coverage.yml
+    secrets: inherit
+
+  full-compatibility:
+    uses: ./.github/workflows/check_compatibility.yml

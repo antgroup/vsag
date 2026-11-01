@@ -217,3 +217,57 @@ Version-branch PRs and manual PR-CI dispatch retain the previous scope. Main-pus
 nightly/daily and release workflows are not rescheduled or changed here. No required
 checks or runner deployment settings change. Regression coverage lives in
 `python3 -m unittest tests/scripts/test_dependency_workflows.py`.
+
+## Main integration and daily regression
+
+Tracking plan: [CI layers #3225](https://github.com/antgroup/vsag/issues/3225).
+Update that issue's original body before changing a layer and after verification;
+do not post progress comments. PR policy above remains unchanged.
+
+`main-ci.yml` handles main pushes independently: no branch-wide cancellation and
+no migration to private runners. The classifier compares the entire immutable
+push `before..after` range (including deletions), not just the last commit.
+Documentation-only changes skip heavy checks. Unknown paths, absent history or
+failed diff operations conservatively select heavy checks and full lint.
+
+| Layer | Checks |
+| --- | --- |
+| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 wheel plus all Python tests; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
+| Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
+| Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
+
+Format and existing path-selected docs/image publishing workflows remain separate.
+CircleCI's duplicate main build is removed; its version branch filters and PR
+classifier remain. Full X86 ASan still covers the MKL image in daily, and the
+existing daily path retains bundled OpenBLAS coverage. CircleCI's generic debug
+build wrapper is not another required duplicate daily job.
+
+The smoke inventory is `scripts/ci/platform_smoke.json`: named memory/file IO and
+serialization unit cases, factory validation/BruteForce functional cases, an assertion-bearing Pyramid build/add/search/serialization round trip, and
+HGraph, BruteForce, IVF and streaming-persistence examples. The Pyramid example
+is excluded from smoke because its search failure path returns exit code zero;
+full daily example coverage remains unchanged. Each selected Catch2
+case must produce a nonempty successful JUnit report; missing binaries, no tests,
+skipped cases, failures and timeouts fail the job. Smoke cases use seed 424242 and
+300-second per-process bounds. Full macOS examples use a 1,800-second bound.
+No assertions or algorithm implementations are changed. Platform runtime success
+must be demonstrated by platform CI; helper tests alone do not establish it.
+
+`Main CI Summary` runs even after upstream failures and requires every selected
+reusable workflow to succeed; unexpected skips/cancellations/missing results fail.
+Lint runs the changed `src/*.cpp` implementation paths (excluding `_test.cpp`),
+with full lint for affected headers or shared build configuration. The release
+build used to generate lint inputs is retained in this scope-only change.
+
+Daily checkouts use the invocation's `github.sha`, never moving `main` midway.
+Extended-daily artifact/log names are distinct from full-regression names, and
+full daily ASan artifacts remain available until retention expiry. Daily jobs
+retain independent run-specific concurrency; the schedule stays commented out.
+Until daily is separately enabled, full regressions removed from main require an
+explicit manual Daily Build & Test run. This PR does not claim daily acceptance
+or new main runtime targets. Failures remain visible; restore/fix and rerun the
+same relevant revision before using daily evidence for release readiness.
+
+Validate with `python3 -m unittest tests/scripts/test_main_ci.py` and the existing
+workflow helper suites. No production runner configuration or trusted digest
+change is part of this migration.

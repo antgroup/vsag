@@ -408,6 +408,9 @@ class CompatibilityDownloadTest(unittest.TestCase):
 
 
 class LeanPrChecksTest(unittest.TestCase):
+    def test_main_ci_policy_suite(self):
+        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py"], cwd=ROOT, check=True)
+
     def selected(self, name, *, base="main", event="pull_request", team=False,
                  cpp=False, python=False, cmake=False):
         body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
@@ -454,7 +457,8 @@ class LeanPrChecksTest(unittest.TestCase):
 
     def test_tsan_push_and_version_triggers_retained(self):
         text = (ROOT / ".github/workflows/tsan_build_and_test.yml").read_text()
-        self.assertIn('push:\n    branches: [ "main", "0.*" ]', text)
+        self.assertIn('push:\n    branches: [ "0.*" ]', text)
+        self.assertIn("./.github/workflows/tsan_build_and_test.yml", (ROOT / ".github/workflows/main-ci.yml").read_text())
         self.assertIn('pull_request:\n    branches: [ "0.*" ]', text)
         self.assertIn('workflow_dispatch:', text)
 

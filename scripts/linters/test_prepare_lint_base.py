@@ -149,8 +149,10 @@ class PreparationTest(unittest.TestCase):
                 with mock.patch.dict(os.environ, GITHUB_OUTPUT=str(output)), \
                      mock.patch.object(helper, 'prepare_base', return_value=BASE), \
                      mock.patch.object(helper, 'get_changed_sources', return_value=[]), \
-                     mock.patch.object(helper, stage, side_effect=RuntimeError('failed')):
+                     mock.patch.object(helper, stage, side_effect=RuntimeError('failed')), \
+                     contextlib.redirect_stderr(io.StringIO()) as diagnostic:
                     self.assertEqual(helper.main(), 1)
+                self.assertIn("::error::Lint base preparation failed (RuntimeError): failed", diagnostic.getvalue())
                 self.assertFalse(output.exists())
 
     def test_success_and_intentionally_empty_diff_publish(self):

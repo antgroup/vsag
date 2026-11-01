@@ -1,9 +1,14 @@
 name: Python Build & Test
 
 on:
+  workflow_call:
+    inputs:
+      x86-only:
+        type: boolean
+        default: false
   workflow_dispatch:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
     paths-ignore:
       - 'docs/**'
 
@@ -45,6 +50,7 @@ jobs:
           overwrite: 'true'
 
   build_python_wheel_aarch64:
+    if: ${{ !inputs.x86-only }}
     name: Python Wheel Build Aarch64
     runs-on: ubuntu-24.04-arm
     concurrency:
@@ -120,6 +126,7 @@ jobs:
           if-no-files-found: ignore
 
   test_python_aarch64:
+    if: ${{ !inputs.x86-only }}
     name: Test Python Aarch64
     needs: build_python_wheel_aarch64
     runs-on: ubuntu-24.04-arm
