@@ -5,8 +5,9 @@ on:
     branches: [ "main", "0.*" ]
     paths-ignore:
       - 'docs/**'
+  # Main PRs use ASan; TSan remains on main push and manual dispatch.
   pull_request:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
   workflow_dispatch:
 
 jobs:

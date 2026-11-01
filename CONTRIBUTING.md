@@ -13,6 +13,7 @@ Before you make any contributions, make sure you follow this list.
 -   Read [Contributing to vsag](CONTRIBUTING.md).
 -   Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
 -   Run [tests](CONTRIBUTING.md#run-tests-with-code-coverage) and check your code coverage rate.
+-   Reduced PR CI does not waive local validation. Follow the [pre-submission checklist](docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr) for checks moved out of PR CI and report any unvalidated platforms.
 
 ## What contributions can I make?
 

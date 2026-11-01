@@ -406,5 +406,114 @@ class CompatibilityDownloadTest(unittest.TestCase):
             self.module.verify(self.directory, self.expected)
 
 
+
+class LeanPrChecksTest(unittest.TestCase):
+    def selected(self, name, *, base="main", event="pull_request", team=False,
+                 cpp=False, python=False, cmake=False):
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
+        expression = re.search(r"^    if: (.*)$", body, re.M).group(1)
+        values = {"github.base_ref": base, "github.event_name": event,
+                  "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
+                  "needs.changes.outputs.python": str(python).lower(),
+                  "needs.changes.outputs.cmake": str(cmake).lower()}
+        for key in sorted(values, key=len, reverse=True):
+            expression = expression.replace(key, repr(values[key]))
+        expression = expression.replace("&&", " and ").replace("||", " or ")
+        expression = re.sub(r"!(?!=)", " not ", expression)
+        return eval(expression, {"__builtins__": {}}, {})
+
+    def test_main_pr_selection_matrix(self):
+        for team in (False, True):
+            self.assertFalse(self.selected("build-asan-macos-arm64", cpp=True, team=team))
+            self.assertFalse(self.selected("build-python-x86", cpp=True, python=True, team=team))
+            for name in ("build-python-x86", "test-python-x86"):
+                for python, cmake in ((True, False), (False, True), (True, True)):
+                    self.assertFalse(self.selected(name, python=python, cmake=cmake, team=team))
+                self.assertFalse(self.selected(name, team=team))
+            self.assertEqual(self.selected("format", cpp=True, team=team), not team)
+            self.assertTrue(self.selected("format", python=True, team=team))
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-python-x86")
+        self.assertIn("needs: [changes, format]", body)
+
+    def test_version_and_dispatch_preserve_legacy_selection(self):
+        for context in ({"base": "0.18"}, {"event": "workflow_dispatch", "base": ""}):
+            self.assertTrue(self.selected("build-asan-macos-arm64", cpp=True, **context))
+            self.assertTrue(self.selected("format", cpp=True, team=True, **context))
+            self.assertTrue(self.selected("build-python-x86", python=True, **context))
+            self.assertTrue(self.selected("test-python-x86", cmake=True, **context))
+            self.assertFalse(self.selected("build-python-x86", **context))
+
+    def test_team_format_coverage(self):
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        team = (ROOT / ".github/workflows/pr-ci-team.yml").read_text()
+        def paths(text, label):
+            section = re.search(r"(?m)^            " + label + r":\n((?:              .*\n)+)", text).group(1)
+            return re.findall(r"- '([^']+)'", section)
+        self.assertEqual(paths(community, "cpp"), paths(team, "cpp"))
+        self.assertIn("./scripts/format/check_format.sh", job_text(ROOT / ".github/workflows/pr-ci-team.yml", "checks"))
+
+    def test_tsan_push_and_version_triggers_retained(self):
+        text = (ROOT / ".github/workflows/tsan_build_and_test.yml").read_text()
+        self.assertIn('push:\n    branches: [ "main", "0.*" ]', text)
+        self.assertIn('pull_request:\n    branches: [ "0.*" ]', text)
+        self.assertIn('workflow_dispatch:', text)
+
+    def test_circleci_only_skips_verified_current_main_prs(self):
+        import importlib.util
+        from unittest.mock import Mock, patch
+        spec = importlib.util.spec_from_file_location("circle_scope", ROOT / "scripts/ci/circleci_pr_scope.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        env = {"CIRCLE_PULL_REQUEST": "https://github.com/antgroup/vsag/pull/123", "CIRCLE_SHA1": "abc"}
+        def pr(base="main", sha="abc", state="open"):
+            return {"state": state, "base": {"ref": base, "repo": {"full_name": "antgroup/vsag"}}, "head": {"sha": sha}}
+        self.assertTrue(module.should_skip(env, lambda _: pr()))
+        for metadata in (pr("0.18"), pr(sha="old"), pr(state="closed"), {}):
+            self.assertFalse(module.should_skip(env, lambda _: metadata))
+        for invalid in ({}, dict(env, CIRCLE_PULL_REQUEST="https://evil.test/pull/123"),
+                        dict(env, CIRCLE_PULL_REQUESTS="https://github.com/antgroup/vsag/pull/124")):
+            api = Mock(side_effect=[pr(), pr("0.18")])
+            self.assertFalse(module.should_skip(invalid, api))
+        with patch.object(module, "fetch_pr", side_effect=TimeoutError), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            run.assert_not_called()
+        with patch.object(module, "fetch_pr", return_value=pr()), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            run.assert_called_once_with(["circleci-agent", "step", "halt"], check=True)
+        config = (ROOT / ".circleci/continue_config.yml").read_text()
+        pr_job = config.split("  pull-request-check:", 1)[1].split("  main-branch-check:", 1)[0]
+        self.assertLess(pr_job.index("circleci_pr_scope.py"), pr_job.index("restore_cache:"))
+        self.assertNotIn("circleci_pr_scope.py", config.split("  main-branch-check:", 1)[1])
+
+    def test_circleci_transport_halt_and_merge_preview(self):
+        import importlib.util
+        from http.client import IncompleteRead
+        from unittest.mock import Mock, patch
+        spec = importlib.util.spec_from_file_location("circle_scope", ROOT / "scripts/ci/circleci_pr_scope.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        env = {"CIRCLE_PULL_REQUEST": "https://github.com/antgroup/vsag/pull/123", "CIRCLE_SHA1": "merge-current"}
+        pr = {"state": "open", "base": {"ref": "main", "repo": {"full_name": "antgroup/vsag"}},
+              "head": {"sha": "head-current"}, "merge_commit_sha": "merge-current"}
+        self.assertTrue(module.should_skip(env, lambda _: pr))
+        self.assertTrue(module.should_skip(dict(env, CIRCLE_SHA1="head-current"), lambda _: pr))
+        self.assertFalse(module.should_skip(dict(env, CIRCLE_SHA1="merge-stale"), lambda _: pr))
+        self.assertFalse(module.should_skip(dict(env, CIRCLE_SHA1=""), lambda _: pr))
+        with patch.object(module.urllib.request, "urlopen", side_effect=IncompleteRead(b"partial")) as request, patch.object(module.time, "sleep") as sleep, patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            self.assertEqual(request.call_count, 2)
+            sleep.assert_called_once_with(1)
+            run.assert_not_called()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = __import__("json").dumps(pr)
+        with patch.object(module.urllib.request, "urlopen", side_effect=[IncompleteRead(b"partial"), response]), patch.object(module.time, "sleep"):
+            self.assertEqual(module.fetch_pr("https://api.github.com/repos/antgroup/vsag/pulls/123"), pr)
+        for error in (subprocess.CalledProcessError(1, "circleci-agent"), FileNotFoundError()):
+            with patch.object(module, "fetch_pr", return_value=pr), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run", side_effect=error) as run:
+                module.main()
+                run.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()
