@@ -81,6 +81,12 @@ constexpr double INF = std::numeric_limits<double>::infinity();
 /// 2 ||x||^2 + 2 ||c||^2 and |<x, c>| at most ||x|| ||c||, so below this every cost,
 /// including the intermediate sums of the GEMM that computes it, is finite in float.
 constexpr double MAX_SQUARED_NORM = static_cast<double>(std::numeric_limits<float>::max()) / 4.0;
+/// The squared-L2 expansion ||x||^2 + ||c||^2 - 2 <x, c> runs in float, whose rounding
+/// is about 2^-24 of ||x||^2 + ||c||^2. When the mean of the centroids lies more than
+/// this many times their mean squared distance to it away from the origin, that
+/// rounding reaches the auction's epsilon (1e-4 of the costs), so the expansion is
+/// taken around the mean instead.
+constexpr double CENTERING_RATIO = 1024.0;
 
 /// Keeps BLAS on one thread inside a task and gives the thread its OpenMP setting
 /// back afterwards: a task may run on the caller's own thread.
@@ -216,8 +222,15 @@ struct CostModel {
     uint64_t dim{0};
     const float* centroids{nullptr};
     uint64_t k{0};
-    /// ||c||^2 for L2SQR, zeros otherwise; `k` entries.
+    /// ||c - center||^2 for L2SQR, zeros otherwise; `k` entries.
     const float* centroid_bias{nullptr};
+    /// What the expansion scores against: for L2SQR the centroids minus `center`,
+    /// otherwise the centroids themselves; `k x dim`.
+    const float* scored_centroids{nullptr};
+    /// L2SQR only, and only when an offset shared by the centroids would cancel away the
+    /// precision of small distances (see CENTERING_RATIO): their mean, taken off vectors
+    /// and centroids before the expansion; `dim` entries. Null otherwise.
+    const float* center{nullptr};
 
     void
     RowTerms(const float* x, double& bias, double& scale) const {
@@ -340,7 +353,7 @@ score_columns(const CostModel& model,
                             static_cast<int32_t>(local),
                             static_cast<int32_t>(dim),
                             1.0F,
-                            model.centroids + begin * dim,
+                            model.scored_centroids + begin * dim,
                             static_cast<int32_t>(dim),
                             block,
                             static_cast<int32_t>(dim),
@@ -376,12 +389,20 @@ gather_rows(const CostModel& model,
             Vector<double>& scale) {
     const uint64_t dim = model.dim;
     const float* block = model.datas + begin * dim;
-    if (rows != nullptr) {
+    if (rows != nullptr or model.center != nullptr) {
         gathered.resize(local * dim);
         for (uint64_t r = 0; r < local; ++r) {
-            std::memcpy(gathered.data() + r * dim,
-                        model.datas + static_cast<uint64_t>(rows[begin + r]) * dim,
-                        dim * sizeof(float));
+            const uint64_t row =
+                rows == nullptr ? begin + r : static_cast<uint64_t>(rows[begin + r]);
+            const float* x = model.datas + row * dim;
+            float* out = gathered.data() + r * dim;
+            if (model.center != nullptr) {
+                for (uint64_t d = 0; d < dim; ++d) {
+                    out[d] = x[d] - model.center[d];
+                }
+            } else {
+                std::memcpy(out, x, dim * sizeof(float));
+            }
         }
         block = gathered.data();
     }
@@ -1073,15 +1094,61 @@ solve_assignment(const CostModel& model,
     return false;
 }
 
+/// Whether squared-L2 costs against these centroids have to be expanded around their
+/// mean (see CENTERING_RATIO); leaves the mean in `center`. Decided once per run, so
+/// the center stays fixed while the centroids move.
+bool
+choose_center(const float* centroids, uint64_t k, uint64_t dim, Vector<float>& center) {
+    // Summed in double in a fixed order, so the decision does not depend on threads.
+    Vector<double> sum(dim, 0.0, center.get_allocator());
+    for (uint64_t j = 0; j < k; ++j) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            sum[d] += static_cast<double>(centroids[j * dim + d]);
+        }
+    }
+    double offset = 0.0;
+    for (uint64_t d = 0; d < dim; ++d) {
+        center[d] = static_cast<float>(sum[d] / static_cast<double>(k));
+        offset += static_cast<double>(center[d]) * static_cast<double>(center[d]);
+    }
+    double spread = 0.0;
+    for (uint64_t j = 0; j < k; ++j) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            const double diff = static_cast<double>(centroids[j * dim + d] - center[d]);
+            spread += diff * diff;
+        }
+    }
+    spread /= static_cast<double>(k);
+    return offset > CENTERING_RATIO * spread;
+}
+
+/// Fills the centroid terms of `model` for its current centroids: for L2SQR their
+/// squared norms, and when the model is centered the centered centroids first; for
+/// the other metrics a zero bias, as their centroids are scored as they are.
 void
-compute_centroid_bias(const CostModel& model, Vector<float>& bias, const SafeThreadPoolPtr& pool) {
+prepare_centroids(const CostModel& model,
+                  Vector<float>& scored,
+                  Vector<float>& bias,
+                  const SafeThreadPoolPtr& pool) {
+    const uint64_t dim = model.dim;
+    if (model.metric != BalancedAssignMetric::L2SQR) {
+        std::fill(bias.begin(), bias.end(), 0.0F);
+        return;
+    }
     const uint64_t task_count = (model.k + CLUSTERS_PER_TASK - 1) / CLUSTERS_PER_TASK;
     parallel_for(pool, task_count, [&](uint64_t task) {
         const uint64_t end = std::min(model.k, (task + 1) * CLUSTERS_PER_TASK);
         for (uint64_t j = task * CLUSTERS_PER_TASK; j < end; ++j) {
-            const float* c = model.centroids + j * model.dim;
-            bias[j] =
-                model.metric == BalancedAssignMetric::L2SQR ? FP32ComputeIP(c, c, model.dim) : 0.0F;
+            const float* c = model.centroids + j * dim;
+            if (model.center == nullptr) {
+                bias[j] = FP32ComputeIP(c, c, dim);
+                continue;
+            }
+            float* out = scored.data() + j * dim;
+            for (uint64_t d = 0; d < dim; ++d) {
+                out[d] = c[d] - model.center[d];
+            }
+            bias[j] = FP32ComputeIP(out, out, dim);
         }
     });
 }
@@ -1218,24 +1285,34 @@ BalancedKMeansCluster::run_flat(uint32_t k,
     const uint64_t width = std::min<uint64_t>(options.candidate_count, k);
     CandidateTable table(count, width, allocator_);
     Vector<float> centroid_bias(k, 0.0F, allocator_);
+    Vector<float> center(dim, 0.0F, allocator_);
+    const bool centered = choose_center(k_centroids_, k, dim, center);
+    Vector<float> scored_centroids(centered ? static_cast<uint64_t>(k) * dim : 0, 0.0F, allocator_);
     Vector<float> previous_centroids(static_cast<uint64_t>(k) * dim, 0.0F, allocator_);
     Vector<double> prices(k, 0.0, allocator_);
     Vector<uint32_t> sizes(allocator_);
     Vector<int32_t> previous(count, -1, allocator_);
-    const CostModel model{
-        BalancedAssignMetric::L2SQR, datas, dim, k_centroids_, k, centroid_bias.data()};
+    const CostModel model{BalancedAssignMetric::L2SQR,
+                          datas,
+                          dim,
+                          k_centroids_,
+                          k,
+                          centroid_bias.data(),
+                          centered ? scored_centroids.data() : k_centroids_,
+                          centered ? center.data() : nullptr};
 
     uint64_t auction_bytes = 0;
     auto record_working_set = [&]() {
         stats_.working_set_bytes =
             std::max(stats_.working_set_bytes,
                      table.MemoryUsage() + auction_bytes + previous.size() * sizeof(int32_t) +
-                         static_cast<uint64_t>(k) * dim * sizeof(float));
+                         static_cast<uint64_t>(k) * dim * sizeof(float) +
+                         scored_centroids.size() * sizeof(float));
     };
     double loss = 0.0;
     auto outcome = FlatOutcome::COMPLETED;
     for (int32_t iteration = 0; iteration < options.iterations; ++iteration) {
-        compute_centroid_bias(model, centroid_bias, thread_pool_);
+        prepare_centroids(model, scored_centroids, centroid_bias, thread_pool_);
         score_rows(model, prices.data(), nullptr, count, table, allocator_, thread_pool_);
         if (iteration == 0) {
             sizes =
@@ -1419,8 +1496,19 @@ BalancedKMeansCluster::Assign(const float* centroids,
     stats_ = BalancedKMeansStats{};
     const auto dim = static_cast<uint64_t>(dim_);
     Vector<float> centroid_bias(k, 0.0F, allocator_);
-    const CostModel model{metric, datas, dim, centroids, k, centroid_bias.data()};
-    compute_centroid_bias(model, centroid_bias, thread_pool_);
+    Vector<float> center(dim, 0.0F, allocator_);
+    const bool centered =
+        metric == BalancedAssignMetric::L2SQR and choose_center(centroids, k, dim, center);
+    Vector<float> scored_centroids(centered ? static_cast<uint64_t>(k) * dim : 0, 0.0F, allocator_);
+    const CostModel model{metric,
+                          datas,
+                          dim,
+                          centroids,
+                          k,
+                          centroid_bias.data(),
+                          centered ? scored_centroids.data() : centroids,
+                          centered ? center.data() : nullptr};
+    prepare_centroids(model, scored_centroids, centroid_bias, thread_pool_);
 
     Vector<int32_t> labels(count, 0, allocator_);
     uint64_t auction_bytes = 0;
@@ -1444,7 +1532,8 @@ BalancedKMeansCluster::Assign(const float* centroids,
                          auction_bytes,
                          allocator_,
                          thread_pool_);
-        stats_.working_set_bytes = table.MemoryUsage() + auction_bytes;
+        stats_.working_set_bytes =
+            table.MemoryUsage() + auction_bytes + scored_centroids.size() * sizeof(float);
     }
 
     const uint64_t task_count = (count + ROWS_PER_REDUCTION - 1) / ROWS_PER_REDUCTION;

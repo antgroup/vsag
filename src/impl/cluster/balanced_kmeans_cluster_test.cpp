@@ -513,6 +513,48 @@ TEST_CASE("BalancedKMeans Assign settles ties that float rounding splits",
     }
 }
 
+TEST_CASE("BalancedKMeans keeps small L2 distances far from the origin",
+          "[ut][BalancedKMeansCluster]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("Assign") {
+        // Expanded in float around the origin, all four costs come out 0, while the
+        // squared distances are [[1, 0], [0, 1]].
+        const std::vector<float> centroids{8192.0F, 8193.0F};
+        const std::vector<float> datas{8193.0F, 8192.0F};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        double cost = -1.0;
+        auto labels = cluster.Assign(
+            centroids.data(), 2, datas.data(), 2, vsag::BalancedAssignMetric::L2SQR, 16, &cost);
+        REQUIRE(labels[0] == 1);
+        REQUIRE(labels[1] == 0);
+        REQUIRE(cost == 0.0);
+    }
+
+    SECTION("Run") {
+        // Moving the data 10000 away from the origin leaves its clustering as it was.
+        constexpr uint64_t dim = 4;
+        constexpr uint64_t count = 2000;
+        constexpr uint32_t k = 20;
+        auto datas = uniform_vectors(count, dim, 113);
+        auto shifted = datas;
+        for (auto& value : shifted) {
+            value += 10000.0F;
+        }
+        vsag::BalancedKMeansOptions options;
+        options.random_seed = 127;
+        options.iterations = 10;
+        vsag::BalancedKMeansCluster plain(static_cast<int32_t>(dim), allocator.get());
+        vsag::BalancedKMeansCluster moved(static_cast<int32_t>(dim), allocator.get());
+        double plain_err = -1.0;
+        double moved_err = -1.0;
+        plain.Run(k, datas.data(), count, options, &plain_err);
+        auto labels = moved.Run(k, shifted.data(), count, options, &moved_err);
+        require_balanced(labels, count, k);
+        REQUIRE(std::abs(moved_err - plain_err) < 0.05 * plain_err);
+    }
+}
+
 TEST_CASE("BalancedKMeans bids keep raising prices far above epsilon",
           "[ut][BalancedKMeansCluster]") {
     // Both vectors remember only the cluster at 0 and bound the other one by 1e16.

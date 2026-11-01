@@ -142,9 +142,9 @@ IVF::Build(const DatasetPtr& base) {
         CHECK_ARGUMENT(this->total_elements_ == 0,
                        "graph bucket searcher requires a fresh Build with no prior data");
     }
-    const bool trained_on_base = this->train(base);
+    this->Train(base);
     // TODO(LHT): duplicate
-    auto result = this->add(base, true, trained_on_base);
+    auto result = this->add(base, true);
     if (graph_build_threshold_ > 0) {
         this->build_bucket_graphs();
     }
@@ -154,13 +154,8 @@ IVF::Build(const DatasetPtr& base) {
 
 void
 IVF::Train(const DatasetPtr& data) {
-    this->train(data);
-}
-
-bool
-IVF::train(const DatasetPtr& data) {
     if (this->is_trained_) {
-        return false;
+        return;
     }
 
     if (common_param_.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
@@ -241,8 +236,6 @@ IVF::train(const DatasetPtr& data) {
         this->reorder_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
     }
     this->is_trained_ = true;
-    // sample_train_data hands back `data` itself when it draws no sample.
-    return train_data == data;
 }
 
 std::vector<int64_t>
@@ -251,7 +244,7 @@ IVF::Add(const DatasetPtr& base) {
 }
 
 std::vector<int64_t>
-IVF::add(const DatasetPtr& base, bool try_optimized_build, bool trained_on_base) {
+IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
@@ -278,7 +271,7 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build, bool trained_on_base)
     Vector<float> classify_buffer(allocator_);
     if (common_param_.data_type_ == DataTypes::DATA_TYPE_FLOAT) {
         buckets = fresh_build ? partition_strategy_->ClassifyDatasForBuild(
-                                    input.Data(), num_element, buckets_per_data_, trained_on_base)
+                                    input.Data(), num_element, buckets_per_data_)
                               : partition_strategy_->ClassifyDatas(
                                     input.Data(), num_element, buckets_per_data_, nullptr);
     } else {
