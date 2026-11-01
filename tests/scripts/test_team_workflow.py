@@ -107,7 +107,7 @@ class TeamWorkflowTest(unittest.TestCase):
                               '</TestCase></MatchingTests>')
         ''')
         for relative in ('tools/eval/eval_dataset_test', 'tools/autotune/autotune_test',
-                         'tests/eval_monitor_test'):
+                         'tools/profile_dataset/profile_dataset_test', 'tests/eval_monitor_test'):
             binary = root / 'build' / relative
             binary.parent.mkdir(parents=True, exist_ok=True)
             binary.write_text('#!' + sys.executable + '\n' + fixture)
@@ -142,7 +142,7 @@ class TeamWorkflowTest(unittest.TestCase):
                                     capture_output=True, text=True, timeout=10)
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             events = [json.loads(line) for line in (root / 'listing-events.jsonl').read_text().splitlines()]
-            self.assertEqual([event['filter'] for event in events], ['', '~[daily]'] * 3)
+            self.assertEqual([event['filter'] for event in events], ['', '~[daily]'] * 4)
 
     def test_tool_inventory_preflight_signal_reaps_running_listing(self):
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -434,7 +434,8 @@ class TeamWorkflowTest(unittest.TestCase):
     def test_all_original_catch2_binaries_and_extra_checks_are_required(self):
         inventory = step(TEAM, 'Publish test inventory and shard plan')
         for binary in ('tests/unittests', 'tests/functests', 'tools/eval/eval_dataset_test',
-                       'tools/autotune/autotune_test', 'tests/eval_monitor_test'):
+                       'tools/autotune/autotune_test', 'tools/profile_dataset/profile_dataset_test',
+                       'tests/eval_monitor_test'):
             self.assertIn('--binary ' + binary, inventory)
         self.assertIn("assert default == filtered", inventory)
         self.assertIn('--context "$TEAM_ARTIFACTS/meta/context.json"', inventory)
