@@ -391,6 +391,9 @@ read_queries(const std::string& path, uint64_t limit) {
         H5::DataSet dataset = file.openDataSet("/neighbors");
         hsize_t dims[2] = {0, 0};
         matrix_extents(dataset, "/neighbors", dims);
+        if (dims[0] < queries.count) {
+            throw std::runtime_error("/neighbors has fewer rows than the queries used");
+        }
         queries.truth_width = dims[1];
         std::vector<int64_t> all(dims[0] * dims[1]);
         dataset.read(all.data(), H5::PredType::NATIVE_INT64);
@@ -413,6 +416,12 @@ run_ivf(const std::string& path,
     auto base = read_hdf5(path, std::numeric_limits<uint64_t>::max());
     auto queries = read_queries(path, query_limit);
     constexpr int64_t topk = 10;
+    if (queries.dim != base.dim) {
+        throw std::runtime_error("/test and /train differ in dimension");
+    }
+    if (queries.truth_width < static_cast<uint64_t>(topk)) {
+        throw std::runtime_error("/neighbors holds fewer than 10 neighbors per query");
+    }
     std::vector<int64_t> ids(base.count);
     std::iota(ids.begin(), ids.end(), 0);
     auto dataset = vsag::Dataset::Make();

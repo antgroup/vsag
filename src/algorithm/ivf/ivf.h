@@ -183,13 +183,8 @@ private:
     DatasetPtr
     search_with_request(const SearchRequest& request, SearchStatistics& stats) const;
 
-    /// Train(), telling whether it trained the partition on every vector of `data`
-    /// (no sample was drawn); false when the index was already trained.
-    bool
-    train(const DatasetPtr& data);
-
     std::vector<int64_t>
-    add(const DatasetPtr& base, bool try_optimized_build, bool trained_on_base = false);
+    add(const DatasetPtr& base, bool try_optimized_build);
 
     /**
      * @brief Parse the JSON search parameter string and populate an
