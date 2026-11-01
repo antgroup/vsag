@@ -330,25 +330,26 @@ loss.
 ### Trade-offs
 
 Measured with [`cluster_benchmark`](../resources/cluster_benchmark.md) on 32
-threads, 25 iterations, loss as the mean squared distance to the assigned centroid
-and peak memory as what the trainer allocates beyond its input:
+threads of one NUMA node, 25 iterations, loss as the mean squared distance to the
+assigned centroid and peak memory as what the trainer allocates beyond its input.
+Every row is the run with the median time of three:
 
 | Data (`n x d`, `k`) | Trainer | Sizes | CV | Loss | Time | Peak memory |
 |---|---|---|---|---|---|---|
-| Uniform (100,000 x 64, 256) | `kmeans` | 340–451 | 0.050 | 4.5992 | 1.07 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.6001 | 0.83 s | 19.0 MiB |
-| Not divisible (99,968 x 64, 256) | `kmeans` | 347–457 | 0.047 | 4.5960 | 1.03 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.5972 | 0.86 s | 19.0 MiB |
-| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 0.98 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 3.7465 | 3.77 s | 19.0 MiB |
-| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–812 | 0.526 | 3.5803 | 1.03 s | 64.4 MiB |
-| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2420 | 4.29 s | 41.8 MiB |
-| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 55.1 s | 1027 MiB |
-| | `balanced_kmeans` | 64–64 | 0 | 43817 | 13.3 s | 60.4 MiB |
-| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–734 | 1.297 | 21.371 | 48.5 s | 1027 MiB |
-| | `balanced_kmeans` | 64–64 | 0 | 21.147 | 28.9 s | 59.9 MiB |
-| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9020 | 55.0 s | 1027 MiB |
-| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9837 | 44.3 s | 95.9 MiB |
+| Uniform (100,000 x 64, 256) | `kmeans` | 343–458 | 0.051 | 4.5993 | 0.98 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.6001 | 0.81 s | 18.8 MiB |
+| Not divisible (99,968 x 64, 256) | `kmeans` | 340–453 | 0.049 | 4.5963 | 0.97 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.5972 | 0.83 s | 19.0 MiB |
+| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 1.00 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 3.7468 | 3.94 s | 19.0 MiB |
+| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–826 | 0.526 | 3.5804 | 0.98 s | 64.4 MiB |
+| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2420 | 4.28 s | 41.8 MiB |
+| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 53.3 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 43817 | 14.0 s | 60.4 MiB |
+| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–734 | 1.297 | 21.371 | 38.8 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 21.147 | 22.4 s | 59.9 MiB |
+| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9021 | 54.6 s | 1027 MiB |
+| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9820 | 37.7 s | 95.9 MiB |
 
 The skewed sets are Zipf-weighted Gaussian mixtures; "separated" places 64
 components far apart, so many small ones have to share clusters, and repeats eight
@@ -365,27 +366,28 @@ vectors in 5% of the rows.
   (whose seeding is single-threaded and whose distance block grows with
   `65536 x k`) and needs 10 to 17 times less memory. Its own seeding does not
   decide that: with k-means++ (`--init kmeans++`) instead of a random sample it
-  takes 12.9 s on SIFT, at a 0.04% higher loss.
+  takes 13.8 s on SIFT, at a 0.04% higher loss.
 
 The same holds for whole indexes. Built from the full SIFT1M (`l2`) and GloVe-100
 (`cosine`) files with 4096 buckets and `fp32` codes, then searched by 32 threads on
 one NUMA node at `scan_buckets_count` 16 / 64 / 128 (`cluster_benchmark --ivf`,
-recall@10 against the files' ground truth):
+recall@10 against the files' ground truth; the run with the median build time of
+three):
 
 | Data | Trainer | Build | Bucket sizes | Recall@10 | Distances per query | QPS |
 |---|---|---|---|---|---|---|
-| SIFT1M | `kmeans` | 68.0 s | 1–1732 | 0.836 / 0.972 / 0.992 | 5205 / 19377 / 37188 | 123k / 37.8k / 20.6k |
-| | `balanced_kmeans` | 30.4 s | 244–245 | 0.827 / 0.971 / 0.992 | 4151 / 16178 / 32064 | 146k / 45.6k / 24.0k |
-| GloVe-100 | `kmeans` | 55.5 s | 1–2678 | 0.777 / 0.901 / 0.941 | 12150 / 44190 / 83183 | 78.1k / 24.6k / 12.9k |
-| | `balanced_kmeans` | 38.0 s | 288–289 | 0.697 / 0.852 / 0.907 | 4987 / 19439 / 38498 | 149k / 45.5k / 24.9k |
+| SIFT1M | `kmeans` | 64.6 s | 1–1667 | 0.833 / 0.972 / 0.992 | 5256 / 19539 / 37530 | 129k / 39.9k / 21.3k |
+| | `balanced_kmeans` | 31.6 s | 244–245 | 0.827 / 0.971 / 0.992 | 4149 / 16176 / 32062 | 151k / 48.3k / 24.5k |
+| GloVe-100 | `kmeans` | 52.9 s | 1–2590 | 0.776 / 0.900 / 0.941 | 11981 / 43656 / 81963 | 84.7k / 25.6k / 13.7k |
+| | `balanced_kmeans` | 41.1 s | 288–289 | 0.698 / 0.852 / 0.907 | 4989 / 19442 / 38501 | 154k / 48.2k / 25.5k |
 
 Queries follow the data, so large buckets are probed more often than small ones,
 and with plain k-means the probed buckets are larger than the mean (a bucket probed
-in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.7
-on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 16% to
-25% more distances on SIFT and 2.2 to 2.4 times as many on GloVe, which buys it
+in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.6
+on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 17% to
+27% more distances on SIFT and 2.1 to 2.4 times as many on GloVe, which buys it
 recall on GloVe. At the same throughput the balanced index has the same or higher
-recall (GloVe: 0.907 at 24.9k QPS against 0.901 at 24.6k), and no query scans more
+recall (GloVe: 0.907 at 25.5k QPS against 0.900 at 25.6k), and no query scans more
 than `scan_buckets_count x ceil(n / buckets_count)` vectors until `Add` grows the
 buckets.
 
