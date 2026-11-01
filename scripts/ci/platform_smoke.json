@@ -1,0 +1,19 @@
+{
+  "unittests": [
+    "MemoryIO Read and Write",
+    "MemoryIO Serialize and Deserialize",
+    "BufferIO Read & Write"
+  ],
+  "functests": [
+    "Factory still creates a supported index",
+    "(PR) BruteForce Build & ContinueAdd Test",
+    "Factory rejects removed index names",
+    "Pyramid half input Build Add and search roundtrip"
+  ],
+  "examples": [
+    "103_index_hgraph",
+    "105_index_brute_force",
+    "106_index_ivf",
+    "402_persistent_streaming"
+  ]
+}

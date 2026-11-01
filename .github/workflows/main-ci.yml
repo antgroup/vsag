@@ -1,0 +1,69 @@
+name: Main CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# No branch-wide concurrency: every main commit keeps its own run.
+jobs:
+  changes:
+    name: Classify complete push
+    runs-on: ubuntu-24.04
+    outputs:
+      heavy: ${{ steps.policy.outputs.heavy }}
+      lint: ${{ steps.policy.outputs.lint }}
+      pattern: ${{ steps.policy.outputs.pattern }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select main checks
+        id: policy
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/main_ci_policy.py
+
+  platforms:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    uses: ./.github/workflows/asan_build_and_test.yml
+    with:
+      smoke: true
+
+  python:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    uses: ./.github/workflows/python_build_and_test.yml
+    with:
+      x86-only: true
+
+  tsan:
+    needs: changes
+    if: needs.changes.outputs.heavy == 'true'
+    uses: ./.github/workflows/tsan_build_and_test.yml
+
+  lint:
+    needs: changes
+    if: needs.changes.outputs.lint != 'none'
+    uses: ./.github/workflows/lint.yml
+    with:
+      mode: ${{ needs.changes.outputs.lint }}
+      pattern: ${{ needs.changes.outputs.pattern }}
+
+  summary:
+    name: Main CI Summary
+    if: always()
+    needs: [changes, platforms, python, tsan, lint]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify selected checks
+        env:
+          MAIN_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/main_ci_summary.py

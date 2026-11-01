@@ -1,8 +1,9 @@
 name: Tsan Build & Test Parallel
 
 on:
+  workflow_call:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
     paths-ignore:
       - 'docs/**'
   # Main PRs use ASan; TSan remains on main push and manual dispatch.

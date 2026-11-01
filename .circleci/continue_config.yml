@@ -28,7 +28,6 @@ workflows:
           filters:
             branches:
               only:
-                - main
                 - ^0\.\d+
 
 jobs:
