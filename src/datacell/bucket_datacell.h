@@ -636,7 +636,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
+        // The residuals the codes will encode: each vector against the bucket a Build
+        // would place it in.
+        auto buckets = strategy_->ClassifyDatasForTrain(data_ptr, static_cast<int64_t>(count));
         for (int i = 0; i < count; ++i) {
             strategy_->GetCentroid(buckets[i], centroid);
             for (int j = 0; j < dim; ++j) {

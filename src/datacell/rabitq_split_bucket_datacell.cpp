@@ -1363,8 +1363,10 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
     }
     CHECK_ARGUMENT(count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                    "RaBitQ split training count is too large");
+    // The residuals the codes will encode: each vector against the bucket a Build would
+    // place it in.
     auto buckets =
-        this->strategy_->ClassifyDatas(classify_data, static_cast<int64_t>(count), 1, nullptr);
+        this->strategy_->ClassifyDatasForTrain(classify_data, static_cast<int64_t>(count));
     for (uint64_t i = 0; i < count; ++i) {
         this->strategy_->GetCentroid(buckets[i], centroid);
         FP32Sub(classify_data + i * this->dim_,
