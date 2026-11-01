@@ -151,7 +151,8 @@ public:
     /// statistics in `stats_`.
     ///
     /// Throws INVALID_ARGUMENT for k == 0, count == 0, k > count, null or
-    /// non-finite data, a non-positive dimension, and invalid options.
+    /// non-finite data, squared norms above FLT_MAX / 4 (distances would overflow),
+    /// a non-positive dimension, and invalid options.
     Vector<int32_t>
     Run(uint32_t k,
         const float* datas,
@@ -160,10 +161,17 @@ public:
         double* err = nullptr);
 
     /// Assigns `count` vectors to `k` fixed centroids with the same capacities and
-    /// auction as Run, without moving the centroids. `*cost` receives the mean cost
-    /// of the assignment under `metric`. Past `work_budget` (see
-    /// BalancedKMeansOptions) the vectors still waiting go to their cheapest cluster
-    /// with a free seat, which keeps the sizes exact.
+    /// auction as Run, without moving the centroids. `k` may exceed `count`: every
+    /// vector then gets a cluster of its own and the others stay empty, which is
+    /// still floor(count / k) or ceil(count / k). `*cost` receives the mean cost of
+    /// the assignment under `metric`. Past `work_budget` (see BalancedKMeansOptions)
+    /// the vectors still waiting go to their cheapest cluster with a free seat,
+    /// which keeps the sizes exact.
+    ///
+    /// Throws INVALID_ARGUMENT for k == 0, count == 0, null or non-finite input,
+    /// squared norms above FLT_MAX / 4 (distances would overflow), a non-positive
+    /// dimension, candidate_count == 0, a negative or NaN work_budget, and an
+    /// unknown metric.
     Vector<int32_t>
     Assign(const float* centroids,
            uint32_t k,
