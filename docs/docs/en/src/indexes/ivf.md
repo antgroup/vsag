@@ -266,18 +266,16 @@ empty and no two differ by more than one vector.
 ```
 
 **What is balanced.** The clusters of the training sample, and the buckets that a
-`Build` into an empty index writes. When the training sample is the whole base and
-the metric is `l2`, the build reuses the trainer's own assignment. Otherwise it
-assigns the base vectors to the trained centroids under the same exact sizes,
-scored with the routing key of the metric (`1 - <x, c>` for `ip`, one minus the
-cosine for `cosine`), so a vector goes to the bucket a query near it is routed to
-whenever the sizes allow. Codes kept relative to a bucket centroid
-(`use_residual`, RaBitQ split storage) are trained on residuals from the same
-balanced assignment, so they cover vectors placed away from their nearest bucket.
-A `Build` on a model trained or exported beforehand can bring fewer vectors than
-buckets; every vector then gets a bucket of its own.
-Vectors added later with `Add` go to their nearest
-bucket, as with the other trainers, so the sizes drift as the index grows. With
+`Build` into an empty index writes. The build assigns the base vectors to the
+trained centroids under the same exact sizes, scored with the routing key of the
+metric (`1 - <x, c>` for `ip`, one minus the cosine for `cosine`), so a vector goes
+to the bucket a query near it is routed to whenever the sizes allow. Codes kept
+relative to a bucket centroid (`use_residual`, RaBitQ split storage) are trained on
+residuals from the same balanced assignment of the training vectors, so they cover
+vectors placed away from their nearest bucket. A `Build` on a model trained or
+exported beforehand can bring fewer vectors than buckets; every vector then gets a
+bucket of its own. Vectors added later with `Add` go to their nearest bucket, as
+with the other trainers, so the sizes drift as the index grows. With
 `buckets_per_data` above 1 the first copy of every vector is balanced and the other
 copies go to the nearest other buckets.
 
@@ -297,16 +295,18 @@ transportation problem, solved by an auction (Bertsekas) with one price per
 cluster: a vector bids for the cluster with the lowest `distance + price`, a full
 cluster gives the seat to the higher bid and its lowest bidder bids again, and
 prices only rise. With epsilon-scaling every assignment is optimal for its
-centroids within `n * epsilon`, epsilon being 1e-4 of the typical distance gap
-between a vector's closest clusters; as the mean is optimal for a fixed cluster,
-the loss does not grow between iterations. Every iteration starts from the
-previous assignment and prices, raised by how far each centroid moved, so most
-vectors keep their seats and only the others bid.
+centroids within `n * epsilon` (for the distances as computed in float), epsilon
+being 1e-4 of the typical distance gap between a vector's closest clusters; as the
+mean is optimal for a fixed cluster, the loss does not grow between iterations.
+Every iteration starts from the previous assignment and prices, raised by how far
+each centroid moved, so most vectors keep their seats and only the others bid.
 
 The working set never holds an `n x buckets_count` matrix. Each vector keeps its
 16 cheapest clusters and a lower bound for all the others, and distances are
-computed in GEMM tiles of at most 64 vectors by 1024 centroids per task. A vector
-whose remembered clusters all become dearer than its bound is scored again
+computed in GEMM tiles of at most 64 vectors by 1024 centroids per task. When the
+centroids lie far from the origin compared with their spread, the tiles are
+computed around the centroids' mean, so that small distances keep their precision.
+A vector whose remembered clusters all become dearer than its bound is scored again
 against every centroid, so the bound is never trusted beyond what it proves.
 
 | | `kmeans` | `balanced_kmeans` |
@@ -336,26 +336,26 @@ Every row is the run with the median time of three:
 
 | Data (`n x d`, `k`) | Trainer | Sizes | CV | Loss | Time | Peak memory |
 |---|---|---|---|---|---|---|
-| Uniform (100,000 x 64, 256) | `kmeans` | 343–458 | 0.051 | 4.5993 | 0.98 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.6001 | 0.81 s | 18.8 MiB |
-| Not divisible (99,968 x 64, 256) | `kmeans` | 340–453 | 0.049 | 4.5963 | 0.97 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.5972 | 0.83 s | 19.0 MiB |
-| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 1.00 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 3.7468 | 3.94 s | 19.0 MiB |
-| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–826 | 0.526 | 3.5804 | 0.98 s | 64.4 MiB |
-| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2420 | 4.28 s | 41.8 MiB |
-| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 53.3 s | 1027 MiB |
-| | `balanced_kmeans` | 64–64 | 0 | 43817 | 14.0 s | 60.4 MiB |
-| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–734 | 1.297 | 21.371 | 38.8 s | 1027 MiB |
-| | `balanced_kmeans` | 64–64 | 0 | 21.147 | 22.4 s | 59.9 MiB |
-| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9021 | 54.6 s | 1027 MiB |
-| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9820 | 37.7 s | 95.9 MiB |
+| Uniform (100,000 x 64, 256) | `kmeans` | 334–464 | 0.050 | 4.5992 | 0.99 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.6001 | 0.85 s | 19.0 MiB |
+| Not divisible (99,968 x 64, 256) | `kmeans` | 328–444 | 0.047 | 4.5963 | 0.96 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.5971 | 0.86 s | 19.0 MiB |
+| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 0.98 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 3.7468 | 3.96 s | 19.0 MiB |
+| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–811 | 0.526 | 3.5804 | 0.98 s | 64.4 MiB |
+| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2413 | 4.24 s | 41.8 MiB |
+| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 54.6 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 43818 | 13.9 s | 60.4 MiB |
+| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–733 | 1.297 | 21.370 | 40.0 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 21.145 | 22.6 s | 59.9 MiB |
+| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9021 | 53.6 s | 1027 MiB |
+| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9825 | 32.8 s | 96.2 MiB |
 
 The skewed sets are Zipf-weighted Gaussian mixtures; "separated" places 64
 components far apart, so many small ones have to share clusters, and repeats eight
 vectors in 5% of the rows.
 
-- **Balance is exact** on every set. Plain k-means leaves its largest cluster at 1.2
+- **Balance is exact** on every set. Plain k-means leaves its largest cluster at 1.1
   to 26.5 times the mean size, and at 4096 clusters some clusters hold one vector.
 - **Loss** is within 0.3% of plain k-means on uniform, non-divisible and SIFT data,
   and lower on GloVe, where plain k-means keeps many nearly empty clusters. Where
@@ -366,7 +366,7 @@ vectors in 5% of the rows.
   (whose seeding is single-threaded and whose distance block grows with
   `65536 x k`) and needs 10 to 17 times less memory. Its own seeding does not
   decide that: with k-means++ (`--init kmeans++`) instead of a random sample it
-  takes 13.8 s on SIFT, at a 0.04% higher loss.
+  takes 13.2 s on SIFT, at a 0.05% higher loss.
 
 The same holds for whole indexes. Built from the full SIFT1M (`l2`) and GloVe-100
 (`cosine`) files with 4096 buckets and `fp32` codes, then searched by 32 threads on
@@ -376,19 +376,20 @@ three):
 
 | Data | Trainer | Build | Bucket sizes | Recall@10 | Distances per query | QPS |
 |---|---|---|---|---|---|---|
-| SIFT1M | `kmeans` | 64.6 s | 1–1667 | 0.833 / 0.972 / 0.992 | 5256 / 19539 / 37530 | 129k / 39.9k / 21.3k |
-| | `balanced_kmeans` | 31.6 s | 244–245 | 0.827 / 0.971 / 0.992 | 4149 / 16176 / 32062 | 151k / 48.3k / 24.5k |
-| GloVe-100 | `kmeans` | 52.9 s | 1–2590 | 0.776 / 0.900 / 0.941 | 11981 / 43656 / 81963 | 84.7k / 25.6k / 13.7k |
-| | `balanced_kmeans` | 41.1 s | 288–289 | 0.698 / 0.852 / 0.907 | 4989 / 19442 / 38501 | 154k / 48.2k / 25.5k |
+| SIFT1M | `kmeans` | 65.6 s | 1–1861 | 0.836 / 0.971 / 0.993 | 5256 / 19491 / 37355 | 125k / 38.4k / 20.8k |
+| | `balanced_kmeans` | 27.9 s | 244–245 | 0.826 / 0.971 / 0.992 | 4149 / 16175 / 32061 | 148k / 45.8k / 23.9k |
+| GloVe-100 | `kmeans` | 56.0 s | 0–2766 | 0.777 / 0.900 / 0.939 | 12137 / 44194 / 83099 | 79.4k / 24.5k / 13.3k |
+| | `balanced_kmeans` | 44.5 s | 288–289 | 0.698 / 0.854 / 0.907 | 4991 / 19451 / 38512 | 142k / 45.1k / 23.8k |
 
 Queries follow the data, so large buckets are probed more often than small ones,
 and with plain k-means the probed buckets are larger than the mean (a bucket probed
-in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.6
+in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.7
 on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 17% to
-27% more distances on SIFT and 2.1 to 2.4 times as many on GloVe, which buys it
-recall on GloVe. At the same throughput the balanced index has the same or higher
-recall (GloVe: 0.907 at 25.5k QPS against 0.900 at 25.6k), and no query scans more
-than `scan_buckets_count x ceil(n / buckets_count)` vectors until `Add` grows the
+27% more distances on SIFT and 2.2 to 2.4 times as many on GloVe, which buys it
+recall on GloVe. At about the same throughput the balanced index has the same or
+higher recall (GloVe: 0.907 at 23.8k QPS against 0.900 at 24.5k; SIFT: 0.992 at
+23.9k against 0.993 at 20.8k), and no query scans more than
+`scan_buckets_count x ceil(n / buckets_count)` vectors until `Add` grows the
 buckets.
 
 Use `balanced_kmeans` when the cost of the largest bucket matters: skewed or

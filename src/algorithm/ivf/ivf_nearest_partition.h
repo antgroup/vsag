@@ -54,10 +54,7 @@ public:
     /// With ivf_train_type "balanced_kmeans", every bucket receives floor(count / k) or
     /// ceil(count / k) of the vectors; otherwise the same as ClassifyDatas.
     Vector<BucketIdType>
-    ClassifyDatasForBuild(const void* datas,
-                          int64_t count,
-                          BucketIdType buckets_per_data,
-                          bool trained_on_datas) override;
+    ClassifyDatasForBuild(const void* datas, int64_t count, BucketIdType buckets_per_data) override;
 
     /// With ivf_train_type "balanced_kmeans", the balanced assignment of the training
     /// vectors to the trained centroids; otherwise the same as ClassifyDatas.
@@ -127,11 +124,6 @@ private:
     // Copied common param, used to lazily create the routing HGraph when a route-graph-layout
     // index is deserialized by a reader configured with use_route_graph=false.
     IndexCommonParam common_param_;
-
-    // The balanced trainer's assignment of its training vectors under L2, kept until the
-    // next ClassifyDatasForBuild, which reuses it when the Build trained on exactly the
-    // vectors it places.
-    Vector<BucketIdType> train_labels_{allocator_};
 };
 
 }  // namespace vsag

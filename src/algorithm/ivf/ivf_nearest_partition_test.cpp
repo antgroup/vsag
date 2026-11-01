@@ -880,17 +880,17 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
         REQUIRE(larger == 11);
     };
 
-    // The Build that trained on these vectors reuses the trainer's assignment (under
-    // L2) or scores them against the final centroids; both are balanced.
-    require_balanced(partition.ClassifyDatasForBuild(vec.data(), data_count, 1, true));
-
-    // Otherwise the vectors are assigned to the trained centroids afresh.
-    auto buckets = partition.ClassifyDatasForBuild(vec.data(), data_count, 1, false);
+    // A Build assigns the vectors to the trained centroids under exact sizes.
+    auto buckets = partition.ClassifyDatasForBuild(vec.data(), data_count, 1);
     require_balanced(buckets);
+
+    // Residual codes are trained on that same assignment, so the residuals a Build
+    // encodes are the ones the codes were trained on.
+    REQUIRE(partition.ClassifyDatasForTrain(vec.data(), data_count) == buckets);
 
     // With two buckets per vector the first copies are the balanced ones and the second
     // copies go to another bucket.
-    auto two = partition.ClassifyDatasForBuild(vec.data(), data_count, 2, false);
+    auto two = partition.ClassifyDatasForBuild(vec.data(), data_count, 2);
     REQUIRE(two.size() == 2 * data_count);
     for (int64_t i = 0; i < data_count; ++i) {
         REQUIRE(two[2 * i] == buckets[i]);
@@ -900,7 +900,7 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
     // More copies than buckets: the copies left without a bucket are marked invalid, as
     // ClassifyDatas marks them, and never name bucket 0.
     constexpr BucketIdType too_many = bucket_count + 7;
-    auto over = partition.ClassifyDatasForBuild(vec.data(), data_count, too_many, false);
+    auto over = partition.ClassifyDatasForBuild(vec.data(), data_count, too_many);
     REQUIRE(over.size() == data_count * too_many);
     for (int64_t i = 0; i < data_count; ++i) {
         const auto* row = over.data() + i * too_many;
@@ -920,7 +920,7 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
     // vector then gets a bucket of its own.
     constexpr int64_t few = 9;
     const float* distinct_rows = vec.data() + (data_count / 2) * dim;
-    auto own = partition.ClassifyDatasForBuild(distinct_rows, few, 1, false);
+    auto own = partition.ClassifyDatasForBuild(distinct_rows, few, 1);
     REQUIRE(own.size() == few);
     std::vector<BucketIdType> sorted_own(own.begin(), own.end());
     std::sort(sorted_own.begin(), sorted_own.end());
@@ -949,6 +949,7 @@ TEST_CASE("IVF Nearest Partition kmeans Build buckets are routed as before",
     auto dataset = Dataset::Make();
     dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
     partition.Train(dataset);
-    REQUIRE(partition.ClassifyDatasForBuild(vec.data(), data_count, 1, true) ==
-            partition.ClassifyDatas(vec.data(), data_count, 1, nullptr));
+    const auto nearest = partition.ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    REQUIRE(partition.ClassifyDatasForBuild(vec.data(), data_count, 1) == nearest);
+    REQUIRE(partition.ClassifyDatasForTrain(vec.data(), data_count) == nearest);
 }
