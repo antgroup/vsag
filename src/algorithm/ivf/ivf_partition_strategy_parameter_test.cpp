@@ -15,8 +15,13 @@
 
 #include "ivf_partition_strategy_parameter.h"
 
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "parameter_test.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 TEST_CASE("IVF Partition Strategy Parameters Test", "[ut][IVFPartitionStrategyParameters]") {
     auto param_str = R"({
         "partition_strategy_type": "gno_imi",
@@ -200,4 +205,63 @@ TEST_CASE("IVF Partition Strategy GPU Settings Do Not Affect Compatibility",
 
     REQUIRE(host->CheckCompatibility(device));
     REQUIRE(device->CheckCompatibility(host));
+}
+
+namespace {
+std::shared_ptr<vsag::IVFPartitionStrategyParameters>
+make_trainer_param(const std::string& strategy, const std::string& trainer) {
+    auto param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    param->FromString(fmt::format(R"({{
+        "partition_strategy_type": "{}",
+        "ivf_train_type": "{}",
+        "gno_imi": {{"first_order_buckets_count": 20, "second_order_buckets_count": 5}}
+    }})",
+                                  strategy,
+                                  trainer));
+    return param;
+}
+}  // namespace
+
+TEST_CASE("IVF Partition Strategy Trainer Types", "[ut][IVFPartitionStrategyParameters]") {
+    // kmeans remains the default trainer.
+    auto defaults = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    REQUIRE(defaults->partition_train_type == vsag::IVFNearestPartitionTrainerType::KMeansTrainer);
+
+    const std::vector<std::pair<std::string, vsag::IVFNearestPartitionTrainerType>> trainers{
+        {"kmeans", vsag::IVFNearestPartitionTrainerType::KMeansTrainer},
+        {"random", vsag::IVFNearestPartitionTrainerType::RandomTrainer},
+        {"balanced_kmeans", vsag::IVFNearestPartitionTrainerType::BalancedKMeansTrainer},
+    };
+    for (const auto& [name, type] : trainers) {
+        auto param = make_trainer_param("ivf", name);
+        REQUIRE(param->partition_train_type == type);
+        REQUIRE(param->ToJson()["ivf_train_type"].GetString() == name);
+        vsag::ParameterTest::TestToJson(param);
+    }
+
+    // An unknown trainer is refused with a message naming the valid ones.
+    for (const std::string name : {"balanced", "BALANCED_KMEANS", "kmeans++", ""}) {
+        CAPTURE(name);
+        try {
+            make_trainer_param("ivf", name);
+            FAIL("an unknown ivf_train_type was accepted");
+        } catch (const vsag::VsagException& e) {
+            REQUIRE(e.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(e.what()).find("balanced_kmeans") != std::string::npos);
+        }
+    }
+
+    // GNO-IMI trains plain k-means, so it cannot honour a balanced request; the other
+    // trainers keep being accepted there as before.
+    REQUIRE_THROWS_AS(make_trainer_param("gno_imi", "balanced_kmeans"), vsag::VsagException);
+    REQUIRE_NOTHROW(make_trainer_param("gno_imi", "random"));
+
+    // The trainer decides how the centroids were computed, not what is stored, so an
+    // index trained one way stays loadable by a reader configured another way.
+    auto kmeans = make_trainer_param("ivf", "kmeans");
+    auto random = make_trainer_param("ivf", "random");
+    auto balanced = make_trainer_param("ivf", "balanced_kmeans");
+    REQUIRE(kmeans->CheckCompatibility(balanced));
+    REQUIRE(balanced->CheckCompatibility(kmeans));
+    REQUIRE(random->CheckCompatibility(balanced));
 }

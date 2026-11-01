@@ -28,6 +28,9 @@ enum class IVFNearestPartitionTrainerType {
     RandomTrainer = 0,
     KMeansTrainer = 1,
     EMeansTrainer = 2,
+    // k-means whose clusters, and the buckets of the initial Build, hold
+    // floor(n / k) or ceil(n / k) vectors each.
+    BalancedKMeansTrainer = 3,
 };
 
 enum class IVFPartitionStrategyType {
@@ -72,9 +75,9 @@ public:
     // are computed, not what the index looks like afterwards, which is why
     // CheckCompatibility ignores them.
     bool enable_gpu_build{false};
-    // Iterations used by the kmeans centroid training (ivf_train_type == "kmeans").
-    // Unset (-1) means "use the per-strategy default", which keeps the historical values:
-    // 25 for the single-level IVF strategy and 30 for GNO-IMI.
+    // Iterations used by the centroid training of ivf_train_type "kmeans" and
+    // "balanced_kmeans". Unset (-1) means "use the per-strategy default", which keeps the
+    // historical values: 25 for the single-level IVF strategy and 30 for GNO-IMI.
     int32_t kmeans_iter_count{-1};
     // Epochs used by the e-means centroid training (ivf_train_type == "e_means").
     int32_t e_means_epochs{DEFAULT_IVF_E_MEANS_EPOCHS};
