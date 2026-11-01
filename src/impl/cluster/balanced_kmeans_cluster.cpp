@@ -82,6 +82,29 @@ constexpr double INF = std::numeric_limits<double>::infinity();
 /// including the intermediate sums of the GEMM that computes it, is finite in float.
 constexpr double MAX_SQUARED_NORM = static_cast<double>(std::numeric_limits<float>::max()) / 4.0;
 
+/// Keeps BLAS on one thread inside a task and gives the thread its OpenMP setting
+/// back afterwards: a task may run on the caller's own thread.
+class SingleThreadedBlas {
+public:
+    SingleThreadedBlas() : saved_(omp_get_max_threads()) {
+        omp_set_num_threads(1);
+    }
+
+    ~SingleThreadedBlas() {
+        omp_set_num_threads(saved_);
+    }
+
+    SingleThreadedBlas(const SingleThreadedBlas&) = delete;
+    SingleThreadedBlas&
+    operator=(const SingleThreadedBlas&) = delete;
+    SingleThreadedBlas(SingleThreadedBlas&&) = delete;
+    SingleThreadedBlas&
+    operator=(SingleThreadedBlas&&) = delete;
+
+private:
+    const int saved_;
+};
+
 /// Runs `func(task)` for every task on the pool and waits for all of them before
 /// rethrowing the first failure, so no task outlives the state it references. A
 /// null pool runs the tasks on the calling thread.
@@ -99,8 +122,16 @@ parallel_for(const SafeThreadPoolPtr& pool, uint64_t task_count, const Func& fun
     }
     std::vector<std::future<void>> futures;
     futures.reserve(task_count);
-    for (uint64_t task = 0; task < task_count; ++task) {
-        futures.emplace_back(pool->GeneralEnqueue(func, task));
+    try {
+        for (uint64_t task = 0; task < task_count; ++task) {
+            futures.emplace_back(pool->GeneralEnqueue(func, task));
+        }
+    } catch (...) {
+        // The tasks already queued reference the caller's state: let them finish first.
+        for (auto& future : futures) {
+            future.wait();
+        }
+        throw;
     }
     for (auto& future : futures) {
         future.wait();
@@ -399,7 +430,7 @@ score_rows(const CostModel& model,
     const uint64_t column_tasks = std::min(MAX_COLUMN_TASKS, model.k / COLUMNS_PER_TASK);
     if (pool == nullptr or row_tasks >= column_tasks or row_count > MAX_COLUMN_SPLIT_ROWS) {
         parallel_for(pool, row_tasks, [&](uint64_t task) {
-            omp_set_num_threads(1);
+            const SingleThreadedBlas single_threaded;
             const uint64_t begin = task * ROWS_PER_TASK;
             const uint64_t local = std::min(ROWS_PER_TASK, row_count - begin);
             Vector<float> gathered(allocator);
@@ -425,7 +456,7 @@ score_rows(const CostModel& model,
         partial.emplace_back(row_count, keep, allocator);
     }
     parallel_for(pool, column_tasks, [&](uint64_t task) {
-        omp_set_num_threads(1);
+        const SingleThreadedBlas single_threaded;
         const uint64_t first = std::min(model.k, task * span);
         const uint64_t last = std::min(model.k, first + span);
         Vector<float> tile(row_count * std::min(model.k, CENTROID_TILE), 0.0F, allocator);
@@ -813,7 +844,13 @@ private:
         second = std::min(second, bound);
         const double gap = std::isfinite(second) ? second - best : 0.0;
         target = best_cluster;
-        offer = price_of(best_cluster) + gap + epsilon;
+        // Epsilon is sized from the costs and prices an auction starts with, but a price
+        // can grow far beyond them, up to the bound of a remote cluster, where adding
+        // epsilon is lost to rounding: the bid would leave the price where it was, and
+        // equal bids could evict each other forever. Every bid raises the price by a
+        // step the price can represent.
+        const double price = price_of(best_cluster);
+        offer = price + gap + std::max(epsilon, std::abs(price) * EPSILON_FLOOR_RATIO);
         return true;
     }
 
@@ -1524,7 +1561,7 @@ BalancedKMeansCluster::update_centroids(const float* datas,
     }
     const uint64_t task_count = (k + CLUSTERS_PER_TASK - 1) / CLUSTERS_PER_TASK;
     parallel_for(thread_pool_, task_count, [&](uint64_t task) {
-        omp_set_num_threads(1);
+        const SingleThreadedBlas single_threaded;
         const uint64_t end = std::min<uint64_t>(k, (task + 1) * CLUSTERS_PER_TASK);
         for (uint64_t j = task * CLUSTERS_PER_TASK; j < end; ++j) {
             float* centroid = k_centroids_ + j * dim;

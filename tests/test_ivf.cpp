@@ -4502,6 +4502,45 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     require_own_buckets(model.value());
 }
 
+TEST_CASE("IVF balanced_kmeans trains residual codes on the buckets it builds", "[ft][ivf][pr]") {
+    // 300 zero vectors and 100 at 100 in every dimension, in two buckets of 200: one
+    // holds 200 zeros, the other the remaining 100 zeros and the far vectors, so those
+    // zeros sit 50 below their centroid in every dimension. Residual codes trained on
+    // nearest-bucket residuals cover only [0, 50] and turned those zeros into 50s.
+    constexpr int64_t dim = 8;
+    constexpr int64_t zeros = 300;
+    constexpr int64_t far = 100;
+    std::vector<float> vectors((zeros + far) * dim, 0.0F);
+    std::fill(vectors.begin() + zeros * dim, vectors.end(), 100.0F);
+    std::vector<int64_t> ids(zeros + far);
+    for (int64_t i = 0; i < zeros + far; ++i) {
+        ids[i] = i;
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(zeros + far)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    const auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "sq8", 2, "balanced_kmeans", true);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+    auto stats = nlohmann::json::parse(index->GetStats());
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == 200);
+
+    std::vector<float> origin(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(origin.data())->Owner(false);
+    auto result = index->KnnSearch(query, zeros, fmt::format(fixtures::search_param_tmp, 2));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == zeros);
+    for (int64_t i = 0; i < zeros; ++i) {
+        REQUIRE(result.value()->GetIds()[i] < zeros);
+        REQUIRE(result.value()->GetDistances()[i] < 1.0F);
+    }
+}
+
 TEST_CASE("IVF rejects unknown trainers", "[ft][ivf][pr]") {
     auto params = nlohmann::json::parse(fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
         "l2", 16, "fp32", 8, "balanced_kmeans", false, 1, false, 1, 512));

@@ -222,33 +222,11 @@ IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
         not this->is_trained_ or count <= 0 or buckets_per_data <= 0) {
         return this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
     }
-    // Scored with the routing key of the metric against the final centroids, which
-    // are unit length for cosine, so that a vector lands in the bucket a query near
-    // it is routed to whenever the capacities allow.
-    auto metric = BalancedAssignMetric::L2SQR;
-    if (metric_type_ == MetricType::METRIC_TYPE_IP) {
-        metric = BalancedAssignMetric::INNER_PRODUCT;
-    } else if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
-        metric = BalancedAssignMetric::COSINE;
-    }
     Vector<BucketIdType> labels(allocator_);
     if (reuse) {
         labels.swap(trained);
     } else {
-        const auto dim = static_cast<uint64_t>(this->dim_);
-        Vector<float> centroids(static_cast<uint64_t>(bucket_count_) * dim, allocator_);
-        Vector<float> centroid(dim, allocator_);
-        for (BucketIdType b = 0; b < bucket_count_; ++b) {
-            this->GetCentroid(b, centroid);
-            std::copy(centroid.begin(), centroid.end(), centroids.data() + b * dim);
-        }
-        BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator_, thread_pool_);
-        const auto assigned = cluster.Assign(centroids.data(),
-                                             static_cast<uint32_t>(bucket_count_),
-                                             static_cast<const float*>(datas),
-                                             static_cast<uint64_t>(count),
-                                             metric);
-        labels.assign(assigned.begin(), assigned.end());
+        labels = this->assign_balanced(datas, count);
     }
     if (buckets_per_data == 1) {
         return labels;
@@ -271,6 +249,45 @@ IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
         }
     }
     return result;
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForTrain(const void* datas, int64_t count) {
+    if (ivf_partition_strategy_param_->partition_train_type !=
+            IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
+        not this->is_trained_ or count <= 0) {
+        return this->ClassifyDatas(datas, count, 1, nullptr);
+    }
+    // A Build places its vectors under the size constraint, often away from their
+    // nearest bucket; residual codes trained on nearest-bucket residuals would not
+    // cover those.
+    return this->assign_balanced(datas, count);
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::assign_balanced(const void* datas, int64_t count) {
+    // Scored with the routing key of the metric against the final centroids, which
+    // are unit length for cosine, so that a vector lands in the bucket a query near
+    // it is routed to whenever the capacities allow.
+    auto metric = BalancedAssignMetric::L2SQR;
+    if (metric_type_ == MetricType::METRIC_TYPE_IP) {
+        metric = BalancedAssignMetric::INNER_PRODUCT;
+    } else if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        metric = BalancedAssignMetric::COSINE;
+    }
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    Vector<float> centroids(static_cast<uint64_t>(bucket_count_) * dim, allocator_);
+    Vector<float> centroid(dim, allocator_);
+    for (BucketIdType b = 0; b < bucket_count_; ++b) {
+        this->GetCentroid(b, centroid);
+        std::copy(centroid.begin(), centroid.end(), centroids.data() + b * dim);
+    }
+    BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator_, thread_pool_);
+    return cluster.Assign(centroids.data(),
+                          static_cast<uint32_t>(bucket_count_),
+                          static_cast<const float*>(datas),
+                          static_cast<uint64_t>(count),
+                          metric);
 }
 
 /// The build-time assignment, offloaded. Nothing means use the host path: the

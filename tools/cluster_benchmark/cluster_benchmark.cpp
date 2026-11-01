@@ -35,6 +35,7 @@
 #include <numeric>
 #include <random>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -185,6 +186,17 @@ read_fvecs(const std::string& path, uint64_t limit) {
     return vectors;
 }
 
+/// The two extents of a rank-2 HDF5 dataset; any other rank is refused before the
+/// extents are read into a fixed array.
+void
+matrix_extents(const H5::DataSet& dataset, const std::string& name, hsize_t (&dims)[2]) {
+    const H5::DataSpace space = dataset.getSpace();
+    if (space.getSimpleExtentNdims() != 2) {
+        throw std::runtime_error(name + " must be a two-dimensional dataset");
+    }
+    space.getSimpleExtentDims(dims);
+}
+
 /// The "train" split of an ann-benchmarks HDF5 file.
 Vectors
 read_hdf5(const std::string& path, uint64_t limit) {
@@ -192,7 +204,7 @@ read_hdf5(const std::string& path, uint64_t limit) {
     H5::DataSet dataset = file.openDataSet("/train");
     H5::DataSpace space = dataset.getSpace();
     hsize_t dims[2] = {0, 0};
-    space.getSimpleExtentDims(dims);
+    matrix_extents(dataset, "/train", dims);
     Vectors vectors{path, std::min<uint64_t>(dims[0], limit), dims[1], {}};
     vectors.data.resize(vectors.count * vectors.dim);
     hsize_t count[2] = {vectors.count, vectors.dim};
@@ -368,7 +380,7 @@ read_queries(const std::string& path, uint64_t limit) {
     {
         H5::DataSet dataset = file.openDataSet("/test");
         hsize_t dims[2] = {0, 0};
-        dataset.getSpace().getSimpleExtentDims(dims);
+        matrix_extents(dataset, "/test", dims);
         queries.dim = dims[1];
         std::vector<float> all(dims[0] * dims[1]);
         dataset.read(all.data(), H5::PredType::NATIVE_FLOAT);
@@ -378,7 +390,7 @@ read_queries(const std::string& path, uint64_t limit) {
     {
         H5::DataSet dataset = file.openDataSet("/neighbors");
         hsize_t dims[2] = {0, 0};
-        dataset.getSpace().getSimpleExtentDims(dims);
+        matrix_extents(dataset, "/neighbors", dims);
         queries.truth_width = dims[1];
         std::vector<int64_t> all(dims[0] * dims[1]);
         dataset.read(all.data(), H5::PredType::NATIVE_INT64);

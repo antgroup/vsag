@@ -83,6 +83,14 @@ public:
         return ClassifyDatas(datas, count, buckets_per_data, nullptr);
     }
 
+    /// Buckets of training vectors for codes that depend on their bucket (residuals),
+    /// placed the way a Build places vectors, so the codes are trained on the
+    /// residuals they will encode. By default every vector goes to its nearest bucket.
+    virtual Vector<BucketIdType>
+    ClassifyDatasForTrain(const void* datas, int64_t count) {
+        return ClassifyDatas(datas, count, 1, nullptr);
+    }
+
     virtual void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) = 0;
 

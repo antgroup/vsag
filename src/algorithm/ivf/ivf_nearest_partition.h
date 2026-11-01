@@ -59,6 +59,11 @@ public:
                           BucketIdType buckets_per_data,
                           bool trained_on_datas) override;
 
+    /// With ivf_train_type "balanced_kmeans", the balanced assignment of the training
+    /// vectors to the trained centroids; otherwise the same as ClassifyDatas.
+    Vector<BucketIdType>
+    ClassifyDatasForTrain(const void* datas, int64_t count) override;
+
     void
     GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override;
 
@@ -102,6 +107,11 @@ private:
     /// should use the host path instead.
     std::optional<Vector<BucketIdType>>
     classify_datas_on_device(const void* datas, int64_t count, BucketIdType buckets_per_data) const;
+
+    /// Balanced assignment of `count` vectors to the trained centroids, scored with the
+    /// routing key of the metric.
+    Vector<BucketIdType>
+    assign_balanced(const void* datas, int64_t count);
 
 private:
     bool use_route_graph_{true};
