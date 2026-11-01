@@ -2,6 +2,7 @@
 """Check the Aarch64 ASan download contract without executing ARM binaries."""
 
 from pathlib import Path
+import os
 import re
 import subprocess
 import tempfile
@@ -51,6 +52,7 @@ class AsanArtifactWorkflowTest(unittest.TestCase):
                 result = subprocess.run(
                     ["sh", "-e", "-c", validation_script(job)],
                     cwd=root, text=True, capture_output=True, timeout=10,
+                    env=dict(os.environ, LC_ALL="C"),
                 )
                 self.assertEqual(result.returncode == 0, expected_success, result.stdout + result.stderr)
                 if not expected_success:
