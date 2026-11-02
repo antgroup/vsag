@@ -543,6 +543,7 @@ They do not change the sparse-graph or `use_hybrid_traversal=true` expansion alg
 
 | Search parameter | Default | Meaning |
 | --- | --- | --- |
+| `hybrid_filter_cost_ratio` | `1.0` | For `use_hybrid_traversal`: relative cost of one predicate filtering against one distance computation (`O_filter / O_dist`). The virtual-overhead budget early-stops the MCI part once `considered * (hybrid_filter_cost_ratio + local_selectivity)` reaches `hybrid_vob`. |
 | `mci_packed_filter` | `true` | Build a query-private one-bit predicate from complete mapped valid IDs, or an identity-mapped byte bitmap. Static CSR members use runtime-dispatched AVX512/AVX2, with a portable scalar fallback. Member order is preserved. When no complete source is available, use the existing predicate checks. |
 | `mci_batch_distance` | `true` | Score up to 64 newly visited legal points per datacell call. Submit the final batch before selecting another parent or checking convergence. FP32 kernels can choose different IDs among exactly tied distances. |
 | `mci_activation_cap` | `0` | Maximum number of outgoing clique incidences considered for each expanded point. Zero means all incidences. Already visited cliques still consume this prefix. This changes the explored graph and can lower recall. |
