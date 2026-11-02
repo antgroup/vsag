@@ -795,7 +795,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 rows.emplace_back(static_cast<const float*>(row));
             }
         }
+        uint64_t hierarchy_index = 0;
         for (const auto& [hname, hierarchy] : hierarchies_) {
+            auto pipnn_phase_start = std::chrono::steady_clock::now();
             auto pipnn_parameter = pipnn_param_;
             pipnn_parameter.alpha = hierarchy->alpha;
             PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
@@ -830,6 +832,13 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                     }
                 };
             hierarchy->root->Build(build_graph);
+            logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} duration={}ms",
+                         hierarchy_index + 1,
+                         hierarchies_.size(),
+                         std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - pipnn_phase_start)
+                             .count());
+            ++hierarchy_index;
 
             auto& root = *hierarchy->root;
             if (root.has_routing()) {
@@ -903,6 +912,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
             submit_exception = std::current_exception();
         }
         drain_futures(futures, submit_exception);
+        logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} (parallel)",
+                     hierarchies_.size(),
+                     hierarchies_.size());
     } else {
         ODescent graph_builder(std::make_shared<ODescentParameter>(*odescent_param_),
                                codes,
@@ -911,13 +923,20 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                true,
                                build_vectors,
                                data_num);
+        uint64_t hi = 0;
         for (const auto& [hname, h_ptr] : hierarchies_) {
+            auto od_phase_start = std::chrono::steady_clock::now();
             h_ptr->root->Build(graph_builder);
+            logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} duration={}ms",
+                         hi + 1,
+                         hierarchies_.size(),
+                         std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - od_phase_start)
+                             .count());
+            ++hi;
         }
     }
-    {
-        logger::info("[pyramid_build] phase=graph_build_complete");
-    }
+    { logger::info("[pyramid_build] phase=graph_build_complete"); }
     cur_element_count_ = data_num;
     return failed_ids;
 }
