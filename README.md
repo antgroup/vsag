@@ -414,19 +414,19 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/Roxanne0321">
-                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
+                <a href="https://github.com/LightWant">
+                    <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
                     <br />
-                    <sub><b>Roxanne</b></sub>
+                    <sub><b>LightWant</b></sub>
                 </a>
             </td>
         </tr>
         <tr>
             <td align="center">
-                <a href="https://github.com/LightWant">
-                    <img src="https://avatars.githubusercontent.com/u/32861432?v=4" width="100" alt="LightWant"/>
+                <a href="https://github.com/Roxanne0321">
+                    <img src="https://avatars.githubusercontent.com/u/188438858?v=4" width="100" alt="Roxanne0321"/>
                     <br />
-                    <sub><b>LightWant</b></sub>
+                    <sub><b>Roxanne</b></sub>
                 </a>
             </td>
             <td align="center">
