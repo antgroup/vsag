@@ -132,14 +132,22 @@ for (const [name, env, success] of [
   ['community cancelled', {COMMUNITY_RESULT:'cancelled'}, false],
   ['policy test failure', {POLICY_TEST_RESULT:'failure'}, false],
   ['route failure', {ROUTE_RESULT:'failure'}, false],
+  ['docs-only cannot publish core gate', {CORE_SELECTED:'false',ROUTE_RESULT:'skipped',POLICY_TEST_RESULT:'skipped'}, false],
+  ['selector failure', {SELECTION_RESULT:'failure'}, false],
+  ['selector cancelled', {SELECTION_RESULT:'cancelled'}, false],
+  ['selector unexpectedly skipped', {SELECTION_RESULT:'skipped'}, false],
+  ['shared checks unexpectedly skipped', {COMMUNITY_RESULT:'skipped'}, false],
+  ['docs-only other base', {CHECK_CONTEXT:'Docs Gate',CORE_SELECTED:'false',ROUTE_RESULT:'skipped',POLICY_TEST_RESULT:'skipped'}, true],
+  ['docs-only other base failure', {CHECK_CONTEXT:'Docs Gate',CORE_SELECTED:'false',ROUTE_RESULT:'skipped',POLICY_TEST_RESULT:'skipped',COMMUNITY_RESULT:'failure'}, false],
 ]) {
   test('gate: '+name, () => {
     const result = spawnSync('bash',['-e','-c',gate], {env:{...process.env,
+      CHECK_CONTEXT:'PR CI Gate',SELECTION_RESULT:'success',CORE_SELECTED:'true',
       ROUTE_RESULT:'success',POLICY_TEST_RESULT:'success',COMMUNITY_RESULT:'success',
       TEAM_SELECTED:'false',TEAM_RESULT:'skipped',...env}});
     assert.equal(result.status===0,success);
     if (!success) {
-      assert.match(result.stdout.toString(), /::error::.+: expected (success|skipped), got (failure|cancelled|skipped)/);
+      assert.match(result.stdout.toString(), /::error::.+: expected .+, got .+/);
     }
   });
 }

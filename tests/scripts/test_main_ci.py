@@ -110,7 +110,9 @@ class MainPolicyTest(unittest.TestCase):
 
     def test_main_uses_only_light_contract_and_no_cancellation(self):
         text = (ROOT / ".github/workflows/main-ci.yml").read_text()
-        self.assertIn("branches: [main]", text)
+        self.assertIn("branches: [main, '0.*']", text)
+        self.assertIn("github.ref == 'refs/heads/main'", text)
+        self.assertIn('workflow_call:', text)
         self.assertIn("smoke: true", text)
         self.assertIn("x86-only: true", text)
         self.assertIn("github.event.before", text)

@@ -99,7 +99,7 @@ topology on Update; equal RaBitQ codes do not mean raw inputs are identical.
 | Reproducible multi-dataset benchmarks and raw results | Delivered separately in benchmark PR #2926 | One unified latest-source CPU/peak/CRUD/quality matrix, cold I/O and hours-long interleaved changed-vector stability |
 | At least one improvement against actual Full with stable retrieval | Historical warm load/RSS/ELF-closure results with explicit Full provenance | Quality-matched native Full comparison, complete deployment package; GIST maintenance quality remains incomplete |
 
-`.github/workflows/lite.yml` defines default-OFF, RaBitQ-ON, ASan/UBSan and
+`.github/workflows/manual-checks.yml` defines default-OFF, RaBitQ-ON, ASan/UBSan and
 coverage jobs, all-source formatting, configured-TU/header tidy, installation
 and consumer checks. Coverage collector gates the production Lite line union at
 90%, not Full or branch coverage. Local passes do not imply online CI has passed.
