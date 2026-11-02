@@ -154,10 +154,12 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     uint32_t hops = 0;
     uint32_t dist_cmp = 0;
     uint32_t count_no_visited = 0;
-    uint32_t unrewarded_hops = 0;
-    uint32_t empty_hops = 0;
-    const uint32_t max_unrewarded_hops = static_cast<uint32_t>(std::max<uint64_t>(ef, 500));
-    const uint32_t max_empty_hops = static_cast<uint32_t>(std::max<uint64_t>(10000, 10 * ef));
+    uint64_t unrewarded_hops = 0;
+    uint64_t empty_hops = 0;
+    const uint64_t max_unrewarded_hops = std::max<uint64_t>(ef, 500);
+    const uint64_t max_empty_hops = ef > std::numeric_limits<uint64_t>::max() / 10
+                                        ? std::numeric_limits<uint64_t>::max()
+                                        : std::max<uint64_t>(10000, 10 * ef);
     uint64_t beam = 1;
     uint32_t vector_size = graph->MaximumDegree() * beam;
     uint32_t current_start = 0;
