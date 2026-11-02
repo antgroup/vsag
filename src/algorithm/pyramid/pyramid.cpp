@@ -900,7 +900,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
             ++hi;
         }
     }
-    { logger::info("[pyramid_build] phase=graph_build_complete"); }
+    {
+        logger::info("[pyramid_build] phase=graph_build_complete");
+    }
     cur_element_count_ = data_num;
     return failed_ids;
 }
