@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <optional>
 #include <type_traits>

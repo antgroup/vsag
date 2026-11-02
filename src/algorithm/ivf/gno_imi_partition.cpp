@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <fstream>
 #include <numeric>
 #include <vector>

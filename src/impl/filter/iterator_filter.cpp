@@ -15,6 +15,8 @@
 
 #include "iterator_filter.h"
 
+#include <cstring>
+
 #include "impl/logger/logger.h"
 #include "utils/util_functions.h"
 

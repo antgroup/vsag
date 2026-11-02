@@ -15,6 +15,8 @@
 
 #include "fp32_quantizer.h"
 
+#include <cstring>
+
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"

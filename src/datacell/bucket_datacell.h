@@ -16,6 +16,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cstring>
 #include <limits>
 #include <shared_mutex>
 #include <type_traits>

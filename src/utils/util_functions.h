@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstring>
 #include <optional>
 #include <string>
 

@@ -16,6 +16,7 @@
 #include "eval_dataset.h"
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <stdexcept>
 
