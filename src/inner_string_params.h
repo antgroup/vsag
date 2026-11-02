@@ -94,6 +94,7 @@ const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
 // quantization type
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED = "sq4_local_shared";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8_LOCAL = "sq8_local";
 const char* const QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM = "sq8_uniform";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";

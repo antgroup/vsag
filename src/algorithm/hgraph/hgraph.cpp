@@ -31,6 +31,7 @@
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
+#include "datacell/sq4_local_shared_view.h"
 #include "dataset_impl.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/filter/iterator_filter.h"
@@ -116,9 +117,19 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         this->code_slot_map_ = std::make_shared<CodeSlotMap>(allocator_);
     }
     neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
-    this->basic_flatten_codes_ =
-        FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
-    if (has_precise_reorder()) {
+    const bool shared_local_sq =
+        hgraph_param->base_codes_param->quantizer_parameter->GetTypeName() ==
+        QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED;
+    if (shared_local_sq) {
+        this->high_precise_codes_ =
+            FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
+        this->basic_flatten_codes_ =
+            std::make_shared<SQ4LocalSharedView>(this->high_precise_codes_, common_param);
+    } else {
+        this->basic_flatten_codes_ =
+            FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
+    }
+    if (has_precise_reorder() and not shared_local_sq) {
         this->high_precise_codes_ =
             FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
     }
@@ -435,7 +446,9 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
         estimate_memory += block_memory_ceil(fused_memory, block_size);
     } else {
-        if (this->basic_flatten_codes_->InMemory()) {
+        if (this->basic_flatten_codes_->InMemory() and
+            this->basic_flatten_codes_->GetQuantizerName() !=
+                QUANTIZATION_TYPE_VALUE_SQ4_LOCAL_SHARED) {
             auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
             estimate_memory += block_memory_ceil(base_memory, block_size);
         }

@@ -142,4 +142,15 @@ Existing `sq8`, `sq4`, `sq8_uniform`, defaults and their formats are unchanged.
 
 The local types require readers that support them. Records and quantizer metadata use existing native binary conventions, not a new cross-endian format. Loading validates dimension, metric and record length. HGraph serialization preserves base and precise stores, including RaBitQ plus either local quantizer. Tune can create them from retained raw data or FP32 codes; lossy local codes alone cannot supply a later precision-changing Tune. Existing `ignore_reorder`, `reorder_source` and Tune restrictions remain applicable.
 
-No broad recall/throughput benchmark campaign accompanies this change.
+### Shared local SQ4 traversal and SQ8 reranking
+
+HGraph can derive its coarse local SQ4 levels from the same local SQ8 record used for reranking. Configure `base_quantization_type: "sq4_local_shared"`, `precise_quantization_type: "sq8_local"`, and `use_reorder: true`. This combination supports dense float32 L2, IP, and cosine; other precise quantizers and reorder-from-base are rejected. Tune is not supported for this shared view.
+
+```json
+{"dtype":"float32","metric_type":"l2","dim":128,
+ "index_param":{"base_quantization_type":"sq4_local_shared",
+                "precise_quantization_type":"sq8_local","use_reorder":true,
+                "max_degree":32,"ef_construction":300}}
+```
+
+Each vector stores just one `dim + 8`-byte SQ8 local record. Traversal derives each coarse code as `floor((code8 + 8) / 17)` (equivalent to rounding `code8 / 17`); reranking uses the original byte. The coarse reconstruction uses the same minimum and 17 times the SQ8 scale. This eliminates a separate SQ4 record, though code decoding during traversal costs work. Floating-point rounding can differ near a quantization boundary from independently encoded `sq4_local`.

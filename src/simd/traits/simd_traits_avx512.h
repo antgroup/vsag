@@ -163,6 +163,25 @@ struct SQ8Traits<Avx512SQ8Tag> : SimdTraits<Avx512Tag> {
         __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
         return _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(v));
     }
+
+    static inline __attribute__((always_inline)) FloatVec
+    load_nibbles_as_float(const uint8_t* p) {
+        const __m128i codes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p));
+        const __m128i mask = _mm_set1_epi8(0x0F);
+        const __m128i low = _mm_and_si128(codes, mask);
+        const __m128i high = _mm_and_si128(_mm_srli_epi16(codes, 4), mask);
+        const __m128i unpacked = _mm_unpacklo_epi8(low, high);
+        return _mm512_cvtepi32_ps(_mm512_cvtepu8_epi32(unpacked));
+    }
+
+    static inline __attribute__((always_inline)) FloatVec
+    load_u8_as_coarse4_float(const uint8_t* p) {
+        const __m128i bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
+        const __m256i fine = _mm256_cvtepu8_epi16(bytes);
+        const __m256i rounded = _mm256_add_epi16(fine, _mm256_set1_epi16(8));
+        const __m256i coarse = _mm256_mulhi_epu16(rounded, _mm256_set1_epi16(3856));
+        return _mm512_cvtepi32_ps(_mm512_cvtepu16_epi32(coarse));
+    }
 };
 
 // --- SQ4Traits for AVX512 (Width=16, STEP=32 nibbles = 16 bytes per call) ---

@@ -16,9 +16,38 @@
 #include "sq4_local_simd.h"
 
 #include "simd_dispatch.h"
+#include "sq4_local_shared_simd.h"
 namespace vsag {
 VSAG_DEFINE_SIMD_DISPATCH(SQ4LocalComputeL2Sqr, SQ4LocalComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ4LocalComputeCodesL2Sqr, SQ4LocalComputeCodesType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ4LocalComputeIP, SQ4LocalComputeType);
 VSAG_DEFINE_SIMD_DISPATCH(SQ4LocalComputeCodesIP, SQ4LocalComputeCodesType);
+
+SQ4LocalSharedComputeType
+GetSQ4LocalSharedCompute() {
+    static const SQ4LocalSharedComputeType compute = []() -> SQ4LocalSharedComputeType {
+#if defined(ENABLE_AVX512)
+        if (SimdStatus::SupportAVX512()) {
+            return avx512::SQ4LocalSharedCompute;
+        }
+#endif
+#if defined(ENABLE_AVX2)
+        if (SimdStatus::SupportAVX2()) {
+            return avx2::SQ4LocalSharedCompute;
+        }
+#endif
+        return nullptr;
+    }();
+    return compute;
+}
+
+SQ4LocalSharedComputeBatch4Type
+GetSQ4LocalSharedComputeBatch4() {
+#if defined(ENABLE_AVX512)
+    if (SimdStatus::SupportAVX512()) {
+        return avx512::SQ4LocalSharedComputeBatch4;
+    }
+#endif
+    return nullptr;
+}
 }  // namespace vsag
