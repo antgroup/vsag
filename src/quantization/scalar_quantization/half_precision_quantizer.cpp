@@ -18,6 +18,7 @@
 
 #include "simd/normalize.h"
 #include "typing.h"
+#include "utils/half_input.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -78,7 +79,11 @@ HalfPrecisionQuantizer<Format, metric>::EncodeOneHalf(const uint16_t* data, uint
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Vector<float> values(this->dim_, this->allocator_);
         for (uint64_t i = 0; i < this->dim_; ++i) {
-            values[i] = Format::HalfToFloat(data[i]);
+            if constexpr (std::is_same_v<Format, FP16Format>) {
+                values[i] = half_input::FP16ToFloat(data[i]);
+            } else {
+                values[i] = Format::HalfToFloat(data[i]);
+            }
         }
         return this->EncodeOneImpl(values.data(), codes);
     } else {

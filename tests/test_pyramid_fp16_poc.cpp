@@ -19,6 +19,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cmath>
 #include <random>
 #include <sstream>
 #include <string>
@@ -288,20 +289,143 @@ TEST_CASE("Pyramid half storage serializes smaller than fp32 storage",
     REQUIRE(sizes[0] < sizes[1]);
 }
 
-TEST_CASE("Pyramid half input rejects PiPNN and missing vectors",
+// The local SQ factories reject TQ, so they are ordinary configurations only.
+TEST_CASE("Pyramid PiPNN half input covers FP32 quantizers and split3+5",
+          "[ft][pyramid][pipnn][half_input][half_quantization][quantizer_matrix]") {
+    const bool bf16 = GENERATE(false, true);
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const std::string configuration = GENERATE("fp32",
+                                               "fp16",
+                                               "bf16",
+                                               "sq8",
+                                               "sq4",
+                                               "sq8_uniform",
+                                               "sq4_uniform",
+                                               "sq8_local",
+                                               "sq4_local",
+                                               "pq",
+                                               "pqfs",
+                                               "rabitq",
+                                               "saq",
+                                               "rom, fp32",
+                                               "rom, fp16",
+                                               "rom, bf16",
+                                               "rom, sq8",
+                                               "rom, sq4",
+                                               "rom, sq8_uniform",
+                                               "rom, sq4_uniform",
+                                               "rom, pq",
+                                               "rom, pqfs",
+                                               "rom, rabitq",
+                                               "rom, saq",
+                                               "pca, rom, sq8_uniform",
+                                               "fht, sq8_uniform",
+                                               "mrle, fp32",
+                                               "split3+5",
+                                               "mrle, split3+5");
+    CAPTURE(bf16, metric, configuration);
+    constexpr int64_t count = 544;
+    constexpr int64_t dim = 32;
+    std::vector<float> decoded(count * dim);
+    std::vector<uint16_t> halves(count * dim);
+    std::vector<int64_t> ids(count);
+    std::vector<std::string> paths(count, "all/half/leaf");
+    std::mt19937 rng(20261104);
+    for (int64_t row = 0; row < count; ++row) {
+        ids[row] = 1000 + row * 7;
+        float norm = 0;
+        for (int64_t d = 0; d < dim; ++d) {
+            // Independent unit directions have a large nearest-neighbor margin.
+            // Avoid zero/subnormal inputs to the legacy generic FP16 converter.
+            const auto sample = static_cast<int>(rng() % 2000) - 1000;
+            const float value = (sample < 0 ? sample : sample + 1) / 1001.0F;
+            decoded[row * dim + d] = value;
+            norm += value * value;
+        }
+        norm = std::sqrt(norm);
+        for (int64_t d = 0; d < dim; ++d) {
+            const float value = decoded[row * dim + d] / norm;
+            auto& bits = halves[row * dim + d];
+            bits = bf16 ? generic::FloatToBF16(value) : generic::FloatToFP16(value);
+            decoded[row * dim + d] = bf16 ? generic::BF16ToFloat(bits) : generic::FP16ToFloat(bits);
+        }
+    }
+    const auto dataset = [&](int64_t row, int64_t size, bool half) {
+        auto data = Dataset::Make()
+                        ->NumElements(size)
+                        ->Dim(dim)
+                        ->Ids(ids.data() + row)
+                        ->Paths(paths.data() + row)
+                        ->Owner(false);
+        return half ? data->Float16Vectors(halves.data() + row * dim)
+                    : data->Float32Vectors(decoded.data() + row * dim);
+    };
+    const auto parameters = [&](bool half) {
+        auto json = JsonWrapper::Parse(HalfPyramidParam(
+            half ? (bf16 ? "bfloat16" : "float16") : "float32", "fp32", "pipnn", true, dim));
+        json["metric_type"].SetString(metric);
+        auto param = json["index_param"];
+        param["ef_construction"].SetInt(64);
+        // Pyramid public parameters do not expose the HGraph training sample count.
+        param["base_pq_dim"].SetInt(8);
+        const bool split = configuration.find("split3+5") != std::string::npos;
+        const bool transform = configuration.find(',') != std::string::npos;
+        param["base_quantization_type"].SetString(transform ? "tq"
+                                                            : (split ? "rabitq" : configuration));
+        if (transform) {
+            param["tq_chain"].SetString(split ? "mrle, rabitq" : configuration);
+            param["rabitq_pca_dim"].SetInt(configuration.find("pca") != std::string::npos ? 16 : 0);
+            // Full rank isolates input plumbing from MRLE projection loss.
+            param["mrle_dim"].SetInt(dim);
+        }
+        if (split) {
+            // x=3 filter + y=5 supplement, exactly as original FP32 tests.
+            param["precise_quantization_type"].SetString("rabitq");
+            param["rabitq_bits_per_dim_base"].SetInt(3);
+            param["rabitq_bits_per_dim_precise"].SetInt(5);
+            param["rabitq_bits_per_dim_query"].SetInt(32);
+        }
+        return json.Dump();
+    };
+    auto half_param = parameters(true);
+    auto half_index = MakeHalfIndex(half_param);
+    auto control = MakeHalfIndex(parameters(false));
+    for (const bool half : {true, false}) {
+        auto target = half ? half_index : control;
+        auto built = target->Build(dataset(0, count, half));
+        REQUIRE(built.has_value());
+        REQUIRE(built.value().empty());
+        REQUIRE(target->GetNumElements() == count);
+    }
+    const auto check = [&](const auto& target, bool half) {
+        for (const int64_t row : {int64_t{0}, int64_t{257}, count - 1}) {
+            CAPTURE(row, half);
+            auto result =
+                target->KnnSearch(dataset(row, 1, half), 1, R"({"pyramid":{"ef_search":1000}})");
+            REQUIRE(result.has_value());
+            REQUIRE(result.value()->GetDim() == 1);
+            REQUIRE(std::isfinite(result.value()->GetDistances()[0]));
+            // Lossy distances need not be exact or nonnegative (IP).
+            REQUIRE(result.value()->GetIds()[0] == ids[row]);
+        }
+    };
+    check(half_index, true);
+    check(control, false);  // Same quantizer and identical decoded coordinates.
+    for (const bool half : {true, false}) {
+        auto binary = (half ? half_index : control)->Serialize();
+        REQUIRE(binary.has_value());
+        auto restored = MakeHalfIndex(half ? half_param : parameters(false));
+        REQUIRE(restored->Deserialize(binary.value()).has_value());
+        REQUIRE(restored->GetNumElements() == count);
+        check(restored, half);
+    }
+}
+
+TEST_CASE("Pyramid half input rejects missing vectors",
           "[ft][pyramid][fp16][bf16][half_input][negative]") {
     const bool bf16 = GENERATE(false, true);
     const std::string dtype = bf16 ? "bfloat16" : "float16";
     const std::string quantization = bf16 ? "bf16" : "fp16";
-    CAPTURE(dtype);
-    SECTION("PiPNN requires float32") {
-        const auto param = HalfPyramidParam(dtype, quantization, "pipnn");
-        auto made = Factory::CreateIndex("pyramid", param);
-        REQUIRE_FALSE(made.has_value());
-        INFO("Pyramid factory error: " << made.error().message);
-        REQUIRE(made.error().type == ErrorType::INVALID_ARGUMENT);
-        REQUIRE(made.error().message.find("PiPNN") != std::string::npos);
-    }
     SECTION("Missing half buffer is rejected") {
         HalfInputFixture data(bf16);
         auto index = MakeHalfIndex(HalfPyramidParam(dtype, quantization));

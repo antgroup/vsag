@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <string_view>
+
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -93,6 +95,18 @@ const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
 
 // quantization params key
 const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
+// Strip only the exact adapter prefix; callers retain ownership of the input name.
+inline constexpr std::string_view QUANTIZATION_ADAPTER_NAME_PREFIX = "QUANTIZATION_ADAPTER_";
+
+inline std::string_view
+GetBaseQuantizerName(std::string_view name) {
+    if (name.compare(
+            0, QUANTIZATION_ADAPTER_NAME_PREFIX.size(), QUANTIZATION_ADAPTER_NAME_PREFIX) == 0) {
+        name.remove_prefix(QUANTIZATION_ADAPTER_NAME_PREFIX.size());
+    }
+    return name;
+}
+
 // quantization type
 const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
 const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";

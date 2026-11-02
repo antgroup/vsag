@@ -25,6 +25,10 @@ namespace vsag {
 /***
  * @brief PQ FastScan Quantizer uses 4-bit packed storage for optimized distance computation.
  *
+ * EncodeOne/EncodeBatch produce row codes: consecutive subspaces occupy the low and high
+ * nibbles of each byte. Compute/ComputeDist consume these ordinary row codes.
+ * ScanBatchDists instead consumes the following Package32 layout, used by IVF.
+ *
  * code layout (32 vectors packed):
  * +--------+--------+-----+--------+
  * | sub0   | sub1   | ... | subN   |
@@ -34,7 +38,7 @@ namespace vsag {
  * query layout:
  * +------------------+--------+--------+
  * | lookup-table     | diff   | lower  |
- * | [pq_dim*16*4B]   | [4B]   | [4B]   |
+ * | [pq_dim*16*1B]   | [4B]   | [4B]   |
  * +------------------+--------+--------+
  *
  * - pqfs-code: 4 bits per subspace, packed for 32 vectors at once
@@ -78,6 +82,12 @@ public:
     ComputeDistImpl(Computer<PQFastScanQuantizer>& computer,
                     const uint8_t* codes,
                     float* dists) const;
+
+    void
+    ScanRowBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,
+                         uint64_t count,
+                         const uint8_t* codes,
+                         float* dists) const;
 
     void
     ScanBatchDistImpl(Computer<PQFastScanQuantizer<metric>>& computer,

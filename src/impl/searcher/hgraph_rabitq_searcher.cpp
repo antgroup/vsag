@@ -1299,7 +1299,9 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     const bool has_direct_traversal_query =
         split_codes->GetFusedTraversalQuery(computer, &traversal_query);
     if (has_direct_traversal_query) {
-        const auto* float_query = static_cast<const float*>(query);
+        // The original query may contain FP16/BF16 values. The fused computer
+        // owns the decoded and transformed FP32 query used by the scorer.
+        const auto* float_query = traversal_query.transformed_query;
         for (uint64_t i = 0; i < traversal_query.dim; ++i) {
             if (not std::isfinite(float_query[i])) {
                 return nullptr;
