@@ -230,17 +230,18 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
-| `window_parallelism` | int | `1` | window 搜索线程数，取值为 `1` 至 `16`。worker 复用线程池，并在本地任务完成后窃取其他 worker 尚未处理的 window。合并后的堆在重排前最多保留 `n_candidate` 个候选。此值大于 `1` 时，KNN 搜索忽略 `timeout_ms`；带过滤器、生效的回调次数限制或推理追踪的查询，其 window 扫描仍使用单线程。 |
-| `worker_n_candidate` | int | `n_candidate` | 每线程请求的候选堆容量；省略时继承最终有效候选数。实际容量至少为查询的 top-k，保证只有一个 window 匹配时也能保留 top-k 个结果。显式设置时须为正数，并满足 `worker_n_candidate × window_parallelism ≥` 最终候选数。例如 `n_candidate=500`、`window_parallelism=2`、`worker_n_candidate=300` 合法。减少此值时，如果高分候选集中在部分 worker，召回率可能下降；总容量满足约束也不保证保留全局排名靠前的所有候选。 |
-| `window_scheduler` | string | `"count_deque"` | 并行 KNN 的 window 调度方式：`count_deque` 保留按数量分区的 deque/try-lock 实现；`count_atomic` 使用按数量划分的连续区间和共享原子游标；`cost_atomic` 按查询剪枝、词项剪枝后实际扫描的 posting 数之和均衡连续区间，再使用原子游标。原子方案中，每个 worker 先处理自己的区间，再按循环顺序领取其他区间的剩余任务。 |
+| `window_parallelism` | int | `1` | 含调用线程的执行槽位数上限，取值 `1` 至 `16`。省略或为 1 使用原串行候选堆；大于 1 启用固定分区近似执行器，首版只支持 immutable 内存 KNN。资源准入可降低实际槽位数，候选计划保持不变。 |
+| `parallel_n_candidate_ratio` | number | 校准阶段并行请求必须显式传入 | 有限且 ≥1。所有局部堆的总容量为 `ceil(倍率 × max(n_candidate, topk))`，独立于执行槽位数分配到固定逻辑分区。增大容量允许保留更多候选并增加成本，不保证保留串行候选集或特定召回率；串行模式只校验该值，不应用它。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
 
-FP32/FP16 稀疏 KNN 重排自动按候选数量静态分批，并行度跟随 `window_parallelism`，最多不超过候选数。调用线程也参与计算，并复用同一查询线程池；各 worker 将距离写入独立候选位置，等待完成后按原候选顺序选择全局 top-k。单 worker 使用一次批量调用。推理查询、DMQ8 和范围搜索保持逐候选重排。库内距离计数与结果统计始终开启。
+新并行路径保持串行精排，包括 DMQ8。候选分区数为 `min(16, 有效window数, max(n_candidate, topk))`，采用固定连续分区，在最多 4 个 window 的 chunk 边界交接执行权；堆归属于逻辑分区，不归属于物理线程。并行模式明确拒绝 Range、reasoning、mutable/disk datacell，以及旧 `worker_n_candidate`、`filter_callback_limit_weight`、`window_scheduler` 参数。
 
-窗口并行扫描和重排共用一个延迟创建的索引专用查询池，最多 16 个线程，并以报告的硬件并发数为上限，至少 1 个线程。查询任务与用户提供的线程池隔离，因为用户池可能包含等待查询所持读锁的写入任务。并行 worker 的 computer、距离缓冲、上下文和本地堆使用默认线程安全分配器；请求分配器的调用及最终结果分配留在调用线程。
+带 Filter 的新模式要求该 Filter 同时实现 `vsag/concurrent_filter.h` 中的可选 `ConcurrentFilterProvider` 能力。非阻塞 lease 提供 label 空间下的独立 evaluator，每个 evaluator 同时只属于一个逻辑槽位；不支持的 Filter 明确失败。callback 总预算在同一次调用的所有分区间共享；deadline 停止新工作并在 drain 后返回错误，callback 预算耗尽可交付已验证候选。
+
+进程级专用查询池结合 CPU affinity、可读取的 cgroup CPU 配额和活动 SINDI 调用限制额外 worker。部署环境变量 `VSAG_SINDI_EXTRA_WORKERS` 可降低额外 worker 上限，`VSAG_SINDI_MAX_CANDIDATES` 控制单次调用的总堆容量上限（缺省 1,048,576），均不属于查询参数。worker 配置在进程查询池初始化时读取，候选容量上限在创建计划时读取。worker scratch 与调用方 arena 隔离；这些控制不代表已限制整个服务的 CPU 或内存。生产参数须通过独立效果集及目标并发下的 P95/P99 验证后选择。
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 

@@ -16,6 +16,8 @@
 #include "sindi_parameter.h"
 
 #include <limits>
+#include <cmath>
+#include <nlohmann/json.hpp>
 
 #include "impl/logger/logger.h"
 #include "inner_string_params.h"
@@ -326,7 +328,25 @@ SINDISearchParameter::FromJson(const JsonType& json) {
         window_parallelism = parse_positive_worker_count(
             search_json["window_parallelism"], 16, "window_parallelism");
     }
-    execution_options.rerank_parallelism = window_parallelism;
+    // Candidate execution and reranking are independent. Preserve the serial rerank baseline.
+    execution_options.rerank_parallelism = 1;
+    parallel_n_candidate_ratio = 1.0;
+    if (search_json.Contains("parallel_n_candidate_ratio")) {
+        parallel_n_candidate_ratio =
+            search_json["parallel_n_candidate_ratio"].GetInnerJson()->get<double>();
+        CHECK_ARGUMENT(std::isfinite(parallel_n_candidate_ratio) and
+                           parallel_n_candidate_ratio >= 1.0,
+                       "parallel_n_candidate_ratio must be finite and >= 1");
+    }
+    if (window_parallelism > 1) {
+        execution_options.rerank_batch = false;
+        CHECK_ARGUMENT(search_json.Contains("parallel_n_candidate_ratio"),
+                       "parallel_n_candidate_ratio is required until its default is calibrated");
+        CHECK_ARGUMENT(not search_json.Contains("worker_n_candidate") and
+                           not search_json.Contains("filter_callback_limit_weight") and
+                           not search_json.Contains("window_scheduler"),
+                       "use parallel_n_candidate_ratio instead of legacy worker parameters");
+    }
     worker_n_candidate = 0;
     if (search_json.Contains("worker_n_candidate")) {
         worker_n_candidate = parse_positive_worker_count(search_json["worker_n_candidate"],
@@ -351,6 +371,7 @@ SINDISearchParameter::ToJson() const {
         json[INDEX_SINDI]["worker_n_candidate"].SetInt(worker_n_candidate);
     }
     json[INDEX_SINDI]["window_parallelism"].SetInt(window_parallelism);
+    json[INDEX_SINDI]["parallel_n_candidate_ratio"].SetDouble(parallel_n_candidate_ratio);
     json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);

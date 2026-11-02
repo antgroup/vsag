@@ -1703,14 +1703,15 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
         const auto parallel_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":2}})";
-        auto parallel_mutable = mutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+            "n_candidate":40,"window_parallelism":2,"parallel_n_candidate_ratio":16}})";
+        REQUIRE_THROWS_AS(mutable_index->KnnSearch(query, 10, parallel_param, nullptr),
+                          vsag::VsagException);
         auto parallel_immutable = immutable_index->KnnSearch(query, 10, parallel_param, nullptr);
         const auto reduced_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":4,"worker_n_candidate":20}})";
+            "n_candidate":40,"window_parallelism":4,"parallel_n_candidate_ratio":1}})";
         auto reduced = immutable_index->KnnSearch(query, 10, reduced_param, nullptr);
         const auto eight_worker_param = R"({"sindi":{"query_prune_ratio":0,
-            "n_candidate":40,"window_parallelism":8,"worker_n_candidate":10}})";
+            "n_candidate":40,"window_parallelism":8,"parallel_n_candidate_ratio":1}})";
         auto eight_worker = immutable_index->KnnSearch(query, 10, eight_worker_param, nullptr);
         const auto insufficient_param = R"({"sindi":{"n_candidate":40,
             "window_parallelism":2,"worker_n_candidate":19}})";
@@ -1719,18 +1720,14 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
         auto immutable_roundtrip =
             immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
         REQUIRE(built->GetDim() == expected->GetDim());
-        REQUIRE(parallel_mutable->GetDim() == expected->GetDim());
         REQUIRE(parallel_immutable->GetDim() == expected->GetDim());
         REQUIRE(reduced->GetDim() == expected->GetDim());
         REQUIRE(eight_worker->GetDim() == expected->GetDim());
         REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
         for (int64_t j = 0; j < expected->GetDim(); ++j) {
             REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
-            REQUIRE(parallel_mutable->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(parallel_immutable->GetIds()[j] == expected->GetIds()[j]);
             REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
-            REQUIRE(std::abs(parallel_mutable->GetDistances()[j] - expected->GetDistances()[j]) <
-                    1e-3);
             REQUIRE(std::abs(parallel_immutable->GetDistances()[j] - expected->GetDistances()[j]) <
                     1e-3);
             REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);

@@ -107,7 +107,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
             "window_parallelism": 4,
-            "worker_n_candidate": 5,
+            "parallel_n_candidate_ratio": 2.0,
             "term_prune_ratio": 0.1,
             "term_retain_threshold": 100,
             "filter_callback_limit": 1000
@@ -120,13 +120,13 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(search_param->term_retain_threshold == 100);
     REQUIRE(search_param->filter_callback_limit == 1000);
     REQUIRE(search_param->window_parallelism == 4);
-    REQUIRE(search_param->worker_n_candidate == 5);
+    REQUIRE(search_param->parallel_n_candidate_ratio == 2.0);
     vsag::ParameterTest::TestToJson(search_param);
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_retain_threshold"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("filter_callback_limit"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("window_parallelism"));
-    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("worker_n_candidate"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("parallel_n_candidate_ratio"));
     REQUIRE_THROWS_AS(
         search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"window_parallelism":17}})")),
         vsag::VsagException);
@@ -526,7 +526,9 @@ TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIPa
     }
     SINDISearchParameter maximum;
     REQUIRE_NOTHROW(maximum.FromJson(
-        JsonType::Parse(R"({"sindi":{"window_parallelism":16,"worker_n_candidate":4294967295}})")));
+        JsonType::Parse(R"({"sindi":{"window_parallelism":16,"parallel_n_candidate_ratio":1}})")));
     REQUIRE(maximum.window_parallelism == 16);
-    REQUIRE(maximum.worker_n_candidate == std::numeric_limits<uint32_t>::max());
+    REQUIRE(maximum.parallel_n_candidate_ratio == 1);
+    REQUIRE_THROWS(maximum.FromJson(JsonType::Parse(
+        R"({"sindi":{"window_parallelism":2,"parallel_n_candidate_ratio":1,"worker_n_candidate":100}})")));
 }
