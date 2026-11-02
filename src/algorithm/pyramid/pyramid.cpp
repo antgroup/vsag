@@ -2465,7 +2465,14 @@ Pyramid::Build(const DatasetPtr& base) {
             const uint64_t matched =
                 cache_->CountMatchedSourceIds(source_id_data, static_cast<uint64_t>(data_num));
             if (matched * 100 >= static_cast<uint64_t>(data_num) * minimum_cache_hit_percent) {
-                return build_with_cache(base);
+                auto cache_result = build_with_cache(base);
+                const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - build_begin)
+                                          .count();
+                logger::info("[pyramid_build] build completed nodes={} duration={}ms (cached)",
+                             data_num,
+                             total_ms);
+                return cache_result;
             }
             logger::info(
                 "[pyramid_build_cache] source-id overlap below {}%; falling back to cold build",
