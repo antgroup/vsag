@@ -15,6 +15,8 @@ is computed via **MaxSim** (sum of maximum per-query-token similarities).
 2. **Representative graph routing.** Each partition selects a real member token as its representative. A quantized HGraph routes each query token to candidate partitions, whose document lists form a coarse-ranked candidate set.
 3. **MaxSim reranking.** The top `rerank_k` candidate documents are read from memory or disk and decoded. MaxSim is evaluated over these stored representations. With lossy quantization this is not exact scoring against the original FP32 input.
 
+Each document enters the coarse candidate set once per query, including when its accumulated coarse score is zero or contributions from query tokens cancel out.
+
 The two-stage pipeline trades candidate recall, quantization error, memory, and latency.
 
 ## Quick start
