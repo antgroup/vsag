@@ -24,6 +24,7 @@
 #include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
 #include "unittest.h"
 #include "utils/util_functions.h"
+#include "vsag/factory.h"
 #include "vsag_exception.h"
 
 struct IVFDefaultParam {
@@ -283,6 +284,149 @@ TEST_CASE("IVF rejects reader IO for base codes", "[ut][IVFParameter]") {
     } catch (const vsag::VsagException& error) {
         REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
         REQUIRE(error.error_.message == "IVF base codes do not support reader_io");
+    }
+}
+
+TEST_CASE("IVF rejects non-float32 external datatypes", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({"use_route_graph": false})");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    REQUIRE_NOTHROW(vsag::IVF::CheckAndMappingExternalParam(external_param, common_param));
+
+    common_param.data_type_ = GENERATE(vsag::DataTypes::DATA_TYPE_FP16,
+                                       vsag::DataTypes::DATA_TYPE_BF16,
+                                       vsag::DataTypes::DATA_TYPE_INT8,
+                                       vsag::DataTypes::DATA_TYPE_SPARSE);
+    const auto expected_message = common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
+                                      ? std::string("IVF not support int8 datatype")
+                                      : fmt::format("IVF only supports float32 datatype, got {}",
+                                                    vsag::ToString(common_param.data_type_));
+    try {
+        vsag::IVF::CheckAndMappingExternalParam(external_param, common_param);
+        FAIL("IVF should reject non-float32 input");
+    } catch (const vsag::VsagException& error) {
+        REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(error.error_.message == expected_message);
+    }
+}
+
+TEST_CASE("IVF public creation rejects half input", "[ut][IVFParameter]") {
+    const auto data_type =
+        GENERATE(vsag::DataTypes::DATA_TYPE_FP16, vsag::DataTypes::DATA_TYPE_BF16);
+    auto result = vsag::Factory::CreateIndex(
+        "ivf",
+        fmt::format(R"({{"dtype":"{}","metric_type":"l2","dim":64,"ivf":{{}}}})",
+                    vsag::ToString(data_type)));
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result.error().message ==
+            fmt::format("failed to create index: IVF only supports float32 datatype, got {}",
+                        vsag::ToString(data_type)));
+}
+
+TEST_CASE("IVF constructor rejects non-float32 input", "[ut][IVFParameter]") {
+    auto external_param = vsag::JsonType::Parse(R"({"use_route_graph": false})");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+        vsag::IVF::CheckAndMappingExternalParam(external_param, common_param));
+    REQUIRE(param != nullptr);
+    REQUIRE_NOTHROW(vsag::IVF(param, common_param));
+
+    common_param.data_type_ = GENERATE(vsag::DataTypes::DATA_TYPE_FP16,
+                                       vsag::DataTypes::DATA_TYPE_BF16,
+                                       vsag::DataTypes::DATA_TYPE_INT8,
+                                       vsag::DataTypes::DATA_TYPE_SPARSE);
+    const auto expected_message = common_param.data_type_ == vsag::DataTypes::DATA_TYPE_INT8
+                                      ? std::string("IVF not support int8 datatype")
+                                      : fmt::format("IVF only supports float32 datatype, got {}",
+                                                    vsag::ToString(common_param.data_type_));
+    try {
+        vsag::IVF index(param, common_param);
+        FAIL("IVF constructor should reject non-float32 input");
+    } catch (const vsag::VsagException& error) {
+        REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(error.error_.message == expected_message);
+    }
+}
+
+TEST_CASE("FLOAT IVF checks non-empty dataset float32 pointers", "[ut][IVFParameter]") {
+    const bool half_only = GENERATE(false, true);
+    CAPTURE(half_only);
+    IVFDefaultParam index_param;
+    index_param.bucket_quantization_type = "fp32";
+    index_param.use_residual = false;
+    index_param.use_reorder = false;
+    index_param.use_attribute_filter = false;
+    index_param.ivf_train_type = "random";
+    auto param = std::make_shared<vsag::IVFParameter>();
+    param->FromString(generate_ivf_param(index_param));
+    param->ivf_partition_strategy_parameter->use_route_graph = false;
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::IVF index(param, common_param);
+
+    constexpr int64_t count = 8;
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(count * common_param.dim_, 1.0F);
+    std::vector<uint16_t> half_vectors(count * common_param.dim_, 0x3c00);
+    auto valid = vsag::Dataset::Make();
+    valid->Dim(common_param.dim_)
+        ->NumElements(count)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto malformed = vsag::Dataset::Make();
+    malformed->Dim(common_param.dim_)->NumElements(count)->Ids(ids.data())->Owner(false);
+    if (half_only) {
+        malformed->Float16Vectors(half_vectors.data());
+    }
+    REQUIRE(malformed->GetFloat32Vectors() == nullptr);
+    auto require_invalid_pointer = [&](auto&& operation) {
+        try {
+            operation();
+            FAIL("non-empty IVF input without float32 vectors should be rejected");
+        } catch (const vsag::VsagException& error) {
+            REQUIRE(error.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(error.error_.message == "IVF requires float32 vectors for non-empty datasets");
+        }
+    };
+
+    SECTION("direct Train rejects before sampling or partition training") {
+        require_invalid_pointer([&] { index.Train(malformed); });
+        REQUIRE(index.GetNumElements() == 0);
+        REQUIRE(index.Build(valid).empty());
+        REQUIRE(index.GetNumElements() == count);
+    }
+    SECTION("direct Build rejects before training or publishing data") {
+        require_invalid_pointer([&] { index.Build(malformed); });
+        REQUIRE(index.GetNumElements() == 0);
+        REQUIRE(index.Build(valid).empty());
+        REQUIRE(index.GetNumElements() == count);
+    }
+    SECTION("direct Add on a trained index rejects before consuming vectors") {
+        index.Train(valid);
+        require_invalid_pointer([&] { index.Add(malformed); });
+        REQUIRE(index.GetNumElements() == 0);
+        REQUIRE(index.Add(valid).empty());
+        REQUIRE(index.GetNumElements() == count);
+    }
+    SECTION("already trained Train remains a no-op") {
+        index.Train(valid);
+        REQUIRE_NOTHROW(index.Train(malformed));
+        REQUIRE(index.GetNumElements() == 0);
+    }
+    SECTION("zero-count input still does not require float32 vectors") {
+        index.Train(valid);
+        malformed->NumElements(0);
+        REQUIRE_NOTHROW(index.Train(malformed));
+        REQUIRE(index.Add(malformed).empty());
+        REQUIRE(index.Build(malformed).empty());
+        REQUIRE(index.GetNumElements() == 0);
     }
 }
 
