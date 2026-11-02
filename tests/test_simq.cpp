@@ -62,9 +62,11 @@
 #include "allocator/memory_record_allocator.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
+#include "impl/thread_pool/default_thread_pool.h"
 #include "index/index_impl.h"
 #include "test_index.h"
 #include "vsag/dataset.h"
+#include "vsag/engine.h"
 #include "vsag/index.h"
 #include "vsag/vsag.h"
 
@@ -1575,4 +1577,59 @@ TEST_CASE("SIMQ immutable representative release and serving roundtrip", "[simq]
     check_result(restored);
     REQUIRE(restored->SetImmutable().has_value());
     check_result(restored);
+}
+
+TEST_CASE("SIMQ Add completes cluster splitting with a bounded shared pool",
+          "[simq][add][nested_pool]") {
+    const auto workers = GENERATE(1, 2);
+    CAPTURE(workers);
+    constexpr int64_t dim = 32;
+    constexpr uint32_t tokens = 8;
+    auto pool = std::make_shared<DefaultThreadPool>(workers);
+    Resource resource(Engine::CreateDefaultAllocator(), pool);
+    Engine engine(&resource);
+    const auto param = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"ip", "dim":{},
+        "index_param":{{"base_io_type":"memory_io", "init_cluster_ratio":0.05,
+            "max_cluster_size":4, "split_start_idx":2, "build_thread_count":1}}
+    }})",
+                                   dim);
+    auto created = engine.CreateIndex("simq", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    std::vector<float> vectors(tokens * dim, 0.0F);
+    for (uint32_t token = 0; token < tokens; ++token) {
+        vectors[token * dim] = 0.1F * static_cast<float>(token);
+    }
+    MultiVector mv;
+    mv.len_ = tokens;
+    mv.vectors_ = vectors.data();
+    auto make_doc = [&](int64_t& label) {
+        return Dataset::Make()
+            ->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&label)
+            ->MultiVectors(&mv)
+            ->MultiVectorDim(dim)
+            ->Owner(false);
+    };
+    int64_t first = 0;
+    REQUIRE(index->Build(make_doc(first)).has_value());
+    for (int64_t label = 1; label <= 5; ++label) {
+        CAPTURE(label);
+        auto added = index->Add(make_doc(label));
+        REQUIRE(added.has_value());
+        REQUIRE(added.value().empty());
+    }
+    REQUIRE(index->GetNumElements() == 6);
+    auto query =
+        Dataset::Make()->NumElements(1)->Dim(dim)->MultiVectors(&mv)->MultiVectorDim(dim)->Owner(
+            false);
+    auto result = index->KnnSearch(query, 6, R"({"simq":{"coarse_k":10000,"rerank_k":10000}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 6);
+    std::unordered_set<int64_t> labels;
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(labels.insert(result.value()->GetIds()[i]).second);
+    }
 }

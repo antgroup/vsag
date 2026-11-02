@@ -631,7 +631,8 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
     // Do not reserve IDs or publish labels until the complete batch is encodable.
     // One task per range avoids a future/allocation for every input vector.
     const auto workers = std::min<uint64_t>(this->build_thread_count_, count);
-    if (this->thread_pool_ != nullptr and workers > 1) {
+    if (this->thread_pool_ != nullptr and workers > 1 and
+        not this->thread_pool_->IsCurrentThread()) {
         const uint64_t block = (count + workers - 1) / workers;
         std::vector<std::future<void>> futures;
         HGraphBuildTaskGuard guard(futures, workers);
@@ -836,9 +837,13 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+    // A worker must not submit and join nested tasks on the same pool.
+    const bool effective_parallel =
+        context.use_parallel_add and not this->thread_pool_->IsCurrentThread();
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+        futures, effective_parallel ? static_cast<uint64_t>(batch.rows.size()) : 0);
+
     this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
@@ -864,7 +869,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         if (attr_sets != nullptr) {
             cur_attr_set = attr_sets + row.input_idx;
         }
-        if (context.use_parallel_add) {
+        if (effective_parallel) {
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -872,7 +877,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
             add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
         }
     }
-    if (context.use_parallel_add) {
+    if (effective_parallel) {
         wait_all_futures(futures);
     }
 }

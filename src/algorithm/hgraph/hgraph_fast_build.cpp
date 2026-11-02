@@ -147,7 +147,7 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         return;
     }
 
-    if (this->thread_pool_ == nullptr) {
+    if (this->thread_pool_ == nullptr or this->thread_pool_->IsCurrentThread()) {
         for (const auto& row : rows) {
             if (this->rabitq_fused_datacell_ != nullptr) {
                 this->insert_fused_optimized_build_codes(get_data(data, row.input_idx),
