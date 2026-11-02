@@ -18,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -39,6 +40,11 @@
 namespace vsag {
 
 namespace {
+
+// Longest run of one bucket's postings that add() appends as a single task. A run is encoded
+// with one batch call and stored with one write; big buckets split into several runs so that
+// every build thread stays busy.
+constexpr uint64_t BUILD_INSERT_RUN_SIZE = 512;
 
 class IVFBucketOptimizedBuildSession {
 public:
@@ -260,44 +266,140 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
                                            precise_offsets.data());
     }
 
+    auto record_posting = [&](int64_t idx, InnerIdType offset_id) -> void {
+        const auto i = idx / buckets_per_data_;
+        if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
+            attr_sets != nullptr) {
+            const auto& attr_set = attr_sets[i];
+            this->attr_filter_index_->Insert(attr_set, offset_id, buckets[idx]);
+        }
+        // Every posting of a vector carries the same extra info; write it once per vector so
+        // runs of different buckets never write the same slot concurrently.
+        if (extra_info_size > 0 and idx % buckets_per_data_ == 0) {
+            this->extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size, i + current_num);
+        }
+    };
     auto add_func = [&](int64_t i) -> void {
         for (int64_t j = 0; j < buckets_per_data_; ++j) {
             const auto* data_ptr = vectors + i * dim_;
             auto idx = i * buckets_per_data_ + j;
             auto posting_id = static_cast<InnerIdType>(idx + current_num * buckets_per_data_);
-            InnerIdType offset_id;
-            if (precise_bucket_ != nullptr) {
-                // Publish the basic posting only after its precise mirror is ready.
-                offset_id = precise_offsets[idx];
-                bucket_->InsertVectorWithOffset(data_ptr, buckets[idx], posting_id, offset_id);
-            } else {
-                offset_id = bucket_->InsertVector(data_ptr, buckets[idx], posting_id);
-            }
+            // Publish the basic posting only after its precise mirror is ready.
+            InnerIdType offset_id = precise_offsets[idx];
+            bucket_->InsertVectorWithOffset(data_ptr, buckets[idx], posting_id, offset_id);
             if (j == 0) {
                 std::lock_guard lock(label_lookup_mutex_);
                 location_map_[i + current_num] =
                     (static_cast<uint64_t>(buckets[idx]) << LOCATION_SPLIT_BIT) |
                     static_cast<uint64_t>(offset_id);
             }
-            if (use_attribute_filter_ and this->attr_filter_index_ != nullptr and
-                attr_sets != nullptr) {
-                const auto& attr_set = attr_sets[i];
-                this->attr_filter_index_->Insert(attr_set, offset_id, buckets[idx]);
-            }
-            if (extra_info_size > 0) {
-                this->extra_infos_->InsertExtraInfo(extra_info + i * extra_info_size,
-                                                    i + current_num);
-            }
+            record_posting(idx, offset_id);
         }
     };
+
+    // Without precise codes, the postings are grouped by bucket and appended in runs, so a
+    // bucket grows once per run instead of once per vector, and each run is encoded in one batch.
+    const auto posting_count =
+        static_cast<uint64_t>(num_element) * static_cast<uint64_t>(buckets_per_data_);
+    Vector<uint64_t> run_postings(this->allocator_);  // posting indexes, grouped by bucket
+    Vector<uint64_t> run_begins(this->allocator_);    // run r: [run_begins[r], run_begins[r + 1])
+    Vector<BucketIdType> run_buckets(this->allocator_);
+    if (precise_bucket_ == nullptr and posting_count > 0) {
+        const auto bucket_count = static_cast<uint64_t>(this->bucket_->GetBucketCount());
+        for (uint64_t idx = 0; idx < posting_count; ++idx) {
+            if (buckets[idx] < 0 or static_cast<uint64_t>(buckets[idx]) >= bucket_count) {
+                throw VsagException(ErrorType::INTERNAL_ERROR, "IVF classified an invalid bucket");
+            }
+        }
+        // Both orders are stable, so without a thread pool every bucket receives its postings
+        // in input order, as when they were inserted one at a time.
+        run_postings.resize(posting_count);
+        if (posting_count < bucket_count) {
+            // A small Add should not pay for every bucket of a large index.
+            std::iota(run_postings.begin(), run_postings.end(), uint64_t{0});
+            std::stable_sort(run_postings.begin(), run_postings.end(), [&](uint64_t a, uint64_t b) {
+                return buckets[a] < buckets[b];
+            });
+        } else {
+            Vector<uint64_t> next_positions(bucket_count + 1, 0, this->allocator_);
+            for (uint64_t idx = 0; idx < posting_count; ++idx) {
+                ++next_positions[static_cast<uint64_t>(buckets[idx]) + 1];
+            }
+            for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
+                next_positions[bucket_id + 1] += next_positions[bucket_id];
+            }
+            for (uint64_t idx = 0; idx < posting_count; ++idx) {
+                run_postings[next_positions[static_cast<uint64_t>(buckets[idx])]++] = idx;
+            }
+        }
+        // Shorter runs for small builds, so they still spread over every build thread.
+        auto run_size = BUILD_INSERT_RUN_SIZE;
+        if (this->thread_pool_ != nullptr and this->build_thread_count_ > 1) {
+            run_size = std::clamp<uint64_t>(
+                posting_count / (4 * this->build_thread_count_), 1, BUILD_INSERT_RUN_SIZE);
+        }
+        for (uint64_t position = 0; position < posting_count; ++position) {
+            const auto bucket_id = buckets[run_postings[position]];
+            if (position == 0 or bucket_id != run_buckets.back() or
+                position - run_begins.back() == run_size) {
+                run_begins.push_back(position);
+                run_buckets.push_back(bucket_id);
+            }
+        }
+        run_begins.push_back(posting_count);
+    }
+    auto append_run = [&](uint64_t run) -> void {
+        const auto begin = run_begins[run];
+        const auto count = run_begins[run + 1] - begin;
+        const auto bucket_id = run_buckets[run];
+        Vector<const void*> run_vectors(count, nullptr, this->allocator_);
+        Vector<InnerIdType> run_ids(count, this->allocator_);
+        Vector<InnerIdType> run_offsets(count, this->allocator_);
+        for (uint64_t k = 0; k < count; ++k) {
+            const auto idx = static_cast<int64_t>(run_postings[begin + k]);
+            run_vectors[k] = vectors + (idx / buckets_per_data_) * dim_;
+            run_ids[k] = static_cast<InnerIdType>(idx + current_num * buckets_per_data_);
+        }
+        bucket_->AppendVectorsToBucket(bucket_id,
+                                       run_vectors.data(),
+                                       run_ids.data(),
+                                       static_cast<InnerIdType>(count),
+                                       run_offsets.data());
+        {
+            std::lock_guard lock(label_lookup_mutex_);
+            for (uint64_t k = 0; k < count; ++k) {
+                const auto idx = static_cast<int64_t>(run_postings[begin + k]);
+                if (idx % buckets_per_data_ == 0) {
+                    location_map_[idx / buckets_per_data_ + current_num] =
+                        (static_cast<uint64_t>(bucket_id) << LOCATION_SPLIT_BIT) |
+                        static_cast<uint64_t>(run_offsets[k]);
+                }
+            }
+        }
+        for (uint64_t k = 0; k < count; ++k) {
+            record_posting(static_cast<int64_t>(run_postings[begin + k]), run_offsets[k]);
+        }
+    };
+
     std::vector<std::future<void>> futures;
     std::exception_ptr first_exception = nullptr;
     try {
-        for (int64_t i = 0; i < num_element; ++i) {
-            if (this->thread_pool_ != nullptr) {
-                futures.emplace_back(thread_pool_->GeneralEnqueue(add_func, i));
-            } else {
-                add_func(i);
+        if (precise_bucket_ != nullptr) {
+            for (int64_t i = 0; i < num_element; ++i) {
+                if (this->thread_pool_ != nullptr) {
+                    futures.emplace_back(thread_pool_->GeneralEnqueue(add_func, i));
+                } else {
+                    add_func(i);
+                }
+            }
+        } else {
+            const auto run_count = run_buckets.size();
+            for (uint64_t run = 0; run < run_count; ++run) {
+                if (this->thread_pool_ != nullptr) {
+                    futures.emplace_back(thread_pool_->GeneralEnqueue(append_run, run));
+                } else {
+                    append_run(run);
+                }
             }
         }
     } catch (...) {
