@@ -236,7 +236,7 @@ failed diff operations conservatively select heavy checks and full lint.
 | Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
-Format and existing path-selected docs/image publishing workflows remain separate.
+Format and path-selected documentation checks use `main-ci.yml`; image publishing remains separate.
 CircleCI's duplicate main build is removed; its version branch filters and PR
 classifier remain. Full X86 ASan still covers the MKL image in daily, and the
 existing daily path retains bundled OpenBLAS coverage. CircleCI's generic debug
@@ -271,3 +271,101 @@ same relevant revision before using daily evidence for release readiness.
 Validate with `python3 -m unittest tests/scripts/test_main_ci.py` and the existing
 workflow helper suites. No production runner configuration or trusted digest
 change is part of this migration.
+
+## Consolidated checks and event isolation
+
+Code checks are grouped by `pr-ci.yml` (PR CI) and `main-ci.yml` (Branch CI).
+PR CI has exactly six top-level jobs: Select CI route, CI Routing Tests, Select
+checks, Community, Team and PR CI Gate. Docs, SIMD Coverage and Lite live inside
+Community, which denotes hosted resources and still runs for Team-routed PRs.
+They execute once and do not extend the internal Team concurrency lock.
+Metadata validation lives in `pr-issue-link.yml` (PR Metadata), and manual entry
+points live in `manual-checks.yml` (Manual Checks). Body/title and label edits
+only trigger PR Metadata, never an empty PR CI run. PR CI listens only to
+opened, reopened and synchronize events. After changing the target branch,
+push a new commit (an empty commit is sufficient) to validate the new base;
+do not rely on a successful Gate from the previous target branch.
+Job names are short and fixed; only Lite includes its matrix mode.
+
+| Check | Automatic selection | Manual entry |
+| --- | --- | --- |
+| Format | Push to main or `0.*`, except documentation-only changes | Manual Checks: format |
+| Docs | PR opened/reopened/synchronize against any branch, or main push; original path filters | Manual Checks: docs |
+| Issue Link | PR opened/edited/reopened/synchronize/labeled/unlabeled targeting main or `0.*` | None |
+| SIMD Coverage | PR opened/reopened/synchronize targeting main; original path filters | None |
+| Lite | PR opened/reopened/synchronize targeting main or `0.*`; original path filters | Manual Checks: lite |
+| Core PR CI | PR opened/reopened/synchronize targeting main or `0.*` | Manual Checks: full-pr |
+| Main integration | Non-deleted main pushes | Manual Checks: full-branch |
+
+Docs, Format and Lite command steps are shared composite actions under
+`.github/actions/check-{docs,format,lite}/`, reused by automatic and manual jobs.
+These actions do not add workflow entries. Matrix modes remain visible per job.
+
+Full manual checks call the existing PR/Branch workflows, with an explicitly
+manual caller job prefix. Manual-only docs/format/Lite do not call the core
+workflows, so they cannot publish skipped automatic gate/build checks. Code
+workflows no longer expose selective workflow_dispatch inputs. The manual wrapper
+keeps read-only permissions; full-pr routes to Community, as before.
+
+The required names `PR CI Gate` and `Format Check` remain unchanged.
+Gate requires successful selection and Community execution, plus routing tests
+and Team when applicable. Community's Shared Checks Result verifies that each
+selected Docs/SIMD/Lite job (including the complete Lite matrix) succeeded;
+only unselected checks may be skipped. Failure, cancellation or unexpected skips
+fail the result and therefore Gate. On other PR target branches, only the
+original docs scope runs through Community with core checks disabled; Gate
+checks that intended route explicitly. Metadata remains independently enforced
+by Mergify; it does not rerun code checks. Other names
+include `Community / Docs`, `Branch Docs`, `Community / SIMD Coverage`,
+`Issue Link` and `Community / Lite <mode>`.
+Branch Docs is distinct from PR Docs. The 2026-11-02 ruleset audit found main
+requires DCO, Mergify Merge Protections and PR CI Gate; version rulesets include
+Format Check. Mergify checks issue links directly from labels/body. Recheck
+protections before merge if they change.
+
+Issue Link uses a PR/head lock before reading live body/labels, and rejects a
+closed PR or changed head. PR code concurrency is set before path selection;
+heavy downstream jobs have no cancellation groups. Branch commits run
+independently. Branch deletions skip selection before checkout. A failed path
+selector causes the required Format Check to fail explicitly, rather than skip.
+
+The selector preserves original path scopes using the complete Git diff,
+including deletions and renames. PR comparisons use merge-base; push comparisons
+use before/after, and new branches use the oldest pushed commit's parent.
+Unavailable ranges fail visibly. Original check commands, images, matrices,
+timeouts and artifacts remain unchanged. Existing full version workflows remain
+unchanged. The retired label workflow is deleted; its script/manifest remain.
+
+This stage leaves 23 workflow YAML files versus the original 27: four old code
+entries and Label configuration are removed, Issue Link stays separate, and one
+manual entry is added. It prioritizes reliable event isolation over removing the
+last two entries. Team/Community remain reusable workflows.
+
+Changing pr-ci.yml changes the trusted Team caller digest. Review and authorize
+its final digest via the private operations process before Team admission. This
+PR does not change production admission, runner configuration or protections.
+
+Validation: the checks-policy, main-policy, routing, Team and SIMD helper suites,
+Lite collector fixtures, documentation checks and actionlint. The SIMD fixtures
+require Linux timeout. Local tests do not establish actual PR/branch runtime
+success.
+
+### Check identity on metadata and out-of-scope events
+
+PR CI does not subscribe to edited: a metadata-only run of the same workflow
+can obscure the full run in the PR merge widget. Target-branch changes require
+a subsequent push; this is a maintainer procedure, not an automatically enforced
+retarget guard. Re-running an old run is not a substitute for validating the new
+base. A one-element naming matrix produces PR CI Gate for maintained targets
+and Docs Gate for other targets. The gate shell verifies its context matches
+the selected core scope. Metadata never publishes a successful code Gate.
+
+Branch formatting/docs use the same always-instantiated context pattern. Deleted
+branches and successful out-of-scope selection publish Format Check Not Required
+or Branch Docs Not Required, never an automatic validation name. Selected checks
+retain Format Check / Branch Docs; selection failures fail the applicable check.
+The no-op identity jobs use hosted runners briefly and run no checkout/check steps.
+
+Manual PR grants actions: read at that calling job only, alongside contents/read
+and pull-requests/read, because nested reusable workflows cannot increase their
+caller's token permissions even when the Team branch will be skipped.

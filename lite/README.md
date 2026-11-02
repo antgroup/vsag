@@ -29,7 +29,7 @@ atomic file replacement, SQ8, mmap or same-instance concurrent access is promise
 `tools/check_tidy.py` checks configured Lite translation units and private/public
 headers using clang-tidy20. `tools/collect_coverage.py` unions production Lite
 source/header executable lines across instrumented tests and enforces 90%; it
-does not measure Full or branch coverage. See `.github/workflows/lite.yml` for
+does not measure Full or branch coverage. See `.github/workflows/manual-checks.yml` for
 default-OFF, ON, sanitizer and coverage CI matrices. Benchmark reports,
 replay scripts, configurations and raw results are delivered separately in
 benchmark PR #2926. Functional tests do not establish final quality,

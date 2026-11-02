@@ -261,9 +261,8 @@ class ComparisonTest(unittest.TestCase):
             self.assertIn("dependency definitions differ", (root / "simd-coverage/summary.md").read_text())
 
     def test_workflow_triggers_for_build_inputs_but_not_unrelated_paths(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
-        path_block = workflow.split("    paths:\n", 1)[1].split("\npermissions:", 1)[0]
-        patterns = re.findall(r"^      - '([^']+)'$", path_block, re.MULTILINE)
+        workflow = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        patterns = json.loads((ROOT / "scripts/ci/checks_paths.json").read_text())["simd"]
 
         def triggers(path):
             # The workflow uses literal paths, ** and **/ only. The latter
@@ -287,7 +286,8 @@ class ComparisonTest(unittest.TestCase):
             "tests/fixtures/framework/CMakeLists.txt",
             "extern/catch2/catch2.cmake", "extern/antlr4/antlr4.cmake",
             ".github/actions/prepare-fetchcontent/action.yml",
-            ".github/workflows/pr-simd-coverage.yml",
+            ".github/workflows/pr-ci.yml",
+            ".github/workflows/pr-ci-community.yml",
             "scripts/coverage/verify_cpp_coverage.py",
             "tests/scripts/simd_coverage_test.py",
             "tests/scripts/pr_simd_merge_base_test.py",
@@ -304,8 +304,15 @@ class ComparisonTest(unittest.TestCase):
             with self.subTest(path=path):
                 self.assertFalse(triggers(path))
 
-    def test_workflow_has_no_privileged_pr_or_cache_upload_path(self):
-        workflow = (ROOT / ".github/workflows/pr-simd-coverage.yml").read_text()
+    def assert_simd_workflow_unprivileged(self, source):
+        # Keep the actual trigger/permissions header; only unrelated jobs are
+        # excluded because Community legitimately caches other build products.
+        header = source.split("\njobs:", 1)[0]
+        job = re.search(r"(?ms)^  simd-coverage:\n.*?(?=^  [\w-]+:\n|\Z)", source)
+        self.assertIsNotNone(job)
+        workflow = header + "\n" + job.group()
+        self.assertNotRegex(workflow, r"(?m)^\s*(?:contents|id-token):\s*write\b")
+        self.assertNotRegex(workflow, r"(?m)^\s*permissions:\s*write-all\b")
         for forbidden in ("pull_request_target", "workflow_run", "secrets.", "actions/cache",
                           "ccache-action", "codecov-action", "id-token: write"):
             self.assertNotIn(forbidden, workflow)
@@ -315,10 +322,28 @@ class ComparisonTest(unittest.TestCase):
                          'rev-parse --verify "${HEAD_SHA}^2"',
                          'git -c safe.directory="$(pwd -P)"'):
             self.assertIn(required, workflow)
+    def test_workflow_has_no_privileged_pr_or_cache_upload_path(self):
+        workflow = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        self.assert_simd_workflow_unprivileged(workflow)
         runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
         self.assertIn("COMPILE_JOBS=4", runner)
         self.assertIn("timeout 15m", runner)
         self.assertNotIn("--allow-running-no-tests", runner)
+
+    def test_security_guard_rejects_real_permission_mutations(self):
+        source = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        mutations = [
+            source.replace("  contents: read", "  contents: write", 1),
+            source.replace("permissions:\n", "permissions:\n  id-token: write\n", 1),
+            source.replace("permissions:\n  contents: read\n  pull-requests: read", "permissions: write-all", 1),
+            source.replace("  simd-coverage:\n", "  simd-coverage:\n    permissions:\n      contents: write\n", 1),
+            source.replace("  simd-coverage:\n", "  simd-coverage:\n    permissions:\n      id-token: write\n", 1),
+        ]
+        for index, mutated in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.assertNotEqual(mutated, source)
+                with self.assertRaises(AssertionError):
+                    self.assert_simd_workflow_unprivileged(mutated)
 
     def test_runner_compares_distinct_revisions_with_container_ownership(self):
         # Exercise real Git/worktrees, metadata, instrumentation verification and

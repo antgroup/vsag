@@ -1,9 +1,9 @@
-name: Main CI
+name: Branch CI
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches: [main, '0.*']
+  workflow_call:
 
 permissions:
   contents: read
@@ -11,7 +11,8 @@ permissions:
 # No branch-wide concurrency: every main commit keeps its own run.
 jobs:
   changes:
-    name: Classify complete push
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.deleted != true))
+    name: Classify changes
     runs-on: ubuntu-24.04
     outputs:
       heavy: ${{ steps.policy.outputs.heavy }}
@@ -30,6 +31,7 @@ jobs:
         run: python3 scripts/ci/main_ci_policy.py
 
   platforms:
+    name: Platforms
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     uses: ./.github/workflows/asan_build_and_test.yml
@@ -37,6 +39,7 @@ jobs:
       smoke: true
 
   python:
+    name: Python
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     uses: ./.github/workflows/python_build_and_test.yml
@@ -44,21 +47,23 @@ jobs:
       x86-only: true
 
   tsan:
+    name: TSan
     needs: changes
     if: needs.changes.outputs.heavy == 'true'
     uses: ./.github/workflows/tsan_build_and_test.yml
 
   lint:
+    name: Lint
     needs: changes
-    if: needs.changes.outputs.lint != 'none'
+    if: needs.changes.result == 'success' && needs.changes.outputs.lint != 'none'
     uses: ./.github/workflows/lint.yml
     with:
       mode: ${{ needs.changes.outputs.lint }}
       pattern: ${{ needs.changes.outputs.pattern }}
 
   summary:
-    name: Main CI Summary
-    if: always()
+    name: Branch Summary
+    if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.event.deleted != true))
     needs: [changes, platforms, python, tsan, lint]
     runs-on: ubuntu-24.04
     steps:
@@ -67,3 +72,70 @@ jobs:
         env:
           MAIN_NEEDS: ${{ toJSON(needs) }}
         run: python3 scripts/ci/main_ci_summary.py
+
+  select-checks:
+    if: github.event_name != 'push' || github.event.deleted != true
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      format: ${{ steps.select.outputs.format }}
+      docs: ${{ steps.select.outputs.docs }}
+      issue: ${{ steps.select.outputs.issue }}
+      simd: ${{ steps.select.outputs.simd }}
+      lite: ${{ steps.select.outputs.lite }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select original event and path scopes
+        id: select
+        run: python3 scripts/ci/checks_policy.py
+
+  clang-format-check:
+    needs: select-checks
+    if: always()
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event.deleted != true && (needs.select-checks.result != 'success' || needs.select-checks.outputs.format == 'true')) && '["Format Check"]' || '["Format Check Not Required"]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful check selection
+        if: matrix.check == 'Format Check'
+        env:
+          SELECTION_RESULT: ${{ needs.select-checks.result }}
+        run: |
+          if [ "$SELECTION_RESULT" != success ]; then
+            echo '::error::Check selection did not succeed; formatting cannot be declared unnecessary.'
+            exit 1
+          fi
+      - name: Checkout code
+        if: matrix.check == 'Format Check'
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-format
+        if: matrix.check == 'Format Check'
+
+  validate:
+    needs: select-checks
+    if: always()
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event.deleted != true && github.ref == 'refs/heads/main' && (needs.select-checks.result != 'success' || needs.select-checks.outputs.docs == 'true')) && '["Branch Docs"]' || '["Branch Docs Not Required"]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful check selection
+        if: matrix.check == 'Branch Docs'
+        env:
+          SELECTION_RESULT: ${{ needs.select-checks.result }}
+        run: |
+          if [ "$SELECTION_RESULT" != success ]; then
+            echo '::error::Check selection did not succeed; documentation checks cannot be declared unnecessary.'
+            exit 1
+          fi
+      - name: Checkout repository
+        if: matrix.check == 'Branch Docs'
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-docs
+        if: matrix.check == 'Branch Docs'

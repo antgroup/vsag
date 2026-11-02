@@ -1,0 +1,63 @@
+name: Manual Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Check to run
+        type: choice
+        default: full-pr
+        options: [full-pr, full-branch, format, docs, lite]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr:
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    name: Manual PR
+    if: inputs.check == 'full-pr'
+    uses: ./.github/workflows/pr-ci.yml
+  branch:
+    name: Manual Branch
+    if: inputs.check == 'full-branch'
+    uses: ./.github/workflows/main-ci.yml
+
+  validate:
+    if: inputs.check == 'docs'
+    name: Manual Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-docs
+
+  clang-format-check:
+    if: inputs.check == 'format'
+    name: Manual Format
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-format
+
+  build-test-install:
+    if: inputs.check == 'lite'
+    name: Manual Lite ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default-off, rabitq-on, sanitizer, coverage]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-lite
+        with:
+          mode: ${{ matrix.mode }}
+

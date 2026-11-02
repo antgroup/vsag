@@ -82,7 +82,7 @@ Remove 为 bool，false 无法区分 ID 缺失和图分配失败。失败回滚�
 | 至少两个数据集/规模的可复现实验及原始结果 | 由实验验收 PR #2926 独立交付 | 最新统一版本 CPU/峰值/CRUD/质量矩阵、冷 I/O、小时级交错真实改值稳定性 |
 | 相比真实 Full 至少一项优化且效果稳定 | 带 Full 来源的历史暖加载/RSS/ELF 依赖闭包结果 | 同质量原生 Full 对照、完整部署包；GIST 维护质量仍未完整验收 |
 
-`.github/workflows/lite.yml` 定义默认关闭、RaBitQ 开启、ASan/UBSan、覆盖率矩阵，
+`.github/workflows/manual-checks.yml` 定义默认关闭、RaBitQ 开启、ASan/UBSan、覆盖率矩阵，
 覆盖全部 Lite 格式、已配置编译单元/头文件静态检查、安装和消费示例。
 覆盖率脚本对生产 Lite 行并集设 90% 门槛，不是整个 Full 或分支覆盖率。
 远程本地通过不代表在线 CI 已通过。
