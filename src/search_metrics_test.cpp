@@ -23,6 +23,76 @@
 #include "unittest.h"
 #include "vsag/vsag.h"
 
+TEST_CASE("Search metrics snapshots an external collector without losing extensions",
+          "[ut][search_metrics]") {
+    vsag::SearchStatistics statistics;
+    statistics.dist_cmp.store(17);
+    statistics.hops.store(9);
+    statistics.query_computer_count.store(1);
+    statistics.reorder_distance_count.store(23);
+    statistics.AddDistance(
+        vsag::DistanceEvaluationPhase::ROUTING, vsag::DistanceEvaluationBackend::RABITQ, 41);
+    statistics.AddDistance(
+        vsag::DistanceEvaluationPhase::RERANK, vsag::DistanceEvaluationBackend::RABITQ, 23);
+    vsag::SearchMetrics metrics;
+    metrics.base.dist_cmp.store(999);
+    REQUIRE(metrics.AddExtension("mci_hybrid_route", std::string("hgraph")));
+    REQUIRE(metrics.AddExtension("custom_flag", true));
+    auto snapshot = std::move(metrics).Snapshot(statistics);
+    auto expected = statistics.ToJson();
+    expected["mci_hybrid_route"].SetString("hgraph");
+    expected["custom_flag"].SetBool(true);
+    CHECK(snapshot.Dump() == expected.Dump());
+    CHECK(snapshot.dist_cmp == 17);
+    CHECK(snapshot.hops == 9);
+    CHECK(snapshot.reorder_distance_count == 23);
+    CHECK(snapshot.DistanceEvaluations(vsag::DistanceEvaluationPhase::ROUTING) == 41);
+    CHECK(snapshot.DistanceEvaluations(vsag::DistanceEvaluationPhase::RERANK) == 23);
+    CHECK(statistics.dist_cmp.load() == 17);
+}
+
+TEST_CASE("HGraph single-query metrics retain lazy JSON compatibility", "[ut][search_metrics]") {
+    constexpr int64_t count = 200;
+    constexpr int64_t dim = 16;
+    std::vector<float> base(count * dim);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t d = 0; d < dim; ++d) {
+            base[i * dim + d] = static_cast<float>((i * 17 + d * 13) % 101) / 101.0F;
+        }
+    }
+    auto created = vsag::Factory::CreateIndex("hgraph", R"({"dtype":"float32",
+        "metric_type":"l2","dim":16,"index_param":{"graph_type":"pipnn",
+        "max_degree":16,"ef_construction":64,"base_quantization_type":"fp32"}})");
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Owner(false)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(base.data());
+    REQUIRE(index->Build(data).has_value());
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false)->Float32Vectors(base.data());
+    auto found = index->KnnSearch(query, 5, R"({"hgraph":{"ef_search":30}})");
+    REQUIRE(found.has_value());
+    auto snapshot = found.value()->GetSearchMetrics();
+    REQUIRE(snapshot.has_value());
+    const auto first = found.value()->GetStatistics();
+    CHECK(first == snapshot->Dump());
+    CHECK(first == found.value()->GetStatistics());
+    const auto json = vsag::JsonType::Parse(first);
+    CHECK(json["mci_hybrid_route"].GetString() == "disabled");
+    CHECK(json["query_computer_count"].GetUint64() == 1);
+    CHECK(json["distance_evaluations"].GetUint64() == snapshot->distance_evaluations);
+    CHECK(snapshot->Extensions().size() == 17);
+    found.value()->Statistics(R"({"replacement":true})");
+    CHECK_FALSE(found.value()->GetSearchMetrics().has_value());
+    CHECK(found.value()->GetStatistics() == R"({"replacement":true})");
+}
+
 TEST_CASE("Search metrics snapshot preserves counters", "[ut][search_metrics]") {
     vsag::SearchMetrics metrics;
     metrics.base.AddDistance(
