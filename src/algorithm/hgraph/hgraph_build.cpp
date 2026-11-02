@@ -165,7 +165,13 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_hit_nodes_ = 0;
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
+    auto build_begin = std::chrono::steady_clock::now();
+    const auto nodes = data->GetNumElements();
     const bool using_build_cache = this->has_loaded_cache();
+    logger::info("[hgraph_build] build starting nodes={} cache={} graph_type={}",
+                 nodes,
+                 using_build_cache,
+                 graph_type_);
     if (using_build_cache and graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             "HGraph PiPNN does not support build_with_cache");
@@ -205,6 +211,10 @@ HGraph::Build(const DatasetPtr& data) {
         (using_build_cache or graph_type_ != GRAPH_TYPE_VALUE_NSW)) {
         this->build_mci_clique_index(ret.empty() ? this->get_data(data) : nullptr);
     }
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - build_begin)
+                              .count();
+    logger::info("[hgraph_build] build completed nodes={} duration={}ms", nodes, total_ms);
     return ret;
 }
 

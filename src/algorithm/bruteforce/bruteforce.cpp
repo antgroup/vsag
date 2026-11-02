@@ -15,6 +15,7 @@
 #include "bruteforce.h"
 
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -33,6 +34,7 @@
 #include "datacell/multi_vector_datacell_parameter.h"
 #include "fmt/chrono.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/logger/logger.h"
 #include "impl/reasoning/reasoning_context.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
@@ -95,8 +97,16 @@ BruteForce::EstimateMemory(uint64_t num_elements) const {
 
 std::vector<int64_t>
 BruteForce::Build(const vsag::DatasetPtr& data) {
+    const auto nodes = data->GetNumElements();
+    const auto build_begin = std::chrono::steady_clock::now();
+    logger::info("[bruteforce_build] build starting nodes={}", nodes);
     this->Train(data);
-    return this->Add(data);
+    auto result = this->Add(data);
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - build_begin)
+                              .count();
+    logger::info("[bruteforce_build] build completed nodes={} duration={}ms", nodes, total_ms);
+    return result;
 }
 
 void
