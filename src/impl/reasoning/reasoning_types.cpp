@@ -48,6 +48,8 @@ ToString(ReasoningTermination termination) {
             return "timeout";
         case ReasoningTermination::kEmptyTraversalLimitReached:
             return "empty_traversal_limit_reached";
+        case ReasoningTermination::kUnrewardedHopsLimitReached:
+            return "unrewarded_hops_limit_reached";
         case ReasoningTermination::kNone:
         default:
             return "none";

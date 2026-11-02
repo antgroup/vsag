@@ -285,7 +285,8 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                 ++unrewarded_hops;
                 if (unrewarded_hops >= max_unrewarded_hops) {
                     if (reasoning != nullptr) {
-                        reasoning->SetTermination(ReasoningTermination::kLowerBoundReached);
+                        reasoning->SetTermination(
+                            ReasoningTermination::kUnrewardedHopsLimitReached);
                     }
                     break;
                 }

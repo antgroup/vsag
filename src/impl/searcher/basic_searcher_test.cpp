@@ -657,7 +657,7 @@ TEST_CASE("BasicSearcher bounded traversal when valid candidates < ef",
     REQUIRE(vl->Get(1) == true);
     REQUIRE(vl->Get(600) == false);
     REQUIRE(vl->Get(1999) == false);
-    REQUIRE(reasoning.termination_ == ReasoningTermination::kLowerBoundReached);
+    REQUIRE(reasoning.termination_ == ReasoningTermination::kUnrewardedHopsLimitReached);
 
     pool->ReturnOne(vl);
 }

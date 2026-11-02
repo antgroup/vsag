@@ -381,6 +381,10 @@ TEST_CASE("ReasoningContext termination reasons are centralized", "[reasoning]")
     REQUIRE(std::string_view(ToString(ReasoningTermination::kHopsLimitReached)) ==
             "hops_limit_reached");
     REQUIRE(std::string_view(ToString(ReasoningTermination::kTimeout)) == "timeout");
+    REQUIRE(std::string_view(ToString(ReasoningTermination::kEmptyTraversalLimitReached)) ==
+            "empty_traversal_limit_reached");
+    REQUIRE(std::string_view(ToString(ReasoningTermination::kUnrewardedHopsLimitReached)) ==
+            "unrewarded_hops_limit_reached");
 }
 
 TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
@@ -391,6 +395,10 @@ TEST_CASE("ReasoningContext SetTermination", "[reasoning]") {
         REQUIRE(ctx.termination_ == ReasoningTermination::kNone);
         ctx.SetTermination(ReasoningTermination::kLowerBoundReached);
         REQUIRE(ctx.termination_ == ReasoningTermination::kLowerBoundReached);
+        ctx.SetTermination(ReasoningTermination::kEmptyTraversalLimitReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kEmptyTraversalLimitReached);
+        ctx.SetTermination(ReasoningTermination::kUnrewardedHopsLimitReached);
+        REQUIRE(ctx.termination_ == ReasoningTermination::kUnrewardedHopsLimitReached);
     }
 
     SECTION("SetTermination can be overwritten") {
