@@ -40,7 +40,7 @@ public:
      * Initializes the libaio context and allocates iocb structures for requests.
      */
     IOContext() {
-        memset(&ctx_, 0, sizeof(ctx_));
+        std::memset(&ctx_, 0, sizeof(ctx_));
         io_setup(DEFAULT_REQUEST_COUNT, &this->ctx_);
         for (int i = 0; i < DEFAULT_REQUEST_COUNT; ++i) {
             this->cb_[i] = static_cast<iocb*>(malloc(sizeof(struct iocb)));

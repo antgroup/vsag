@@ -104,8 +104,8 @@ graph_mce::change_to_core_order() {
         std::sort(p_d_edge.data() + p_d_idx[i], p_d_edge.data() + p_d_idx[i + 1]);
     }
 
-    memcpy(p_edge.data(), p_d_edge.data(), sizeof(uint32_t) * m);
-    memcpy(p_idx.data(), p_d_idx, sizeof(uint32_t) * (n + 1));
+    std::memcpy(p_edge.data(), p_d_edge.data(), sizeof(uint32_t) * m);
+    std::memcpy(p_idx.data(), p_d_idx, sizeof(uint32_t) * (n + 1));
 
     p_idx2.resize(n);
     core_number = 0;

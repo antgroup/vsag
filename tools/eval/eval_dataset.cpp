@@ -47,7 +47,7 @@ parse_sparse_vectors(const char* src_data,
 
         if (ptr + sizeof(uint32_t) > end)
             break;
-        memcpy(&vec.len_, ptr, sizeof(uint32_t));
+        std::memcpy(&vec.len_, ptr, sizeof(uint32_t));
         ptr += sizeof(uint32_t);
 
         if (vec.len_ == 0) {
@@ -65,10 +65,10 @@ parse_sparse_vectors(const char* src_data,
         vec.ids_ = new uint32_t[vec.len_];
         vec.vals_ = new float[vec.len_];
 
-        memcpy(vec.ids_, ptr, keys_size);
+        std::memcpy(vec.ids_, ptr, keys_size);
         ptr += keys_size;
 
-        memcpy(vec.vals_, ptr, vals_size);
+        std::memcpy(vec.vals_, ptr, vals_size);
         ptr += vals_size;
 
         std::vector<uint32_t> indices(vec.len_);
@@ -132,7 +132,7 @@ parse_token_sequences(const char* src_data,
             throw std::runtime_error("parse_token_sequences: truncated stream at length header");
         }
         uint32_t seq_len = 0;
-        memcpy(&seq_len, ptr, sizeof(uint32_t));
+        std::memcpy(&seq_len, ptr, sizeof(uint32_t));
         ptr += sizeof(uint32_t);
 
         target_vectors[idx].token_seq_len_ = seq_len;
@@ -144,7 +144,7 @@ parse_token_sequences(const char* src_data,
                 throw std::runtime_error("parse_token_sequences: truncated stream at payload");
             }
             target_vectors[idx].token_sequence_ = new uint32_t[seq_len];
-            memcpy(target_vectors[idx].token_sequence_, ptr, payload_size);
+            std::memcpy(target_vectors[idx].token_sequence_, ptr, payload_size);
             ptr += payload_size;
         }
         ++idx;
@@ -576,7 +576,7 @@ EvalDataset::Load(const std::string& filename) {
                     uint32_t count = obj->train_vector_counts_[i];
                     obj->multi_train_vectors_[i].len_ = count;
                     obj->multi_train_vectors_[i].vectors_ = new float[count * mv_dim];
-                    memcpy(
+                    std::memcpy(
                         obj->multi_train_vectors_[i].vectors_, ptr, count * mv_dim * sizeof(float));
                     ptr += count * mv_dim;
                 }
@@ -622,7 +622,7 @@ EvalDataset::Load(const std::string& filename) {
                     uint32_t count = obj->test_vector_counts_[i];
                     obj->multi_test_vectors_[i].len_ = count;
                     obj->multi_test_vectors_[i].vectors_ = new float[count * mv_dim];
-                    memcpy(
+                    std::memcpy(
                         obj->multi_test_vectors_[i].vectors_, ptr, count * mv_dim * sizeof(float));
                     ptr += count * mv_dim;
                 }
@@ -935,12 +935,12 @@ serialize_sparse_vectors(const std::vector<SparseVector>& vectors,
         if (offsets_out != nullptr) {
             offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
         }
-        memcpy(ptr, &vec.len_, sizeof(uint32_t));
+        std::memcpy(ptr, &vec.len_, sizeof(uint32_t));
         ptr += sizeof(uint32_t);
         if (vec.len_ > 0) {
-            memcpy(ptr, vec.ids_, vec.len_ * sizeof(uint32_t));
+            std::memcpy(ptr, vec.ids_, vec.len_ * sizeof(uint32_t));
             ptr += vec.len_ * sizeof(uint32_t);
-            memcpy(ptr, vec.vals_, vec.len_ * sizeof(float));
+            std::memcpy(ptr, vec.vals_, vec.len_ * sizeof(float));
             ptr += vec.len_ * sizeof(float);
         }
     }
@@ -980,11 +980,11 @@ serialize_token_sequences(const std::vector<SparseVector>& vectors,
         if (offsets_out != nullptr) {
             offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
         }
-        memcpy(ptr, &vec.token_seq_len_, sizeof(uint32_t));
+        std::memcpy(ptr, &vec.token_seq_len_, sizeof(uint32_t));
         ptr += sizeof(uint32_t);
         if (vec.token_seq_len_ > 0 && vec.token_sequence_ != nullptr) {
             const size_t payload_size = static_cast<size_t>(vec.token_seq_len_) * sizeof(uint32_t);
-            memcpy(ptr, vec.token_sequence_, payload_size);
+            std::memcpy(ptr, vec.token_sequence_, payload_size);
             ptr += payload_size;
         }
     }
@@ -1195,7 +1195,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
             for (int64_t i = 0; i < dataset->number_of_base_; ++i) {
                 const auto& mv = dataset->multi_train_vectors_[i];
                 size_t bytes = mv.len_ * dataset->multi_vector_dim_ * sizeof(float);
-                memcpy(ptr, mv.vectors_, bytes);
+                std::memcpy(ptr, mv.vectors_, bytes);
                 ptr += mv.len_ * dataset->multi_vector_dim_;
             }
             hsize_t dims[2] = {static_cast<hsize_t>(total_sub_vectors),
@@ -1218,7 +1218,7 @@ EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
             for (int64_t i = 0; i < dataset->number_of_query_; ++i) {
                 const auto& mv = dataset->multi_test_vectors_[i];
                 size_t bytes = mv.len_ * dataset->multi_vector_dim_ * sizeof(float);
-                memcpy(ptr, mv.vectors_, bytes);
+                std::memcpy(ptr, mv.vectors_, bytes);
                 ptr += mv.len_ * dataset->multi_vector_dim_;
             }
             hsize_t dims[2] = {static_cast<hsize_t>(total_sub_vectors),

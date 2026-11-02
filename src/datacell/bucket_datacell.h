@@ -612,7 +612,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::FactoryComputer(const void* query) {
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             Normalize(float_query, comp->raw_query_.data(), this->quantizer_->GetDim());
         } else {
-            memcpy(
+            std::memcpy(
                 comp->raw_query_.data(), float_query, sizeof(float) * this->quantizer_->GetDim());
         }
         float_query = comp->raw_query_.data();
