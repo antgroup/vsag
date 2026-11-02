@@ -72,6 +72,12 @@ HGraph search loop reads the record directly and prefetches graph links and
 quantized codes together. The codec uses 16 reproducibly trained residual
 clusters.
 
+For latency-sensitive single-query searches, `rabitq_use_fht: true` selects
+FHT/Kac rotation in place of the dense random orthogonal matrix. This option
+is independent of `rabitq_fused_datacell`. Both options must be set before
+`Build`; changing an existing dense-rotation or ordinary split index requires
+a rebuild. They cannot be enabled through search parameters.
+
 By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on at most 65,536
 vectors. When `train_sample_count` is smaller than the dataset, it selects that many vectors using
 fixed-seed uniform reservoir sampling. Increasing the value can improve cluster-centroid quality at

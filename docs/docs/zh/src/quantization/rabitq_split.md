@@ -74,6 +74,11 @@ KMeans codec。`train_sample_count` 小于数据集大小时，使用固定 seed
 sampling 选择相应数量的向量。增大该值可能提升 cluster centroid 的质量，但会增加
 构建时间和训练阶段的临时内存；将其设置为不小于数据集大小即可使用全部向量训练。
 
+对于关注单查询延迟的场景，可以使用 `rabitq_use_fht: true`，以 FHT/Kac 旋转替代
+稠密随机正交矩阵。该选项与 `rabitq_fused_datacell` 相互独立。这两个选项都必须在
+`Build` 前设置；已有的稠密旋转索引或普通 split 索引需要重建，不能通过检索参数
+切换。
+
 该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
 `Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、
 Range Search 和并发查询）、按 ID 计算距离、内存统计以及 Serialize/Deserialize。
