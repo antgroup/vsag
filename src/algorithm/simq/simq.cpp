@@ -787,6 +787,10 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 std::vector<int64_t>
 SIMQ::Add(const DatasetPtr& data) {
     std::unique_lock lock(global_mutex_);
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "simq: cannot add to an immutable index");
+    }
 
     if (rep_hgraph_ == nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -1367,6 +1371,8 @@ SIMQ::SetImmutable() {
     if (this->rep_hgraph_ != nullptr) {
         this->rep_hgraph_->SetImmutable();
     }
+    // Swap with an empty vector to release capacity, not only the logical size.
+    Vector<uint8_t>(allocator_).swap(representative_codes_);
     this->immutable_.store(true, std::memory_order_release);
 }
 
@@ -1769,7 +1775,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, representative_codes_);
 
     JsonType info;
-    info["simq_format_version"].SetInt(1);
+    info["simq_format_version"].SetInt(representative_codes_.empty() ? 2 : 1);
     info["representative_quantization_type"].SetString(representative_quantization_type_);
     info["dim"].SetInt(dim_);
     info["total_count"].SetInt(total_count_.load());
@@ -1788,7 +1794,7 @@ SIMQ::Deserialize(StreamReader& reader) {
 
     const auto format_version =
         info.Contains("simq_format_version") ? info["simq_format_version"].GetInt() : 0;
-    if (format_version != 0 and format_version != 1) {
+    if (format_version < 0 or format_version > 2) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "unsupported SIMQ format version");
     }
     BufferStreamReader buf_reader(&reader, std::numeric_limits<uint64_t>::max(), allocator_);
@@ -1858,9 +1864,9 @@ SIMQ::Deserialize(StreamReader& reader) {
         CHECK_ARGUMENT(vec_to_cluster_[tid] < n_clusters, "SIMQ cluster ID out of bounds");
         CHECK_ARGUMENT(token_to_doc_[tid] < total_count_val, "SIMQ document ID out of bounds");
     }
-    if (format_version == 1) {
+    if (format_version >= 1) {
         CHECK_ARGUMENT(info.Contains("representative_quantization_type"),
-                       "SIMQ version 1 requires representative quantization metadata");
+                       "SIMQ version 1/2 requires representative quantization metadata");
     }
     representative_quantization_type_ = info.Contains("representative_quantization_type")
                                             ? info["representative_quantization_type"].GetString()
@@ -1875,12 +1881,23 @@ SIMQ::Deserialize(StreamReader& reader) {
         static_cast<uint64_t>(num_clusters_) <= std::numeric_limits<uint64_t>::max() / code_size,
         "SIMQ representative code size overflow");
     const auto expected_size = static_cast<uint64_t>(num_clusters_) * code_size;
-    if (format_version == 1) {
+    if (format_version >= 1) {
         uint64_t stored_size = 0;
         StreamReader::ReadObj(buf_reader, stored_size);
-        CHECK_ARGUMENT(stored_size == expected_size, "SIMQ representative code count mismatch");
-        representative_codes_.resize(expected_size);
-        buf_reader.Read(reinterpret_cast<char*>(representative_codes_.data()), expected_size);
+        if (format_version == 2) {
+            CHECK_ARGUMENT(stored_size == 0, "SIMQ v2 requires absent representative codes");
+        } else {
+            CHECK_ARGUMENT(stored_size == expected_size, "SIMQ representative code count mismatch");
+        }
+        if (stored_size == 0) {
+            // Restore both SIMQ and nested HGraph read-only state through the
+            // same transition used after Build. SetImmutable takes this mutex.
+            lock.unlock();
+            this->SetImmutable();
+        } else {
+            representative_codes_.resize(expected_size);
+            buf_reader.Read(reinterpret_cast<char*>(representative_codes_.data()), expected_size);
+        }
     } else {
         // Old graphs stored FP32 representatives; migrate each independently.
         // Encoding under the restored document model gives one consistent metric
