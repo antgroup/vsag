@@ -15,6 +15,8 @@
 
 #include "ivf_partition_strategy.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 
 namespace vsag {

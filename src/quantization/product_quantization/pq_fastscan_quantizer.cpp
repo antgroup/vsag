@@ -15,6 +15,8 @@
 
 #include "pq_fastscan_quantizer.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "index_common_param.h"

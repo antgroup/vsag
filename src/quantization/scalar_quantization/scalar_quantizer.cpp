@@ -15,6 +15,8 @@
 
 #include "scalar_quantizer.h"
 
+#include <cstring>
+
 #include "scalar_quantization_trainer.h"
 #include "scalar_quantization_utils.h"
 #include "simd/normalize.h"

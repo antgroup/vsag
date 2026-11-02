@@ -15,6 +15,7 @@
 
 #include "fht_kac_rotate_transformer.h"
 
+#include <cstring>
 #include <random>
 
 #include "simd/rabitq_simd.h"

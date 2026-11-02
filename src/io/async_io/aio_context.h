@@ -17,6 +17,8 @@
 
 #if HAVE_LIBAIO
 
+#include <cstring>
+
 #include "libaio.h"
 #include "utils/resource_object.h"
 #include "utils/resource_object_pool.h"

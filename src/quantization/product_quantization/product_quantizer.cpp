@@ -15,6 +15,8 @@
 
 #include "product_quantizer.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "simd/fp32_simd.h"

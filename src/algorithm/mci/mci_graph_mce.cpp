@@ -1,6 +1,7 @@
 #include "mci_graph_mce.h"
 
 #include <algorithm>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 

@@ -15,6 +15,7 @@
 
 #include "conjugate_graph.h"
 
+#include <cstring>
 #include <limits>
 
 #include "vsag_exception.h"
