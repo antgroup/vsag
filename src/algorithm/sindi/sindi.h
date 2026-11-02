@@ -32,6 +32,7 @@ namespace vsag {
 
 class ReasoningContext;
 struct SindiWindowSearchProfile;
+struct SindiParallelState;
 
 /**
  * @brief SINDI: Sparse INverted Index with windowed term lists.
@@ -203,7 +204,8 @@ private:
                 const SindiMetadataSearchRoute& metadata_route = {},
                 uint64_t worker_n_candidate = 0,
                 const SindiSearchOptions& window_options = {},
-                SindiWindowSearchProfile* window_profile = nullptr) const;
+                SindiWindowSearchProfile* window_profile = nullptr,
+                SindiParallelState* parallel = nullptr) const;
 
     bool
     UseTermListsHeapInsert(const SINDISearchParameter& search_param,
