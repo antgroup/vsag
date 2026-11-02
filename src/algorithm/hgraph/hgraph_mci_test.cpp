@@ -836,7 +836,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         return result.value();
     };
     verify(index, false);
-    REQUIRE(index->Remove({ids[0]}).value() == 1);
+    REQUIRE(index->Remove(ids[0]).value() == 1);
     verify(index, true);
     REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     auto before = verify(index, false);
@@ -852,7 +852,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
         REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
     }
-    REQUIRE(restored.value()->Remove({ids[0]}).value() == 1);
+    REQUIRE(restored.value()->Remove(ids[0]).value() == 1);
     verify(restored.value(), true);
 
     auto concurrent_queries = std::async(std::launch::async, [&]() {
@@ -885,7 +885,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
     });
     // Cross the 100-mutation boundary while queries run.
     for (uint64_t i = 0; i < 60; ++i) {
-        REQUIRE(index->Remove({ids[0]}).value() == 1);
+        REQUIRE(index->Remove(ids[0]).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     }
     const auto concurrent_error = concurrent_queries.get();
@@ -944,7 +944,7 @@ TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][h
     // The ascending brute-force scan has already accepted the first ID when it pauses.
     // Deletion completes before the pending query resumes, even if its initial filter was null.
     const auto status = reached.wait_for(std::chrono::seconds(10));
-    auto removed = index->Remove({ids[0]});
+    auto removed = index->Remove(ids[0]);
     resume.set_value();
     auto result = search.get();
     REQUIRE(status == std::future_status::ready);
@@ -1005,7 +1005,7 @@ TEST_CASE("MCI restored tombstoned padding label permits batch KNN", "[ut][hgrap
     const auto params = json.Dump();
     auto index = vsag::Factory::CreateIndex("hgraph", params).value();
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::MARK_REMOVE).value() == 1);
     auto binary = index->Serialize();
     REQUIRE(binary.has_value());
     auto restored = vsag::Factory::CreateIndex("hgraph", params).value();
@@ -1130,7 +1130,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     REQUIRE(index->GetNumElements() == 44);
     REQUIRE(index->GetNumberRemoved() == 1);
     verify();
-    REQUIRE(index->Remove({ids[2]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+    REQUIRE(index->Remove(ids[2], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
     verify();
     REQUIRE(index->Add(dataset(46, 2)).has_value());
     active.push_back(ids[46]);
@@ -1141,7 +1141,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     stats = vsag::JsonType::Parse(index->GetStats());
     REQUIRE(stats["mci_total_nodes"].GetInt() == 0);
     REQUIRE(stats["mci_inactive_node_count"].GetInt() == 0);
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
     REQUIRE(index->Add(dataset(0, total)).has_value());
     active = ids;
     verify();
@@ -1170,7 +1170,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
         return true;
     });
     for (uint64_t i = 0; i < 8; ++i) {
-        REQUIRE(index->Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         REQUIRE(index->Add(dataset(0, 1)).has_value());
     }
     REQUIRE(concurrent_search.get());
@@ -1256,7 +1256,7 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
 
     SECTION("Entry point replacement skips soft-deleted nodes") {
         REQUIRE(index->Remove({100, 101}).value() == 2);
-        REQUIRE(index->Remove({100}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(100, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         auto result = index->KnnSearch(make_dataset(ids, vectors, 2, 1, 2),
                                        1,
                                        R"({"hgraph":{"ef_search":64,"use_mci":false}})");
@@ -1266,10 +1266,10 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
     }
 
     SECTION("Moving an old tombstone cannot hide the readded live label") {
-        REQUIRE(index->Remove({104}).value() == 1);
+        REQUIRE(index->Remove(104).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 4, 1, 2)).has_value());
         for (auto label : {100, 105, 101}) {
-            REQUIRE(index->Remove({label}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+            REQUIRE(index->Remove(label, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         }
         REQUIRE(index->GetNumElements() == 3);
         REQUIRE(index->GetNumberRemoved() == 1);
@@ -1292,6 +1292,64 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
         REQUIRE(result.value()->GetIds()[0] == 104);
         REQUIRE(result.value()->GetDistances()[0] == 0.0F);
     }
+}
+
+TEST_CASE("HGraph MCI filter queries labels under pinned deletion view",
+          "[ut][hgraph][mci][label_table]") {
+    constexpr int64_t total = 24;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    auto created = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    REQUIRE(index->Remove(ids.back(), vsag::RemoveMode::MARK_REMOVE).value() == 1);
+
+    class AbsentLookupFilter : public HalfRatioAllValidFilter {
+    public:
+        AbsentLookupFilter(const std::vector<int64_t>& valid, vsag::IndexPtr index)
+            : HalfRatioAllValidFilter(valid), index_(std::move(index)) {
+        }
+        bool
+        CheckValid(int64_t id) const override {
+            ++callbacks_;
+            if (index_->CheckIdExist(999999999) or not index_->CheckIdExist(1000) or
+                index_->CheckIdExist(1023)) {
+                saw_unexpected_label_ = true;
+            }
+            auto missing = index_->GetRawVectorByIds(&absent_label_, 1);
+            if (missing.has_value()) {
+                saw_unexpected_label_ = true;
+            }
+            return HalfRatioAllValidFilter::CheckValid(id);
+        }
+        vsag::IndexPtr index_;
+        int64_t absent_label_ = 999999999;
+        mutable int64_t callbacks_ = 0;
+        mutable bool saw_unexpected_label_ = false;
+    };
+    const std::vector<int64_t> valid(ids.begin(), ids.end() - 1);
+    auto filter = std::make_shared<AbsentLookupFilter>(valid, index);
+    auto result = index->KnnSearch(
+        make_dataset(ids, vectors, 1, 1, dim),
+        3,
+        R"({"hgraph":{"ef_search":32,"use_mci":true,"mci_seed_ratio":0.5,"mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    if (not result.has_value()) {
+        FAIL(result.error().message);
+    }
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(filter->callbacks_ > 0);
+    REQUIRE_FALSE(filter->saw_unexpected_label_);
 }
 
 TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][hgraph][mci]") {
@@ -1334,12 +1392,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
         ->Owner(false);
 
     auto filter = std::make_shared<HalfRatioAllValidFilter>(ids);
-    auto result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 filter);
+    auto result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.5,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() > 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
@@ -1354,12 +1412,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(std::stoull(result.value()->GetStatistics({"mci_seed_count"})[0]) ==
             expected_seed_count);
 
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0,"timeout_ms":0}})",
-                                 filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0,"timeout_ms":0}})",
+        filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"is_timeout"})[0] == "true");
 
@@ -1367,12 +1425,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     REQUIRE(stats["mci_max_clique_size"].GetInt() > 0);
 
     auto callback_filter = std::make_shared<CallbackOnlyFilter>();
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 callback_filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        callback_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("disabled")");
 
@@ -1397,24 +1455,24 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
     for (auto id : ids) {
         all_invalid->Set(id);
     }
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 all_invalid);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        all_invalid);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
 
     const std::vector<int64_t> mixed_ids{9000, ids[base_count + 1]};
     auto mixed_filter = std::make_shared<HalfRatioAllValidFilter>(mixed_ids);
-    result =
-        index.value()->KnnSearch(query,
-                                 1,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 mixed_filter);
+    result = index.value()->KnnSearch(
+        query,
+        1,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":0.1,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        mixed_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 1);
     REQUIRE(result.value()->GetIds()[0] == ids[base_count + 1]);
@@ -1423,12 +1481,12 @@ TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][
 
     const std::vector<int64_t> stale_ids{9000, 9001, 9002};
     auto stale_filter = std::make_shared<CountingValidIdsFilter>(stale_ids);
-    result =
-        index.value()->KnnSearch(query,
-                                 3,
-                                 R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,)"
-                                 R"("hgraph_valid_ratio_threshold":1.0}})",
-                                 stale_filter);
+    result = index.value()->KnnSearch(
+        query,
+        3,
+        R"({"hgraph":{"ef_search":16,"use_mci":true,"mci_seed_ratio":1.0,"mci_seed_coverage":0,)"
+        R"("hgraph_valid_ratio_threshold":1.0}})",
+        stale_filter);
     REQUIRE(result.has_value());
     REQUIRE(result.value()->GetDim() == 0);
     REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("hgraph")");
@@ -1519,8 +1577,12 @@ TEST_CASE("HGraph companion MCI incrementally adds INT8 vectors", "[ut][hgraph][
                                  filter);
     REQUIRE(search_result.has_value());
     REQUIRE(search_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
-    REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) > 0);
-    REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) > 0);
+    // The seed budget covers every valid point, so neither clique expansion nor
+    // HGraph navigation should add work, including after incremental insertion.
+    REQUIRE(std::stoull(search_result.value()->GetStatistics({"dist_cmp"})[0]) == total);
+    REQUIRE(std::stoull(search_result.value()->GetStatistics({"hops"})[0]) == 0);
+    const auto search_stats = vsag::JsonType::Parse(search_result.value()->GetStatistics());
+    REQUIRE(search_stats["distance_evaluations_by_phase"]["routing"].GetUint64() == 0);
 }
 
 TEST_CASE("HGraph analyzer sends only typed INT8 query buffers", "[ut][hgraph][mci]") {
@@ -1912,7 +1974,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_base_clique_count"].GetInt() ==
             static_cast<int64_t>(cliques.size()));
     if (scenario == "marked") {
-        REQUIRE(index->Remove({ids[total - 1]}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[total - 1], vsag::RemoveMode::MARK_REMOVE).value() == 1);
     }
     REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
     const auto stats = vsag::JsonType::Parse(index->GetStats());
@@ -3627,7 +3689,7 @@ TEST_CASE("HGraph MCI bitmap remains equivalent after removal readdition and rel
     };
     verify(true, false);  // Warm the identity-mapping cache before changing labels.
     const auto mode = GENERATE(vsag::RemoveMode::MARK_REMOVE, vsag::RemoveMode::FORCE_REMOVE);
-    REQUIRE(index->Remove({0}, mode).value() == 1);
+    REQUIRE(index->Remove(0, mode).value() == 1);
     const bool identity_after_remove = mode == vsag::RemoveMode::MARK_REMOVE;
     verify(identity_after_remove, true);
     reload();

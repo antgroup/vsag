@@ -139,6 +139,16 @@ TEST_CASE("FlattenDataCell rejects invalid distance reads", "[ut][Flatten][inval
     auto computer = cell.FactoryComputer(vector);
     InnerIdType ids[4] = {0, 0, 0, 1};
     float distances[4] = {};
+    SECTION("empty batch accepts null buffers without changing statistics") {
+        SearchStatistics stats;
+        QueryContext context{.stats = &stats};
+        stats.io_cnt.store(7, std::memory_order_relaxed);
+        stats.distance_evaluations.store(11, std::memory_order_relaxed);
+        cell.Query(nullptr, computer, nullptr, 0, &context);
+        CHECK(stats.io_cnt.load(std::memory_order_relaxed) == 7);
+        CHECK(stats.distance_evaluations.load(std::memory_order_relaxed) == 11);
+    }
+
     SECTION("reserved and sentinel IDs") {
         CHECK_THROWS_AS(cell.Query(distances, computer, ids + 3, 1), VsagException);
         CHECK_THROWS_AS(cell.Query(distances, computer, ids, 4), VsagException);

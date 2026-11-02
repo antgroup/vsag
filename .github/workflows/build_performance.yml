@@ -22,7 +22,7 @@ jobs:
   benchmark-x86:
     name: Build Performance X86 (not a PR check)
     if: github.ref == 'refs/heads/main' && (github.event_name != 'schedule' || github.repository == 'antgroup/vsag')
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 180
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
@@ -128,9 +128,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            ccache cmake g++ gcc gfortran lcov libaio-dev libcurl4-openssl-dev \
-            liblapacke-dev libomp-15-dev libopenblas-dev liburing-dev make \
-            ninja-build python3-dev clang-tidy-15 time
+            ccache cmake g++-13 gcc-13 gfortran-13 lcov libaio-dev libcurl4-openssl-dev \
+            liblapacke-dev libomp-dev libopenblas-dev liburing-dev make \
+            ninja-build python3-dev time
+          sudo ln -sf /usr/bin/gcc-13 /usr/local/bin/gcc
+          sudo ln -sf /usr/bin/g++-13 /usr/local/bin/g++
+          sudo ln -sf /usr/bin/g++-13 /usr/local/bin/c++
+          sudo ln -sf /usr/bin/gcc-13 /usr/local/bin/cc
+          sudo ln -sf /usr/bin/gfortran-13 /usr/local/bin/gfortran
           {
             g++ --version
             cmake --version

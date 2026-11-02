@@ -621,6 +621,7 @@ TEST_CASE("LabelTable Concurrent MarkRemove", "[ut][LabelTable]") {
         threads.reserve(num_threads);
 
         std::vector<LabelType> all_labels;
+        all_labels.reserve(num_labels);
         for (int i = 0; i < num_labels; ++i) {
             all_labels.push_back(static_cast<LabelType>(i));
         }
@@ -703,6 +704,56 @@ TEST_CASE("LabelTable padding restore ignores unused capacity", "[ut][LabelTable
     REQUIRE_FALSE(labels.HasActivePaddingLabel());
 }
 
+TEST_CASE("LabelTable lookups under pinned deletion view", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    const bool use_reverse_map = GENERATE(false, true);
+    LabelTable table(&allocator, use_reverse_map);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    REQUIRE(table.MarkRemove(101) == 1);
+    auto view = table.GetDeletedIdsReadView();
+    REQUIRE(view != nullptr);
+    // A user callback during MCI traversal holds this non-recursive deletion read view.
+    // Test both absent and present lookups, including a tombstone, on the SAME thread.
+    REQUIRE_FALSE(table.CheckLabel(999));
+    REQUIRE(table.CheckLabel(100));
+    REQUIRE_FALSE(table.CheckLabel(101));
+    REQUIRE_FALSE(table.TryGetIdByLabel(999).first);
+    REQUIRE(table.TryGetIdByLabel(100).second == 0);
+    REQUIRE_FALSE(table.TryGetIdByLabel(101).first);
+    REQUIRE_FALSE(view->CheckValid(1));
+    view.reset();
+    REQUIRE(table.CheckLabel(100));
+    REQUIRE_FALSE(table.CheckLabel(101));
+    REQUIRE_FALSE(table.CheckLabel(999));
+    table.Resize(4);
+    table.Insert(2, 999);
+    REQUIRE(table.CheckLabel(999));
+}
+
+TEST_CASE("LabelTable relabel under pinned deletion view", "[ut][LabelTable]") {
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable labels(allocator.get());
+    labels.Insert(0, 10);
+    labels.Insert(1, 20);
+    REQUIRE(labels.MarkRemove(20) == 1);
+    auto deletion_view = labels.GetDeletedIdsReadView();
+    REQUIRE(deletion_view != nullptr);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
+    // A user callback during MCI traversal retains this read view. Ordinary relabeling
+    // must not acquire the same deletion mutex exclusively on this thread.
+    labels.UpdateLabel(10, 30);
+    REQUIRE(labels.GetLabelById(0) == 30);
+    REQUIRE(labels.TryGetIdByLabel(30).first);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
+    // The destination is present in the reverse map but belongs to the removed row.
+    // A pinned view must not make this ordinary relabel acquire a deletion writer lock.
+    labels.UpdateLabel(30, 20);
+    REQUIRE(labels.GetLabelById(0) == 20);
+    REQUIRE(labels.TryGetIdByLabel(20).second == 0);
+    REQUIRE_FALSE(deletion_view->CheckValid(1));
+}
+
 TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
     auto allocator = std::make_shared<DefaultAllocator>();
 
@@ -763,4 +814,92 @@ TEST_CASE("LabelTable reports identity label mappings", "[ut][LabelTable]") {
         target.Deserialize(reader);
         REQUIRE(target.IsIdentityMapping());
     }
+}
+
+TEST_CASE("LabelTable concurrent Insert and Resize are mutually exclusive", "[ut][LabelTable]") {
+    // A Resize that reallocates label_table_'s storage must not race with
+    // an Insert that writes into that same storage.  With the barrier both
+    // operations start as close together as possible; TSan / ASan will flag
+    // any data race on label_table_ or label_remap_.
+    constexpr int64_t k_iter = 20000;
+
+    auto allocator = std::make_shared<DefaultAllocator>();
+    LabelTable label_table(allocator.get());
+
+    // Pre-load slot 0 so the inserter starts at id 1.
+    label_table.Insert(0, 0);
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<bool> resized{false};
+
+    std::thread inserter([&]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (not go.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        // The resizer must actually grow storage, not merely observe that Insert
+        // has already made every small Resize request a no-op.
+        while (not resized.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        for (int64_t i = 0; i < k_iter; ++i) {
+            auto inner_id = static_cast<InnerIdType>(i + 1);
+            label_table.Insert(inner_id, static_cast<LabelType>(i));
+        }
+    });
+
+    std::thread resizer([&]() {
+        ready.fetch_add(1, std::memory_order_release);
+        while (not go.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        label_table.Resize(128);
+        resized.store(true, std::memory_order_release);
+        for (int64_t s = 129; s < (k_iter + 16); s += 64) {
+            label_table.Resize(static_cast<uint64_t>(s));
+        }
+    });
+
+    // Release both threads once they are ready.
+    while (ready.load(std::memory_order_acquire) < 2) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    inserter.join();
+    resizer.join();
+
+    REQUIRE(resized.load(std::memory_order_acquire));
+    REQUIRE(label_table.GetTotalCount() == k_iter + 1);
+    for (int64_t i = 0; i < k_iter; ++i) {
+        REQUIRE(label_table.GetLabelById(static_cast<InnerIdType>(i + 1)) ==
+                static_cast<LabelType>(i));
+    }
+}
+
+TEST_CASE("LabelTable MergeOther rejects truncated source storage", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    auto source = std::make_shared<LabelTable>(&allocator);
+    auto destination = std::make_shared<LabelTable>(&allocator);
+    source->Insert(0, 100);
+    source->Insert(1, 101);
+    source->ShrinkToFit(1);  // Truncation does not decrease GetTotalCount().
+    REQUIRE(source->GetTotalCount() == 2);
+    auto id_map = [](LabelType label) { return std::make_tuple(true, label); };
+    REQUIRE_THROWS_AS(destination->MergeOther(source, id_map), VsagException);
+    REQUIRE(destination->GetTotalCount() == 0);
+}
+
+TEST_CASE("LabelTable CopyAllLabels rejects truncated logical count", "[ut][LabelTable]") {
+    DefaultAllocator allocator;
+    LabelTable table(&allocator);
+    table.Insert(0, 100);
+    table.Insert(1, 101);
+    table.ShrinkToFit(1);
+    REQUIRE(table.GetTotalCount() == 2);
+    LabelType labels[2] = {-2, -2};
+    REQUIRE_THROWS_AS(table.CopyAllLabels(labels, table.GetTotalCount()), VsagException);
+    REQUIRE(labels[0] == -2);
+    REQUIRE(labels[1] == -2);
 }

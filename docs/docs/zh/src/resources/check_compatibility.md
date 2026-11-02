@@ -44,6 +44,24 @@ cmake --build build-release -j
 工具会创建当前版本的索引实例，反序列化旧索引文件，然后执行一次小规模 KNN 搜索。加载和搜索都成功
 时输出 `<identifier> success`；否则输出 `<identifier> failed` 并以非零状态退出。
 
+
+可选的第二个参数指定输入目录；未指定时读取 `COMPATIBILITY_INDEX_DIR`，环境变量未设置或为空则使用
+`/tmp`。索引、两个 JSON 文件和向量数据必须来自同一目录，该目录可只读挂载。
+
+```bash
+COMPATIBILITY_INDEX_DIR=/path/to/fixtures BUILD_DIR=./build bash scripts/check_compatibility.sh
+./build/tools/check_compatibility/check_compatibility v1.1.0_hgraph /path/to/fixtures
+```
+
+脚本需要 Python 3，按实际发布的 `v*_*.index` 文件确定测试用例。在调用工具前，检查每个受维护
+索引及其两个参数文件均非空，且参数必须是 JSON 对象。孤立的 JSON 配套文件会被报告，但不会据此
+新增测试用例；这些文件仍须参与完整发布资产清单校验。向量文件大小必须恰好为 20,480,000 字节
+（10,000 个 512 维 float32 向量）；缺失、截断或过大的输入均失败。工具仍用前 500 个向量执行 top-1
+查询并核对原始 ID。已移除的 HNSW、fresh-HNSW、DiskANN 索引继续排除；没有受维护索引时不能通过。
+
+上述检查验证本地文件结构，不验证发布资产全集及内容摘要。CI 缓存或下载的生成方必须在发布输入前
+独立核对完整预期资产清单和摘要；仅枚举目录、检查大小无法识别整个索引文件组缺失或同长度向量文件损坏。
+
 ## 本地入口
 
 `tools/check_compatibility/README_zh.md` 保留为浏览工具目录时的简短入口。

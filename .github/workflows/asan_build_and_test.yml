@@ -1,15 +1,24 @@
 name: Asan Build & Test Parallel
 
 on:
+  workflow_call:
+    inputs:
+      full-examples:
+        type: boolean
+        default: false
+      smoke:
+        type: boolean
+        default: false
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
     paths-ignore:
       - 'docs/**'
   workflow_dispatch:
 jobs:
   build_asan_x86:
+    if: ${{ !inputs.smoke }}
     name: Asan Build X86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
@@ -47,7 +56,7 @@ jobs:
 
   build_asan_aarch64:
     name: Asan Build Aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
       volumes:
@@ -123,9 +132,10 @@ jobs:
           overwrite: 'true'
 
   test_asan_x86:
+    if: ${{ !inputs.smoke }}
     name: Test X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -155,6 +165,7 @@ jobs:
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
       - name: Upload Log
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           path: ./log
@@ -166,7 +177,9 @@ jobs:
   test_asan_aarch64:
     name: Test Aarch64
     needs: build_asan_aarch64
-    runs-on: ubuntu-22.04-arm
+    env:
+      SMOKE: ${{ inputs.smoke }}
+    runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
         test_type: [ unittests, functests ]
@@ -184,18 +197,31 @@ jobs:
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: test_aarch64-${{ github.run_id }}
           path: ./build
+      - name: Validate Test Artifact
+        run: |
+          if ! test -s ./build/tests/unittests || ! test -s ./build/tests/functests; then
+            echo "::error::Aarch64 test artifact is incomplete; expected tests/unittests and tests/functests"
+            df -h .
+            find ./build -maxdepth 3 -type f -printf '%P %s bytes\n' 2>/dev/null || true
+            exit 1
+          fi
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
           echo leak:libgomp.so >> omp.supp
           export LSAN_OPTIONS=suppressions=omp.supp
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
+          if [ "$SMOKE" = "true" ]; then
+            python3 scripts/ci/platform_smoke.py "${{ matrix.test_type }}"
+          else
+            ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
+          fi
       - name: Upload Log
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           path: ./log
@@ -207,6 +233,9 @@ jobs:
   test_asan_macos_arm64:
     name: Test macOS arm64
     needs: build_asan_macos_arm64
+    env:
+      SMOKE: ${{ inputs.smoke }}
+      FULL_EXAMPLES: ${{ inputs.full-examples }}
     runs-on: macos-15
     strategy:
       matrix:
@@ -233,8 +262,19 @@ jobs:
           ASAN_OPTIONS: detect_container_overflow=0
         run: |
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
+          if [ "$SMOKE" = "true" ]; then
+            python3 scripts/ci/platform_smoke.py "${{ matrix.test_type }}"
+            if [ "${{ matrix.test_type }}" = "unittests" ]; then
+              python3 scripts/ci/platform_smoke.py examples
+            fi
+          else
+            ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }}
+            if [ "$FULL_EXAMPLES" = "true" ] && [ "${{ matrix.test_type }}" = "unittests" ]; then
+              python3 scripts/ci/platform_smoke.py all-examples
+            fi
+          fi
       - name: Upload Log
+        if: always()
         uses: actions/upload-artifact@v5
         with:
           path: ./log
@@ -244,15 +284,16 @@ jobs:
           overwrite: 'true'
 
   test_example_x86:
+    if: ${{ !inputs.smoke }}
     name: Test Example X86
     needs: build_asan_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
     concurrency:
-      group: test_example_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      group: test_example_x86--${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -280,13 +321,15 @@ jobs:
   test_example_aarch64:
     name: Test Example Aarch64
     needs: build_asan_aarch64
-    runs-on: ubuntu-22.04-arm
+    env:
+      SMOKE: ${{ inputs.smoke }}
+    runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
       volumes:
         - /opt:/useless
     concurrency:
-      group: test_example_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      group: test_example_aarch64--${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
@@ -297,16 +340,27 @@ jobs:
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6
         with:
           name: test_aarch64-${{ github.run_id }}
           path: ./build
+      - name: Validate Test Artifact
+        run: |
+          if ! test -s ./build/tests/unittests || ! test -s ./build/tests/functests; then
+            echo "::error::Aarch64 test artifact is incomplete; expected tests/unittests and tests/functests"
+            df -h .
+            find ./build -maxdepth 3 -type f -printf '%P %s bytes\n' 2>/dev/null || true
+            exit 1
+          fi
       - name: Do Test In example
         run: |
+          printf 'leak:libgomp.so\nleak:libgomp.so.1\n' > "$RUNNER_TEMP/asan-example-lsan.supp"
+          export LSAN_OPTIONS="suppressions=$RUNNER_TEMP/asan-example-lsan.supp"
+          if [ "$SMOKE" = "true" ]; then
+            python3 scripts/ci/platform_smoke.py examples
+            exit 0
+          fi
           cd ./build/examples/cpp
-          echo "leak:libgomp.so" > lsan.supp
-          echo "leak:libgomp.so.1" >> lsan.supp
-          export LSAN_OPTIONS=suppressions=$(pwd)/lsan.supp
           for example in ./*; do
             filename=$(basename "$example")
             if [[ $filename =~ ^[0-9]{3} ]]; then
@@ -315,11 +369,22 @@ jobs:
               $example
             fi
           done
+      - name: Upload Smoke Example Logs
+        if: always() && inputs.smoke
+        uses: actions/upload-artifact@v5
+        with:
+          name: smoke-examples-aarch64-${{ github.run_id }}
+          path: ./log
+          if-no-files-found: ignore
+          retention-days: 3
+
 
   clean_up:
+    # Full daily consumers retain immutable artifacts until retention expiry.
+    if: ${{ !inputs.full-examples }}
     name: Clean Up
     needs: [ test_asan_x86, test_asan_aarch64, test_asan_macos_arm64 ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up

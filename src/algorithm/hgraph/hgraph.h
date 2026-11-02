@@ -54,6 +54,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
@@ -64,6 +65,7 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
@@ -96,6 +98,9 @@ public:
                       std::shared_ptr<const InnerIndexInterface> owner) const override;
 
     friend class HGraphAnalyzer;
+    friend class HGraphFGIM;
+    friend class HGraphFGIMTestAccessor;
+    friend class HGraphCodeWriteTestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
 
@@ -103,7 +108,7 @@ public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
-        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
     ~HGraph() override = default;
 
@@ -156,6 +161,10 @@ public:
 
     std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override;
+
+    /// Cached counter, recalculated on demand once a mutation has invalidated it.
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -537,6 +546,9 @@ private:
 
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
+        if (SearchLockScope::IsNoLock()) {
+            return {};
+        }
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
             return std::shared_lock<std::shared_mutex>(this->global_mutex_);
         }
@@ -916,9 +928,16 @@ private:
     void
     init_resize_bit_and_reorder();
 
-    /// Compute memory usage breakdown and cache the result.
+    /// Compute the memory usage breakdown and cache the result. Records the mutation version it
+    /// observed so a mutation racing with this snapshot is not silently swallowed.
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
+
+    /// Invalidate the cached counter instead of recomputing it. The per-element Add/Remove paths
+    /// call this so they do not pay the O(total) breakdown; the next GetMemoryUsage() recalculates
+    /// it. Paths that already hold the mutation locks may keep calling cal_memory_usage() eagerly.
+    void
+    mark_memory_usage_dirty() const;
 
     /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
@@ -1250,9 +1269,18 @@ private:
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    mutable std::shared_mutex global_mutex_;  // guards total_count_, entry_point_id_
+    // HGraph::resize takes global_mutex_ before persistent_codes_mutex_; code writers
+    // must never acquire global_mutex_ while holding persistent_codes_mutex_.
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
-    mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
+    // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
+    enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
+    UnorderedMap<InnerIdType, uint8_t> pending_code_writes_;
+
+    void
+    finish_code_write(InnerIdType inner_id, uint8_t code);
+
+    mutable std::mutex mci_build_mutex_;  // serializes full MCI reconstruction
     // MCI writers take mutation before force_remove; label scopes end before repair/search.
     // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
     // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
@@ -1270,6 +1298,14 @@ private:
     std::atomic<bool> physical_code_resize_pending_{false};
 
     std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+
+    /// Memory-usage cache bookkeeping. A mutation either invalidates the counter by bumping the
+    /// version (the per-element Add/Remove paths) or recomputes it eagerly while it already holds
+    /// the mutation locks (build, resize, deserialize); the cached counter is re-derived only when
+    /// GetMemoryUsage() observes a version it has not accounted for yet. Keep the two counters on
+    /// separate cache lines: every mutation writes the first while every query reads the second.
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_version_{1};
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_accounted_version_{0};
 
     /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
     /// links are both fully written, and which concurrent readers may therefore observe.

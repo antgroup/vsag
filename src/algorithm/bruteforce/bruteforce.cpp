@@ -1370,7 +1370,8 @@ BruteForce::shrink_to_fit() {
             throw;
         }
         // Deletion has already completed; compaction is best effort when memory is exhausted.
-    } catch (const std::bad_alloc&) {
+    } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+                                       // Cleanup must preserve the primary result or exception.
         // SafeAllocator reports failed storage shrinking as std::bad_alloc.
     }
     this->max_capacity_.store(total_count);

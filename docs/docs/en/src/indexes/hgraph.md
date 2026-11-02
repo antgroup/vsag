@@ -57,6 +57,25 @@ auto result = index->KnnSearch(
     query, /*topk=*/10, R"({"hgraph": {"ef_search": 100}})").value();
 ```
 
+## Disk read-cache example
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+uses 1,000 64-dimensional vectors, in-memory SQ8 base codes, and disk-backed FP32
+precise codes (`async_io`) for query reranking. It sets `build_by_base: true` so
+graph construction reads the in-memory base codes, avoiding repeated disk-cache
+refills during this small usage example. This changes the graph construction
+quantization; it is not a recall benchmark or an example of precise-code graph
+construction.
+
+Read caching remains enabled with a 131,072-byte budget (one 128-KiB page).
+The 256,000-byte FP32 payload spans two pages. The example serializes to a
+`BinarySet`, restores a new index, and checks the restored count, top-10 result
+shape, ID range, and finite distances. Run it with a writable file path in a
+fresh working directory. Writes and durability behavior are unchanged.
+Focused AsyncIO tests cover one-page eviction/refill, write invalidation, and
+invalid reads; the HGraph read-cache functional test retains precise-code graph
+construction coverage.
+
 ## Build parameters
 
 Build-time parameters live under `index_param`. The table below highlights the keys

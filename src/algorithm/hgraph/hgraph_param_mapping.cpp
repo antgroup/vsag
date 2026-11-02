@@ -308,7 +308,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
                    key == "adaptive_pruning_apply_to_reverse" ||
                    key == "adaptive_pruning_apply_to_upper" ||
                    key == "adaptive_pruning_fill_rejected" || key == "fill_rejected" ||
-                   key == HGRAPH_USE_MCI || key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
+                   key == HGRAPH_USE_MCI || key == "mci_clique_activation_order" ||
+                   key == HGRAPH_MCI_MCS || key == HGRAPH_MCI_CLIQUE_MAX ||
                    key == HGRAPH_MCI_ALPHA || key == HGRAPH_MCI_KNNG_SOURCE ||
                    key == HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY ||
                    key == HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY ||

@@ -265,9 +265,36 @@ ProductQuantizer<metric>::SerializeImpl(StreamWriter& writer) {
 template <MetricType metric>
 void
 ProductQuantizer<metric>::DeserializeImpl(StreamReader& reader) {
-    StreamReader::ReadObj(reader, this->pq_dim_);
-    StreamReader::ReadObj(reader, this->subspace_dim_);
-    StreamReader::ReadVector(reader, this->codebooks_);
+    int64_t pq_dim = 0;
+    int64_t subspace_dim = 0;
+    uint64_t codebook_len = 0;
+    StreamReader::ReadObj(reader, pq_dim);
+    StreamReader::ReadObj(reader, subspace_dim);
+    StreamReader::ReadObj(reader, codebook_len);
+
+    // codebooks_/reverse_codebooks_ are allocated from the construction-time geometry
+    // (dim * CENTROIDS_PER_SUBSPACE). The base-class wrapper has already overwritten
+    // dim_ with the file value, so validate every deserialized field against the
+    // construction-time state before codebooks_ is resized or indexed with them.
+    if (pq_dim != this->pq_dim_ or subspace_dim != this->subspace_dim_ or
+        this->dim_ != static_cast<uint64_t>(this->pq_dim_ * this->subspace_dim_) or
+        codebook_len != this->reverse_codebooks_.size()) {
+        throw VsagException(
+            ErrorType::INVALID_BINARY,
+            fmt::format("product quantizer geometry mismatch: file pq_dim={}, subspace_dim={}, "
+                        "codebook_size={}, dim={}, expected pq_dim={}, subspace_dim={}, "
+                        "codebook_size={}",
+                        pq_dim,
+                        subspace_dim,
+                        codebook_len,
+                        this->dim_,
+                        this->pq_dim_,
+                        this->subspace_dim_,
+                        this->reverse_codebooks_.size()));
+    }
+
+    this->codebooks_.resize(codebook_len);
+    reader.Read(reinterpret_cast<char*>(this->codebooks_.data()), codebook_len * sizeof(float));
     this->transpose_codebooks();
 }
 

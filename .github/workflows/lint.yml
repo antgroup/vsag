@@ -1,8 +1,16 @@
 name: Lint
 
 on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        default: full
+      pattern:
+        type: string
+        default: ''
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
     paths-ignore:
       - 'docs/**'
   workflow_dispatch:
@@ -36,8 +44,8 @@ jobs:
           key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
           restore-keys: |
             external-${{ runner.os }}-${{ runner.arch }}-
-      - name: Install clang-tidy 15
-        run: sudo apt install clang-tidy-15 -y
+      - name: Install clang-tidy 20
+        run: sudo apt install clang-tidy-20 -y
       - name: Load Cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -45,6 +53,9 @@ jobs:
           save: ${{ github.event_name != 'pull_request' }}
           key: build-lint-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Run lint
+        env:
+          LINT_MODE: ${{ inputs.mode || 'full' }}
+          LINT_PATTERN: ${{ inputs.pattern }}
         # `make release` defaults to the OpenBLAS backend. Reuse the system
         # OpenBLAS shipped in the ci-x86-openblas image so lint doesn't have
         # to rebuild OpenBLAS from source on every run.
@@ -52,4 +63,12 @@ jobs:
           export CMAKE_GENERATOR="Ninja"
           export EXTRA_DEFINED="-DVSAG_USE_SYSTEM_OPENBLAS=ON"
           make release
-          make lint
+          case "$LINT_MODE" in
+            full) make lint ;;
+            changed)
+              test -n "$LINT_PATTERN"
+              source_filter=$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$")')
+              ./scripts/linters/run-clang-tidy-20.sh -p build-release/ -use-color -source-filter "$source_filter" -j 4 "$LINT_PATTERN"
+              ;;
+            *) echo "Invalid lint mode" >&2; exit 1 ;;
+          esac

@@ -687,22 +687,22 @@ TEST_CASE("Pyramid query analyzer honors paths and removals", "[ut][pyramid][ana
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {10.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      1.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      100.0F,
-                                                      0.0F,
-                                                      0.0F,
-                                                      0.0F};
+    std::array<float, PYRAMID_TEST_DIM * 4> vectors = {10.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       1.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       100.0F,
+                                                       0.0F,
+                                                       0.0F,
+                                                       0.0F};
     std::array<int64_t, 4> ids = {101, 102, 201, 202};
     std::array<std::string, 4> paths = {"root/a/leaf", "root/a/leaf", "root/b/leaf", "root/b/leaf"};
     auto base = vsag::Dataset::Make()
@@ -714,7 +714,7 @@ TEST_CASE("Pyramid query analyzer honors paths and removals", "[ut][pyramid][ana
                     ->Owner(false);
     REQUIRE(index->Build(base).empty());
 
-    std::array<float, PYRAMID_TEST_DIM* 2> query_vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> query_vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 100.0F, 0.0F, 0.0F, 0.0F};
     std::array<std::string, 2> query_paths = {"root/a/leaf", "root/b/leaf"};
     auto query = vsag::Dataset::Make()
@@ -760,22 +760,22 @@ TEST_CASE("Pyramid query analyzer includes graph duplicates in path ground truth
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 4> vectors = {1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      1.0F,
-                                                      2.0F,
-                                                      3.0F,
-                                                      4.0F,
-                                                      9.0F,
-                                                      8.0F,
-                                                      7.0F,
-                                                      6.0F};
+    std::array<float, PYRAMID_TEST_DIM * 4> vectors = {1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       1.0F,
+                                                       2.0F,
+                                                       3.0F,
+                                                       4.0F,
+                                                       9.0F,
+                                                       8.0F,
+                                                       7.0F,
+                                                       6.0F};
     std::array<int64_t, 4> ids = {100, 101, 102, 103};
     std::array<std::string, 4> paths = {"tenant", "tenant", "tenant", "tenant"};
     auto base = vsag::Dataset::Make()
@@ -817,7 +817,7 @@ TEST_CASE("Pyramid query analyzer supports a built root without query paths",
     auto param = vsag::Pyramid::CheckAndMappingExternalParam(external_param, common_param);
     auto index = std::make_shared<vsag::Pyramid>(param, common_param);
 
-    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
     std::array<int64_t, 2> ids = {100, 101};
     std::array<std::string, 2> paths = {"", ""};
@@ -850,7 +850,7 @@ TEST_CASE("Pyramid query analyzer selects an available ground truth code source"
     const bool store_raw_vector = GENERATE(false, true);
     CAPTURE(store_raw_vector);
     constexpr int64_t dim = 4;
-    std::array<float, dim* 3> vectors = {
+    std::array<float, dim * 3> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 0.123456F, 0.234567F, 0.345678F, 0.456789F, 1.0F, 1.0F, 1.0F, 1.0F};
     std::array<int64_t, 3> ids = {10, 11, 12};
     std::array<std::string, 3> paths = {"leaf", "leaf", "leaf"};
@@ -974,7 +974,7 @@ TEST_CASE("Pyramid SearchWithRequest reports reasoning for expected labels",
           "[ut][pyramid][reasoning]") {
     auto test_index = MakePyramidIndex(100);
     const auto& index = test_index.index;
-    std::array<float, PYRAMID_TEST_DIM* 2> vectors = {
+    std::array<float, PYRAMID_TEST_DIM * 2> vectors = {
         0.0F, 0.0F, 0.0F, 0.0F, 10.0F, 0.0F, 0.0F, 0.0F};
     std::array<int64_t, 2> ids = {100, 101};
     std::array<std::string, 2> paths = {"tenant", "tenant"};
@@ -1188,7 +1188,7 @@ TEST_CASE("Pyramid reports statistics for flat and graph leaves", "[ut][pyramid]
 TEST_CASE("Pyramid exposes stored raw vectors", "[ut][pyramid][raw_vector]") {
     constexpr int64_t count = 3;
     const auto graph_type = GENERATE("nsw", "odescent");
-    std::array<float, count* PYRAMID_TEST_DIM> vectors = {
+    std::array<float, count * PYRAMID_TEST_DIM> vectors = {
         0.123456F,
         0.234567F,
         0.345678F,
@@ -2365,8 +2365,8 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
         nullptr);
     REQUIRE(serial->GetDim() == 5);
 
-    // With a thread pool the same request must take the parallel branch and still return the
-    // same ranked result as the serial path.
+    // Compare each index against its own serial baseline: a supplied pool can also change
+    // graph construction, even when build_thread_count is one.
     auto pooled_index = MakePyramidIndex(1,
                                          1,
                                          false,
@@ -2378,18 +2378,34 @@ TEST_CASE("Pyramid parallelism degrades to serial search without a thread pool",
                                          false,
                                          vsag::SafeThreadPool::FactoryDefaultThreadPool());
     REQUIRE(pooled_index.index->Build(base).empty());
+    const auto pooled_serial = pooled_index.index->KnnSearch(
+        query,
+        5,
+        R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":1}})",
+        nullptr);
+    REQUIRE(pooled_serial->GetDim() == 5);
 
     for (const int64_t parallelism : {2, 4, 16}) {
+        CAPTURE(parallelism);
         const std::string params =
             R"({"pyramid":{"ef_search":50,"subindex_ef_search":50,"parallelism":)" +
             std::to_string(parallelism) + "}}";
         const auto result = test_index.index->KnnSearch(query, 5, params, nullptr);
         const auto pooled = pooled_index.index->KnnSearch(query, 5, params, nullptr);
         REQUIRE(result->GetDim() == serial->GetDim());
-        REQUIRE(pooled->GetDim() == serial->GetDim());
+        REQUIRE(pooled->GetDim() == pooled_serial->GetDim());
         for (int64_t i = 0; i < serial->GetDim(); ++i) {
+            CAPTURE(i,
+                    result->GetIds()[i],
+                    serial->GetIds()[i],
+                    result->GetDistances()[i],
+                    serial->GetDistances()[i],
+                    pooled->GetIds()[i],
+                    pooled_serial->GetIds()[i],
+                    pooled->GetDistances()[i],
+                    pooled_serial->GetDistances()[i]);
             REQUIRE(result->GetIds()[i] == serial->GetIds()[i]);
-            REQUIRE(pooled->GetIds()[i] == serial->GetIds()[i]);
+            REQUIRE(pooled->GetIds()[i] == pooled_serial->GetIds()[i]);
         }
     }
 }
@@ -2459,6 +2475,83 @@ private:
     std::function<bool(int64_t)> check_;
 };
 }  // namespace
+
+TEST_CASE("Pyramid cold and warm encoding submit tasks only for supported stores",
+          "[ut][pyramid][pyramid_build_cache][warm_encode][cold_encode]") {
+    // Cross the 4096-vector batch boundary. Flat-only nodes avoid graph construction;
+    // cold Add still submits one hierarchy-insertion task per vector, accounted for below.
+    constexpr int64_t count = 4097;
+    const auto mode =
+        GENERATE(std::string("fp32"), std::string("split_rabitq"), std::string("mrle_fp32"));
+    const auto warm = GENERATE(false, true);
+    CAPTURE(mode, warm);
+    auto pool = std::make_shared<PyramidSearchPool>(4);
+    auto target = MakePyramidIndex(count + 1,
+                                   4,
+                                   false,
+                                   mode == "split_rabitq",
+                                   false,
+                                   mode == "mrle_fp32",
+                                   false,
+                                   false,
+                                   false,
+                                   std::make_shared<vsag::SafeThreadPool>(pool));
+    std::vector<float> vectors(count * PYRAMID_TEST_DIM);
+    FillRootVectors(vectors, count);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(count, "leaf"), sources(count);
+    vsag::PyramidBuildCache cache(target.allocator.get());
+    auto& graph = cache.CreateGraphCache("default", "leaf");
+    for (int64_t i = 0; i < count; ++i) {
+        sources[i] = "warm-encode-" + std::to_string(i);
+        graph.source_ids_.push_back(sources[i]);
+    }
+    vsag::Vector<vsag::InnerIdType> neighbors(target.allocator.get());
+    neighbors.push_back(0);
+    graph.neighbors_.emplace(sources.front(), std::move(neighbors));
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    cache.Serialize(writer);
+    if (warm) {
+        target.index->ImportCache(stream);
+    }
+    auto dataset = MakePyramidDataset(vectors.data(), ids.data(), paths.data(), count);
+    dataset->SourceID(sources.data());
+    REQUIRE(target.index->Build(dataset).empty());
+    REQUIRE(target.index->GetNumElements() == count);
+    const auto stats = vsag::JsonType::Parse(target.index->GetStats());
+    // Cache statistics distinguish warm reuse from cold Build even without graph nodes.
+    if (warm) {
+        REQUIRE(stats["build_cache_hit_rate"].GetFloat() >= 0.0F);
+    } else {
+        REQUIRE(stats["build_cache_hit_rate"]["skipped_reason"].GetString() ==
+                "index was not built from an imported cache");
+    }
+    // Both encoding and Finalize use the supplied pool. Warm encoding submits two batches
+    // per supported store; split RaBitQ additionally submits four finalization workers.
+    // Cold NSW Build uses Add/encode_add_batch: four fused encoding workers for supported
+    // stores, plus four finalization workers only for split RaBitQ. TQ/MRLE has no optimized
+    // session and makes that entire cold encode serial, including its retained FP32 raw store.
+    const auto memory = target.index->GetMemoryUsageDetail();
+    CHECK(memory.count("raw_vector") == (mode == "mrle_fp32" ? 1 : 0));
+    CHECK(memory.count("precise_codes") == 0);
+    // add_to_hierarchy/run_parallel_insertions submits count tasks even for flat nodes.
+    const uint64_t cold_insert_tasks = count;
+    const uint64_t cold_encode_tasks = mode == "mrle_fp32" ? 0 : 4;
+    const uint64_t finalize_tasks = mode == "split_rabitq" ? 4 : 0;
+    const uint64_t expected_tasks =
+        warm ? 2 + finalize_tasks : cold_insert_tasks + cold_encode_tasks + finalize_tasks;
+    CHECK(pool->submitted.load() == expected_tasks);
+    CHECK(pool->running.load() == 0);
+    // Check both batches and the tail via the public distance API after finalization.
+    for (const auto id : {int64_t{0}, int64_t{4095}, int64_t{4096}}) {
+        const auto distance =
+            target.index->CalcDistanceById(vectors.data() + id * PYRAMID_TEST_DIM, id, true);
+        CHECK(std::isfinite(distance));
+        CHECK(distance == Catch::Approx(0.0F).margin(0.01F));
+    }
+}
 
 TEST_CASE("Pyramid limits node tasks to request parallelism", "[ut][pyramid][parallel][bounded]") {
     const auto threads = GENERATE(1, 2, 4, 8, 32);

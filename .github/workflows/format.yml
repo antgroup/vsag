@@ -10,15 +10,16 @@ on:
 jobs:
   clang-format-check:
     name: Format Check
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Clang format
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-15
-          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          sudo bash scripts/deps/install_toolchain_ubuntu.sh
+          sudo apt-get install -y clang-format-20
+          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
           clang-format --version
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh

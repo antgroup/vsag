@@ -76,6 +76,19 @@ public:
         SetQuery(sparse_query);
     }
 
+    // Preserve query/pruning state while rebinding mutable storage to worker scratch.
+    SparseTermComputer(const SparseTermComputer& other, Allocator* allocator)
+        : sorted_query_(other.sorted_query_, allocator),
+          raw_query_(other.raw_query_),
+          query_retain_ratio_(other.query_retain_ratio_),
+          term_retain_ratio_(other.term_retain_ratio_),
+          term_retain_threshold_per_window_(other.term_retain_threshold_per_window_),
+          pruned_len_(other.pruned_len_),
+          term_iterator_(other.term_iterator_),
+          term_prune_enabled_(other.term_prune_enabled_),
+          allocator_(allocator) {
+    }
+
     void
     SetQuery(const SparseVector& sparse_query) {
         sort_sparse_vector(sparse_query, sorted_query_);

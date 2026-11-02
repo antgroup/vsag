@@ -102,7 +102,8 @@ HGraphBuildTaskGuard::HGraphBuildTaskGuard(std::vector<std::future<void>>& futur
 HGraphBuildTaskGuard::~HGraphBuildTaskGuard() {
     try {
         wait_all_futures(futures_);
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Cleanup must preserve the primary result or exception.
     }
 }
 
@@ -182,7 +183,8 @@ HGraph::prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows) 
         // wrapper task complete. Drain the pool before optimized-build state can be released.
         try {
             this->thread_pool_->WaitUntilEmpty();
-        } catch (...) {
+        } catch (...) {  // NOLINT(bugprone-empty-catch)
+            // Cleanup must preserve the primary result or exception.
         }
         std::rethrow_exception(enqueue_exception);
     }

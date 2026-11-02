@@ -779,6 +779,23 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(stats.size() == 1);
     REQUIRE(stats[0] == "false");
 
+    const std::string parallel_timeout_param = R"({"sindi":{"n_candidate":20,
+        "query_prune_ratio":0.0,"term_prune_ratio":0.0,
+        "window_parallelism":2,"timeout_ms":0}})";
+    auto parallel = index->KnnSearch(query, 5, parallel_timeout_param);
+    REQUIRE(parallel.has_value());
+    REQUIRE(parallel.value()->GetStatistics({"is_timeout"})[0] == "false");
+    REQUIRE(parallel.value()->GetDim() == result.value()->GetDim());
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 5;
+    request.params_str_ = parallel_timeout_param;
+    auto parallel_request = index->SearchWithRequest(request);
+    REQUIRE(parallel_request.has_value());
+    REQUIRE(parallel_request.value()->GetStatistics({"is_timeout"})[0] == "false");
+    REQUIRE(parallel_request.value()->GetDim() == result.value()->GetDim());
+
     auto range = index->RangeSearch(query, 100.0F, timeout_param, 5);
     REQUIRE(range.has_value());
     stats = range.value()->GetStatistics({"is_timeout"});
@@ -786,6 +803,10 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(stats[0] == "true");
     // Cooperative timeout may retain results from the current window.
     REQUIRE(range.value()->GetDim() <= 5);
+
+    auto parallel_range = index->RangeSearch(query, 100.0F, parallel_timeout_param, 5);
+    REQUIRE(parallel_range.has_value());
+    REQUIRE(parallel_range.value()->GetStatistics({"is_timeout"})[0] == "true");
 
     auto normal_range =
         index->RangeSearch(query, 100.0F, fixtures::SINDITestIndex::search_param, 5);

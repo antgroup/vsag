@@ -26,9 +26,31 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve-source:
+    name: Pin release source
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+      - name: Resolve immutable release commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  toolchain-compatibility:
+    name: Release toolchain compatibility
+    needs: resolve-source
+    uses: ./.github/workflows/toolchain-compatibility.yml
+    with:
+      ref: ${{ needs.resolve-source.outputs.sha }}
+
   build-and-release:
     name: Build, Test, and Publish Release
-    runs-on: ubuntu-22.04
+    needs: [resolve-source, toolchain-compatibility]
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -45,7 +67,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
 
       - name: Validate release target

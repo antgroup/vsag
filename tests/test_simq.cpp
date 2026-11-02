@@ -1112,3 +1112,231 @@ TEST_CASE("SIMQ serialized version and representative bounds", "[simq][serializa
         REQUIRE(restored->GetNumElements() == 2);
     }
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// support_duplicate / deduplicate_storage parameter tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("SIMQParameter: support_duplicate JSON round-trip", "[simq][parameter]") {
+    IndexCommonParam common_param;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = SIMQ_DIM;
+
+    SECTION("default both false") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rt_default"}})");
+        auto param = SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param);
+        REQUIRE_NOTHROW(param->ToJson());
+        const auto serialized = param->ToJson();
+        SIMQParameter restored;
+        restored.support_duplicate = not serialized["support_duplicate"].GetBool();
+        restored.deduplicate_storage = not serialized["deduplicate_storage"].GetBool();
+        restored.FromJson(serialized);
+        auto out = restored.ToJson();
+        REQUIRE(restored.support_duplicate == serialized["support_duplicate"].GetBool());
+        REQUIRE(restored.deduplicate_storage == serialized["deduplicate_storage"].GetBool());
+        // Backward compatibility: when no flags are provided, both default to false.
+        REQUIRE(out["support_duplicate"].GetBool() == false);
+        REQUIRE(out["deduplicate_storage"].GetBool() == false);
+    }
+
+    SECTION("support_duplicate=true round-trip") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rt_sd", "support_duplicate": true}})");
+        auto param = SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param);
+        const auto serialized = param->ToJson();
+        SIMQParameter restored;
+        restored.support_duplicate = not serialized["support_duplicate"].GetBool();
+        restored.deduplicate_storage = not serialized["deduplicate_storage"].GetBool();
+        restored.FromJson(serialized);
+        auto out = restored.ToJson();
+        REQUIRE(restored.support_duplicate == serialized["support_duplicate"].GetBool());
+        REQUIRE(restored.deduplicate_storage == serialized["deduplicate_storage"].GetBool());
+        REQUIRE(out["support_duplicate"].GetBool() == true);
+        REQUIRE(out["deduplicate_storage"].GetBool() == false);
+    }
+
+    SECTION("both true round-trip") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rt_both", "support_duplicate": true, "deduplicate_storage": true}})");
+        auto param = SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param);
+        const auto serialized = param->ToJson();
+        SIMQParameter restored;
+        restored.support_duplicate = not serialized["support_duplicate"].GetBool();
+        restored.deduplicate_storage = not serialized["deduplicate_storage"].GetBool();
+        restored.FromJson(serialized);
+        auto out = restored.ToJson();
+        REQUIRE(restored.support_duplicate == serialized["support_duplicate"].GetBool());
+        REQUIRE(restored.deduplicate_storage == serialized["deduplicate_storage"].GetBool());
+        REQUIRE(out["support_duplicate"].GetBool() == true);
+        REQUIRE(out["deduplicate_storage"].GetBool() == true);
+    }
+
+    SECTION("support_duplicate=false explicit round-trip") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rt_sd_false", "support_duplicate": false, "deduplicate_storage": false}})");
+        auto param = SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param);
+        const auto serialized = param->ToJson();
+        SIMQParameter restored;
+        restored.support_duplicate = not serialized["support_duplicate"].GetBool();
+        restored.deduplicate_storage = not serialized["deduplicate_storage"].GetBool();
+        restored.FromJson(serialized);
+        auto out = restored.ToJson();
+        REQUIRE(restored.support_duplicate == serialized["support_duplicate"].GetBool());
+        REQUIRE(restored.deduplicate_storage == serialized["deduplicate_storage"].GetBool());
+        REQUIRE(out["support_duplicate"].GetBool() == false);
+        REQUIRE(out["deduplicate_storage"].GetBool() == false);
+    }
+}
+
+TEST_CASE("SIMQParameter: deduplicate_storage without support_duplicate is rejected",
+          "[simq][parameter]") {
+    IndexCommonParam common_param;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = SIMQ_DIM;
+
+    SECTION("deduplicate_storage=true alone") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rej_ds", "deduplicate_storage": true}})");
+        REQUIRE_THROWS_AS(SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param),
+                          VsagException);
+    }
+
+    SECTION("deduplicate_storage=true with support_duplicate=false") {
+        std::string json = fmt::format(
+            R"({{"base_io_type": "memory_io", "base_file_path": "/tmp/simq_rej_both", "support_duplicate": false, "deduplicate_storage": true}})");
+        REQUIRE_THROWS_AS(SIMQ::CheckAndMappingExternalParam(JsonType::Parse(json), common_param),
+                          VsagException);
+    }
+}
+
+TEST_CASE("SIMQ: Factory creates index with support_duplicate", "[simq][parameter][build]") {
+    auto ds = generate_dataset();
+    TempFile tmp;
+
+    SECTION("Factory accepts support_duplicate=true in parameter") {
+        auto build_param = fmt::format(
+            R"({{"dtype": "float32", "metric_type": "ip", "dim": {}, "index_param": {{"base_io_type": "async_io", "base_file_path": "{}", "support_duplicate": true}}}})",
+            SIMQ_DIM,
+            tmp.path);
+        auto r = vsag::Factory::CreateIndex("simq", build_param);
+        REQUIRE(r.has_value());
+        auto index = r.value();
+        auto build_result = index->Build(ds.base_dataset);
+        REQUIRE(build_result.has_value());
+        // This is a build smoke test; the serialization test below checks graph wiring.
+        REQUIRE(index->GetNumElements() == static_cast<int64_t>(BASE_DOCS));
+    }
+
+    SECTION("Factory rejects deduplicate_storage=true alone") {
+        auto build_param = fmt::format(
+            R"({{"dtype": "float32", "metric_type": "ip", "dim": {}, "index_param": {{"base_io_type": "async_io", "base_file_path": "{}", "deduplicate_storage": true}}}})",
+            SIMQ_DIM,
+            tmp.path);
+        auto r = vsag::Factory::CreateIndex("simq", build_param);
+        REQUIRE(not r.has_value());
+        // Verify the rejection is the intended guard, not a generic parse error.
+        REQUIRE(r.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+        REQUIRE(r.error().message.find("deduplicate_storage requires support_duplicate") !=
+                std::string::npos);
+    }
+}
+
+TEST_CASE("SIMQ multi-vector duplicate flags and aliases survive two serialization cycles",
+          "[simq][parameter][serialization][duplicate_roundtrip]") {
+    const bool duplicate_tokens = GENERATE(false, true);
+    CAPTURE(duplicate_tokens);
+    const std::string parameters =
+        R"({"dtype":"float32","metric_type":"ip","dim":4,"repr":"multi_vector","index_param":{"base_io_type":"memory_io","build_thread_count":1,"init_cluster_ratio":1.0,"support_duplicate":true,"deduplicate_storage":true}})";
+    // Restore into defaults to ensure the serialized flags, not constructor flags, win.
+    const std::string restore_parameters =
+        R"({"dtype":"float32","metric_type":"ip","dim":4,"repr":"multi_vector","index_param":{"base_io_type":"memory_io","build_thread_count":1}})";
+    auto created = Factory::CreateIndex("simq", parameters);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    float values[] = {1, 0, 0, 0, 0, 1, 0, 0};
+    if (duplicate_tokens) {
+        std::copy_n(values, 4, values + 4);
+    }
+    MultiVector mv{2, values};
+    int64_t id = 10;
+    auto data = Dataset::Make()
+                    ->NumElements(1)
+                    ->Dim(4)
+                    ->MultiVectorDim(4)
+                    ->MultiVectors(&mv)
+                    ->Ids(&id)
+                    ->Owner(false);
+    REQUIRE(index->Build(data).has_value());
+    const auto check_representative_group = [&](const IndexPtr& current) {
+        auto stats = JsonType::Parse(current->GetStats());
+        auto graph_stats = stats["rep_hgraph"];
+        // With init_cluster_ratio=1, both token IDs remain representatives even when
+        // their vectors are identical. With support_duplicate enabled, this ratio
+        // counts actual HGraph tracker aliases, rather than comparing vector values.
+        REQUIRE(graph_stats["total_count"].GetInt() == 2);
+        REQUIRE(graph_stats["duplicate_ratio"].GetFloat() == (duplicate_tokens ? 0.5F : 0.0F));
+    };
+    check_representative_group(index);
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        CAPTURE(cycle);
+        std::stringstream serialized;
+        REQUIRE(index->Serialize(serialized).has_value());
+        IOStreamReader reader(serialized);
+        auto footer = Footer::Parse(reader);
+        REQUIRE(footer != nullptr);
+        auto info = footer->GetMetadata()->Get("basic_info");
+        auto param = JsonType::Parse(info["index_param"].GetString());
+        REQUIRE(param["support_duplicate"].GetBool());
+        REQUIRE(param["deduplicate_storage"].GetBool());
+
+        // Inspect the actual nested representative HGraph, not just SIMQ's parameters.
+        reader.Seek(0);
+        uint64_t count = 0;
+        int64_t clusters = 0;
+        uint64_t lists = 0;
+        StreamReader::ReadObj(reader, count);
+        StreamReader::ReadObj(reader, clusters);
+        StreamReader::ReadObj(reader, lists);
+        REQUIRE(count == 1);
+        REQUIRE(clusters == 2);
+        REQUIRE(lists == 2);
+        std::vector<InnerIdType> ids;
+        for (uint64_t i = 0; i < lists; ++i) {
+            StreamReader::ReadVector(reader, ids);
+        }
+        StreamReader::ReadVector(reader, ids);  // vec_to_cluster
+        StreamReader::ReadVector(reader, ids);  // token_to_doc
+        std::vector<uint32_t> offsets;
+        std::vector<float> distances;
+        std::vector<uint64_t> token_counts;
+        StreamReader::ReadVector(reader, offsets);
+        StreamReader::ReadVector(reader, distances);
+        StreamReader::ReadVector(reader, token_counts);
+        uint64_t graph_size = 0;
+        StreamReader::ReadObj(reader, graph_size);
+        REQUIRE(graph_size > 0);
+        REQUIRE(graph_size <= reader.Length() - reader.GetCursor());
+        SliceStreamReader graph_reader(&reader, graph_size);
+        auto graph_footer = Footer::Parse(graph_reader);
+        REQUIRE(graph_footer != nullptr);
+        auto graph_info = graph_footer->GetMetadata()->Get("basic_info");
+        auto graph_param = JsonType::Parse(graph_info["index_param"].GetString());
+        REQUIRE(graph_param["support_duplicate"].GetBool());
+        REQUIRE(graph_param["deduplicate_storage"].GetBool());
+
+        serialized.clear();
+        serialized.seekg(0);
+        auto restored = Factory::CreateIndex("simq", restore_parameters);
+        REQUIRE(restored.has_value());
+        REQUIRE(restored.value()->Deserialize(serialized).has_value());
+        check_representative_group(restored.value());
+        auto result = restored.value()->KnnSearch(data, 1, "{}");
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 1);
+        REQUIRE(result.value()->GetIds()[0] == id);
+        REQUIRE(std::abs(result.value()->GetDistances()[0]) < 1e-6F);
+        index = restored.value();
+    }
+}

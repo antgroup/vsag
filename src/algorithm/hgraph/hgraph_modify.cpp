@@ -55,7 +55,8 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
             this->remove_from_mci(removed_inner_ids);
             this->maybe_compact_mci(delete_count);
             this->mci_cliques_->MarkAvailable(this->total_count_.load());
-            this->cal_memory_usage();
+            // Same as Add: invalidate instead of paying the O(total) breakdown per call.
+            this->mark_memory_usage_dirty();
         }
         return delete_count;
     }
@@ -83,7 +84,8 @@ HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
                     throw;
                 }
                 // Deletion has already completed; compaction is best effort when memory is exhausted.
-            } catch (const std::bad_alloc&) {
+            } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+                // Cleanup must preserve the primary result or exception.
                 // SafeAllocator reports failed storage shrinking as std::bad_alloc.
             }
         }
@@ -201,12 +203,27 @@ HGraph::graph_force_remove_one(const InnerIdType& inner_id,
 
 void
 HGraph::move_id(InnerIdType from, InnerIdType to) {
-    basic_flatten_codes_->Move(from, to);
+    const auto source = pending_code_writes_.find(from);
+    const uint8_t source_pending = source == pending_code_writes_.end() ? 0 : source->second;
+    // Allocate metadata before touching storage. A throwing Move may have written part of
+    // its destination; only that storage becomes unknown, not every source-pending bit.
+    auto& destination_pending = pending_code_writes_[to];
+    auto move_codes = [&](const FlattenInterfacePtr& codes, uint8_t mask) {
+        destination_pending |= mask;
+        codes->Move(from, to);
+        destination_pending = (destination_pending & ~mask) | (source_pending & mask);
+    };
+    move_codes(basic_flatten_codes_,
+               BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (high_precise_codes_) {
-        high_precise_codes_->Move(from, to);
+        move_codes(high_precise_codes_,
+                   PRECISE_CODE | (raw_vector_ == high_precise_codes_ ? RAW_CODE : 0));
     }
     if (create_new_raw_vector_ and raw_vector_ != nullptr) {
-        raw_vector_->Move(from, to);
+        move_codes(raw_vector_, RAW_CODE);
+    }
+    if (destination_pending == 0) {
+        pending_code_writes_.erase(to);
     }
 
     if (extra_infos_) {
@@ -258,10 +275,12 @@ HGraph::force_remove_one(int64_t label) {
             this->find_new_entry_point();
         }
         was_mark_removed = this->label_table_->IsRemoved(inner_id);
+        std::unique_lock codes_lock(this->persistent_codes_mutex_);
         this->label_table_->ForceRemove(label, inner_id);
         if (swap_id != inner_id) {
             this->move_id(swap_id, inner_id);
         }
+        this->pending_code_writes_.erase(swap_id);
     }
     if (was_mark_removed) {
         this->delete_count_.fetch_sub(1);

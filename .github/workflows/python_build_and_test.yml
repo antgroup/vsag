@@ -1,16 +1,21 @@
 name: Python Build & Test
 
 on:
+  workflow_call:
+    inputs:
+      x86-only:
+        type: boolean
+        default: false
   workflow_dispatch:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "0.*" ]
     paths-ignore:
       - 'docs/**'
 
 jobs:
   build_python_wheel_x86:
     name: Python Wheel Build X86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: python_build_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -45,8 +50,9 @@ jobs:
           overwrite: 'true'
 
   build_python_wheel_aarch64:
+    if: ${{ !inputs.x86-only }}
     name: Python Wheel Build Aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     concurrency:
       group: python_build_aarch64-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -79,13 +85,16 @@ jobs:
   test_python_x86:
     name: Test Python X86
     needs: build_python_wheel_x86
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     concurrency:
       group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
     
       - name: Prepare Env
@@ -102,31 +111,11 @@ jobs:
             pip3 install numpy pyjson pytest
       
       - name: Run Python Test
+        shell: bash
         run: |
-            cd ./tests/python/
-            echo "=== Running pytest with detailed output ==="
-            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-            echo "=== Test execution completed ==="
-        continue-on-error: true
-      
-      - name: Analyze Test Results
-        run: |
-            cd ./tests/python/
-            echo "=== Analyzing test results ==="
-            if grep -q "FAILED\|ERROR" test-output.log; then
-              echo "❌ Some tests failed!"
-              echo "=== Failed tests summary ==="
-              grep -A 5 "FAILED\|ERROR" test-output.log || true
-              exit 1
-            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
-              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
-              echo "✅ All tests passed! ($PASSED tests)"
-            else
-              echo "⚠️ Could not determine test results"
-              cat test-output.log
-              exit 1
-            fi
-      
+          set -euo pipefail
+          cd ./tests/python/
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5
@@ -137,15 +126,19 @@ jobs:
           if-no-files-found: ignore
 
   test_python_aarch64:
+    if: ${{ !inputs.x86-only }}
     name: Test Python Aarch64
     needs: build_python_wheel_aarch64
-    runs-on: ubuntu-22.04-arm
+    runs-on: ubuntu-24.04-arm
     concurrency:
       group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
@@ -161,31 +154,11 @@ jobs:
           pip3 install numpy pyjson pytest
       
       - name: Run Python Test
+        shell: bash
         run: |
-            cd ./tests/python/
-            echo "=== Running pytest with detailed output ==="
-            python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
-            echo "=== Test execution completed ==="
-        continue-on-error: true
-      
-      - name: Analyze Test Results
-        run: |
-            cd ./tests/python/
-            echo "=== Analyzing test results ==="
-            if grep -q "FAILED\|ERROR" test-output.log; then
-              echo "❌ Some tests failed!"
-              echo "=== Failed tests summary ==="
-              grep -A 5 "FAILED\|ERROR" test-output.log || true
-              exit 1
-            elif grep -q "passed" test-output.log && ! grep -q "FAILED" test-output.log; then
-              PASSED=$(grep -oP '\d+(?= passed)' test-output.log || echo "0")
-              echo "✅ All tests passed! ($PASSED tests)"
-            else
-              echo "⚠️ Could not determine test results"
-              cat test-output.log
-              exit 1
-            fi
-      
+          set -euo pipefail
+          cd ./tests/python/
+          python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5
@@ -198,7 +171,7 @@ jobs:
   clean_up:
     name: Clean Up
     needs: [ test_python_x86, test_python_aarch64 ]
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up

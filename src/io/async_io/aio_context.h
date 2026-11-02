@@ -59,7 +59,7 @@ public:
      * @brief Resets the context for reuse (no state to reset).
      */
     void
-    Reset() override{};
+    Reset() override {};
 
     /**
      * @brief Returns the memory usage of this context.

@@ -21,7 +21,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Deps
-        run: pip3 install -r ./scripts/perf_reports/requirements.txt
+        run: |
+          python3 -m venv "$RUNNER_TEMP/perf-venv"
+          "$RUNNER_TEMP/perf-venv/bin/python" -m pip install -r ./scripts/perf_reports/requirements.txt
+          echo "$RUNNER_TEMP/perf-venv/bin" >> "$GITHUB_PATH"
       - name: Download Datasets
         run: bash ./scripts/download_annbench_datasets.sh
       - name: Build Performance Release

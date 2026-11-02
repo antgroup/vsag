@@ -10,6 +10,19 @@ HGraph 都是推荐的默认索引。
 - 源码：`src/algorithm/hgraph.{h,cpp}`
 - 示例：[`examples/cpp/103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp)
 
+## 磁盘读缓存示例
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+使用 1,000 个 64 维向量，基础 SQ8 编码存于内存，精排 FP32 编码存于磁盘（`async_io`）。
+示例设置 `build_by_base: true`，让构图读取内存中的基础编码，避免在这个小型用法示例中反复填充磁盘读缓存。
+这会改变构图所用的量化编码，因此该示例不是召回率基准，也不演示使用精排编码构图。
+
+读缓存保持启用，预算为 131,072 字节（一个 128-KiB 页）；256,000 字节的 FP32 数据跨越两页。
+示例序列化为 `BinarySet` 后恢复新索引，并检查恢复后的元素数量、top-10 结果形状、ID 范围及距离是否有限。
+请在新的工作目录中使用可写文件路径运行。写入和持久化行为保持不变。
+专门的 AsyncIO 测试覆盖单页缓存的淘汰与重新加载、写入失效及无效读取；
+HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
+
 ## 工作原理
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在

@@ -55,8 +55,8 @@ arm64。macOS 当前验证范围是核心 C++ 库的 `make debug`、`make releas
   - macOS 使用 Xcode Command Line Tools 提供的 Apple Clang
 - 构建工具：
   - **CMake 3.18.0** 或更高版本
-  - **clang-format 15**（精确版本，用于代码格式化）
-  - **clang-tidy 15**（精确版本，用于静态检查）
+  - **clang-format 20**（精确版本，用于代码格式化）
+  - **clang-tidy 20**（精确版本，用于静态检查）
 - 其他依赖项：
   - Linux：gfortran、OpenMP、libaio、Python 3.6+、curl
   - macOS：Xcode Command Line Tools、Homebrew
@@ -84,3 +84,7 @@ make release && make install
 ```
 
 更多构建选项请参考 [编译构建](../development/building.md)。
+
+## C++ 客户端兼容性
+
+Full VSAG 源码构建在内部使用 C++20；安装后的公开头文件和 API 支持 C++17 客户端。CUDA、Node.js 绑定和独立 Lite 保持 C++17。Ubuntu 自动安装脚本要求 Ubuntu 24.04+，安装 GCC 13 和 LLVM 20；旧发行版需要自行准备对应工具链。预编译包保持既有 glibc 基线，客户端的 `_GLIBCXX_USE_CXX11_ABI` 必须与所选包一致。
