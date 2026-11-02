@@ -2508,3 +2508,147 @@ TEST_CASE("BucketDataCell InsertVectorWithOffset", "[ut][BucketDataCell]") {
         REQUIRE(dst->GetInnerIds(bucket_id)[2] == 25);
     }
 }
+
+TEST_CASE("RaBitQ split bucket validates serialized inner IDs before allocation",
+          "[ut][BucketDataCell][rabitq_split][inner_id_validation]") {
+    class BoundedAllocator : public DefaultAllocator {
+    public:
+        void*
+        Allocate(uint64_t size) override {
+            check_size(size);
+            return DefaultAllocator::Allocate(size);
+        }
+
+        void*
+        Reallocate(void* ptr, uint64_t size) override {
+            check_size(size);
+            return DefaultAllocator::Reallocate(ptr, size);
+        }
+
+        void
+        check_size(uint64_t size) {
+            // Normal supplement storage uses 2 MiB blocks; corrupt location arrays exceed this cap.
+            if (size > 4 * 1024 * 1024) {
+                ++rejected_allocations;
+                throw std::runtime_error("oversized test allocation: " + std::to_string(size));
+            }
+        }
+
+        uint64_t rejected_allocations{0};
+    };
+
+    auto allocator = std::make_shared<BoundedAllocator>();
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 32;
+    constexpr InnerIdType sparse_id = 17;
+    constexpr auto empty_id = std::numeric_limits<InnerIdType>::max();
+    const bool use_residual = GENERATE(false, true);
+    auto vectors = fixtures::generate_vectors(count, dim, false, 3229);
+    auto json = JsonType::Parse(R"({
+        "io_params": {"type": "memory_io"},
+        "quantization_params": {
+            "type": "rabitq", "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 6,
+            "rabitq_bits_per_dim_filter": 1, "fast_encode_rabitq": true
+        },
+        "buckets_count": 2, "use_residual": false
+    })");
+    json["use_residual"].SetBool(use_residual);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto make_bucket = [&]() {
+        auto bucket = BucketInterface::MakeInstance(param, common_param);
+        bucket->SetStrategy(std::make_shared<FixedCentroidPartitionStrategy>(common_param, 2));
+        return bucket;
+    };
+    auto bucket = make_bucket();
+    bucket->Train(vectors.data(), count);
+    bucket->InsertVector(vectors.data(), 0, 0);
+    bucket->InsertVectorWithOffset(vectors.data() + dim, 1, sparse_id, 2);
+    // Relocation leaves an empty lane and a sparse high-water mark of sparse_id + 1.
+    bucket->InsertVector(vectors.data() + 2 * dim, 1, 0);
+    REQUIRE(bucket->GetInnerIds(0)[0] == empty_id);
+    REQUIRE(bucket->GetInnerIds(1)[0] == empty_id);
+    REQUIRE(bucket->GetInnerIds(1)[2] == sparse_id);
+
+    std::string bytes;
+    uint64_t ids_cursor = 0;
+    uint64_t ids_end = 0;
+    WriteFuncStreamWriter writer(
+        [&](uint64_t cursor, uint64_t size, void* data) {
+            if (data == bucket->GetInnerIds(1)) {
+                ids_cursor = cursor;
+                ids_end = cursor + size;
+            }
+            bytes.resize(cursor + size);
+            if (size != 0) {
+                std::memcpy(bytes.data() + cursor, data, size);
+            }
+        },
+        0);
+    bucket->Serialize(writer);
+    REQUIRE(ids_cursor > 0);
+    REQUIRE(ids_end - ids_cursor == 4 * sizeof(InnerIdType));
+
+    SECTION("sparse upper boundary and empty lanes roundtrip and remain mutable") {
+        auto restored = make_bucket();
+        std::stringstream stream(bytes);
+        IOStreamReader reader(stream);
+        REQUIRE_NOTHROW(restored->Deserialize(reader));
+        restored->FinalizeLoad();
+        REQUIRE(restored->GetInnerIds(0)[0] == empty_id);
+        REQUIRE(restored->GetInnerIds(1)[0] == empty_id);
+        REQUIRE(restored->GetInnerIds(1)[2] == sparse_id);
+        auto computer = bucket->FactoryComputer(vectors.data());
+        auto restored_computer = restored->FactoryComputer(vectors.data());
+        REQUIRE(restored->QueryOneById(restored_computer, 1, 2) ==
+                bucket->QueryOneById(computer, 1, 2));
+        restored->InsertVector(vectors.data() + 3 * dim, 0, sparse_id);
+        REQUIRE(restored->GetInnerIds(1)[2] == empty_id);
+        REQUIRE(restored->GetInnerIds(0)[1] == sparse_id);
+        REQUIRE(std::isfinite(restored->QueryOneById(restored_computer, 0, 1)));
+        auto reloaded = make_bucket();
+        REQUIRE_NOTHROW(test_serializion(*restored, *reloaded));
+        REQUIRE(reloaded->GetInnerIds(0)[1] == sparse_id);
+    }
+
+    SECTION("invalid IDs are rejected immediately after the bucket IDs are read") {
+        const InnerIdType invalid_id = GENERATE(sparse_id + 1, 1000000U, empty_id - 1);
+        CAPTURE(invalid_id, use_residual);
+        // Replace the last lane, so validation must cover the whole vector, including empty lanes.
+        std::memcpy(bytes.data() + ids_end - sizeof(invalid_id), &invalid_id, sizeof(invalid_id));
+        auto restored = make_bucket();
+        std::stringstream stream(bytes);
+        IOStreamReader reader(stream);
+        try {
+            restored->Deserialize(reader);
+            FAIL("corrupt bucket ID was accepted");
+        } catch (const VsagException& error) {
+            REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(error.what()).find("invalid inner id") != std::string::npos);
+        }
+        REQUIRE(reader.GetCursor() == ids_end);
+    }
+
+    SECTION("merge defensively validates IDs before rebuilding locations") {
+        // GetInnerIds exposes mutable lanes; an empty merge reaches rebuild_locations without
+        // reading any supplement by the corrupted ID. Keep residual processing out of this path.
+        if (not use_residual) {
+            const InnerIdType invalid_id = GENERATE(sparse_id + 1, 1000000U, empty_id - 1);
+            bucket->GetInnerIds(1)[3] = invalid_id;
+            auto other = make_bucket();
+            try {
+                bucket->MergeOther(other, 0);
+                FAIL("corrupt bucket ID was accepted during location rebuild");
+            } catch (const VsagException& error) {
+                REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+                REQUIRE(std::string(error.what()).find("invalid inner id") != std::string::npos);
+            }
+        }
+    }
+    REQUIRE(allocator->rejected_allocations == 0);
+}

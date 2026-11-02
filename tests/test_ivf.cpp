@@ -23,6 +23,7 @@
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <numeric>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -4224,5 +4225,115 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         auto reloaded_result = reloaded.value()->KnnSearch(query, topk, search_param);
         REQUIRE(reloaded_result.has_value());
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
+    }
+}
+
+TEST_CASE("IVF RaBitQ split load preserves deleted IDs and supports Add",
+          "[ft][ivf][rabitq_split][inner_id_validation]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 128;
+    const std::string params = R"({
+        "dtype": "float32", "metric_type": "l2", "dim": 64,
+        "index_param": {
+            "buckets_count": 4, "base_quantization_type": "rabitq",
+            "precise_quantization_type": "rabitq", "base_io_type": "memory_io",
+            "rabitq_bits_per_dim_query": 32, "rabitq_bits_per_dim_base": 1,
+            "rabitq_bits_per_dim_precise": 5, "use_reorder": true,
+            "use_residual": true, "ivf_train_type": "random",
+            "train_sample_count": 512, "thread_count": 1
+        }
+    })";
+    auto vectors = fixtures::generate_vectors(count + 1, dim, false, 3229);
+    std::vector<int64_t> labels(count + 1);
+    std::iota(labels.begin(), labels.end(), 1000);
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(vectors.data())
+                    ->Owner(false);
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data())
+                     ->Owner(false);
+    auto created = vsag::Factory::CreateIndex("ivf", params);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(base).has_value());
+    // Removing the highest ID must not lower the code ID high-water mark on load.
+    auto removed = index->Remove(labels[count - 1]);
+    REQUIRE(removed.has_value());
+    REQUIRE(removed.value() == 1);
+    REQUIRE(index->GetNumElements() == count - 1);
+    constexpr const char* search = R"({"ivf":{"scan_buckets_count":4,"factor":2}})";
+    auto before = index->KnnSearch(query, 10, search);
+    REQUIRE(before.has_value());
+    REQUIRE(before.value()->GetDim() == 10);
+    REQUIRE(before.value()->GetIds()[0] == labels[0]);
+    auto binary = index->Serialize();
+    REQUIRE(binary.has_value());
+    auto loaded = vsag::Factory::CreateIndex("ivf", params);
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded.value()->Deserialize(binary.value()).has_value());
+    // The 1.1 IVF format does not persist mark-remove state. Reapply the mark while retaining
+    // the highest-ID code in storage, then check that queries and subsequent Add still work.
+    REQUIRE(loaded.value()->Remove(labels[count - 1]).has_value());
+    REQUIRE(loaded.value()->GetNumElements() == count - 1);
+    auto deleted_query = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(dim)
+                             ->Float32Vectors(vectors.data() + (count - 1) * dim)
+                             ->Owner(false);
+    auto check_deleted = [&](const vsag::IndexPtr& restored) {
+        auto result = restored->KnnSearch(deleted_query, 10, search);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == 10);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(result.value()->GetIds()[i] != labels[count - 1]);
+        }
+    };
+    check_deleted(index);
+    check_deleted(loaded.value());
+    auto after = loaded.value()->KnnSearch(query, 10, search);
+    REQUIRE(after.has_value());
+    REQUIRE(after.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 10; ++i) {
+        REQUIRE(after.value()->GetIds()[i] == before.value()->GetIds()[i]);
+        REQUIRE(after.value()->GetDistances()[i] == before.value()->GetDistances()[i]);
+        REQUIRE(after.value()->GetIds()[i] != labels[count - 1]);
+        for (int64_t j = 0; j < i; ++j) {
+            REQUIRE(after.value()->GetIds()[i] != after.value()->GetIds()[j]);
+        }
+    }
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Ids(labels.data() + count)
+                     ->Float32Vectors(vectors.data() + count * dim)
+                     ->Owner(false);
+    auto add_result = loaded.value()->Add(added);
+    REQUIRE(add_result.has_value());
+    REQUIRE(add_result.value().empty());
+    REQUIRE(loaded.value()->GetNumElements() == count);
+    auto added_query = vsag::Dataset::Make()
+                           ->NumElements(1)
+                           ->Dim(dim)
+                           ->Float32Vectors(vectors.data() + count * dim)
+                           ->Owner(false);
+    std::stringstream stream;
+    REQUIRE(loaded.value()->Serialize(stream).has_value());
+    auto reloaded = vsag::Factory::CreateIndex("ivf", params);
+    REQUIRE(reloaded.has_value());
+    REQUIRE(reloaded.value()->Deserialize(stream).has_value());
+    REQUIRE(reloaded.value()->Remove(labels[count - 1]).has_value());
+    REQUIRE(reloaded.value()->GetNumElements() == count);
+    check_deleted(reloaded.value());
+    auto result = reloaded.value()->KnnSearch(added_query, 10, search);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+    REQUIRE(result.value()->GetIds()[0] == labels[count]);
+    for (int64_t i = 0; i < 10; ++i) {
+        REQUIRE(result.value()->GetIds()[i] != labels[count - 1]);
     }
 }
