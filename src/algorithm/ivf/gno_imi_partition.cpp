@@ -132,7 +132,8 @@ GNOIMIPartition::Train(const DatasetPtr dataset) {
                 num_element,
                 ivf_partition_strategy_param_->GetKMeansIterCount(),
                 err);
-        memcpy(data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
+        std::memcpy(
+            data_centroids, cls.k_centroids_, dim * centroids->GetNumElements() * sizeof(float));
         BruteForce route_index(param_ptr_, common_param_);
         auto build_result = route_index.Build(centroids);
         auto assign = this->inner_classify_datas(route_index, residuals.data(), num_element);

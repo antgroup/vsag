@@ -124,7 +124,7 @@ ScalarQuantizer<metric, bit>::encode_one_with_scratch(const float* data,
         Normalize(data, normalized, this->dim_);
         cur = normalized;
     }
-    memset(codes, 0, this->code_size_);
+    std::memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; d++) {
         if (diff_[d] < std::numeric_limits<float>::epsilon()) {
             delta = 1.0F;
@@ -196,7 +196,7 @@ ScalarQuantizer<metric, bit>::ProcessQueryImpl(const float* query,
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);
     } else {
-        memcpy(computer.buf_, query, this->dim_ * sizeof(float));
+        std::memcpy(computer.buf_, query, this->dim_ * sizeof(float));
     }
 }
 

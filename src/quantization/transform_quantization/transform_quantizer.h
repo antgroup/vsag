@@ -261,9 +261,9 @@ TransformQuantizer<QuantTmpl, metric>::TrainImpl(const float* data, uint64_t cou
     for (uint64_t i = 0; i < count; ++i) {
         const auto* transformed = ExecuteChainTransform(
             data + i * this->dim_, nullptr, nullptr, primary_scratch, secondary_scratch);
-        memcpy(transformed_data.data() + i * transformed_dim,
-               transformed,
-               transformed_dim * sizeof(float));
+        std::memcpy(transformed_data.data() + i * transformed_dim,
+                    transformed,
+                    transformed_dim * sizeof(float));
     }
 
     // 3. train quantizer based on transformed data
