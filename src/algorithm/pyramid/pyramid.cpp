@@ -920,9 +920,10 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
-    const auto ef_search = static_cast<int64_t>(parsed_param.ef_search);
     InnerSearchParam search_param;
-    search_param.ef = limited_size > 0 ? std::max(ef_search, limited_size) : ef_search;
+    search_param.ef = limited_size > 0
+                          ? std::max(parsed_param.ef_search, static_cast<uint64_t>(limited_size))
+                          : parsed_param.ef_search;
     search_param.radius = radius;
     search_param.search_mode = RANGE_SEARCH;
     search_param.parallel_search_thread_count = parsed_param.parallel_search_thread_count;
@@ -977,6 +978,8 @@ Pyramid::RangeSearch(const DatasetPtr& query,
                           hierarchy_name,
                           collect_rabitq_lower_bounds ? &rabitq_lower_bound_candidates : nullptr,
                           radius);
+    // search_impl retains candidates within (radius, radius + THRESHOLD_ERROR] as slack during
+    // internal graph traversal; FilterDatasetByThreshold enforces the strict user-specified radius cutoff.
     auto filtered = FilterDatasetByThreshold(result, radius, allocator_);
     // Keep traversal slack internal, including after precise reorder.
     filtered->Statistics(stats.Dump());
@@ -1018,9 +1021,10 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     } else {
         CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                        "multi-hierarchy search (union/intersection) is not yet implemented");
-        const auto ef_search = static_cast<int64_t>(parsed_param.ef_search);
         search_param.ef =
-            request.limited_size_ > 0 ? std::max(ef_search, request.limited_size_) : ef_search;
+            request.limited_size_ > 0
+                ? std::max(parsed_param.ef_search, static_cast<uint64_t>(request.limited_size_))
+                : parsed_param.ef_search;
         search_param.radius = request.radius_;
         search_param.search_mode = RANGE_SEARCH;
         search_param.enable_reorder = use_reorder_;
@@ -1128,6 +1132,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
     if (is_knn) {
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
     } else {
+        // search_impl retains candidates within (radius, radius + THRESHOLD_ERROR] as slack during
+        // internal graph traversal; FilterDatasetByThreshold enforces the strict user-specified radius cutoff.
         result = FilterDatasetByThreshold(result, request.radius_, ctx.alloc);
     }
     if (reasoning_ctx) {

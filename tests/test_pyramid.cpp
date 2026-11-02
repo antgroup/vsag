@@ -3994,7 +3994,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
         // ID 1: dist^2 = 0.25 <= 1.0 (inside)
         // ID 2: dist^2 = 1.00 <= 1.0 (at boundary)
         // ID 3: dist^2 = 1.05 > 1.0 (formerly leaked under traversal slack, must be filtered out)
-        // ID 4: dist^2 = 4.00 > 1.10 (far outside)
+        // ID 4: dist^2 = 4.00 > 1.0 (far outside)
         auto base = MakeDenseDataset({{{0.5F, 0.0F, 0.0F, 0.0F}},
                                       {{1.0F, 0.0F, 0.0F, 0.0F}},
                                       {{1.0247F, 0.0F, 0.0F, 0.0F}},
