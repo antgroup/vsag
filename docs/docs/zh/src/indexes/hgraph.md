@@ -284,7 +284,7 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
-| `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
+| `brute_force_threshold` | float | 普通 HGraph：`0.0`；fused KNN：`0.02` | 选择率感知的暴搜回退开关。当过滤通过率小于等于阈值时，跳过图遍历，直接扫描合格 ID。准备过过滤集合的路径使用实际通过率，其余路径使用 `ValidRatio()` 提示（详见下一节）。取值范围 `[0.0, 1.0]`；显式设置 `0.0` 可关闭自动扫描。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
 | `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
@@ -304,7 +304,7 @@ auto result = index->KnnSearch(
 图搜索在大多数候选都能通过过滤时是最优策略——图遍历能很快进入查询邻域。但是当
 过滤越来越严格（只有极少数向量能通过）时，beam 需要扩展非常多的节点才能凑够
 `ef_search` 个**通过过滤的**候选，此时召回率会下降，延迟反而上升。在某个临界点，
-对通过过滤的 id 做一次完整暴扫既更快又精确。
+直接扫描通过过滤的 ID 可以省去大部分图遍历。
 
 `brute_force_threshold` 允许 HGraph 在每次查询时自动按 filter 选择率做这个切换：
 
@@ -314,13 +314,22 @@ auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})"
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
+fused RaBitQ 的非迭代 KNN 查询默认启用 `0.02` 阈值；显式设置
+`brute_force_threshold: 0` 可关闭。ID 过滤、属性表达式、位图以及删除标记按 AND
+共同判定。属性过滤要求构建时设置 `use_attribute_filter: true`。
+
+fused 对普通回调先抽样估计通过率，再对可能适合扫描的谓词枚举实际合格 ID；只有实际通过率
+不大于阈值时才选择扫描。`ValidRatio()` 提示不准确不会造成漏判过滤条件。属性表达式每个
+请求执行一次，批量查询复用合格集合。可直接枚举的属性结果位图直接枚举置位 ID，再检查 ID、位图及删除条件；图搜索可以直接使用准备好的有效位图。扫描直接访问合格 ID，跳过图路由和后续重排。
+扫描使用最终量化编码或原始向量，仍保留对应编码的量化误差。
+
 工作原理（实现位于 `src/algorithm/hgraph/hgraph_search.cpp`）：
 
-- 暴搜回退仅在**同时**满足以下条件时触发：
+- 普通 HGraph 的显式回退需要启用阈值并提供过滤条件；准备过滤集合后按实际通过率判断。未准备集合的路径仍使用以下提示值条件：
     - `brute_force_threshold > 0.0`，**并且**
     - 提供了 filter，**并且**
     - `filter->ValidRatio() <= brute_force_threshold`。
-- `Filter::ValidRatio()` 的准确性会直接影响是否切换 —— 这是用户提供的提示值。
+- 对没有准备合格集合的路径，用户提供的 `Filter::ValidRatio()` 提示决定是否切换。
   详见 [带过滤的搜索](../advanced/filtered_search.md) 中关于该方法的约定。
 - 暴搜会遍历所有通过过滤的内部 id，并按 64 一批用当前最精确的 flatten 存储
   计算距离（顺序：若启用了 `store_raw_vector` 则用原始向量；否则若
@@ -333,17 +342,21 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 
 取值建议：
 
-- 不带过滤或过滤通过率较高的场景，保持默认 `0.0`。
+- 普通 HGraph 保持默认 `0.0`；fused KNN 保持默认 `0.02` 即可自动选择。
 - 高选择性过滤（如 `ValidRatio` ≤ 0.05）下，`0.01–0.05` 是合理起点。再往上调
   实际上等于「只要带 filter 就走暴搜」。
-- 暴搜的代价大致是 `O(N × dim)`，`N` 是索引内总向量数（与选择率无关，因为
-  每个 id 都要走一次 `CheckValid`）。当原本需要把 `ef_search` 调到很大才能
-  维持召回时，暴搜带来的收益最明显。
+- 回调过滤先抽样最多 256 条记录，必要时再遍历 N 条索引记录；完整属性结果位图直接枚举命中 ID。扫描阶段只计算通过全部条件的 M 条向量的距离；批量查询复用准备结果。
 
 可运行示例：
 [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)。
 
 ### 过滤跳过策略（skip_ratio 与 skip_strategy）
+
+fused KNN 同样使用这两个参数，但将被跳过的桥接节点放入延后队列。主队列耗尽后，
+仍会恢复检查这些节点，并按合格候选边界决定是否展开。被过滤节点不占合格候选名额；
+即使已有 topk 条结果，也不会直接丢弃尚未检查的桥接节点。
+
+以下概率性行为针对普通 HGraph 搜索循环。
 
 当搜索带有 filter 时，HGraph 在图遍历过程中需要频繁调用 Filter::CheckValid() 来验证每个候选点是否有效。这个检查可能很耗时（特别是复杂过滤逻辑）。skip_ratio 和 skip_strategy 提供了一种概率性优化：通过跳过部分 filter 检查来加速搜索，但可能降低召回率。
 

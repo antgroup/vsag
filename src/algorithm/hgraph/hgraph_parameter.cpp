@@ -595,6 +595,7 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
             "hgraph mci hgraph_valid_ratio_threshold must be in range [0, 1]");
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD)) {
+        obj.has_brute_force_threshold = true;
         obj.brute_force_threshold =
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD].GetFloat();
         CHECK_ARGUMENT(  // NOLINT

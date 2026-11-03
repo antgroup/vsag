@@ -458,6 +458,139 @@ TEST_CASE("HGraph fused RaBitQ rejects ExportModel",
     REQUIRE(model_result.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
 }
 
+TEST_CASE("HGraph RaBitQ selective scans preserve attribute and ID predicates",
+          "[ft][rabitq_split][hgraph][fused][filtered_scan]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 512;
+    const bool fused = GENERATE(false, true);
+    auto param = vsag::JsonType::Parse(fixtures::HGraphRaBitQSplitTestIndex::GenerateBuildParam(
+        "l2", dim, "memory_io", "", 3, 5, true));
+    param["index_param"]["graph_storage_type"].SetString("flat");
+    param["index_param"]["graph_type"].SetString("pipnn");
+    param["index_param"]["rabitq_fused_datacell"].SetBool(fused);
+    param["index_param"]["rabitq_use_fht"].SetBool(true);
+    param["index_param"]["use_attribute_filter"].SetBool(true);
+    param["index_param"]["build_thread_count"].SetInt(2);
+    auto made = vsag::Factory::CreateIndex("hgraph", param.Dump());
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> labels(count);
+    std::vector<vsag::AttributeSet> attrs(count);
+    std::vector<vsag::AttributeValue<int32_t>> values(count);
+    const std::vector<uint64_t> selected{3, 73, 183, 251};
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = 100000 + static_cast<int64_t>(i) * 13;
+        values[i].name_ = "group";
+        values[i].GetValue().push_back(
+            std::find(selected.begin(), selected.end(), i) != selected.end() ? 1 : 0);
+        attrs[i].attrs_.push_back(&values[i]);
+    }
+    auto base = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Owner(false)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(vectors.data())
+                    ->AttributeSets(attrs.data());
+    REQUIRE(index->Build(base).has_value());
+    auto query = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false)->Float32Vectors(
+        vectors.data());
+    struct IdFilter final : vsag::Filter {
+        std::vector<int64_t> ids;
+        bool
+        CheckValid(int64_t id) const override {
+            return std::find(ids.begin(), ids.end(), id) != ids.end();
+        }
+        // Deliberately use the default ValidRatio=1: routing must discover the real predicate.
+    };
+    auto filter = std::make_shared<IdFilter>();
+    filter->ids = {labels[73], labels[183], labels[80]};
+    const auto check = [&](const vsag::SearchRequest& request,
+                           std::vector<int64_t> expected,
+                           bool scan) {
+        CAPTURE(fused, request.enable_attribute_filter_, request.enable_bitset_filter_, expected);
+        auto found = index->SearchWithRequest(request);
+        REQUIRE(found.has_value());
+        auto result = found.value();
+        REQUIRE(result->GetDim() == static_cast<int64_t>(expected.size()));
+        std::vector<int64_t> actual;
+        for (int64_t i = 0; i < result->GetDim(); ++i) actual.push_back(result->GetIds()[i]);
+        std::sort(actual.begin(), actual.end());
+        std::sort(expected.begin(), expected.end());
+        CHECK(actual == expected);
+        if (scan) {
+            auto stats = vsag::JsonType::Parse(result->GetStatistics());
+            CHECK(stats["mci_hybrid_route"].GetString() == "brute_force");
+        } else {
+            auto stats = vsag::JsonType::Parse(result->GetStatistics());
+            CHECK(stats["mci_hybrid_route"].GetString() != "brute_force");
+        }
+    };
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 10;
+    request.params_str_ =
+        fused
+            ? R"({"hgraph":{"ef_search":30,"rabitq_one_bit_search":true}})"
+            : R"({"hgraph":{"ef_search":30,"rabitq_one_bit_search":true,"brute_force_threshold":0.02}})";
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = "group = 1";
+    const std::vector<int64_t> attr_labels{labels[3], labels[73], labels[183], labels[251]};
+    check(request, attr_labels, true);
+    request.attribute_filter_str_ = "group != 0";
+    check(request, attr_labels, true);
+    request.expression_ = vsag::AstParse("group = 1", index->GetAttrTypeSchema());
+    check(request, attr_labels, true);
+    request.enable_filter_ = true;
+    request.filter_ = filter;
+    check(request, {labels[73], labels[183]}, true);
+    auto invalid = vsag::Bitset::Make();
+    invalid->Set(labels[73]);
+    request.enable_bitset_filter_ = true;
+    request.bitset_filter_ = invalid;
+    check(request, {labels[183]}, true);
+    request.enable_bitset_filter_ = false;
+    request.bitset_filter_ = nullptr;
+    request.expression_.reset();
+    std::stringstream stream;
+    REQUIRE(index->Serialize(stream).has_value());
+    auto restored = vsag::Factory::CreateIndex("hgraph", param.Dump());
+    REQUIRE(restored.has_value());
+    REQUIRE(restored.value()->Deserialize(stream).has_value());
+    index = restored.value();
+    check(request, {labels[73], labels[183]}, true);
+    request.attribute_filter_str_ = "group = 9";
+    check(request, {}, true);
+    request.enable_attribute_filter_ = false;
+    check(request, filter->ids, true);
+    // Marked deletions must also participate in the enumerated scan predicate.
+    REQUIRE(index->Remove(labels[183]).has_value());
+    check(request, {labels[73], labels[80]}, true);
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = "group = 1";
+    check(request, {labels[73]}, true);
+    // Explicit zero forces graph traversal, including deferred-bridge recovery.
+    if (fused) {
+        request.params_str_ =
+            R"({"hgraph":{"ef_search":64,"rabitq_one_bit_search":true,"brute_force_threshold":0,"skip_ratio":1}})";
+        check(request, {labels[73]}, false);
+    }
+    request.params_str_ =
+        R"({"hgraph":{"ef_search":30,"rabitq_one_bit_search":true,"brute_force_threshold":0.02}})";
+    request.query_ = vsag::Dataset::Make()->NumElements(2)->Dim(dim)->Owner(false)->Float32Vectors(
+        vectors.data());
+    auto batch = index->SearchWithRequest(request);
+    REQUIRE(batch.has_value());
+    REQUIRE(batch.value()->GetNumElements() == 2);
+    REQUIRE(batch.value()->GetDim() == 10);
+    for (uint64_t row = 0; row < 2; ++row) {
+        CHECK(batch.value()->GetIds()[row * 10] == labels[73]);
+        for (uint64_t col = 1; col < 10; ++col)
+            CHECK(batch.value()->GetIds()[row * 10 + col] == -1);
+    }
+}
+
 TEST_CASE("HGraph fused RaBitQ remains mutable until explicitly immutable",
           "[ft][rabitq_split][hgraph][fused][immutable][serialize]") {
     using namespace fixtures;

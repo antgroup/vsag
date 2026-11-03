@@ -166,6 +166,7 @@ public:
     // valid inner ids using the best available flatten codes. Default 0
     // preserves existing behaviour.
     float brute_force_threshold{0.0F};
+    bool has_brute_force_threshold{false};
     float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
     float skip_ratio{0.2F};
     FilterSearchSkipStrategyType skip_strategy_type{

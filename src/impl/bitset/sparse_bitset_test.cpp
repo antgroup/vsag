@@ -25,6 +25,24 @@
 using namespace roaring;
 using namespace vsag;
 
+TEST_CASE("SparseBitset enumerates set bits within a bounded domain", "[ut][bitset][enumerate]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseBitset bits;
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    bits.Set(129, true);
+    bits.GetSetBits(64, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    bits.GetSetBits(65, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64}, allocator.get()));
+    bits.GetSetBits(130, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64, 129}, allocator.get()));
+    bits.GetSetBits(0, ids);
+    CHECK(ids.empty());
+}
+
 TEST_CASE("SparseBitset Test", "[ut][bitset]") {
     SparseBitset bitset;
     // empty

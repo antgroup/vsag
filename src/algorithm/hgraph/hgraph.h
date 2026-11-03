@@ -898,7 +898,8 @@ private:
                        int64_t topk,
                        float radius,
                        QueryContext* ctx,
-                       const std::optional<float>& threshold = std::nullopt) const;
+                       const std::optional<float>& threshold = std::nullopt,
+                       const Vector<InnerIdType>* valid_ids = nullptr) const;
 
     DatasetPtr
     search_range_with_request(const SearchRequest& request,

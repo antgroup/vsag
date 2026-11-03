@@ -41,6 +41,17 @@ SparseBitset::Count() {
     return r_.cardinality();
 }
 
+void
+SparseBitset::GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ids.clear();
+    for (const auto id : r_) {
+        if (id >= limit)
+            break;
+        ids.push_back(id);
+    }
+}
+
 std::string
 SparseBitset::Dump() {
     return r_.toString();

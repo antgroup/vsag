@@ -21,6 +21,11 @@
 #include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
 #include "hgraph.h"  // IWYU pragma: keep
+#include "impl/bitset/fast_bitset.h"
+#include "impl/bitset/sparse_bitset.h"
+#include "impl/filter/black_list_filter.h"
+#include "impl/filter/combined_filter.h"
+#include "impl/filter/inner_id_wrapper_filter.h"
 #include "impl/filter/iterator_filter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/query_computer_pool.h"
@@ -32,6 +37,162 @@
 
 namespace vsag {
 namespace {
+class FusedLabelFilter final : public Filter {
+public:
+    FusedLabelFilter(FilterPtr filter,
+                     FilterPtr deleted,
+                     const HGraphRaBitQFusedDataCell& graph,
+                     bool identity)
+        : filter_(std::move(filter)),
+          deleted_(std::move(deleted)),
+          graph_(graph),
+          identity_(identity) {
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        return (deleted_ == nullptr or deleted_->CheckValid(id)) and
+               filter_->CheckValid(
+                   identity_ ? id
+                             : graph_.GetLabel(graph_.GetNodeRecord(static_cast<InnerIdType>(id))));
+    }
+
+    float
+    ValidRatio() const override {
+        return filter_->ValidRatio();
+    }
+
+    Distribution
+    FilterDistribution() const override {
+        return filter_->FilterDistribution();
+    }
+
+    void
+    GetValidIds(const int64_t** ids, int64_t& count) const override {
+        filter_->GetValidIds(ids, count);
+    }
+
+    const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        if (identity_ and deleted_ == nullptr)
+            return filter_->GetValidBitmap(size);
+        if (size != nullptr)
+            *size = 0;
+        return nullptr;
+    }
+
+private:
+    FilterPtr filter_;
+    FilterPtr deleted_;
+    const HGraphRaBitQFusedDataCell& graph_;
+    bool identity_;
+};
+
+// A sample selects whether to enumerate the predicate. Scan routing uses the exact enumeration.
+class PreparedSearchFilter final : public Filter {
+public:
+    PreparedSearchFilter(FilterPtr source,
+                         InnerIdType count,
+                         float scan_threshold,
+                         Allocator* allocator,
+                         const Vector<InnerIdType>* attribute_ids = nullptr,
+                         const FilterPtr& remaining_filter = nullptr)
+        : source_(std::move(source)), bitmap_(allocator), ids_(allocator) {
+        if (attribute_ids != nullptr) {
+            bitmap_.resize(count);
+            for (const auto id : *attribute_ids) {
+                if (id < count and
+                    (remaining_filter == nullptr or remaining_filter->CheckValid(id))) {
+                    bitmap_[id] = 1;
+                    ids_.push_back(id);
+                }
+            }
+            complete_ = true;
+            ratio_ = count == 0 ? 0.0F : static_cast<float>(ids_.size()) / count;
+            return;
+        }
+        // Read the caller's hint once, including for small sets that are fully enumerated.
+        const float hinted_ratio = source_->ValidRatio();
+        constexpr uint64_t sample_limit = 256;
+        const auto samples = std::min<uint64_t>(count, sample_limit);
+        uint64_t accepted = 0;
+        uint64_t random = 73;
+        for (uint64_t i = 0; i < samples; ++i) {
+            const uint64_t begin = i * count / samples;
+            const uint64_t end = (i + 1) * count / samples;
+            random = random * 6364136223846793005ULL + 1442695040888963407ULL;
+            accepted +=
+                source_->CheckValid(static_cast<InnerIdType>(begin + random % (end - begin)));
+        }
+        ratio_ = samples == 0 ? 0.0F : static_cast<float>(accepted) / samples;
+        const bool enumerate =
+            count <= sample_limit or
+            (scan_threshold > 0.0F and
+             (hinted_ratio <= scan_threshold or ratio_ <= std::min(1.0F, 2.0F * scan_threshold)));
+        if (enumerate) {
+            bitmap_.resize(count);
+            for (InnerIdType id = 0; id < count; ++id) {
+                if (source_->CheckValid(id)) {
+                    bitmap_[id] = 1;
+                    ids_.push_back(id);
+                }
+            }
+            complete_ = true;
+            ratio_ = count == 0 ? 0.0F : static_cast<float>(ids_.size()) / count;
+        }
+    }
+
+    bool
+    CheckValid(int64_t id) const override {
+        if (complete_) {
+            return id >= 0 and static_cast<uint64_t>(id) < bitmap_.size() and bitmap_[id] != 0;
+        }
+        return source_->CheckValid(id);
+    }
+
+    float
+    ValidRatio() const override {
+        return ratio_;
+    }
+
+    Distribution
+    FilterDistribution() const override {
+        return source_->FilterDistribution();
+    }
+
+    void
+    GetValidIds(const int64_t** ids, int64_t& count) const override {
+        source_->GetValidIds(ids, count);
+    }
+
+    const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        if (complete_) {
+            if (size != nullptr)
+                *size = bitmap_.size();
+            return bitmap_.data();
+        }
+        return source_->GetValidBitmap(size);
+    }
+
+    bool
+    ShouldScan(float threshold) const {
+        return complete_ and threshold > 0.0F and ratio_ <= threshold;
+    }
+
+    const Vector<InnerIdType>&
+    ValidIds() const {
+        return ids_;
+    }
+
+private:
+    FilterPtr source_;
+    Vector<uint8_t> bitmap_;
+    Vector<InnerIdType> ids_;
+    float ratio_{1.0F};
+    bool complete_{false};
+};
+
 // Pin one deletion generation while filtering; release it before any label lookup.
 void
 filter_deleted_candidates(const DistHeapPtr& result,
@@ -471,7 +632,8 @@ HGraph::brute_force_search(const void* query,
                            int64_t topk,
                            float radius,
                            QueryContext* ctx,
-                           const std::optional<float>& threshold) const {
+                           const std::optional<float>& threshold,
+                           const Vector<InnerIdType>* valid_ids) const {
     auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
     Allocator* alloc = (ctx != nullptr && ctx->alloc != nullptr) ? ctx->alloc : this->allocator_;
 
@@ -508,12 +670,16 @@ HGraph::brute_force_search(const void* query,
     Vector<InnerIdType> batch_ids(brute_force_batch_size, alloc);
     Vector<float> batch_dists(brute_force_batch_size, alloc);
 
-    InnerIdType cursor = 0;
-    while (cursor < total) {
+    uint64_t cursor = 0;
+    const uint64_t scan_count = valid_ids == nullptr ? total : valid_ids->size();
+    while (cursor < scan_count) {
         InnerIdType batch_count = 0;
-        while (cursor < total && batch_count < brute_force_batch_size) {
-            if (filter == nullptr || filter->CheckValid(cursor)) {
-                batch_ids[batch_count++] = cursor;
+        while (cursor < scan_count && batch_count < brute_force_batch_size) {
+            const auto id =
+                valid_ids == nullptr ? static_cast<InnerIdType>(cursor) : (*valid_ids)[cursor];
+            if (id < total and
+                (valid_ids != nullptr or filter == nullptr or filter->CheckValid(id))) {
+                batch_ids[batch_count++] = id;
             }
             ++cursor;
         }
@@ -543,7 +709,8 @@ HGraph::brute_force_search<InnerSearchMode::KNN_SEARCH>(const void*,
                                                         int64_t,
                                                         float,
                                                         QueryContext*,
-                                                        const std::optional<float>&) const;
+                                                        const std::optional<float>&,
+                                                        const Vector<InnerIdType>*) const;
 
 template DistHeapPtr
 HGraph::brute_force_search<InnerSearchMode::RANGE_SEARCH>(const void*,
@@ -551,7 +718,8 @@ HGraph::brute_force_search<InnerSearchMode::RANGE_SEARCH>(const void*,
                                                           int64_t,
                                                           float,
                                                           QueryContext*,
-                                                          const std::optional<float>&) const;
+                                                          const std::optional<float>&,
+                                                          const Vector<InnerIdType>*) const;
 
 DatasetPtr
 HGraph::RangeSearch(const DatasetPtr& query,
@@ -743,6 +911,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
+    CHECK_ARGUMENT(not request.enable_attribute_filter_ or this->attr_filter_index_ != nullptr,
+                   "attribute filtering requires use_attribute_filter at build time");
     const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
@@ -881,6 +1051,20 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
+    if (rabitq_fused_datacell_ != nullptr and not support_duplicate_ and
+        request.filter_ != nullptr and not params.use_extra_info_filter) {
+        ft = std::make_shared<FusedLabelFilter>(request.filter_,
+                                                this->label_table_->GetDeletedIdsFilter(),
+                                                *rabitq_fused_datacell_,
+                                                this->label_table_->IsIdentityMapping());
+    }
+    if (request.enable_bitset_filter_ and request.bitset_filter_ != nullptr) {
+        auto combined = std::make_shared<CombinedFilter>();
+        combined->AppendFilter(ft);
+        combined->AppendFilter(std::make_shared<InnerIdWrapperFilter>(
+            std::make_shared<BlackListFilter>(request.bitset_filter_), *this->label_table_));
+        ft = combined;
+    }
 
     if (is_range) {
         return this->search_range_with_request(request, params, ft, ctx);
@@ -924,6 +1108,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // hops_limit only takes effect when it's greater than ef_search
     apply_hops_limit(base_search_param, params);
 
+    Vector<InnerIdType> attribute_ids(ctx.alloc);
+    FilterPtr remaining_filter = ft;
+    bool have_attribute_ids = false;
     if (request.enable_attribute_filter_ and this->attr_filter_index_ != nullptr) {
         ExprPtr expression = request.expression_;
         if (expression == nullptr) {
@@ -933,8 +1120,48 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         auto executor =
             Executor::MakeInstance(this->allocator_, expression, this->attr_filter_index_);
         executor->Init();
-        base_search_param.executors.emplace_back(executor);
+        if (rabitq_fused_datacell_ != nullptr or params.brute_force_threshold > 0.0F) {
+            executor->Clear();
+            FilterPtr attribute_filter(executor, executor->Run());
+            if (executor->only_bitset_) {
+                if (const auto* bits = dynamic_cast<const FastBitset*>(executor->bitset_)) {
+                    bits->GetSetBits(this->PublishedCount(), attribute_ids);
+                    have_attribute_ids = true;
+                } else if (const auto* sparse =
+                               dynamic_cast<const SparseBitset*>(executor->bitset_)) {
+                    sparse->GetSetBits(this->PublishedCount(), attribute_ids);
+                    have_attribute_ids = true;
+                }
+            }
+            auto combined = std::make_shared<CombinedFilter>();
+            combined->AppendFilter(attribute_filter);
+            combined->AppendFilter(ft);
+            ft = combined;
+            base_search_param.is_inner_id_allowed = ft;
+        } else {
+            base_search_param.executors.emplace_back(executor);
+        }
     }
+
+    // An explicit zero disables the fused default of scanning predicates passing at most 2%.
+    const float scan_threshold = params.has_brute_force_threshold    ? params.brute_force_threshold
+                                 : rabitq_fused_datacell_ != nullptr ? 0.02F
+                                                                     : 0.0F;
+    std::shared_ptr<PreparedSearchFilter> prepared_filter;
+    if (ft != nullptr and not use_custom_distance and
+        (rabitq_fused_datacell_ != nullptr or scan_threshold > 0.0F)) {
+        prepared_filter =
+            std::make_shared<PreparedSearchFilter>(ft,
+                                                   this->PublishedCount(),
+                                                   scan_threshold,
+                                                   ctx.alloc,
+                                                   have_attribute_ids ? &attribute_ids : nullptr,
+                                                   remaining_filter);
+        ft = prepared_filter;
+        base_search_param.is_inner_id_allowed = ft;
+    }
+    const bool prepared_scan =
+        prepared_filter != nullptr and prepared_filter->ShouldScan(scan_threshold);
 
     // Single-query preserves the original "dim = actual result count" contract; multi-query
     // uses a fixed query_count x k rectangular layout. Guard the multiplication against overflow.
@@ -1071,13 +1298,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         bool mci_tried = false;
         if (not params.use_hybrid_traversal and not use_custom_distance and
             // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-            not(params.brute_force_threshold > 0.0F and
+            not prepared_scan and
+            not(prepared_filter == nullptr and params.brute_force_threshold > 0.0F and
                 mci_result.valid_ratio <= params.brute_force_threshold)) {
             mci_tried = true;
             mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
         }
         // Per-query entry point search through hierarchical graphs.
-        if (mci_result.route != "mci") {
+        if (mci_result.route != "mci" and not prepared_scan) {
             if (vt == nullptr) {
                 vt = this->pool_->TakeOne();
             }
@@ -1131,10 +1359,17 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             this->mci_parameters_.enabled and this->mci_cliques_ != nullptr and
             this->mci_cliques_->HasCliqueIndex(hybrid_total_count);
         if (not use_custom_distance) {
-            if (params.brute_force_threshold > 0.0F &&
-                mci_result.valid_ratio <= params.brute_force_threshold) {
+            if (prepared_scan or
+                (prepared_filter == nullptr and params.brute_force_threshold > 0.0F and
+                 mci_result.valid_ratio <= params.brute_force_threshold)) {
                 search_result = this->brute_force_search<InnerSearchMode::KNN_SEARCH>(
-                    raw_query, ft, k, 0.0F, &ctx, request.threshold_);
+                    raw_query,
+                    ft,
+                    k,
+                    0.0F,
+                    &ctx,
+                    request.threshold_,
+                    prepared_scan ? &prepared_filter->ValidIds() : nullptr);
                 brute_force_used = true;
                 mci_result.route = "brute_force";
             } else if (hybrid_available) {

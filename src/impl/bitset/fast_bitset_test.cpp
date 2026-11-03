@@ -25,6 +25,34 @@
 #include "vsag_exception.h"
 using namespace vsag;
 
+TEST_CASE("FastBitset enumerates set bits within a bounded domain", "[ut][FastBitset][enumerate]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FastBitset bits(allocator.get());
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    bits.Set(129, true);
+    bits.GetSetBits(64, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    bits.GetSetBits(65, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64}, allocator.get()));
+    bits.GetSetBits(130, ids);
+    CHECK(ids == Vector<InnerIdType>({0, 63, 64, 129}, allocator.get()));
+    bits.Not();
+    bits.GetSetBits(65, ids);
+    REQUIRE(ids.size() == 62);
+    CHECK(ids.front() == 1);
+    CHECK(ids.back() == 62);
+    bits.Clear();
+    bits.Not();
+    bits.GetSetBits(130, ids);
+    REQUIRE(ids.size() == 130);
+    CHECK(ids.back() == 129);
+    bits.GetSetBits(0, ids);
+    CHECK(ids.empty());
+}
+
 std::pair<FastBitsetPtr, std::vector<int>>
 GetRandomBitset(Allocator* allocator, int64_t max_size, int64_t max_element) {
     auto values = select_k_numbers(max_element, max_size);

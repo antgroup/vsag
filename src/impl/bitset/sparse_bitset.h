@@ -49,6 +49,9 @@ public:
     uint64_t
     Count() override;
 
+    void
+    GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const;
+
     std::string
     Dump() override;
 

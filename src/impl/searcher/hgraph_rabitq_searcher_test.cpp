@@ -246,9 +246,12 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     run_search(make_search_graph(false), 0);
 
     SECTION("filtered traversal crosses rejected bridges beyond ef") {
+        const auto skip_strategy =
+            GENERATE(FilterSearchSkipStrategyType::RANDOM,
+                     FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
         auto graph_param = std::make_shared<GraphDataCellParameter>();
         graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
-        graph_param->max_degree_ = 1;
+        graph_param->max_degree_ = 2;
         graph_param->init_max_capacity_ = count;
         auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
             graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
@@ -257,21 +260,33 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
             return lhs.full_distance < rhs.full_distance;
         });
         for (InnerIdType id = 0; id < count; ++id) {
-            auto node = ordered[id];
+            auto node = id == 1 ? ordered.back() : id == count - 1 ? ordered[1] : ordered[id];
             set_coarse_score(node, node.full_distance);
             graph->SetNodeCodes(
                 id, id, node.cluster_id, node.filter.data(), node.supplement.data());
             Vector<InnerIdType> neighbors(allocator.get());
-            if (id + 1 < count) {
+            if (id == 0) {
+                neighbors.push_back(1);
+                neighbors.push_back(2);
+            } else if (id > 1 and id + 1 < count) {
                 neighbors.push_back(id + 1);
             }
             graph->InsertNeighborsById(id, neighbors);
         }
-        // The only accepted node is behind a chain longer than ef, in increasing
-        // distance order. Rejected nodes must not exhaust the accepted-candidate
-        // budget or stop traversal.
-        auto filter =
-            std::make_shared<WhiteListFilter>([](LabelType id) { return id == count - 1; });
+        // The first accepted neighbor fills the result budget but is farther than the accepted
+        // node behind the second, rejected bridge. Even maximal skip must recover that bridge.
+        class BridgeFilter final : public Filter {
+        public:
+            bool
+            CheckValid(int64_t id) const override {
+                return id == 1 or id == count - 1;
+            }
+            float
+            ValidRatio() const override {
+                return 0.0F;
+            }
+        };
+        auto filter = std::make_shared<BridgeFilter>();
         auto attr_index = AttributeInvertedInterface::MakeInstance(allocator.get());
         for (InnerIdType id = 0; id < count; ++id) {
             AttributeValue<int32_t> value;
@@ -293,7 +308,7 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
             REQUIRE(result->Size() == 1);
             CHECK(result->Top().second == count - 1);
         };
-        for (const auto ef : {2U, 41U}) {
+        for (const auto ef : {1U, 2U, 41U}) {
             for (const bool one_bit : {false, true}) {
                 for (const bool reorder : {false, true}) {
                     CAPTURE(ef, one_bit, reorder);
@@ -304,6 +319,8 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
                     search_param.rerank_topk = 1;
                     search_param.enable_rabitq_one_bit_search = one_bit;
                     search_param.enable_reorder = reorder;
+                    search_param.skip_ratio = 1.0F;
+                    search_param.skip_strategy_type = skip_strategy;
                     search_param.is_inner_id_allowed = filter;
                     check_filtered_search(search_param);
                     // Attribute-only requests have no ID filter to activate filtered traversal.

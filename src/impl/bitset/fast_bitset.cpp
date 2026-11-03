@@ -68,6 +68,21 @@ FastBitset::Count() {
 }
 
 void
+FastBitset::GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const {
+    ids.clear();
+    for (uint64_t word = 0; word < (limit + 63) / 64; ++word) {
+        uint64_t bits = word < size_ ? data_[word] : get_fill_bit() ? FILL_ONE : 0;
+        const auto remaining = limit - word * 64;
+        if (remaining < 64)
+            bits &= (uint64_t{1} << remaining) - 1;
+        while (bits != 0) {
+            ids.push_back(static_cast<InnerIdType>(word * 64 + __builtin_ctzll(bits)));
+            bits &= bits - 1;
+        }
+    }
+}
+
+void
 FastBitset::Or(const ComputableBitset& another) {
     const auto* fast_another = static_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {

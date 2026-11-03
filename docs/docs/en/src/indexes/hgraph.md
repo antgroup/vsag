@@ -374,7 +374,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
-| `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
+| `brute_force_threshold` | float | Ordinary HGraph: `0.0`; fused KNN: `0.02` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; an explicit `0.0` disables automatic scanning. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
 | `enable_reorder` | bool | `true` | Whether to re-rank coarse candidates against the precise codes. Set to `false` to skip reordering and return the approximate results directly. Use `use_reorder: true` in `index_param` to store the precise codes needed for reordering. |
@@ -395,26 +395,38 @@ Graph traversal is the right strategy when most candidates pass the filter — t
 graph quickly reaches the neighborhood of the query. As filter selectivity
 increases (only a tiny fraction of vectors survive), the beam has to expand far
 more nodes just to fill `ef_search` with **valid** candidates, and recall drops.
-At some point an exhaustive scan over the surviving ids is both faster *and*
-exact.
+At low passing rates, scanning only the surviving IDs avoids most graph traversal.
 
 `brute_force_threshold` lets HGraph make that switch automatically on a
 per-query basis:
 
 ```cpp
-// When the active filter keeps ≤ 1% of ids, run an exact scan instead.
+// Scan the matching IDs when the active filter keeps ≤ 1% of IDs.
 auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})";
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
+Non-iterator fused RaBitQ KNN queries enable a `0.02` threshold by default. Set
+`brute_force_threshold: 0` explicitly to disable it. ID predicates, attribute expressions,
+bitsets and deletion marks are combined with AND. Attribute filtering requires
+`use_attribute_filter: true` at build time.
+
+For callback predicates, fused queries sample selectivity and enumerate actual matching IDs when a scan may
+be appropriate. Scan routing uses the exact matching fraction, so inaccurate `ValidRatio()`
+hints cannot change predicate correctness. Attribute expressions run once per request;
+batch queries reuse the matching set. Attribute results available as complete bitsets enumerate set IDs directly,
+then apply the ID, bitset and deletion predicates. Graph search can use the resulting validity
+bitmap directly. Scans visit matching IDs without graph routing
+or a subsequent reorder pass. Distances use the final codes or raw vectors and retain the
+quantization error of the selected codes.
+
 How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 
-- The fallback only fires when **all** of the following hold:
+- Ordinary HGraph explicit fallback requires a positive threshold and a predicate. Prepared predicates use their actual selectivity; paths without preparation retain these hint-based conditions:
     - `brute_force_threshold > 0.0`, **and**
     - a filter is supplied, **and**
     - `filter->ValidRatio() <= brute_force_threshold`.
-- The accuracy of `Filter::ValidRatio()` matters — it is the user-supplied hint
-  the dispatcher checks against the threshold. See
+- On paths using hints without preparation, `Filter::ValidRatio()` controls routing. See
   [Filtered Search](../advanced/filtered_search.md) for the API contract.
 - The scan iterates every valid inner id and computes distances in batches of
   64 using the most precise flatten storage available (raw vectors if
@@ -430,20 +442,24 @@ How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 
 Picking a value:
 
-- Leave at `0.0` (default) for unfiltered or weakly filtered workloads.
+- Ordinary HGraph keeps its `0.0` default; fused KNN uses `0.02` for automatic routing.
 - For highly selective filters, `0.01–0.05` is a reasonable starting point.
   Setting it higher than that effectively turns the index into a brute-force
   scanner whenever a filter is present.
-- The cost of the brute-force scan is roughly `O(N × dim)` where `N` is the
-  total number of indexed vectors (regardless of selectivity, because every id
-  is visited to check `CheckValid`). The benefit grows when graph search would
-  otherwise need a much larger `ef_search` to recover recall.
+- Callback preparation uses a sample of at most 256 records and, when needed, a full pass over N indexed records. Complete attribute bitsets enumerate matching IDs directly. Scanning computes distances only for the M vectors passing every predicate; batch queries reuse preparation.
 
 See
 [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)
 for a runnable brute-force fallback example.
 
 ### Filter Skip Strategy (skip_ratio and skip_strategy)
+
+Fused KNN supports these parameters by deferring rejected bridge nodes. When the primary
+frontier is exhausted, deferred nodes are checked against the accepted-candidate boundary.
+Rejected nodes do not consume the accepted-candidate budget, and filling topk does not
+permanently discard unchecked bridges.
+
+The following probabilistic behavior describes the ordinary HGraph loop.
 
 When searching with a filter, HGraph needs to frequently call Filter::CheckValid() during graph traversal to verify whether each candidate point is valid. This check can be expensive (especially for complex filter logic). skip_ratio and skip_strategy provide a probabilistic optimization: they skip some filter checks to speed up the search, but may reduce recall.
 
