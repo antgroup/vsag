@@ -121,6 +121,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(search_param->filter_callback_limit == 1000);
     REQUIRE(search_param->window_parallelism == 4);
     REQUIRE(search_param->parallel_n_candidate_ratio == 2.0);
+    REQUIRE_FALSE(search_param->profile_cpu);
     vsag::ParameterTest::TestToJson(search_param);
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_retain_threshold"));
@@ -529,6 +530,10 @@ TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIPa
         JsonType::Parse(R"({"sindi":{"window_parallelism":16,"parallel_n_candidate_ratio":1}})")));
     REQUIRE(maximum.window_parallelism == 16);
     REQUIRE(maximum.parallel_n_candidate_ratio == 1);
+    REQUIRE_NOTHROW(maximum.FromJson(JsonType::Parse(R"({"sindi":{"profile_cpu":true}})")));
+    REQUIRE(maximum.profile_cpu);
+    REQUIRE(maximum.ToJson()[INDEX_SINDI]["profile_cpu"].GetBool());
+    REQUIRE_THROWS(maximum.FromJson(JsonType::Parse(R"({"sindi":{"profile_cpu":"true"}})")));
     REQUIRE_THROWS(maximum.FromJson(JsonType::Parse(
         R"({"sindi":{"window_parallelism":2,"parallel_n_candidate_ratio":1,"worker_n_candidate":100}})")));
 }

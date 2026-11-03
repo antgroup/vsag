@@ -7,6 +7,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "impl/searcher/sindi_searcher.h"
@@ -44,6 +45,12 @@ struct SindiParallelState {
     // Internal A/B/C test control, never parsed from request JSON.
     uint32_t execution_limit{16};
     uint32_t granted{0};
+    uint32_t filter_slots{0};
+    uint32_t cpu_slots{0};
+    uint32_t worker_limit{0};
+    bool profile_cpu{false};
+    bool worker_cpu_available{true};
+    uint64_t worker_cpu_ns{0};
     uint64_t callback_limit{0};
     std::atomic<uint64_t> callbacks{0};
     std::atomic<uint64_t> completed_windows{0};
@@ -51,6 +58,13 @@ struct SindiParallelState {
     Clock::time_point deadline{Clock::time_point::max()};
     SindiParallelPlan plan;
 };
+
+struct SindiCpuTime;
+std::string
+SindiExecutionStatistics(std::string summary,
+                         const SindiParallelState* parallel,
+                         const SindiCpuTime& caller_cpu,
+                         bool profile_cpu);
 
 void
 SearchSindiPartitions(const SindiWindowSearchRequest& request,

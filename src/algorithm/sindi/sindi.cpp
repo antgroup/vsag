@@ -14,7 +14,6 @@
 // limitations under the License.
 
 #include "sindi.h"
-#include "sindi_parallel_search.h"
 
 #include <algorithm>
 #include <cstring>
@@ -43,6 +42,8 @@
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "sindi_cpu_timer.h"
+#include "sindi_parallel_search.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -799,6 +800,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
     const auto search_json = JsonType::Parse(parameters);
     search_param.FromJson(search_json);
     const auto& window_options = search_param.execution_options;
+    SindiCpuTime caller_cpu;
+    SindiCpuTimer cpu_timer(search_param.profile_cpu, caller_cpu);
     std::unique_ptr<SindiParallelState> parallel;
     if (search_param.window_parallelism > 1) {
         CHECK_ARGUMENT(immutable_term_datacell_ != nullptr,
@@ -808,10 +811,11 @@ SINDI::KnnSearch(const DatasetPtr& query,
         parallel->ratio = search_param.parallel_n_candidate_ratio;
         parallel->requested = search_param.window_parallelism;
         parallel->callback_limit = search_param.filter_callback_limit;
+        parallel->profile_cpu = search_param.profile_cpu;
         if (search_param.enable_time_record) {
-            parallel->deadline = entered + std::chrono::duration_cast<
-                SindiParallelState::Clock::duration>(
-                std::chrono::duration<double, std::milli>(search_param.timeout_ms));
+            parallel->deadline =
+                entered + std::chrono::duration_cast<SindiParallelState::Clock::duration>(
+                              std::chrono::duration<double, std::milli>(search_param.timeout_ms));
         }
     }
     SindiWindowSearchProfile window_profile;
@@ -825,8 +829,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
     InnerSearchParam inner_param;
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
     inner_param.parallel_search_thread_count = search_param.window_parallelism;
-    const auto worker_candidates = parallel ? inner_param.ef
-                                           : resolve_worker_candidates(search_param, inner_param.ef);
+    const auto worker_candidates =
+        parallel ? inner_param.ef : resolve_worker_candidates(search_param, inner_param.ef);
     inner_param.topk = threshold.has_value() ? static_cast<int64_t>(inner_param.ef) : k;
     inner_param.distance_threshold = threshold;
     inner_param.enable_reorder = use_reorder_;
@@ -845,13 +849,24 @@ SINDI::KnnSearch(const DatasetPtr& query,
 
     SearchStatistics statistics;
     auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
+    const auto annotate = [&](const DatasetPtr& result) {
+        cpu_timer.Stop();
+        if (statistics_ptr == nullptr) {
+            return;
+        }
+        SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
+        auto summary = SindiSearcher::DumpStatistics(statistics, window_options, window_profile);
+        summary = SindiExecutionStatistics(
+            std::move(summary), parallel.get(), caller_cpu, search_param.profile_cpu);
+        result->Statistics(summary);
+    };
     const auto metadata_route = metadata_filter_.Classify(query, window_size_);
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
-        if (statistics_ptr != nullptr) {
-            SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-            result->Statistics(statistics.Dump());
+        if (parallel) {
+            parallel->plan = SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio);
         }
+        annotate(result);
         return result;
     }
     metadata_filter_.ApplyFilter(metadata_route, inner_param.is_inner_id_allowed);
@@ -894,26 +909,7 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                           window_options,
                                           &window_profile,
                                           parallel.get());
-    if (statistics_ptr != nullptr) {
-        SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-        auto summary = SindiSearcher::DumpStatistics(statistics, window_options, window_profile);
-        if (parallel) {
-            auto json = nlohmann::json::parse(summary);
-            json["sindi_strategy"] = "accel_v1";
-            json["sindi_requested_slots"] = parallel->requested;
-            json["sindi_granted_slots"] = parallel->granted;
-            json["sindi_partitions"] = parallel->plan.quotas.size();
-            json["sindi_candidate_capacity"] = parallel->plan.capacity;
-            json["sindi_n_candidate"] = inner_param.ef;
-            json["sindi_execution_complete"] =
-                parallel->stop.load() == SindiParallelState::Stop::NONE;
-            json["sindi_stop_reason"] =
-                parallel->stop.load() == SindiParallelState::Stop::CALLBACK_LIMIT
-                    ? "callback_limit" : "none";
-            summary = json.dump();
-        }
-        result->Statistics(summary);
-    }
+    annotate(result);
     SindiStageTimer result_timer(stages.enabled, stages.result_us);
     return FilterDatasetByThreshold(result, threshold, allocator, k);
 }
@@ -978,10 +974,19 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             }
             windows.push_back(static_cast<uint32_t>(cur));
         }
-        const SindiWindowSearchRequest request{windows, term_datacell_, computer, inner_param,
-            metadata_filter_, metadata_route, nullptr, search_allocator, window_size_,
-            static_cast<uint64_t>(cur_element_count_.load()), 0,
-            use_term_lists_heap_insert, statistics};
+        const SindiWindowSearchRequest request{windows,
+                                               term_datacell_,
+                                               computer,
+                                               inner_param,
+                                               metadata_filter_,
+                                               metadata_route,
+                                               nullptr,
+                                               search_allocator,
+                                               window_size_,
+                                               static_cast<uint64_t>(cur_element_count_.load()),
+                                               0,
+                                               use_term_lists_heap_insert,
+                                               statistics};
         preparation_timer.Stop();
         SindiStageTimer windows_timer(window_options.stage_profile, stages.windows_us);
         SearchSindiPartitions(request, *parallel, heap);
@@ -1102,8 +1107,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         const bool time_statistics = window_options.stage_profile and statistics != nullptr and
                                      rerank_type_ != SPARSE_RERANK_TYPE_DMQ8;
         for (auto i = 0; i < candidate_size; i++) {
-            if (parallel != nullptr and
-                SindiParallelState::Clock::now() >= parallel->deadline) {
+            if (parallel != nullptr and SindiParallelState::Clock::now() >= parallel->deadline) {
                 throw std::runtime_error("SINDI deadline exceeded during rerank");
             }
             auto inner_id = batch_rerank ? rerank_ids[i] : heap.top().second;
@@ -1302,11 +1306,12 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     const auto search_json = JsonType::Parse(request.params_str_);
     search_param.FromJson(search_json);
     if (search_param.window_parallelism > 1) {
-        CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH and
-                           request.expected_labels_.empty(),
+        CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH and request.expected_labels_.empty(),
                        "SINDI parallel search does not support Range or reasoning");
         rlock.unlock();
-        return KnnSearch(request.query_, request.topk_, request.params_str_,
+        return KnnSearch(request.query_,
+                         request.topk_,
+                         request.params_str_,
                          request.enable_filter_ ? request.filter_ : nullptr,
                          select_query_allocator(request.search_allocator_, this->allocator_));
     }
