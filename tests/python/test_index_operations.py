@@ -631,18 +631,20 @@ def test_knn_search_fast_path_and_fallbacks_agree(monkeypatch):
 
     ids, dists = index.knn_search(vectors[1], 5, "{}")
     assert binds == []
-    assert ids.tolist() == [1, 0, 2, -1, -1]
-    assert dists[3:].tolist() == [-1.0, -1.0]
+    assert ids.tolist() == [1, 0, 2]
+    assert dists.shape == (3,)
 
     strided = np.arange(8, dtype=np.float32)[::2]  # a view with stride 2, not contiguous
     with pytest.raises(ValueError, match="contiguous"):
         index.knn_search(strided, 5, "{}")
-    for variant in (np.int64(5), 5.0):
+    for variant in (np.int64(5),):
         binds.clear()
         slow_ids, slow_dists = index.knn_search(vectors[1], variant, "{}")
         assert binds == [1]
         assert slow_ids.tolist() == ids.tolist()
         np.testing.assert_array_equal(slow_dists, dists)
+    with pytest.raises(TypeError):
+        index.knn_search(vectors[1], 5.0, "{}")
     binds.clear()
     kw_ids, _ = index.knn_search(vector=vectors[1], k=5, parameters="{}")
     assert binds == [1]
@@ -670,7 +672,12 @@ def test_knn_search_fast_path_and_fallbacks_agree(monkeypatch):
     slow = one_dim.knn_search(single, np.int64(1), "{}")
     assert fast[0].tolist() == slow[0].tolist()
 
-    # A failing search keeps the "-1 filled" contract instead of raising.
-    bad_ids, bad_dists = index.knn_search(np.ones(7, dtype=np.float32), 3, "{}")
-    assert bad_ids.tolist() == [-1, -1, -1]
-    assert bad_dists.tolist() == [-1.0, -1.0, -1.0]
+    # Both paths preserve the native error instead of returning plausible padding.
+    for keyword in (False, True):
+        with pytest.raises(pyvsag.VsagError) as caught:
+            if keyword:
+                index.knn_search(vector=np.ones(7, dtype=np.float32), k=3, parameters="{}")
+            else:
+                index.knn_search(np.ones(7, dtype=np.float32), 3, "{}")
+        assert caught.value.code > 0
+        assert caught.value.operation == "knn_search"
