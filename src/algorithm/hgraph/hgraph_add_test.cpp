@@ -2462,3 +2462,34 @@ TEST_CASE("HGraph optimized fused build omits Tune pending metadata",
     REQUIRE(
         restored->KnnSearch(MakeFloatQuery(vectors, dim), 1, kBruteForceSearchParams).has_value());
 }
+
+TEST_CASE("HGraph multi-row Add runs inline on its pool worker", "[ut][hgraph][add][nested_pool]") {
+    const auto quantization = GENERATE(0, 1, 2);
+    CAPTURE(quantization);
+    auto common = MakeCommonParam(32, 1);
+    auto param = quantization == 0 ? MakeFp32HGraphJson(false, 2) : MakeRabitQRawVectorHGraphJson();
+    param["build_thread_count"].SetInt(2);
+    if (quantization == 2) {
+        param["deduplicate_storage"].SetBool(false);
+        param["rabitq_fused_datacell"].SetBool(true);
+        param["precise_quantization_type"].SetString("rabitq");
+        param["rabitq_bits_per_dim_base"].SetInt(2);
+        param["rabitq_bits_per_dim_precise"].SetInt(6);
+        param["use_reorder"].SetBool(true);
+        param["reorder_source"].SetString("base");
+        param["store_raw_vector"].SetBool(false);
+    }
+    auto index = MakeHGraphIndex(param, common);
+    std::vector<float> vectors(32 * 4);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 13 + 7) % 101) / 101.0F;
+    }
+    std::vector<int64_t> ids{10, 11, 12, 13};
+    auto data = MakeFloatDataset(vectors, ids, 32, 4);
+    auto task = common.thread_pool_->GeneralEnqueue([&]() { return index->Add(data); });
+    // The test runner timeout bounds regressions; no detached worker may outlive its data.
+    auto result = task.get();
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    REQUIRE(index->GetNumElements() == 4);
+}

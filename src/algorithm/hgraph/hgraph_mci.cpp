@@ -1429,7 +1429,8 @@ HGraph::build_mci_clique_index(const void* vectors) {
 
     // Parallel round executor: batch uncovered seeds, solve them in workers, then merge results.
     auto solve_parallel_round = [&](uint64_t round_id, float now_alpha) {
-        if (this->thread_pool_ == nullptr or this->build_thread_count_ <= 1) {
+        if (this->thread_pool_ == nullptr or this->build_thread_count_ <= 1 or
+            this->thread_pool_->IsCurrentThread()) {
             solve_serial_round(round_id, now_alpha);
             return;
         }
@@ -2261,7 +2262,9 @@ MciIncrementalAddExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& 
     const auto row_count = static_cast<uint64_t>(batch.rows.size());
     const auto thread_count = std::max<uint64_t>(
         1, std::min<uint64_t>(static_cast<uint64_t>(hgraph_.build_thread_count_), row_count));
-    const bool use_workers = thread_count > 1 and row_count >= K_MCI_PLAN_MIN_ROWS;
+    const bool use_workers =
+        thread_count > 1 and row_count >= K_MCI_PLAN_MIN_ROWS and
+        not(hgraph_.thread_pool_ != nullptr and hgraph_.thread_pool_->IsCurrentThread());
     logger::info("hgraph mci incremental add started, added={}, threads={}",
                  row_count,
                  use_workers ? thread_count : 1);

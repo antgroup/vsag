@@ -60,7 +60,8 @@ public:
 
     std::future<void>
     Enqueue(std::function<void(void)> task) override {
-        auto func_wrapper = [task = std::move(task)]() {
+        auto func_wrapper = [pool = GetUnderlyingPool(), task = std::move(task)]() {
+            PoolThreadScope scope(pool);
             try {
                 task();
             } catch (std::exception& e) {
@@ -80,6 +81,24 @@ public:
     void
     SetPoolSize(std::uint64_t limit) override {
         pool_->SetPoolSize(limit);
+    }
+
+    // Unlike RequiresInlineExecution(), unknown external pools are not assumed to be current.
+    bool
+    IsCurrentThread() const {
+        const auto* pool = GetUnderlyingPool();
+        if (pool == nullptr) {
+            return false;
+        }
+        for (auto* scope = current_scope_; scope != nullptr; scope = scope->previous_) {
+            if (scope->pool_ == pool) {
+                return true;
+            }
+        }
+        if (const auto* identity = dynamic_cast<const DefaultThreadPool*>(pool)) {
+            return identity->IsCurrentThread();
+        }
+        return false;
     }
 
     // Unknown external pools may already be occupied by the calling query. Submitting
@@ -102,6 +121,31 @@ public:
     }
 
 private:
+    const ThreadPool*
+    GetUnderlyingPool() const {
+        const ThreadPool* pool = pool_;
+        while (const auto* wrapper = dynamic_cast<const SafeThreadPool*>(pool)) {
+            pool = wrapper->pool_;
+        }
+        return pool;
+    }
+
+    class PoolThreadScope {
+    public:
+        explicit PoolThreadScope(const ThreadPool* pool) : pool_(pool), previous_(current_scope_) {
+            current_scope_ = this;
+        }
+
+        ~PoolThreadScope() {
+            current_scope_ = previous_;
+        }
+
+        const ThreadPool* pool_;
+        PoolThreadScope* previous_;
+    };
+
+    inline static thread_local PoolThreadScope* current_scope_{nullptr};
+
     ThreadPool* pool_{nullptr};
     std::shared_ptr<ThreadPool> pool_ptr_{nullptr};
     bool owner_{false};
