@@ -23,12 +23,8 @@ def run():
     """Run all tests using pytest"""
     # Get the directory where this script is located
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    args = [
-        "-v",
-        os.path.join(script_dir, "test_ivf.py"),
-        os.path.join(script_dir, "test_hgraph.py"),
-        os.path.join(script_dir, "test_bruteforce.py"),
-    ]
+    # Directory discovery includes new test modules without maintaining a list.
+    args = ["-v", script_dir]
     return pytest.main(args)
 
 

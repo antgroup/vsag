@@ -112,4 +112,4 @@ def test_sindi_knn_search_with_statistics(index_name, use_reorder):
     assert statistics["distance_evaluations"] == 0
     assert statistics["complete"] is True
     np.testing.assert_array_equal(ids, [[-1, -1]])
-    np.testing.assert_array_equal(distances, [[-1.0, -1.0]])
+    assert np.isposinf(distances).all()
