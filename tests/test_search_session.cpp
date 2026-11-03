@@ -31,7 +31,6 @@
 #include "impl/searcher/searcher_utils.h"
 #include "json_types.h"
 #include "vsag/dataset.h"
-#include "vsag/engine.h"
 #include "vsag/factory.h"
 #include "vsag/filter.h"
 #include "vsag/index.h"
@@ -47,9 +46,7 @@ constexpr const char* kSearch =
 
 vsag::IndexPtr
 MakeSessionIndex(bool populate = true) {
-    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), nullptr);
-    vsag::Engine engine(&resource);
-    auto created = engine.CreateIndex("hgraph", R"({
+    auto created = vsag::Factory::CreateIndex("hgraph", R"({
         "dtype":"float32", "metric_type":"l2", "dim":1,
         "index_param":{"base_quantization_type":"fp32","max_degree":16,
         "ef_construction":128,"use_reorder":false}
