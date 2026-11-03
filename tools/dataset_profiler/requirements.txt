@@ -1,0 +1,7 @@
+# Runtime dependencies for the VSAG dataset profiler (tools/dataset_profiler).
+numpy>=1.24
+h5py>=3.8
+
+# For the test suite only:
+#   pip install pytest
+#   python -m pytest tests -q

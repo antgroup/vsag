@@ -98,6 +98,7 @@
 - [HDF5 数据集格式](resources/dataset_format.md)
 - [索引分析工具](resources/analyze_index.md)
 - [兼容性检查工具](resources/check_compatibility.md)
+- [数据集特征可视化工具](resources/dataset_profiler.md)
 
 # 资源
 

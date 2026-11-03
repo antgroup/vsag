@@ -1,0 +1,969 @@
+{
+  "config": {
+    "clusters": 4,
+    "effective_pairwise_sample_size": 32,
+    "effective_sample_size": 64,
+    "max_dimension_points": 1024,
+    "metric": "euclidean",
+    "near_duplicate_relative_epsilon": 0.001,
+    "pairwise_sample_size": 32,
+    "pairwise_sampling_method": "first effective_pairwise_sample_size rows of the seeded random sample (which is itself uniformly random)",
+    "sample_size": 64,
+    "sampling_method": "numpy.random.Generator(PCG64); Floyd's algorithm without replacement; indices sorted ascending before use",
+    "seed": 42
+  },
+  "dataset": {
+    "attributes": {
+      "distance": "euclidean"
+    },
+    "count": 120,
+    "datasets": [
+      "test",
+      "train"
+    ],
+    "dim": 16,
+    "dim_inferred": false,
+    "distance_metric": "euclidean",
+    "dtype": "FLOAT32",
+    "has_offsets": false,
+    "vector_type": "dense"
+  },
+  "input": {
+    "file_name": "toy_dense.hdf5",
+    "file_size_bytes": 14336,
+    "split": "train"
+  },
+  "metrics": {
+    "anisotropy": {
+      "available": true,
+      "definition": "Eigenvalue concentration of the centered sample covariance: the largest eigenvalue share, top-10 share, effective rank, and mean pairwise cosine similarity. High top-1 share indicates a dominant direction.",
+      "effective_rank": 1.0329965616,
+      "explained_variance_ratio": [
+        0.9949739696,
+        0.0048953605,
+        6.9245e-05,
+        9.1328e-06,
+        7.263e-06,
+        6.6246e-06,
+        6.2974e-06,
+        6.2193e-06,
+        5.033e-06,
+        4.5838e-06
+      ],
+      "interpretation": "top1_eigenvalue_share near 1 indicates a dominant direction; effective_rank near 1 indicates nearly one-dimensional variation",
+      "mean_pairwise_cosine": 0.0811067732,
+      "method": "eigendecomposition of centered sample covariance",
+      "sample_size": 64,
+      "scope": "sample",
+      "top10_eigenvalue_share": 0.999983729,
+      "top1_eigenvalue_share": 0.9949739696
+    },
+    "clustering": {
+      "available": true,
+      "cluster_sizes": [
+        12,
+        11,
+        40,
+        1
+      ],
+      "clustering_available": true,
+      "definition": "Optional deterministic PCA-2 projection of the sample and optional k-means cluster summary over that projection.",
+      "explained_variance_ratio_pc1": 0.9949739696,
+      "explained_variance_ratio_pc2": 0.0048953605,
+      "inertia": 2333.8808616177,
+      "iterations": 3,
+      "labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        3,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        0,
+        1,
+        0,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "method": "deterministic PCA-2 projection of the seeded sample",
+      "n_clusters": 4,
+      "projection_points": [
+        [
+          -18.6954030016,
+          -0.101011753
+        ],
+        [
+          -18.769532938,
+          -0.124641574
+        ],
+        [
+          -19.3322804991,
+          -0.9355128672
+        ],
+        [
+          -18.5189795455,
+          -0.3024165193
+        ],
+        [
+          -18.769532938,
+          -0.124641574
+        ],
+        [
+          1354.9863797021,
+          -2.6929492834
+        ],
+        [
+          -19.2647303817,
+          0.0989660974
+        ],
+        [
+          -18.715046258,
+          -0.1534110146
+        ],
+        [
+          -18.905889649,
+          0.0880730082
+        ],
+        [
+          -18.3467058956,
+          -0.2309442611
+        ],
+        [
+          -18.8890266472,
+          -0.5660627727
+        ],
+        [
+          -18.4189705123,
+          -0.6213816339
+        ],
+        [
+          -19.4932043498,
+          -0.8251744184
+        ],
+        [
+          -18.9126302098,
+          -0.1685382012
+        ],
+        [
+          -19.2647246685,
+          -0.9399309702
+        ],
+        [
+          -19.379425137,
+          -0.2900073497
+        ],
+        [
+          -19.1646509878,
+          -0.6900419377
+        ],
+        [
+          -18.9094056084,
+          0.0672234708
+        ],
+        [
+          -18.6002902466,
+          -0.3960761845
+        ],
+        [
+          -28.1153705506,
+          -13.0405568424
+        ],
+        [
+          -27.9957258215,
+          -14.1585011501
+        ],
+        [
+          -28.7904364503,
+          -13.6456169026
+        ],
+        [
+          -27.5797832719,
+          -13.6979670396
+        ],
+        [
+          -28.2240757606,
+          -13.2400878443
+        ],
+        [
+          -28.919998079,
+          -13.9496717917
+        ],
+        [
+          -28.1079135263,
+          -13.3127657189
+        ],
+        [
+          -28.2037586796,
+          -13.9674782135
+        ],
+        [
+          -27.9007220028,
+          -13.6090048109
+        ],
+        [
+          -27.7278897322,
+          -13.6389722796
+        ],
+        [
+          -28.2286647356,
+          -14.2838740996
+        ],
+        [
+          -28.0464960164,
+          -13.4974692647
+        ],
+        [
+          -28.7433934179,
+          -13.5495546005
+        ],
+        [
+          -28.8365313605,
+          -13.5550187989
+        ],
+        [
+          -28.5303735099,
+          -13.8695990422
+        ],
+        [
+          -28.0347046563,
+          -14.3962507828
+        ],
+        [
+          -28.5136756972,
+          -13.7274989625
+        ],
+        [
+          -27.769352206,
+          -13.6868374541
+        ],
+        [
+          -28.2470629821,
+          -14.144079795
+        ],
+        [
+          -28.6866219204,
+          -13.6542695194
+        ],
+        [
+          -28.0618233801,
+          -13.8453965548
+        ],
+        [
+          -27.7174012791,
+          -13.9717142096
+        ],
+        [
+          -28.2915013186,
+          -14.0620343891
+        ],
+        [
+          -16.8148868843,
+          14.9186470617
+        ],
+        [
+          -17.2692154317,
+          14.9838393576
+        ],
+        [
+          -16.2583430259,
+          14.5507712222
+        ],
+        [
+          -16.7483853988,
+          14.5130063769
+        ],
+        [
+          -15.4431350243,
+          15.0917256854
+        ],
+        [
+          -16.9721436474,
+          14.5374684148
+        ],
+        [
+          -16.72821951,
+          15.4295303465
+        ],
+        [
+          -16.1923401733,
+          14.2746984595
+        ],
+        [
+          -17.193222183,
+          14.0657186599
+        ],
+        [
+          -16.1472028666,
+          14.6628075606
+        ],
+        [
+          -16.687527839,
+          15.0076819335
+        ],
+        [
+          -17.1601301049,
+          14.6942050534
+        ],
+        [
+          -16.3752043437,
+          15.3327330222
+        ],
+        [
+          -16.7945001954,
+          15.0149466868
+        ],
+        [
+          -16.6347861623,
+          14.9643493243
+        ],
+        [
+          -16.6933909619,
+          15.0647505871
+        ],
+        [
+          -16.7752108904,
+          14.363963165
+        ],
+        [
+          -16.2780749437,
+          14.923352641
+        ],
+        [
+          -16.9275045236,
+          14.9731626291
+        ],
+        [
+          -16.3169665091,
+          14.50389817
+        ],
+        [
+          -16.5461966764,
+          14.8078538245
+        ],
+        [
+          -16.4060865778,
+          14.7335896235
+        ]
+      ],
+      "sample_size": 64,
+      "scope": "sample"
+    },
+    "dimensions": {
+      "definition": "Per-coordinate count, mean, standard deviation, minimum, maximum, and zero ratio over the selected split.",
+      "dim": 16,
+      "per_dimension": {
+        "max": {
+          "bucket_size": 1,
+          "downsampled": false,
+          "source_length": 16,
+          "values": [
+            4.9771981239,
+            5.7136044502,
+            5.1253185272,
+            207.552444458,
+            4.4437794685,
+            3.388053894,
+            258.8473205566,
+            325.966003418,
+            142.9326477051,
+            4.76892519,
+            2.9417226315,
+            202.7844238281,
+            5.1918087006,
+            3.2839119434,
+            5.21504879,
+            4.4401721954
+          ]
+        },
+        "mean": {
+          "bucket_size": 1,
+          "downsampled": false,
+          "source_length": 16,
+          "values": [
+            -7.667329511,
+            -3.0332418824,
+            -1.8966283016,
+            2.4728561803,
+            -0.3450230193,
+            -2.4829891122,
+            2.8079502252,
+            2.6989919956,
+            1.6964068959,
+            -1.6521264026,
+            -1.1009128115,
+            1.4662248464,
+            -0.8020474593,
+            -6.766114973,
+            -1.9397269539,
+            -3.508628767
+          ]
+        },
+        "min": {
+          "bucket_size": 1,
+          "downsampled": false,
+          "source_length": 16,
+          "values": [
+            -858.9626464844,
+            -325.7226257324,
+            -260.0692138672,
+            -3.7851216793,
+            -28.776506424,
+            -266.34765625,
+            -4.4272899628,
+            -5.0716218948,
+            -3.8773283958,
+            -88.4777679443,
+            -86.1587295532,
+            -5.425839901,
+            -85.1957702637,
+            -626.9149780273,
+            -285.9913635254,
+            -373.794128418
+          ]
+        },
+        "std": {
+          "bucket_size": 1,
+          "downsampled": false,
+          "source_length": 16,
+          "values": [
+            78.1092629495,
+            29.8535987507,
+            23.8667972211,
+            19.1548523762,
+            4.0840581673,
+            24.2896689695,
+            23.7184137361,
+            29.8088967965,
+            13.2362795052,
+            8.9796409934,
+            8.1097519239,
+            18.7650052346,
+            8.5105667698,
+            56.9356862282,
+            26.1913429756,
+            34.1020541968
+          ]
+        },
+        "zero_ratio": {
+          "bucket_size": 1,
+          "downsampled": false,
+          "source_length": 16,
+          "values": [
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0084033613,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333,
+            0.0083333333
+          ]
+        }
+      },
+      "sample_size": null,
+      "scope": "full",
+      "summary": {
+        "mean": {
+          "count": 16,
+          "max": 2.8079502252,
+          "mean": -1.2532711907,
+          "min": -7.667329511,
+          "p1": -7.5321473303,
+          "p25": -2.6205523047,
+          "p5": -6.9914186075,
+          "p50": -1.3765196071,
+          "p75": 1.5237703588,
+          "p95": 2.726231553,
+          "p99": 2.7916064907,
+          "std": 3.0154691255
+        },
+        "std": {
+          "count": 16,
+          "max": 78.1092629495,
+          "mean": 25.4822422996,
+          "min": 4.0840581673,
+          "p1": 4.6879122307,
+          "p25": 12.1721198773,
+          "p5": 7.1033284847,
+          "p50": 23.7926054786,
+          "p75": 29.820072285,
+          "p95": 62.2290804086,
+          "p99": 74.9332264413,
+          "std": 18.4287109015
+        },
+        "zero_ratio": {
+          "count": 16,
+          "max": 0.0084033613,
+          "mean": 0.0083377101,
+          "min": 0.0083333333,
+          "p1": 0.0083333333,
+          "p25": 0.0083333333,
+          "p5": 0.0083333333,
+          "p50": 0.0083333333,
+          "p75": 0.0083333333,
+          "p95": 0.0083508403,
+          "p99": 0.0083928571,
+          "std": 1.69511e-05
+        }
+      },
+      "top_variance_dimensions": [
+        {
+          "dimension": 0,
+          "mean": -7.667329511,
+          "std": 78.1092629495,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 13,
+          "mean": -6.766114973,
+          "std": 56.9356862282,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 15,
+          "mean": -3.508628767,
+          "std": 34.1020541968,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 1,
+          "mean": -3.0332418824,
+          "std": 29.8535987507,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 7,
+          "mean": 2.6989919956,
+          "std": 29.8088967965,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 14,
+          "mean": -1.9397269539,
+          "std": 26.1913429756,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 5,
+          "mean": -2.4829891122,
+          "std": 24.2896689695,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 2,
+          "mean": -1.8966283016,
+          "std": 23.8667972211,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 6,
+          "mean": 2.8079502252,
+          "std": 23.7184137361,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 3,
+          "mean": 2.4728561803,
+          "std": 19.1548523762,
+          "zero_ratio": 0.0084033613
+        }
+      ],
+      "top_zero_dimensions": [
+        {
+          "dimension": 3,
+          "mean": 2.4728561803,
+          "zero_ratio": 0.0084033613
+        },
+        {
+          "dimension": 15,
+          "mean": -3.508628767,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 14,
+          "mean": -1.9397269539,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 13,
+          "mean": -6.766114973,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 12,
+          "mean": -0.8020474593,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 11,
+          "mean": 1.4662248464,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 10,
+          "mean": -1.1009128115,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 9,
+          "mean": -1.6521264026,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 8,
+          "mean": 1.6964068959,
+          "zero_ratio": 0.0083333333
+        },
+        {
+          "dimension": 7,
+          "mean": 2.6989919956,
+          "zero_ratio": 0.0083333333
+        }
+      ]
+    },
+    "duplicates": {
+      "definition": "Exact duplicate detection by hashing each complete vector; near-duplicate pairs are sampled pairs whose chosen distance is below a relative threshold derived from the sampled pairwise-distance median.",
+      "exact": {
+        "count": 120,
+        "definition": "Vectors whose complete byte representation is identical.",
+        "duplicate_groups": 1,
+        "duplicate_ratio": 0.0166666667,
+        "duplicate_vectors": 2,
+        "max_group_size": 3,
+        "sample_size": null,
+        "scope": "full",
+        "unique_vectors": 118
+      },
+      "near_duplicate": {
+        "available": true,
+        "definition": "Sampled pairs whose distance is at most epsilon times the sampled pairwise-distance median.",
+        "median_pairwise_distance": 15.6824777812,
+        "near_duplicate_pairs": 1,
+        "near_duplicate_ratio": 0.002016129,
+        "pair_count": 496,
+        "relative_epsilon": 0.001,
+        "sample_size": 32,
+        "scope": "sample",
+        "threshold": 0.0156824778
+      },
+      "sample_size": null,
+      "scope": "mixed",
+      "scope_note": "exact duplicate detection covers the full split; the near-duplicate indicator covers the bounded pairwise sample"
+    },
+    "invalid_values": {
+      "count": 120,
+      "definition": "Counts of NaN/Inf values in the selected split and the number of vectors containing at least one such value. Invalid entries are excluded from numeric summaries and treated as zero in norms.",
+      "invalid_ratio": 0.0005208333,
+      "invalid_values": 1,
+      "sample_size": null,
+      "scope": "full",
+      "total_values": 1920,
+      "vectors_with_invalid": 1,
+      "vectors_with_invalid_ratio": 0.0083333333
+    },
+    "nearest_neighbor_distances": {
+      "available": true,
+      "definition": "For each vector in the bounded sample, the distance to its nearest other vector in the same sample (diagonal excluded).",
+      "histogram": {
+        "bin_count": 20,
+        "bins": [
+          -858.9626464844,
+          -815.896548152,
+          -772.8304498196,
+          -729.7643514872,
+          -686.6982531548,
+          -643.6321548223,
+          -600.5660564899,
+          -557.4999581575,
+          -514.4338598251,
+          -471.3677614927,
+          -428.3016631603,
+          -385.2355648279,
+          -342.1694664955,
+          -299.1033681631,
+          -256.0372698307,
+          -212.9711714983,
+          -169.9050731659,
+          -126.8389748335,
+          -83.7728765011,
+          -40.7067781687,
+          2.3593201637
+        ],
+        "counts": [
+          1,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          31
+        ]
+      },
+      "sample_size": 32,
+      "scope": "sample",
+      "stats": {
+        "count": 32,
+        "max": 2.3593201637,
+        "mean": -27.5290439874,
+        "min": -858.9626464844,
+        "p1": -593.7247842097,
+        "p25": -2.7506123781,
+        "p5": -3.2516905189,
+        "p50": -2.3543208838,
+        "p75": 2.0313094854,
+        "p95": 2.2382728338,
+        "p99": 2.3358640146,
+        "std": 149.3479472748
+      }
+    },
+    "norms": {
+      "count": 120,
+      "definition": "L2 norm ||x||_2 of every vector, computed over all finite values in the selected split.",
+      "histogram": {
+        "bin_count": 20,
+        "bins": [
+          0.0,
+          68.8884556375,
+          137.7769112751,
+          206.6653669126,
+          275.5538225501,
+          344.4422781876,
+          413.3307338252,
+          482.2191894627,
+          551.1076451002,
+          619.9961007378,
+          688.8845563753,
+          757.7730120128,
+          826.6614676504,
+          895.5499232879,
+          964.4383789254,
+          1033.3268345629,
+          1102.2152902005,
+          1171.103745838,
+          1239.9922014755,
+          1308.8806571131,
+          1377.7691127506
+        ],
+        "counts": [
+          119,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      },
+      "non_finite_norms": 0,
+      "sample_size": null,
+      "scope": "full",
+      "stats": {
+        "count": 120,
+        "max": 1377.7691127506,
+        "mean": 23.3671371033,
+        "min": 0.0,
+        "p1": 3.4883344003,
+        "p25": 4.598193065,
+        "p5": 3.8390001516,
+        "p50": 15.3975603837,
+        "p75": 16.0432229961,
+        "p95": 16.6348738597,
+        "p99": 16.9372130561,
+        "std": 124.2774363619
+      }
+    },
+    "outliers": {
+      "count": 120,
+      "definition": "Robust norm outliers: vectors whose norm has a modified z-score above 3.5, using median and median absolute deviation. Invalid (NaN/Inf) value counts are reported separately.",
+      "mad_norm": 0.9384653936,
+      "max_over_median_norm": 89.4797018758,
+      "median_norm": 15.3975603837,
+      "method": "modified z-score (median/MAD)",
+      "outlier_count": 40,
+      "outlier_ratio": 0.3333333333,
+      "sample_size": null,
+      "scope": "full",
+      "threshold": 4.8697240588
+    },
+    "pairwise_distances": {
+      "definition": "Distribution of distances between distinct vectors in a bounded random sample. The full M x M matrix is allocated only for the configured sample size, never for the complete dataset.",
+      "dense_sample_materialized": true,
+      "histogram": {
+        "bin_count": 20,
+        "bins": [
+          8.43e-08,
+          69.1976328784,
+          138.3952656725,
+          207.5928984666,
+          276.7905312606,
+          345.9881640547,
+          415.1857968488,
+          484.3834296429,
+          553.581062437,
+          622.7786952311,
+          691.9763280252,
+          761.1739608192,
+          830.3715936133,
+          899.5692264074,
+          968.7668592015,
+          1037.9644919956,
+          1107.1621247897,
+          1176.3597575838,
+          1245.5573903778,
+          1314.7550231719,
+          1383.952655966
+        ],
+        "counts": [
+          465,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          31
+        ]
+      },
+      "matrix_is_bounded": true,
+      "metric": "euclidean",
+      "pair_count": 496,
+      "requested_pairwise_sample_size": 32,
+      "sample_size": 32,
+      "scope": "sample",
+      "sparse_sparse_distance_loops": false,
+      "stats": {
+        "count": 496,
+        "max": 1383.952655966,
+        "mean": 94.9479844118,
+        "min": 8.43e-08,
+        "p1": 1.3181406256,
+        "p25": 2.1777065554,
+        "p5": 1.6455049703,
+        "p50": 15.6824777812,
+        "p75": 16.7807703793,
+        "p95": 1373.7211169061,
+        "p99": 1383.237880348,
+        "std": 331.3111900325
+      }
+    },
+    "sparsity": {
+      "all_zero_vector_ratio": 0.0083333333,
+      "all_zero_vectors": 1,
+      "count": 120,
+      "definition": "Count and fraction of exactly-zero entries; for sparse vectors this also reports non-zero entries per vector and density = nnz / (count * dim).",
+      "density": 0.9916666667,
+      "non_zero_values": 1904,
+      "representation": "dense",
+      "sample_size": null,
+      "scope": "full",
+      "total_values": 1920,
+      "zero_ratio": 0.0083333333,
+      "zero_values": 16
+    }
+  },
+  "schema_version": "1.0",
+  "tool": {
+    "name": "vsag-dataset-profiler",
+    "version": "0.1.0"
+  },
+  "warnings": []
+}
