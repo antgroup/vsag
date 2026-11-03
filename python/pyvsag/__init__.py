@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from ._index import Index, _check
+from ._index import Index, VsagError, _check
 from ._lib import lib as _lib
 from ._version import __version__
 
@@ -39,5 +39,5 @@ def set_logger_debug():
     _set_log_level("debug")
 
 
-__all__ = ["Index", "set_logger_off", "set_logger_info", "set_logger_debug", "__version__"]
+__all__ = ["Index", "VsagError", "set_logger_off", "set_logger_info", "set_logger_debug", "__version__"]
 

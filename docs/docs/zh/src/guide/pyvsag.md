@@ -157,8 +157,8 @@ for rid, rdist in zip(result_ids, result_dists):
 
 | 方法 | 返回值 |
 | --- | --- |
-| `knn_search(vector, k, parameters)` | `(ids, distances)`：形状为 `(k,)` 的数组（`int64`、`float32`）。搜索未能填满的位置为 `-1`。 |
-| `knn_search(index_pointers, indices, values, k, parameters)` | 稀疏查询批次的同样结果，形状为 `(num_queries, k)`。 |
+| `knn_search(vector, k, parameters)` | `(ids, distances)`：形状为 `(actual_count,)` 的数组（`int64`、`float32`）。只返回实际命中，不补齐到 k。 |
+| `knn_search(index_pointers, indices, values, k, parameters)` | 稀疏查询批次的矩形结果，形状为 `(num_queries, k)`，以 ID `-1` / 距离 `+inf` 补齐。 |
 | `range_search(point, threshold, parameters)` | `threshold` 范围内所有结果的 `(ids, distances)`；没有结果时为空数组。 |
 | `knn_search_with_statistics(...)` / `range_search_with_statistics(...)` | 上述数组，外加 JSON 字符串形式的搜索统计信息（稀疏批次为字符串列表）。见 [搜索统计](search_statistics.md)。 |
 
@@ -194,19 +194,19 @@ new_index = pyvsag.Index("hgraph", index_params)
 new_index.load("index.bin")
 ```
 
-底层序列化或反序列化失败（包括文件无法打开）时，`save` 与 `load` 会抛出 `RuntimeError`。
+文件打开或最终 stream I/O 失败时，`save` 与 `load` 抛出 `OSError`；核心序列化/反序列化失败抛出 `VsagError`。保存失败不保证事务性回滚，可能留下部分文件。这里沿用 native stream 格式，不引入 Python 专属持久化格式。
 
 ## 索引操作
 
 | 方法 | 返回值 | 说明 |
 | --- | --- | --- |
-| `build(...)` | `None` | 稠密 `build(vectors, ids, num_elements, dim)` 或稀疏 `build(index_pointers, indices, values, ids)`。 |
-| `add(...)` | `None` | 与 `build` 相同的两种形式。 |
-| `remove(ids)` | `int` | 删除一维整数 ID 数组，返回实际删除的数量。没有 ID 被删除和操作失败时都返回 `0`。 |
+| `build(...)` | 失败 ID 的 `list[int]` | 稠密 `build(vectors, ids, num_elements, dim)` 或稀疏 `build(index_pointers, indices, values, ids)`。 |
+| `add(...)` | 失败 ID 的 `list[int]` | 与 `build` 相同的两种形式。 |
+| `remove(ids)` | `int` | 删除一维整数 ID 数组，返回实际删除的数量。成功但没有删除时返回 `0`；失败抛出异常。 |
 | `get_num_elements()` | `int` | 索引当前元素数量。 |
 | `get_memory_usage()` | `int` | 索引占用的内存字节数。 |
 | `check_id_exist(id)` | `bool` | 指定 ID 当前是否存在。 |
-| `get_min_max_id()` | `(min_id, max_id)` | 操作失败时返回 `(-1, -1)`。 |
+| `get_min_max_id()` | `(min_id, max_id)` | 返回 native 最小/最大 ID；失败抛出异常，不返回伪造哨兵。 |
 | `calc_distances_by_id(query, ids)`（旧别名 `cal_distance_by_id`） | `numpy.ndarray` | 每个 ID 一个 float32 距离，缺失 ID 为 `-1`。 |
 
 ```python
@@ -233,19 +233,22 @@ removed = index.remove(candidate_ids)
 和空 query 会以 `RuntimeError` 拒绝，不会被当作缺失 ID。其他 NumPy 输入会按需转为连续的 float32 / int64
 数组，正负步长的视图都保持逻辑顺序。它不支持稀疏、多向量或多 query 输入。
 
-## 错误处理
+## 错误处理与迁移
 
-| 失败情形 | 行为 |
-| --- | --- |
-| `pyvsag.Index(...)` 无法创建索引 | `RuntimeError`（`error type: UNSUPPORTED_INDEX`、`error type: invalid_parameter` 或 `error type: unexpectedError`） |
-| `build`、`add`、`save`、`load`、`get_num_elements`、`get_memory_usage`、`check_id_exist`、`calc_distances_by_id`、`*_with_statistics` | `RuntimeError`，消息以操作名开头并附带 C++ 错误信息 |
-| `knn_search` | 不抛异常：ids 和 distances 都填 `-1` |
-| `range_search` | 不抛异常：返回空数组 |
-| `remove` | 不抛异常：返回 `0` |
-| `get_min_max_id` | 不抛异常：返回 `(-1, -1)` |
-| dtype、形状、布局、字节序或整数范围不对 | `ValueError`；调用参数不对时抛出 `TypeError` |
+- 核心操作失败统一抛出 `pyvsag.VsagError`（`RuntimeError` 子类），包含整数 `.code`、公开方法名 `.operation` 和核心错误消息；普通搜索与统计版一致，不再吞错。
+- `.code` 沿用 C++ 的正错误码，在 Python 边界将 C ABI 的负错误码取反，不改变现有 C ABI。
+- `save` / `load` 的文件打开或最终 stream I/O 失败抛出 `OSError`；其他 native 错误仍为 `VsagError`。
+- dtype、形状、布局、字节序、可表示范围错误为 `ValueError`；调用参数类型错误为 `TypeError`。
+- dense KNN 返回实际命中数量的一维数组，不再补齐到 k；稀疏 batch 保留 `(num_queries, k)` 矩形结果，以 ID `-1` 和距离 `+inf` 填充不足部分。
+- build/add 返回失败 ID 列表，部分成功仍返回失败项，空列表表示无失败；忽略返回值的原有调用不受影响。remove/minmax 操作失败不再伪装为 0 或 `(-1, -1)`。
+- CSR 整数在转为 uint32 前检查，拒绝负数和越界；float32 转换溢出拒绝为 `ValueError`，不能静默把有限大数变成 inf。支持的非连续 ID/CSR 数组按逻辑顺序复制，dense 向量的严格 dtype/layout 要求不变。
 
-如果搜索失败时必须抛出异常，请使用 `*_with_statistics` 变体。
+```python
+try:
+    ids, distances = index.knn_search(query, 10, search_params)
+except pyvsag.VsagError as error:
+    print(error.operation, error.code, str(error))
+```
 
 ## 日志
 

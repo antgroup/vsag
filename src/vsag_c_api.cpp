@@ -25,11 +25,13 @@
 #include <algorithm>
 #include <atomic>
 #include <condition_variable>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <functional>
 #include <future>
 #include <istream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -78,6 +80,10 @@ struct vsag_index {
     std::shared_ptr<vsag::Index> index;
     // Keeps the engine's host resources alive for as long as the index exists.
     std::shared_ptr<void> owner;
+};
+
+struct VsagIdList {
+    std::vector<int64_t> ids;
 };
 
 struct vsag_search_result {
@@ -157,23 +163,28 @@ struct DatasetView {
 };
 
 DatasetView
-make_view(const vsag_dataset_t* handle, bool single_query) {
+make_view(const vsag_dataset_t* handle, bool single_query, bool allow_empty = false) {
     if (handle == nullptr) {
         throw std::invalid_argument("dataset is NULL");
     }
-    if (handle->num_elements <= 0) {
+    if (handle->num_elements < 0 or (handle->num_elements == 0 and not allow_empty)) {
         throw std::invalid_argument("dataset num_elements must be positive");
     }
     if (single_query and handle->num_elements != 1) {
         throw std::invalid_argument("dataset must hold exactly one vector");
     }
+    if (handle->num_elements == 0) {
+        DatasetView empty;
+        empty.dataset = vsag::Dataset::Make()->Owner(false)->NumElements(0)->Dim(handle->dim);
+        return empty;
+    }
     const bool is_sparse = handle->index_pointers != nullptr;
     const bool is_dense = handle->float32_vectors != nullptr or
                           handle->float16_vectors != nullptr or handle->int8_vectors != nullptr;
-    if (not is_sparse and not is_dense) {
+    if (not is_sparse and not is_dense and not(single_query and handle->dim == 0)) {
         throw std::invalid_argument("dataset has no vectors");
     }
-    if (is_dense and handle->dim <= 0) {
+    if (is_dense and (handle->dim < 0 or (handle->dim == 0 and not single_query))) {
         throw std::invalid_argument("dataset dim must be positive");
     }
 
@@ -212,8 +223,10 @@ make_view(const vsag_dataset_t* handle, bool single_query) {
             }
             auto& row = view.sparse_vectors[i];
             row.len_ = end - begin;
-            row.ids_ = const_cast<uint32_t*>(handle->indices) + begin;
-            row.vals_ = const_cast<float*>(handle->values) + begin;
+            row.ids_ = handle->indices == nullptr ? nullptr
+                                                  : const_cast<uint32_t*>(handle->indices) + begin;
+            row.vals_ =
+                handle->values == nullptr ? nullptr : const_cast<float*>(handle->values) + begin;
         }
         view.dataset->SparseVectors(view.sparse_vectors.data());
     }
@@ -585,10 +598,31 @@ private:
 };
 
 vsag_error_t*
+validate_search_result(const vsag::DatasetPtr& data, int64_t maximum_count) {
+    if (data == nullptr) {
+        return make_error(VSAG_INTERNAL_ERROR, "core returned a NULL search result");
+    }
+    const auto count = data->GetDim();
+    if (count < 0 or count > maximum_count or
+        static_cast<uint64_t>(count) >
+            static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) / sizeof(int64_t)) {
+        return make_error(VSAG_INTERNAL_ERROR, "core returned invalid search result size");
+    }
+    if (count != 0 and (data->GetIds() == nullptr or data->GetDistances() == nullptr)) {
+        return make_error(VSAG_INTERNAL_ERROR, "core returned NULL search result buffers");
+    }
+    return nullptr;
+}
+
+vsag_error_t*
 make_result(const tl::expected<vsag::DatasetPtr, vsag::Error>& searched,
-            vsag_search_result_t** out_result) {
+            vsag_search_result_t** out_result,
+            int64_t maximum_count) {
     if (not searched.has_value()) {
         return make_error(searched.error());
+    }
+    if (auto* error = validate_search_result(searched.value(), maximum_count)) {
+        return error;
     }
     auto result = std::make_unique<vsag_search_result>();
     result->dataset = searched.value();
@@ -937,8 +971,59 @@ vsag_error_t*
 vsag_index_build(vsag_index_t* index, const vsag_dataset_t* base) {
     return guarded([&]() -> vsag_error_t* {
         VSAG_REQUIRE(index != nullptr, "index is NULL");
-        auto view = make_view(base, false);
+        auto view = make_view(base, false, true);
         return to_error(index->index->Build(view.dataset));
+    });
+}
+
+uint64_t
+vsag_id_list_count(const vsag_id_list_t* ids) {
+    return ids == nullptr ? 0 : ids->ids.size();
+}
+
+const int64_t*
+vsag_id_list_data(const vsag_id_list_t* ids) {
+    return ids == nullptr or ids->ids.empty() ? nullptr : ids->ids.data();
+}
+
+void
+vsag_id_list_destroy(vsag_id_list_t* ids) {
+    delete ids;
+}
+
+vsag_error_t*
+vsag_index_build_with_failed_ids(vsag_index_t* index,
+                                 const vsag_dataset_t* base,
+                                 vsag_id_list_t** out_failed_ids) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_failed_ids != nullptr, "out_failed_ids is NULL");
+        *out_failed_ids = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(base, false, true);
+        auto result = index->index->Build(view.dataset);
+        if (not result.has_value()) {
+            return make_error(result.error());
+        }
+        *out_failed_ids = new VsagIdList{std::move(result.value())};
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_add_with_failed_ids(vsag_index_t* index,
+                               const vsag_dataset_t* base,
+                               vsag_id_list_t** out_failed_ids) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_failed_ids != nullptr, "out_failed_ids is NULL");
+        *out_failed_ids = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(base, false, true);
+        auto result = index->index->Add(view.dataset);
+        if (not result.has_value()) {
+            return make_error(result.error());
+        }
+        *out_failed_ids = new VsagIdList{std::move(result.value())};
+        return nullptr;
     });
 }
 
@@ -955,7 +1040,7 @@ vsag_error_t*
 vsag_index_add(vsag_index_t* index, const vsag_dataset_t* base, uint64_t* out_failed_count) {
     return guarded([&]() -> vsag_error_t* {
         VSAG_REQUIRE(index != nullptr, "index is NULL");
-        auto view = make_view(base, false);
+        auto view = make_view(base, false, true);
         auto added = index->index->Add(view.dataset);
         if (not added.has_value()) {
             return make_error(added.error());
@@ -1038,13 +1123,12 @@ vsag_index_knn_search(const vsag_index_t* index,
         *out_result = nullptr;
         VSAG_REQUIRE(index != nullptr, "index is NULL");
         VSAG_REQUIRE(parameters != nullptr, "parameters is NULL");
-        VSAG_REQUIRE(k > 0, "knn_search requires k >= 1");
         auto view = make_view(query, true);
         const auto& searched =
             filter == nullptr
                 ? index->index->KnnSearch(view.dataset, k, parameters)
                 : index->index->KnnSearch(view.dataset, k, parameters, filter->filter);
-        return make_result(searched, out_result);
+        return make_result(searched, out_result, std::max<int64_t>(k, 0));
     });
 }
 
@@ -1067,7 +1151,8 @@ vsag_index_range_search(const vsag_index_t* index,
             filter == nullptr ? index->index->RangeSearch(view.dataset, radius, parameters, limit)
                               : index->index->RangeSearch(
                                     view.dataset, radius, parameters, filter->filter, limit);
-        return make_result(searched, out_result);
+        return make_result(
+            searched, out_result, limit > 0 ? limit : std::numeric_limits<int64_t>::max());
     });
 }
 
@@ -1088,6 +1173,16 @@ vsag_index_knn_search_float32(const vsag_index_t* index,
         VSAG_REQUIRE(out_ids != nullptr and out_distances != nullptr, "output buffer is NULL");
         VSAG_REQUIRE(k > 0, "knn_search requires k >= 1");
         VSAG_REQUIRE(dim > 0, "dim must be positive");
+        VSAG_REQUIRE(dim <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
+                     "dim exceeds int64 range");
+        VSAG_REQUIRE(
+            num_queries <= static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) / dim /
+                               sizeof(float),
+            "query buffer size overflows");
+        VSAG_REQUIRE(
+            num_queries <= static_cast<uint64_t>(std::numeric_limits<std::ptrdiff_t>::max()) /
+                               static_cast<uint64_t>(k) / sizeof(int64_t),
+            "result buffer size overflows");
         const std::string search_parameters(parameters);
         for (uint64_t i = 0; i < num_queries; ++i) {
             auto query = vsag::Dataset::Make();
@@ -1102,10 +1197,15 @@ vsag_index_knn_search_float32(const vsag_index_t* index,
             if (not searched.has_value()) {
                 return make_error(searched.error());
             }
-            const auto count = std::min<int64_t>(searched.value()->GetDim(), k);
-            std::memcpy(out_ids + i * k, searched.value()->GetIds(), count * sizeof(int64_t));
-            std::memcpy(
-                out_distances + i * k, searched.value()->GetDistances(), count * sizeof(float));
+            if (auto* error = validate_search_result(searched.value(), k)) {
+                return error;
+            }
+            const auto count = searched.value()->GetDim();
+            if (count != 0) {
+                std::memcpy(out_ids + i * k, searched.value()->GetIds(), count * sizeof(int64_t));
+                std::memcpy(
+                    out_distances + i * k, searched.value()->GetDistances(), count * sizeof(float));
+            }
             if (out_counts != nullptr) {
                 out_counts[i] = count;
             }
@@ -1196,10 +1296,23 @@ vsag_index_serialize_file(const vsag_index_t* index, const char* file_path) {
         VSAG_REQUIRE(file_path != nullptr, "file_path is NULL");
         std::ofstream file(file_path, std::ios::binary);
         if (not file.is_open()) {
-            return make_error(VSAG_INTERNAL_ERROR,
-                              std::string("failed to open file for writing: ") + file_path);
+            return make_error(
+                VSAG_INTERNAL_ERROR,
+                std::string("file I/O: failed to open file for writing: ") + file_path);
         }
-        return to_error(index->index->Serialize(file));
+        auto serialized = index->index->Serialize(file);
+        if (not serialized.has_value()) {
+            return make_error(serialized.error());
+        }
+        file.flush();
+        if (not file.good()) {
+            return make_error(VSAG_INTERNAL_ERROR, "file I/O: failed to flush serialized file");
+        }
+        file.close();
+        if (file.fail()) {
+            return make_error(VSAG_INTERNAL_ERROR, "file I/O: failed to close serialized file");
+        }
+        return nullptr;
     });
 }
 
@@ -1210,10 +1323,22 @@ vsag_index_deserialize_file(vsag_index_t* index, const char* file_path) {
         VSAG_REQUIRE(file_path != nullptr, "file_path is NULL");
         std::ifstream file(file_path, std::ios::binary);
         if (not file.is_open()) {
-            return make_error(VSAG_MISSING_FILE,
-                              std::string("failed to open file for reading: ") + file_path);
+            return make_error(
+                VSAG_MISSING_FILE,
+                std::string("file I/O: failed to open file for reading: ") + file_path);
         }
-        return to_error(index->index->Deserialize(file));
+        auto deserialized = index->index->Deserialize(file);
+        if (not deserialized.has_value()) {
+            return make_error(deserialized.error());
+        }
+        if (file.bad() or file.fail()) {
+            return make_error(VSAG_READ_ERROR, "file I/O: failed to read serialized file");
+        }
+        file.close();
+        if (file.fail()) {
+            return make_error(VSAG_READ_ERROR, "file I/O: failed to close serialized file");
+        }
+        return nullptr;
     });
 }
 

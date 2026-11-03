@@ -18,6 +18,7 @@
 #include <atomic>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -656,7 +657,7 @@ TEST_CASE("vsag_c_api invalid arguments", "[vsag_c_api][ut]") {
     REQUIRE(code_of(vsag_dataset_create(nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE_OK(vsag_dataset_create(&raw));
     DatasetPtr empty(raw);
-    REQUIRE(code_of(vsag_index_build(index.get(), empty.get())) == VSAG_INVALID_ARGUMENT);
+    REQUIRE_OK(vsag_index_build(index.get(), empty.get()));
     REQUIRE_OK(vsag_dataset_set_num_elements(raw, 2));
     REQUIRE(code_of(vsag_index_build(index.get(), empty.get())) == VSAG_INVALID_ARGUMENT);
     REQUIRE_OK(vsag_dataset_set_float32_vectors(raw, data.datas.data()));
@@ -954,4 +955,138 @@ TEST_CASE("vsag_c_api logger callback", "[vsag_c_api][ut]") {
     REQUIRE_OK(vsag_set_logger(nullptr, nullptr));
     REQUIRE_OK(vsag_index_serialize_file(index.get(), paths[0].c_str()));
     REQUIRE(records.count.load() == before);
+}
+
+TEST_CASE("vsag_c_api failed ID lists preserve native results", "[vsag_c_api][ut]") {
+    auto index = make_index("brute_force", R"({"dtype":"float32","metric_type":"l2","dim":128})");
+    std::vector<float> vectors(3 * dim, 0.0F);
+    std::vector<int64_t> ids{10, 20, 20};
+    auto base = make_dense(vectors.data(), 3, ids.data());
+    vsag_id_list_t* failed = nullptr;
+    REQUIRE_OK(vsag_index_build_with_failed_ids(index.get(), base.get(), &failed));
+    REQUIRE(failed != nullptr);
+    REQUIRE(vsag_id_list_count(failed) == 1);
+    REQUIRE(vsag_id_list_data(failed)[0] == 20);
+    // Ownership is independent of the caller buffers and dataset handle.
+    ids[2] = 99;
+    base.reset();
+    REQUIRE(vsag_id_list_data(failed)[0] == 20);
+    vsag_id_list_destroy(failed);
+
+    ids = {20, 30, 30};
+    base = make_dense(vectors.data(), 3, ids.data());
+    REQUIRE_OK(vsag_index_add_with_failed_ids(index.get(), base.get(), &failed));
+    REQUIRE(vsag_id_list_count(failed) == 2);
+    std::vector<int64_t> actual(vsag_id_list_data(failed), vsag_id_list_data(failed) + 2);
+    std::sort(actual.begin(), actual.end());
+    REQUIRE(actual == std::vector<int64_t>{20, 30});
+    vsag_id_list_destroy(failed);
+
+    auto empty = make_dense(nullptr, 0);
+    REQUIRE_OK(vsag_index_build_with_failed_ids(index.get(), empty.get(), &failed));
+    REQUIRE(vsag_id_list_count(failed) == 0);
+    REQUIRE(vsag_id_list_data(failed) == nullptr);
+    vsag_id_list_destroy(failed);
+    REQUIRE_OK(vsag_index_add_with_failed_ids(index.get(), empty.get(), &failed));
+    REQUIRE(vsag_id_list_count(failed) == 0);
+    vsag_id_list_destroy(failed);
+    REQUIRE_OK(vsag_index_build(index.get(), empty.get()));
+    uint64_t failed_count = 999;
+    REQUIRE_OK(vsag_index_add(index.get(), empty.get(), &failed_count));
+    REQUIRE(failed_count == 0);
+
+    failed = reinterpret_cast<vsag_id_list_t*>(1);
+    REQUIRE(code_of(vsag_index_build_with_failed_ids(nullptr, base.get(), &failed)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(failed == nullptr);
+    REQUIRE(code_of(vsag_index_add_with_failed_ids(index.get(), nullptr, &failed)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(failed == nullptr);
+    REQUIRE(code_of(vsag_index_add_with_failed_ids(index.get(), base.get(), nullptr)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(vsag_id_list_count(nullptr) == 0);
+    REQUIRE(vsag_id_list_data(nullptr) == nullptr);
+    vsag_id_list_destroy(nullptr);
+}
+
+TEST_CASE("vsag_c_api empty operations follow the native early return", "[vsag_c_api][ut]") {
+    auto index = make_index();
+    auto empty = make_dense(nullptr, 0);
+    REQUIRE_OK(vsag_index_build(index.get(), empty.get()));
+    REQUIRE_OK(vsag_index_add(index.get(), empty.get(), nullptr));
+    std::vector<float> vector(dim, 0.0F);
+    auto query = make_dense(vector.data(), 1);
+    vsag_search_result_t* result = nullptr;
+    REQUIRE_OK(
+        vsag_index_knn_search(index.get(), query.get(), 0, search_parameters, nullptr, &result));
+    ResultPtr owned(result);
+    REQUIRE(vsag_search_result_count(result) == 0);
+    REQUIRE_OK(vsag_dataset_set_dim(query.get(), 0));
+    vsag_search_result_destroy(owned.release());
+    REQUIRE_OK(
+        vsag_index_knn_search(index.get(), query.get(), 0, search_parameters, nullptr, &result));
+    owned.reset(result);
+    REQUIRE(vsag_search_result_count(result) == 0);
+    vsag_search_result_destroy(owned.release());
+    REQUIRE_OK(vsag_index_range_search(
+        index.get(), query.get(), -1.0F, -1, search_parameters, nullptr, &result));
+    owned.reset(result);
+    REQUIRE(vsag_search_result_count(result) == 0);
+}
+
+TEST_CASE("vsag_c_api file failures have distinct I/O messages", "[vsag_c_api][ut]") {
+    TestData data;
+    auto index = data.BuildIndex();
+    auto* error = vsag_index_serialize_file(index.get(), "/nonexistent_dir/index.bin");
+    REQUIRE(error != nullptr);
+    REQUIRE(std::string(vsag_error_message(error)).find("file I/O: ") == 0);
+    vsag_error_destroy(error);
+#if defined(__linux__)
+    error = vsag_index_serialize_file(index.get(), "/dev/full");
+    REQUIRE(error != nullptr);
+    REQUIRE(vsag_error_code(error) == VSAG_INTERNAL_ERROR);
+    REQUIRE(std::string(vsag_error_message(error)).find("file I/O: ") == 0);
+    vsag_error_destroy(error);
+#endif
+}
+
+TEST_CASE("vsag_c_api flat search checks pointer arithmetic before reads", "[vsag_c_api][ut]") {
+    auto index = make_index();
+    float query = 0.0F;
+    int64_t id = -99;
+    float distance = -99.0F;
+    int64_t count = -99;
+    REQUIRE(code_of(vsag_index_knn_search_float32(index.get(),
+                                                  &query,
+                                                  std::numeric_limits<uint64_t>::max(),
+                                                  dim,
+                                                  1,
+                                                  search_parameters,
+                                                  nullptr,
+                                                  &id,
+                                                  &distance,
+                                                  &count)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_knn_search_float32(index.get(),
+                                                  &query,
+                                                  1,
+                                                  std::numeric_limits<uint64_t>::max(),
+                                                  1,
+                                                  search_parameters,
+                                                  nullptr,
+                                                  &id,
+                                                  &distance,
+                                                  &count)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_knn_search_float32(index.get(),
+                                                  &query,
+                                                  1,
+                                                  dim,
+                                                  std::numeric_limits<int64_t>::max(),
+                                                  search_parameters,
+                                                  nullptr,
+                                                  &id,
+                                                  &distance,
+                                                  &count)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(id == -99);
+    REQUIRE(distance == -99.0F);
+    REQUIRE(count == -99);
 }

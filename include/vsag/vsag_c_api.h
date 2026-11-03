@@ -77,6 +77,7 @@ typedef struct vsag_engine_options vsag_engine_options_t;
 typedef struct vsag_filter vsag_filter_t;
 typedef struct vsag_index vsag_index_t;
 typedef struct vsag_search_result vsag_search_result_t;
+typedef struct VsagIdList vsag_id_list_t;
 
 /** The value of VSAG_C_API_VERSION the library was built with. */
 uint32_t
@@ -302,12 +303,39 @@ vsag_index_destroy(vsag_index_t* index);
 vsag_error_t*
 vsag_index_build(vsag_index_t* index, const vsag_dataset_t* base);
 
+/**
+ * Builds the index and returns the exact IDs rejected by the native operation.
+ * On success `*out_failed_ids` is an owning list (possibly empty); destroy it with
+ * vsag_id_list_destroy(). On error `*out_failed_ids` is NULL. Backend duplicate-ID
+ * behavior is preserved; an empty list is not a universal deduplication guarantee.
+ */
+vsag_error_t*
+vsag_index_build_with_failed_ids(vsag_index_t* index,
+                                 const vsag_dataset_t* base,
+                                 vsag_id_list_t** out_failed_ids);
+
+uint64_t
+vsag_id_list_count(const vsag_id_list_t* ids);
+
+/** Borrowed until the list is destroyed; NULL for a NULL or empty list. */
+const int64_t*
+vsag_id_list_data(const vsag_id_list_t* ids);
+
+void
+vsag_id_list_destroy(vsag_id_list_t* ids);
+
 vsag_error_t*
 vsag_index_train(vsag_index_t* index, const vsag_dataset_t* data);
 
 /** `out_failed_count` (may be NULL) receives how many vectors were not inserted. */
 vsag_error_t*
 vsag_index_add(vsag_index_t* index, const vsag_dataset_t* base, uint64_t* out_failed_count);
+
+/** Same owning-list and error contract as vsag_index_build_with_failed_ids(). */
+vsag_error_t*
+vsag_index_add_with_failed_ids(vsag_index_t* index,
+                               const vsag_dataset_t* base,
+                               vsag_id_list_t** out_failed_ids);
 
 vsag_error_t*
 vsag_index_remove(vsag_index_t* index,
