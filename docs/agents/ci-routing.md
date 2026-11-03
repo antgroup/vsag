@@ -318,6 +318,17 @@ checks that intended route explicitly. Metadata remains independently enforced
 by Mergify; it does not rerun code checks. Other names
 include `Community / Docs`, `Branch Docs`, `Community / SIMD Coverage`,
 `Issue Link` and `Community / Lite <mode>`.
+
+SIMD Coverage still compares clean base/head coverage with the same test filter,
+seed and thresholds. It builds only `unittests_simd` and its dependencies using
+`scripts/coverage/simd_coverage.mk`, with a CI-only CMake overlay that also includes
+the Local SQ reference tests tagged `[simd]` outside `src/simd/` and preserves
+the aggregate executable's normal library initialization/ISA diagnostics. The overlay applies
+to both revisions, including bases that predate this helper. Ordinary `make cov`
+and local module builds are unchanged. Adding `[simd]` tests outside the module
+requires updating the coverage inventory guard and verifying aggregate/module
+inventory and SIMD line-coverage equivalence.
+
 Branch Docs is distinct from PR Docs. The 2026-11-02 ruleset audit found main
 requires DCO, Mergify Merge Protections and PR CI Gate; version rulesets include
 Format Check. Mergify checks issue links directly from labels/body. Recheck

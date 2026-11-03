@@ -330,6 +330,75 @@ class ComparisonTest(unittest.TestCase):
         self.assertIn("timeout 15m", runner)
         self.assertNotIn("--allow-running-no-tests", runner)
 
+    def test_module_build_preserves_coverage_configuration(self):
+        args = ["make", "-n", "COMPILE_JOBS=4", "CMAKE_GENERATOR=Ninja"]
+        full = subprocess.check_output(args + ["cov"], cwd=ROOT, text=True).splitlines()
+        scoped = subprocess.check_output(
+            args + ["-f", "Makefile", "-f", "scripts/coverage/simd_coverage.mk", "cov-simd"],
+            cwd=ROOT, text=True).splitlines()
+        self.assertEqual(full[0], scoped[0].split(" -DCMAKE_PROJECT_VSAG_INCLUDE=", 1)[0])
+        self.assertIn("simd_coverage.cmake", scoped[0])
+        self.assertEqual(len(scoped), 2)
+        self.assertIn("--target unittests_simd --parallel 4", scoped[1])
+        self.assertNotIn("--target", full[1])
+        runner = (ROOT / "scripts/coverage/run_simd_coverage.sh").read_text()
+        self.assertIn("timeout 15m ./build/tests/unittests_simd '[simd]~[!benchmark]' --rng-seed 424242 --order lex", runner)
+        self.assertIn('export CCACHE_DISABLE=1', runner)
+
+    def test_simd_tags_outside_module_remain_in_coverage_target(self):
+        outside = set()
+        for directory in (ROOT / "src", ROOT / "tests"):
+            for source in directory.rglob("*.cpp"):
+                relative = source.relative_to(ROOT).as_posix()
+                if "[simd]" in source.read_text() and not relative.startswith("src/simd/"):
+                    outside.add(relative)
+        self.assertEqual(outside, {
+            "src/quantization/scalar_quantization/local_scalar_quantizer_test.cpp"})
+        overlay = (ROOT / "scripts/coverage/simd_coverage.cmake").read_text()
+        for relative in outside:
+            self.assertIn(relative, overlay)
+        self.assertIn('add_library (vsag_simd_coverage_reference OBJECT "${local_sq_tests}")', overlay)
+        self.assertIn('target_link_libraries (vsag_simd_coverage_reference PRIVATE unittest_deps)', overlay)
+
+    def test_cmake_overlay_completes_only_the_scoped_target(self):
+        overlay = ROOT / "scripts/coverage/simd_coverage.cmake"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "main.cpp").write_text("int main() { return 0; }\n")
+            (root / "CMakeLists.txt").write_text(
+                "cmake_minimum_required(VERSION 3.19)\nproject(VSAG LANGUAGES CXX)\n"
+                "add_executable(unittests_simd main.cpp)\n"
+                "add_executable(unittests main.cpp)\n"
+                "add_library(unittest_deps INTERFACE)\n"
+                "add_library(coverage_config INTERFACE)\n"
+                "target_compile_options(coverage_config INTERFACE --coverage)\n"
+                "target_link_libraries(unittests_simd PRIVATE coverage_config)\n"
+                'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/scoped.txt" '
+                'CONTENT "$<TARGET_PROPERTY:unittests_simd,SOURCES>")\n'
+                'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/full.txt" '
+                'CONTENT "$<TARGET_PROPERTY:unittests,SOURCES>")\n')
+            local_sq = root / "src/quantization/scalar_quantization/local_scalar_quantizer_test.cpp"
+            for has_local_sq in (False, True):
+                if has_local_sq:
+                    local_sq.parent.mkdir(parents=True)
+                    local_sq.write_text("// fixture\n")
+                build = root / str(has_local_sq)
+                result = subprocess.run(
+                    ["cmake", "-S", str(root), "-B", str(build),
+                     "-DCMAKE_PROJECT_VSAG_INCLUDE=" + str(overlay),
+                     "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"],
+                    text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                sources = (build / "scoped.txt").read_text().split(";")
+                self.assertIn(str(ROOT / "scripts/coverage/simd_coverage_init.cpp"), sources)
+                self.assertEqual(any("local_scalar_quantizer_test.cpp.o" in source for source in sources), has_local_sq)
+                self.assertEqual((build / "full.txt").read_text(), "main.cpp")
+                commands = json.loads((build / "compile_commands.json").read_text())
+                if has_local_sq:
+                    reference = [row for row in commands if row["file"] == str(local_sq)]
+                    self.assertEqual(len(reference), 1)
+                    self.assertNotIn("--coverage", reference[0]["command"])
+
     def test_security_guard_rejects_real_permission_mutations(self):
         source = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
         mutations = [
@@ -359,23 +428,30 @@ class ComparisonTest(unittest.TestCase):
             scripts = root / "scripts/coverage"
             scripts.mkdir(parents=True)
             for name in ("run_simd_coverage.sh", "compare_simd_coverage.py",
-                         "verify_cpp_coverage.py"):
+                         "verify_cpp_coverage.py", "simd_coverage.mk", "simd_coverage.cmake", "simd_coverage_init.cpp"):
                 shutil.copyfile(ROOT / "scripts/coverage" / name, scripts / name)
             source = root / SOURCE
             source.parent.mkdir(parents=True)
             source.write_text("before\n")
-            (root / "Makefile").write_text("cov:\n\tpython3 fixture.py\n")
+            (root / "Makefile").write_text("DEBUG_BUILD_DIR=./build/\ncov:\n\tpython3 fixture.py\n")
             (root / "fixture.py").write_text(
                 "import json\nfrom pathlib import Path\n"
                 "root = Path.cwd()\n"
                 "assert not (root / 'build').exists()\n"
                 "(root / 'build/tests').mkdir(parents=True)\n"
-                "binary = root / 'build/tests/unittests'\n"
+                "binary = root / 'build/tests/unittests_simd'\n"
                 "binary.write_text('#!/bin/sh\\ngit rev-parse --verify HEAD\\n')\n"
                 "binary.chmod(0o755)\n"
                 "(root / 'build/compile_commands.json').write_text(json.dumps([\n"
                 f"    {{'file': '{SOURCE}', 'directory': str(root),\n"
                 "     'arguments': ['c++', '--coverage']}] ))\n")
+            tools = root / "fixture-bin"
+            tools.mkdir()
+            cmake = tools / "cmake"
+            cmake.write_text("#!/bin/sh\ncase \"$*\" in\n"
+                             "  *--build*) [ \"$*\" = \"--build ./build/ --target unittests_simd --parallel 4\" ] || exit 91; python3 fixture.py ;;\n"
+                             "esac\n")
+            cmake.chmod(0o755)
             (scripts / "collect_cpp_coverage.sh").write_text(
                 "mkdir coverage\n"
                 f"printf 'SF:{SOURCE}\\nDA:1,1\\nend_of_record\\n' > coverage/coverage.info\n")
@@ -386,7 +462,8 @@ class ComparisonTest(unittest.TestCase):
             git("add", ".")
             git("commit", "-qm", "head")
             head = git("rev-parse", "HEAD")
-            env = dict(os.environ, GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
+            env = dict(os.environ, PATH=str(tools) + os.pathsep + os.environ["PATH"],
+                       GIT_TEST_ASSUME_DIFFERENT_OWNER="1",
                        GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="safe.directory",
                        GIT_CONFIG_VALUE_0="")
             untrusted = subprocess.run(["git", "diff", "--quiet", base, head, "--", "extern"],

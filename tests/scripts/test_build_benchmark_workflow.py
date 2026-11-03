@@ -262,6 +262,45 @@ class WorkflowContractTest(unittest.TestCase):
             self.assertNotEqual(self.run_python('Verify benchmark report', root).returncode, 0)
             self.assertIn('FAILED', (root / 'build-metrics/verification.txt').read_text())
 
+    def test_container_workspace_trust_precedes_ref_validation(self):
+        runtime = job(BENCH, 'performance-performance')
+        self.assertLess(runtime.index('name: Configure benchmark workspace trust'),
+                        runtime.index('name: Resolve approved benchmark commit'))
+        trust = step(runtime, 'Configure benchmark workspace trust').split('run: ', 1)[1].strip()
+        validator = textwrap.dedent(
+            step(runtime, 'Resolve approved benchmark commit').split('run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            helper = workspace / 'scripts/ci/configure-git-safe-directory.sh'
+            helper.parent.mkdir(parents=True)
+            helper.write_bytes((ROOT / 'scripts/ci/configure-git-safe-directory.sh').read_bytes())
+            env = dict(os.environ, GIT_CONFIG_GLOBAL=str(root / 'gitconfig'),
+                       GIT_CONFIG_NOSYSTEM='1', GITHUB_ACTIONS='true',
+                       GITHUB_WORKSPACE=str(workspace), REQUESTED_REF='main',
+                       GITHUB_OUTPUT=str(root / 'output'), GITHUB_STEP_SUMMARY=str(root / 'summary'))
+            subprocess.run(['git', 'init', '-q'], cwd=workspace, env=env, check=True)
+            subprocess.run(['git', '-c', 'user.name=Workflow Test',
+                            '-c', 'user.email=workflow-test@example.invalid',
+                            'commit', '--allow-empty', '-qm', 'approved'],
+                           cwd=workspace, env=env, check=True)
+            env['GIT_TEST_ASSUME_DIFFERENT_OWNER'] = '1'
+            def run(script):
+                return subprocess.run(['bash', '-eu', '-c', script], cwd=workspace,
+                                      env=env, text=True, capture_output=True)
+            unsafe = run(validator)
+            self.assertNotEqual(unsafe.returncode, 0)
+            self.assertIn('dubious ownership', unsafe.stderr)
+            configured = run(trust)
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            safe = run(validator)
+            self.assertEqual(safe.returncode, 0, safe.stderr)
+            trusted = subprocess.check_output(
+                ['git', 'config', '--global', '--get-all', 'safe.directory'],
+                cwd=workspace, env=env, text=True)
+            self.assertEqual(trusted.splitlines(), [str(workspace)])
+
     def test_ref_gate_with_real_git_history(self):
         script = textwrap.dedent(step(BENCH, 'Resolve approved benchmark commit').split('run: |\n', 1)[1])
         self.assertNotIn('${{', script)

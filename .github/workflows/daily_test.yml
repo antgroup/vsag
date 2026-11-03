@@ -743,6 +743,9 @@ jobs:
           ref: main
           fetch-depth: 0
           persist-credentials: false
+      - name: Configure benchmark workspace trust
+        shell: bash
+        run: bash scripts/ci/configure-git-safe-directory.sh
       - name: Resolve approved benchmark commit
         id: target
         env:
