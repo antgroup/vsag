@@ -27,6 +27,7 @@ namespace vsag {
 enum class IVFNearestPartitionTrainerType {
     RandomTrainer = 0,
     KMeansTrainer = 1,
+    BalancedKMeansTrainer = 2,
 };
 
 enum class IVFPartitionStrategyType {
@@ -69,7 +70,8 @@ public:
     // are computed, not what the index looks like afterwards, which is why
     // CheckCompatibility ignores them.
     bool enable_gpu_build{false};
-    // Iterations used by the kmeans centroid training (ivf_train_type == "kmeans").
+    // Iterations used by the centroid training (ivf_train_type == "kmeans" or
+    // "balanced_kmeans").
     // Unset (-1) means "use the per-strategy default", which keeps the historical values:
     // 25 for the single-level IVF strategy and 30 for GNO-IMI.
     int32_t kmeans_iter_count{-1};

@@ -33,6 +33,64 @@ splits the space into two orthogonal sets of centroids
 (`first_order_buckets_count` × `second_order_buckets_count`) for even finer
 partitioning on very large corpora.
 
+### Balanced k-means training (`ivf_train_type: "balanced_kmeans"`)
+
+Standard k-means assigns every vector to its nearest centroid without any
+capacity constraint, so skewed, duplicated, or unevenly distributed corpora can
+produce buckets that differ in size by orders of magnitude — and even empty
+ones. Oversized buckets raise search latency and weaken partition pruning.
+
+`balanced_kmeans` keeps the same squared-L2 objective and mean centroid update
+as `kmeans`, but every assignment step is capacity-constrained: with `n`
+training vectors and `buckets_count` clusters, each final cluster holds either
+`floor(n / k)` or `ceil(n / k)` vectors. The guarantee extends to the initial
+bucket assignment of `Build`, so the stored buckets inherit the balance, and no
+cluster is ever empty as long as `1 <= k <= n`.
+
+How it works, per iteration:
+
+1. Each vector keeps only its `num_candidates` (8 by default) nearest clusters;
+   distances are evaluated one vector at a time in fixed parallel blocks, so no
+   `n × k` distance matrix is ever materialized and peak memory stays
+   `O(n · candidates + k · dim)` instead of `O(n · k)`.
+2. The `n mod k` clusters with the highest unconstrained nearest-centroid demand
+   receive `ceil(n / k)` seats, the others `floor(n / k)`.
+3. Vectors are then placed most-constrained first, in decreasing order of their
+   *regret* (the cost gap between their best and second-best candidate). Each
+   vector takes the nearest cluster that still has a free seat; a vector whose
+   remembered candidates are all full recomputes distances against the clusters
+   that still have seats. Because the capacities sum to exactly `n`, a seat is
+   always available.
+4. Centroids are re-set to the mean of their assigned vectors and the cycle
+   repeats until the loss stops improving (`kmeans_iter_count` bounds it).
+
+Complexity and trade-offs. Per iteration the trainer pays the same
+`O(n · k · dim)` distance work as standard k-means, plus an `O(n log n)`
+ordering; memory is bounded as above. Balancing is a heuristic (regret-greedy
+insertion), not an exact transportation solve, so the loss can be somewhat
+above an unconstrained k-means: the gap is small on uniform or evenly clustered
+data and grows on strongly skewed mixtures, where equal-size buckets must split
+tight clusters. Run `cluster_balance_bench` to measure both sides on your own
+shapes. What the extra loss buys is a hard bound on bucket size: every bucket
+holds at most `ceil(n / k)` vectors, the per-query scanned work is bounded by
+`scan_buckets_count × ceil(n / k)`, and tail latency stops depending on how
+skewed the corpus happens to be.
+
+Notes:
+
+- `random` and `kmeans` are unchanged; the default remains `kmeans`.
+- Cosine indexes normalize the trained centroids exactly as in the `kmeans`
+  path, and the initial bucket assignment uses the metric's own routing order
+  (`1 - <x, c>` for IP/cosine, squared L2 for L2).
+- `balanced_kmeans` is available only with `partition_strategy_type: "ivf"`;
+  GNO-IMI always trains plain k-means.
+- The trainer runs on the host; `enable_gpu_build` does not accelerate balanced
+  training or the balanced initial assignment.
+- Results are deterministic for a given input and seed, independent of the
+  thread count.
+- Compare balance, loss, time, and memory yourself with the reproducible
+  `cluster_balance_bench` tool (`tools/cluster_balance_bench`).
+
 ## Quick start
 
 ```cpp
@@ -79,8 +137,8 @@ Build-time parameters live under `index_param`. See
 | `buckets_count` | int | `10` | Number of inverted lists (effective for `ivf`) |
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
-| `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
-| `kmeans_iter_count` | int | `25` (`ivf`), `30` (`gno_imi`) | KMeans training iterations for centroid training (effective with `ivf_train_type: "kmeans"`). Higher → better bucket quality, longer build. |
+| `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans`, `balanced_kmeans`, or `random` |
+| `kmeans_iter_count` | int | `25` (`ivf`), `30` (`gno_imi`) | KMeans training iterations for centroid training (effective with `ivf_train_type: "kmeans"` or `"balanced_kmeans"`). Higher → better bucket quality, longer build. |
 | `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
 | `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
 | `enable_gpu_build` | bool | `false` | Use the CUDA backend while building (effective for `ivf`); see [GPU-accelerated build](#gpu-accelerated-build) |

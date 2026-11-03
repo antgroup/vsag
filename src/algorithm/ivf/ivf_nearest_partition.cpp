@@ -31,6 +31,7 @@
 #include "gpu/gpu_plan.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "impl/cluster/balanced_kmeans_cluster.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "query_context.h"
@@ -122,6 +123,19 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 ivf_partition_strategy_param_->GetKMeansIterCount());
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        // Same sample, iteration budget and distance handling as the kmeans
+        // branch above; only the assignment step is capacity-constrained. The
+        // trainer always runs on the host: enable_gpu_build accelerates the
+        // plain kmeans passes, and a balanced training stays on the host even
+        // when the flag is on.
+        BalancedKMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
+        cls.Run(this->bucket_count_,
+                dataset->GetFloat32Vectors(),
+                dataset->GetNumElements(),
+                ivf_partition_strategy_param_->GetKMeansIterCount());
+        memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
@@ -176,6 +190,64 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
         return std::move(assigned.value());
     }
     return classify_datas_on_host(datas, count, buckets_per_data, ctx);
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
+                                           int64_t count,
+                                           BucketIdType buckets_per_data,
+                                           QueryContext* ctx) const {
+    // Balancing the first assignment is defined for one bucket per vector over a
+    // trained partition; anything else (including a build that brings fewer
+    // vectors than buckets, where the trainer has already placed one vector per
+    // bucket best it can) takes the plain routing.
+    const bool balance_buckets = this->ivf_partition_strategy_param_->partition_train_type ==
+                                     IVFNearestPartitionTrainerType::BalancedKMeansTrainer and
+                                 buckets_per_data == 1 and count > 0 and datas != nullptr and
+                                 this->is_trained_ and this->bucket_count_ > 0;
+    if (not balance_buckets) {
+        return this->ClassifyDatas(datas, count, buckets_per_data, ctx);
+    }
+
+    // The layout decides where the centroids are, the same question GetCentroid
+    // asks; the balanced assignment needs them all at once.
+    const uint64_t centroid_bytes = static_cast<uint64_t>(this->bucket_count_) *
+                                    static_cast<uint64_t>(this->dim_) * sizeof(float);
+    Vector<float> centroids(this->allocator_);
+    if (this->use_route_graph_) {
+        centroids.resize(static_cast<uint64_t>(this->bucket_count_) * this->dim_);
+        for (BucketIdType b = 0; b < this->bucket_count_; ++b) {
+            this->route_index_ptr_->GetCodeByInnerId(
+                b,
+                reinterpret_cast<uint8_t*>(centroids.data() +
+                                           static_cast<uint64_t>(b) * this->dim_));
+        }
+    } else {
+        // A trained scan-layout partition stores exactly this many centroids;
+        // anything else cannot be balanced and is routed instead.
+        if (this->centroids_.size() * sizeof(float) != centroid_bytes) {
+            return this->ClassifyDatas(datas, count, buckets_per_data, ctx);
+        }
+        centroids = this->centroids_;
+    }
+
+    // Assign under the index metric: squared L2 for L2SQR indexes, and the
+    // scan routing key 1 - <x, c> for IP and cosine (cosine centroids were
+    // normalized during training), the same orders the plain routing would
+    // follow.
+    BalancedKMeansCluster cls(
+        static_cast<int32_t>(this->dim_), this->allocator_, this->thread_pool_);
+    const auto labels = cls.Assign(this->bucket_count_,
+                                   centroids.data(),
+                                   static_cast<const float*>(datas),
+                                   static_cast<uint64_t>(count),
+                                   this->metric_type_);
+
+    Vector<BucketIdType> result(count, INVALID_BUCKET_ID, this->allocator_);
+    for (int64_t i = 0; i < count; ++i) {
+        result[i] = static_cast<BucketIdType>(labels[i]);
+    }
+    return result;
 }
 
 Vector<BucketIdType>

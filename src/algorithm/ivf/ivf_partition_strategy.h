@@ -61,6 +61,18 @@ public:
                   BucketIdType buckets_per_data,
                   QueryContext* ctx) const = 0;
 
+    /// Bucket assignment for the first Add of a fresh Build, where the index is
+    /// still empty and a strategy may do more than route each vector to its
+    /// nearest bucket (issue #2870: the balanced k-means trainer balances the
+    /// initial buckets instead). The default is the plain routing.
+    virtual Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType buckets_per_data,
+                          QueryContext* ctx) const {
+        return this->ClassifyDatas(datas, count, buckets_per_data, ctx);
+    }
+
     virtual Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,
