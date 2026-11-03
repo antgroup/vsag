@@ -301,6 +301,41 @@ HGraphTuneCases(bool sample, bool pipnn) {
             {"sq4,bf16", "sq4"}};
 }
 
+std::vector<uint64_t>
+HGraphBudgetCounts(uint64_t minimum, uint64_t maximum) {
+    std::vector<uint64_t> counts;
+    // Collect legal sizes directly: GCC 13 + TSan diagnoses the erase/remove_if
+    // form as stringop-overread under -O2 -Werror.
+    for (const uint64_t count : {minimum,
+                                 uint64_t{256},
+                                 uint64_t{400},
+                                 uint64_t{512},
+                                 uint64_t{600},
+                                 uint64_t{1000},
+                                 uint64_t{1800},
+                                 maximum}) {
+        if (count >= minimum && count <= maximum) {
+            counts.push_back(count);
+        }
+    }
+    std::sort(counts.begin(), counts.end());
+    counts.resize(std::unique(counts.begin(), counts.end()) - counts.begin());
+    return counts;
+}
+
+TEST_CASE("HGraph budget candidate counts preserve bounds and coverage", "[test_budget]") {
+    REQUIRE(HGraphBudgetCounts(128, 1000) == std::vector<uint64_t>{128, 256, 400, 512, 600, 1000});
+    REQUIRE(HGraphBudgetCounts(256, 600) == std::vector<uint64_t>{256, 400, 512, 600});
+    REQUIRE(HGraphBudgetCounts(320, 1000) == std::vector<uint64_t>{320, 400, 512, 600, 1000});
+    REQUIRE(HGraphBudgetCounts(512, 1800) == std::vector<uint64_t>{512, 600, 1000, 1800});
+    REQUIRE(HGraphBudgetCounts(1000, 1000) == std::vector<uint64_t>{1000});
+    REQUIRE(HGraphBudgetCounts(128, 200) == std::vector<uint64_t>{128, 200});
+    REQUIRE(HGraphBudgetCounts(512, 256).empty());
+    REQUIRE(HGraphBudgetCounts(0, 0) == std::vector<uint64_t>{0});
+    const auto largest = std::numeric_limits<uint64_t>::max();
+    REQUIRE(HGraphBudgetCounts(largest, largest) == std::vector<uint64_t>{largest});
+}
+
 void
 ApplyHGraphBudget(const HGraphResourcePtr& resource) {
     const auto title = HGraphCaseTitle(resource->identity);
@@ -360,15 +395,7 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource) {
             minimum = std::max(minimum, training_minimum);
         }
     }
-    std::vector<uint64_t> counts{minimum, 256, 400, 512, 600, 1000, 1800, resource->base_count};
-    counts.erase(std::remove_if(counts.begin(),
-                                counts.end(),
-                                [&](uint64_t count) {
-                                    return count < minimum || count > resource->base_count;
-                                }),
-                 counts.end());
-    std::sort(counts.begin(), counts.end());
-    counts.erase(std::unique(counts.begin(), counts.end()), counts.end());
+    const auto counts = HGraphBudgetCounts(minimum, resource->base_count);
 
     std::vector<std::vector<budget::RunSpec>> candidates;
     for (const auto count : counts) {
