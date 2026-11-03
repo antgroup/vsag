@@ -46,10 +46,10 @@ for role in base head; do
         export VSAG_THIRDPARTY_DOWNLOAD_DIR="$PWD/.ci-downloads"
         export CMAKE_GENERATOR=Ninja
         export EXTRA_DEFINED=-DVSAG_USE_SYSTEM_OPENBLAS=ON
-        make cov COMPILE_JOBS=4
+        make -f Makefile -f "$root/scripts/coverage/simd_coverage.mk" cov-simd COMPILE_JOBS=4
         python3 "$root/scripts/coverage/verify_cpp_coverage.py" instrumentation \
             build/compile_commands.json --source-root "$PWD"
-        timeout 15m ./build/tests/unittests '[simd]~[!benchmark]' --rng-seed 424242 --order lex
+        timeout 15m ./build/tests/unittests_simd '[simd]~[!benchmark]' --rng-seed 424242 --order lex
         bash scripts/coverage/collect_cpp_coverage.sh
         cp coverage/coverage.info "$root/simd-coverage/$role.info"
         python3 - "$root" "$role" "$sha" <<'PY'
