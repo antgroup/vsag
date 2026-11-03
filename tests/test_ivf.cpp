@@ -3946,6 +3946,84 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     }
 }
 
+TEST_CASE("IVF Batch Search Statistics", "[ft][ivf][search_statistics][pr]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t base_count = 200;
+    constexpr int64_t num_queries = 2;
+    constexpr int64_t topk = 10;
+    const auto parallelism = GENERATE(1, 2);
+    CAPTURE(parallelism);
+
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, "l2");
+    auto params = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", 10, "kmeans", false, 1, false, 2);
+    auto created = vsag::Factory::CreateIndex("ivf", params);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(dataset->base_).has_value());
+
+    vsag::SearchRequest request;
+    request.topk_ = topk;
+    request.params_str_ = R"({"ivf":{"scan_buckets_count":5,"parallelism":1}})";
+    std::vector<vsag::DatasetPtr> single_results;
+    nlohmann::json expected = {{"is_timeout", false}, {"complete", true}};
+    for (int64_t i = 0; i < num_queries; ++i) {
+        request.query_ = vsag::Dataset::Make()
+                             ->NumElements(1)
+                             ->Dim(dim)
+                             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + i * dim)
+                             ->Owner(false);
+        auto result = index->SearchWithRequest(request);
+        REQUIRE(result.has_value());
+        single_results.push_back(result.value());
+        auto statistics = nlohmann::json::parse(result.value()->GetStatistics());
+        REQUIRE(statistics["distance_evaluations"].get<uint64_t>() > 0);
+        for (const auto& field : statistics.items()) {
+            if (field.key() == "is_timeout") {
+                expected[field.key()] =
+                    expected[field.key()].get<bool>() or field.value().get<bool>();
+            } else if (field.key() == "complete") {
+                expected[field.key()] =
+                    expected[field.key()].get<bool>() and field.value().get<bool>();
+            } else if (field.value().is_object()) {
+                for (const auto& counter : field.value().items()) {
+                    auto& sum = expected[field.key()][counter.key()];
+                    sum =
+                        (sum.is_null() ? 0 : sum.get<uint64_t>()) + counter.value().get<uint64_t>();
+                }
+            } else {
+                auto& sum = expected[field.key()];
+                sum = (sum.is_null() ? 0 : sum.get<uint64_t>()) + field.value().get<uint64_t>();
+            }
+        }
+    }
+
+    request.query_ = vsag::Dataset::Make()
+                         ->NumElements(num_queries)
+                         ->Dim(dim)
+                         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
+                         ->Owner(false);
+    request.params_str_ =
+        fmt::format(R"({{"ivf":{{"scan_buckets_count":5,"parallelism":{}}}}})", parallelism);
+    auto batch = index->SearchWithRequest(request);
+    REQUIRE(batch.has_value());
+    REQUIRE(batch.value()->GetNumElements() == num_queries);
+    REQUIRE(batch.value()->GetDim() == topk);
+    for (int64_t i = 0; i < num_queries; ++i) {
+        REQUIRE(single_results[i]->GetDim() == topk);
+        for (int64_t j = 0; j < topk; ++j) {
+            CHECK(batch.value()->GetIds()[i * topk + j] == single_results[i]->GetIds()[j]);
+            CHECK(batch.value()->GetDistances()[i * topk + j] ==
+                  single_results[i]->GetDistances()[j]);
+        }
+    }
+    auto actual = nlohmann::json::parse(batch.value()->GetStatistics());
+    for (const auto& field : expected.items()) {
+        CAPTURE(field.key());
+        CHECK(actual.at(field.key()) == field.value());
+    }
+}
+
 TEST_CASE("IVF Batch Search Parallel", "[ft][ivf][pr]") {
     constexpr auto dim = 32;
     constexpr auto buckets_count = 10;
@@ -4099,6 +4177,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
     REQUIRE(filter_count > 0);
     REQUIRE(full_count >= reorder_count);
     REQUIRE(reorder_count == 2 * topk);
+    REQUIRE(statistics["reorder_candidate_count"].GetUint64() == reorder_count);
     REQUIRE(inner_product_count == reorder_count);
     REQUIRE(statistics["distance_evaluations_by_phase"]["approximate"].GetUint64() == filter_count);
     REQUIRE(statistics["distance_evaluations_by_phase"]["rerank"].GetUint64() == reorder_count);

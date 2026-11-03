@@ -125,6 +125,8 @@ public:
             }
         }
         if (ctx.stats != nullptr) {
+            ctx.stats->reorder_candidate_count.fetch_add(static_cast<uint32_t>(candidate_count),
+                                                         std::memory_order_relaxed);
             ctx.stats->reorder_distance_count.fetch_add(static_cast<uint32_t>(candidate_count),
                                                         std::memory_order_relaxed);
         }
