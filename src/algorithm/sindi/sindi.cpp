@@ -813,9 +813,17 @@ SINDI::KnnSearch(const DatasetPtr& query,
         parallel->callback_limit = search_param.filter_callback_limit;
         parallel->profile_cpu = search_param.profile_cpu;
         if (search_param.enable_time_record) {
-            parallel->deadline =
-                entered + std::chrono::duration_cast<SindiParallelState::Clock::duration>(
-                              std::chrono::duration<double, std::milli>(search_param.timeout_ms));
+            const auto available = std::chrono::duration<double, std::milli>(
+                                       SindiParallelState::Clock::time_point::max() - entered)
+                                       .count();
+            if (search_param.timeout_ms <= 0) {
+                parallel->deadline = entered;
+            } else if (search_param.timeout_ms < available) {
+                parallel->deadline =
+                    entered +
+                    std::chrono::duration_cast<SindiParallelState::Clock::duration>(
+                        std::chrono::duration<double, std::milli>(search_param.timeout_ms));
+            }
         }
     }
     SindiWindowSearchProfile window_profile;
@@ -850,6 +858,9 @@ SINDI::KnnSearch(const DatasetPtr& query,
     SearchStatistics statistics;
     auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
     const auto annotate = [&](const DatasetPtr& result) {
+        if (parallel and SindiParallelState::Clock::now() >= parallel->deadline) {
+            throw std::runtime_error("SINDI deadline exceeded before result publication");
+        }
         cpu_timer.Stop();
         if (statistics_ptr == nullptr) {
             return;
