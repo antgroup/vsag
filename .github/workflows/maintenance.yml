@@ -1,0 +1,191 @@
+name: Maintenance
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      task:
+        type: choice
+        default: docs
+        options:
+          - docs
+permissions:
+  contents: read
+jobs:
+  scope:
+    if: ${{ github.event_name == 'push' && github.event.deleted != true }}
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        run: python3 scripts/ci/maintenance_scope.py
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo VSAG
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: repo-vsag
+          persist-credentials: false
+      - name: Checkout Repo VSAGIO
+        uses: actions/checkout@v4
+        with:
+          repository: vsag-io/vsag-io.github.io
+          token: ${{ secrets.GH_PAT }}
+          ref: main
+          path: repo-vsagio
+      - name: Prepare shared sync branch
+        working-directory: repo-vsagio
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          expected_remote_oid="$(git ls-remote origin refs/heads/sync | awk 'NR == 1 { print $1 }')"
+          if [[ -n "$expected_remote_oid" ]]; then
+            [[ "$expected_remote_oid" =~ ^[0-9a-f]{40}$ ]]
+            git fetch --no-tags origin \
+              "refs/heads/sync:refs/remotes/origin/sync"
+          else
+            expected_remote_oid=0000000000000000000000000000000000000000
+          fi
+          git checkout -B sync origin/main
+          echo "EXPECTED_REMOTE_OID=$expected_remote_oid" >> "$GITHUB_ENV"
+      - name: Sync docs books (zh, en)
+        run: |
+          set -euo pipefail
+          mkdir -p repo-vsagio/docs
+          rsync -av --delete repo-vsag/docs/docs/zh/ repo-vsagio/docs/zh/
+          rsync -av --delete repo-vsag/docs/docs/en/ repo-vsagio/docs/en/
+      - name: Sync blogs books (zh, en)
+        run: |
+          set -euo pipefail
+          mkdir -p repo-vsagio/blogs
+          rsync -av --delete repo-vsag/docs/blog/zh/ repo-vsagio/blogs/zh/
+          rsync -av --delete repo-vsag/docs/blog/en/ repo-vsagio/blogs/en/
+      - name: Sync landing page (site root)
+        run: |
+          set -euo pipefail
+          mkdir -p repo-vsagio/landing
+          rsync -av --delete repo-vsag/docs/landing/ repo-vsagio/landing/
+      - name: Commit and publish shared snapshot
+        working-directory: repo-vsagio
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A docs blogs landing
+          if [[ -n "$(git status --porcelain)" ]]; then
+            git commit -m "docs: sync from vsag@${GITHUB_SHA}"
+          fi
+          set +e
+          push_output="$(git push \
+            --force-with-lease="refs/heads/sync:${EXPECTED_REMOTE_OID}" \
+            origin sync 2>&1)"
+          push_status=$?
+          set -e
+          if [[ "$push_status" -eq 0 ]]; then
+            exit 0
+          fi
+          printf '%s\n' "$push_output" >&2
+          if grep -Fq 'stale info' <<< "$push_output"; then
+            echo "Warning: shared sync branch changed during this run; keeping the other snapshot." >&2
+            exit 0
+          fi
+          exit "$push_status"
+    needs:
+      - scope
+    if: ${{ !cancelled() && ((github.event_name == 'workflow_dispatch' && inputs.task == 'docs') || needs.scope.outputs.docs == 'true') }}
+  contributors:
+    runs-on: ubuntu-latest
+    name: Update contributors in README
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Update contributors list
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node .github/scripts/update-contributors-readme.mjs
+
+      - name: Check for README changes
+        id: changes
+        run: |
+          if git diff --quiet -- README.md; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update contributors PR
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          branch="automation/contributors-readme"
+          title="docs(contributor): contributors readme action update"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Probe the remote for the automation branch. git ls-remote
+          # --exit-code returns 0 when the ref exists, 2 when it does not,
+          # and other codes on real errors (auth/network/etc.) that must
+          # not be silently ignored.
+          set +e
+          git ls-remote --exit-code --heads origin "$branch" >/dev/null
+          ls_remote_rc=$?
+          set -e
+          if [ "$ls_remote_rc" -eq 0 ]; then
+            remote_branch_exists=1
+          elif [ "$ls_remote_rc" -eq 2 ]; then
+            remote_branch_exists=0
+          else
+            echo "git ls-remote failed with exit code $ls_remote_rc" >&2
+            exit "$ls_remote_rc"
+          fi
+
+          if [ "$remote_branch_exists" -eq 1 ]; then
+            # Populate a remote-tracking ref so --force-with-lease has an
+            # up-to-date lease and does not fail with "stale info".
+            git fetch origin "$branch":"refs/remotes/origin/$branch"
+          fi
+
+          git checkout -B "$branch"
+          git add README.md
+          git commit -m "docs(contributor): stable contributors readme update"
+
+          if [ "$remote_branch_exists" -eq 1 ]; then
+            lease_sha="$(git rev-parse "refs/remotes/origin/$branch")"
+            git push --force-with-lease="$branch:$lease_sha" origin "$branch"
+          else
+            git push origin "$branch"
+          fi
+
+          pr_number="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
+
+          if [ -z "$pr_number" ]; then
+            pr_url="$(gh pr create --base main --head "$branch" --title "$title" --body "")"
+            pr_number="${pr_url##*/}"
+          else
+            gh pr edit "$pr_number" --title "$title" --body ""
+          fi
+    if: ${{ github.event_name == 'push' && github.event.deleted != true }}
+    concurrency:
+      group: update-contributors
+      cancel-in-progress: true

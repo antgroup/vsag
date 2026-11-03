@@ -183,7 +183,7 @@ The image upgrade can land on main ahead of the C++20 migration. Copy the follow
 - `docker/Dockerfile.aarch64.base`
 - `scripts/deps/install_toolchain_ubuntu.sh`
 - `.github/workflows/update-ci-image.yml`
-- `.github/workflows/performance.yml` (use a virtual environment with the CI image Python)
+- the `performance` profile in `.github/workflows/daily_test.yml` (use a virtual environment with the CI image Python)
 
 These changes build independently of the CMake, source, formatter configuration and release-package changes in the toolchain PR. The existing x86 MKL/OpenBLAS and aarch64 OpenBLAS Dockerfiles inherit the upgraded bases without edits. The manylinux `Dockerfile.dist_*` changes belong to the toolchain/release migration and are not required for this image-only PR.
 
@@ -369,3 +369,57 @@ The no-op identity jobs use hosted runners briefly and run no checkout/check ste
 Manual PR grants actions: read at that calling job only, alongside contents/read
 and pull-requests/read, because nested reusable workflows cannot increase their
 caller's token permissions even when the Team branch will be skipped.
+
+## Workflow entry layout
+
+The Actions entries are PR CI, Branch CI, Daily CI, Release, Maintenance, CI Images,
+Manual Checks, and PR Metadata. Team CI and Community CI remain reusable groups
+under PR CI; their standalone Actions pages do not own independent run history.
+Common hosted execution steps live under `.github/actions/`; entry workflows own
+job runners, dependencies, selection and permissions. No workflow generator is needed.
+
+- PR CI retains the required `PR CI Gate` name. PR Metadata alone handles body/label
+  edits. Retargeting a PR still requires pushing a new commit before code validation.
+- Branch CI retains a separate run for each main commit. Main uses platform smoke,
+  Python x86, TSan and selected lint; version branches retain their full standalone
+  scopes, including Coverage and compatibility. SIMD path checks are also here.
+- Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
+  lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
+  selected jobs appear inside that manual run, not a separately dispatched run.
+- Daily CI defaults to a manually selected `regression` profile. Full regression
+  scheduling remains disabled. The pre-existing weekday performance and weekly
+  build-performance schedules select only their respective profiles; they do not
+  start full regression. No nightly compiler-cache scheduling is changed here.
+- Maintenance preserves docs-only push filtering for docs synchronization and
+  main-push contributor updates. It never executes on PR events.
+- Release consolidates release creation, Wheels and old-version indexes. The
+  existing Release workflow is disabled in repository settings and must stay so
+  until publication is separately authorized. Manual toolchain checks remain
+  available through Manual Checks without enabling publication.
+
+All new shared actions must be reviewed together with their callers. Moving a
+command into a composite action does not change the contributor-side validation
+requirements. For toolchain checks of historical commits, load the shared action
+from the workflow's immutable source before checking out the requested target.
+
+After merge, verify the intended runs before disabling retired workflow entries.
+First check references on maintained version branches as well: GitHub workflow
+state is repository-wide, so disabling an old entry while a version branch still
+uses it would suppress that branch's checks. Keep historical run records unless
+separate deletion is explicitly requested. A smaller workflow directory does not
+by itself remove historical entries from the Actions sidebar.
+
+### Performance profile source and concurrency
+
+The Daily CI `performance` profile runs only in the canonical repository's main
+context (scheduled, manual, or a reusable call from a main push). Like
+`build-performance`, it accepts `inputs.ref` only as `main` or a full commit SHA
+reachable from fetched upstream main. Both profiles share the same inline ref
+validator through a YAML anchor; validation precedes dependency installation and
+execution, and the actual commit is recorded in the job summary. Notification
+credentials are scoped to the runtime profile's report step.
+
+Each runtime-performance run/attempt has its own concurrency group with
+`cancel-in-progress: false`; a manual invocation cannot cancel a scheduled run.
+Runs can execute concurrently if GitHub-hosted capacity permits. This does not
+change the Team pool or enable full daily regression scheduling.

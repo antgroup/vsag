@@ -13,13 +13,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PR = (ROOT / '.github/workflows/pr-ci-community.yml').read_text(encoding='utf-8')
-BENCH = (ROOT / '.github/workflows/build_performance.yml').read_text(encoding='utf-8')
+BENCH = (ROOT / '.github/workflows/daily_test.yml').read_text(encoding='utf-8')
 
 
 def block(workflow, header, description):
     """Extract our block-style YAML subset, stopping at the next peer/ancestor."""
     match = re.search(r'^( *)' + header + r'[ \t]*(?:#.*)?$', workflow, re.MULTILINE)
-    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'build_performance.yml' if workflow == BENCH else 'provided workflow'
+    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'daily_test.yml' if workflow == BENCH else 'provided workflow'
     if match is None:
         raise AssertionError(f'Missing {description} in {workflow_name}; check its name and block formatting')
     lines = []
@@ -32,7 +32,7 @@ def block(workflow, header, description):
 
 
 def step(workflow, name):
-    return block(workflow, r'-[ \t]+name:[ \t]+' + re.escape(name), f'step {name!r}')
+    return block(workflow, r'-[ \t]+name:[ \t]+' + re.escape(name), f'step {name!r}').replace('run: &approved-benchmark-ref |', 'run: |')
 
 
 def job(workflow, name):
@@ -159,8 +159,9 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('clang-tidy-20', step(team, 'Lint changed sources'))
 
     def test_security_and_isolation(self):
+        benchmark = job(BENCH, "build-performance-benchmark-x86")
         self.assertIn('permissions:\n  contents: read\n', BENCH)
-        self.assertNotIn('secrets.', BENCH)
+        self.assertNotIn('secrets.', benchmark)
         self.assertNotIn('pull_request:', BENCH)
         self.assertNotIn('pull_request_target', BENCH)
         self.assertIn("cron: '23 3 * * 1'", BENCH)
@@ -169,13 +170,13 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertIn('group: build-performance-', BENCH)
         self.assertIn('persist-credentials: false', BENCH)
         self.assertIn('CCACHE_DIR: ${{ github.workspace }}/.benchmark-ccache', BENCH)
-        self.assertNotIn('uses: actions/cache@', BENCH)
-        self.assertNotIn('actions/cache/save', BENCH)
-        self.assertNotIn('ccache-action', BENCH)
+        self.assertNotIn('uses: actions/cache@', benchmark)
+        self.assertNotIn('actions/cache/save', benchmark)
+        self.assertNotIn('ccache-action', benchmark)
         self.assertIn('uses: actions/cache/restore@v4', BENCH)
         self.assertNotIn('install_deps', step(BENCH, 'Prepare trusted Ubuntu host'))
-        self.assertNotIn('/opt/hostedtoolcache', BENCH)
-        self.assertIn("REQUESTED_REF: ${{ github.event.inputs.ref || 'main' }}", BENCH)
+        self.assertNotIn('/opt/hostedtoolcache', benchmark)
+        self.assertIn("REQUESTED_REF: ${{ inputs.ref || 'main' }}", BENCH)
         self.assertIn('if: always()', step(BENCH, 'Upload build metrics'))
         self.assertIn('retention-days: 14', step(BENCH, 'Upload build metrics'))
         collect = step(BENCH, 'Collect isolated cold warm and no-op metrics')

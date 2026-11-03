@@ -1,0 +1,53 @@
+name: toolchain-compatibility-source-baseline
+description: Shared source-baseline execution; callers own runners and dependencies.
+inputs:
+  matrix-compiler:
+    description: Caller matrix.compiler
+    required: false
+    default: ''
+  matrix-abi:
+    description: Caller matrix.abi
+    required: false
+    default: ''
+  target-ref:
+    description: Pinned source to validate
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.target-ref }}
+    - name: Install retained source-baseline compilers
+      shell: sh
+      run: |
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y \
+          gcc-9 g++-9 clang-13 gfortran gfortran-9 cmake ninja-build make git \
+          ca-certificates libaio-dev libopenblas-dev liblapacke-dev libomp-13-dev
+    - name: Build C++20 library with the older compiler
+      shell: bash
+      env:
+        COMPILER: ${{ inputs.matrix-compiler }}
+        ABI: ${{ inputs.matrix-abi }}
+      run: |
+        case "$COMPILER" in
+          gcc9) cc=gcc-9; cxx=g++-9 ;;
+          clang13) cc=clang-13; cxx=clang++-13 ;;
+          *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+        esac
+        "$cxx" --version
+        make debug COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+        cmake --install build --prefix /tmp/vsag-baseline
+    - name: Validate older C++17 client
+      shell: bash
+      env:
+        COMPILER: ${{ inputs.matrix-compiler }}
+        ABI: ${{ inputs.matrix-abi }}
+      run: |
+        case "$COMPILER" in
+          gcc9) export CXX=g++-9 ;;
+          clang13) export CXX=clang++-13 ;;
+          *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+        esac
+        bash scripts/release/check_compatibility.sh /tmp/vsag-baseline "$ABI"

@@ -171,8 +171,8 @@ add_subdirectory("${VSAG_SOURCE_DIR}/src/simd" simd)
         from tests.scripts.test_build_benchmark_workflow import step
         from tests.scripts.test_dependency_workflows import job_text
 
-        body = job_text(ROOT / '.github/workflows/toolchain-compatibility.yml',
-                        'source-baseline')
+        body = job_text(ROOT / '.github/workflows/manual-checks.yml',
+                        'toolchain-source-baseline')
         self.assertIn('abi: [0, 1]', body)
         build = step(body, 'Build C++20 library with the older compiler')
         client = step(body, 'Validate older C++17 client')

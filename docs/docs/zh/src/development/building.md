@@ -95,12 +95,12 @@ stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表�
 
 PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v4`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
 
-独立的 **Build Performance Benchmark**（`.github/workflows/build_performance.yml`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 22.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
+**Daily CI / Build Performance X86** 配置（`.github/workflows/daily_test.yml`, `profile=build-performance`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 24.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
 
 ```bash
-gh workflow run build_performance.yml --ref main -f ref=main
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=main
 # 或指定本仓库 main 历史中可达的完整 40 位 commit SHA：
-gh workflow run build_performance.yml --ref main -f ref=<full-main-history-sha>
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=<full-main-history-sha>
 ```
 
 工作流本身必须从 `main` dispatch（其他工作流分支会被跳过），并显式 checkout `antgroup/vsag` upstream `main`，只接受 `main` 或该已获取 upstream 历史中的完整 SHA，并将实际 checkout 的 SHA（不是 dispatch 事件 SHA）及 main 基线写入 `target.txt`。PR ref、任意分支和未合并功能提交均被有意拒绝，因此迁移草稿分支无法通过此入口测量自己；hosted dispatch 和端到端验收需等工作流及受支持 collector 进入 main 后完成。fork 的定时任务被禁用。
