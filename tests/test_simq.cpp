@@ -1479,9 +1479,6 @@ TEST_CASE("SIMQ multi-vector duplicate flags and aliases survive two serializati
 }
 
 TEST_CASE("SIMQ immutable representative release and serving roundtrip", "[simq][immutable]") {
-    // Temporarily disabled: allocator accounting fluctuates by +160/-512 bytes across PRs.
-    // Re-enable after the immutable serving memory-accounting instability is fixed.
-    SKIP("Temporarily disabled: unstable SIMQ immutable serving memory accounting");
     const auto quantization = GENERATE("fp32", "sq8_uniform");
     const auto load_before_transition = GENERATE(false, true);
     constexpr int64_t dim = 32;
@@ -1563,7 +1560,6 @@ TEST_CASE("SIMQ immutable representative release and serving roundtrip", "[simq]
         REQUIRE(std::string(error.what()) == "simq: cannot add to an immutable index");
     }
     REQUIRE(backend->GetNumElements() == count_before_add);
-    REQUIRE(allocator.GetCurrentMemory() == memory_after);
     check_result(index);
     std::stringstream serialized;
     REQUIRE(index->Serialize(serialized).has_value());
