@@ -60,7 +60,9 @@ jobs:
               - 'cmake/**'
             coverage:
               - '.github/codecov.yml'
-              - '.github/workflows/coverage.yml'
+              - '.github/actions/coverage-*/**'
+              - '.github/workflows/main-ci.yml'
+              - '.github/workflows/daily_test.yml'
               - '.github/workflows/pr-ci.yml'
               - '.github/workflows/pr-ci-community.yml'
               - '.github/workflows/pr-ci-team.yml'
@@ -596,3 +598,75 @@ jobs:
           check_result Docs "$RUN_DOCS" "$DOCS_RESULT"
           check_result SIMD "$RUN_SIMD" "$SIMD_RESULT"
           check_result Lite "$RUN_LITE" "$LITE_RESULT"
+  version-tsan-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      non_markdown: ${{ steps.execute.outputs.non_markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-changes
+        id: execute
+    if: ${{ (inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (true) }}
+  version-tsan-build-tsan:
+    name: Build with TSAN
+    needs:
+      - version-tsan-changes
+    if: ${{ ((inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (github.event_name != 'pull_request' || needs.version-tsan-changes.outputs.non_markdown == 'true')) && needs.version-tsan-changes.result == 'success' }}
+    runs-on: ubuntu-24.04
+    env:
+      EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          cleanup_failed=0
+          for path in /useless/*; do
+            case "$path" in
+              /useless/runner-cache) continue ;;
+            esac
+            rm -rf -- "$path" || cleanup_failed=1
+          done
+          node24_diagnostics after
+          exit "$cleanup_failed"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - uses: ./.github/actions/tsan-build-and-test-build-tsan
+        id: execute
+  version-tsan-test-tsan:
+    name: Run TSAN Tests
+    needs:
+      - version-tsan-changes
+      - version-tsan-build-tsan
+    if: ${{ ((inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (github.event_name != 'pull_request' || needs.version-tsan-changes.outputs.non_markdown == 'true')) && needs.version-tsan-changes.result == 'success' && needs.version-tsan-build-tsan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-test-tsan
+        id: execute

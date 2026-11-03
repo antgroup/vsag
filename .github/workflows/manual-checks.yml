@@ -7,7 +7,11 @@ on:
         description: Check to run
         type: choice
         default: full-pr
-        options: [full-pr, full-branch, format, docs, lite]
+        options: [full-pr, full-branch, format, docs, lite, asan, tsan, python, lint, coverage, compatibility, simd, toolchain, performance, build-performance]
+      ref:
+        description: Toolchain ref or approved main benchmark SHA
+        type: string
+        default: main
 
 permissions:
   contents: read
@@ -24,9 +28,13 @@ jobs:
     uses: ./.github/workflows/pr-ci.yml
   branch:
     name: Manual Branch
-    if: inputs.check == 'full-branch'
+    if: ${{ contains(fromJSON('["full-branch","asan","tsan","python","lint","coverage","compatibility","simd"]'), inputs.check) }}
     uses: ./.github/workflows/main-ci.yml
 
+    with:
+      profile: ${{ inputs.check }}
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   validate:
     if: inputs.check == 'docs'
     name: Manual Docs
@@ -61,3 +69,62 @@ jobs:
         with:
           mode: ${{ matrix.mode }}
 
+  performance:
+    if: ${{ inputs.check == 'performance' || inputs.check == 'build-performance' }}
+    uses: ./.github/workflows/daily_test.yml
+    with:
+      profile: ${{ inputs.check }}
+      ref: ${{ inputs.ref }}
+    secrets:
+      PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
+      PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
+    name: Manual Performance
+  toolchain-installed-client:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc13
+          - clang20
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-installed-client
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ inputs.ref || github.sha || github.sha }}
+    if: ${{ (inputs.check == 'toolchain') && (true) }}
+    permissions:
+      contents: read
+    name: Manual Toolchain Installed Client
+  toolchain-source-baseline:
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc9
+          - clang13
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-source-baseline
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ inputs.ref || github.sha || github.sha }}
+    if: ${{ (inputs.check == 'toolchain') && (true) }}
+    permissions:
+      contents: read
+    name: Manual Toolchain Source Baseline

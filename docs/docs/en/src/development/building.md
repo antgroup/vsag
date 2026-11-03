@@ -96,12 +96,12 @@ or a measurement of generated build artifacts alone.
 
 PR CI's **ASan Build X86** runs one `make asan COMPILE_JOBS=3`, with Ninja, compile commands, system OpenBLAS, examples and tools enabled. The Makefile still enables tests, Sanitize and ASan/UBSan; changed-source lint, downstream tests, compatibility checks and build artifacts retain their existing contracts. `ccache --zero-stats` resets counters, **not cached objects**. The build step logs elapsed time, and an always-run step prints verbose/fallback cache diagnostics without hiding a build failure. ccache stays enabled in its default directory on the disposable GitHub-hosted VM; no compiler cache is restored or saved between jobs. PR X86 dependency archives intentionally change from restore-and-save to **restore-only** (`actions/cache/restore@v4`), preventing PR contexts from writing archives back to the shared cache; this policy is not limited to the standalone benchmark.
 
-The separate **Build Performance Benchmark** workflow (`.github/workflows/build_performance.yml`) runs weekly on Mondays at 03:23 UTC on upstream `main`, or manually from Actions. It is not a PR required check and uses separate concurrency, an Ubuntu 22.04 hosted runner, a 180-minute timeout and 14-day report retention. Once the workflow is on the default branch, for example:
+The **Daily CI / Build Performance X86** profile (`.github/workflows/daily_test.yml`, `profile=build-performance`) runs weekly on Mondays at 03:23 UTC on upstream `main`, or manually from Actions. It is not a PR required check and uses separate concurrency, an Ubuntu 24.04 hosted runner, a 180-minute timeout and 14-day report retention. Once the workflow is on the default branch, for example:
 
 ```bash
-gh workflow run build_performance.yml --ref main -f ref=main
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=main
 # Or use a full 40-character commit SHA reachable from this repository's main:
-gh workflow run build_performance.yml --ref main -f ref=<full-main-history-sha>
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=<full-main-history-sha>
 ```
 
 The workflow must itself be dispatched from `main` (other workflow branches are skipped). It explicitly checks out `antgroup/vsag` upstream `main`, accepts only `main` or a full SHA in that fetched upstream history, and records the actual checked-out SHA (not the dispatch event SHA) and the main baseline in `target.txt`. PR refs, arbitrary branches and unmerged feature commits are intentionally rejected. Therefore a draft migration branch cannot benchmark itself through this entry point; hosted dispatch and end-to-end validation remain pending until the workflow and supported collector are available on main. Scheduled execution is disabled on forks.

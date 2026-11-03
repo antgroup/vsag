@@ -85,7 +85,8 @@ class Selection(unittest.TestCase):
             self.assertNotIn('pull_request_target', text)
         self.assertIn('\nconcurrency:\n', pr)
         self.assertEqual(pr.count('    concurrency:'), 1)
-        self.assertNotIn('    concurrency:', community)
+        self.assertNotIn('\nconcurrency:', community)
+        self.assertNotIn('    concurrency:', community.split('  version-tsan-changes:', 1)[0])
         self.assertIn("github.event.deleted != true", branch)
 
     def test_deleted_branch_never_diffs_or_selects_checks(self):
@@ -128,7 +129,8 @@ class Selection(unittest.TestCase):
         for item in manual['jobs'].values():
             self.assertTrue(item['name'].startswith('Manual '))
         self.assertEqual(manual['jobs']['pr']['if'], "inputs.check == 'full-pr'")
-        self.assertEqual(manual['jobs']['branch']['if'], "inputs.check == 'full-branch'")
+        self.assertIn('full-branch', manual['jobs']['branch']['if'])
+        self.assertIn('inputs.check', manual['jobs']['branch']['if'])
         self.assertEqual(pr['jobs']['gate']['name'], '${{ matrix.check }}')
         self.assertEqual(branch['jobs']['clang-format-check']['name'], '${{ matrix.check }}')
         for choice in ('full-pr','full-branch'):
@@ -159,7 +161,7 @@ class Selection(unittest.TestCase):
         self.assertIn('needs: [route, routing-tests, select-checks, community, team]', gate)
         self.assertIn('if: always()', gate)
         community = (ROOT / '.github/workflows/pr-ci-community.yml').read_text()
-        result = community.split('  shared-checks-result:\n',1)[1]
+        result = re.search(r'(?ms)^  shared-checks-result:\n(.*?)(?=^  [\w-]+:\n|\Z)', community)[1]
         self.assertIn('needs: [validate, simd-coverage, build-test-install]', result)
         self.assertIn('if: always()', result)
         script = textwrap.dedent(result.split('        run: |\n',1)[1])
@@ -264,7 +266,7 @@ console.log(JSON.stringify(keys));
             block=text.split('  '+job+':\n',1)[1].split('\n  ',1)[0]
             # Read only top-level job fields, not nested step fields.
             block=text.split('  '+job+':\n',1)[1]
-            return re.search(r'^    if: (.*)$',block,re.M).group(1)
+            return re.search(r'^    if: (.*)$',block,re.M).group(1).removeprefix('${{').removesuffix('}}').strip()
         expressions={key:expression(pr,key) for key in ('route','routing-tests','team')}
         expressions.update({key:expression(branch,key) for key in ('changes','summary')})
         harness=r"""
@@ -280,7 +282,7 @@ const cases=[
 ];
 const out=cases.map(([event_name,action,base_ref,check,deleted])=>{
  const github={event_name,base_ref,ref:'refs/heads/'+base_ref,event:{action,deleted,changes:{}}};
- const inputs={check}; const needs={route:{outputs:{team:'true'}}};
+ const inputs={check,profile:''}; const needs={route:{outputs:{team:'true'}}};
  return Object.fromEntries(Object.entries(expressions).map(([k,e])=>[k,Boolean(eval(e))]));
 });
 console.log(JSON.stringify(out));
@@ -302,7 +304,7 @@ console.log(JSON.stringify(out));
         workflow=(ROOT / '.github/workflows/main-ci.yml').read_text()
         job=workflow.split('  clang-format-check:\n',1)[1].split('\n  validate:',1)[0]
         expression=re.search(r'^        check: \$\{\{ (.*) \}\}$',job,re.M).group(1)
-        self.assertIn('    if: always()', job)
+        self.assertRegex(job, r'    if: (?:\$\{\{ )?always\(\)')
         harness=r"""
 const expression=process.argv[1]; const always=()=>true; const fromJSON=JSON.parse;
 let out=[];
@@ -374,7 +376,7 @@ console.log(JSON.stringify(results));
         self.assertEqual(rows[6]['format'],['Format Check'])
         self.assertEqual(rows[6]['docs'],['Branch Docs Not Required'])
         for key in ('clang-format-check','validate'):
-            self.assertIn('    if: always()', job(branch,key))
+            self.assertRegex(job(branch,key), r'    if: (?:\$\{\{ )?always\(\)')
         manual=(ROOT / '.github/workflows/manual-checks.yml').read_text()
         self.assertIn('      actions: read',job(manual,'pr'))
         self.assertNotIn('actions:',manual.split('jobs:',1)[0])

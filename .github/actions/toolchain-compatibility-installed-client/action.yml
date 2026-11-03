@@ -1,0 +1,57 @@
+name: toolchain-compatibility-installed-client
+description: Shared installed-client execution; callers own runners and dependencies.
+inputs:
+  matrix-compiler:
+    description: Caller matrix.compiler
+    required: false
+    default: ''
+  matrix-abi:
+    description: Caller matrix.abi
+    required: false
+    default: ''
+  target-ref:
+    description: Pinned source to validate
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.target-ref }}
+    - name: Install toolchain and dependencies
+      shell: bash -e {0}
+      run: sudo env VSAG_INSTALL_INTEL_MKL=OFF bash scripts/deps/install_deps_ubuntu.sh
+    - name: Build C++20 library and run existing tests
+      shell: bash
+      env:
+        COMPILER: ${{ inputs.matrix-compiler }}
+        ABI: ${{ inputs.matrix-abi }}
+      run: |
+        case "$COMPILER" in
+          gcc13) cc=gcc-13; cxx=g++-13 ;;
+          clang20) cc=clang-20; cxx=clang++-20 ;;
+          *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+        esac
+        make test COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+        python3 scripts/ci/check-cxx-standards.py build
+        make release COMPILE_JOBS=2 EXTRA_DEFINED="-DCMAKE_C_COMPILER=$cc -DCMAKE_CXX_COMPILER=$cxx -DENABLE_CXX11_ABI=$ABI"
+        python3 scripts/ci/check-cxx-standards.py build-release
+        cmake --install build-release --prefix "$RUNNER_TEMP/vsag-install"
+    - name: Compile installed headers and run C++17 client
+      env:
+        COMPILER: ${{ inputs.matrix-compiler }}
+        ABI: ${{ inputs.matrix-abi }}
+      shell: bash -e {0}
+      run: |
+        case "$COMPILER" in
+          gcc13) export CXX=g++-13 ;;
+          clang20) export CXX=clang++-20 ;;
+          *) echo "Unknown compiler: $COMPILER" >&2; exit 1 ;;
+        esac
+        bash scripts/release/check_compatibility.sh "$RUNNER_TEMP/vsag-install" "$ABI" "$RUNNER_TEMP/compatibility-reports"
+    - name: Retain compatibility evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: compatibility-${{ inputs.matrix-compiler }}-abi${{ inputs.matrix-abi }}
+        path: ${{ runner.temp }}/compatibility-reports

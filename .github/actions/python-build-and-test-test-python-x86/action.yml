@@ -1,0 +1,33 @@
+name: python-build-and-test-test-python-x86
+description: Shared test_python_x86 execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Prepare Env
+      shell: bash -e {0}
+      run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+    - name: Download Test
+      uses: actions/download-artifact@v5
+      with:
+        name: wheelhouse_x86-${{ github.run_id }}
+        path: ./wheelhouse
+    - name: Install Python Wheel
+      shell: bash -e {0}
+      run: |
+        pip3 uninstall pyvsag -y
+        pip3 install ./wheelhouse/*.whl
+        pip3 install numpy pyjson pytest
+    - name: Run Python Test
+      shell: bash
+      run: |
+        set -euo pipefail
+        cd ./tests/python/
+        python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+    - name: Upload Test Logs
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: pytest-logs-x86-${{ github.run_id }}
+        path: ./tests/python/test-output.log
+        retention-days: 30
+        if-no-files-found: ignore

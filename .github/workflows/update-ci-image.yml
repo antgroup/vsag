@@ -1,4 +1,4 @@
-name: Update Docker Image
+name: CI Images
 
 on:
   push: # refresh ci containers
@@ -7,7 +7,7 @@ on:
       - 'scripts/deps/install_toolchain_ubuntu.sh'
       - '.github/workflows/update-ci-image.yml'
   pull_request: # to make sure dockerfile change correctly
-    branches: [ 'main' ]
+    branches: ['main']
     paths:
       - 'docker/**'
       - 'scripts/deps/install_toolchain_ubuntu.sh'

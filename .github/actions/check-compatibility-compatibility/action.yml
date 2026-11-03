@@ -1,0 +1,16 @@
+name: check-compatibility-compatibility
+description: Shared compatibility execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Download Compatibility Indexes from Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+      shell: sh
+      run: python3 scripts/ci/download_compatibility_inputs.py --directory "$COMPATIBILITY_INDEX_DIR"
+    - name: Compile Check Compatibility Tools
+      shell: sh
+      run: export CMAKE_GENERATOR="Ninja" EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make release VSAG_ENABLE_TOOLS=ON
+    - name: Run Check Compatibility
+      shell: sh
+      run: bash ./scripts/check_compatibility.sh
