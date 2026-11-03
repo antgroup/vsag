@@ -206,6 +206,17 @@ TEST_CASE("SINDI parallel search preserves filtering and deterministic ties",
         "parallel_n_candidate_ratio":4,"n_candidate":16,"timeout_ms":1}})",
                                    filter));
     REQUIRE(filter->probe->live == 0);
+    auto generous = index.KnnSearch(query,
+                                    8,
+                                    R"({"sindi":{"window_parallelism":2,
+        "parallel_n_candidate_ratio":4,"n_candidate":16,"timeout_ms":9223372036854775807}})",
+                                    nullptr);
+    REQUIRE(generous->GetDim() == 8);
+    REQUIRE_THROWS(index.KnnSearch(query,
+                                   8,
+                                   R"({"sindi":{"window_parallelism":2,
+        "parallel_n_candidate_ratio":4,"n_candidate":16,"timeout_ms":-1}})",
+                                   nullptr));
     REQUIRE_THROWS(
         index.KnnSearch(query,
                         8,
