@@ -20,6 +20,8 @@
 #include <limits>
 #include <vector>
 
+#include "attr/argparse.h"
+#include "attr/executor/executor.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
@@ -242,6 +244,76 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     };
     run_search(make_search_graph(true), 5);
     run_search(make_search_graph(false), 0);
+
+    SECTION("filtered traversal crosses rejected bridges beyond ef") {
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 1;
+        graph_param->init_max_capacity_ = count;
+        auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        auto ordered = encoded;
+        std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.full_distance < rhs.full_distance;
+        });
+        for (InnerIdType id = 0; id < count; ++id) {
+            auto node = ordered[id];
+            set_coarse_score(node, node.full_distance);
+            graph->SetNodeCodes(
+                id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+            Vector<InnerIdType> neighbors(allocator.get());
+            if (id + 1 < count) {
+                neighbors.push_back(id + 1);
+            }
+            graph->InsertNeighborsById(id, neighbors);
+        }
+        // The only accepted node is behind a chain longer than ef, in increasing
+        // distance order. Rejected nodes must not exhaust the accepted-candidate
+        // budget or stop traversal.
+        auto filter =
+            std::make_shared<WhiteListFilter>([](LabelType id) { return id == count - 1; });
+        auto attr_index = AttributeInvertedInterface::MakeInstance(allocator.get());
+        for (InnerIdType id = 0; id < count; ++id) {
+            AttributeValue<int32_t> value;
+            value.name_ = "allowed";
+            value.GetValue().push_back(id == count - 1 ? 1 : 0);
+            AttributeSet attrs;
+            attrs.attrs_.push_back(&value);
+            attr_index->Insert(attrs, id);
+        }
+        auto expression = AstParse("allowed = 1", &attr_index->field_type_map_);
+        auto executor = Executor::MakeInstance(allocator.get(), expression, attr_index);
+        executor->Init();
+        const auto check_filtered_search = [&](const InnerSearchParam& search_param) {
+            auto visited = std::make_shared<VisitedList>(count, allocator.get());
+            RaBitQCandidateVector candidates(allocator.get());
+            auto result = searcher.Search(
+                graph, flatten, visited, vectors.data(), search_param, nullptr, &candidates);
+            REQUIRE(result != nullptr);
+            REQUIRE(result->Size() == 1);
+            CHECK(result->Top().second == count - 1);
+        };
+        for (const auto ef : {2U, 41U}) {
+            for (const bool one_bit : {false, true}) {
+                for (const bool reorder : {false, true}) {
+                    CAPTURE(ef, one_bit, reorder);
+                    InnerSearchParam search_param;
+                    search_param.ep = 0;
+                    search_param.ef = ef;
+                    search_param.topk = 1;
+                    search_param.rerank_topk = 1;
+                    search_param.enable_rabitq_one_bit_search = one_bit;
+                    search_param.enable_reorder = reorder;
+                    search_param.is_inner_id_allowed = filter;
+                    check_filtered_search(search_param);
+                    // Attribute-only requests have no ID filter to activate filtered traversal.
+                    search_param.is_inner_id_allowed.reset();
+                    search_param.executors.push_back(executor);
+                    check_filtered_search(search_param);
+                }
+            }
+        }
+    }
 
     auto full_hint_graph = make_search_graph(false);
     InnerSearchParam full_hint_param;

@@ -531,13 +531,25 @@ private:
 
 class SearchBuffer {
 public:
-    SearchBuffer(uint64_t capacity, Allocator* allocator)
-        : data_(capacity + 1, allocator), capacity_(capacity) {
+    SearchBuffer(uint64_t capacity, Allocator* allocator, bool filtered)
+        : data_(filtered ? 0 : capacity + 1, allocator),
+          capacity_(capacity),
+          filtered_(filtered),
+          frontier_(allocator, -1),
+          accepted_(allocator, static_cast<int64_t>(capacity)) {
     }
 
     void
-    Insert(InnerIdType id, float distance) {
+    Insert(InnerIdType id, float distance, bool allowed) {
         if (IsFull(distance)) {
+            return;
+        }
+        if (filtered_) {
+            // Rejected nodes remain bridges without tightening the search boundary.
+            frontier_.Push(distance, id);
+            if (allowed) {
+                accepted_.Push(distance, id);
+            }
             return;
         }
         const auto pos = binary_search(distance);
@@ -550,11 +562,19 @@ public:
 
     [[nodiscard]] bool
     HasNext() const {
+        if (filtered_) {
+            return not frontier_.Empty() and not IsFull(frontier_.Top().first);
+        }
         return current_ < size_;
     }
 
     InnerIdType
     Pop() {
+        if (filtered_) {
+            const auto id = frontier_.Top().second;
+            frontier_.Pop();
+            return id;
+        }
         const auto id = data_[current_].id;
         data_[current_].checked = true;
         ++current_;
@@ -566,11 +586,17 @@ public:
 
     [[nodiscard]] InnerIdType
     NextId() const {
+        if (filtered_) {
+            return frontier_.Top().second;
+        }
         return data_[current_].id;
     }
 
     [[nodiscard]] bool
     IsFull(float distance) const {
+        if (filtered_) {
+            return accepted_.Size() == capacity_ and distance > accepted_.Top().first;
+        }
         return size_ == capacity_ and distance > data_[size_ - 1].distance;
     }
 
@@ -579,7 +605,8 @@ private:
     binary_search(float distance) const {
         uint64_t lo = 0;
         uint64_t length = size_;
-        // Advance by a conditionally selected half to keep this hot search branchless.
+        // Advance by a conditionally selected half to keep this hot search
+        // branchless.
         while (length > 1) {
             const auto half = length >> 1U;
             length -= half;
@@ -593,6 +620,9 @@ private:
     uint64_t size_{0};
     uint64_t current_{0};
     uint64_t capacity_{0};
+    bool filtered_{false};
+    StandardHeap<false, false> frontier_;
+    StandardHeap<true, true> accepted_;
 };
 
 template <typename Scorer>
@@ -629,7 +659,10 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     BoundedResults results(deferred_rerank ? deferred_rerank_count : result_limit, allocator);
-    SearchBuffer candidate_set(search_param.ef, allocator);
+    SearchBuffer candidate_set(
+        search_param.ef,
+        allocator,
+        search_param.is_inner_id_allowed != nullptr or not search_param.executors.empty());
 
     uint32_t rabitq_filter_count = 0;
     uint32_t rabitq_full_count = 0;
@@ -760,7 +793,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
     const bool entry_allowed = is_allowed(search_param.ep);
-    if (should_rerank and not entry_full_distance_available) {
+    if (should_rerank and entry_allowed and not entry_full_distance_available) {
         if (not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
             return std::make_shared<StandardHeap<true, false>>(allocator, -1);
         }
@@ -772,7 +805,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         entry_filter_ip,
         entry_allowed,
         entry_full_distance_available ? entry_distance : std::numeric_limits<float>::quiet_NaN());
-    candidate_set.Insert(search_param.ep, entry_distance);
+    candidate_set.Insert(search_param.ep, entry_distance, entry_allowed);
     visited_list->Set(search_param.ep);
     if (entry_allowed and result_eligible(entry_distance)) {
         results.Insert(
@@ -819,7 +852,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 allowed,
                 full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
             if (not candidate_set.IsFull(distance)) {
-                candidate_set.Insert(neighbor, distance);
+                candidate_set.Insert(neighbor, distance, allowed);
             }
             if (allowed) {
                 if (result_eligible(distance)) {
@@ -843,7 +876,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         const bool promising =
             results.Size() < rerank_topk or (should_rerank ? lower_bound < results.WorstDistance()
                                                            : distance < results.WorstDistance());
-        if (promising and should_rerank and not full_distance_available) {
+        if (promising and allowed and should_rerank and not full_distance_available) {
             if (not supplement_prefetched) {
                 graph->PrefetchFusedSupplement(neighbor);
             }
@@ -861,7 +894,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
         }
         if (not candidate_set.IsFull(distance)) {
-            candidate_set.Insert(neighbor, distance);
+            candidate_set.Insert(neighbor, distance, allowed);
         }
         if (promising and allowed and result_eligible(distance)) {
             results.Insert(neighbor, distance, filter_inner_product, full_distance_available);
@@ -1349,7 +1382,10 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         }
     }
     auto result = std::make_shared<StandardHeap<true, false>>(allocator, -1);
-    SearchBuffer candidate_set(search_param.ef, allocator);
+    SearchBuffer candidate_set(
+        search_param.ef,
+        allocator,
+        search_param.is_inner_id_allowed != nullptr or not search_param.executors.empty());
     uint32_t rabitq_filter_count = 0;
     uint32_t rabitq_full_count = 0;
     uint32_t rabitq_filter_fallback_full_count = 0;
@@ -1510,7 +1546,8 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     if (not score_node(search_param.ep, &entry_distance, &entry_lower_bound, &entry_filter_ip)) {
         return result;
     }
-    if (should_rerank and not deferred_rerank) {
+    const bool entry_allowed = is_allowed(search_param.ep);
+    if (should_rerank and entry_allowed and not deferred_rerank) {
         const bool refined =
             exact_filter_ip_hint
                 ? refine_node_with_hint(search_param.ep, entry_filter_ip, &entry_distance)
@@ -1519,9 +1556,9 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             return result;
         }
     }
-    candidate_set.Insert(search_param.ep, entry_distance);
+    candidate_set.Insert(search_param.ep, entry_distance, entry_allowed);
     visited_list->Set(search_param.ep);
-    if (is_allowed(search_param.ep) and result_eligible(entry_distance)) {
+    if (entry_allowed and result_eligible(entry_distance)) {
         result->Push(entry_distance, search_param.ep);
     }
     push_duplicates(search_param.ep);
@@ -1609,7 +1646,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             const bool allowed = is_allowed(neighbor);
             if (deferred_rerank) {
                 if (not candidate_set.IsFull(distance)) {
-                    candidate_set.Insert(neighbor, distance);
+                    candidate_set.Insert(neighbor, distance, allowed);
                 }
                 if (allowed) {
                     result->Push(distance, neighbor);
@@ -1630,7 +1667,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             const bool promising =
                 result->Size() < rerank_topk or
                 (should_rerank ? lower_bound < result_bound : distance < result_bound);
-            if (promising and should_rerank) {
+            if (promising and allowed and should_rerank) {
                 graph->PrefetchFusedSupplement(neighbor);
                 const bool refined = exact_filter_ip_hint
                                          ? refine_node_with_hint(neighbor, filter_ip, &distance)
@@ -1641,7 +1678,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             }
 
             if (not candidate_set.IsFull(distance)) {
-                candidate_set.Insert(neighbor, distance);
+                candidate_set.Insert(neighbor, distance, allowed);
             }
             if (promising and allowed and result_eligible(distance)) {
                 result->Push(distance, neighbor);
