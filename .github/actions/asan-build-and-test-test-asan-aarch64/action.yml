@@ -30,7 +30,7 @@ runs:
       run: |
         echo leak:libomp.so > omp.supp
         echo leak:libgomp.so >> omp.supp
-        export LSAN_OPTIONS=suppressions=omp.supp
+        export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
         chmod +x ./build/tests/${{ inputs.matrix-test-type }}
         if [ "$SMOKE" = "true" ]; then
           python3 scripts/ci/platform_smoke.py "${{ inputs.matrix-test-type }}"

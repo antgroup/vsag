@@ -21,8 +21,7 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        cd ./tests/python/
-        python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+        python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility --cwd tests/python -- python3 -m pytest . -v --tb=short 2>&1 | tee tests/python/test-output.log
     - name: Upload Test Logs
       if: always()
       uses: actions/upload-artifact@v5

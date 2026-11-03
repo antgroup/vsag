@@ -10,6 +10,10 @@ on:
           - regression
           - performance
           - build-performance
+      logical_date:
+        description: Optional Asia/Shanghai YYYY-MM-DD for regression replay
+        type: string
+        default: ''
       ref:
         type: string
         default: main
@@ -22,6 +26,10 @@ on:
       profile:
         type: string
         default: regression
+      logical_date:
+        description: Optional Asia/Shanghai YYYY-MM-DD for regression replay
+        type: string
+        default: ''
       ref:
         type: string
         default: main
@@ -38,8 +46,61 @@ on:
   #   - cron: '0 14 * * *'
 
 jobs:
+  daily-plan:
+    name: Freeze Daily plan
+    if: ${{ github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      simd_options: ${{ steps.plan.outputs.simd_options }}
+      simd_keys: ${{ steps.plan.outputs.simd_keys }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Read original run date
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: context.runId
+            });
+            require('fs').writeFileSync('daily-run.json', JSON.stringify({
+              created_at: run.data.created_at
+            }));
+      - name: Freeze source, date and matrix
+        id: plan
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+          LOGICAL_DATE: ${{ inputs.logical_date }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, 'scripts/testing')
+          import daily_plan as p
+          created = json.load(open('daily-run.json'))['created_at']
+          ctx = p.context(os.environ['SOURCE_SHA'], created, os.environ['LOGICAL_DATE'] or None)
+          p.write('daily-context/context.json', ctx)
+          p.write('daily-context/expected-lanes.json', ['daily_test_asan_x86-unittests', 'daily_test_asan_x86-functests', 'daily_test_asan_aarch64-unittests', 'daily_test_asan_aarch64-functests', 'daily_test_asan_simd-unittests_simd', 'daily_test_asan_simd-sentinels', 'daily_test_tsan-functests', 'full-platform-test-asan-x86-unittests', 'full-platform-test-asan-x86-functests', 'full-platform-test-asan-aarch64-unittests', 'full-platform-test-asan-aarch64-functests', 'full-platform-test-asan-macos-arm64-unittests', 'full-platform-test-asan-macos-arm64-functests', 'full-platform-test-asan-macos-arm64-examples', 'full-platform-test-example-x86-examples', 'full-platform-test-example-aarch64-examples', 'full-python-test-python-x86-pytest', 'full-python-test-python-aarch64-pytest', 'full-coverage-coverage-unittests', 'full-coverage-coverage-functests', 'full-compatibility-compatibility-compatibility'])
+          mode = ctx['simd_mode']
+          flags = {'generic': '-DDISABLE_SSE_FORCE=1', 'sse': '-DDISABLE_AVX_FORCE=1', 'avx': '-DDISABLE_AVX2_FORCE=1'}
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              print('simd_options=' + json.dumps([mode + ';' + flags[mode]]), file=output)
+              print('simd_keys=' + json.dumps([mode]), file=output)
+          PY
+      - uses: actions/upload-artifact@v5
+        with:
+          name: daily-context-${{ github.run_id }}
+          overwrite: true
+          path: daily-context
+          retention-days: 30
+          if-no-files-found: error
+
   daily_build_asan_x86:
     name: Asan Build X86
+    needs: daily-plan
     runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-openblas
@@ -82,6 +143,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_build_asan_aarch64:
     name: Asan Build Aarch64
+    needs: daily-plan
     runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
@@ -118,7 +180,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_test_asan_x86:
     name: Test X86
-    needs: daily_build_asan_x86
+    needs: [daily-plan, daily_build_asan_x86]
     runs-on: ubuntu-24.04
     concurrency:
       group: daily_test_x86-${{ matrix.test_type }}-${{ github.run_id }}
@@ -133,12 +195,21 @@ jobs:
       image: vsaglib/vsag:ci-x86-openblas
       volumes:
         - /opt:/useless
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: daily_test_asan_x86
+      VSAG_DAILY_ENVIRONMENT: daily_test_asan_x86
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
@@ -149,7 +220,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
+          export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
@@ -161,10 +232,20 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-daily_test_asan_x86-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_test_asan_aarch64:
     name: Test Aarch64
-    needs: daily_build_asan_aarch64
+    needs: [daily-plan, daily_build_asan_aarch64]
     runs-on: ubuntu-24.04-arm
     strategy:
       matrix:
@@ -176,12 +257,21 @@ jobs:
     concurrency:
       group: daily_test_aarch64-${{ matrix.test_type }}-${{ github.run_id }}
       cancel-in-progress: false
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: daily_test_asan_aarch64
+      VSAG_DAILY_ENVIRONMENT: daily_test_asan_aarch64
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - name: Clean Build
         run: rm -rf ./build
       - name: Download Test
@@ -192,7 +282,7 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
+          export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
           chmod +x ./build/tests/${{ matrix.test_type }}
           ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
       - name: Upload Log
@@ -204,10 +294,20 @@ jobs:
           retention-days: 3
           overwrite: 'true'
 
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-daily_test_asan_aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   asan_test_clean_up:
     name: Clean Up
-    needs: [daily_test_asan_x86, daily_test_asan_aarch64]
+    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64]
     runs-on: ubuntu-24.04
     steps:
       - name: Create Empty File
@@ -232,6 +332,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_build_simd:
     name: Asan Build Simd
+    needs: daily-plan
     runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
@@ -239,7 +340,7 @@ jobs:
         - /opt:/useless
     strategy:
       matrix:
-        simd_option: ["avx;-DDISABLE_AVX2_FORCE=1", "sse;-DDISABLE_AVX_FORCE=1", "generic;-DDISABLE_SSE_FORCE=1"]
+        simd_option: ${{ fromJSON(needs.daily-plan.outputs.simd_options) }}
     concurrency:
       group: daily_build_simd-${{ matrix.simd_option }}-${{ github.run_id }}
       cancel-in-progress: false
@@ -257,6 +358,7 @@ jobs:
           echo ${EXTRA_KEY}
           echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
           export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan
+          cmake --build build --target unittests_simd --parallel 3
       - name: Clean
         run: find ./build -type f -name "*.o" -exec rm -f {} +
       - name: Save Test
@@ -271,12 +373,12 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_test_asan_simd:
     name: Unit Test Simd
-    needs: daily_build_simd
+    needs: [daily-plan, daily_build_simd]
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        test_type: [unittests, functests]
-        simd_key: [avx, sse, generic]
+        test_type: [unittests_simd]
+        simd_key: ${{ fromJSON(needs.daily-plan.outputs.simd_keys) }}
     concurrency:
       group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.run_id }}
       cancel-in-progress: false
@@ -284,12 +386,21 @@ jobs:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: daily_test_asan_simd
+      VSAG_DAILY_ENVIRONMENT: daily_test_asan_simd
     steps:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
@@ -300,18 +411,29 @@ jobs:
       - name: Do Asan Test In ${{ matrix.test_type }}
         run: |
           echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
+          export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
           chmod +x ./build/tests/${{ matrix.test_type }}
-          ./scripts/testing/test_parallel_by_name.sh ${{ matrix.test_type }} ~[pr]
+          python3 scripts/testing/daily_entry.py unittests_simd simd
+          python3 scripts/testing/daily_measure.py --name sentinels --owner simd -- python3 scripts/ci/platform_smoke.py functests
+
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-daily_test_asan_simd-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
 
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_clean_up_simd:
     name: Clean Up
-    needs: daily_test_asan_simd
+    needs: [daily-plan, daily_test_asan_simd]
     runs-on: ubuntu-24.04
     strategy:
       matrix:
-        simd_key: [avx, sse, generic]
+        simd_key: ${{ fromJSON(needs.daily-plan.outputs.simd_keys) }}
     steps:
       - name: Create Empty File
         run: touch /tmp/clean_up
@@ -327,6 +449,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_build_tsan:
     name: Daily Build with TSAN
+    needs: daily-plan
     runs-on: ubuntu-24.04
     concurrency:
       group: daily_build_tsan_x86-${{ github.run_id }}
@@ -362,15 +485,24 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   daily_test_tsan:
     name: Daily Run TSAN Tests
-    needs: daily_build_tsan
+    needs: [daily-plan, daily_build_tsan]
     runs-on: ubuntu-24.04
     concurrency:
       group: daily_test_tsan_x86-${{ github.run_id }}
       cancel-in-progress: false
     container:
       image: vsaglib/vsag:ci-x86-mkl
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: daily_test_tsan
+      VSAG_DAILY_ENVIRONMENT: daily_test_tsan
     steps:
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - name: Clean Env
         run: rm -rf ./build
       - name: Download Test
@@ -379,16 +511,32 @@ jobs:
           name: daily_test_x86-${{ github.run_id }}-tsan
           path: ./build/
       - name: Run TSAN tests
+        env:
+          OPENBLAS_NUM_THREADS: "1"
         run: |
-          echo leak:libomp.so > omp.supp
-          export LSAN_OPTIONS=suppressions=omp.supp
+          echo race:libomp.so > omp.supp
+          echo race:libomp.so.5 >> omp.supp
+          echo race:fmt::v10::detail::format_decimal >> omp.supp
+          echo "race:libmkl_intel_thread.so.2" >> omp.supp
+          export TSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
           chmod +x ./build/tests/functests
-          ./build/tests/functests "[concurrent]~[pr]"
+          python3 scripts/testing/daily_entry.py functests concurrent
+
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-daily_test_tsan-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
 
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   full-platform-build-asan-x86:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false) }}
     name: Asan Build X86
+    needs: daily-plan
     runs-on: ubuntu-24.04
     container:
       image: vsaglib/vsag:ci-x86-mkl
@@ -405,6 +553,7 @@ jobs:
         id: execute
   full-platform-build-asan-aarch64:
     name: Asan Build Aarch64
+    needs: daily-plan
     runs-on: ubuntu-24.04-arm
     container:
       image: vsaglib/vsag:ci-aarch64-openblas
@@ -422,6 +571,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   full-platform-build-asan-macos-arm64:
     name: Asan Build macOS arm64
+    needs: daily-plan
     runs-on: macos-15
     concurrency:
       group: asan_build_macos-${{ github.sha }}
@@ -437,6 +587,7 @@ jobs:
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
     name: Test X86
     needs:
+      - daily-plan
       - full-platform-build-asan-x86
     runs-on: ubuntu-24.04
     concurrency:
@@ -451,19 +602,43 @@ jobs:
       image: vsaglib/vsag:ci-x86-mkl
       volumes:
         - /opt:/useless
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-platform-test-asan-x86
+      VSAG_DAILY_ENVIRONMENT: full-platform-test-asan-x86
+      VSAG_DAILY_CORE_ONLY: "1"
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/asan-build-and-test-test-asan-x86
         id: execute
         with:
           matrix-test-type: ${{ matrix.test_type }}
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-platform-test-asan-x86-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
   full-platform-test-asan-aarch64:
     name: Test Aarch64
     needs:
+      - daily-plan
       - full-platform-build-asan-aarch64
     env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-platform-test-asan-aarch64
+      VSAG_DAILY_ENVIRONMENT: full-platform-test-asan-aarch64
+      VSAG_DAILY_CORE_ONLY: "1"
       SMOKE: ${{ false }}
     runs-on: ubuntu-24.04-arm
     strategy:
@@ -482,16 +657,36 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/asan-build-and-test-test-asan-aarch64
         id: execute
         with:
           matrix-test-type: ${{ matrix.test_type }}
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-platform-test-asan-aarch64-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-platform-build-asan-aarch64.result == 'success' }}
   full-platform-test-asan-macos-arm64:
     name: Test macOS arm64
     needs:
+      - daily-plan
       - full-platform-build-asan-macos-arm64
     env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-platform-test-asan-macos-arm64
+      VSAG_DAILY_ENVIRONMENT: full-platform-test-asan-macos-arm64
+      VSAG_DAILY_CORE_ONLY: "1"
       SMOKE: ${{ false }}
       FULL_EXAMPLES: ${{ true }}
     runs-on: macos-15
@@ -505,15 +700,31 @@ jobs:
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/asan-build-and-test-test-asan-macos-arm64
         id: execute
         with:
           matrix-test-type: ${{ matrix.test_type }}
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-platform-test-asan-macos-arm64-${{ matrix.test_type }}-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-platform-build-asan-macos-arm64.result == 'success' }}
   full-platform-test-example-x86:
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-platform-build-asan-x86.result == 'success' }}
     name: Test Example X86
     needs:
+      - daily-plan
       - full-platform-build-asan-x86
     runs-on: ubuntu-24.04
     container:
@@ -523,17 +734,39 @@ jobs:
     concurrency:
       group: test_example_x86--${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-platform-test-example-x86
+      VSAG_DAILY_ENVIRONMENT: full-platform-test-example-x86
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/asan-build-and-test-test-example-x86
         id: execute
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-platform-test-example-x86-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
   full-platform-test-example-aarch64:
     name: Test Example Aarch64
     needs:
+      - daily-plan
       - full-platform-build-asan-aarch64
     env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-platform-test-example-aarch64
+      VSAG_DAILY_ENVIRONMENT: full-platform-test-example-aarch64
       SMOKE: ${{ false }}
     runs-on: ubuntu-24.04-arm
     container:
@@ -547,15 +780,31 @@ jobs:
       - name: Free Disk Space
         run: rm -rf /useless/hostedtoolcache
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/asan-build-and-test-test-example-aarch64
         id: execute
         with:
           inputs-smoke: ${{ false }}
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-platform-test-example-aarch64-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-platform-build-asan-aarch64.result == 'success' }}
   full-platform-clean-up:
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!true)) && needs.full-platform-test-asan-x86.result == 'success' && needs.full-platform-test-asan-aarch64.result == 'success' && needs.full-platform-test-asan-macos-arm64.result == 'success' }}
     name: Clean Up
     needs:
+      - daily-plan
       - full-platform-test-asan-x86
       - full-platform-test-asan-aarch64
       - full-platform-test-asan-macos-arm64
@@ -568,6 +817,7 @@ jobs:
         id: execute
   full-python-build-python-wheel-x86:
     name: Python Wheel Build X86
+    needs: daily-plan
     runs-on: ubuntu-24.04
     concurrency:
       group: python_build_x86-${{ github.event.pull_request.number || github.sha }}
@@ -582,6 +832,7 @@ jobs:
   full-python-build-python-wheel-aarch64:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false) }}
     name: Python Wheel Build Aarch64
+    needs: daily-plan
     runs-on: ubuntu-24.04-arm
     concurrency:
       group: python_build_aarch64-${{ github.event.pull_request.number || github.sha }}
@@ -595,11 +846,16 @@ jobs:
   full-python-test-python-x86:
     name: Test Python X86
     needs:
+      - daily-plan
       - full-python-build-python-wheel-x86
     runs-on: ubuntu-24.04
     concurrency:
       group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-python-test-python-x86
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-x86
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
@@ -607,18 +863,38 @@ jobs:
         with:
           python-version: '3.10'
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-python-test-python-x86-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-python-build-python-wheel-x86.result == 'success' }}
   full-python-test-python-aarch64:
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (!false)) && needs.full-python-build-python-wheel-aarch64.result == 'success' }}
     name: Test Python Aarch64
     needs:
+      - daily-plan
       - full-python-build-python-wheel-aarch64
     runs-on: ubuntu-24.04-arm
     concurrency:
       group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-python-test-python-aarch64
+      VSAG_DAILY_ENVIRONMENT: full-python-test-python-aarch64
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
@@ -626,11 +902,26 @@ jobs:
         with:
           python-version: '3.10'
       - uses: actions/checkout@v4
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/python-build-and-test-test-python-aarch64
         id: execute
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-python-test-python-aarch64-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
   full-python-clean-up:
     name: Clean Up
     needs:
+      - daily-plan
       - full-python-test-python-x86
       - full-python-test-python-aarch64
     runs-on: ubuntu-24.04
@@ -643,6 +934,7 @@ jobs:
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true)) && needs.full-python-test-python-x86.result == 'success' && needs.full-python-test-python-aarch64.result == 'success' }}
   full-lint-clang-tidy-check:
     name: Lint
+    needs: daily-plan
     runs-on: ubuntu-latest
     container:
       image: vsaglib/vsag:ci-x86-openblas
@@ -665,6 +957,7 @@ jobs:
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   full-coverage-changes:
     name: Detect Changes
+    needs: daily-plan
     runs-on: ubuntu-latest
     outputs:
       non_markdown: ${{ steps.execute.outputs.non_markdown }}
@@ -676,6 +969,7 @@ jobs:
   full-coverage-coverage:
     name: Test Coverage
     needs:
+      - daily-plan
       - full-coverage-changes
     if: ${{ ((github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (github.event_name != 'push' || needs.full-coverage-changes.outputs.non_markdown == 'true')) && needs.full-coverage-changes.result == 'success' }}
     runs-on: ubuntu-latest
@@ -685,6 +979,10 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86-openblas
     env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-coverage-coverage
+      VSAG_DAILY_ENVIRONMENT: full-coverage-coverage
+      VSAG_DAILY_COVERAGE: "1"
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
       VSAG_TEST_SEED: 424242
@@ -693,12 +991,27 @@ jobs:
         with:
           fetch-depth: '0'
           persist-credentials: false
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/coverage-coverage
         id: execute
         with:
           secrets-CODECOV-TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-coverage-coverage-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
   full-compatibility-compatibility:
     name: Check Compatibility
+    needs: daily-plan
     runs-on: ubuntu-latest
     concurrency:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
@@ -706,6 +1019,9 @@ jobs:
     container:
       image: vsaglib/vsag:ci-x86-openblas
     env:
+      VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
+      VSAG_DAILY_LANE: full-compatibility-compatibility
+      VSAG_DAILY_ENVIRONMENT: full-compatibility-compatibility
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
     steps:
       - name: Install GitHub CLI
@@ -724,8 +1040,23 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - name: Download frozen Daily plan
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
       - uses: ./.github/actions/check-compatibility-compatibility
         id: execute
+      - name: Upload Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: daily-results-full-compatibility-compatibility-${{ github.run_id }}
+          overwrite: true
+          path: daily-results
+          retention-days: 30
+          if-no-files-found: error
+
     if: ${{ (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) && (true) }}
   performance-performance:
     name: Performance
@@ -1038,6 +1369,38 @@ jobs:
     concurrency:
       group: build-performance-${{ github.workflow }}-${{ github.event_name }}
       cancel-in-progress: false
+
+  daily-summary:
+    name: Daily budget and completeness
+    if: ${{ always() && (github.event_name != 'schedule' && (inputs.profile == '' || inputs.profile == 'regression')) }}
+    needs: [daily-plan, daily_test_asan_x86, daily_test_asan_aarch64, daily_test_asan_simd, daily_test_tsan, full-platform-test-asan-x86, full-platform-test-asan-aarch64, full-platform-test-asan-macos-arm64, full-platform-test-example-x86, full-platform-test-example-aarch64, full-python-test-python-x86, full-python-test-python-aarch64, full-coverage-coverage, full-compatibility-compatibility, full-lint-clang-tidy-check]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          name: daily-context-${{ github.run_id }}
+          path: daily-context
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+        with:
+          pattern: daily-results-*-${{ github.run_id }}
+          path: daily-collected
+      - name: Reconcile every expected lane
+        if: always()
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          python3 scripts/testing/daily_report.py --collect daily-collected --expected-file daily-context/expected-lanes.json --summary "$GITHUB_STEP_SUMMARY" --json daily-summary.json
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: daily-summary-${{ github.run_id }}
+          overwrite: true
+          path: daily-summary.json
+          retention-days: 30
+          if-no-files-found: error
 
 permissions:
   contents: read

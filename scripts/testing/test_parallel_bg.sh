@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [ -n "${VSAG_DAILY_CONTEXT:-}" ]; then
+  exec python3 scripts/testing/daily_entry.py coverage
+fi
+
 pids=()
 exit_codes=()
 logger_files=()

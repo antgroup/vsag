@@ -19,6 +19,7 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <limits>
@@ -26,9 +27,11 @@
 #include <random>
 #include <sstream>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "core/test_budget.h"
+#include "framework/daily_test_plan.h"
 #include "framework/test_budget_context.h"
 #include "framework/test_reader.h"
 #include "functest.h"
@@ -57,6 +60,7 @@ public:
     std::string graph_type{"nsw"};
     bool sample{true};
     uint64_t query_count{100};
+    uint64_t disk_graph_io_start{0};
     fixtures::budget::CaseIdentity identity;
     std::vector<std::pair<std::string, std::string>> tune_cases;
     std::shared_ptr<const budget::CasePlan> budget_plan;
@@ -201,6 +205,78 @@ SelectHGraphValues(const std::vector<T>& values, uint64_t count, uint64_t seed) 
         selected.push_back(values[index]);
     }
     return selected;
+}
+
+const std::vector<std::string> hgraph_graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
+
+std::vector<std::pair<std::string, std::string>>
+HGraphDiskIOCases(int dim) {
+    std::vector<std::pair<std::string, std::string>> cases = {
+        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
+        {"rabitq,fp16", "rabitq,fp16,async_io"},
+        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
+    };
+    cases.erase(std::remove_if(cases.begin(),
+                               cases.end(),
+                               [&](const auto& value) {
+                                   return HGraphTestIndex::IsRaBitQ(value.first) &&
+                                          dim < fixtures::RABITQ_MIN_RACALL_DIM;
+                               }),
+                cases.end());
+    return cases;
+}
+
+template <typename Callback>
+void
+ForEachHGraphDiskIOCase(const HGraphResourcePtr& resource, Callback callback) {
+    auto select_idx = resource->disk_graph_io_start;
+    for (const auto& metric : resource->metric_types) {
+        for (const auto dim : resource->dims) {
+            for (const auto& [memory_io, disk_io] : HGraphDiskIOCases(dim)) {
+                callback(metric, dim, memory_io, disk_io, hgraph_graph_io_types.at(select_idx));
+                select_idx = (select_idx + 1) % hgraph_graph_io_types.size();
+            }
+        }
+    }
+}
+
+nlohmann::json
+HGraphDailyGroups(const HGraphResourcePtr& resource) {
+    nlohmann::json groups = nlohmann::json::array();
+    uint64_t disk_graph_io_start = 0;
+    const bool disk_io = HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index";
+    for (const auto& metric : resource->metric_types) {
+        for (const auto dim : resource->dims) {
+            nlohmann::json group = {{"metric", metric},
+                                    {"dim", dim},
+                                    {"quantizers", resource->test_cases},
+                                    {"tune_pairs", resource->tune_cases},
+                                    {"base_count", resource->base_count},
+                                    {"query_count", resource->query_count}};
+            if (disk_io) {
+                // Carry the original whole-case cursor across dimensions AND metrics.
+                // Unsupported RaBitQ entries never advance it in the original loop.
+                group["disk_graph_io_start"] = disk_graph_io_start;
+                disk_graph_io_start = (disk_graph_io_start + HGraphDiskIOCases(dim).size()) %
+                                      hgraph_graph_io_types.size();
+            }
+            groups.push_back(std::move(group));
+        }
+    }
+    return groups;
+}
+
+void
+SelectHGraphDailyGroup(const HGraphResourcePtr& resource, const nlohmann::json& selected) {
+    const auto groups = HGraphDailyGroups(resource);
+    if (std::find(groups.begin(), groups.end(), selected) == groups.end()) {
+        throw std::invalid_argument("Daily HGraph configuration not in full inventory");
+    }
+    if (HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index") {
+        resource->disk_graph_io_start = selected.at("disk_graph_io_start").get<uint64_t>();
+    }
+    resource->metric_types = {selected.at("metric").get<std::string>()};
+    resource->dims = {selected.at("dim").get<int>()};
 }
 
 std::vector<std::pair<std::string, std::string>>
@@ -497,6 +573,25 @@ HGraphTestIndex::GetResource(bool sample,
         resource->dims = SelectHGraphValues(fixtures::get_common_used_dims(), 1, seed + 3);
     }
     ApplyHGraphBudget(resource);
+    // Keep the original whole-case workload size and assertions. Rotation splits
+    // metric/dimension groups; each group retains every legal quantizer/tune pair.
+    if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
+        const auto groups = HGraphDailyGroups(resource);
+        if (const auto* path = std::getenv("VSAG_DAILY_ENUMERATE")) {
+            std::ofstream output(path);
+            output << groups.dump(2) << std::endl;
+            if (!output) {
+                throw std::runtime_error("Cannot write Daily configuration inventory");
+            }
+            // Inventory mode is never counted as test execution.
+            SKIP("Daily configuration enumeration only");
+        }
+        if (const auto* text = std::getenv("VSAG_DAILY_HGRAPH")) {
+            const auto selected = nlohmann::json::parse(text);
+            SelectHGraphDailyGroup(resource, selected);
+            std::cerr << "DAILY_HGRAPH " << selected.dump() << std::endl;
+        }
+    }
     return resource;
 }
 
@@ -654,6 +749,7 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const std::string& search_param,
                              float recall,
                              bool expect_success) {
+    fixtures::daily::Phase daily_phase("TestGeneral");
     REQUIRE(index->GetIndexType() == vsag::IndexType::HGRAPH);
     TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
@@ -1339,6 +1435,59 @@ MakeHGraphQueryComputerCountParam(const std::string& quantization,
     }
 
 }  // namespace
+
+TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequence",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    auto whole = std::make_shared<HGraphTestResource>();
+    whole->identity = {"(Daily) HGraph Disk IO Type Index", "", __FILE__, 0};
+    whole->base_count = 600;
+    whole->metric_types = {"l2", "ip"};
+    // Skipped RaBitQ entries make successive groups start at different backends.
+    whole->dims = {64, RABITQ_MIN_RACALL_DIM, 128, RABITQ_MIN_RACALL_DIM + 1};
+    using Record = std::tuple<std::string, int, std::string, std::string, std::string>;
+    std::vector<Record> expected, unsplit, split;
+    const std::vector<std::pair<std::string, std::string>> original_cases = {
+        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
+        {"rabitq,fp16", "rabitq,fp16,async_io"},
+        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
+    };
+    const std::vector<std::string> original_backends = {"block_memory_io", "mmap_io", "async_io"};
+    uint64_t cursor = 0;
+    // Independent oracle: the pre-split nested loop, including its skip semantics.
+    for (const auto& metric : whole->metric_types) {
+        for (const auto dim : whole->dims) {
+            for (const auto& [memory, disk] : original_cases) {
+                if (memory.rfind("rabitq", 0) == 0 && dim < RABITQ_MIN_RACALL_DIM) {
+                    continue;
+                }
+                expected.emplace_back(metric, dim, memory, disk, original_backends[cursor]);
+                cursor = (cursor + 1) % original_backends.size();
+            }
+        }
+    }
+    ForEachHGraphDiskIOCase(whole, [&](const auto&... args) { unsplit.emplace_back(args...); });
+    const auto groups = HGraphDailyGroups(whole);
+    REQUIRE(groups.size() == 8);
+    for (const auto& group : groups) {
+        auto selected = std::make_shared<HGraphTestResource>(*whole);
+        SelectHGraphDailyGroup(selected, group);
+        ForEachHGraphDiskIOCase(selected,
+                                [&](const auto&... args) { split.emplace_back(args...); });
+    }
+    REQUIRE(unsplit == expected);
+    REQUIRE(split == expected);
+    REQUIRE(std::any_of(split.begin(), split.end(), [](const auto& value) {
+        return std::get<2>(value) == "sq8_uniform,bf16" && std::get<4>(value) == "mmap_io";
+    }));
+    auto invalid = groups.at(1);
+    invalid["disk_graph_io_start"] = 0;
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+    invalid.erase("disk_graph_io_start");
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+    REQUIRE(whole->dims.size() == 4);
+    REQUIRE(whole->metric_types.size() == 2);
+}
 
 TEST_CASE("HGraph budget normalizes each quantizer before whole-case accounting",
           "[ft][hgraph][test_budget][pr]") {
@@ -4608,47 +4757,36 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     auto size = 1024 * 1024 * 2;
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     float recall = 0.98;
-    const std::vector<std::pair<std::string, std::string>> io_cases = {
-        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
-        {"rabitq,fp16", "rabitq,fp16,async_io"},
-        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
-    };
-    const std::vector<std::string> graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
-    auto select_idx = 0;
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto& [memory_io_str, disk_io_str] : io_cases) {
-                INFO(fmt::format("metric_type: {}, dim: {}, memory_io_str: {}, disk_io_str: {}",
-                                 metric_type,
-                                 dim,
-                                 memory_io_str,
-                                 disk_io_str));
-                if (HGraphTestIndex::IsRaBitQ(memory_io_str) &&
-                    (dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
-                    continue;  // Skip invalid RaBitQ configurations
-                }
-                vsag::Options::Instance().set_block_size_limit(size);
-                HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
-                build_param.graph_type = resource->graph_type;
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                auto index = TestIndex::TestFactory(test_index->name, param, true);
-                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
-                    dim, resource->base_count, metric_type);
-                TestIndex::TestBuildIndex(index, dataset, true);
-                build_param.quantization_str = disk_io_str;
-
-                auto graph_io_type = graph_io_types[select_idx];
-                build_param.graph_io_type = graph_io_type;
-                param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
-                TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
-                HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
-                ++select_idx;
-                select_idx %= graph_io_types.size();
-                vsag::Options::Instance().set_block_size_limit(origin_size);
-            }
-        }
-    }
+    ForEachHGraphDiskIOCase(
+        resource,
+        [&](const auto& metric_type,
+            int dim,
+            const auto& memory_io_str,
+            const auto& disk_io_str,
+            const auto& graph_io_type) {
+            INFO(fmt::format(
+                "metric_type: {}, dim: {}, memory_io_str: {}, disk_io_str: {}, graph_io_type: {}",
+                metric_type,
+                dim,
+                memory_io_str,
+                disk_io_str,
+                graph_io_type));
+            vsag::Options::Instance().set_block_size_limit(size);
+            HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
+            build_param.graph_type = resource->graph_type;
+            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto index = TestIndex::TestFactory(test_index->name, param, true);
+            auto dataset =
+                HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+            build_param.quantization_str = disk_io_str;
+            build_param.graph_io_type = graph_io_type;
+            param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
+            TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
+            HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        });
 }
 
 HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Disk IO Type Index",
