@@ -232,6 +232,7 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
 | `window_parallelism` | int | `1` | 含调用线程的执行槽位数上限，取值 `1` 至 `16`。省略或为 1 使用原串行候选堆；大于 1 启用固定分区近似执行器，首版只支持 immutable 内存 KNN。资源准入可降低实际槽位数，候选计划保持不变。 |
 | `parallel_n_candidate_ratio` | number | 校准阶段并行请求必须显式传入 | 有限且 ≥1。所有局部堆的总容量为 `ceil(倍率 × max(n_candidate, topk))`，独立于执行槽位数分配到固定逻辑分区。增大容量允许保留更多候选并增加成本，不保证保留串行候选集或特定召回率；串行模式只校验该值，不应用它。 |
+| `profile_cpu` | bool | `false` | 串行和并行 KNN 的诊断选项。采集调用线程参数解析后至统计序列化前的 CPU 时间，并累加后台 window worker 的 CPU 时间；关闭时不读取线程 CPU 时钟。 |
 | `filter_callback_limit` | uint64 | `0` | 单次带过滤检索最多调用用户 `Filter::CheckValid` 回调的次数；`0` 表示不限制。删除 ID 过滤器等内部检查不计数。达到正数上限时，在正常处理最后一次回调结果后停止候选及后续窗口扫描，并返回已经通过过滤的候选，因此结果可能不完整。该限制同时适用于 KNN、范围检索以及常规 API 和 `SearchWithRequest` |
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
@@ -242,6 +243,12 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 带 Filter 的新模式要求该 Filter 同时实现 `vsag/concurrent_filter.h` 中的可选 `ConcurrentFilterProvider` 能力。非阻塞 lease 提供 label 空间下的独立 evaluator，每个 evaluator 同时只属于一个逻辑槽位；不支持的 Filter 明确失败。callback 总预算在同一次调用的所有分区间共享；deadline 停止新工作并在 drain 后返回错误，callback 预算耗尽可交付已验证候选。
 
 进程级专用查询池结合 CPU affinity、可读取的 cgroup CPU 配额和活动 SINDI 调用限制额外 worker。部署环境变量 `VSAG_SINDI_EXTRA_WORKERS` 可降低额外 worker 上限，`VSAG_SINDI_MAX_CANDIDATES` 控制单次调用的总堆容量上限（缺省 1,048,576），均不属于查询参数。worker 配置在进程查询池初始化时读取，候选容量上限在创建计划时读取。worker scratch 与调用方 arena 隔离；这些控制不代表已限制整个服务的 CPU 或内存。生产参数须通过独立效果集及目标并发下的 P95/P99 验证后选择。
+
+CPU 准入根据进程的 cgroup membership 和挂载信息定位 v1/v2 层级，取可见祖先中可读取 CPU 配额的最小值。查询池配置是初始化快照，不是整个服务的 CPU 限流或动态扩缩容策略。
+
+并行结果统计提供 `sindi_requested_slots`、`sindi_granted_slots`、`sindi_filter_slots`（首次 Filter 租约容量）、`sindi_cpu_slots`、`sindi_worker_limit`、`sindi_partitions`、`sindi_candidate_capacity`、`sindi_n_candidate`、`sindi_windows_processed`、`sindi_execution_complete` 和 `sindi_stop_reason`。既有 `complete` 表示距离计数覆盖是否完整，存在未计数的近似计算时为 false，不表示窗口计划没有执行完。deadline 和 worker 异常仍在回收所有任务后返回错误；deadline 在窗口边界和每 32 次 Filter 回调协作检查，callback permit 上限逐回调精确检查。
+
+显式设置 `profile_cpu:true` 时，`sindi_cpu_time_enabled`、`sindi_cpu_time_complete` 表示采样启用和可用状态；`sindi_search_cpu_us` 为调用线程与后台 worker CPU 时间之和，`sindi_worker_cpu_us` 为后台部分，不可用时省略数值。这些值不含 VSAG 之前的 SQL/Filter 准备、统计序列化和最终阈值结果包装，不代表整条 SQL 的 CPU 成本。串行和并行对照应采用相同采样设置，服务级 CPU 另行监控。
 
 合并 ratio 与 threshold 限制后，每条非空倒排链至少扫描一个 posting。
 

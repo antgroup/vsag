@@ -104,6 +104,7 @@ public:
     uint32_t worker_n_candidate{0};
     uint32_t window_parallelism{1};
     double parallel_n_candidate_ratio{1.0};
+    bool profile_cpu{false};
     SindiSearchOptions execution_options;
     uint64_t filter_callback_limit{0};
 

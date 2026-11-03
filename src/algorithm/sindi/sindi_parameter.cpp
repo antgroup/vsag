@@ -15,8 +15,8 @@
 
 #include "sindi_parameter.h"
 
-#include <limits>
 #include <cmath>
+#include <limits>
 #include <nlohmann/json.hpp>
 
 #include "impl/logger/logger.h"
@@ -331,12 +331,13 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     // Candidate execution and reranking are independent. Preserve the serial rerank baseline.
     execution_options.rerank_parallelism = 1;
     parallel_n_candidate_ratio = 1.0;
+    profile_cpu = search_json.Contains("profile_cpu") and search_json["profile_cpu"].GetBool();
     if (search_json.Contains("parallel_n_candidate_ratio")) {
         parallel_n_candidate_ratio =
             search_json["parallel_n_candidate_ratio"].GetInnerJson()->get<double>();
-        CHECK_ARGUMENT(std::isfinite(parallel_n_candidate_ratio) and
-                           parallel_n_candidate_ratio >= 1.0,
-                       "parallel_n_candidate_ratio must be finite and >= 1");
+        CHECK_ARGUMENT(
+            std::isfinite(parallel_n_candidate_ratio) and parallel_n_candidate_ratio >= 1.0,
+            "parallel_n_candidate_ratio must be finite and >= 1");
     }
     if (window_parallelism > 1) {
         execution_options.rerank_batch = false;
@@ -372,6 +373,7 @@ SINDISearchParameter::ToJson() const {
     }
     json[INDEX_SINDI]["window_parallelism"].SetInt(window_parallelism);
     json[INDEX_SINDI]["parallel_n_candidate_ratio"].SetDouble(parallel_n_candidate_ratio);
+    json[INDEX_SINDI]["profile_cpu"].SetBool(profile_cpu);
     json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
     json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
     json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
