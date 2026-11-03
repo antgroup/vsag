@@ -116,6 +116,28 @@ removed = index.remove(candidate_ids)
 
 Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回 `-1`，不属于操作失败。
 
+## 索引分析
+
+安装 wheel 后会同时获得索引分析 API 与 `pyvsag-analyze-index` 命令；运行时不需要 VSAG 源码、
+CMake 或 C++ 编译器。支持的索引类型、结果结构与查询文件格式请参考
+[索引分析文档](../resources/analyze_index.md)。
+
+```python
+import pyvsag
+
+report = pyvsag.analyze_index(index_path="index.bin")
+print(report["schema_version"])
+print(report["index"]["name"], report["static_analysis"]["statistics"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin > report.json
+```
+
+Python API 返回普通字典，可直接传给 `json.dumps()`。命令将相同的 JSON 文档写入 stdout，
+将诊断信息写入 stderr，并在分析失败时返回非零退出码。传入 `query_path=...`
+（或 `--query_path ...`）会额外执行动态 `AnalyzeIndexBySearch` 分析。
+
 ## 与 C++ 库的关系
 
 `pyvsag` 绑定的是同一份核心 C++ 实现，行为和性能特征与 C++ 版本保持一致。因此：

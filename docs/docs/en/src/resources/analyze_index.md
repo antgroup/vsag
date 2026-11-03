@@ -2,10 +2,12 @@
 
 VSAG ships an introspection capability for inspecting an index that has already been built or
 loaded, so you can diagnose recall regressions, quantization quality, graph health and search
-performance **without** rebuilding the index. This capability is exposed in two ways:
+performance **without** rebuilding the index. This capability is exposed in several ways:
 
 - the C++ API `Index::AnalyzeIndexBySearch` (declared in `include/vsag/index.h`);
-- the command-line diagnostic tool `analyze_index`, located under `tools/analyze_index/`.
+- the C++ command-line diagnostic tool `analyze_index`, located under `tools/analyze_index/`;
+- the public Python API `pyvsag.analyze_index()` in the official `pyvsag` wheel;
+- the installed `pyvsag-analyze-index` command, which is a thin wrapper around that Python API.
 
 ## The `AnalyzeIndexBySearch` API
 
@@ -204,10 +206,176 @@ analysis, and Pyramid subindex quality, use the `GetStats()` JSON.
 ## The `analyze_index` Tool
 
 `analyze_index` is the user-facing wrapper around the analyzer APIs. It loads a serialized VSAG
-index from disk, prints its metadata and `GetStats()` output, and (optionally) runs
+index from disk, reports its metadata and `GetStats()` output, and (optionally) runs
 `AnalyzeIndexBySearch` against a query file.
 
-### Building
+The C++ executable, the Python API and the installed command all call the same native component
+(`vsag::AnalyzeIndex`, implemented in `src/analyzer/index_analyzer.cpp`). There is no separate
+Python-specific loading or analysis implementation.
+
+### Installing from pip
+
+Installing any official `pyvsag` wheel also installs the analyzer command and the Python API.
+No VSAG source tree, CMake or C++ compiler is required at runtime, and the wheel version must
+match the VSAG version that wrote the index.
+
+```bash
+pip install pyvsag
+```
+
+Verify the installation:
+
+```bash
+pyvsag-analyze-index --help
+python -c "import pyvsag; print(pyvsag.ANALYSIS_SCHEMA_VERSION)"
+```
+
+### Python API
+
+```python
+import json
+import pyvsag
+
+report = pyvsag.analyze_index(
+    index_path="/path/to/index",
+    build_parameter="default",
+    query_path=None,
+    query_data_type="auto",
+    base_path=None,
+    groundtruth_path=None,
+    save_groundtruth_path=None,
+    search_parameter="default",
+    topk=100,
+)
+print(json.dumps(report, indent=2))
+```
+
+`analyze_index` returns a plain `dict`, so the result can be serialized with `json.dumps()`
+without custom encoders. Key points:
+
+- Only `index_path` is required. Without `query_path` the call performs static analysis and
+  `dynamic_analysis` is `None`.
+- `build_parameter` defaults to `"default"`, which reuses the build parameters embedded in the
+  index file.
+- `topk` must be positive; `groundtruth_path` and `save_groundtruth_path` require `query_path`.
+- Invalid arguments raise `ValueError` (or `TypeError` for wrong Python types); unreadable,
+  damaged or incompatible indexes raise `RuntimeError` with the underlying cause.
+- The API does not parse or require human-readable logs.
+
+### Installed command
+
+```bash
+pyvsag-analyze-index --index_path /path/to/index
+```
+
+The command accepts the same options as the C++ tool (see the table below). Hyphenated aliases
+such as `--index-path` are accepted in addition to the underscore names.
+
+Output contract:
+
+- **stdout** contains exactly one JSON report and nothing else. Diagnostic logging from the
+  native library is suppressed by the command.
+- **stderr** receives actionable error messages.
+- The exit code is `0` on success and non-zero when argument validation, loading or analysis
+  fails.
+
+```bash
+# Static analysis only (metadata + statistics).
+pyvsag-analyze-index --index_path /path/to/index
+
+# Static + dynamic analysis.
+pyvsag-analyze-index \
+    --index_path /path/to/index \
+    --query_path /path/to/queries.bin \
+    --query_data_type dense \
+    --search_parameter '{"hgraph":{"ef_search":64}}' \
+    --topk 50
+```
+
+### Result schema
+
+Both interfaces return the same document:
+
+```json
+{
+  "schema_version": "1.0",
+  "index": {
+    "path": "/path/to/index",
+    "name": "hgraph",
+    "dim": 128,
+    "data_type": "float32",
+    "metric": "l2",
+    "extra_info_size": 0,
+    "metadata_source": "serialized_metadata",
+    "metadata_complete": true,
+    "index_parameter": { "max_degree": 32 }
+  },
+  "static_analysis": {
+    "supported": true,
+    "statistics": { "total_count": 10000, "average_degree": 31.8 }
+  },
+  "dynamic_analysis": {
+    "supported": true,
+    "query_path": "/path/to/queries.bin",
+    "query_data_type": "dense",
+    "topk": 100,
+    "search_parameter": "default",
+    "results": { "_analysis": { "schema_version": 1, "status": "complete" } }
+  },
+  "warnings": [],
+  "compatibility": {
+    "schema_version": "1.0",
+    "serialization_format": "vsag-serialized-index",
+    "static_analysis_supported": true,
+    "dynamic_analysis_supported": true,
+    "metadata_complete": true
+  }
+}
+```
+
+Top-level fields are stable:
+
+| Field | Meaning |
+| --- | --- |
+| `schema_version` | Version of the report layout. Check it before consuming results. |
+| `index` | Index metadata recovered from the serialized file (or from `build_parameter`). |
+| `static_analysis` | `supported` flag and the `GetStats()` statistics object. |
+| `dynamic_analysis` | `null` for static-only runs, otherwise the query inputs plus `AnalyzeIndexBySearch` results. |
+| `warnings` | Non-fatal notices, for example incomplete metadata or an ignored `base_path`. |
+| `compatibility` | Feature support and metadata-completeness flags for the loaded index. |
+
+Fatal problems are never reported as partial results: invalid arguments, damaged files,
+incompatible serialized formats and unsupported operations raise an error (C++ exception) or a
+Python exception, and the command exits non-zero.
+
+### Supported index types and serialized formats
+
+Static analysis requires the index to implement `IndexFeature::SUPPORT_GET_STATS`; dynamic
+analysis requires `IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH`. All factory-registered
+indexes in this release provide both features:
+
+| Index type | Static analysis | Dynamic analysis | Notes |
+| --- | --- | --- | --- |
+| `hgraph`, `lazy_hgraph` | Yes | Yes | Graph health metrics are reported through `GetStats()`. |
+| `ivf` | Yes | Yes | Quantization fields appear when reorder is enabled. |
+| `pyramid` | Yes | Yes (KNN only) | Path-scoped queries cannot be expressed through the CLI; use the C++ API to attach paths. |
+| `sindi`, `sindi_v2`, `simq` | Yes | Yes | Sparse indexes; pass `base_path`/`groundtruth_path` for recall and bias metrics. |
+| `brute_force`, `warp` | Yes | Yes | Exact-search baseline. |
+
+Serialized index input: a file produced by `Index::Serialize(std::ostream&)` /
+`pyvsag.Index.save()`, including the VSAG footer metadata. Files without footer metadata, or
+files written by an incompatible VSAG version, fail with a clear error instead of returning
+partial data.
+
+Query dataset inputs:
+
+- Dense: `uint32 rows, uint32 cols, float32 data[rows * cols]`.
+- Sparse CSR: `int64 nrow, int64 ncol, int64 nnz`, followed by `int64 indptr[nrow + 1]`,
+  `int32 indices[nnz]` and `float32 data[nnz]`.
+- SINDI ground truth: `.dev.gt` layout — `uint32 query_count, uint32 topk`, followed by
+  flattened `int32 ids` and `float32 distances`.
+
+### Building the C++ tool from source
 
 Tools are not built by default — enable them explicitly:
 
@@ -236,7 +404,7 @@ cmake --build build-release -j
 | `--topk` | `-k` | No | Top-K for dynamic analysis (default `100`). |
 
 The query file format is the simple binary `(uint32 rows, uint32 cols, float32 data...)` layout
-consumed by `load_query()` in `tools/analyze_index/analyze_index.cpp`.
+consumed by the shared analyzer component in `src/analyzer/index_analyzer.cpp`.
 
 The dense query format contains vectors only. The tool does not currently provide a way to attach
 default or named Pyramid hierarchy paths to the loaded `Dataset`. Therefore it cannot express
@@ -260,7 +428,9 @@ ground truth from the original sparse base vectors and can save it through `--sa
     --index_path /path/to/my_index.hgraph
 ```
 
-Reports the index name, dimension, data type, metric, build parameters, and `GetStats()` JSON.
+Prints the JSON report described in [Result schema](#result-schema) to stdout. `index` contains
+the index name, dimension, data type, metric and build parameters; `static_analysis.statistics`
+contains the `GetStats()` JSON.
 
 **2. Static + dynamic analysis**
 
@@ -272,8 +442,9 @@ Reports the index name, dimension, data type, metric, build parameters, and `Get
     --topk 50
 ```
 
-In addition to the static section, prints a `Search Analyze: { ... }` JSON block produced by
-`AnalyzeIndexBySearch`.
+In addition to the static section, `dynamic_analysis.results` contains the JSON object produced
+by `AnalyzeIndexBySearch`. The C++ tool writes the report to stdout and keeps library warnings and
+errors on stderr.
 
 When a serialized index only embeds `index_param`, `analyze_index` can still reload it without
 `--build_parameter`; missing metadata fields are filled with analyzer defaults where possible.
@@ -295,5 +466,8 @@ When a serialized index only embeds `index_param`, `analyze_index` can still rel
 
 - API: `Index::AnalyzeIndexBySearch` in `include/vsag/index.h`
 - Implementations: `src/analyzer/{analyzer,hgraph_analyzer,pyramid_analyzer}.h`
-- Tool source: `tools/analyze_index/`
+- Shared analysis component: `src/analyzer/index_analyzer.{h,cpp}`
+- C++ tool source: `tools/analyze_index/`
+- Python API: `python/pyvsag/analyzer.py`
+- Installed command: `python/pyvsag/analyze_index_cli.py`
 - Local tool entry point: `tools/analyze_index/README.md`

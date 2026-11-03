@@ -21,6 +21,7 @@ sys.path.append(_cur_file_dir)
 
 from _pyvsag import *
 from ._version import __version__
+from .analyzer import ANALYSIS_SCHEMA_VERSION, analyze_index
 
 import _pyvsag
 __doc__ = _pyvsag.__doc__

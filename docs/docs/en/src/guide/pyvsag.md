@@ -114,6 +114,30 @@ propagating underlying operation failures.
 
 The Node.js equivalents `calcDistancesById(query, ids)` and legacy `calDistanceById(query, ids)` retain their 1D `Float32Array` result. They require exactly `Float32Array` queries and `BigInt64Array` IDs (other array kinds throw `TypeError`), validate the actual query length through the C++ Dataset API, and throw `Error` with the C++ message on operation failure. Missing IDs still produce `-1`; they are not operation failures.
 
+## Index Analysis
+
+Installing the wheel also installs the index analysis API and the `pyvsag-analyze-index` command;
+no VSAG source tree, CMake or C++ compiler is needed at runtime. See the
+[Index Analysis guide](../resources/analyze_index.md) for supported index types, the result
+schema and the query file formats.
+
+```python
+import pyvsag
+
+report = pyvsag.analyze_index(index_path="index.bin")
+print(report["schema_version"])
+print(report["index"]["name"], report["static_analysis"]["statistics"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin > report.json
+```
+
+The Python API returns a plain dictionary that can be passed to `json.dumps()`. The command
+writes the same JSON document to stdout, sends diagnostics to stderr and exits non-zero when
+analysis fails. Passing `query_path=...` (or `--query_path ...`) additionally runs dynamic
+`AnalyzeIndexBySearch` analysis.
+
 ## Relationship with the C++ Library
 
 `pyvsag` wraps the same `vsag::Index` API as C++ and shares the underlying index binaries. You can
