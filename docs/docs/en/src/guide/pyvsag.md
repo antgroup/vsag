@@ -233,6 +233,30 @@ pyvsag.set_logger_debug()   # detailed debug output
 - A shallow `copy.copy(index)` shares the same native index; the native index is released when the
   last reference goes away.
 
+## Index Analysis
+
+Installing the wheel also installs the index analysis API and the `pyvsag-analyze-index` command;
+no VSAG source tree, CMake or C++ compiler is needed at runtime. See the
+[Index Analysis guide](../resources/analyze_index.md) for supported index types, the result
+schema and the query file formats.
+
+```python
+import pyvsag
+
+report = pyvsag.analyze_index(index_path="index.bin")
+print(report["schema_version"])
+print(report["index"]["name"], report["static_analysis"]["statistics"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin > report.json
+```
+
+The Python API returns a plain dictionary that can be passed to `json.dumps()`. The command
+writes the same JSON document to stdout, sends diagnostics to stderr and exits non-zero when
+analysis fails. Passing `query_path=...` (or `--query_path ...`) additionally runs dynamic
+`AnalyzeIndexBySearch` analysis.
+
 ## Relationship with the C++ Library
 
 `pyvsag` wraps the same `vsag::Index` implementation as C++ and shares the underlying index

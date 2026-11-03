@@ -16,6 +16,7 @@
 from ._index import Index, _check
 from ._lib import lib as _lib
 from ._version import __version__
+from .analyzer import ANALYSIS_SCHEMA_VERSION, analyze_index
 
 _LOG_LEVELS = {"off": _lib.VSAG_LOG_OFF, "info": _lib.VSAG_LOG_INFO, "debug": _lib.VSAG_LOG_DEBUG}
 

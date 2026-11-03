@@ -11,6 +11,8 @@ build-backend = "setuptools.build_meta"
 [tool.cibuildwheel]
 build = "cp310-*"
 skip = ["*-musllinux*", "*i686*", "pp*"]
+test-requires = ["numpy", "pytest"]
+test-command = "python {project}/scripts/python/smoke_test_wheel.py"
 before-build = "bash scripts/deps/install_deps_centos.sh"
 before-all = "yum install -y gcc gcc-c++ ca-certificates"
 

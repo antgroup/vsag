@@ -257,7 +257,7 @@ jobs:
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
-          CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py
+          CIBW_TEST_COMMAND: pip install numpy pytest && python /project/tests/python/run_test.py && python /project/scripts/python/smoke_test_wheel.py
       - uses: actions/upload-artifact@v5
         if: ${{ github.event_name == 'release' || inputs.arch == '' || inputs.arch == matrix.arch }}
         with:
