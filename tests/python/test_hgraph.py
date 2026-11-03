@@ -88,8 +88,12 @@ def test_hgraph_knn_search_with_statistics(dataset_factory):
     assert distances.shape == (5,)
     assert statistics["distance_evaluations"] > 0
 
-    with pytest.raises(RuntimeError, match="knn search failed"):
+    with pytest.raises(pyvsag.VsagError) as caught:
         index.knn_search_with_statistics(query, 5, "not valid JSON")
+    assert isinstance(caught.value, RuntimeError)
+    assert caught.value.operation == "knn_search_with_statistics"
+    assert type(caught.value.code) is int
+    assert caught.value.code > 0
 
 
 def test_hgraph_range_search_with_statistics(dataset_factory):
@@ -110,8 +114,12 @@ def test_hgraph_range_search_with_statistics(dataset_factory):
     assert distances.shape == legacy_distances.shape
     assert statistics["distance_evaluations"] > 0
 
-    with pytest.raises(RuntimeError, match="range search failed"):
+    with pytest.raises(pyvsag.VsagError) as caught:
         index.range_search_with_statistics(query, 1.0, "not valid JSON")
+    assert isinstance(caught.value, RuntimeError)
+    assert caught.value.operation == "range_search_with_statistics"
+    assert type(caught.value.code) is int
+    assert caught.value.code > 0
 
 
 @pytest.mark.parametrize("metric", ["ip"])
