@@ -14,12 +14,4 @@ runs:
     - name: Do Test In example
       shell: sh
       run: |
-        cd ./build/examples/cpp
-        for example in ./*; do
-          filename=$(basename "$example")
-          if [[ $filename =~ ^[0-9]{3} ]]; then
-            chmod +x $example
-            echo "Run $example"
-            $example
-          fi
-        done
+        python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples

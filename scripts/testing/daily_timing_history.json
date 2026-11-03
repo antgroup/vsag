@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "version": "bootstrap-unmeasured-v1",
+  "samples": [],
+  "note": "No completed per-configuration measurements yet. Timeout durations are lower bounds, not timing predictions. Unknown costs remain explicit; manual acceptance is required."
+}

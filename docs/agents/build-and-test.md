@@ -82,3 +82,5 @@ The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and L
 Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.
 
 TSan CI sets `OPENBLAS_NUM_THREADS=1` because the system OpenBLAS library is not instrumented. This keeps BLAS work on the calling thread while VSAG thread pools and concurrent tests remain enabled; sanitizer failures still fail the job.
+
+See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.

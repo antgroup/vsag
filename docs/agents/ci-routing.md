@@ -434,3 +434,5 @@ Each runtime-performance run/attempt has its own concurrency group with
 `cancel-in-progress: false`; a manual invocation cannot cancel a scheduled run.
 Runs can execute concurrently if GitHub-hosted capacity permits. This does not
 change the Team pool or enable full daily regression scheduling.
+
+See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.

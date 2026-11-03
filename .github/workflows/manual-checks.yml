@@ -70,6 +70,9 @@ jobs:
           mode: ${{ matrix.mode }}
 
   performance:
+    permissions:
+      contents: read
+      actions: read
     if: ${{ inputs.check == 'performance' || inputs.check == 'build-performance' }}
     uses: ./.github/workflows/daily_test.yml
     with:
