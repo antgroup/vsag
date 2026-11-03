@@ -68,10 +68,25 @@ IVFPartitionStrategyParameters::IVFPartitionStrategyParameters() = default;
 
 void
 IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
-    if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_KMEANS) {
+    const std::string train_type = json[IVF_TRAIN_TYPE_KEY].GetString();
+    if (train_type == IVF_TRAIN_TYPE_KMEANS) {
         this->partition_train_type = IVFNearestPartitionTrainerType::KMeansTrainer;
-    } else if (json[IVF_TRAIN_TYPE_KEY].GetString() == IVF_TRAIN_TYPE_RANDOM) {
+    } else if (train_type == IVF_TRAIN_TYPE_RANDOM) {
         this->partition_train_type = IVFNearestPartitionTrainerType::RandomTrainer;
+    } else if (train_type == IVF_TRAIN_TYPE_BALANCED_KMEANS) {
+        this->partition_train_type = IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
+    } else {
+        // Unknown trainer names used to be silently treated as the default. They
+        // are refused now (issue #2870): a typo must not train an index the user
+        // asked not to build. Serialized indexes only ever store the names above.
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("unknown {}: \"{}\", expected one of: "
+                                        "\"{}\", \"{}\", \"{}\"",
+                                        IVF_TRAIN_TYPE_KEY,
+                                        train_type,
+                                        IVF_TRAIN_TYPE_KMEANS,
+                                        IVF_TRAIN_TYPE_RANDOM,
+                                        IVF_TRAIN_TYPE_BALANCED_KMEANS));
     }
 
     if (json[IVF_PARTITION_STRATEGY_TYPE_KEY].GetString() == IVF_PARTITION_STRATEGY_TYPE_NEAREST) {
@@ -80,6 +95,16 @@ IVFPartitionStrategyParameters::FromJson(const JsonType& json) {
                IVF_PARTITION_STRATEGY_TYPE_GNO_IMI) {
         this->partition_strategy_type = IVFPartitionStrategyType::GNO_IMI;
     }
+    // The two-level GNO-IMI strategy trains plain k-means at both levels; the
+    // balanced constraint is defined for the single-level IVF strategy.
+    CHECK_ARGUMENT(
+        not(this->partition_strategy_type == IVFPartitionStrategyType::GNO_IMI and
+            this->partition_train_type == IVFNearestPartitionTrainerType::BalancedKMeansTrainer),
+        fmt::format("{}: \"{}\" is only supported with {} \"{}\"",
+                    IVF_TRAIN_TYPE_KEY,
+                    IVF_TRAIN_TYPE_BALANCED_KMEANS,
+                    IVF_PARTITION_STRATEGY_TYPE_KEY,
+                    IVF_PARTITION_STRATEGY_TYPE_NEAREST));
     if (json.Contains(IVF_ROUTE_MAX_DEGREE_KEY)) {
         this->route_max_degree = static_cast<int32_t>(json[IVF_ROUTE_MAX_DEGREE_KEY].GetInt());
         CHECK_ARGUMENT(this->route_max_degree > 0, "route_max_degree must be positive");
@@ -138,6 +163,9 @@ IVFPartitionStrategyParameters::ToJson() const {
         json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_KMEANS);
     } else if (this->partition_train_type == IVFNearestPartitionTrainerType::RandomTrainer) {
         json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_RANDOM);
+    } else if (this->partition_train_type ==
+               IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        json[IVF_TRAIN_TYPE_KEY].SetString(IVF_TRAIN_TYPE_BALANCED_KMEANS);
     }
 
     if (this->partition_strategy_type == IVFPartitionStrategyType::IVF) {

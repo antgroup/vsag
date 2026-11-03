@@ -28,6 +28,49 @@ IVF 通常是一个更合适的默认选择。
 正交中心划分（`first_order_buckets_count` × `second_order_buckets_count`），在超大规模
 语料上能得到更精细的分区。
 
+### 均衡 k-means 训练（`ivf_train_type: "balanced_kmeans"`）
+
+普通 k-means 把每条向量分配给最近的中心，不限制桶容量，因此偏斜、包含大量重复或
+分布不均的数据集会产出大小悬殊甚至为空的桶：过大的桶会拉高检索延迟、削弱分区裁剪。
+
+`balanced_kmeans` 保持与 `kmeans` 相同的平方 L2 目标与均值中心更新，但每一步分配都
+受容量约束：`n` 条训练向量、`buckets_count` 个桶时，每个桶最终恰好容纳
+`floor(n / k)` 或 `ceil(n / k)` 条向量。该保证还延伸到 `Build` 的首次桶分配，
+存储的桶继承均衡性；只要 `1 <= k <= n`，就不会出现空桶。
+
+每次迭代的流程：
+
+1. 每条向量只保留最近的 `num_candidates`（默认 8）个候选桶；距离按固定分块并行逐条
+   计算，永远不会物化 `n × k` 距离矩阵，峰值内存为 `O(n · candidates + k · dim)`
+   而非 `O(n · k)`。
+2. 无约束最近分配吸引票数最多的 `n mod k` 个桶获得 `ceil(n / k)` 个名额，其余桶
+   各得 `floor(n / k)` 个。
+3. 向量按“后悔值”（首选与次选候选的代价差）从大到小依次落位——最容易被挤出的向量
+   优先保住首选名额；每条向量选择仍有空位且距离最近的候选桶；若候选全部满员，则按需
+   重算到所有尚有空位桶的距离。由于总容量恰好等于 `n`，名额总是够用。
+4. 每个中心更新为其成员的均值，重复上述过程直到损失不再下降（由
+   `kmeans_iter_count` 限制迭代次数）。
+
+复杂度与取舍。每次迭代与标准 k-means 同样需要 `O(n · k · dim)` 次距离计算，另加
+`O(n log n)` 排序；内存如上所述有界。均衡分配采用后悔值贪心启发式而非精确的运输问题
+求解，因此损失可能略高于无约束 k-means：在均匀或簇大小均衡的数据上差距很小，在偏斜
+严重的数据上差距更大（等大的桶必须拆分紧密的簇）。可用 `cluster_balance_bench`
+在自家数据形状上实测两边。换来的收益是桶大小的硬上界：每个桶至多容纳
+`ceil(n / k)` 条向量，单次查询的扫描量被 `scan_buckets_count × ceil(n / k)` 封顶，
+长尾延迟不再取决于语料有多偏斜。
+
+补充说明：
+
+- `random` 与 `kmeans` 的行为不变，默认仍是 `kmeans`。
+- cosine 索引下训练后的中心归一化与 `kmeans` 路径完全一致；首次桶分配沿用各度量自身
+  的路由顺序（IP/cosine 用 `1 - <x, c>`，L2 用平方距离）。
+- `balanced_kmeans` 仅支持 `partition_strategy_type: "ivf"`；GNO-IMI 始终训练普通
+  k-means。
+- 均衡训练与首次分配在 CPU 上执行，`enable_gpu_build` 不会加速它们。
+- 给定输入与随机种子时结果确定，且与线程数无关。
+- 用可复现的 `cluster_balance_bench` 工具（`tools/cluster_balance_bench`）对比
+  均衡度、损失、时间与内存。
+
 ## 快速开始
 
 ```cpp
@@ -73,8 +116,8 @@ auto result = index->KnnSearch(
 | `buckets_count` | int | `10` | 倒排列表数量（`ivf` 策略下生效） |
 | `first_order_buckets_count` | int | `10` | 第一级桶数（`gno_imi` 策略下生效） |
 | `second_order_buckets_count` | int | `10` | 第二级桶数（`gno_imi` 策略下生效） |
-| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans` 或 `random` |
-| `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
+| `ivf_train_type` | string | `"kmeans"` | 中心训练方式：`kmeans`、`balanced_kmeans` 或 `random` |
+| `kmeans_iter_count` | int | `25`（`ivf`）、`30`（`gno_imi`） | KMeans 质心训练的迭代次数（`ivf_train_type: "kmeans"` 或 `"balanced_kmeans"` 时生效）。越大桶划分质量越好，构建越慢。 |
 | `route_max_degree` | int | `64` | 路由 HGraph 的最大度数（`ivf` 策略下生效） |
 | `route_ef_construction` | int | `300` | 路由 HGraph 的构建搜索宽度（`ivf` 策略下生效） |
 | `enable_gpu_build` | bool | `false` | 构建时使用 CUDA 后端（`ivf` 策略下生效），参见 [GPU 加速构建](#gpu-加速构建) |
