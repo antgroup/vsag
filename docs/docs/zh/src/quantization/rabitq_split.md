@@ -520,6 +520,8 @@ bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该
 
 ## 使用注意
 
+- Pyramid 增量 `Add` 会在搜图和剪枝时使用有界的操作内缓存，复用解包后的标量编码；
+  模型反序列化后同样生效，无需增加参数，持久化的 split record 格式保持不变。
 - split storage 当前可用于 HGraph、IVF 和 Pyramid，并且要求 fp32 query code。
   Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通
   搜索路径，

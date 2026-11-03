@@ -20,8 +20,46 @@
 
 namespace vsag {
 
+namespace {
+
+std::unique_ptr<FlattenPairwiseDistanceComputer>
+make_pairwise_computer(const FlattenInterfacePtr& flatten) {
+    auto* accelerated = dynamic_cast<FlattenPairwiseDistanceInterface*>(flatten.get());
+    return accelerated != nullptr ? accelerated->FactoryPairwiseDistanceComputer() : nullptr;
+}
+
+}  // namespace
+
+FlattenDistanceProvider::FlattenDistanceProvider(FlattenInterfacePtr flatten,
+                                                 ComputerInterfacePtr computer)
+    : flatten_(std::move(flatten)), computer_(std::move(computer)) {
+}
+
+float
+FlattenDistanceProvider::PairwiseDistance(InnerIdType id1,
+                                          InnerIdType id2,
+                                          const ComputerInterfacePtr& /*computer*/) const {
+    // Query-only providers never need a pairwise cache.
+    if (not pairwise_initialized_) {
+        pairwise_computer_ = make_pairwise_computer(flatten_);
+        pairwise_initialized_ = true;
+    }
+    return pairwise_computer_ != nullptr ? pairwise_computer_->Compute(id1, id2)
+                                         : flatten_->ComputePairVectors(id1, id2);
+}
+
+FlattenIdDistanceProvider::FlattenIdDistanceProvider(FlattenInterfacePtr flatten,
+                                                     InnerIdType query_id)
+    : flatten_(std::move(flatten)),
+      query_id_(query_id),
+      pairwise_computer_(make_pairwise_computer(flatten_)) {
+}
+
 float
 FlattenIdDistanceProvider::QueryDistance(InnerIdType id, QueryContext* ctx) const {
+    if (pairwise_computer_ != nullptr) {
+        return pairwise_computer_->Compute(query_id_, id, ctx);
+    }
     float distance = 0.0F;
     flatten_->QueryById(&distance, query_id_, &id, 1, ctx);
     return distance;
@@ -32,6 +70,12 @@ FlattenIdDistanceProvider::BatchQueryDistance(float* distances,
                                               const InnerIdType* ids,
                                               InnerIdType count,
                                               QueryContext* ctx) const {
+    if (pairwise_computer_ != nullptr) {
+        for (InnerIdType i = 0; i < count; ++i) {
+            distances[i] = pairwise_computer_->Compute(query_id_, ids[i], ctx);
+        }
+        return;
+    }
     flatten_->QueryById(distances, query_id_, ids, count, ctx);
 }
 
@@ -39,7 +83,8 @@ float
 FlattenIdDistanceProvider::PairwiseDistance(InnerIdType id1,
                                             InnerIdType id2,
                                             const ComputerInterfacePtr& /*computer*/) const {
-    return flatten_->ComputePairVectors(id1, id2);
+    return pairwise_computer_ != nullptr ? pairwise_computer_->Compute(id1, id2)
+                                         : flatten_->ComputePairVectors(id1, id2);
 }
 
 ComputerInterfacePtr

@@ -561,6 +561,9 @@ second count-scaled copy of the split codes.
 
 ## Operational notes
 
+- Pyramid incremental `Add` reuses decoded scalar codes in bounded, operation-local
+  caches during graph traversal and pruning, including after model deserialization.
+  No additional parameter is needed; persisted split records remain unchanged.
 - Split storage is currently available on HGraph, IVF, and Pyramid and requires
   fp32 query codes. Pyramid enables the one-bit split search path by default for
   split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the
