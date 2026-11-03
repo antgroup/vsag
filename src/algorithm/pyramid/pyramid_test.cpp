@@ -2230,6 +2230,68 @@ TEST_CASE("Pyramid scalar RaBitQ split build supports search serialization and A
     check_query(loaded, count);
 }
 
+TEST_CASE("Pyramid split model supports repeated single-vector Add",
+          "[ut][pyramid][pairwise_cache]") {
+    constexpr int64_t dim = 64, train_count = 96, add_count = 64;
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    const auto storage = GENERATE("flat", "compressed");
+    vsag::IndexCommonParam common;
+    common.dim_ = dim;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = metric;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"rabitq", "precise_quantization_type":"rabitq",
+        "rabitq_bits_per_dim_base":3, "rabitq_bits_per_dim_precise":5,
+        "rabitq_bits_per_dim_query":32, "use_reorder":true,
+        "max_degree":12, "ef_construction":64, "index_min_size":8,
+        "build_thread_count":4, "support_duplicate":true,
+        "hierarchies":[{"name":"default", "root_graph_type":"multi_layer"}]
+    })");
+    external["graph_storage_type"].SetString(storage);
+    const auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+    auto vectors = fixtures::generate_vectors(train_count + add_count, dim, true, 42);
+    std::vector<int64_t> ids(train_count + add_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<std::string> paths(ids.size(), "a");
+    const auto dataset = [&](int64_t offset, int64_t count) {
+        return vsag::Dataset::Make()
+            ->NumElements(count)
+            ->Dim(dim)
+            ->Ids(ids.data() + offset)
+            ->Float32Vectors(vectors.data() + offset * dim)
+            ->Paths("default", paths.data() + offset)
+            ->Owner(false);
+    };
+    auto seed = std::make_shared<vsag::Pyramid>(param, common);
+    REQUIRE(seed->Build(dataset(0, train_count)).empty());
+    auto model = seed->ExportModel(common);
+    REQUIRE(model->GetNumElements() == 0);
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    model->Serialize(writer);
+    auto restored = std::make_shared<vsag::Pyramid>(param, common);
+    vsag::IOStreamReader reader(stream);
+    restored->Deserialize(reader);
+    REQUIRE(restored->GetNumElements() == 0);
+    for (int64_t i = 0; i < add_count; ++i) {
+        REQUIRE(restored->Add(dataset(train_count + i, 1)).empty());
+    }
+    REQUIRE(restored->GetNumElements() == add_count);
+    const auto search = R"({"pyramid":{"ef_search":64,"hierarchies":["default"]}})";
+    for (int64_t i : {0, 31, 63}) {
+        auto result =
+            restored->KnnSearch(dataset(train_count + i, 1), 1, search, vsag::FilterPtr{});
+        REQUIRE(result->GetDim() == 1);
+        REQUIRE(result->GetIds()[0] == train_count + i);
+    }
+    std::stringstream saved;
+    vsag::IOStreamWriter saved_writer(saved);
+    REQUIRE_NOTHROW(restored->Serialize(saved_writer));
+}
+
 TEST_CASE("Pyramid rehydrates isolated physical duplicate owners after deserialize",
           "[ut][pyramid][duplicate][duplicate_legacy_empty_owner]") {
     const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
