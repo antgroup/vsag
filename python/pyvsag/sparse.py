@@ -12,8 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Helpers for reading sparse-vector HDF5 datasets produced by the
-``eval_performance`` C++ tool.
+"""Helpers for working with sparse vectors.
+
+The module provides two groups of helpers:
+
+* :func:`build_term_vocabulary` and :func:`term_weights_to_csr` convert
+  human-readable term-weight mappings (``{term: weight}``) into the
+  ``uint32`` / ``float32`` CSR arrays accepted by pyvsag's sparse indexes
+  such as SINDI.
+* :func:`load_sparse_hdf5` and :func:`decode_sparse_bytes` read sparse
+  datasets produced by the ``eval_performance`` C++ tool.
 
 The eval tool stores sparse vectors in a custom layout that does **not**
 match the typical ``(N, D)`` HDF5 dense matrix layout. This module decodes
@@ -45,20 +53,247 @@ file raises :class:`ValueError`.
 
 from __future__ import annotations
 
+import math
+import operator
 import struct
-from typing import Any, Dict, List, Optional, Sequence
+from collections.abc import Mapping as MappingABC
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
 __all__ = [
+    "build_term_vocabulary",
+    "term_weights_to_csr",
     "load_sparse_hdf5",
     "decode_sparse_bytes",
 ]
+
+# Term IDs and CSR offsets are transported as uint32, so every identifier
+# must fit in this range.
+_UINT32_MAX = (1 << 32) - 1
+_MAX_TERM_COUNT = 1 << 32
+_FLOAT32_MAX = float(np.finfo(np.float32).max)
 
 # Each record header is a single little-endian uint32 storing the number
 # of non-zero entries in the vector.
 _LEN_STRUCT = struct.Struct("<I")
 _LEN_SIZE = _LEN_STRUCT.size  # 4
+
+
+def build_term_vocabulary(
+    documents: Sequence[Mapping[str, float]],
+) -> Dict[str, int]:
+    """Assign a stable ``uint32``-compatible ID to every term.
+
+    Terms are sorted lexicographically and numbered from ``0``, so the
+    result is deterministic and does not depend on dict insertion order or
+    on the order of ``documents``. The returned mapping can be passed to
+    :func:`term_weights_to_csr` for both documents and queries.
+
+    Args:
+        documents: Sequence (or iterable) of term-weight mappings, for
+            example ``[{"vector": 1.0, "search": 0.8}]``. Only the keys
+            are inspected; weights may be any numeric value.
+
+    Returns:
+        A ``dict[str, int]`` whose IDs are contiguous from ``0`` to
+        ``len(vocabulary) - 1``. An empty input yields an empty dict.
+
+    Raises:
+        TypeError: If a document is not a mapping or a term is not a
+            string.
+        ValueError: If the number of distinct terms exceeds the ``uint32``
+            ID space.
+
+    Example:
+        >>> from pyvsag.sparse import build_term_vocabulary
+        >>> build_term_vocabulary([{"b": 1.0, "a": 0.5}])
+        {'a': 0, 'b': 1}
+    """
+    terms = set()
+    for position, document in enumerate(documents):
+        if not isinstance(document, MappingABC):
+            raise TypeError(
+                f"documents[{position}] must be a mapping of str to numeric "
+                f"weight, got {type(document).__name__}"
+            )
+        for term in document:
+            if not isinstance(term, str):
+                raise TypeError(
+                    f"documents[{position}] contains a non-string term "
+                    f"{term!r} ({type(term).__name__})"
+                )
+            terms.add(term)
+
+    if len(terms) > _MAX_TERM_COUNT:
+        raise ValueError(
+            f"vocabulary has {len(terms)} terms, exceeding the uint32 term "
+            f"ID space (maximum {_MAX_TERM_COUNT})"
+        )
+
+    return {term: index for index, term in enumerate(sorted(terms))}
+
+
+def term_weights_to_csr(
+    documents: Sequence[Mapping[str, float]],
+    vocabulary: Mapping[str, int],
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Convert term-weight mappings into pyvsag sparse CSR arrays.
+
+    Each document becomes one CSR row. Terms are translated to their ID in
+    ``vocabulary`` and sorted by ID, so the output is deterministic even
+    when the input mappings have different insertion orders.
+
+    Args:
+        documents: Sequence (or iterable) of ``{term: weight}`` mappings.
+            An empty mapping produces an empty CSR row.
+        vocabulary: Mapping returned by :func:`build_term_vocabulary` (or
+            an equivalent ``str -> int`` mapping). Every term used by a
+            document must be present; IDs must fit in ``uint32``.
+
+    Returns:
+        A tuple ``(index_pointers, indices, values)``:
+
+        * ``index_pointers``: ``uint32`` array of shape ``(num_documents + 1,)``
+          with the start/end offsets of each row.
+        * ``indices``: ``uint32`` array of shape ``(nnz,)`` with the term
+          IDs, ordered within each row.
+        * ``values``: ``float32`` array of shape ``(nnz,)`` with the
+          corresponding weights.
+
+        The returned arrays can be passed directly to
+        ``index.build(index_pointers=..., indices=..., values=..., ids=...)``
+        and ``index.knn_search(...)``.
+
+    Raises:
+        TypeError: If a document or the vocabulary is not a mapping, a
+            term is not a string, a vocabulary ID is not an integer, or a
+            weight is not numeric.
+        KeyError: If a document uses a term absent from ``vocabulary``.
+        ValueError: If a vocabulary ID is outside the ``uint32`` range, a
+            weight is non-finite or does not fit in ``float32``, or the
+            total number of stored terms exceeds the ``uint32`` range.
+
+    Example:
+        >>> from pyvsag.sparse import (
+        ...     build_term_vocabulary,
+        ...     term_weights_to_csr,
+        ... )
+        >>> documents = [{"vector": 1.0}, {"search": 0.5, "vector": 0.8}]
+        >>> vocabulary = build_term_vocabulary(documents)
+        >>> index_pointers, indices, values = term_weights_to_csr(
+        ...     documents, vocabulary
+        ... )
+        >>> index_pointers.tolist(), indices.tolist(), values.tolist()
+        ([0, 1, 3], [1, 0, 2], [1.0, 0.5, 0.8])
+    """
+    if not isinstance(vocabulary, MappingABC):
+        raise TypeError(
+            "vocabulary must be a mapping of str to uint32-compatible integer, "
+            f"got {type(vocabulary).__name__}"
+        )
+
+    index_pointers = [0]
+    indices: List[int] = []
+    values: List[float] = []
+    resolved_ids: Dict[str, int] = {}
+
+    for position, document in enumerate(documents):
+        if not isinstance(document, MappingABC):
+            raise TypeError(
+                f"documents[{position}] must be a mapping of str to numeric "
+                f"weight, got {type(document).__name__}"
+            )
+
+        row = []
+        for term, weight in document.items():
+            if not isinstance(term, str):
+                raise TypeError(
+                    f"documents[{position}] contains a non-string term "
+                    f"{term!r} ({type(term).__name__})"
+                )
+            if term not in vocabulary:
+                raise KeyError(
+                    f"term {term!r} in documents[{position}] is missing from "
+                    "the vocabulary"
+                )
+            term_id = resolved_ids.get(term)
+            if term_id is None:
+                term_id = _validate_term_id(term, vocabulary[term])
+                resolved_ids[term] = term_id
+            row.append((term_id, term, _validate_weight(term, weight)))
+
+        # Sort by ID so rows are deterministic; the term breaks ties if a
+        # caller passes a vocabulary with duplicate IDs.
+        row.sort(key=lambda item: (item[0], item[1]))
+        for term_id, _, weight in row:
+            indices.append(term_id)
+            values.append(weight)
+        index_pointers.append(len(indices))
+
+    if len(indices) > _UINT32_MAX:
+        raise ValueError(
+            f"CSR has {len(indices)} stored terms, exceeding the uint32 "
+            f"offset space (maximum {_UINT32_MAX})"
+        )
+
+    return (
+        np.asarray(index_pointers, dtype=np.uint32),
+        np.asarray(indices, dtype=np.uint32),
+        np.asarray(values, dtype=np.float32),
+    )
+
+
+def _validate_term_id(term: str, value: Any) -> int:
+    """Return ``value`` as an int, rejecting IDs outside the uint32 range."""
+    if isinstance(value, bool):
+        raise TypeError(
+            f"vocabulary ID for term {term!r} must be an integer, not bool"
+        )
+    try:
+        term_id = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(
+            f"vocabulary ID for term {term!r} must be an integer, got "
+            f"{type(value).__name__}"
+        ) from exc
+
+    if term_id < 0 or term_id > _UINT32_MAX:
+        raise ValueError(
+            f"vocabulary ID for term {term!r} is {term_id}, outside the "
+            f"uint32 range [0, {_UINT32_MAX}]"
+        )
+    return term_id
+
+
+def _validate_weight(term: str, value: Any) -> float:
+    """Return ``value`` as a finite float that fits in float32."""
+    if isinstance(value, (str, bytes, bytearray)):
+        raise TypeError(
+            f"weight for term {term!r} must be numeric, got "
+            f"{type(value).__name__}"
+        )
+    try:
+        weight = float(value)
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"weight for term {term!r} must be numeric, got "
+            f"{type(value).__name__}"
+        ) from exc
+    except OverflowError as exc:
+        raise ValueError(
+            f"weight for term {term!r} does not fit in float32: {value!r}"
+        ) from exc
+
+    if not math.isfinite(weight):
+        raise ValueError(
+            f"weight for term {term!r} must be finite, got {weight!r}"
+        )
+    if weight < -_FLOAT32_MAX or weight > _FLOAT32_MAX:
+        raise ValueError(
+            f"weight for term {term!r} does not fit in float32: {weight!r}"
+        )
+    return weight
 
 
 def decode_sparse_bytes(buffer: Any) -> List[Dict[int, float]]:
