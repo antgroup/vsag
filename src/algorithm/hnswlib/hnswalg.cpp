@@ -212,7 +212,13 @@ HierarchicalNSW::getDistanceByInternalId(uint32_t internal_id, const void* data_
 
 float
 HierarchicalNSW::getSelfDistanceByInternalId(uint32_t internal_id) {
-    return getDistanceByInternalId(internal_id, getDataByInternalId(internal_id));
+    // Pin storage before obtaining a pointer: resize can reallocate the underlying block.
+    std::shared_lock resize_lock(resize_mutex_);
+    const void* stored_data = getDataByInternalId(internal_id);
+    const void* query_data = stored_data;
+    std::shared_ptr<float[]> normalize_query;
+    normalizeVector(query_data, normalize_query);
+    return fstdistfunc_(query_data, stored_data, dist_func_param_);
 }
 
 uint32_t

@@ -16,6 +16,7 @@
 #include "hnsw.h"
 
 #include <cstdlib>
+#include <future>
 #include <memory>
 #include <new>
 #include <nlohmann/json.hpp>
@@ -1084,4 +1085,33 @@ TEST_CASE("update mark-deleted vector", "[ut][hnsw]") {
     }
 
     delete alg_hnsw;
+}
+
+TEST_CASE("HNSW pins self-distance storage during concurrent resize", "[ut][hnsw][resize]") {
+    hnswlib::L2Space space(4);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    hnswlib::HierarchicalNSW graph(&space, 2, allocator.get());
+    graph.init_memory_space();
+    const float vector[] = {1.0F, 2.0F, 3.0F, 4.0F};
+    REQUIRE(graph.addPoint(vector, 10));
+    std::promise<void> start;
+    auto gate = start.get_future().share();
+    auto reader = std::async(std::launch::async, [&graph, gate]() {
+        gate.wait();
+        for (uint64_t i = 0; i < 10000; ++i) {
+            if (graph.getSelfDistanceByInternalId(0) != 0.0F) {
+                return false;
+            }
+        }
+        return true;
+    });
+    auto grower = std::async(std::launch::async, [&graph, gate]() {
+        gate.wait();
+        for (uint64_t capacity = 3; capacity <= 128; ++capacity) {
+            graph.resizeIndex(capacity);
+        }
+    });
+    start.set_value();
+    REQUIRE(reader.get());
+    REQUIRE_NOTHROW(grower.get());
 }

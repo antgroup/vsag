@@ -28,6 +28,7 @@ inline bool
 IsFiniteFloatBits(float value) {
     uint32_t bits = 0;
     std::memcpy(&bits, &value, sizeof(bits));
+    // An all-ones exponent denotes infinity (zero mantissa) or NaN (nonzero mantissa).
     return (bits & 0x7F800000U) != 0x7F800000U;
 }
 

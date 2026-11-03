@@ -337,7 +337,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
                 }
             }
-            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
+            if (not IsFiniteFloatBits(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 if (!iter_ctx->CheckPoint(cur_id)) {
                     continue;
@@ -562,7 +562,7 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
                     rabitq_lower_bound_candidates->emplace_back(lower_bound_dists[i], cur_id);
                 }
             }
-            if (not std::isfinite(dist) || top_candidates->Size() < ef || lower_bound > dist ||
+            if (not IsFiniteFloatBits(dist) || top_candidates->Size() < ef || lower_bound > dist ||
                 (mode == RANGE_SEARCH && dist <= inner_search_param.radius)) {
                 candidate_set->Push(traversal_priority(dist), cur_id);
                 //                flatten->Prefetch(candidate_set->Top().second);
@@ -620,15 +620,27 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             if (min_distance <= inner_search_param.duplicate_distance_threshold) {
                 inner_search_param.duplicate_id = min_index;
             }
-        } else if (inner_search_param.duplicate_query_id < flatten->TotalCount()) {
-            if (flatten->CompareVectors(inner_search_param.duplicate_query_id, min_index)) {
+        } else {
+            const bool has_stored_query =
+                inner_search_param.duplicate_query_id < flatten->TotalCount();
+            Vector<uint8_t> query_code(allocator_);
+            bool encoded_query = false;
+            if (not has_stored_query) {
+                query_code.resize(flatten->code_size_);
+                encoded_query =
+                    flatten->Encode(static_cast<const float*>(query), query_code.data());
+            }
+            auto matches_query = [&](InnerIdType id) {
+                return has_stored_query
+                           ? flatten->CompareVectors(inner_search_param.duplicate_query_id, id)
+                           : encoded_query and flatten->CompareCodeWithId(query_code.data(), id);
+            };
+            if (matches_query(min_index)) {
                 inner_search_param.duplicate_id = min_index;
             } else {
                 // Quantization can rank a different code ahead of an identical one.
                 for (uint32_t i = 0; i < top_candidates->Size(); ++i) {
-                    if (data[i].second != min_index &&
-                        flatten->CompareVectors(inner_search_param.duplicate_query_id,
-                                                data[i].second)) {
+                    if (data[i].second != min_index && matches_query(data[i].second)) {
                         inner_search_param.duplicate_id = data[i].second;
                         break;
                     }

@@ -15,7 +15,10 @@
 
 #include "io/mmap_io/mmap_io.h"
 
+#include <array>
+#include <atomic>
 #include <memory>
+#include <thread>
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
@@ -130,5 +133,40 @@ TEST_CASE("MMapIO existing file", "[ut][MMapIO]") {
     io2->Read(64, 0, read_buf.data());
     for (uint64_t i = 0; i < 64; ++i) {
         REQUIRE(read_buf[i] == 0xEF);
+    }
+}
+
+TEST_CASE("MMapIO reserved disjoint writes keep metadata stable", "[ut][MMapIO][review_round2]") {
+    fixtures::TempDir dir("mmap_reserved_writes");
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    MMapIO io(dir.GenerateRandomFile(false), allocator.get());
+    constexpr uint64_t workers = 8;
+    constexpr uint64_t row_size = 64;
+    io.Resize(workers * row_size);
+    std::atomic<bool> start{false};
+    std::vector<std::thread> threads;
+    for (uint64_t worker = 0; worker < workers; ++worker) {
+        threads.emplace_back([&, worker]() {
+            std::array<uint8_t, row_size> row;
+            row.fill(static_cast<uint8_t>(worker));
+            while (not start.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            for (uint64_t iteration = 0; iteration < 1024; ++iteration) {
+                io.Write(row.data(), row.size(), worker * row_size);
+            }
+        });
+    }
+    start.store(true, std::memory_order_release);
+    for (auto& thread : threads) {
+        thread.join();
+    }
+    REQUIRE(io.size_ == workers * row_size);
+    for (uint64_t worker = 0; worker < workers; ++worker) {
+        std::array<uint8_t, row_size> row;
+        REQUIRE(io.Read(row.size(), worker * row_size, row.data()));
+        for (auto byte : row) {
+            REQUIRE(byte == worker);
+        }
     }
 }

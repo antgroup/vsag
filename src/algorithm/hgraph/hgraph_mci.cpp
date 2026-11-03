@@ -29,6 +29,7 @@
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "hgraph.h"
+#include "hgraph_storage_state.h"
 #include "impl/filter/filter_headers.h"
 #include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
@@ -1085,6 +1086,9 @@ HGraph::build_mci_clique_index(const void* vectors) {
             query = decoded_queries[worker_id].data();
         }
         CHECK_ARGUMENT(query != nullptr, "failed to prepare hgraph mci query vector");
+        // The graph and shared code slots are complete here. Authorize only this
+        // worker's internal candidate query while the initial Add is still hidden.
+        const StorageState::InternalSearchScope internal_search(*this->storage_state_);
         return this->search_mci_knn(inner_id, query, total);
     };
     MCIKNNGraph graph(this->allocator_);
