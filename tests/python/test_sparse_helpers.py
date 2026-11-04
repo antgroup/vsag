@@ -124,8 +124,9 @@ def test_term_weights_to_csr_empty_input():
     assert values.dtype == np.float32
 
 
-def test_term_weights_to_csr_rejects_empty_documents():
-    vocabulary = {"term": 0, "other": 1}
+@pytest.mark.parametrize("vocabulary_type", [dict, TermVocabulary])
+def test_term_weights_to_csr_rejects_empty_documents(vocabulary_type):
+    vocabulary = vocabulary_type({"term": 0, "other": 1})
     with pytest.raises(ValueError, match="empty"):
         term_weights_to_csr([{}, {"term": 1.0}], vocabulary)
 
