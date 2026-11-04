@@ -22,8 +22,11 @@
 namespace {
 constexpr uint64_t FOOTER_MIN_SIZE = 36;
 
-// Local mirror of the non-standard CRC32 written by old vsag versions:
-// `crc ^= byte` sign-extends the (signed) char. Used here to emulate footers
+// Local mirror of the non-standard CRC32 written by old vsag versions. The
+// original `crc ^= byte` relied on plain char being signed; int8_t makes that
+// sign extension explicit so the emulation reproduces the legacy x86_64/macOS
+// bytes regardless of this platform's plain char signedness (signed on
+// x86_64/macOS, unsigned on linux aarch64/ppc64le). Used here to emulate footers
 // produced by those versions; must stay independent from the implementation
 // under test so removing the read-side fallback makes the tests fail.
 uint32_t
@@ -31,7 +34,7 @@ legacy_footer_checksum(const std::string& bytes) {
     constexpr uint32_t polynomial = 0xEDB88320;
     uint32_t crc = 0xFFFFFFFF;
     for (const char& byte : bytes) {
-        crc ^= byte;
+        crc ^= static_cast<uint32_t>(static_cast<int8_t>(byte));
         for (uint64_t j = 0; j < 8; ++j) {
             crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
         }

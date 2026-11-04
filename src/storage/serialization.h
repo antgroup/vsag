@@ -245,20 +245,27 @@ private:
     }
 
     // Non-standard CRC32 used by old versions to write the footer checksum:
-    // `crc ^= byte` sign-extends the (signed) char, so the result differs from
-    // calculate_checksum() whenever the input contains bytes >= 0x80. The footer
-    // JSON carries user-controlled UTF-8 strings (e.g. index_name, index
-    // parameters), so such bytes do occur in practice. Kept only as a read-side
-    // fallback in Footer::Parse to load data written by old versions; the write
-    // path must use calculate_checksum(). This fallback may be removed only after
-    // support for footers written by pre-dual-accept versions is explicitly
-    // dropped; remove the legacy tests in footer_parse_test.cpp together with it.
+    // the original `crc ^= byte` relied on plain char being signed, which
+    // sign-extended bytes >= 0x80 to a negative int before widening to uint32_t.
+    // That made the result differ from calculate_checksum() whenever the input
+    // contains bytes >= 0x80. Here the sign extension is made explicit with
+    // int8_t so the output matches the legacy x86_64/macOS bytes on every
+    // platform (plain char is signed there but unsigned on linux
+    // aarch64/ppc64le). The footer JSON carries user-controlled UTF-8 strings
+    // (e.g. index_name, index parameters), so such bytes do occur in practice.
+    // Kept only as a read-side fallback in Footer::Parse to load data written by
+    // old versions; the write path must use calculate_checksum(). This fallback
+    // may be removed only after support for footers written by pre-dual-accept
+    // versions is explicitly dropped; remove the legacy tests in
+    // footer_parse_test.cpp together with it.
     static uint32_t
     calculate_checksum_legacy(std::string_view bytes) {
         constexpr uint32_t polynomial = 0xEDB88320;
         uint32_t crc = 0xFFFFFFFF;
         for (const char& byte : bytes) {
-            crc ^= byte;  // intentional sign extension, byte-for-byte legacy behavior
+            // int8_t makes the legacy sign extension explicit and independent of
+            // whether plain char is signed on this platform.
+            crc ^= static_cast<uint32_t>(static_cast<int8_t>(byte));
             for (uint64_t j = 0; j < 8; ++j) {
                 crc = (crc >> 1) ^ ((crc & 1) == 1 ? polynomial : 0);
             }
