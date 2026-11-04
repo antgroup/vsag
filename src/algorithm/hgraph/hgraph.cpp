@@ -196,6 +196,10 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
         optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
     }
     check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY and
+        basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+    }
     if (this->using_dedup_storage()) {
         this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
             this->basic_flatten_codes_, this->code_slot_map_, allocator_, &this->total_count_);
@@ -236,6 +240,18 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     // map
     auto inner_json = map_hgraph_param(hgraph_json);
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        if (not hgraph_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE)) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+        if (not hgraph_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE)) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+        inner_json[RAW_VECTOR_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+            QUANTIZATION_TYPE_VALUE_BINARY);
+    }
     ValidateMRLEDim(hgraph_json, this->dim_);
     const bool requires_raw_vector = RequiresRawVectorForMRLERaBitQSplit(inner_json);
     if (requires_raw_vector) {
@@ -245,6 +261,9 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // construct param obj
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->FromJson(inner_json);
+    CHECK_ARGUMENT(
+        data_type_ != DataTypes::DATA_TYPE_BINARY or not hgraph_parameter->mci_parameters.enabled,
+        "binary HGraph does not support MCI");
     auto inner_parameter = std::make_shared<InnerIndexParameter>();
     inner_parameter->FromJson(inner_json);
 
@@ -304,10 +323,12 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         if (covers_active_ids(raw_vector_)) {
             tune_source = raw_vector_;
         } else if (covers_active_ids(high_precise_codes_) and
-                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+                   (high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 or
+                    high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY)) {
             tune_source = high_precise_codes_;
         } else if (covers_active_ids(basic_flatten_codes_) and
-                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+                   (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 or
+                    basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY)) {
             tune_source = basic_flatten_codes_;
         } else {
             return false;
@@ -979,20 +1000,23 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     }
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
+        auto new_base_query = Dataset::Make();
+        set_dataset(data_type_, dim_, new_base_query, new_base_vec, 1);
 
         float self_dist = 0.0F;
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
-            const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            auto old_base_query = Dataset::Make();
+            set_dataset(data_type_, dim_, old_base_query, base_data.data(), 1);
+            const float old_self_dist = this->CalcDistanceById(old_base_query, id);
+            self_dist = this->CalcDistanceById(new_base_query, id);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->CalcDistanceById(new_base_query, id);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -1006,9 +1030,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->CalcDistanceById(
+                    new_base_query, this->label_table_->GetLabelById(neighbor_inner_id));
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;
@@ -1046,6 +1069,9 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     }
     if (has_precise_reorder()) {
         update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    if (update_status and create_new_raw_vector_ and raw_vector_ != nullptr) {
+        update_status = raw_vector_->UpdateVector(new_base_vec, inner_id);
     }
     return update_status;
 }

@@ -402,6 +402,9 @@ HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     auto hgraph_parameter = std::make_shared<HGraphParameter>();
     hgraph_parameter->data_type = common_param.data_type_;
     hgraph_parameter->FromJson(inner_json);
+    CHECK_ARGUMENT(common_param.data_type_ != DataTypes::DATA_TYPE_BINARY or
+                       not hgraph_parameter->mci_parameters.enabled,
+                   "binary HGraph does not support MCI");
     if (hgraph_parameter->rabitq_fused_datacell) {
         CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
             common_param.metric_ == MetricType::METRIC_TYPE_L2SQR or
