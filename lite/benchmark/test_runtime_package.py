@@ -18,6 +18,70 @@ from run_mixed_cpu_acceptance import sha
 
 
 class RuntimePackageTests(unittest.TestCase):
+    def test_composed_archive_symlinks_cannot_write_outside_destination(self):
+        attacks = [
+            [('inside/keep', b'safe'), ('dir/link', '../inside'),
+             ('dir/link/../../escape', b'changed')],
+            [('c/seed', b'safe'), ('a/b', '../c'), ('x', 'a/b/../../outside'),
+             ('x/payload', b'changed')],
+        ]
+        for index, members in enumerate(attacks):
+            with self.subTest(attack=index), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                sentinel = root / ('escape' if index == 0 else 'outside/payload')
+                sentinel.parent.mkdir(parents=True, exist_ok=True)
+                sentinel.write_bytes(b'original')
+                archive = root / 'attack.tar.gz'
+                with tarfile.open(archive, 'w:gz') as stream:
+                    for name, value in members:
+                        member = tarfile.TarInfo(name)
+                        if isinstance(value, str):
+                            member.type = tarfile.SYMTYPE
+                            member.linkname = value
+                            stream.addfile(member)
+                        else:
+                            member.size = len(value)
+                            stream.addfile(member, io.BytesIO(value))
+                destination = root / 'out'
+                rejected = False
+                try:
+                    safe_bundle_unpack(archive, destination)
+                except ValueError:
+                    rejected = True
+                self.assertEqual(sentinel.read_bytes(), b'original')
+                self.assertTrue(rejected)
+                self.assertFalse(destination.exists())
+
+    def test_forward_file_alias_chain_remains_supported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / 'safe.tar.gz'
+            with tarfile.open(archive, 'w:gz') as stream:
+                for name, target in [('lib/libvsag.so', 'libvsag.so.0.18'),
+                                     ('lib/libvsag.so.0.18', 'real.so')]:
+                    member = tarfile.TarInfo(name)
+                    member.type = tarfile.SYMTYPE
+                    member.linkname = target
+                    stream.addfile(member)
+                member = tarfile.TarInfo('lib/real.so')
+                member.size = 3
+                stream.addfile(member, io.BytesIO(b'elf'))
+            safe_bundle_unpack(archive, root / 'out')
+            self.assertTrue((root / 'out/lib/libvsag.so').is_symlink())
+            self.assertEqual((root / 'out/lib/libvsag.so').read_bytes(), b'elf')
+
+    def test_dangling_and_cyclic_file_aliases_rejected_before_extraction(self):
+        for target in ['missing', 'alias']:
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                with tarfile.open(root / 'bad.tar.gz', 'w:gz') as stream:
+                    member = tarfile.TarInfo('alias')
+                    member.type = tarfile.SYMTYPE
+                    member.linkname = target
+                    stream.addfile(member)
+                with self.assertRaises(ValueError):
+                    safe_bundle_unpack(root / 'bad.tar.gz', root / 'out')
+                self.assertFalse((root / 'out').exists())
 
     def preflight_fixture(self, root):
         feature = root / 'feature'

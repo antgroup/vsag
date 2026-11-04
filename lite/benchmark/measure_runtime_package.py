@@ -108,19 +108,36 @@ def safe_bundle_unpack(archive, destination):
     with tarfile.open(archive, 'r:gz') as stream:
         members = stream.getmembers()
         seen = set()
+        entries = {}
         for member in members:
             target = root / member.name
-            if member.name.startswith('/') or root not in target.resolve().parents:
+            if member.name.startswith('/') or '..' in Path(member.name).parts or root not in target.resolve().parents:
                 raise ValueError('Unsafe bundle member')
             normalized = target.resolve()
             if normalized in seen:
                 raise ValueError('Duplicate bundle member')
             seen.add(normalized)
+            entries[normalized] = member
             if member.issym():
-                if Path(member.linkname).is_absolute() or root not in (target.parent / member.linkname).resolve().parents:
+                if Path(member.linkname).name != member.linkname or member.linkname in ['', '.', '..']:
                     raise ValueError('Unsafe bundle alias')
             elif not member.isfile():
                 raise ValueError('Unexpected bundle entry type')
+        # Bundles contain regular files and same-directory file aliases only.
+        # Validate the archive graph, not filesystem state before links exist.
+        for path, member in entries.items():
+            if any(parent in entries for parent in path.parents):
+                raise ValueError('Bundle entry has a file/alias ancestor')
+            if member.issym():
+                current = path
+                chain = set()
+                while entries[current].issym():
+                    if current in chain:
+                        raise ValueError('Cyclic bundle alias')
+                    chain.add(current)
+                    current = current.parent / entries[current].linkname
+                    if current not in entries:
+                        raise ValueError('Dangling bundle alias')
         for member in members:
             stream.extract(member, root)
 

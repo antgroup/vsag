@@ -146,6 +146,10 @@ when no fresh Full receipt is provided and still enforces the exact library and
 header hashes. New-source comparisons require matching fresh Full/Lite receipts.
 Record O3/Ofast semantics and actual selected SIMD paths; equal ef is not equal
 quality. Package bytes cover the stated application/runtime/loader/notices only.
+The fresh Full SDK retains CMake's actual versioned SONAME aliases rather than
+assuming a fixed version. Bundle unpacking accepts regular files and same-directory
+file-alias chains ending at an archived regular file. Parent traversal, file-valued
+ancestors and dangling/cyclic aliases are rejected before any extraction.
 
 ### Evidence verification
 

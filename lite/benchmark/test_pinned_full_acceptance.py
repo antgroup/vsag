@@ -3,6 +3,7 @@
 import json
 import hashlib
 import io
+import shutil
 import statistics
 import tarfile
 from pathlib import Path
@@ -305,6 +306,61 @@ class CurrentPublishedFullTests(unittest.TestCase):
 
 
 class CurrentSourceTests(unittest.TestCase):
+    def test_actual_cmake_soname_alias_chain_survives_sdk_copy(self):
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            source, build = root / 'source', root / 'build'
+            source.mkdir()
+            (source / 'CMakeLists.txt').write_text(
+                'cmake_minimum_required(VERSION 3.18)\nproject(alias_fixture LANGUAGES CXX)\n'
+                'add_library(vsag SHARED library.cpp)\n'
+                'set_target_properties(vsag PROPERTIES VERSION 0.18.0 SOVERSION 0.18)\n')
+            (source / 'library.cpp').write_text('extern "C" int marker(){return 7;}\n')
+            subprocess.run(['cmake', '-S', str(source), '-B', str(build), '-G', 'Ninja'],
+                           check=True, capture_output=True, text=True)
+            subprocess.run(['cmake', '--build', str(build)], check=True, capture_output=True, text=True)
+            library = build / 'libvsag.so.0.18.0'
+            original = library.read_bytes()
+            consumer = source / 'consumer.cpp'
+            consumer.write_text('extern "C" int marker(); int main(){return marker()==7?0:1;}\n')
+            broken, fixed = root / 'broken', root / 'fixed'
+            for destination in [broken, fixed]:
+                destination.mkdir()
+                shutil.copyfile(library, destination / library.name)
+            for alias in ['libvsag.so', 'libvsag.so.0.0']:
+                (broken / alias).symlink_to(library.name)
+            def consume(destination):
+                binary = root / (destination.name + '-consumer')
+                subprocess.run(['c++', str(consumer), '-L' + str(destination),
+                                '-Wl,-rpath,' + str(destination), '-lvsag', '-o', str(binary)],
+                               check=True, capture_output=True, text=True)
+                env = {key:value for key,value in __import__('os').environ.items()
+                       if key not in ['LD_LIBRARY_PATH', 'LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG']}
+                return subprocess.run([str(binary)], env=env, capture_output=True, text=True)
+            control = consume(broken)
+            self.assertNotEqual(control.returncode, 0)
+            self.assertIn('libvsag.so.0.18', control.stderr)
+            aliases = build_fresh_full_reference.preserve_library_aliases(library, fixed)
+            self.assertEqual(aliases['libvsag.so.0.18'], 'libvsag.so.0.18.0')
+            self.assertTrue((fixed / 'libvsag.so').is_symlink())
+            self.assertEqual(consume(fixed).returncode, 0)
+            self.assertEqual(library.read_bytes(), original)
+
+    def test_full_alias_validation_precedes_any_alias_install(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source, destination = root / 'source', root / 'install'
+            source.mkdir()
+            destination.mkdir()
+            library = source / 'libvsag.so.0.18.0'
+            library.write_bytes(b'owned library fixture')
+            (source / 'libvsag.so').symlink_to(library.name)
+            (root / 'foreign').write_bytes(b'foreign')
+            (source / 'libvsag.so.bad').symlink_to('../foreign')
+            with self.assertRaises(ValueError):
+                build_fresh_full_reference.preserve_library_aliases(library, destination)
+            self.assertEqual(list(destination.iterdir()), [])
+
     def test_strict_fp_supports_historical_and_current_compiler_profiles(self):
         transform = build_fresh_full_reference.strict_fp_config
         legacy = 'vsag_add_compile_flag (-g)\nvsag_add_compile_flag (-Ofast)\n'
