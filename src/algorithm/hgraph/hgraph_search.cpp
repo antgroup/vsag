@@ -41,21 +41,20 @@ class FusedLabelFilter final : public Filter {
 public:
     FusedLabelFilter(FilterPtr filter,
                      FilterPtr deleted,
-                     const HGraphRaBitQFusedDataCell& graph,
+                     const LabelTable& labels,
                      uint64_t identity_limit)
         : filter_(std::move(filter)),
           deleted_(std::move(deleted)),
-          graph_(graph),
+          labels_(labels),
           identity_limit_(identity_limit) {
     }
 
     [[nodiscard]] bool
     CheckValid(int64_t id) const override {
         return id >= 0 and (deleted_ == nullptr or deleted_->CheckValid(id)) and
-               filter_->CheckValid(
-                   static_cast<uint64_t>(id) < identity_limit_
-                       ? id
-                       : graph_.GetLabel(graph_.GetNodeRecord(static_cast<InnerIdType>(id))));
+               filter_->CheckValid(static_cast<uint64_t>(id) < identity_limit_
+                                       ? id
+                                       : labels_.GetLabelById(static_cast<InnerIdType>(id)));
     }
 
     [[nodiscard]] float
@@ -92,7 +91,7 @@ public:
 private:
     FilterPtr filter_;
     FilterPtr deleted_;
-    const HGraphRaBitQFusedDataCell& graph_;
+    const LabelTable& labels_;
     uint64_t identity_limit_;
 };
 
@@ -1099,12 +1098,13 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (rabitq_fused_datacell_ != nullptr and not support_duplicate_ and
         request.filter_ != nullptr and not params.use_extra_info_filter) {
         // Add can publish new labels under the same global read lock as this query.
-        // Snapshot the domain before checking identity; new IDs must read their fused label.
+        // Snapshot before checking identity. Other IDs use synchronized label-table reads:
+        // the published watermark can cover holes whose fused records are not initialized yet.
         const auto identity_count = this->PublishedCount();
         ft = std::make_shared<FusedLabelFilter>(
             request.filter_,
             this->label_table_->GetDeletedIdsFilter(),
-            *rabitq_fused_datacell_,
+            *this->label_table_,
             this->label_table_->IsIdentityMapping() ? identity_count : 0);
     }
     if (request.enable_bitset_filter_ and request.bitset_filter_ != nullptr) {

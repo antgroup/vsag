@@ -87,6 +87,15 @@ public:
     }
 
     static void
+    ReserveFusedHole(HGraph& graph, InnerIdType id, int64_t label) {
+        // Model a later Add worker publishing before the preceding row's fused write.
+        graph.total_count_.store(id + 2);
+        graph.label_table_->Insert(id, label);
+        graph.label_table_->Insert(id + 1, label + 1);
+        graph.PublishNode(id + 1);
+    }
+
+    static void
     SetPrecise(HGraph& graph, const FlattenInterfacePtr& codes) {
         graph.high_precise_codes_ = codes;
     }
@@ -2513,8 +2522,11 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
     constexpr int64_t dim = 64;
     constexpr int64_t count = 512;
     const bool bitmap = GENERATE(false, true);
+    const bool duplicate = GENERATE(false, true);
+    const bool iterator = GENERATE(false, true);
+    CAPTURE(bitmap, duplicate, iterator);
     auto params = MakeFp32HGraphJson(false);
-    params["support_duplicate"].SetBool(false);
+    params["support_duplicate"].SetBool(duplicate);
     params["base_quantization_type"].SetString("rabitq");
     params["precise_quantization_type"].SetString("rabitq");
     params["use_reorder"].SetBool(true);
@@ -2532,7 +2544,8 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
     auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
     vsag::HGraphCodeWriteTestAccess::UseBottomLevelForAdd(*graph);
     struct PausingFilter final : vsag::Filter {
-        explicit PausingFilter(bool expose) : expose_(expose), bitmap_(1024, 1) {
+        PausingFilter(bool expose, bool pause_bitmap)
+            : expose_(expose), pause_bitmap_(pause_bitmap), bitmap_(1024, 1) {
         }
         bool
         CheckValid(int64_t id) const override {
@@ -2543,26 +2556,36 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
         }
         float
         ValidRatio() const override {
-            entered.store(true);
-            while (not released.load()) {
-                std::this_thread::yield();
+            if (not pause_bitmap_) {
+                Pause();
             }
             return 1.0F;
         }
         const uint8_t*
         GetValidBitmap(uint64_t* size) const override {
+            if (pause_bitmap_) {
+                Pause();
+            }
             if (size != nullptr) {
                 *size = expose_ ? bitmap_.size() : 0;
             }
             return expose_ ? bitmap_.data() : nullptr;
         }
+        void
+        Pause() const {
+            entered.store(true);
+            while (not released.load()) {
+                std::this_thread::yield();
+            }
+        }
         bool expose_;
+        bool pause_bitmap_;
         std::vector<uint8_t> bitmap_;
         mutable std::atomic<bool> entered{false};
         std::atomic<bool> released{false};
         mutable std::atomic<uint64_t> new_label_checks{0};
     };
-    auto filter = std::make_shared<PausingFilter>(bitmap);
+    auto filter = std::make_shared<PausingFilter>(bitmap, bitmap and (duplicate or iterator));
     auto query = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(true)->Float32Vectors(
         new float[dim]{});
     auto added = vsag::Dataset::Make()
@@ -2571,12 +2594,13 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
                      ->Owner(true)
                      ->Ids(new int64_t[1]{1000000})
                      ->Float32Vectors(new float[dim]{});
-    std::packaged_task<vsag::DatasetPtr()> search([index, query, filter] {
-        auto result = index->KnnSearch(
-            query,
-            1,
-            R"({"hgraph":{"ef_search":512,"brute_force_threshold":0,"skip_ratio":0}})",
-            filter);
+    std::packaged_task<vsag::DatasetPtr()> search([index, query, filter, iterator] {
+        const std::string parameters =
+            R"({"hgraph":{"ef_search":512,"brute_force_threshold":0,"skip_ratio":0}})";
+        vsag::IteratorContext* iter_ctx = nullptr;
+        auto result = iterator ? index->KnnSearch(query, 1, parameters, filter, iter_ctx, false)
+                               : index->KnnSearch(query, 1, parameters, filter);
+        std::unique_ptr<vsag::IteratorContext> iter_owner(iter_ctx);
         if (not result.has_value()) {
             throw std::runtime_error(result.error().message);
         }
@@ -2618,4 +2642,50 @@ TEST_CASE("HGraph fused filters bound identity shortcuts during concurrent Add",
     REQUIRE(found->GetDim() == 1);
     CHECK(found->GetIds()[0] < count);
     CHECK(filter->new_label_checks.load() > 0);
+}
+
+TEST_CASE("HGraph fused preparation reads reserved labels through the label table",
+          "[ut][hgraph][fused][fused_filter_add]") {
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 512;
+    auto params = MakeFp32HGraphJson(false);
+    params["support_duplicate"].SetBool(false);
+    params["base_quantization_type"].SetString("rabitq");
+    params["precise_quantization_type"].SetString("rabitq");
+    params["use_reorder"].SetBool(true);
+    params["rabitq_bits_per_dim_base"].SetInt(3);
+    params["rabitq_bits_per_dim_precise"].SetInt(5);
+    params["rabitq_bits_per_dim_query"].SetInt(32);
+    params["rabitq_use_fht"].SetBool(true);
+    params["rabitq_fused_datacell"].SetBool(true);
+    params["resize_increase_count_bit"].SetUint64(10);
+    auto index = MakeHGraphIndex(params, MakeCommonParam(dim));
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 1000000);
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, count)).has_value());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    vsag::HGraphCodeWriteTestAccess::ReserveFusedHole(*graph, count, 2000000);
+    struct TrackingFilter final : vsag::Filter {
+        bool
+        CheckValid(int64_t label) const override {
+            saw_reserved_label = saw_reserved_label or label == 2000000;
+            return label >= 1000000 and label < 1000512;
+        }
+        float
+        ValidRatio() const override {
+            return 1.0F;
+        }
+        mutable bool saw_reserved_label{false};
+    };
+    auto filter = std::make_shared<TrackingFilter>();
+    auto query = MakeFloatQuery(vectors, dim);
+    auto result = index->KnnSearch(
+        query, 1, R"({"hgraph":{"ef_search":32,"brute_force_threshold":0}})", filter);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    CHECK(filter->saw_reserved_label);
+    CHECK(result.value()->GetIds()[0] >= 1000000);
+    CHECK(result.value()->GetIds()[0] < 1000512);
 }
