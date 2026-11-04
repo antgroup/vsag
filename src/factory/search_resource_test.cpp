@@ -20,7 +20,7 @@ TEST_CASE("SearchResource composes common resources and shares query admission",
     SearchResource overlay(common, root);
     Engine first(&root), second(&overlay), plain(&common);
     const auto json =
-        R"({"dtype":"sparse","metric_type":"ip","index_param":{"immutable":true,"term_id_limit":4,"window_size":4}})";
+        R"({"dtype":"sparse","metric_type":"ip","dim":4,"index_param":{"immutable":true,"term_id_limit":4,"window_size":10000}})";
     auto a = first.CreateIndex("sindi", json);
     auto b = second.CreateIndex("sindi", json);
     auto c = plain.CreateIndex("sindi", json);
@@ -57,7 +57,7 @@ TEST_CASE("Index retains query context after the resource wrapper is released",
         Engine engine(&resource);
         auto created = engine.CreateIndex(
             "sindi",
-            R"({"dtype":"sparse","metric_type":"ip","index_param":{"immutable":true,"term_id_limit":4,"window_size":4}})");
+            R"({"dtype":"sparse","metric_type":"ip","dim":4,"index_param":{"immutable":true,"term_id_limit":4,"window_size":10000}})");
         REQUIRE(created.has_value());
         retained = created.value();
         auto typed = std::dynamic_pointer_cast<IndexImpl<SINDI>>(retained);

@@ -87,7 +87,6 @@ struct SindiParallelState {
     uint32_t filter_slots{0};
     uint32_t cpu_slots{0};
     uint32_t worker_limit{0};
-    bool resources_ready{false};
     bool profile_cpu{false};
     bool worker_cpu_available{true};
     uint64_t worker_cpu_ns{0};
