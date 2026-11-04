@@ -526,10 +526,10 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
     CHECK_ARGUMENT(not distance_count_overflows,
                    "CalcDistancesById distance buffer size overflows");
     const bool is_sparse = (query->GetSparseVectors() != nullptr);
-    const bool is_float_query = query->GetFloat32Vectors() != nullptr && !is_sparse &&
-                                query->GetMultiVectors() == nullptr &&
-                                query->GetInt8Vectors() == nullptr &&
-                                query->GetFloat16Vectors() == nullptr;
+    const bool is_float_query =
+        query->GetFloat32Vectors() != nullptr && !is_sparse &&
+        query->GetMultiVectors() == nullptr && query->GetInt8Vectors() == nullptr &&
+        query->GetBinaryVectors() == nullptr && query->GetFloat16Vectors() == nullptr;
     if (is_float_query) {
         CHECK_ARGUMENT(query->GetDim() == dim_, "CalcDistancesById query dimension mismatch");
     }
@@ -793,6 +793,26 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         return vectors;
     }
 
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        const auto packed_dim = static_cast<uint64_t>((dim_ + 7) / 8);
+        auto* binary_vectors =
+            static_cast<uint8_t*>(allocator->Allocate(static_cast<uint64_t>(count) * packed_dim));
+        if (binary_vectors == nullptr) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY,
+                                "failed to allocate memory for vectors");
+        }
+        vectors->NumElements(count)
+            ->Dim(dim_)
+            ->BinaryVectors(binary_vectors)
+            ->Owner(/*auto release=*/not has_specified_allocator, allocator);
+        for (int64_t i = 0; i < count; ++i) {
+            InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
+            this->GetVectorByInnerId(inner_id,
+                                     reinterpret_cast<float*>(binary_vectors + i * packed_dim));
+        }
+        return vectors;
+    }
+
     auto* float_vectors = static_cast<float*>(allocator->Allocate(sizeof(float) * count * dim_));
     if (float_vectors == nullptr) {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to allocate memory for vectors");
@@ -801,7 +821,7 @@ InnerIndexInterface::GetVectorByIds(const int64_t* ids,
         ->Dim(dim_)
         ->Float32Vectors(float_vectors)
         ->Owner(/*auto release=*/not has_specified_allocator, allocator);
-    for (int i = 0; i < count; ++i) {
+    for (int64_t i = 0; i < count; ++i) {
         InnerIdType inner_id = this->label_table_->GetIdByLabel(ids[i]);
         this->GetVectorByInnerId(inner_id, float_vectors + i * dim_);
     }
@@ -884,12 +904,20 @@ InnerIndexInterface::get_data_by_ids_with_flag(const int64_t* ids,
     const auto item_per_thread =
         count / thread_count + static_cast<int64_t>(count % thread_count != 0);
     if ((selected_data_flag & DATA_FLAG_FLOAT32_VECTOR) != 0U) {
-        auto* fp32_data = reinterpret_cast<float*>(
-            this->allocator_->Allocate(count * this->dim_ * sizeof(float)));
-        dataset->Float32Vectors(fp32_data);
+        const bool is_binary = data_type_ == DataTypes::DATA_TYPE_BINARY;
+        const auto bytes_per_vector =
+            static_cast<uint64_t>(is_binary ? (dim_ + 7) / 8 : dim_ * sizeof(float));
+        auto* vector_data = static_cast<uint8_t*>(
+            this->allocator_->Allocate(static_cast<uint64_t>(count) * bytes_per_vector));
+        if (is_binary) {
+            dataset->BinaryVectors(vector_data);
+        } else {
+            dataset->Float32Vectors(reinterpret_cast<float*>(vector_data));
+        }
         auto get_vec_func = [&](int64_t begin, int64_t end) {
             for (int64_t i = begin; i < end; ++i) {
-                this->GetVectorByInnerId(inner_ids[i], fp32_data + i * this->dim_);
+                this->GetVectorByInnerId(
+                    inner_ids[i], reinterpret_cast<float*>(vector_data + i * bytes_per_vector));
             }
         };
         if (this->thread_pool_ != nullptr and thread_count > 1) {

@@ -212,6 +212,10 @@ get_vectors(DataTypes type,
             element_bytes = sizeof(uint16_t);
             *vectors_ptr = const_cast<uint16_t*>(base->GetFloat16Vectors());
             break;
+        case DataTypes::DATA_TYPE_BINARY:
+            *vectors_ptr = const_cast<uint8_t*>(base->GetBinaryVectors());
+            *data_size_ptr = (static_cast<uint64_t>(dim) + 7U) / 8U;
+            return;
         default:
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 fmt::format("no support for this type: {}", (int)type));
@@ -233,6 +237,11 @@ set_dataset(DataTypes type,
         base->Int8Vectors((int8_t*)vectors_ptr)->Dim(dim)->Owner(false)->NumElements(num_element);
     } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
         base->Float16Vectors((uint16_t*)vectors_ptr)
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        base->BinaryVectors((uint8_t*)vectors_ptr)
             ->Dim(dim)
             ->Owner(false)
             ->NumElements(num_element);

@@ -1256,6 +1256,9 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
 
     if (is_warp) {
+        CHECK_ARGUMENT(common_param.data_type_ != DataTypes::DATA_TYPE_BINARY,
+                       "WARP does not support binary datatype");
+
         // Remove the marker key before mapping (it would cause "invalid config param" error)
         JsonType warp_external_param = external_param;
         warp_external_param.Erase(WARP_MODE_MARKER);

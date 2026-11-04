@@ -148,7 +148,7 @@ def test_binary_rejects_invalid_dtype():
     dim = 64
     index = pyvsag.Index("brute_force", index_params("brute_force", dim))
     vectors = np.zeros((10, dim // 8), dtype=np.float32)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         index.build(
             vectors=vectors,
             ids=np.arange(10, dtype=np.int64),
@@ -161,7 +161,7 @@ def test_binary_rejects_invalid_shape_and_query_length():
     dim = 65  # ceil(65 / 8) == 9 bytes
     index = pyvsag.Index("brute_force", index_params("brute_force", dim))
     vectors = np.zeros((10, 8), dtype=np.uint8)  # one byte short
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         index.build(
             vectors=vectors,
             ids=np.arange(10, dtype=np.int64),
@@ -176,9 +176,9 @@ def test_binary_rejects_invalid_shape_and_query_length():
         num_elements=10,
         dim=dim,
     )
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         index.knn_search(vector=np.zeros(8, dtype=np.uint8), k=1, parameters="{}")
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         index.range_search(
             point=np.zeros(10, dtype=np.uint8), threshold=1.0, parameters="{}"
         )
@@ -190,7 +190,7 @@ def test_binary_rejects_non_contiguous_arrays():
     contiguous = np.zeros((10, dim // 8), dtype=np.uint8)
     non_contiguous = np.asfortranarray(contiguous)
     assert not non_contiguous.flags["C_CONTIGUOUS"]
-    with pytest.raises(RuntimeError):
+    with pytest.raises(ValueError):
         index.build(
             vectors=non_contiguous,
             ids=np.arange(10, dtype=np.int64),
