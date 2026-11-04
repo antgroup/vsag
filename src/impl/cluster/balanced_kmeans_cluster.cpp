@@ -1115,7 +1115,7 @@ choose_center(const float* centroids, uint64_t k, uint64_t dim, Vector<float>& c
     double spread = 0.0;
     for (uint64_t j = 0; j < k; ++j) {
         for (uint64_t d = 0; d < dim; ++d) {
-            const double diff = static_cast<double>(centroids[j * dim + d] - center[d]);
+            const auto diff = static_cast<double>(centroids[j * dim + d] - center[d]);
             spread += diff * diff;
         }
     }
