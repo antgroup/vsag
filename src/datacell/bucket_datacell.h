@@ -625,27 +625,21 @@ template <typename QuantTmpl, typename IOTmpl>
 void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
+    Vector<float> residuals(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
         auto dim = this->quantizer_->GetDim();
-        train_data_buffer.resize(count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            train_data_buffer.resize(count * dim);
             for (int i = 0; i < count; ++i) {
                 Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
             }
             data_ptr = train_data_buffer.data();
         }
-        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        // Residuals to the buckets a Build's assignment gives this batch. For a sample
-        // that is the same procedure, not the same placement of each vector.
-        auto buckets = strategy_->ClassifyDatasForTrain(data_ptr, static_cast<int64_t>(count));
-        for (int i = 0; i < count; ++i) {
-            strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
-            }
-        }
-        data = train_data_buffer.data();
+        // Residuals to the buckets a Build and Add give this batch. For a sample that is
+        // the same procedure, not the same placement of each vector.
+        count = strategy_->ResidualsForTrain(data_ptr, static_cast<int64_t>(count), residuals);
+        data = residuals.data();
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }

@@ -271,13 +271,14 @@ trained centroids under the same exact sizes, scored with the routing key of the
 metric (`1 - <x, c>` for `ip`, one minus the cosine for `cosine`), so a vector goes
 to the bucket a query near it is routed to whenever the sizes allow. Codes kept
 relative to a bucket centroid (`use_residual`, RaBitQ split storage) are trained on
-residuals from the same balanced assignment of the training vectors, so they cover
-vectors placed away from their nearest bucket. A `Build` on a model trained or
-exported beforehand can bring fewer vectors than buckets; every vector then gets a
-bucket of its own. Vectors added later with `Add` go to their nearest bucket, as
-with the other trainers, so the sizes drift as the index grows. With
-`buckets_per_data` above 1 the first copy of every vector is balanced and the other
-copies go to the nearest other buckets.
+residuals from the same balanced assignment of the training vectors and, where it
+differs, from their nearest buckets, so they cover both the vectors a `Build` places
+away from their nearest bucket and the vectors `Add` routes to it. A `Build` on a
+model trained or exported beforehand can bring fewer vectors than buckets; every
+vector then gets a bucket of its own. Vectors added later with `Add` go to their
+nearest bucket, as with the other trainers, so the sizes drift as the index grows.
+With `buckets_per_data` above 1 the first copy of every vector is balanced and the
+other copies go to the nearest other buckets.
 
 **What stays the same.** Training uses the same sample, objective and iterations
 as `kmeans` (squared L2, centroids are means, `kmeans_iter_count` iterations), and

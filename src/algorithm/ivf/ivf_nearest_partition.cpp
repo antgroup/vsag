@@ -241,15 +241,22 @@ IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
 
 Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatasForTrain(const void* datas, int64_t count) {
+    auto nearest = this->ClassifyDatas(datas, count, 1, nullptr);
     if (ivf_partition_strategy_param_->partition_train_type !=
             IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
         not this->is_trained_ or count <= 0) {
-        return this->ClassifyDatas(datas, count, 1, nullptr);
+        return nearest;
     }
     // A Build places its vectors under the size constraint, often away from their
-    // nearest bucket; residual codes trained on nearest-bucket residuals would not
-    // cover those.
-    return this->assign_balanced(datas, count);
+    // nearest bucket, while Add routes every vector to the nearest one. Residual codes
+    // trained on either assignment alone would not cover the other.
+    const auto balanced = this->assign_balanced(datas, count);
+    Vector<BucketIdType> buckets(static_cast<uint64_t>(count) * 2, allocator_);
+    for (int64_t i = 0; i < count; ++i) {
+        buckets[2 * i] = balanced[i];
+        buckets[2 * i + 1] = nearest[i];
+    }
+    return buckets;
 }
 
 Vector<BucketIdType>

@@ -104,6 +104,21 @@ private:
     float centroid_scale_{1.0F};
 };
 
+// Every vector trains on bucket 0, and the odd ones on bucket 1 as well.
+class TwoTrainBucketsPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    Vector<BucketIdType>
+    ClassifyDatasForTrain(const void*, int64_t count) override {
+        Vector<BucketIdType> buckets(2 * count, 0, allocator_);
+        for (int64_t i = 1; i < count; i += 2) {
+            buckets[2 * i + 1] = 1;
+        }
+        return buckets;
+    }
+};
+
 class TrackingReader : public Reader {
 public:
     explicit TrackingReader(std::shared_ptr<std::string> data) : data_(std::move(data)) {
@@ -850,6 +865,56 @@ TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][Buck
         for (uint64_t i = 0; i < actual.size(); ++i) {
             REQUIRE(std::abs(actual[i] - expected[i]) < 1e-5F);
         }
+    }
+}
+
+TEST_CASE("Residual training rows cover every bucket of a vector", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 5;
+    auto vectors = fixtures::generate_vectors(count, dim);
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    Vector<float> residuals(allocator.get());
+    Vector<float> centroid(dim, allocator.get());
+
+    auto require_row = [&](FixedCentroidPartitionStrategy& strategy,
+                           uint64_t row,
+                           uint64_t vector,
+                           BucketIdType bucket) {
+        strategy.GetCentroid(bucket, centroid);
+        for (uint64_t d = 0; d < dim; ++d) {
+            REQUIRE(residuals[row * dim + d] == vectors[vector * dim + d] - centroid[d]);
+        }
+    };
+
+    SECTION("one bucket per vector keeps one row per vector") {
+        FixedCentroidPartitionStrategy strategy(common_param, 2);
+        REQUIRE(strategy.ResidualsForTrain(vectors.data(), count, residuals) == count);
+        REQUIRE(residuals.size() == count * dim);
+        for (uint64_t i = 0; i < count; ++i) {
+            require_row(strategy, i, i, 0);
+        }
+    }
+
+    SECTION("a second bucket adds a row only where it differs") {
+        TwoTrainBucketsPartitionStrategy strategy(common_param, 2);
+        REQUIRE(strategy.ResidualsForTrain(vectors.data(), count, residuals) == count + 2);
+        REQUIRE(residuals.size() == (count + 2) * dim);
+        require_row(strategy, 0, 0, 0);
+        require_row(strategy, 1, 1, 0);
+        require_row(strategy, 2, 1, 1);
+        require_row(strategy, 3, 2, 0);
+        require_row(strategy, 4, 3, 0);
+        require_row(strategy, 5, 3, 1);
+        require_row(strategy, 6, 4, 0);
+    }
+
+    SECTION("no vectors, no rows") {
+        FixedCentroidPartitionStrategy strategy(common_param, 2);
+        REQUIRE(strategy.ResidualsForTrain(vectors.data(), 0, residuals) == 0);
+        REQUIRE(residuals.empty());
     }
 }
 
