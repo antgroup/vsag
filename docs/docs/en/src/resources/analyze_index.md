@@ -279,6 +279,12 @@ Output contract:
 - The exit code is `0` on success and non-zero when argument validation, loading or analysis
   fails.
 
+For `python -m pyvsag.analyze_index_cli`, startup-banner suppression is detected through
+`sys.orig_argv` on CPython 3.10 and later, or through `/proc` on older Linux CPython versions.
+On older non-Linux interpreters, use the installed `pyvsag-analyze-index` command instead, or
+set `VSAG_SUPPRESS_INIT_BANNER=1` before starting Python; otherwise the native startup banner
+may precede the JSON report on stdout.
+
 ```bash
 # Static analysis only (metadata + statistics).
 pyvsag-analyze-index --index_path /path/to/index

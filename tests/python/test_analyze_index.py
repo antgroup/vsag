@@ -171,8 +171,8 @@ def test_library_import_does_not_change_banner_environment():
     env.pop("VSAG_SUPPRESS_INIT_BANNER", None)
     code = (
         "import os, pyvsag; "
-        "assert 'VSAG_SUPPRESS_INIT_BANNER' not in os.environ, "
-        "import pyvsag mutated the host environment"
+        "assert 'VSAG_SUPPRESS_INIT_BANNER' not in os.environ, '"
+        "import pyvsag mutated the host environment'"
     )
 
     returncode, stdout, stderr = _run([sys.executable, "-c", code], env=env)

@@ -20,11 +20,7 @@ to stdout, sends diagnostics and errors to stderr, and exits non-zero when analy
 
 import argparse
 import json
-import os
 import sys
-
-# This is a CLI-local setting; pyvsag.__init__ applies it before the native import when needed.
-os.environ["VSAG_SUPPRESS_INIT_BANNER"] = "1"
 
 from .analyzer import analyze_index
 
@@ -62,7 +58,7 @@ def build_parser():
         "--query-path",
         "-qp",
         default=None,
-        help="Binary single-query dataset path. Omit for static analysis only.",
+        help="Binary query dataset path. Omit for static analysis only.",
     )
     parser.add_argument(
         "--query_data_type",
