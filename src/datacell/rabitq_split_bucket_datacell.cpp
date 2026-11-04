@@ -2103,8 +2103,16 @@ RaBitQSplitBucketDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     CHECK_ARGUMENT(this->bucket_count_ == expected_bucket_count,
                    "RaBitQ split bucket count does not match serialized data");
     this->codes_->Deserialize(reader);
+    // TotalCount is the code ID high-water mark, including sparse and deleted entries.
+    const auto total_count = this->codes_->TotalCount();
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
         StreamReader::ReadVector(reader, this->inner_ids_[bucket_id]);
+        for (const auto inner_id : this->inner_ids_[bucket_id]) {
+            if (inner_id == EMPTY_INNER_ID) {
+                continue;
+            }
+            CHECK_ARGUMENT(inner_id < total_count, "invalid inner id for RaBitQ split bucket");
+        }
         if (this->use_residual_) {
             StreamReader::ReadVector(reader, this->residual_bias_[bucket_id]);
         }
@@ -2175,12 +2183,14 @@ void
 RaBitQSplitBucketDataCell::rebuild_locations() {
     std::lock_guard lock(this->locations_mutex_);
     this->locations_.clear();
+    const auto total_count = this->codes_->TotalCount();
     for (BucketIdType bucket_id = 0; bucket_id < this->bucket_count_; ++bucket_id) {
         for (InnerIdType offset = 0; offset < this->inner_ids_[bucket_id].size(); ++offset) {
             const auto inner_id = this->inner_ids_[bucket_id][offset];
             if (inner_id == EMPTY_INNER_ID) {
                 continue;
             }
+            CHECK_ARGUMENT(inner_id < total_count, "invalid inner id for RaBitQ split bucket");
             if (this->locations_.size() <= inner_id) {
                 this->locations_.resize(static_cast<uint64_t>(inner_id) + 1, INVALID_LOCATION);
             }

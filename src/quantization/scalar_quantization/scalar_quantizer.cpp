@@ -15,6 +15,8 @@
 
 #include "scalar_quantizer.h"
 
+#include <cstring>
+
 #include "scalar_quantization_trainer.h"
 #include "scalar_quantization_utils.h"
 #include "simd/normalize.h"
@@ -89,7 +91,7 @@ ScalarQuantizer<metric, bit>::EncodeOneImpl(const float* data, uint8_t* codes) c
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         normalized.resize(this->dim_);
     }
-    return EncodeOneWithScratch(data, codes, normalized.data());
+    return encode_one_with_scratch(data, codes, normalized.data());
 }
 
 template <MetricType metric, int bit>
@@ -102,7 +104,7 @@ ScalarQuantizer<metric, bit>::EncodeBatchImpl(const float* data,
         normalized.resize(this->dim_);
     }
     for (uint64_t i = 0; i < count; ++i) {
-        if (not EncodeOneWithScratch(
+        if (not encode_one_with_scratch(
                 data + i * this->dim_, codes + i * this->code_size_, normalized.data())) {
             return false;
         }
@@ -112,9 +114,9 @@ ScalarQuantizer<metric, bit>::EncodeBatchImpl(const float* data,
 
 template <MetricType metric, int bit>
 bool
-ScalarQuantizer<metric, bit>::EncodeOneWithScratch(const float* data,
-                                                   uint8_t* codes,
-                                                   float* normalized) const {
+ScalarQuantizer<metric, bit>::encode_one_with_scratch(const float* data,
+                                                      uint8_t* codes,
+                                                      float* normalized) const {
     float delta = 0;
     uint8_t scaled = 0;
     const float* cur = data;
@@ -122,7 +124,7 @@ ScalarQuantizer<metric, bit>::EncodeOneWithScratch(const float* data,
         Normalize(data, normalized, this->dim_);
         cur = normalized;
     }
-    memset(codes, 0, this->code_size_);
+    std::memset(codes, 0, this->code_size_);
     for (uint64_t d = 0; d < this->dim_; d++) {
         if (diff_[d] < std::numeric_limits<float>::epsilon()) {
             delta = 1.0F;
@@ -194,7 +196,7 @@ ScalarQuantizer<metric, bit>::ProcessQueryImpl(const float* query,
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);
     } else {
-        memcpy(computer.buf_, query, this->dim_ * sizeof(float));
+        std::memcpy(computer.buf_, query, this->dim_ * sizeof(float));
     }
 }
 

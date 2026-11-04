@@ -259,7 +259,7 @@ SparseDmqDataCell::Deserialize(LvalueOrRvalue<StreamReader> reader) {
         CHECK_ARGUMENT(offsets_[id + 1] - offsets_[id] >= sizeof(SparseDmqQuantizer::EncodedHeader),
                        "serialized DMQ code is smaller than its header");
         SparseVector vector;
-        vector.len_ = quantizer_->GetEncodedLength(codes_.data() + offsets_[id]);
+        vector.len_ = SparseDmqQuantizer::GetEncodedLength(codes_.data() + offsets_[id]);
         CHECK_ARGUMENT(offsets_[id + 1] - offsets_[id] == quantizer_->GetEncodedSize(vector),
                        "serialized DMQ code size is inconsistent");
     }

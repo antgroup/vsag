@@ -371,8 +371,12 @@ KMeansCluster::Run(uint32_t k,
                                                               gpu_config_.min_work_threshold);
         if (not accumulated) {
             for (uint64_t i = 0; i < count; i += bs) {
-                futures.emplace_back(thread_pool_->GeneralEnqueue(
-                    update_centroids_func, i / bs, i, std::min(i + bs, count)));
+                if (thread_pool_->IsCurrentThread()) {
+                    update_centroids_func(i / bs, i, std::min(i + bs, count));
+                } else {
+                    futures.emplace_back(thread_pool_->GeneralEnqueue(
+                        update_centroids_func, i / bs, i, std::min(i + bs, count)));
+                }
             }
             for (auto& future : futures) {
                 future.wait();

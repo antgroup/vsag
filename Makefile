@@ -21,6 +21,7 @@ VSAG_ENABLE_EXAMPLES ?= OFF
 VSAG_ENABLE_INTEL_MKL ?= OFF
 VSAG_ENABLE_LIBAIO ?= ON
 VSAG_USE_SYSTEM_DEPS ?= AUTO
+LINT_BUILD_DIR ?= build-release/
 
 VSAG_CMAKE_ARGS := -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_COLOR_DIAGNOSTICS=ON -DENABLE_INTEL_MKL=${VSAG_ENABLE_INTEL_MKL}
 VSAG_CMAKE_ARGS := ${VSAG_CMAKE_ARGS} -DENABLE_LIBAIO=${VSAG_ENABLE_LIBAIO}
@@ -123,6 +124,7 @@ test-module:             ## Build and run one unit-test module. Usage: make test
 
 .PHONY: test-cmake
 test-cmake:              ## Run focused CMake helper tests.
+	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/cxx_standard_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/generator_selection_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/thirdparty_override_test.cmake
 	cmake -DVSAG_SOURCE_DIR=${CURDIR} -P tests/cmake/release_build_modes_test.cmake
@@ -175,11 +177,13 @@ cov:                     ## Build unit tests with code coverage enabled.
 .PHONEY: lint
 lint:                    ## Check coding styles defined in `.clang-tidy`.
 	@./scripts/linters/check-struct-names.py
-	@./scripts/linters/run-clang-tidy-15.sh -p build-release/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS}
+	@pattern=$$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$$")') && \
+	    ./scripts/linters/run-clang-tidy-20.sh -p "${LINT_BUILD_DIR}" -use-color -source-filter "$$pattern" -j ${COMPILE_JOBS}
 
 .PHONEY: fix-lint
 fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements, use it be careful!!!
-	@./scripts/linters/run-clang-tidy-15.sh -p build-release/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j ${COMPILE_JOBS} -fix
+	@pattern=$$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$$")') && \
+	    ./scripts/linters/run-clang-tidy-20.sh -p "${LINT_BUILD_DIR}" -use-color -source-filter "$$pattern" -j ${COMPILE_JOBS} -fix
 
 .PHONY: test_parallel
 test_parallel:           ## Run all tests parallel (used in CI).

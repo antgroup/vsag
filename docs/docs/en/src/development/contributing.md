@@ -105,7 +105,7 @@ compliance, and taking full responsibility for the contribution.
 ## Coding Style
 
 Read the [C++ Coding Guide](coding_style.md) before changing C++ code. It documents the exact
-clang-format 15 and clang-tidy 15 rules, naming conventions, diagnostic suppressions, and local
+clang-format 20 and clang-tidy 20 rules, naming conventions, diagnostic suppressions, and local
 commands required by VSAG.
 
 ## Local Testing

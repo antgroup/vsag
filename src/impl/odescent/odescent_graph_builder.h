@@ -170,8 +170,8 @@ private:
     void
     parallelize_task(const std::function<void(int64_t i, int64_t end)>& task);
 
-    uint64_t dim_;
-    int64_t data_num_;
+    uint64_t dim_{0};
+    int64_t data_num_{0};
     Vector<Linklist> graph_;
     Vector<std::mutex> points_lock_;
     SafeThreadPool* thread_pool_{nullptr};

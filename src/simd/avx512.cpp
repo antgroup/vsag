@@ -383,7 +383,8 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 }
 
 #if defined(ENABLE_AVX512)
-__inline __m512i __attribute__((__always_inline__)) load_16_short(const uint16_t* data) {
+__inline __m512i __attribute__((__always_inline__))
+load_16_short(const uint16_t* data) {
     __m256i bf16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data));
     __m512i bf32 = _mm512_cvtepu16_epi32(bf16);
     return _mm512_slli_epi32(bf32, 16);
@@ -933,8 +934,35 @@ RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
 float
 RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_AVX512)
-    return simd::RaBitQFloatThreeBitCenteredIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
-        vector, bits, dim, &generic::RaBitQFloatThreeBitCenteredIP);
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    auto sum = _mm512_setzero_ps();
+    const auto center = _mm512_set1_ps(-3.5F);
+    const auto four = _mm512_set1_ps(4.0F);
+    const auto two = _mm512_set1_ps(2.0F);
+    const auto one = _mm512_set1_ps(1.0F);
+    uint64_t d = 0;
+    for (; d + 16 <= dim; d += 16) {
+        uint16_t high_bits;
+        uint16_t middle_bits;
+        uint16_t low_bits;
+        std::memcpy(&high_bits, bits + (d >> 3), sizeof(high_bits));
+        std::memcpy(&middle_bits, bits + plane_bytes + (d >> 3), sizeof(middle_bits));
+        std::memcpy(&low_bits, bits + 2 * plane_bytes + (d >> 3), sizeof(low_bits));
+        auto weight = _mm512_mask_add_ps(center, high_bits, center, four);
+        weight = _mm512_mask_add_ps(weight, middle_bits, weight, two);
+        weight = _mm512_mask_add_ps(weight, low_bits, weight, one);
+        sum = _mm512_fmadd_ps(weight, _mm512_loadu_ps(vector + d), sum);
+    }
+    float result = _mm512_reduce_add_ps(sum);
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const auto mask = static_cast<uint8_t>(1U << (d & 7));
+        float weight = (bits[byte_idx] & mask) != 0U ? 2.0F : -2.0F;
+        weight += (bits[plane_bytes + byte_idx] & mask) != 0U ? 1.0F : -1.0F;
+        weight += (bits[2 * plane_bytes + byte_idx] & mask) != 0U ? 0.5F : -0.5F;
+        result += vector[d] * weight;
+    }
+    return result;
 #else
     return avx2::RaBitQFloatThreeBitCenteredIP(vector, bits, dim);
 #endif
@@ -949,15 +977,49 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
                                     uint64_t dim,
                                     float* results) {
 #if defined(ENABLE_AVX512)
-    simd::RaBitQFloatThreeBitCenteredIPBatch4Impl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
-        vector,
-        bits1,
-        bits2,
-        bits3,
-        bits4,
-        dim,
-        results,
-        &generic::RaBitQFloatThreeBitCenteredIPBatch4);
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* codes[4] = {bits1, bits2, bits3, bits4};
+    __m512 sums[4] = {
+        _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps(), _mm512_setzero_ps()};
+    const auto center = _mm512_set1_ps(-3.5F);
+    const auto four = _mm512_set1_ps(4.0F);
+    const auto two = _mm512_set1_ps(2.0F);
+    const auto one = _mm512_set1_ps(1.0F);
+
+    uint64_t d = 0;
+    for (; d + 16 <= dim; d += 16) {
+        const uint64_t byte_idx = d >> 3;
+        const auto query = _mm512_loadu_ps(vector + d);
+        for (uint64_t i = 0; i < 4; ++i) {
+            uint16_t high_bits;
+            uint16_t middle_bits;
+            uint16_t low_bits;
+            std::memcpy(&high_bits, codes[i] + byte_idx, sizeof(high_bits));
+            std::memcpy(&middle_bits, codes[i] + plane_bytes + byte_idx, sizeof(middle_bits));
+            std::memcpy(&low_bits, codes[i] + 2 * plane_bytes + byte_idx, sizeof(low_bits));
+
+            // q * (4*b2 + 2*b1 + b0 - 3.5): three masked adds replace three
+            // signed blends followed by two adds. All weights remain exact halves.
+            auto weight = _mm512_mask_add_ps(center, high_bits, center, four);
+            weight = _mm512_mask_add_ps(weight, middle_bits, weight, two);
+            weight = _mm512_mask_add_ps(weight, low_bits, weight, one);
+            sums[i] = _mm512_fmadd_ps(weight, query, sums[i]);
+        }
+    }
+    for (uint64_t i = 0; i < 4; ++i) {
+        results[i] = _mm512_reduce_add_ps(sums[i]);
+    }
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const auto mask = static_cast<uint8_t>(1U << (d & 7));
+        const float query = vector[d];
+        for (uint64_t i = 0; i < 4; ++i) {
+            float weight = (codes[i][byte_idx] & mask) != 0U ? 2.0F : -2.0F;
+            weight += (codes[i][plane_bytes + byte_idx] & mask) != 0U ? 1.0F : -1.0F;
+            weight += (codes[i][2 * plane_bytes + byte_idx] & mask) != 0U ? 0.5F : -0.5F;
+            results[i] += query * weight;
+        }
+    }
 #else
     avx2::RaBitQFloatThreeBitCenteredIPBatch4(vector, bits1, bits2, bits3, bits4, dim, results);
 #endif
@@ -1211,6 +1273,40 @@ RaBitQFloatSupplementCodeIP(const float* vector,
                             uint64_t dim,
                             uint32_t supplement_bits) {
 #if defined(ENABLE_AVX512)
+    if (supplement_bits == 5) {
+        // The common 3+5 split needs five fixed planes. Decode directly into the
+        // running code vector instead of materializing and adding each selected bit.
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        const auto one = _mm512_set1_ps(1.0F);
+        const auto two = _mm512_set1_ps(2.0F);
+        const auto four = _mm512_set1_ps(4.0F);
+        const auto eight = _mm512_set1_ps(8.0F);
+        const auto sixteen = _mm512_set1_ps(16.0F);
+        auto sum = _mm512_setzero_ps();
+        uint64_t d = 0;
+        for (; d + 16 <= dim; d += 16) {
+            uint16_t masks[5];
+            for (uint64_t bit = 0; bit < 5; ++bit) {
+                std::memcpy(
+                    masks + bit, supplement_code + bit * plane_bytes + (d >> 3), sizeof(uint16_t));
+            }
+            auto code = _mm512_maskz_mov_ps(masks[0], one);
+            code = _mm512_mask_add_ps(code, masks[1], code, two);
+            code = _mm512_mask_add_ps(code, masks[2], code, four);
+            code = _mm512_mask_add_ps(code, masks[3], code, eight);
+            code = _mm512_mask_add_ps(code, masks[4], code, sixteen);
+            sum = _mm512_fmadd_ps(code, _mm512_loadu_ps(vector + d), sum);
+        }
+        float result = _mm512_reduce_add_ps(sum);
+        for (; d < dim; ++d) {
+            uint32_t code = 0;
+            for (uint32_t bit = 0; bit < 5; ++bit) {
+                code |= ((supplement_code[bit * plane_bytes + (d >> 3)] >> (d & 7)) & 1U) << bit;
+            }
+            result += vector[d] * static_cast<float>(code);
+        }
+        return result;
+    }
     return simd::RaBitQFloatSupplementCodeIPImpl<simd::RaBitQTraits<simd::Avx512RaBitQTag>>(
         vector, supplement_code, dim, supplement_bits);
 #else
@@ -1756,6 +1852,23 @@ FHTRotate(float* data, uint64_t dim_) {
 #if defined(ENABLE_AVX512)
     uint64_t n = dim_;
     uint64_t step = 1;
+    if (n >= 16 and (n & 15U) == 0) {
+        // Complete the four local butterfly stages in registers. The remaining
+        // stages combine different 16-float blocks and retain the existing loop.
+        for (uint64_t i = 0; i < n; i += 16) {
+            auto value = _mm512_loadu_ps(data + i);
+            auto other = _mm512_permute_ps(value, 0xB1);
+            value = _mm512_mask_sub_ps(_mm512_add_ps(value, other), 0xAAAA, other, value);
+            other = _mm512_permute_ps(value, 0x4E);
+            value = _mm512_mask_sub_ps(_mm512_add_ps(value, other), 0xCCCC, other, value);
+            other = _mm512_shuffle_f32x4(value, value, 0xB1);
+            value = _mm512_mask_sub_ps(_mm512_add_ps(value, other), 0xF0F0, other, value);
+            other = _mm512_shuffle_f32x4(value, value, 0x4E);
+            value = _mm512_mask_sub_ps(_mm512_add_ps(value, other), 0xFF00, other, value);
+            _mm512_storeu_ps(data + i, value);
+        }
+        step = 16;
+    }
     while (step < n) {
         if (step >= 16) {  // step is the power of 2
             avx512::RotateOp(data, 0, dim_, step);

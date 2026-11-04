@@ -1,6 +1,6 @@
 # 编译构建
 
-VSAG 是一个 C++ 项目，使用 CMake 构建。项目源码使用 C++17 标准编写，请确保你使用的编译器支持 C++17 的语法。我们建议你使用 GCC 9.4.0 或者 Clang 13.0.0 以后的版本，因为这些版本在我们的开发中工作良好。
+VSAG 使用 CMake 构建。Full VSAG 的内部 CPU 源码使用 C++20，Linux 保留 GCC 9.4.0+ / Clang 13.0.0+ 的源码编译器基线，开发和 CI 固定使用 GCC 13 / Clang 20，并单独验证旧基线。公开头文件和 API 保持 C++17 可用；CUDA 源文件、Node.js 绑定和独立 Lite 继续使用 C++17。clang-format 和 clang-tidy 固定为版本 20。
 
 支持的平台包括 Ubuntu 20.04+、CentOS 7+，以及 Apple Silicon 上的 macOS 14+。
 macOS 使用 Xcode Command Line Tools 提供的 Apple Clang 和 Homebrew 依赖；当前支持范围是
@@ -95,12 +95,12 @@ stamp、日志和元数据不计入 `local_bytes`，也不计入准备阶段表�
 
 PR CI 的 **ASan Build X86** 只运行一次 `make asan COMPILE_JOBS=3`，保留 Ninja、compile commands、system OpenBLAS、examples 和 tools。Makefile 仍启用 tests、Sanitize 和 ASan/UBSan，changed-source lint、下游测试、兼容性检查及构建产物契约保持不变。`ccache --zero-stats` 只重置统计，**不删除缓存对象**。构建步骤记录耗时，always 步骤输出 verbose/兼容回退缓存诊断，不掩盖真实构建失败；ccache 仍启用并使用一次性 GitHub-hosted VM 上的默认目录，不跨 job 恢复或保存编译缓存。PR X86 的依赖归档缓存有意从恢复并保存改为**只恢复**（`actions/cache/restore@v4`），防止 PR 上下文将归档写回共享缓存；这项策略并不只适用于独立 benchmark。
 
-独立的 **Build Performance Benchmark**（`.github/workflows/build_performance.yml`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 22.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
+**Daily CI / Build Performance X86** 配置（`.github/workflows/daily_test.yml`, `profile=build-performance`）每周一 UTC 03:23 测 upstream `main`，也可通过 Actions 手动运行。它不是 PR required check，使用独立 concurrency、Ubuntu 24.04 hosted runner、180 分钟超时和 14 天报告保留期。工作流进入默认分支后，可运行：
 
 ```bash
-gh workflow run build_performance.yml --ref main -f ref=main
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=main
 # 或指定本仓库 main 历史中可达的完整 40 位 commit SHA：
-gh workflow run build_performance.yml --ref main -f ref=<full-main-history-sha>
+gh workflow run daily_test.yml --ref main -f profile=build-performance -f ref=<full-main-history-sha>
 ```
 
 工作流本身必须从 `main` dispatch（其他工作流分支会被跳过），并显式 checkout `antgroup/vsag` upstream `main`，只接受 `main` 或该已获取 upstream 历史中的完整 SHA，并将实际 checkout 的 SHA（不是 dispatch 事件 SHA）及 main 基线写入 `target.txt`。PR ref、任意分支和未合并功能提交均被有意拒绝，因此迁移草稿分支无法通过此入口测量自己；hosted dispatch 和端到端验收需等工作流及受支持 collector 进入 main 后完成。fork 的定时任务被禁用。
@@ -247,3 +247,15 @@ CMake 优先使用带版本后缀的变量，再使用旧变量，并保留默�
 
 如果机器内存足够，可以适当调大 `COMPILE_JOBS`；默认值会比较保守，以避免 CI 里再次触发
 内存不足。
+
+## 工具链分层验证
+
+Linux 开发以 GCC 13 为主编译器、Clang 20 为第二编译器。分别使用独立目录执行 `make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"` 和 `make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"`。
+
+Ubuntu 自动依赖安装脚本要求 Ubuntu 24.04+，安装 GCC 13 和 LLVM 20（必要时使用 apt.llvm.org）；其他发行版需要自行准备对应工具链。源码编译器要求不改变预编译包的 glibc 基线或 libstdc++ ABI 选择，客户端仍可使用 C++17。
+
+开发工具链版本不等于客户端或源码构建的最低编译器版本。GCC 9.4.0 / Clang 13.0.0 的既有源码基线保持为兼容性验证目标；这里的 C++20 表示本库采用的构建模式，不代表旧编译器完整实现了所有 C++20 特性。
+
+启用 CUDA 时，必须单独选择已安装 CUDA toolkit 支持的 host compiler。CMake 默认将 `CMAKE_CUDA_HOST_COMPILER` 设为 CPU 编译器；如果该组合不受 toolkit 支持，请通过 `EXTRA_DEFINED="-DENABLE_CUDA=ON -DCMAKE_CUDA_HOST_COMPILER=/path/to/toolkit-supported-g++"` 显式指定。CUDA 使用 C++17 并不改变 nvcc 对 host compiler 的支持范围；CPU 检查不能替代实际 CUDA toolkit 的构建验证。
+
+维护中的 CI 容器镜像以 Ubuntu 26.04 为基线，使用 GCC 13 和 LLVM 20。Ubuntu 24.04 是开发与运行兼容性目标。发布包继续保持既有 manylinux/glibc 基线；Ubuntu 24.04 上的运行兼容性应独立于 Ubuntu 26.04 的 CI 构建进行验证。

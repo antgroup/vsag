@@ -154,8 +154,10 @@ JsonWrapper::SetUint64(uint64_t value) {
 
 template <class T>
 void
+// Keep the exported template instantiation signature.
+// NOLINTNEXTLINE(performance-unnecessary-value-param)
 JsonWrapper::SetVector(std::vector<T> value) {
-    (*json_) = value;
+    (*json_) = std::move(value);
 }
 
 void

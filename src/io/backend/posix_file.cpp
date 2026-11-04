@@ -103,7 +103,7 @@ PosixFile::PosixFile(FileOpenOptions options) : options_(std::move(options)) {
             write_fd_ = read_fd_;
         }
 
-        struct stat file_stat {};
+        struct stat file_stat{};
         if (fstat(write_fd_, &file_stat) != 0) {
             throw_file_error("fstat", options_.path);
         }

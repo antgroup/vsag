@@ -1,0 +1,8 @@
+name: check-docs
+description: Shared steps for automatic and manual checks
+runs:
+  using: composite
+  steps:
+    - name: Check documentation structure and links
+      shell: bash
+      run: node .github/scripts/check-docs.mjs

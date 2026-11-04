@@ -38,6 +38,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
 #include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "storage/stream_reader.h"
@@ -224,6 +225,12 @@ HGraph::build_by_pipnn(const DatasetPtr& data) {
     return this->build_by_batch_graph(data, true);
 }
 
+RaBitQFusedCodeView
+HGraph::FusedBatchCodes::View(uint64_t input_idx) const {
+    const auto* one_bit_code = codes.data() + input_idx * stride;
+    return {one_bit_code, one_bit_code + one_bit_size, clusters[input_idx]};
+}
+
 std::vector<int64_t>
 HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     std::vector<int64_t> failed_ids;
@@ -290,8 +297,8 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
     if (not defer_persistent_codes or this->rabitq_fused_datacell_ != nullptr) {
         this->train_codes_with_dataset(this->sample_train_dataset(data));
     }
-    this->validate_fused_encoding_data(static_cast<const float*>(vectors),
-                                       static_cast<uint64_t>(total));
+    // Validate every encoding before publishing IDs, and retain it for the actual code write.
+    auto fused_codes = this->prepare_fused_codes(data);
     this->resize(current_count + new_ids_count);
     this->total_count_ += new_ids_count;
     const bool all_rows_are_valid =
@@ -314,6 +321,14 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
         if (create_new_raw_vector_) {
             batch_insert_flatten_codes(this->raw_vector_);
+        }
+    };
+    auto insert_persistent_row = [&](int64_t input_idx, InnerIdType inner_id) {
+        if (fused_codes != nullptr) {
+            const auto view = fused_codes->View(static_cast<uint64_t>(input_idx));
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id, &view);
+        } else {
+            this->insert_persistent_codes(get_data(data, input_idx), inner_id);
         }
     };
     bool persistent_codes_batched = false;
@@ -347,7 +362,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         if (defer_persistent_codes) {
             deferred_code_ids.emplace_back(inner_id, i);
         } else if (not persistent_codes_batched and not this->using_dedup_storage()) {
-            this->insert_persistent_codes(get_data(data, i), inner_id);
+            insert_persistent_row(i, inner_id);
         }
         if (temporary_sq8_build_data != nullptr and not temporary_codes_batched) {
             temporary_sq8_build_data->InsertVector(get_data(data, i), inner_id);
@@ -377,25 +392,42 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
         }
     }
 
-    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid) {
-        constexpr InnerIdType batch_size = 4096;
-        const auto batch_count = (static_cast<InnerIdType>(total) + batch_size - 1) / batch_size;
+    if (this->rabitq_fused_datacell_ != nullptr and all_rows_are_valid and not inner_ids.empty()) {
+        const bool use_parallel = this->thread_pool_ != nullptr and
+                                  this->build_thread_count_ > 1 and
+                                  not this->thread_pool_->IsCurrentThread();
+        const auto worker_count =
+            use_parallel ? std::min<uint64_t>(this->build_thread_count_, inner_ids.size()) : 1;
+        const auto batch_size = (inner_ids.size() + worker_count - 1) / worker_count;
         std::vector<std::future<void>> futures;
-        HGraphBuildTaskGuard future_guard(futures, static_cast<uint64_t>(batch_count));
-        for (InnerIdType begin = 0; begin < total; begin += batch_size) {
-            const auto end = std::min<InnerIdType>(begin + batch_size, total);
-            auto publish_batch = [this, data, &inner_ids, begin, end]() {
-                for (InnerIdType i = begin; i < end; ++i) {
-                    this->sync_fused_node_codes(inner_ids[i], get_data(data, i));
+        HGraphBuildTaskGuard future_guard(futures, use_parallel ? worker_count : 0);
+        for (uint64_t begin = 0; begin < inner_ids.size(); begin += batch_size) {
+            const auto end = std::min<uint64_t>(begin + batch_size, inner_ids.size());
+            auto publish_batch = [this, data, &inner_ids, &fused_codes, begin, end]() {
+                for (uint64_t i = begin; i < end; ++i) {
+                    if (fused_codes != nullptr) {
+                        const auto view = fused_codes->View(i);
+                        this->rabitq_fused_datacell_->SetNodeCodes(
+                            inner_ids[i],
+                            label_table_->GetLabelById(inner_ids[i]),
+                            view.cluster_id,
+                            view.one_bit_code,
+                            view.supplement_code);
+                    } else {
+                        this->sync_fused_node_codes(inner_ids[i],
+                                                    get_data(data, static_cast<int64_t>(i)));
+                    }
                 }
             };
-            if (this->thread_pool_ != nullptr and this->build_thread_count_ > 1) {
+            if (use_parallel) {
                 futures.emplace_back(this->thread_pool_->GeneralEnqueue(std::move(publish_batch)));
             } else {
                 publish_batch();
             }
         }
         wait_all_futures(futures);
+        // The common case no longer needs a second full code buffer while PiPNN builds its graph.
+        fused_codes.reset();
     }
 
     auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
@@ -490,7 +522,7 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             batch_insert_persistent_codes();
         } else {
             for (const auto& [inner_id, local_idx] : deferred_code_ids) {
-                this->insert_persistent_codes(get_data(data, local_idx), inner_id);
+                insert_persistent_row(local_idx, inner_id);
             }
         }
     }
@@ -531,7 +563,7 @@ HGraph::add_impl(const DatasetPtr& data) {
 
     this->validate_add_data(data);
     auto context = this->prepare_add_context(data);
-    this->prepare_fused_add_codes(data, context);
+    context.fused_codes = this->prepare_fused_codes(data);
     this->prepare_graph_read_codes(data, context);
     auto batch = this->prepare_add_batch(data);
     this->prepare_temporary_graph_read_codes(data, context, batch);
@@ -560,7 +592,8 @@ HGraph::add_impl(const DatasetPtr& data) {
                 this->mci_cliques_->MarkAvailable(this->total_count_.load());
             }
         }
-        this->cal_memory_usage();
+        // A per-element Add must not pay the O(total) breakdown; GetMemoryUsage() recalculates.
+        this->mark_memory_usage_dirty();
     }
     return batch.failed_ids;
 }
@@ -582,36 +615,19 @@ HGraph::validate_fused_vector_data(const float* data, uint64_t count) const {
     }
 }
 
-void
-HGraph::validate_fused_encoding_data(const float* data, uint64_t count) const {
+std::unique_ptr<HGraph::FusedBatchCodes>
+HGraph::prepare_fused_codes(const DatasetPtr& data) const {
     if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
-        return;
+        return nullptr;
     }
     CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    ByteBuffer one_bit(rabitq_split_codes_->OneBitCodeSize(), allocator_);
-    ByteBuffer supplement(rabitq_split_codes_->SupplementCodeSize(), allocator_);
-    const auto dim = static_cast<uint64_t>(this->dim_);
-    for (uint64_t row = 0; row < count; ++row) {
-        uint32_t cluster_id = 0;
-        CHECK_ARGUMENT(rabitq_split_codes_->EncodeFused(
-                           data + row * dim, one_bit.data, supplement.data, &cluster_id),
-                       "failed to encode fused RaBitQ node codes");
-    }
-}
-
-void
-HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const {
-    if (this->rabitq_fused_datacell_ == nullptr or this->optimized_build_codes_ != nullptr) {
-        return;
-    }
-    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
-    auto encoded = std::make_unique<FusedAddCodes>(this->allocator_);
+    auto encoded = std::make_unique<FusedBatchCodes>(this->allocator_);
     const auto count = static_cast<uint64_t>(data->GetNumElements());
     const auto dim = static_cast<uint64_t>(this->dim_);
     encoded->one_bit_size = rabitq_split_codes_->OneBitCodeSize();
     encoded->stride = encoded->one_bit_size + rabitq_split_codes_->SupplementCodeSize();
     if (encoded->stride == 0 or count > std::numeric_limits<uint64_t>::max() / encoded->stride) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused Add code buffer size overflow");
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "fused batch code buffer size overflow");
     }
     encoded->codes.resize(count * encoded->stride);
     encoded->clusters.resize(count);
@@ -629,7 +645,8 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
     // Do not reserve IDs or publish labels until the complete batch is encodable.
     // One task per range avoids a future/allocation for every input vector.
     const auto workers = std::min<uint64_t>(this->build_thread_count_, count);
-    if (this->thread_pool_ != nullptr and workers > 1) {
+    if (this->thread_pool_ != nullptr and workers > 1 and
+        not this->thread_pool_->IsCurrentThread()) {
         const uint64_t block = (count + workers - 1) / workers;
         std::vector<std::future<void>> futures;
         HGraphBuildTaskGuard guard(futures, workers);
@@ -663,7 +680,7 @@ HGraph::prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) con
     } else {
         encode_range(0, count);
     }
-    context.fused_codes = std::move(encoded);
+    return encoded;
 }
 
 void
@@ -834,9 +851,13 @@ HGraph::prepare_temporary_graph_read_codes(const DatasetPtr& data,
 
 void
 HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch) {
+    // A worker must not submit and join nested tasks on the same pool.
+    const bool effective_parallel =
+        context.use_parallel_add and not this->thread_pool_->IsCurrentThread();
     std::vector<std::future<void>> futures;
     HGraphBuildTaskGuard future_guard(
-        futures, context.use_parallel_add ? static_cast<uint64_t>(batch.rows.size()) : 0);
+        futures, effective_parallel ? static_cast<uint64_t>(batch.rows.size()) : 0);
+
     this->prepare_build_codes(data, batch.rows);
 
     const auto* extra_infos = data->GetExtraInfos();
@@ -862,7 +883,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         if (attr_sets != nullptr) {
             cur_attr_set = attr_sets + row.input_idx;
         }
-        if (context.use_parallel_add) {
+        if (effective_parallel) {
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -870,7 +891,7 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
             add_func(get_data(data, row.input_idx), row, extra_info, cur_attr_set);
         }
     }
-    if (context.use_parallel_add) {
+    if (effective_parallel) {
         wait_all_futures(futures);
     }
 }
@@ -1041,12 +1062,7 @@ HGraph::prepare_codes_before_probe_if_needed(const void* data,
                                              const AddContext& context) {
     if (this->should_insert_codes_before_probe(context.use_dedup_storage)) {
         if (context.fused_codes != nullptr) {
-            const auto& encoded = *context.fused_codes;
-            const auto input_idx = static_cast<uint64_t>(row.input_idx);
-            RaBitQFusedCodeView view;
-            view.one_bit_code = encoded.codes.data() + input_idx * encoded.stride;
-            view.supplement_code = view.one_bit_code + encoded.one_bit_size;
-            view.cluster_id = encoded.clusters[input_idx];
+            const auto view = context.fused_codes->View(static_cast<uint64_t>(row.input_idx));
             this->insert_persistent_codes(data, row.inner_id, &view);
         } else {
             this->insert_persistent_codes(data, row.inner_id);
@@ -1341,6 +1357,9 @@ HGraph::resize(uint64_t new_size) {
             this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size_power_2));
         }
         if (not this->using_dedup_storage()) {
+            // Serialise with insert_persistent_codes so resize cannot reallocate the
+            // flatten storage while a concurrent InsertVector is writing into it.
+            std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
             this->basic_flatten_codes_->Resize(new_size_power_2);
             if (has_precise_reorder()) {
                 this->high_precise_codes_->Resize(new_size_power_2);
@@ -1467,6 +1486,20 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_CONCURRENT, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ADD_SEARCH_DELETE_CONCURRENT,
                                               false);
+    }
+
+    // Lifecycle copies (Clone / ExportModel) re-create datacells through the same IO
+    // parameters. For user-defined IO this re-binds the *source* Reader/Writer pair: the copy
+    // would either share one backing store (Clone) or resize that store through the shared
+    // Writer during later builds (ExportModel). Both silently corrupt the original index, so
+    // reject the operations until the pair can supply independent storage for copies.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr and
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
     }
 }
 

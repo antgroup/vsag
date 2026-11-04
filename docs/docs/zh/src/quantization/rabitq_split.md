@@ -74,6 +74,11 @@ KMeans codec。`train_sample_count` 小于数据集大小时，使用固定 seed
 sampling 选择相应数量的向量。增大该值可能提升 cluster centroid 的质量，但会增加
 构建时间和训练阶段的临时内存；将其设置为不小于数据集大小即可使用全部向量训练。
 
+对于关注单查询延迟的场景，可以使用 `rabitq_use_fht: true`，以 FHT/Kac 旋转替代
+稠密随机正交矩阵。该选项与 `rabitq_fused_datacell` 相互独立。这两个选项都必须在
+`Build` 前设置；已有的稠密旋转索引或普通 split 索引需要重建，不能通过检索参数
+切换。
+
 该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
 `Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、
 Range Search 和并发查询）、按 ID 计算距离、内存统计以及 Serialize/Deserialize。
@@ -92,6 +97,10 @@ label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。
 完成后立即释放；最终索引只保留 fused RaBitQ record。构建后的 `Add` 会按需
 解码 fused record 来更新图，不会常驻保存 SQ8 或原始向量副本；关注插入
 吞吐时建议使用批量 Add。
+
+当 `graph_type="pipnn"` 时，fused HGraph 并行预编码整个批次，并在发布索引时复用
+这些字节，每条输入只编码一次。临时编码缓冲区随输入批次增大；输入标签全部被接受时，
+该缓冲区会在 PiPNN 构建底层图前释放。
 
 融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
 
@@ -515,6 +524,8 @@ bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该
 
 ## 使用注意
 
+- Pyramid 增量 `Add` 会在搜图和剪枝时使用有界的操作内缓存，复用解包后的标量编码；
+  模型反序列化后同样生效，无需增加参数，持久化的 split record 格式保持不变。
 - split storage 当前可用于 HGraph、IVF 和 Pyramid，并且要求 fp32 query code。
   Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通
   搜索路径，

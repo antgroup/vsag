@@ -44,6 +44,19 @@
 #include "vsag/filter.h"
 #include "vsag/serialize_writer.h"
 
+namespace vsag {
+
+/// Test-only hook: expose the MCI companion so a case can install a known clique topology
+/// instead of depending on the heuristic clique construction.
+struct HGraphMCITestAccess {
+    static CliqueDataCellPtr
+    GetCliques(const HGraph& index) {
+        return index.mci_cliques_;
+    }
+};
+
+}  // namespace vsag
+
 namespace {
 
 // Observe the actual candidate-search entry used by both insertion and deletion repair.
@@ -724,12 +737,17 @@ TEST_CASE("HGraph rejects mismatched serialized MCI node counts", "[ut][hgraph][
 
 TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fails",
           "[ut][hgraph][mci][force_remove]") {
+    constexpr uint64_t kDeleteCliqueSizeThreshold = 30;
+    constexpr uint64_t kDeleteNodeMctThreshold = 3;
+    const std::string io = GENERATE("memory_io", "block_memory_io");
+    CAPTURE(io);
     auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(2));
     auto params = config["index_param"];
+    params["base_io_type"].SetString(io);
     params["support_force_remove"].SetBool(true);
     params["build_thread_count"].SetInt(1);
-    params["mci_delete_clique_size_threshold"].SetInt(30);
-    params["mci_delete_node_mct_threshold"].SetInt(3);
+    params["mci_delete_clique_size_threshold"].SetInt(kDeleteCliqueSizeThreshold);
+    params["mci_delete_node_mct_threshold"].SetInt(kDeleteNodeMctThreshold);
     vsag::IndexCommonParam common;
     common.dim_ = 2;
     common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
@@ -739,10 +757,32 @@ TEST_CASE("HGraph MCI stays unpublished when force-remove repair allocation fail
     std::vector<int64_t> ids{0, 1, 2, 3, 4, 5};
     std::vector<float> vectors{0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6};
     REQUIRE(index.Build(make_dataset(ids, vectors, 0, 6, 2)).empty());
+    // Clique construction is heuristic: deleting a singleton has no surviving repair seed.
+    // Install a known topology so the injected search failure is always reached, including
+    // repair of old tail ID 5 after FORCE_REMOVE moves it into slot 0.
+    auto cliques = vsag::HGraphMCITestAccess::GetCliques(index);
+    // Discard the heuristic CSR and delta, then republish the replacement before removal.
+    cliques->Clear(ids.size());
+    vsag::Vector<vsag::InnerIdType> members({0, 5}, common.allocator_.get());
+    cliques->AppendNewClique(members, ids.size());
+    for (vsag::InnerIdType id = 1; id < 5; ++id) {
+        members.assign(1, id);
+        cliques->AppendNewClique(members, ids.size());
+    }
+    cliques->Flush(ids.size());
+    cliques->MarkAvailable(ids.size());
+    REQUIRE(cliques->HasCliqueIndex(ids.size()));
+    vsag::Vector<vsag::InnerIdType> removed(1, 0, common.allocator_.get());
+    const auto snapshot =
+        cliques->PrepareDelete(removed, kDeleteCliqueSizeThreshold, kDeleteNodeMctThreshold);
+    REQUIRE(snapshot.retired_clique_ids.size() == 1);
+    REQUIRE(snapshot.repair_node_ids.size() == 1);
+    REQUIRE(snapshot.repair_node_ids[0] == 5);
+    index.candidate_searches = 0;
     index.fail_candidate_search = true;
     REQUIRE_THROWS_AS(index.Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE), std::bad_alloc);
     index.fail_candidate_search = false;
-    REQUIRE(index.candidate_searches > 0);
+    REQUIRE(index.candidate_searches == 1);
     // Physical deletion is not rolled back. Queries must fall back to the repaired HGraph,
     // never read the old CSR with moved IDs, even after a subsequent no-op removal.
     REQUIRE(index.GetNumElements() == 5);
@@ -836,7 +876,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         return result.value();
     };
     verify(index, false);
-    REQUIRE(index->Remove({ids[0]}).value() == 1);
+    REQUIRE(index->Remove(ids[0]).value() == 1);
     verify(index, true);
     REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     auto before = verify(index, false);
@@ -852,7 +892,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
         REQUIRE(before->GetIds()[i] == after->GetIds()[i]);
         REQUIRE(before->GetDistances()[i] == after->GetDistances()[i]);
     }
-    REQUIRE(restored.value()->Remove({ids[0]}).value() == 1);
+    REQUIRE(restored.value()->Remove(ids[0]).value() == 1);
     verify(restored.value(), true);
 
     auto concurrent_queries = std::async(std::launch::async, [&]() {
@@ -885,7 +925,7 @@ TEST_CASE("HGraph MCI fast search survives mutations automatic compaction and se
     });
     // Cross the 100-mutation boundary while queries run.
     for (uint64_t i = 0; i < 60; ++i) {
-        REQUIRE(index->Remove({ids[0]}).value() == 1);
+        REQUIRE(index->Remove(ids[0]).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 0, 1, dim)).has_value());
     }
     const auto concurrent_error = concurrent_queries.get();
@@ -944,7 +984,7 @@ TEST_CASE("HGraph fallback discards candidates marked during traversal", "[ut][h
     // The ascending brute-force scan has already accepted the first ID when it pauses.
     // Deletion completes before the pending query resumes, even if its initial filter was null.
     const auto status = reached.wait_for(std::chrono::seconds(10));
-    auto removed = index->Remove({ids[0]});
+    auto removed = index->Remove(ids[0]);
     resume.set_value();
     auto result = search.get();
     REQUIRE(status == std::future_status::ready);
@@ -1005,7 +1045,7 @@ TEST_CASE("MCI restored tombstoned padding label permits batch KNN", "[ut][hgrap
     const auto params = json.Dump();
     auto index = vsag::Factory::CreateIndex("hgraph", params).value();
     REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::MARK_REMOVE).value() == 1);
     auto binary = index->Serialize();
     REQUIRE(binary.has_value());
     auto restored = vsag::Factory::CreateIndex("hgraph", params).value();
@@ -1130,7 +1170,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     REQUIRE(index->GetNumElements() == 44);
     REQUIRE(index->GetNumberRemoved() == 1);
     verify();
-    REQUIRE(index->Remove({ids[2]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+    REQUIRE(index->Remove(ids[2], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
     verify();
     REQUIRE(index->Add(dataset(46, 2)).has_value());
     active.push_back(ids[46]);
@@ -1141,7 +1181,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
     stats = vsag::JsonType::Parse(index->GetStats());
     REQUIRE(stats["mci_total_nodes"].GetInt() == 0);
     REQUIRE(stats["mci_inactive_node_count"].GetInt() == 0);
-    REQUIRE(index->Remove({-1}, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
+    REQUIRE(index->Remove(-1, vsag::RemoveMode::FORCE_REMOVE).value() == 0);
     REQUIRE(index->Add(dataset(0, total)).has_value());
     active = ids;
     verify();
@@ -1170,7 +1210,7 @@ TEST_CASE("HGraph MCI physical deletion compacts slots and preserves mixed mutat
         return true;
     });
     for (uint64_t i = 0; i < 8; ++i) {
-        REQUIRE(index->Remove({ids[0]}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[0], vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         REQUIRE(index->Add(dataset(0, 1)).has_value());
     }
     REQUIRE(concurrent_search.get());
@@ -1256,7 +1296,7 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
 
     SECTION("Entry point replacement skips soft-deleted nodes") {
         REQUIRE(index->Remove({100, 101}).value() == 2);
-        REQUIRE(index->Remove({100}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+        REQUIRE(index->Remove(100, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         auto result = index->KnnSearch(make_dataset(ids, vectors, 2, 1, 2),
                                        1,
                                        R"({"hgraph":{"ef_search":64,"use_mci":false}})");
@@ -1266,10 +1306,10 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
     }
 
     SECTION("Moving an old tombstone cannot hide the readded live label") {
-        REQUIRE(index->Remove({104}).value() == 1);
+        REQUIRE(index->Remove(104).value() == 1);
         REQUIRE(index->Add(make_dataset(ids, vectors, 4, 1, 2)).has_value());
         for (auto label : {100, 105, 101}) {
-            REQUIRE(index->Remove({label}, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
+            REQUIRE(index->Remove(label, vsag::RemoveMode::FORCE_REMOVE).value() == 1);
         }
         REQUIRE(index->GetNumElements() == 3);
         REQUIRE(index->GetNumberRemoved() == 1);
@@ -1292,6 +1332,64 @@ TEST_CASE("HGraph MCI force remove handles marked entry points and shadowed labe
         REQUIRE(result.value()->GetIds()[0] == 104);
         REQUIRE(result.value()->GetDistances()[0] == 0.0F);
     }
+}
+
+TEST_CASE("HGraph MCI filter queries labels under pinned deletion view",
+          "[ut][hgraph][mci][label_table]") {
+    constexpr int64_t total = 24;
+    constexpr int64_t dim = 4;
+    std::vector<int64_t> ids(total);
+    std::iota(ids.begin(), ids.end(), 1000);
+    std::vector<float> vectors(total * dim, 0.0F);
+    for (int64_t i = 0; i < total; ++i) {
+        vectors[i * dim] = static_cast<float>(i / 4);
+        vectors[i * dim + 1] = static_cast<float>(i % 4);
+        vectors[i * dim + 2] = static_cast<float>((i * 3) % 7);
+        vectors[i * dim + 3] = static_cast<float>((i * 5) % 11);
+    }
+    auto created = vsag::Factory::CreateIndex("hgraph", generate_hgraph_mci_params(dim));
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(make_dataset(ids, vectors, 0, total, dim)).has_value());
+    REQUIRE(index->Remove(ids.back(), vsag::RemoveMode::MARK_REMOVE).value() == 1);
+
+    class AbsentLookupFilter : public HalfRatioAllValidFilter {
+    public:
+        AbsentLookupFilter(const std::vector<int64_t>& valid, vsag::IndexPtr index)
+            : HalfRatioAllValidFilter(valid), index_(std::move(index)) {
+        }
+        bool
+        CheckValid(int64_t id) const override {
+            ++callbacks_;
+            if (index_->CheckIdExist(999999999) or not index_->CheckIdExist(1000) or
+                index_->CheckIdExist(1023)) {
+                saw_unexpected_label_ = true;
+            }
+            auto missing = index_->GetRawVectorByIds(&absent_label_, 1);
+            if (missing.has_value()) {
+                saw_unexpected_label_ = true;
+            }
+            return HalfRatioAllValidFilter::CheckValid(id);
+        }
+        vsag::IndexPtr index_;
+        int64_t absent_label_ = 999999999;
+        mutable int64_t callbacks_ = 0;
+        mutable bool saw_unexpected_label_ = false;
+    };
+    const std::vector<int64_t> valid(ids.begin(), ids.end() - 1);
+    auto filter = std::make_shared<AbsentLookupFilter>(valid, index);
+    auto result = index->KnnSearch(
+        make_dataset(ids, vectors, 1, 1, dim),
+        3,
+        R"({"hgraph":{"ef_search":32,"use_mci":true,"mci_seed_ratio":0.5,"mci_seed_coverage":0,"hgraph_valid_ratio_threshold":1.0}})",
+        filter);
+    if (not result.has_value()) {
+        FAIL(result.error().message);
+    }
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    REQUIRE(filter->callbacks_ > 0);
+    REQUIRE_FALSE(filter->saw_unexpected_label_);
 }
 
 TEST_CASE("HGraph companion MCI incrementally updates cliques after Add", "[ut][hgraph][mci]") {
@@ -1916,7 +2014,7 @@ TEST_CASE("MCI Add stops at unique degree rather than clique count",
     REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_base_clique_count"].GetInt() ==
             static_cast<int64_t>(cliques.size()));
     if (scenario == "marked") {
-        REQUIRE(index->Remove({ids[total - 1]}, vsag::RemoveMode::MARK_REMOVE).value() == 1);
+        REQUIRE(index->Remove(ids[total - 1], vsag::RemoveMode::MARK_REMOVE).value() == 1);
     }
     REQUIRE(index->Add(make_dataset(ids, vectors, total, 1, dim)).has_value());
     const auto stats = vsag::JsonType::Parse(index->GetStats());
@@ -3631,7 +3729,7 @@ TEST_CASE("HGraph MCI bitmap remains equivalent after removal readdition and rel
     };
     verify(true, false);  // Warm the identity-mapping cache before changing labels.
     const auto mode = GENERATE(vsag::RemoveMode::MARK_REMOVE, vsag::RemoveMode::FORCE_REMOVE);
-    REQUIRE(index->Remove({0}, mode).value() == 1);
+    REQUIRE(index->Remove(0, mode).value() == 1);
     const bool identity_after_remove = mode == vsag::RemoveMode::MARK_REMOVE;
     verify(identity_after_remove, true);
     reload();

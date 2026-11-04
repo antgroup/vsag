@@ -26,6 +26,7 @@
 #include "impl/graph_build_helper.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "inner_string_params.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/constants.h"
@@ -92,6 +93,8 @@ checked_lazy_hgraph_param(const ParamPtr& param) {
 const LazyHGraphParameterPtr&
 checked_lazy_hgraph_param(const LazyHGraphParameterPtr& param) {
     CHECK_ARGUMENT(param != nullptr, "lazy_hgraph parameter must be LazyHGraphParameter");
+    // Constructor callers pass an owned parameter lvalue and consume this reference immediately.
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return param;
 }
 
@@ -124,6 +127,37 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     JsonType hgraph_json;
     if (external_param.Contains(LAZY_HGRAPH_HGRAPH)) {
         hgraph_json = external_param[LAZY_HGRAPH_HGRAPH];
+    }
+
+    // Precise FP32 user-defined IO pairs cannot be reused across temporary HGraph instances
+    // that LazyHGraph creates during EstimateMemory (lazy_hgraph.cpp line ~337). Those
+    // temporaries share the same Reader/Writer pair, resize the backing store to a small
+    // initial capacity, and permanently truncate the live index's remaining codes. Reject
+    // this backend until the pair can supply independent storage for transient instances.
+    //
+    // Check every possible placement of the io type key so an outer default like
+    // "block_memory_io" does not mask a nested "user_defined_io" in index_param.hgraph.
+    {
+        std::string pt;
+        if (external_param.Contains("precise_io_type")) {
+            pt = external_param["precise_io_type"].GetString();
+        }
+        if (!pt.empty() && pt == IO_TYPE_VALUE_USER_DEFINED_IO) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "lazy_hgraph does not support user_defined_io: its temporary instances "
+                "would share the Reader/Writer pair and truncate the backing store");
+        }
+        pt.clear();
+        if (hgraph_json.Contains("precise_io_type")) {
+            pt = hgraph_json["precise_io_type"].GetString();
+        }
+        if (!pt.empty() && pt == IO_TYPE_VALUE_USER_DEFINED_IO) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "lazy_hgraph does not support user_defined_io: its temporary instances "
+                "would share the Reader/Writer pair and truncate the backing store");
+        }
     }
 
     JsonType flat_json;

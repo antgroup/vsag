@@ -1,0 +1,31 @@
+name: python-build-and-test-build-python-wheel-x86
+description: Shared build_python_wheel_x86 execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Prepare Env
+      shell: bash -e {0}
+      run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+    - name: Load Cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: "2G"
+        save: ${{ github.event_name != 'pull_request' }}
+        key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+    - name: Make Python Wheel
+      shell: bash -e {0}
+      run: |
+        sudo apt update
+        sudo apt install -y python3-venv
+        export CMAKE_GENERATOR="Ninja"
+        export VSAG_OPENBLAS_TARGET=GENERIC
+        export CIBW_ENVIRONMENT="${CIBW_ENVIRONMENT:+$CIBW_ENVIRONMENT }VSAG_OPENBLAS_TARGET=GENERIC"
+        make pyvsag
+    - name: Save Wheel
+      uses: actions/upload-artifact@v5
+      with:
+        path: ./wheelhouse
+        name: wheelhouse_x86-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 1
+        overwrite: 'true'

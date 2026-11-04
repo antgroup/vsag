@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "version": "night-window-v2",
+  "minutes": {
+    "hgraph": 85,
+    "pyramid": 45,
+    "sindi": 40,
+    "other": 25,
+    "concurrent": 70,
+    "simd": 15,
+    "unit-coverage": 45,
+    "bindings-examples-compatibility": 20,
+    "reserve": 15
+  },
+  "core_minutes": {
+    "hgraph": 25,
+    "pyramid": 15,
+    "sindi": 15
+  },
+  "rotation_minutes": {
+    "hgraph": 50,
+    "pyramid": 25,
+    "sindi": 20
+  },
+  "reserve_minutes": {
+    "hgraph": 10,
+    "pyramid": 5,
+    "sindi": 5
+  },
+  "case_timeout_seconds": 1800,
+  "timezone": "Asia/Shanghai",
+  "window": {
+    "timezone": "Asia/Shanghai",
+    "start": "22:00",
+    "end": "08:00",
+    "wall_minutes": 600,
+    "execution_minutes": 570,
+    "cleanup_minutes": 30,
+    "job_execution_minutes": 270
+  },
+  "minutes_note": "Legacy cumulative diagnostic allocations, not the elapsed workflow deadline.",
+  "x86_shards": 4
+}

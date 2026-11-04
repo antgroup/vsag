@@ -9,7 +9,7 @@ repository root are authoritative:
 - [`.clang-tidy`](https://github.com/antgroup/vsag/blob/main/.clang-tidy) defines naming and
   static-analysis checks.
 
-VSAG requires **clang-format 15** and **clang-tidy 15** exactly. Other versions may produce
+VSAG requires **clang-format 20** and **clang-tidy 20** exactly. Other versions may produce
 different formatting or diagnostics and are not accepted by CI.
 
 ## Code layout
@@ -40,7 +40,7 @@ The formatter starts from the Google style and applies the following VSAG rules:
 | Trailing comments | Aligned when they form a consecutive group |
 | Existing comment text | Not automatically reflowed |
 
-For example, clang-format 15 formats a class declaration like this:
+For example, clang-format 20 formats a class declaration like this:
 
 ```cpp
 class Example {
@@ -170,10 +170,10 @@ Install the required tools:
 
 ```bash
 # Ubuntu or Debian
-sudo apt-get install clang-format-15 clang-tidy-15 clang-tools-15
+sudo apt-get install clang-format-20 clang-tidy-20 clang-tools-20
 
 # macOS
-brew install llvm@15
+brew install llvm@20
 ```
 
 Format all project C++ files and inspect the resulting diff:
@@ -207,8 +207,8 @@ make test
 
 ## Before submitting a change
 
-- Format all changed C++ files with clang-format 15.
-- Run clang-tidy 15 for changed production sources.
+- Format all changed C++ files with clang-format 20.
+- Run clang-tidy 20 for changed production sources.
 - Ensure names follow the rules above, including `CamelCase` struct names.
 - Keep every `NOLINT` check-specific and document its rationale.
 - Add tests for new features and regression tests for bug fixes.

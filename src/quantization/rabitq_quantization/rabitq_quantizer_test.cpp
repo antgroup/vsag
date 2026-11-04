@@ -214,6 +214,69 @@ TEST_CASE("RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     }
 }
 
+TEMPLATE_TEST_CASE_SIG("RaBitQ encoding rejects missing buffers",
+                       "[ut][RaBitQuantizer][rabitq_encode_buffers]",
+                       ((MetricType metric), metric),
+                       MetricType::METRIC_TYPE_L2SQR,
+                       MetricType::METRIC_TYPE_IP,
+                       MetricType::METRIC_TYPE_COSINE) {
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t count = 8;
+    const uint64_t base_bits = GENERATE(1, 2, 4, 8);
+    CAPTURE(metric, base_bits);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto vectors = fixtures::generate_vectors(count, dim);
+    RaBitQuantizer<metric> quantizer(dim,
+                                     dim,
+                                     32,
+                                     base_bits,
+                                     false,
+                                     false,
+                                     allocator.get(),
+                                     RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                     RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                     1,
+                                     true);
+    REQUIRE(quantizer.TrainImpl(vectors.data(), count));
+    std::vector<uint8_t> code(quantizer.GetCodeSize(), 0xA5);
+    const auto original_code = code;
+    REQUIRE_FALSE(quantizer.EncodeOne(vectors.data(), nullptr));
+    REQUIRE_FALSE(quantizer.EncodeOne(nullptr, code.data()));
+    REQUIRE_FALSE(quantizer.EncodeOne(nullptr, nullptr));
+    REQUIRE_FALSE(quantizer.EncodeBatch(vectors.data(), nullptr, count));
+    REQUIRE_FALSE(quantizer.EncodeBatch(nullptr, code.data(), count));
+    REQUIRE_FALSE(quantizer.EncodeBatch(nullptr, nullptr, count));
+    REQUIRE(quantizer.EncodeBatch(nullptr, nullptr, 0));
+    REQUIRE(code == original_code);
+
+    uint64_t code_sum = 123;
+    REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(vectors.data(), nullptr, code_sum));
+    REQUIRE(code_sum == 123);
+
+    std::vector<uint8_t> batch(count * quantizer.GetCodeSize());
+    REQUIRE(quantizer.EncodeBatch(vectors.data(), batch.data(), count));
+    for (uint64_t i = 0; i < count; ++i) {
+        REQUIRE(quantizer.EncodeOne(vectors.data() + i * dim, code.data()));
+        REQUIRE(std::equal(code.begin(), code.end(), batch.data() + i * code.size()));
+    }
+
+    if (quantizer.SupportScalarCodeBuild()) {
+        std::vector<uint8_t> scalar_code(quantizer.GetScalarCodeSize(), 0xA5);
+        const auto original_scalar_code = scalar_code;
+        REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(nullptr, scalar_code.data(), code_sum));
+        REQUIRE(scalar_code == original_scalar_code);
+        REQUIRE(code_sum == 123);
+        REQUIRE(quantizer.EncodeOneToScalarCode(vectors.data(), scalar_code.data(), code_sum));
+        quantizer.PackScalarCode(scalar_code.data(), code.data());
+        REQUIRE(std::equal(code.begin(), code.end(), batch.begin()));
+        REQUIRE(code_sum ==
+                std::accumulate(scalar_code.begin(), scalar_code.begin() + dim, uint64_t{0}));
+    } else {
+        REQUIRE_FALSE(quantizer.EncodeOneToScalarCode(vectors.data(), code.data(), code_sum));
+        REQUIRE(code_sum == 123);
+    }
+}
+
 TEST_CASE("Extend RaBitQ Basic Test", "[ut][RaBitQuantizer]") {
     auto count = 1000;
     auto dim = 32;

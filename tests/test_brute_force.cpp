@@ -1259,7 +1259,7 @@ TEST_CASE("(PR) BruteForce Force Remove Reclaims Storage",
     auto memory_before_remove = index->GetMemoryUsage();
 
     allocator->SetAllocationLimit(allocator->AllocatedBytes());
-    auto oom_remove = index->Remove({ids.front()}, vsag::RemoveMode::FORCE_REMOVE);
+    auto oom_remove = index->Remove(ids.front(), vsag::RemoveMode::FORCE_REMOVE);
     REQUIRE(not oom_remove.has_value());
     REQUIRE(index->GetNumElements() == count);
     REQUIRE(index->CheckIdExist(ids.front()));
@@ -2142,7 +2142,7 @@ TEST_CASE("BruteForce distance stays consistent during force removal",
     start.store(true);
     bool removed = true;
     for (int64_t i = 0; i < count; ++i) {
-        auto result = index->Remove({labels[i]}, vsag::RemoveMode::FORCE_REMOVE);
+        auto result = index->Remove(labels[i], vsag::RemoveMode::FORCE_REMOVE);
         if (!result.has_value())
             removed = false;
     }

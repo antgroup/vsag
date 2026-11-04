@@ -67,7 +67,10 @@ LabelTable::GetDeletedIdsReadView() const {
 
 void
 LabelTable::RestoreDeletedIds(const Vector<InnerIdType>& ids, uint64_t total) {
+    // Reads label_table_ and writes label_remap_ while updating the delete set, so it needs
+    // both locks (delete first, per the class-wide order declared on storage_mutex_).
     std::scoped_lock lock(delete_ids_mutex_);
+    std::scoped_lock slock(storage_mutex_);
     CHECK_ARGUMENT(total <= label_table_.size(), "logical count exceeds label storage");
     UnorderedSet<InnerIdType> restored(allocator_);
     for (auto id : ids) {
@@ -111,6 +114,16 @@ LabelTable::LabelTable(Allocator* allocator,
 
 bool
 LabelTable::CheckLabel(LabelType label) const {
+    // All deletion-state writers also hold storage_mutex_ exclusively. A search callback
+    // may already pin delete_ids_mutex_ through GetDeletedIdsReadView(), so avoid taking
+    // that non-recursive mutex again, even when the label exists.
+    auto slock = make_search_read_lock(storage_mutex_);
+    return CheckLabelLocked(label);
+}
+
+bool
+LabelTable::CheckLabelLocked(LabelType label) const {
+    // Caller holds storage_mutex_; every deletion-state writer holds it exclusively.
     bool is_exist = false;
     InnerIdType inner_id = INVALID_ID;
     if (use_reverse_map_) {
@@ -126,11 +139,8 @@ LabelTable::CheckLabel(LabelType label) const {
         }
         inner_id = result - label_table_.begin();
     }
-    {
-        auto rlock = make_search_read_lock(this->delete_ids_mutex_);
-        if (this->deleted_ids_.count(inner_id) > 0) {
-            return false;
-        }
+    if (this->deleted_ids_.count(inner_id) > 0) {
+        return false;
     }
     return true;
 }
@@ -155,6 +165,10 @@ LabelTable::get_id_by_label_with_label_table(LabelType label) const noexcept {
 
 std::pair<bool, InnerIdType>
 LabelTable::TryGetIdByLabel(LabelType label, bool return_even_removed) const noexcept {
+    // The storage lock protects the label scan/remap against reallocation and deletion
+    // state against mutation. Acquiring the deletion mutex here would recursively lock a
+    // pinned search view on the same thread.
+    auto slock = make_search_read_lock(storage_mutex_);
     InnerIdType id;
     if (use_reverse_map_) {
         id = this->get_id_by_label_with_reverse_map(label);
@@ -165,7 +179,6 @@ LabelTable::TryGetIdByLabel(LabelType label, bool return_even_removed) const noe
         return {false, 0};
     }
     if (not return_even_removed) {
-        auto rlock = make_search_read_lock(delete_ids_mutex_);
         if (this->deleted_ids_.count(id) > 0) {
             return {false, 0};
         }
@@ -185,6 +198,10 @@ LabelTable::GetIdByLabel(LabelType label, bool return_even_removed) const {
 
 uint32_t
 LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
+    // Resolving labels reads label_table_/label_remap_ while the delete set is written, so hold
+    // both locks across the whole operation (delete first, per the class-wide order).
+    std::scoped_lock wlock(delete_ids_mutex_);
+    std::scoped_lock slock(storage_mutex_);
     std::vector<InnerIdType> ids;
     ids.reserve(labels.size());
     for (const auto& label : labels) {
@@ -199,7 +216,6 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
         }
     }
     uint32_t removed_count = 0;
-    std::scoped_lock wlock(delete_ids_mutex_);
     for (const auto& id : ids) {
         if (this->deleted_ids_.insert(id).second) {
             active_padding_label_ids_.erase(id);
@@ -211,9 +227,12 @@ LabelTable::MarkRemove(const std::vector<LabelType>& labels) {
 
 void
 LabelTable::Deserialize(StreamReader& reader) {
+    std::scoped_lock wlock(delete_ids_mutex_);
+    std::scoped_lock slock(storage_mutex_);
     StreamReader::ReadVector(reader, label_table_);
     MarkLabelsMutated();
-    RebuildActivePaddingLabelIds();
+    // Locked helper: both locks are already held.
+    RebuildActivePaddingLabelIdsLocked();
     if (use_reverse_map_) {
         this->label_remap_.Clear();
         this->label_remap_.Reserve(label_table_.size());
@@ -232,13 +251,16 @@ LabelTable::Deserialize(StreamReader& reader) {
 
 void
 LabelTable::TrimUnusedSlots(uint64_t valid_count) {
+    std::scoped_lock wlock(delete_ids_mutex_);
+    std::scoped_lock slock(storage_mutex_);
     if (valid_count > label_table_.size()) {
         throw VsagException(ErrorType::READ_ERROR,
                             "label table is smaller than the stored vector count");
     }
     label_table_.resize(valid_count);
     total_count_.store(static_cast<int64_t>(valid_count));
-    RebuildActivePaddingLabelIds();
+    // Locked helper: both locks are already held.
+    RebuildActivePaddingLabelIdsLocked();
     if (use_reverse_map_) {
         label_remap_.Clear();
         label_remap_.Reserve(valid_count);
@@ -250,32 +272,70 @@ LabelTable::TrimUnusedSlots(uint64_t valid_count) {
 
 void
 LabelTable::MergeOther(const LabelTablePtr& other, const IdMapFunction& id_map) {
-    auto other_size = other->GetTotalCount();
-    auto current_total_count = total_count_.load();
-    auto other_size_u = static_cast<uint64_t>(other_size);
-    auto current_total_count_u = static_cast<uint64_t>(current_total_count);
-    this->label_table_.resize(current_total_count_u + other_size_u);
-    if (use_reverse_map_) {
-        this->label_remap_.Reserve(this->label_remap_.Size() + other_size_u);
-        for (uint64_t i = 0; i < other_size_u; ++i) {
-            auto new_label = std::get<1>(id_map(other->label_table_[i]));
-            auto new_inner_id = static_cast<InnerIdType>(i + current_total_count_u);
-            this->label_table_[i + current_total_count_u] = new_label;
-            if (new_label == -1 && !other->IsRemoved(static_cast<InnerIdType>(i))) {
-                std::scoped_lock wlock(delete_ids_mutex_);
-                active_padding_label_ids_.insert(new_inner_id);
-            }
-            this->label_remap_.InsertOrAssign(new_label, new_inner_id);
+    //            -- Lock order --
+    //  1) Snapshot `other` under its lock (delete-then-storage).
+    //  2) Reserve space once under our lock, then for each source row:
+    //     call id_map outside any lock, briefly re-acquire our locks to
+    //     publish ONE label.  This preserves incremental-visibility:
+    //     a callback that calls destination->CheckIdExist(candidate) sees
+    //     every label already mapped from earlier source rows, while
+    //     callbacks still run outside the non-recursive mutexes so
+    //     re-entrant reads are safe. Merge must be exclusive of other destination
+    //     mutations: id_map may check destination labels before publishing, and
+    //     per-row locks cannot make that check-and-publish atomic against Add.
+
+    // -- 1. Snapshot `other` under its lock --
+    // A concurrent shrink can leave the logical count larger than physical storage.
+    // Reject that inconsistent state rather than indexing past the end or silently
+    // dropping source rows (which would shift the merged inner-id layout).
+    std::vector<LabelType> other_labels;
+    std::vector<bool> other_removed;
+    {
+        std::shared_lock other_delete_lock(other->delete_ids_mutex_);
+        std::shared_lock other_storage_lock(other->storage_mutex_);
+        const auto other_count = other->total_count_.load();
+        CHECK_ARGUMENT(other_count >= 0, "merge source logical count is negative");
+        CHECK_ARGUMENT(static_cast<uint64_t>(other_count) <= other->label_table_.size(),
+                       "merge source logical count exceeds label storage");
+        const auto other_size = static_cast<uint64_t>(other_count);
+        other_labels.reserve(other_size);
+        other_removed.reserve(other_size);
+        for (uint64_t i = 0; i < other_size; ++i) {
+            other_labels.push_back(other->label_table_[i]);
+            other_removed.push_back(other->deleted_ids_.count(static_cast<InnerIdType>(i)) > 0);
         }
-    } else {
-        for (uint64_t i = 0; i < other_size_u; ++i) {
-            auto new_label = std::get<1>(id_map(other->label_table_[i]));
-            this->label_table_[i + current_total_count_u] = new_label;
-            if (new_label == -1 && !other->IsRemoved(static_cast<InnerIdType>(i))) {
-                std::scoped_lock wlock(delete_ids_mutex_);
-                active_padding_label_ids_.insert(
-                    static_cast<InnerIdType>(i + current_total_count_u));
-            }
+    }
+    const auto other_size_u = other_labels.size();
+
+    // -- 2. Reserve / resize once --
+    const uint64_t base = [&]() -> uint64_t {
+        std::unique_lock<std::shared_mutex> delete_lock(delete_ids_mutex_);
+        std::unique_lock<std::shared_mutex> write_lock(storage_mutex_);
+        auto b = static_cast<uint64_t>(total_count_.load());
+        label_table_.resize(b + other_size_u);
+        if (use_reverse_map_) {
+            label_remap_.Reserve(label_remap_.Size() + other_size_u);
+        }
+        return b;
+    }();
+
+    // -- 3. Per-element: callback outside lock, write inside lock --
+    for (uint64_t i = 0; i < other_size_u; ++i) {
+        // Callback runs outside any lock; re-entrant reads are safe.
+        LabelType new_label = std::get<1>(id_map(other_labels[i]));
+
+        // Publish ONE label so the next callback sees it.
+        std::unique_lock<std::shared_mutex> delete_lock(delete_ids_mutex_);
+        std::unique_lock<std::shared_mutex> write_lock(storage_mutex_);
+        auto new_inner_id = static_cast<InnerIdType>(i + base);
+        CHECK_ARGUMENT(i + base < label_table_.size(),
+                       "merge destination label storage shrank during callbacks");
+        label_table_[i + base] = new_label;
+        if (new_label == -1 && not other_removed[i]) {
+            active_padding_label_ids_.insert(new_inner_id);
+        }
+        if (use_reverse_map_) {
+            label_remap_.InsertOrAssign(new_label, new_inner_id);
         }
     }
     MarkLabelsMutated();

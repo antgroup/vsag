@@ -45,6 +45,10 @@ build() {
     local dockerfile=$2
     local makefile_target=$3
     local dist_name_suffix=$4
+    local glibc_baseline=2.28
+    [[ "$makefile_target" == dist-pre-cxx11-abi ]] && glibc_baseline=2.17
+    local abi=1
+    [[ "$makefile_target" == dist-pre-cxx11-abi ]] && abi=0
     local compile_jobs=${COMPILE_JOBS:-6}
 
     if ! [[ "$compile_jobs" =~ ^[0-9]+$ ]]; then
@@ -58,12 +62,13 @@ build() {
            bash -c "\
            export COMPILE_JOBS=\"$compile_jobs\" && \
            export CMAKE_INSTALL_PREFIX=/tmp/vsag && \
-           export EXTRA_DEFINED=\"\${EXTRA_DEFINED:+\$EXTRA_DEFINED }-DVSAG_USE_SYSTEM_DEPS:STRING=OFF\" && \
-           make clean-release && make $makefile_target && make run-dist-tests && make install && \
+           export EXTRA_DEFINED=\"\${EXTRA_DEFINED:+\$EXTRA_DEFINED }-DVSAG_USE_SYSTEM_DEPS:STRING=OFF -DCMAKE_INSTALL_LIBDIR:PATH=lib\" && \
+           make clean-release && make $makefile_target && make install && \
+           test -f /tmp/vsag/lib/libvsag.so && \
+           VSAG_MAX_GLIBC=$glibc_baseline bash scripts/release/check_compatibility.sh /tmp/vsag $abi /tmp/vsag-compatibility && \
            mkdir -p ./dist && \
            cp -r /tmp/vsag ./dist/ && \
            cd ./dist && \
-           rm -r ./vsag/lib && mv ./vsag/lib64 ./vsag/lib && \
            tar czvf vsag.tar.gz ./vsag && rm -r ./vsag
     "
     version=$(git describe --tags --always --dirty --match "v*")
