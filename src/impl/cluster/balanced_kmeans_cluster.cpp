@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <future>
 #include <limits>
 #include <mutex>
@@ -26,6 +27,7 @@
 
 #include "impl/logger/logger.h"
 #include "simd/fp32_simd.h"
+#include "simd/normalize.h"
 #include "utils/util_functions.h"
 #include "vsag_exception.h"
 
@@ -226,6 +228,17 @@ BalancedKMeansCluster::Assign(uint32_t k,
         }
     }
 
+    Vector<float> normalized_datas(allocator_);
+    if (metric == MetricType::METRIC_TYPE_COSINE) {
+        normalized_datas.resize(count * static_cast<uint64_t>(dim_));
+        for (uint64_t i = 0; i < count; ++i) {
+            Normalize(datas + i * static_cast<uint64_t>(dim_),
+                      normalized_datas.data() + i * static_cast<uint64_t>(dim_),
+                      dim_);
+        }
+        datas = normalized_datas.data();
+    }
+
     Vector<int32_t> labels(count, -1, allocator_);
     const double loss =
         this->balanced_assign(centroids, datas, count, k, metric, num_candidates, labels.data());
@@ -259,11 +272,14 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
         Vector<uint64_t> local_demand(k, 0ULL, allocator_);
         // The small top-c buffers are reused across the block's vectors; c is
         // runtime, so they are heap buffers rather than variable-length arrays.
-        Vector<float> best_dist(c, K_MAX_DISTANCE, allocator_);
+        // Infinity is only an uninitialized sentinel. A real distance may
+        // legitimately clamp to K_MAX_DISTANCE and must still be selectable.
+        Vector<float> best_dist(c, std::numeric_limits<float>::infinity(), allocator_);
         Vector<uint32_t> best_id(c, 0U, allocator_);
         for (uint64_t i = begin; i < end; ++i) {
             const float* x = datas + i * static_cast<uint64_t>(dim_);
-            std::fill(best_dist.begin(), best_dist.end(), K_MAX_DISTANCE);
+            std::fill(
+                best_dist.begin(), best_dist.end(), std::numeric_limits<float>::infinity());
             std::fill(best_id.begin(), best_id.end(), 0U);
             for (uint32_t j = 0; j < k; ++j) {
                 const float dist =
@@ -303,8 +319,20 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
             futures.emplace_back(thread_pool_->GeneralEnqueue(scan_block, begin, end));
         }
     }
+    std::exception_ptr scan_exception;
     for (auto& future : futures) {
-        future.wait();
+        try {
+            future.get();
+        } catch (...) {
+            if (scan_exception == nullptr) {
+                scan_exception = std::current_exception();
+            }
+        }
+    }
+    // Every submitted block has finished before the captured stack state can
+    // unwind, and no placeholder candidate data is consumed after a failure.
+    if (scan_exception != nullptr) {
+        std::rethrow_exception(scan_exception);
     }
 
     // Step 2: capacity targets. Exactly n mod k clusters hold ceil(n / k)
@@ -375,7 +403,7 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
             // the clusters that still have seats instead of keeping the full
             // row. Rare for c > 1, and bounded work even when it repeats.
             const float* x = datas + i * static_cast<uint64_t>(dim_);
-            float best = K_MAX_DISTANCE;
+            float best = std::numeric_limits<float>::infinity();
             for (uint32_t j = 0; j < k; ++j) {
                 if (remaining[j] == 0) {
                     continue;

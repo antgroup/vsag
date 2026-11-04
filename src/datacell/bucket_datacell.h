@@ -639,7 +639,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
+        // Residuals must cover the same capacity-constrained assignments used by
+        // the initial Build; nearest-centroid training can otherwise clip the
+        // residuals of vectors that balancing moves to another bucket.
+        auto buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
         for (int i = 0; i < count; ++i) {
             strategy_->GetCentroid(buckets[i], centroid);
             for (int j = 0; j < dim; ++j) {

@@ -1363,8 +1363,10 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
     }
     CHECK_ARGUMENT(count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                    "RaBitQ split training count is too large");
-    auto buckets =
-        this->strategy_->ClassifyDatas(classify_data, static_cast<int64_t>(count), 1, nullptr);
+    // Keep residual training consistent with the capacity-constrained initial
+    // Build assignment; other partition strategies retain their plain routing.
+    auto buckets = this->strategy_->ClassifyDatasForBuild(
+        classify_data, static_cast<int64_t>(count), 1, nullptr);
     for (uint64_t i = 0; i < count; ++i) {
         this->strategy_->GetCentroid(buckets[i], centroid);
         FP32Sub(classify_data + i * this->dim_,

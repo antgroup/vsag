@@ -21,9 +21,11 @@
 #include <limits>
 #include <numeric>
 #include <random>
+#include <thread>
 #include <vector>
 
 #include "allocator/memory_record_allocator.h"
+#include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
 
@@ -124,6 +126,31 @@ require_exact_balance(const std::vector<uint64_t>& sizes, uint64_t n, uint32_t k
     }
     REQUIRE(big == extra);
 }
+
+class WorkerFailAllocator : public vsag::DefaultAllocator {
+public:
+    WorkerFailAllocator() : owner_(std::this_thread::get_id()) {
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        if (std::this_thread::get_id() != owner_) {
+            throw std::bad_alloc();
+        }
+        return vsag::DefaultAllocator::Allocate(size);
+    }
+
+    void*
+    Reallocate(void* pointer, uint64_t size) override {
+        if (std::this_thread::get_id() != owner_) {
+            throw std::bad_alloc();
+        }
+        return vsag::DefaultAllocator::Reallocate(pointer, size);
+    }
+
+private:
+    std::thread::id owner_;
+};
 
 }  // namespace
 
@@ -387,6 +414,58 @@ TEST_CASE("BalancedKMeans Assign balances fixed centroids", "[ut][BalancedKMeans
     REQUIRE(labels[1] == 0);
     REQUIRE(cluster.Stats().min_cluster_size == 1);
     REQUIRE(cluster.Stats().max_cluster_size == 1);
+}
+
+TEST_CASE("BalancedKMeans cosine assignment normalizes input rows",
+          "[ut][BalancedKMeansCluster]") {
+    constexpr uint32_t k = 2;
+    constexpr int32_t dim = 2;
+    const std::vector<float> centroids = {1.0F, 0.0F, 0.0F, 1.0F};
+    const std::vector<float> data = {100.0F, 99.0F, 1.0F, 0.0F};
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::BalancedKMeansCluster cluster(dim, allocator.get());
+
+    const auto labels = cluster.Assign(
+        k, centroids.data(), data.data(), 2, vsag::MetricType::METRIC_TYPE_COSINE, 2U);
+    // Raw magnitudes make the regrets tie and give the first row centroid 0.
+    // Cosine regrets instead give the exactly aligned second row priority.
+    REQUIRE(labels[0] == 1);
+    REQUIRE(labels[1] == 0);
+}
+
+TEST_CASE("BalancedKMeans saturated distances still use available seats",
+          "[ut][BalancedKMeansCluster]") {
+    constexpr uint32_t k = 2;
+    constexpr int32_t dim = 1;
+    const std::vector<float> centroids = {-1e20F, 1e20F};
+    const std::vector<float> data = {0.0F, 0.0F};
+    const uint32_t candidates = GENERATE(1U, 2U);
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::BalancedKMeansCluster cluster(dim, allocator.get());
+
+    const auto labels = cluster.Assign(k,
+                                       centroids.data(),
+                                       data.data(),
+                                       2,
+                                       vsag::MetricType::METRIC_TYPE_L2SQR,
+                                       candidates);
+    REQUIRE(labels[0] != labels[1]);
+    require_exact_balance(cluster_sizes(labels, k), 2, k);
+}
+
+TEST_CASE("BalancedKMeans propagates candidate worker exceptions",
+          "[ut][BalancedKMeansCluster]") {
+    constexpr uint32_t k = 2;
+    constexpr int32_t dim = 1;
+    constexpr uint64_t count = 2048;  // More than one candidate-scan block.
+    const std::vector<float> centroids = {0.0F, 1.0F};
+    const std::vector<float> data(count, 0.0F);
+    auto pool = vsag::SafeThreadPool::FactoryDefaultThreadPool();
+    pool->SetPoolSize(2);
+    WorkerFailAllocator allocator;
+    vsag::BalancedKMeansCluster cluster(dim, &allocator, pool);
+
+    REQUIRE_THROWS_AS(cluster.Assign(k, centroids.data(), data.data(), count), std::bad_alloc);
 }
 
 TEST_CASE("BalancedKMeans Assign with fewer vectors than clusters spreads them",

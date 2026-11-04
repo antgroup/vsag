@@ -104,6 +104,16 @@ private:
     float centroid_scale_{1.0F};
 };
 
+class BuildAssignedPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        return Vector<BucketIdType>(count, 1, allocator_);
+    }
+};
+
 class TrackingReader : public Reader {
 public:
     explicit TrackingReader(std::shared_ptr<std::string> data) : data_(std::move(data)) {
@@ -793,6 +803,38 @@ TEST_CASE("BucketDataCell batch query", "[ut][BucketDataCell]") {
         REQUIRE_THROWS(
             sparse_bucket->Query(&dist, sparse_computer, &bucket_id, &hole_offset_id, 1));
     }
+}
+
+TEST_CASE("BucketDataCell residual training uses build assignments", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t bucket_count = 2;
+    const std::vector<float> vectors = {50.0F, 100.0F};
+    auto param_json = JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": { "type": "sq8" },
+        "buckets_count": 2,
+        "use_residual": true
+    })");
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    // Centroids are 50 and 100. Plain training assigns both rows to bucket 0
+    // and learns residuals [0, 50], which clips the -50 residual needed when
+    // Build places the first row in bucket 1. Build-aware training learns it.
+    auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), vectors.size());
+    bucket->InsertVector(vectors.data(), 1, 0);
+
+    auto computer = bucket->FactoryComputer(vectors.data());
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 1, 0)) < 1e-4F);
 }
 
 TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][BucketDataCell]") {
