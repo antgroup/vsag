@@ -1406,6 +1406,12 @@ HGraph::can_estimate_build_memory() const {
     if (hgraph_param == nullptr) {
         return false;
     }
+    if (hgraph_param->bottom_graph_param != nullptr and
+        hgraph_param->bottom_graph_param->use_reverse_edges_) {
+        // ReverseEdge maps and incoming-neighbor vectors are not represented by the forward
+        // graph terms in EstimateMemory(), so reverse-edge builds remain outside this model.
+        return false;
+    }
     if (hgraph_param->base_codes_param == nullptr or
         hgraph_param->base_codes_param->io_parameter == nullptr) {
         return false;
@@ -1429,6 +1435,15 @@ HGraph::can_estimate_build_memory() const {
     if (this->has_precise_reorder() and
         this->high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
         // Precise reorder only carries a meaningful estimate for fp32 precise codes.
+        return false;
+    }
+    if (this->has_precise_reorder() and not this->build_by_base_ and
+        not this->high_precise_codes_->InMemory() and
+        hgraph_param->precise_codes_param != nullptr and
+        hgraph_param->precise_codes_param->io_parameter != nullptr and
+        hgraph_param->precise_codes_param->io_parameter->enable_read_cache_) {
+        // Construction probes can retain up to the configured OptionalPageCache budget while
+        // reading file-backed precise codes. That cache is not part of the in-memory model.
         return false;
     }
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
@@ -1593,8 +1608,9 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     }
 
     // Peak build memory = the retained footprint Build() leaves behind + the build-only
-    // temporaries. EstimateMemory() models most retained components and rounds each one up to
-    // the configured block size.
+    // temporaries. EstimateMemory() models retained components using their backend allocation
+    // granularity: contiguous stores use their exact sizes and blocked stores use block rounding.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
     uint64_t final_memory = this->EstimateMemory(num_elements);
     const uint64_t element_count =
         next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
@@ -1608,7 +1624,12 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         // EstimateMemory() omits precise codes that search is told to ignore, but Build still
         // resizes and populates them. Restore their retained footprint for the build estimate.
         const uint64_t precise_memory = this->high_precise_codes_->code_size_ * element_count;
-        final_memory += block_memory_ceil(precise_memory, block_size);
+        const bool precise_is_contiguous =
+            hgraph_param->precise_codes_param != nullptr and
+            hgraph_param->precise_codes_param->io_parameter != nullptr and
+            hgraph_param->precise_codes_param->io_parameter->Kind() == IOKind::MEMORY;
+        final_memory +=
+            precise_is_contiguous ? precise_memory : block_memory_ceil(precise_memory, block_size);
     }
     uint64_t build_memory = 0;
 
@@ -1688,7 +1709,6 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     //     old and new contiguous stores alive together. HGraph::resize() grows the bottom graph
     //     and code stores sequentially, so only the largest previous store is needed beyond the
     //     final footprint. BlockMemoryIO grows by adding independent blocks and has no transient.
-    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
     const uint64_t resize_batch_size = uint64_t{1} << this->resize_increase_count_bit_;
     const uint64_t current_capacity = this->max_capacity_.load();
     const bool grows_code_stores = current_capacity < element_count;

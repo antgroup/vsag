@@ -27,7 +27,9 @@
 #include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
+#include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
@@ -455,6 +457,23 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
             std::ceil(static_cast<double>(memory) / static_cast<double>(block_size)) *
             static_cast<double>(block_size));
     };
+    auto retained_store_memory = [&](uint64_t memory, const IOParamPtr& io_parameter) {
+        if (io_parameter != nullptr and io_parameter->Kind() == IOKind::MEMORY) {
+            // MemoryIO allocates exactly the requested contiguous byte range. Only blocked
+            // backends retain a final partially used block beyond the logical store size.
+            return memory;
+        }
+        return block_memory_ceil(memory, block_size);
+    };
+    auto flatten_io = [](const FlattenInterfaceParamPtr& param) -> IOParamPtr {
+        return param == nullptr ? nullptr : param->io_parameter;
+    };
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    const auto graph_param =
+        hgraph_param == nullptr
+            ? GraphDataCellParamPtr{}
+            : std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    const auto graph_io = graph_param == nullptr ? IOParamPtr{} : graph_param->io_parameter_;
 
     if (this->rabitq_fused_datacell_ != nullptr) {
         const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
@@ -462,19 +481,23 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     } else {
         if (this->basic_flatten_codes_->InMemory()) {
             auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
-            estimate_memory += block_memory_ceil(base_memory, block_size);
+            const auto base_io =
+                hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->base_codes_param);
+            estimate_memory += retained_store_memory(base_memory, base_io);
         }
         if (bottom_graph_->InMemory()) {
             auto bottom_graph_memory =
                 (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
-            estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+            estimate_memory += retained_store_memory(bottom_graph_memory, graph_io);
         }
     }
 
     if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
         not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
-        estimate_memory += block_memory_ceil(precise_memory, block_size);
+        const auto precise_io =
+            hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->precise_codes_param);
+        estimate_memory += retained_store_memory(precise_memory, precise_io);
     }
 
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
@@ -485,12 +508,18 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         // precise codes already hold the raw vectors, raw_vector_ aliases them and
         // create_new_raw_vector_ stays false, so nothing is counted twice.
         auto raw_vector_memory = this->raw_vector_->code_size_ * element_count;
-        estimate_memory += block_memory_ceil(raw_vector_memory, block_size);
+        const auto raw_io =
+            hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->raw_vector_param);
+        estimate_memory += retained_store_memory(raw_vector_memory, raw_io);
     }
 
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && this->extra_infos_->InMemory()) {
         auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * element_count;
-        estimate_memory += block_memory_ceil(extra_info_memory, block_size);
+        const auto extra_info_io =
+            hgraph_param == nullptr || hgraph_param->extra_info_param == nullptr
+                ? IOParamPtr{}
+                : hgraph_param->extra_info_param->io_parameter;
+        estimate_memory += retained_store_memory(extra_info_memory, extra_info_io);
     }
 
     auto label_map_memory =

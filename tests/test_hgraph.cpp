@@ -4624,6 +4624,36 @@ TEST_CASE("HGraph EstimateBuildMemory unsupported configuration", "[ft][memory][
     }
 }
 
+TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+
+    SECTION("cached file-backed precise codes") {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "sq8,fp32,buffer_io");
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["build_by_base"].SetBool(false);
+        param["index_param"]["precise_enable_read_cache"].SetBool(true);
+        param["index_param"]["precise_cache_total_size"].SetUint64(1024 * 1024);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    }
+
+    SECTION("reverse edges") {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["use_reverse_edges"].SetBool(true);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    }
+}
+
 TEST_CASE("HGraph EstimateBuildMemory disabled after cache import", "[ft][memory][hgraph][build]") {
     using namespace fixtures;
     // The feature bit is computed at construction, but a nonempty imported cache switches
@@ -4712,7 +4742,45 @@ TEST_CASE("HGraph EstimateBuildMemory includes contiguous graph resize",
     auto contiguous_graph = make_index("memory_io");
     REQUIRE(block_graph->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
     REQUIRE(contiguous_graph->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
-    REQUIRE(contiguous_graph->EstimateBuildMemory(count) > block_graph->EstimateBuildMemory(count));
+
+    // Backend-specific retained sizes differ, so compare only the build-only overhead. The
+    // contiguous graph contributes one previous 1024-row store to the final resize peak.
+    const auto block_build_only =
+        block_graph->EstimateBuildMemory(count) - block_graph->EstimateMemory(count);
+    const auto contiguous_build_only =
+        contiguous_graph->EstimateBuildMemory(count) - contiguous_graph->EstimateMemory(count);
+    constexpr uint64_t previous_graph_bytes = 1024 * (96 + 1) * sizeof(uint32_t);
+    REQUIRE(contiguous_build_only == block_build_only + previous_graph_bytes);
+}
+
+TEST_CASE("HGraph EstimateMemory uses exact sizes for contiguous stores",
+          "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    RunWithGeneratedBlockSizeLimit([&] {
+        constexpr int64_t dim = 16;
+        constexpr uint64_t count = 512;
+        HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["base_io_type"].SetString("memory_io");
+        param["index_param"]["graph_io_type"].SetString("memory_io");
+        param["index_param"]["max_degree"].SetUint64(64);
+        param["index_param"]["resize_increase_count_bit"].SetUint64(10);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+        constexpr uint64_t capacity = 1024;
+        constexpr uint64_t contiguous_store_bytes =
+            capacity * dim * sizeof(float) + capacity * (64 + 1) * sizeof(uint32_t);
+        const auto retained = index->EstimateMemory(count);
+        REQUIRE(retained >= contiguous_store_bytes);
+        // Label, route-graph and synchronization bookkeeping accounts for the remaining bytes;
+        // neither contiguous store may be rounded up to the 2 MiB test block size.
+        REQUIRE(retained < contiguous_store_bytes + 1024 * 1024);
+        REQUIRE(index->EstimateBuildMemory(count) < 16 * 1024 * 1024);
+    });
 }
 
 TEST_CASE("HGraph Build limits tasks on a supplied thread pool", "[ft][memory][hgraph][build]") {

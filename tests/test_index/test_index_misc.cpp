@@ -107,7 +107,8 @@ TestIndex::TestEstimateBuildMemory(const std::string& index_name,
                 if (quantizer == "fp32" and estimate_count > 2) {
                     // With two-row growth, the last MemoryIO resize can briefly retain the old
                     // store alongside the final store. BlockMemoryIO only adds another block.
-                    // Compare the estimates directly because MemoryRecordAllocator::Reallocate()
+                    // Compare build-only overhead because the retained base-store sizes now use
+                    // backend-specific allocation granularity. MemoryRecordAllocator::Reallocate()
                     // cannot observe the old/new overlap hidden inside realloc().
                     auto contiguous_param = serial_param;
                     contiguous_param["index_param"]["base_io_type"].SetString("memory_io");
@@ -125,9 +126,12 @@ TestIndex::TestEstimateBuildMemory(const std::string& index_name,
                     const uint64_t previous_store_bytes =
                         previous_count * static_cast<uint64_t>(dataset->base_->GetDim()) *
                         sizeof(float);
-                    REQUIRE(contiguous_index->EstimateBuildMemory(estimate_count) >=
-                            block_index->EstimateBuildMemory(estimate_count) +
-                                previous_store_bytes);
+                    const auto contiguous_build_only =
+                        contiguous_index->EstimateBuildMemory(estimate_count) -
+                        contiguous_index->EstimateMemory(estimate_count);
+                    const auto block_build_only = block_index->EstimateBuildMemory(estimate_count) -
+                                                  block_index->EstimateMemory(estimate_count);
+                    REQUIRE(contiguous_build_only == block_build_only + previous_store_bytes);
                 }
                 if (quantizer == "sq8" or quantizer == "sq8_uniform") {
                     // Ignoring reorder during search must not change the build peak: Build still
