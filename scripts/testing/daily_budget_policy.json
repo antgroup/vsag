@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "version": "weekly-v1",
+  "version": "night-window-v2",
   "minutes": {
     "hgraph": 85,
     "pyramid": 45,
@@ -28,5 +28,16 @@
     "sindi": 5
   },
   "case_timeout_seconds": 1800,
-  "timezone": "Asia/Shanghai"
+  "timezone": "Asia/Shanghai",
+  "window": {
+    "timezone": "Asia/Shanghai",
+    "start": "22:00",
+    "end": "08:00",
+    "wall_minutes": 600,
+    "execution_minutes": 570,
+    "cleanup_minutes": 30,
+    "job_execution_minutes": 270
+  },
+  "minutes_note": "Legacy cumulative diagnostic allocations, not the elapsed workflow deadline.",
+  "x86_shards": 4
 }
