@@ -14,6 +14,7 @@
 
 #include <fmt/format.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -22,6 +23,7 @@
 #include <limits>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -37,6 +39,7 @@
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
+#include "io/common/io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
@@ -1368,6 +1371,59 @@ HGraph::resize(uint64_t new_size) {
         this->cal_memory_usage();
     }
 }
+
+bool
+HGraph::can_estimate_build_memory() const {
+    if (this->graph_type_ != GRAPH_TYPE_VALUE_NSW) {
+        // The first version estimates the in-memory NSW build path only.
+        return false;
+    }
+    if (this->has_loaded_cache()) {
+        // An imported build cache switches Build() onto the warm-start/refine path, which has
+        // different temporaries than a cold in-memory build.
+        return false;
+    }
+    if (this->mci_parameters_.enabled) {
+        // MCI clique maintenance runs inside the build and adds its own peak storage.
+        return false;
+    }
+    if (this->using_dedup_storage()) {
+        // Duplicate storage keeps a full temporary code flatten of its own during the first
+        // build, which the in-memory NSW model below does not account for.
+        return false;
+    }
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    if (hgraph_param == nullptr) {
+        return false;
+    }
+    if (hgraph_param->base_codes_param == nullptr or
+        hgraph_param->base_codes_param->io_parameter == nullptr) {
+        return false;
+    }
+    const auto base_io_kind = hgraph_param->base_codes_param->io_parameter->Kind();
+    const bool base_codes_in_memory =
+        base_io_kind == IOKind::MEMORY or base_io_kind == IOKind::BLOCK_MEMORY;
+    if (not base_codes_in_memory) {
+        // File / mmap backed base code stores cannot be accounted as an in-memory peak.
+        return false;
+    }
+    const auto quantizer_name = this->basic_flatten_codes_->GetQuantizerName();
+    const bool estimable_quantizer = quantizer_name == QUANTIZATION_TYPE_VALUE_FP32 or
+                                     quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+                                     quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM;
+    if (not estimable_quantizer) {
+        // The first version estimates in-memory NSW builds with fp32 / sq8 / sq8_uniform codes,
+        // i.e. the quantizers whose codes are written straight into the persistent flatten.
+        return false;
+    }
+    if (this->has_precise_reorder() and
+        this->high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        // Precise reorder only carries a meaningful estimate for fp32 precise codes.
+        return false;
+    }
+    return true;
+}
+
 void
 HGraph::InitFeatures() {
     // Common Init
@@ -1414,6 +1470,12 @@ HGraph::InitFeatures() {
                                             IndexFeature::SUPPORT_CLONE,
                                             IndexFeature::SUPPORT_EXPORT_MODEL,
                                             IndexFeature::SUPPORT_TUNE});
+
+    // Build-time memory estimation: only declared for configurations that can produce a
+    // meaningful EstimateBuildMemory() result (in-memory NSW build, estimable quantization,
+    // no imported cache and no in-build MCI maintenance).
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
 
     // About Train
     auto name = this->basic_flatten_codes_->GetQuantizerName();
@@ -1492,6 +1554,60 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_CLONE, false);
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_EXPORT_MODEL, false);
     }
+}
+
+uint64_t
+HGraph::EstimateBuildMemory(uint64_t num_elements) const {
+    if (this->index_feature_list_ == nullptr or
+        not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY)) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph doesn't support EstimateBuildMemory for the current build "
+                            "configuration");
+    }
+    if (num_elements == 0) {
+        // A build of zero elements allocates no codes, no graph and no training sample.
+        return 0;
+    }
+
+    // Peak build memory = the retained footprint Build() leaves behind + the build-only
+    // temporaries. The retained part is already modelled by EstimateMemory(), which rounds each
+    // component up to the configured block size.
+    const uint64_t final_memory = this->EstimateMemory(num_elements);
+    uint64_t build_memory = 0;
+
+    // (1) Quantizer training sample: Build() trains on sample_train_data(), which copies
+    //     min(N, max(512, train_sample_count)) rows into allocator-owned buffers. While the
+    //     sample is copied the staging buffer and the returned dataset coexist, so the peak is
+    //     two float32 copies of the sample plus its ids and index arrays.
+    constexpr uint64_t kMinTrainSampleCount = 512;
+    const uint64_t train_sample_count = std::min<uint64_t>(
+        num_elements,
+        std::max<uint64_t>(kMinTrainSampleCount, static_cast<uint64_t>(this->train_sample_count_)));
+    build_memory += train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float) * 2;
+    build_memory += train_sample_count * (sizeof(int64_t) + sizeof(int64_t));
+
+    // Workers that may hold construction scratch at the same time. A single-threaded build has
+    // no thread pool and inserts on the calling thread.
+    const uint64_t build_threads =
+        this->thread_pool_ == nullptr
+            ? 1
+            : std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(num_elements));
+
+    // (2) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
+    //     the pool and runs one KNN search with ef_construct as the candidate budget: the
+    //     visited list is one tag word plus one bit word per 64 nodes held by the graph, and the
+    //     search keeps a result heap and a candidate heap of up to ef_construct entries each.
+    const uint64_t visited_list_bytes =
+        (num_elements + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
+    const uint64_t probe_heap_bytes =
+        2 * this->ef_construct_ * sizeof(std::pair<float, InnerIdType>);
+    build_memory += build_threads * (visited_list_bytes + probe_heap_bytes);
+
+    // (3) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
+    //     before writing it into the persistent flatten storage.
+    build_memory += build_threads * static_cast<uint64_t>(this->basic_flatten_codes_->code_size_);
+
+    return final_memory + build_memory;
 }
 
 void

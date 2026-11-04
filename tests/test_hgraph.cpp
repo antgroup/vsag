@@ -45,6 +45,7 @@
 #include "vsag/resource.h"
 #include "vsag/search_request.h"
 #include "vsag/serialize_writer.h"
+#include "vsag_exception.h"
 
 namespace fixtures {
 
@@ -4337,6 +4338,55 @@ TestHGraphEstimateMemoryAndGetMemoryUsage(const fixtures::HGraphTestIndexPtr& te
 HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Estimate Memory And Get Memory Usage",
                                 "[ft][memory][hgraph]",
                                 TestHGraphEstimateMemoryAndGetMemoryUsage)
+
+TEST_CASE("HGraph EstimateBuildMemory for in-memory NSW build", "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(16, 512, "l2");
+    for (const auto& quantization : {"fp32", "sq8", "sq8_uniform"}) {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, quantization);
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+        INFO(fmt::format("base_quantization_type: {}", quantization));
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+
+        // (a) an in-memory NSW build advertises the feature
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+        // (b) the build peak is strictly greater than the retained footprint of the same count,
+        //     and the estimate grows with the element count
+        const uint64_t count = 1024;
+        const auto final_estimate = index->EstimateMemory(count);
+        const auto build_estimate = index->EstimateBuildMemory(count);
+        REQUIRE(build_estimate > final_estimate);
+        REQUIRE(build_estimate > index->EstimateBuildMemory(count / 2));
+
+        // boundary: an empty build retains no code, graph or training sample storage
+        REQUIRE(index->EstimateBuildMemory(0) == 0);
+
+        // (c) the estimate stays in the same order of magnitude as the allocator footprint
+        //     recorded while a real Build() of the same configuration runs
+        TestIndex::TestEstimateBuildMemory(HGraphTestIndex::name, param, dataset);
+    }
+}
+
+TEST_CASE("HGraph EstimateBuildMemory unsupported configuration", "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    // RaBitQ base codes are outside the estimate model, so the feature stays off and the call
+    // falls back to the unsupported-operation error of InnerIndexInterface.
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "rabitq");
+    build_param.graph_type = "nsw";
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE_THROWS_AS(index->EstimateBuildMemory(100), vsag::VsagException);
+    try {
+        index->EstimateBuildMemory(100);
+        FAIL("EstimateBuildMemory must throw for an unsupported configuration");
+    } catch (const vsag::VsagException& e) {
+        REQUIRE(e.error_.type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+}
 
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph ELP Optimizer",

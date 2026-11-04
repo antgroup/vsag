@@ -154,6 +154,33 @@ public:
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
 
+    /**
+      * @brief Return the estimated memory required while building the index.
+      *
+      * For configurations that declare SUPPORT_ESTIMATE_BUILD_MEMORY the estimate is the
+      * retained footprint of the built index (the EstimateMemory() result for the built element
+      * count) plus the build-only temporaries that exist while an in-memory NSW graph is
+      * constructed:
+      *
+      *   1. the quantizer training sample, which sample_train_data() copies into two
+      *      allocator-owned float32 buffers plus its id and index arrays;
+      *   2. the per-worker construction probe scratch: one pool visited list over the graph's
+      *      nodes and the result/candidate heaps bounded by ef_construction;
+      *   3. one temporary encode row per worker, used by InsertVector() before the code is
+      *      written into the persistent flatten storage.
+      *
+      * The estimate deliberately excludes memory held by the caller for the input data vectors.
+      * Only the persistent flatten storage, graph, label and extra-info structures that
+      * EstimateMemory() already models are counted for the retained part.
+      *
+      * @param num_elements denotes the amount of data used to build the index.
+      * @return estimated memory required during building.
+      * @throws VsagException with ErrorType::UNSUPPORTED_INDEX_OPERATION when the current
+      *         configuration cannot produce a meaningful estimate.
+      */
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override;
+
     void
     GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
 
@@ -954,6 +981,12 @@ private:
     support_force_remove() const {
         return support_force_remove_;
     }
+
+    /// True when the current configuration can produce a meaningful build memory estimate:
+    /// in-memory NSW graph build with an estimable base quantization, without an imported build
+    /// cache, in-build MCI clique maintenance, or duplicate-storage temporary codes.
+    [[nodiscard]] bool
+    can_estimate_build_memory() const;
 
     /// True when duplicate logical ids share physical vector storage slots.
     [[nodiscard]] bool

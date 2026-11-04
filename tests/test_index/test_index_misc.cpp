@@ -46,6 +46,36 @@ TestIndex::TestEstimateMemory(const std::string& index_name,
 }
 
 void
+TestIndex::TestEstimateBuildMemory(const std::string& index_name,
+                                   const std::string& build_param,
+                                   const TestDatasetPtr& dataset) {
+    auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
+    {
+        vsag::Resource resource(allocator.get(), nullptr);
+        vsag::Engine engine(&resource);
+        auto index1 = engine.CreateIndex(index_name, build_param).value();
+        REQUIRE(index1->GetNumElements() == 0);
+        if (index1->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY)) {
+            auto data_size = dataset->base_->GetNumElements();
+            auto estimate_build_memory = index1->EstimateBuildMemory(data_size);
+            REQUIRE(estimate_build_memory > 0);
+            // The peak build estimate must cover the retained final footprint.
+            auto final_estimate_memory = index1->EstimateMemory(data_size);
+            REQUIRE(estimate_build_memory >= final_estimate_memory);
+            auto build_index = index1->Build(dataset->base_);
+            auto real_memory = allocator->GetCurrentMemory();
+            if (estimate_build_memory <= static_cast<uint64_t>(real_memory * 0.8) or
+                estimate_build_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
+                WARN(fmt::format("estimate_build_memory({}) is not in range [{}, {}]",
+                                 estimate_build_memory,
+                                 static_cast<uint64_t>(real_memory * 0.8),
+                                 static_cast<uint64_t>(real_memory * 1.2)));
+            }
+        }
+    }
+}
+
+void
 TestIndex::TestGetMemoryUsage(const std::string& index_name,
                               const std::string& build_param,
                               const TestDatasetPtr& dataset) {
