@@ -259,8 +259,8 @@ def _profile_dense(
     pair_positions = np.sort(rng.permutation(sample_idx.size)[:pair_n])
 
     dim_count = np.zeros(dim, dtype=np.float64)
-    dim_sum = np.zeros(dim, dtype=np.float64)
-    dim_sumsq = np.zeros(dim, dtype=np.float64)
+    dim_mean = np.zeros(dim, dtype=np.float64)
+    dim_m2 = np.zeros(dim, dtype=np.float64)
     dim_zero = np.zeros(dim, dtype=np.float64)
     dim_min = np.full(dim, np.inf, dtype=np.float64)
     dim_max = np.full(dim, -np.inf, dtype=np.float64)
@@ -291,9 +291,30 @@ def _profile_dense(
         norms_parts.append(norms)
         all_zero_vectors += int(np.count_nonzero(norms == 0))
 
-        dim_count += finite.sum(axis=0)
-        dim_sum += valid.sum(axis=0)
-        dim_sumsq += np.einsum("ij,ij->j", valid, valid)
+        # Merge each block with the running per-coordinate Welford state.  In
+        # particular, do not subtract E[x]^2 from E[x^2]: that loses small
+        # variations around large FLOAT32 magnitudes.
+        block_count = finite.sum(axis=0).astype(np.float64)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            block_mean = np.where(
+                block_count > 0, valid.sum(axis=0) / block_count, 0.0
+            )
+        centered = np.where(finite, valid - block_mean, 0.0)
+        block_m2 = np.einsum("ij,ij->j", centered, centered)
+        combined_count = dim_count + block_count
+        delta = block_mean - dim_mean
+        with np.errstate(divide="ignore", invalid="ignore"):
+            weight = np.where(
+                combined_count > 0, block_count / combined_count, 0.0
+            )
+            correction = np.where(
+                combined_count > 0,
+                delta * delta * dim_count * weight,
+                0.0,
+            )
+        dim_mean += delta * weight
+        dim_m2 += block_m2 + correction
+        dim_count = combined_count
         dim_zero += ((raw == 0) & finite).sum(axis=0)
         masked_min = np.where(finite, raw, np.inf).min(axis=0)
         masked_max = np.where(finite, raw, -np.inf).max(axis=0)
@@ -332,8 +353,8 @@ def _profile_dense(
         "outliers": _outliers_metric(norms),
         "dimensions": _dimensions_metric(
             dim_count,
-            dim_sum,
-            dim_sumsq,
+            dim_mean,
+            dim_m2,
             dim_zero,
             dim_min,
             dim_max,
@@ -461,13 +482,13 @@ def _profile_sparse(
         )
 
     if accumulator is not None:
-        dim_count, dim_sum, dim_sumsq, dim_zero, dim_min, dim_max = (
+        dim_count, dim_mean, dim_m2, dim_zero, dim_min, dim_max = (
             accumulator.arrays(count)
         )
         dimensions = _dimensions_metric(
             dim_count,
-            dim_sum,
-            dim_sumsq,
+            dim_mean,
+            dim_m2,
             dim_zero,
             dim_min,
             dim_max,
@@ -536,14 +557,14 @@ def _profile_sparse(
 
 
 class _DimAccumulator:
-    """Bounded growable accumulators for streaming sparse per-dimension data."""
+    """Bounded growable Welford accumulators for sparse dimension data."""
 
     def __init__(self) -> None:
         self._max_index = -1
         self.count = np.zeros(0, dtype=np.float64)
         self.invalid = np.zeros(0, dtype=np.float64)
-        self.sum = np.zeros(0, dtype=np.float64)
-        self.sumsq = np.zeros(0, dtype=np.float64)
+        self.mean = np.zeros(0, dtype=np.float64)
+        self.m2 = np.zeros(0, dtype=np.float64)
         self.zero = np.zeros(0, dtype=np.float64)
         self.min = np.full(0, np.inf, dtype=np.float64)
         self.max = np.full(0, -np.inf, dtype=np.float64)
@@ -555,14 +576,18 @@ class _DimAccumulator:
     def _ensure(self, size: int) -> None:
         if size <= self.count.size:
             return
+        if size > _MAX_SPARSE_STATS_DIMENSION:
+            # The profiling loop normally disables dimension metrics before
+            # reaching this guard.  Keep the accumulator itself safe as well.
+            raise ValueError("sparse dimension exceeds per-dimension statistics limit")
         new_size = min(
             max(size, max(16, self.count.size * 2)), _MAX_SPARSE_STATS_DIMENSION
         )
         pad = new_size - self.count.size
         self.count = np.concatenate([self.count, np.zeros(pad)])
         self.invalid = np.concatenate([self.invalid, np.zeros(pad)])
-        self.sum = np.concatenate([self.sum, np.zeros(pad)])
-        self.sumsq = np.concatenate([self.sumsq, np.zeros(pad)])
+        self.mean = np.concatenate([self.mean, np.zeros(pad)])
+        self.m2 = np.concatenate([self.m2, np.zeros(pad)])
         self.zero = np.concatenate([self.zero, np.zeros(pad)])
         self.min = np.concatenate([self.min, np.full(pad, np.inf)])
         self.max = np.concatenate([self.max, np.full(pad, -np.inf)])
@@ -579,9 +604,26 @@ class _DimAccumulator:
             return
         index = all_indices[finite]
         vals = values[finite].astype(np.float64, copy=False)
-        np.add.at(self.count, index, 1.0)
-        np.add.at(self.sum, index, vals)
-        np.add.at(self.sumsq, index, vals * vals)
+
+        # Merge one stable per-record batch for each feature.  np.unique also
+        # makes repeated feature IDs deterministic without scalar Welford loops.
+        unique, inverse = np.unique(index, return_inverse=True)
+        group_count = np.bincount(inverse).astype(np.float64)
+        group_sum = np.bincount(inverse, weights=vals)
+        group_mean = group_sum / group_count
+        centered = vals - group_mean[inverse]
+        group_m2 = np.bincount(inverse, weights=centered * centered)
+        old_count = self.count[unique]
+        old_mean = self.mean[unique]
+        combined_count = old_count + group_count
+        delta = group_mean - old_mean
+        weight = group_count / combined_count
+        self.mean[unique] = old_mean + delta * weight
+        self.m2[unique] = (
+            self.m2[unique] + group_m2 + delta * delta * old_count * weight
+        )
+        self.count[unique] = combined_count
+
         zero = vals == 0
         if np.any(zero):
             np.add.at(self.zero, index[zero], 1.0)
@@ -589,25 +631,30 @@ class _DimAccumulator:
         np.maximum.at(self.max, index, vals)
 
     def arrays(self, vector_count: int):
-        """Include implicit zeros while excluding stored invalid values."""
+        """Merge implicit zeros stably while excluding stored invalid values."""
         dim = self.dim
         finite_count = self.count[:dim]
         invalid_count = self.invalid[:dim]
         count = float(vector_count) - invalid_count
-        zero = count - (finite_count - self.zero[:dim])
-        implicit_zero = (float(vector_count) - finite_count - invalid_count) > 0
+        implicit_count = np.maximum(count - finite_count, 0.0)
+        mean = self.mean[:dim].copy()
+        m2 = self.m2[:dim].copy()
+        with np.errstate(divide="ignore", invalid="ignore"):
+            mean_weight = np.where(count > 0, finite_count / count, 0.0)
+            zero_correction = np.where(
+                count > 0,
+                mean * mean * finite_count * (implicit_count / count),
+                0.0,
+            )
+        mean *= mean_weight
+        m2 += zero_correction
+        zero = self.zero[:dim] + implicit_count
+        implicit_zero = implicit_count > 0
         minimum = self.min[:dim].copy()
         maximum = self.max[:dim].copy()
         minimum[implicit_zero] = np.minimum(minimum[implicit_zero], 0.0)
         maximum[implicit_zero] = np.maximum(maximum[implicit_zero], 0.0)
-        return (
-            count,
-            self.sum[:dim],
-            self.sumsq[:dim],
-            zero,
-            minimum,
-            maximum,
-        )
+        return count, mean, m2, zero, minimum, maximum
 
 
 # ---------------------------------------------------------------------------
@@ -711,17 +758,18 @@ def _invalid_metric(
 
 def _dimensions_metric(
     count: np.ndarray,
-    total: np.ndarray,
-    total_sq: np.ndarray,
+    mean_value: np.ndarray,
+    m2: np.ndarray,
     zero: np.ndarray,
     minimum: np.ndarray,
     maximum: np.ndarray,
     max_points: int,
     warnings: List[str],
 ) -> Dict[str, Any]:
+    mean = np.asarray(mean_value, dtype=np.float64).copy()
+    mean[count <= 0] = np.nan
     with np.errstate(divide="ignore", invalid="ignore"):
-        mean = np.where(count > 0, total / count, np.nan)
-        variance = np.where(count > 0, total_sq / count - mean * mean, np.nan)
+        variance = np.where(count > 0, m2 / count, np.nan)
         std = np.sqrt(np.maximum(variance, 0))
         zero_ratio = np.where(count > 0, zero / count, np.nan)
     minimum = np.where(np.isfinite(minimum), minimum, np.nan)
@@ -1206,6 +1254,10 @@ def _dense_euclidean(matrix: np.ndarray) -> np.ndarray:
     )
     scale = squared_norms[:, None] + squared_norms[None, :]
     unstable = (scale > 0) & (squared <= _EUCLIDEAN_GRAM_REL_TOL * scale)
+    # A zero self-distance always satisfies the relative test.  It needs no
+    # correction and must not send every ordinary row through the O(M*D)
+    # direct-difference fallback.
+    np.fill_diagonal(unstable, False)
     if np.any(unstable):
         for row in np.unique(np.nonzero(unstable)[0]):
             difference = matrix[row] - matrix

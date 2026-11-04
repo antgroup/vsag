@@ -182,3 +182,23 @@ def test_downsampled_points_labelled_with_source_dimension_ranges(tmp_path):
     assert "dimensions 0-1" in text
     assert "dimensions 2-3" in text
 
+
+def test_downsampled_points_use_exact_nonuniform_source_ranges(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "nonuniform_buckets.hdf5"
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["distance"] = "euclidean"
+        handle.create_dataset(
+            "train", data=np.arange(10, dtype=np.float32).reshape(2, 5)
+        )
+    report = profile_dataset(
+        str(path), sample_size=2, pairwise_sample_size=2, max_dimension_points=2
+    )
+    text = render_html(report)
+    assert "dimensions 0-1" in text
+    assert "dimensions 2-4" in text
+    assert "dimensions 0-2" not in text
+    assert "dimensions 3-4" not in text
+

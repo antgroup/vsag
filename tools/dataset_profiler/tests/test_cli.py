@@ -132,3 +132,4 @@ def test_help_mentions_key_flags():
     text = parser.format_help()
     for flag in ("--seed", "--sample-size", "--pairwise-sample-size", "--ai", "--out-html"):
         assert flag in text
+    assert "omitted when --out-json is given without --out-html" in " ".join(text.split())

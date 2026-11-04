@@ -575,14 +575,20 @@ def _chart_line(
         return '<p class="muted">Not enough per-dimension points for %s.</p>' % _e(title)
     pairs = _thin(pairs, _MAX_SVG_POINTS)
     downsampled = bool(data.get("downsampled"))
-    bucket_size = max(1, int(data.get("bucket_size") or 1))
     source_length = int(data.get("source_length") or len(values))
+    # Match stats.downsample's integer-linspace partition exactly.  A single
+    # ceiling bucket size is wrong when source_length is not divisible by the
+    # number of output points.
+    boundaries = [
+        (position * source_length) // len(values)
+        for position in range(len(values) + 1)
+    ]
 
     def source_range(index: int):
         if not downsampled:
             return index, index
-        start = index * bucket_size
-        end = min(start + bucket_size, source_length) - 1
+        start = boundaries[index]
+        end = boundaries[index + 1] - 1
         return start, max(start, end)
 
     def x_position(index: int) -> float:

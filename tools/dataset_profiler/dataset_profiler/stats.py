@@ -78,11 +78,24 @@ def histogram(values: Iterable[float], bins: int = HISTOGRAM_BINS) -> Dict[str, 
     array = array[np.isfinite(array)]
     if array.size == 0:
         return {"bins": [], "counts": [], "bin_count": 0}
-    counts, edges = np.histogram(array, bins=int(bins))
+    bin_count = int(bins)
+    if np.all(array == array[0]):
+        # NumPy's automatic constant-range padding is +/-0.5, which rounds
+        # away at large magnitudes.  Supply a scale-aware representable range.
+        value = float(array[0])
+        padding = max(abs(value) * 1e-3, math.ulp(value) * 4.0, 0.5)
+        lower = value - padding
+        upper = value + padding
+        if not (math.isfinite(lower) and math.isfinite(upper) and lower < upper):
+            lower = float(np.nextafter(value, -np.inf))
+            upper = float(np.nextafter(value, np.inf))
+        counts, edges = np.histogram(array, bins=bin_count, range=(lower, upper))
+    else:
+        counts, edges = np.histogram(array, bins=bin_count)
     return {
         "bins": [as_finite_float(edge) for edge in edges],
         "counts": [int(count) for count in counts],
-        "bin_count": int(bins),
+        "bin_count": bin_count,
     }
 
 

@@ -26,7 +26,9 @@ from dataset_profiler.profiler import (
     _DENSE_BLOCK_BYTES,
     _DENSE_BLOCK_BYTES_PER_VALUE,
     _DENSE_BLOCK_MAX_ROWS,
+    _DimAccumulator,
     _dense_block_rows,
+    _dense_euclidean,
     _mean_pairwise_cosine,
     _outliers_metric,
     profile_dataset,
@@ -397,4 +399,104 @@ def test_mean_pairwise_cosine_matches_explicit_pairs():
     expected = (1.0 + -1.0 + 0.0 + -1.0 + 0.0 + 0.0) / 6.0
     assert _mean_pairwise_cosine(matrix) == pytest.approx(expected)
     assert _mean_pairwise_cosine(np.ones((1, 2))) is None
+
+
+def test_sparse_implicit_zeros_still_exclude_invalid_entries(tmp_path):
+    path = tmp_path / "implicit_zeros_invalid.hdf5"
+    records = [
+        (np.array([0], dtype=np.uint32), np.array([2], dtype=np.float32)),
+        (np.array([0], dtype=np.uint32), np.array([np.nan], dtype=np.float32)),
+        (np.array([1], dtype=np.uint32), np.array([4], dtype=np.float32)),
+    ]
+    _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=3, pairwise_sample_size=3)
+    per_dimension = report["metrics"]["dimensions"]["per_dimension"]
+    assert per_dimension["mean"]["values"][0] == 1.0
+    assert per_dimension["std"]["values"][0] == 1.0
+    assert per_dimension["min"]["values"][0] == 0.0
+    assert per_dimension["max"]["values"][0] == 2.0
+    assert per_dimension["zero_ratio"]["values"][0] == 0.5
+    assert report["metrics"]["invalid_values"]["invalid_values"] == 1
+
+
+def test_sparse_accumulator_rejects_id_driven_oversized_allocation():
+    accumulator = _DimAccumulator()
+    with pytest.raises(ValueError, match="exceeds per-dimension statistics limit"):
+        accumulator._ensure(2**31 + 1)
+    assert accumulator.count.size == 0
+
+
+def test_zero_robust_spread_detects_deviations_on_both_sides():
+    norms = np.ones(101, dtype=np.float64)
+    norms[0] = 0.0
+    norms[-1] = 1000.0
+    result = _outliers_metric(norms)
+    assert result["outlier_count"] == 2
+    assert result["method"] == "median fallback (MAD and IQR are zero)"
+
+
+def test_sparse_ip_near_duplicates_use_euclidean_distance(tmp_path):
+    path = tmp_path / "sparse_ip_duplicates.hdf5"
+    records = [
+        (np.array([0], dtype=np.uint32), np.array([0.5], dtype=np.float32)),
+        (np.array([0], dtype=np.uint32), np.array([0.5], dtype=np.float32)),
+        (np.array([0], dtype=np.uint32), np.array([2], dtype=np.float32)),
+        (
+            np.array([0, 1], dtype=np.uint32),
+            np.array([2, 100], dtype=np.float32),
+        ),
+    ]
+    _write_sparse(path, records, metric="ip")
+    report = profile_dataset(str(path), sample_size=4, pairwise_sample_size=4)
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert near["metric"] == "euclidean"
+    assert near["median_pairwise_distance"] > 0
+    assert near["near_duplicate_pairs"] == 1
+
+
+def test_large_constant_norm_histogram_has_representable_edges(tmp_path):
+    path = tmp_path / "constant_large_norm.hdf5"
+    value = float(2**60)
+    _write_dense(path, [[value, 0]])
+    report = profile_dataset(str(path), sample_size=1, pairwise_sample_size=1)
+    histogram = report["metrics"]["norms"]["histogram"]
+    assert sum(histogram["counts"]) == 1
+    assert histogram["bins"][0] < value < histogram["bins"][-1]
+
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_dimension_variance_is_stable_at_large_offsets(tmp_path, vector_type):
+    path = tmp_path / ("stable_variance_" + vector_type + ".hdf5")
+    values = np.full(256, 2**30, dtype=np.float32)
+    values[-1] += 128
+    if vector_type == "dense":
+        _write_dense(path, values.reshape(-1, 1))
+    else:
+        records = [
+            (np.array([0], dtype=np.uint32), np.array([value], dtype=np.float32))
+            for value in values
+        ]
+        _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=8, pairwise_sample_size=4)
+    per_dimension = report["metrics"]["dimensions"]["per_dimension"]
+    assert per_dimension["mean"]["values"] == [2**30 + 0.5]
+    assert per_dimension["std"]["values"][0] == pytest.approx(math.sqrt(63.75))
+
+
+def test_dense_euclidean_skips_direct_fallback_for_self_distances(monkeypatch):
+    real_einsum = np.einsum
+    row_wise_calls = 0
+
+    def tracking_einsum(subscripts, *operands, **kwargs):
+        nonlocal row_wise_calls
+        if subscripts == "ij,ij->i":
+            row_wise_calls += 1
+        return real_einsum(subscripts, *operands, **kwargs)
+
+    monkeypatch.setattr(np, "einsum", tracking_einsum)
+    distances = _dense_euclidean(np.eye(4, dtype=np.float64))
+    assert row_wise_calls == 1  # only the initial squared-norm reduction
+    expected = np.full((4, 4), np.sqrt(2.0))
+    np.fill_diagonal(expected, 0.0)
+    np.testing.assert_allclose(distances, expected)
 
