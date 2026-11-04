@@ -157,7 +157,8 @@ auto loaded = vsag::Index::Load(stream, load_parameters).value();
 有四个环节在设备上执行：聚类内部的 k-means++ 播种、最近中心赋值、中心累加，
 以及之后把底库向量分配到桶。`ivf_train_type: "random"` 不做聚类，因此只有
 最后一项对它生效。`ivf_train_type: "balanced_kmeans"` 的聚类以及 `Build` 的均衡
-分桶都在主机上执行，因此这几项中只有之后 `Add` 的向量的分桶对它生效。
+分桶都在主机上执行，因此这几项中只有最近桶分配对它生效：用于之后 `Add` 的向量，以及
+相对桶中心编码时的训练向量。
 
 这四个设置只作用于 `ivf` 分区策略。在 `partition_strategy_type: "gno_imi"` 下
 它们会被接受但忽略，与表中其他按策略生效的参数一致，该构建全程留在主机。
