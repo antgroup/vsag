@@ -1,0 +1,25 @@
+name: Refresh Daily execution window
+description: Keep immutable source/date selection while refreshing the current retry attempt clock.
+outputs:
+  remaining_minutes:
+    description: Remaining whole minutes before the fixed job/attempt cutoff
+    value: ${{ steps.clock.outputs.remaining_minutes }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@v7
+      with:
+        retries: 3
+        script: |
+          const run = await github.rest.actions.getWorkflowRun({...context.repo, run_id: context.runId});
+          const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun,
+            {...context.repo, run_id: context.runId, filter: 'latest', per_page: 100});
+          const current = jobs.filter(job => job.status === 'in_progress' && job.runner_name === process.env.RUNNER_NAME);
+          if (current.length !== 1 || !current[0].started_at) throw new Error('Cannot identify the current job start');
+          require('fs').writeFileSync('daily-context/attempt-start.json', JSON.stringify({
+            started_at: run.data.run_started_at, source_sha: run.data.head_sha,
+            attempt: run.data.run_attempt, job_started_at: current[0].started_at, job_id: current[0].id
+          }));
+    - id: clock
+      shell: bash
+      run: python3 scripts/testing/daily_window.py --context daily-context/context.json --attempt daily-context/attempt-start.json

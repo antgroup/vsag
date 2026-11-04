@@ -51,5 +51,12 @@
     "Pyramid dense native distance contract": "pyramid",
     "gh#369": "other",
     "gh#1974": "other"
+  },
+  "architecture_policy": {
+    "arm_extension_strata": 10,
+    "aspirational_expansion_weights": {
+      "x86": 9,
+      "arm": 1
+    }
   }
 }

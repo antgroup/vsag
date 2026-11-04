@@ -38,7 +38,12 @@ class AsanArtifactWorkflowTest(unittest.TestCase):
                 self.assertIn(f"uses: {DOWNLOAD_ACTION}", job)
                 self.assertLess(job.index("name: Download Test"), job.index("name: Validate Test Artifact"))
                 self.assertLess(job.index("name: Validate Test Artifact"), job.index("name: Do "))
-                self.assertIn("name: test_aarch64-${{ github.run_id }}", job)
+                if name == "platforms-test-example-aarch64":
+                    self.assertIn("inputs.artifact-name || format('test_aarch64-{0}', github.run_id)", job)
+                    action = (ROOT / ".github/actions/asan-build-and-test-test-example-aarch64/action.yml").read_text()
+                    self.assertIn("artifact-name:\n    description: Optional caller-provided build artifact\n    required: false\n    default: ''", action)
+                else:
+                    self.assertIn("name: test_aarch64-${{ github.run_id }}", job)
                 self.assertIn("path: ./build", job)
 
     def check_artifact(self, files, expected_success):
