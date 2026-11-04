@@ -22,8 +22,9 @@ import math
 import numpy as np
 import pytest
 
-from dataset_profiler.profiler import profile_dataset
+from dataset_profiler.profiler import _outliers_metric, profile_dataset
 from dataset_profiler.report import DEFINITIONS
+from dataset_profiler.sampling import make_rng, sample_indices
 from dataset_profiler.stats import dump_json
 
 EXPECTED_DENSE_METRICS = set(DEFINITIONS)
@@ -36,6 +37,30 @@ REQUIRED_TOP_LEVEL_KEYS = {
     "metrics",
     "warnings",
 }
+
+
+def _write_dense(path, matrix, metric="euclidean"):
+    import h5py
+
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["distance"] = metric
+        handle.create_dataset("train", data=np.asarray(matrix, dtype=np.float32))
+
+
+def _write_sparse(path, records, metric="ip"):
+    import h5py
+
+    from conftest import encode_sparse_record
+
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["type"] = "sparse"
+        handle.attrs["distance"] = metric
+        stream = b"".join(
+            encode_sparse_record(ids, values) for ids, values in records
+        )
+        handle.create_dataset(
+            "train", data=np.frombuffer(stream, dtype=np.int8).copy()
+        )
 
 
 def test_dense_report_contains_all_documented_metrics(dense_path):
@@ -212,3 +237,103 @@ def test_missing_file_rejected(tmp_path):
 def test_split_selection(dense_path):
     report = profile_dataset(str(dense_path), split="test", sample_size=4, pairwise_sample_size=4)
     assert report["dataset"]["count"] == 6
+
+
+def test_nearest_neighbor_uses_distances_not_coordinates(tmp_path):
+    path = tmp_path / "nearest.hdf5"
+    _write_dense(path, [[0, 0], [3, 4], [6, 8]])
+    report = profile_dataset(
+        str(path), metric="euclidean", sample_size=3, pairwise_sample_size=3
+    )
+    stats = report["metrics"]["nearest_neighbor_distances"]["stats"]
+    assert stats["count"] == 3
+    assert stats["min"] == 5.0
+    assert stats["max"] == 5.0
+    assert stats["mean"] == 5.0
+
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_pairwise_subset_is_seeded_random_subset(tmp_path, vector_type):
+    seed = 17
+    rng = make_rng(seed)
+    expected_sample = sample_indices(10, 6, rng)
+    expected_positions = np.sort(rng.permutation(6)[:2])
+    assert expected_positions.tolist() != [0, 1]
+    expected_rows = expected_sample[expected_positions]
+    expected_distance = float(abs(2 ** expected_rows[0] - 2 ** expected_rows[1]))
+
+    path = tmp_path / (vector_type + ".hdf5")
+    values = (2.0 ** np.arange(10)).astype(np.float32)
+    if vector_type == "dense":
+        _write_dense(path, values.reshape(-1, 1))
+    else:
+        records = [
+            (np.array([0], dtype=np.uint32), np.array([value], dtype=np.float32))
+            for value in values
+        ]
+        _write_sparse(path, records, metric="euclidean")
+    report = profile_dataset(
+        str(path),
+        metric="euclidean",
+        seed=seed,
+        sample_size=6,
+        pairwise_sample_size=2,
+    )
+    stats = report["metrics"]["pairwise_distances"]["stats"]
+    assert stats["count"] == 1
+    assert stats["min"] == expected_distance
+
+
+def test_sparse_dimensions_include_implicit_zeros(tmp_path):
+    path = tmp_path / "implicit_zeros.hdf5"
+    records = [
+        (np.array([0], dtype=np.uint32), np.array([2], dtype=np.float32)),
+        (np.array([1], dtype=np.uint32), np.array([4], dtype=np.float32)),
+    ]
+    _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    per_dimension = report["metrics"]["dimensions"]["per_dimension"]
+    assert per_dimension["mean"]["values"] == [1.0, 2.0]
+    assert per_dimension["std"]["values"] == [1.0, 2.0]
+    assert per_dimension["min"]["values"] == [0.0, 0.0]
+    assert per_dimension["max"]["values"] == [2.0, 4.0]
+    assert per_dimension["zero_ratio"]["values"] == [0.5, 0.5]
+
+
+def test_sparse_huge_feature_id_skips_only_dimension_arrays(tmp_path):
+    path = tmp_path / "huge_feature_id.hdf5"
+    records = [
+        (np.array([0], dtype=np.uint32), np.array([1], dtype=np.float32)),
+        (np.array([2**31], dtype=np.uint32), np.array([2], dtype=np.float32)),
+    ]
+    _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    assert report["dataset"]["dim"] == 2**31 + 1
+    assert report["metrics"]["dimensions"]["available"] is False
+    assert "exceeds the per-dimension statistics limit" in report["metrics"]["dimensions"]["reason"]
+    assert report["metrics"]["norms"]["count"] == 2
+    assert report["metrics"]["sparsity"]["cells"] == 2 * (2**31 + 1)
+    assert any("other metrics are still reported" in item for item in report["warnings"])
+
+
+def test_zero_mad_and_iqr_still_detect_extreme_norms():
+    norms = np.ones(100, dtype=np.float64)
+    norms[-1] = 100.0
+    result = _outliers_metric(norms)
+    assert result["outlier_count"] == 1
+    assert result["method"] == "median fallback (MAD and IQR are zero)"
+    identical = _outliers_metric(np.ones(100, dtype=np.float64))
+    assert identical["outlier_count"] == 0
+    assert identical["method"].startswith("all norms identical")
+
+
+def test_ip_near_duplicates_use_nonnegative_duplicate_distance(tmp_path):
+    path = tmp_path / "ip_duplicates.hdf5"
+    _write_dense(path, [[2, 0], [2, 0], [100, 0]], metric="ip")
+    report = profile_dataset(
+        str(path), metric="ip", sample_size=3, pairwise_sample_size=3
+    )
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert near["metric"] == "euclidean"
+    assert near["pair_count"] == 3
+    assert near["near_duplicate_pairs"] == 1

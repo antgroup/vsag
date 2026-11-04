@@ -36,7 +36,9 @@ def as_finite_float(value: Any) -> Optional[float]:
         return None
     if not math.isfinite(number):
         return None
-    return round(number, 10)
+    # Preserve small finite magnitudes: fixed-decimal rounding would serialize
+    # values such as 5e-11 as zero in JSON, HTML, and AI payloads.
+    return number
 
 
 def summarize(values: Iterable[float]) -> Dict[str, Any]:

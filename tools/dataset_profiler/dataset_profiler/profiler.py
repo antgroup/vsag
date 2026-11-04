@@ -48,6 +48,7 @@ _DEFAULT_DENSE_METRIC = "euclidean"
 _DEFAULT_SPARSE_METRIC = "ip"
 _MAX_ANISOTROPY_DIM = 50000
 _MAX_ANISOTROPY_BYTES = 256 * 1024 * 1024
+_MAX_SPARSE_STATS_DIMENSION = 10_000_000
 
 
 @dataclass
@@ -163,8 +164,8 @@ def profile_dataset(
             "effective_pairwise_sample_size": effective_pairwise,
             "sampling_method": SAMPLING_METHOD,
             "pairwise_sampling_method": (
-                "first effective_pairwise_sample_size rows of the seeded random "
-                "sample (which is itself uniformly random)"
+                "uniformly random subset selected by a seeded permutation of the "
+                "sampled rows"
             ),
             "metric": metric_name,
             "clusters": int(config.clusters),
@@ -228,6 +229,9 @@ def _profile_dense(
     dim = int(metadata.dim or 0)
     sample_idx = sample_indices(count, min(config.sample_size, count), rng)
     pair_n = min(config.pairwise_sample_size, sample_idx.size)
+    # Sorting only restores row order after selection; the subset itself comes
+    # from a seeded permutation and is not biased toward low dataset indices.
+    pair_positions = np.sort(rng.permutation(sample_idx.size)[:pair_n])
 
     dim_count = np.zeros(dim, dtype=np.float64)
     dim_sum = np.zeros(dim, dtype=np.float64)
@@ -284,8 +288,16 @@ def _profile_dense(
     # Invalid (NaN/Inf) entries are excluded from numeric summaries and treated
     # as zero, matching the semantics of the norms metric.
     sample_matrix = np.where(np.isfinite(sample_matrix), sample_matrix, 0.0)
-    pair_matrix = sample_matrix[:pair_n]
-    pair_values = _upper_triangle(_pairwise_dense(pair_matrix, metric))
+    pair_matrix = sample_matrix[pair_positions]
+    pair_distances = _pairwise_dense(pair_matrix, metric)
+    pair_values = _upper_triangle(pair_distances)
+    duplicate_pair_values = pair_values
+    duplicate_metric = metric
+    if metric == "ip":
+        # IP distance (1 - dot) is negative for unnormalized duplicates and is
+        # therefore unsuitable for a non-negative near-duplicate threshold.
+        duplicate_pair_values = _upper_triangle(_pairwise_dense(pair_matrix, "euclidean"))
+        duplicate_metric = "euclidean"
 
     metrics: Dict[str, Any] = {
         "invalid_values": _invalid_metric(
@@ -307,12 +319,16 @@ def _profile_dense(
             total_values, zero_values, all_zero_vectors, count
         ),
         "duplicates": _duplicates_metric(
-            hashes, count, pair_values, config.near_duplicate_relative_epsilon
+            hashes,
+            count,
+            duplicate_pair_values,
+            config.near_duplicate_relative_epsilon,
+            duplicate_metric,
         ),
     }
     metrics.update(
         _sampled_metrics(
-            pair_matrix=pair_matrix,
+            pair_matrix=pair_distances,
             sample_matrix=sample_matrix,
             pair_values=pair_values,
             metric=metric,
@@ -349,9 +365,13 @@ def _profile_sparse(
         raise ValueError("sparse dataset '/%s' is empty" % metadata.split)
     sample_idx = sample_indices(count, min(config.sample_size, count), rng)
     pair_n = min(config.pairwise_sample_size, sample_idx.size)
+    pair_positions = np.sort(rng.permutation(sample_idx.size)[:pair_n])
     sample_set = set(int(index) for index in sample_idx)
+    pair_sample_set = set(int(sample_idx[position]) for position in pair_positions)
 
-    accumulator = _DimAccumulator()
+    accumulator: Optional[_DimAccumulator] = _DimAccumulator()
+    dimension_stats_reason: Optional[str] = None
+    dim = 0
     hashes: Counter = Counter()
     norms_parts: List[np.ndarray] = []
     nnz_parts: List[np.ndarray] = []
@@ -385,7 +405,19 @@ def _profile_sparse(
         nnz_parts.append(np.array([length], dtype=np.int64))
         if norms == 0.0:
             all_zero_vectors += 1
-        accumulator.add(ids, values, finite)
+        if ids.size:
+            dim = max(dim, int(ids[-1]) + 1)
+        if dim > _MAX_SPARSE_STATS_DIMENSION and accumulator is not None:
+            dimension_stats_reason = (
+                "sparse dimensionality %d exceeds the per-dimension statistics "
+                "limit of %d; other metrics are still reported"
+                % (dim, _MAX_SPARSE_STATS_DIMENSION)
+            )
+            warnings.append(dimension_stats_reason)
+            # Release the bounded accumulators before continuing the full pass.
+            accumulator = None
+        if accumulator is not None:
+            accumulator.add(ids, values, finite)
         hashes[_digest(ids.astype("<u4", copy=False).tobytes() + values.astype("<f4", copy=False).tobytes())] += 1
         if index in sample_set:
             sample_records.append((index, ids.copy(), values.copy()))
@@ -393,8 +425,9 @@ def _profile_sparse(
     if len(sample_records) != len(sample_set):
         raise ValueError("sparse sampling failed: not all sampled records were found")
     sample_records.sort(key=lambda item: item[0])
-    pair_records = sample_records[:pair_n]
-    dim = accumulator.dim
+    pair_records = [
+        record for record in sample_records if record[0] in pair_sample_set
+    ]
     metadata.dim = dim
     if dim == 0:
         warnings.append(
@@ -402,21 +435,11 @@ def _profile_sparse(
             "per-dimension statistics are unavailable"
         )
 
-    dim_count, dim_sum, dim_sumsq, dim_zero, dim_min, dim_max = accumulator.arrays()
-    norms = np.concatenate(norms_parts) if norms_parts else np.empty(0)
-    nnz = np.concatenate(nnz_parts) if nnz_parts else np.empty(0, dtype=np.int64)
-
-    pair_matrix = _pairwise_sparse(pair_records, metric)
-    pair_values = _upper_triangle(pair_matrix)
-    sample_matrix = _sparse_sample_to_dense(sample_records, dim)
-
-    metrics: Dict[str, Any] = {
-        "invalid_values": _invalid_metric(
-            invalid_values, vectors_with_invalid, count * dim if dim else None, count
-        ),
-        "norms": _norms_metric(norms),
-        "outliers": _outliers_metric(norms),
-        "dimensions": _dimensions_metric(
+    if accumulator is not None:
+        dim_count, dim_sum, dim_sumsq, dim_zero, dim_min, dim_max = (
+            accumulator.arrays(count)
+        )
+        dimensions = _dimensions_metric(
             dim_count,
             dim_sum,
             dim_sumsq,
@@ -425,7 +448,37 @@ def _profile_sparse(
             dim_max,
             config.max_dimension_points,
             warnings,
+        )
+    else:
+        dimensions = metric_entry(
+            DEFINITIONS["dimensions"],
+            "full",
+            None,
+            available=False,
+            reason=dimension_stats_reason,
+            dim=int(dim),
+        )
+    norms = np.concatenate(norms_parts) if norms_parts else np.empty(0)
+    nnz = np.concatenate(nnz_parts) if nnz_parts else np.empty(0, dtype=np.int64)
+
+    pair_matrix = _pairwise_sparse(pair_records, metric)
+    pair_values = _upper_triangle(pair_matrix)
+    duplicate_pair_values = pair_values
+    duplicate_metric = metric
+    if metric == "ip":
+        duplicate_pair_values = _upper_triangle(
+            _pairwise_sparse(pair_records, "euclidean")
+        )
+        duplicate_metric = "euclidean"
+    sample_matrix = _sparse_sample_to_dense(sample_records, dim)
+
+    metrics: Dict[str, Any] = {
+        "invalid_values": _invalid_metric(
+            invalid_values, vectors_with_invalid, count * dim if dim else None, count
         ),
+        "norms": _norms_metric(norms),
+        "outliers": _outliers_metric(norms),
+        "dimensions": dimensions,
         "sparsity": _sparse_sparsity_metric(
             count,
             dim,
@@ -435,7 +488,11 @@ def _profile_sparse(
             all_zero_vectors,
         ),
         "duplicates": _duplicates_metric(
-            hashes, count, pair_values, config.near_duplicate_relative_epsilon
+            hashes,
+            count,
+            duplicate_pair_values,
+            config.near_duplicate_relative_epsilon,
+            duplicate_metric,
         ),
     }
     metrics.update(
@@ -454,11 +511,12 @@ def _profile_sparse(
 
 
 class _DimAccumulator:
-    """Growable per-dimension accumulators for streaming sparse data."""
+    """Bounded growable accumulators for streaming sparse per-dimension data."""
 
     def __init__(self) -> None:
         self._max_index = -1
         self.count = np.zeros(0, dtype=np.float64)
+        self.invalid = np.zeros(0, dtype=np.float64)
         self.sum = np.zeros(0, dtype=np.float64)
         self.sumsq = np.zeros(0, dtype=np.float64)
         self.zero = np.zeros(0, dtype=np.float64)
@@ -472,9 +530,12 @@ class _DimAccumulator:
     def _ensure(self, size: int) -> None:
         if size <= self.count.size:
             return
-        new_size = max(size, max(16, self.count.size * 2))
+        new_size = min(
+            max(size, max(16, self.count.size * 2)), _MAX_SPARSE_STATS_DIMENSION
+        )
         pad = new_size - self.count.size
         self.count = np.concatenate([self.count, np.zeros(pad)])
+        self.invalid = np.concatenate([self.invalid, np.zeros(pad)])
         self.sum = np.concatenate([self.sum, np.zeros(pad)])
         self.sumsq = np.concatenate([self.sumsq, np.zeros(pad)])
         self.zero = np.concatenate([self.zero, np.zeros(pad)])
@@ -486,9 +547,12 @@ class _DimAccumulator:
             return
         self._max_index = max(self._max_index, int(ids.max()))
         self._ensure(self._max_index + 1)
+        all_indices = ids.astype(np.int64, copy=False)
+        if not bool(finite.all()):
+            np.add.at(self.invalid, all_indices[~finite], 1.0)
         if not np.any(finite):
             return
-        index = ids[finite].astype(np.int64, copy=False)
+        index = all_indices[finite]
         vals = values[finite].astype(np.float64, copy=False)
         np.add.at(self.count, index, 1.0)
         np.add.at(self.sum, index, vals)
@@ -499,15 +563,25 @@ class _DimAccumulator:
         np.minimum.at(self.min, index, vals)
         np.maximum.at(self.max, index, vals)
 
-    def arrays(self):
+    def arrays(self, vector_count: int):
+        """Include implicit zeros while excluding stored invalid values."""
         dim = self.dim
+        finite_count = self.count[:dim]
+        invalid_count = self.invalid[:dim]
+        count = float(vector_count) - invalid_count
+        zero = count - (finite_count - self.zero[:dim])
+        implicit_zero = (float(vector_count) - finite_count - invalid_count) > 0
+        minimum = self.min[:dim].copy()
+        maximum = self.max[:dim].copy()
+        minimum[implicit_zero] = np.minimum(minimum[implicit_zero], 0.0)
+        maximum[implicit_zero] = np.maximum(maximum[implicit_zero], 0.0)
         return (
-            self.count[:dim],
+            count,
             self.sum[:dim],
             self.sumsq[:dim],
-            self.zero[:dim],
-            self.min[:dim],
-            self.max[:dim],
+            zero,
+            minimum,
+            maximum,
         )
 
 
@@ -558,9 +632,15 @@ def _outliers_metric(norms: np.ndarray) -> Dict[str, Any]:
             mask = (values < q1 - 3.0 * iqr) | (values > q3 + 3.0 * iqr)
             method = "IQR fallback (MAD is zero)"
             threshold = 3.0 * iqr
-        else:
+        elif np.all(values == median):
             mask = np.zeros(values.shape, dtype=bool)
             method = "all norms identical; no outlier can be distinguished"
+            threshold = 0.0
+        else:
+            # With a repeated central value, both robust spreads can be zero
+            # even though extreme values exist (for example 99 ones and 100).
+            mask = values != median
+            method = "median fallback (MAD and IQR are zero)"
             threshold = 0.0
     outlier_count = int(np.count_nonzero(mask))
     max_over_median = float(values.max() / median) if median > 0 else None
@@ -735,6 +815,7 @@ def _duplicates_metric(
     count: int,
     pair_values: np.ndarray,
     epsilon: float,
+    near_metric: str,
 ) -> Dict[str, Any]:
     duplicate_vectors = sum(value - 1 for value in hashes.values() if value > 1)
     duplicate_groups = sum(1 for value in hashes.values() if value > 1)
@@ -752,7 +833,7 @@ def _duplicates_metric(
         "duplicate_groups": int(duplicate_groups),
         "max_group_size": int(max_group),
     }
-    near = _near_duplicate_summary(pair_values, epsilon)
+    near = _near_duplicate_summary(pair_values, epsilon, near_metric)
     return metric_entry(
         DEFINITIONS["duplicates"],
         "mixed",
@@ -766,7 +847,9 @@ def _duplicates_metric(
     )
 
 
-def _near_duplicate_summary(pair_values: np.ndarray, epsilon: float) -> Dict[str, Any]:
+def _near_duplicate_summary(
+    pair_values: np.ndarray, epsilon: float, metric: str
+) -> Dict[str, Any]:
     if pair_values.size == 0:
         return {
             "available": False,
@@ -790,9 +873,10 @@ def _near_duplicate_summary(pair_values: np.ndarray, epsilon: float) -> Dict[str
     return {
         "available": True,
         "definition": (
-            "Sampled pairs whose distance is at most epsilon times the sampled "
-            "pairwise-distance median."
+            "Sampled pairs whose duplicate-detection distance is at most epsilon "
+            "times the sampled pairwise-distance median."
         ),
+        "metric": metric,
         "scope": "sample",
         "sample_size": int(_sample_size_from_pair_count(pair_values.size)),
         "pair_count": int(finite.size),

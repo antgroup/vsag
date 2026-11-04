@@ -300,12 +300,12 @@ class HDF5Dataset:
     ) -> Iterator[Tuple[int, np.ndarray, np.ndarray]]:
         dset = self._file[self.split]
         total_bytes = int(dset.shape[0])
-        buffer = b""
+        buffer = bytearray()
         index = 0
         position = 0
         while position < total_bytes:
             end = min(position + max_chunk_bytes, total_bytes)
-            buffer += bytes(np.asarray(dset[position:end]).tobytes())
+            buffer.extend(np.asarray(dset[position:end]).tobytes())
             position = end
             offset = 0
             while True:
@@ -313,13 +313,21 @@ class HDF5Dataset:
                     break
                 (length,) = _LEN_STRUCT.unpack_from(buffer, offset)
                 record_size = _LEN_SIZE + 8 * int(length)
+                record_start = position - len(buffer) + offset
+                remaining = total_bytes - record_start
+                if record_size > remaining:
+                    raise DatasetFormatError(
+                        "sparse record is truncated: len=%d requires %d byte(s), "
+                        "but only %d byte(s) remain"
+                        % (int(length), record_size, remaining)
+                    )
                 if offset + record_size > len(buffer):
                     break
                 ids, values, consumed = _decode_one_record(buffer, offset, record_size)
                 yield index, ids, values
                 index += 1
                 offset += consumed
-            buffer = buffer[offset:]
+            del buffer[:offset]
         if buffer:
             raise DatasetFormatError(
                 "sparse byte stream has %d trailing byte(s) that do not form a "

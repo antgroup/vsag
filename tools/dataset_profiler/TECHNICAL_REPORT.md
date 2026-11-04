@@ -18,7 +18,7 @@ never conflated.
 | `dimensions` (per-coordinate mean/std/min/max/zero-ratio + top lists) | full | Shows scale mismatch between coordinates (a warning sign for Euclidean indexes) and dimensions carrying no signal (candidates for pruning). |
 | `sparsity` | full | Exact-zero ratio for dense files; stored entries, non-zero counts per vector (`nnz`), and density for sparse files. Predicts SINDI-style sparse index behavior and compression headroom. |
 | `invalid_values` | full | NaN/Inf counts per dataset and per affected vector; indexes and quantizers silently degrade on invalid input. |
-| `duplicates` | full (exact) + sample (near) | Exact duplicates are byte-identical vectors (full coverage via hashing). Near-duplicates are a bounded indicator: sampled pairs closer than `epsilon x median(sampled pairwise distance)`. |
+| `duplicates` | full (exact) + sample (near) | Exact duplicates are byte-identical vectors (full coverage via hashing). Near-duplicates are a bounded indicator: sampled pairs closer than `epsilon x median(sampled duplicate-detection distance)`, using Euclidean distance for IP inputs to keep the threshold non-negative. |
 | `pairwise_distances` | sample | Distribution shape (median, spread, tails) informs distance-based thresholds and graph vs. IVF trade-offs. |
 | `nearest_neighbor_distances` | sample | Small NN-distance gaps relative to typical distances indicate hard recall problems for graph indexes. |
 | `outliers` | full | Robust modified z-score over norms (median/MAD, IQR fallback) — norm outliers distort shared quantization ranges. |
@@ -39,20 +39,23 @@ dataset, and bounded memory for streaming sparse files.
 * **Index selection**: Floyd's algorithm (`sample_indices`) draws `k` distinct
   indices from `[0, n)` with memory/time bounded by `k`, not `n` — important
   for sparse files without `*_offsets`, which are scanned streaming.
-* **Pairwise bound**: the pairwise matrix is built from the first
-  `min(pairwise_sample_size, sample_size, N)` rows of the (uniformly random)
-  sample. Taking a prefix of a uniform random sample is itself a uniform
-  random subsample, so no second index draw is needed. The report records
-  requested vs. effective sizes and the exact method string.
+* **Pairwise bound**: a seeded permutation of the uniformly random sample
+  selects `min(pairwise_sample_size, sample_size, N)` rows for the pairwise
+  matrix. Sorting the selected positions afterward restores deterministic row
+  order without biasing the subset toward low dataset indices. The report
+  records requested vs. effective sizes and the exact method string.
 * **Streaming**: dense files are read in row blocks (65536 rows); sparse files
   are decoded record-by-record from bounded byte chunks (default 64 MiB).
   Full-dataset statistics (norms, per-dimension aggregates, duplicates,
   invalid counts, sparsity) come from a single streaming pass; nothing beyond
   the block buffer, the bounded accumulators, and the bounded sample is ever
   materialized.
-* **Per-dimension arrays**: longer than `max_dimension_points` (default 1024)
-  series are bucket-averaged for storage, with `source_length`, `bucket_size`,
-  and `downsampled` flags recorded so charts stay honest.
+* **Per-dimension arrays**: sparse absent coordinates contribute implicit zeros
+  to per-dimension statistics. Sparse accumulation stops at dimensionality
+  10,000,000 (other metrics continue) to bound memory. Series longer than
+  `max_dimension_points` (default 1024) are bucket-averaged for storage, with
+  `source_length`, `bucket_size`, and `downsampled` flags recorded so charts
+  stay honest.
 * **Determinism**: two runs with the same file, configuration, sample sizes,
   and seed produce byte-identical JSON (`sort_keys`, fixed indent,
   `allow_nan=False`). The committed example reports under `examples/output/`
@@ -79,9 +82,10 @@ dataset, and bounded memory for streaming sparse files.
 * **Credentials**: the API key is read from the environment (`VSAG_AI_API_KEY`,
   fallback `OPENAI_API_KEY`, or a custom variable via `VSAG_AI_KEY_ENV`),
   sent only in the `Authorization` header over https (plaintext URLs are
-  rejected), and never written to reports. Error messages are redacted
-  (`sk-…` patterns and bearer tokens) and truncated; tests assert keys cannot
-  leak through provider failures.
+  rejected), and never written to reports. Redirects are rejected so the
+  bearer token cannot be forwarded to another endpoint. Error messages are
+  redacted (`sk-…` patterns and bearer tokens) and truncated; tests assert keys
+  cannot leak through provider failures.
 * **Self-contained HTML**: all CSS/JS/SVG are inlined; opening a report
   contacts no external service.
 

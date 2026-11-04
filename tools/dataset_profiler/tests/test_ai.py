@@ -229,6 +229,23 @@ def test_provider_from_env_resolution():
     assert fallback.base_url == "https://other.example/v1"
 
 
+def test_provider_rejects_redirects_before_forwarding_credentials():
+    provider = OpenAICompatibleProvider(
+        api_key="sk-supersecretvalue123", model="m", base_url="https://api.example.com/v1"
+    )
+    handler = next(
+        item for item in provider._opener.handlers if isinstance(item, ai._RejectRedirectHandler)
+    )
+    request = ai.urllib.request.Request(
+        "https://api.example.com/v1/chat/completions",
+        headers={"Authorization": "Bearer sk-supersecretvalue123"},
+    )
+    with pytest.raises(AIAnalysisError, match="redirects are disabled"):
+        handler.redirect_request(
+            request, None, 302, "Found", {}, "https://attacker.example/collect"
+        )
+
+
 def test_openai_request_body_excludes_credentials_and_vectors(monkeypatch, dense_path, dense_matrix):
     captured = {}
 
@@ -242,16 +259,16 @@ def test_openai_request_body_excludes_credentials_and_vectors(monkeypatch, dense
         def __exit__(self, *args):
             return False
 
-    def fake_urlopen(request, timeout=None):
+    def fake_open(request, timeout=None):
         captured["headers"] = dict(request.headers)
         captured["body"] = request.data.decode("utf-8")
         captured["url"] = request.full_url
         return FakeResponse()
 
-    monkeypatch.setattr(ai.urllib.request, "urlopen", fake_urlopen)
     provider = OpenAICompatibleProvider(
         api_key="sk-supersecretvalue123", model="m", base_url="https://api.example.com/v1"
     )
+    monkeypatch.setattr(provider._opener, "open", fake_open)
     report = _report(dense_path)
     block = analyze_report(report, provider=provider)
     assert block["status"] == "ok"

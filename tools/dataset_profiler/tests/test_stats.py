@@ -42,6 +42,12 @@ def test_as_finite_float_maps_non_finite_to_none():
     assert as_finite_float(np.float64(2.5)) == 2.5
 
 
+def test_small_finite_values_survive_serialization():
+    value = 5e-12
+    assert as_finite_float(value) == value
+    assert json.loads(dump_json({"value": value}))["value"] == value
+
+
 def test_summarize_reports_percentiles_and_skips_non_finite():
     stats = summarize([1.0, 2.0, 3.0, math.nan, math.inf, 4.0])
     assert stats["count"] == 4

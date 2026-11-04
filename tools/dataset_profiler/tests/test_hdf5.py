@@ -201,3 +201,29 @@ def test_read_sparse_rows_returns_requested_indices(sparse_path):
     with HDF5Dataset(str(sparse_path)) as dataset:
         rows = dataset.read_sparse_rows([2, 10, 13])
     assert set(rows) == {2, 10, 13}
+
+
+def test_sparse_without_offsets_handles_records_across_tiny_chunks(
+    sparse_no_offsets_path, sparse_records
+):
+    with HDF5Dataset(str(sparse_no_offsets_path)) as dataset:
+        records = list(dataset.iter_sparse_records(max_chunk_bytes=16))
+    assert len(records) == len(sparse_records)
+    for (_, ids, values), (ref_ids, ref_values) in zip(records, sparse_records):
+        np.testing.assert_array_equal(ids, ref_ids)
+        np.testing.assert_allclose(values, ref_values)
+
+
+def test_sparse_impossible_length_is_rejected_before_buffering(tmp_path):
+    import struct
+
+    import h5py
+
+    path = tmp_path / "impossible_length.hdf5"
+    stream = np.frombuffer(struct.pack("<I", 2**32 - 1), dtype=np.int8).copy()
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["type"] = "sparse"
+        handle.create_dataset("train", data=stream)
+    with HDF5Dataset(str(path)) as dataset:
+        with pytest.raises(DatasetFormatError, match="truncated"):
+            list(dataset.iter_sparse_records(max_chunk_bytes=16))

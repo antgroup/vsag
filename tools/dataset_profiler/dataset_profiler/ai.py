@@ -63,6 +63,15 @@ class AIAnalysisError(RuntimeError):
     """Raised for configuration, transport, or response-validation failures."""
 
 
+class _RejectRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so bearer credentials cannot reach another endpoint."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AIAnalysisError(
+            "AI provider redirects are disabled; refusing HTTP %s redirect" % code
+        )
+
+
 # ---------------------------------------------------------------------------
 # Prompt construction
 # ---------------------------------------------------------------------------
@@ -291,6 +300,7 @@ class OpenAICompatibleProvider:
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
+        self._opener = urllib.request.build_opener(_RejectRedirectHandler())
 
     def complete(self, prompt: str) -> str:
         request = urllib.request.Request(
@@ -310,7 +320,7 @@ class OpenAICompatibleProvider:
             method="POST",
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with self._opener.open(request, timeout=self.timeout) as response:
                 body = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             raise AIAnalysisError(

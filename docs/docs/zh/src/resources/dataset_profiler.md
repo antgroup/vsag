@@ -43,8 +43,8 @@ python -m dataset_profiler my_dataset.hdf5 \
     --out-json my_dataset.profile.json --out-html my_dataset.profile.html
 ```
 
-`examples/make_toy_datasets.py` 可端到端重新生成自带的演示数据与报告；`examples/output/`
-目录中保存了示例 JSON/HTML 文件。
+`tools/dataset_profiler/examples/make_toy_datasets.py` 可端到端重新生成自带的演示数据与报告；
+`tools/dataset_profiler/examples/output/` 目录中保存了示例 JSON/HTML 文件。
 
 ## 支持的数据格式
 
@@ -75,7 +75,7 @@ JSON 报告中每项指标都带有人类可读的 `definition`、`scope`（`ful
 | `sparsity` | 全量 | 零值/非零值计数与密度；稀疏文件还统计存储条目数与每向量非零元素（nnz）分布。 |
 | `invalid_values` | 全量 | NaN/Inf 的数量（按值与受影响向量）。非法值不参与数值统计，在其余计算中按 0 处理。 |
 | `outliers` | 全量 | 基于稳健修正 z 分数（median/MAD，IQR 兜底）的范数异常向量。 |
-| `duplicates` | 混合 | 精确重复（全量，字节级一致），外加基于采样配对近重复指示指标（`距离 ≤ epsilon × 采样距离中位数`）。 |
+| `duplicates` | 混合 | 精确重复（全量，字节级一致），外加基于采样配对的近重复指示指标（`距离 ≤ epsilon × 采样距离中位数`）；内积输入在该指标中使用非负的欧氏距离。 |
 | `pairwise_distances` | 采样 | 有界随机样本内两两距离的分布。 |
 | `nearest_neighbor_distances` | 采样 | 每个采样向量到样本内最近邻的距离。 |
 | `anisotropy` | 采样 | 中心化协方差特征值集中度：最大特征值占比、前 10 占比、有效秩、平均两两余弦相似度。 |
@@ -84,8 +84,8 @@ JSON 报告中每项指标都带有人类可读的 `definition`、`scope`（`ful
 ## 采样与可复现性
 
 - 所有采样均使用显式 `--seed`（默认 42）与独立 PCG64 生成器；采样方法字符串记录在报告中。
-- 样本下标用 Floyd 算法抽取（内存/时间受样本量约束，适配流式扫描），两两距离矩阵取该均匀样本
-  的前缀。
+- 样本下标用 Floyd 算法抽取（内存/时间受样本量约束，适配流式扫描）；再通过带种子的随机排列
+  选择两两距离子集，避免偏向低下标行。
 - `--sample-size` 约束分布与降维类计算，`--pairwise-sample-size` 约束距离矩阵；报告中同时记录
   请求值与生效值。
 - 相同输入、配置、采样规模与随机种子两次运行生成的 JSON 报告逐字节一致（键排序、固定缩进）。
@@ -97,7 +97,7 @@ JSON 报告中每项指标都带有人类可读的 `definition`、`scope`（`ful
 - 原始向量既不写入报告，也绝不发送给 AI 服务：AI 请求只包含聚合指标、采样配置、警告与有限的
   非敏感元数据。
 - AI 凭据只来自环境变量，仅通过 https 的 `Authorization` 头传输，且绝不写入报告、命令输出或
-  错误信息（错误消息会被脱敏）。
+  错误信息（错误消息会被脱敏）。工具拒绝 HTTP 重定向，避免凭据被转发到其他端点。
 
 ## 可选的 AI 辅助解读
 

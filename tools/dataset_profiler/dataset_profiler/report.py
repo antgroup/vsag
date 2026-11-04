@@ -42,8 +42,9 @@ DEFINITIONS: Dict[str, str] = {
     ),
     "duplicates": (
         "Exact duplicate detection by hashing each complete vector; near-duplicate "
-        "pairs are sampled pairs whose chosen distance is below a relative threshold "
-        "derived from the sampled pairwise-distance median."
+        "pairs use Euclidean distance for inner-product inputs and the chosen "
+        "distance otherwise, below a relative threshold derived from the sampled "
+        "duplicate-detection distance median."
     ),
     "pairwise_distances": (
         "Distribution of distances between distinct vectors in a bounded random "

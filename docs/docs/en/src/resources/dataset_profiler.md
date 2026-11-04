@@ -47,8 +47,9 @@ python -m dataset_profiler my_dataset.hdf5 \
     --out-json my_dataset.profile.json --out-html my_dataset.profile.html
 ```
 
-`examples/make_toy_datasets.py` regenerates the bundled demo datasets and reports end to end,
-and the `examples/output/` directory contains the committed example JSON/HTML files.
+`tools/dataset_profiler/examples/make_toy_datasets.py` regenerates the bundled demo datasets
+and reports end to end, and the `tools/dataset_profiler/examples/output/` directory contains
+the committed example JSON/HTML files.
 
 ## Supported input formats
 
@@ -82,7 +83,7 @@ section.
 | `sparsity` | full | Zero/non-zero counts and density; for sparse files also stored entries and nnz-per-vector distribution. |
 | `invalid_values` | full | NaN/Inf counts (values and affected vectors). Invalid entries are excluded from numeric summaries and treated as zero elsewhere. |
 | `outliers` | full | Robust norm outliers via modified z-score (median/MAD, IQR fallback). |
-| `duplicates` | mixed | Exact duplicates (full, byte-identical) plus a near-duplicate indicator over the sampled pairs (`distance ≤ epsilon × median sampled distance`). |
+| `duplicates` | mixed | Exact duplicates (full, byte-identical) plus a near-duplicate indicator over sampled pairs (`distance ≤ epsilon × median sampled distance`); inner-product inputs use non-negative Euclidean distance for this indicator. |
 | `pairwise_distances` | sample | Distance distribution between pairs of a bounded random sample. |
 | `nearest_neighbor_distances` | sample | Per sampled vector, distance to the nearest other sampled vector. |
 | `anisotropy` | sample | Centered-covariance eigenvalue concentration: top-1/top-10 share, effective rank, mean pairwise cosine. |
@@ -92,8 +93,8 @@ section.
 
 - All sampling uses an explicit `--seed` (default 42) with a dedicated PCG64 generator; the
   method string is recorded in the report.
-- Sample indices are drawn with Floyd's algorithm (bounded by the sample size, streaming-safe)
-  and the pairwise matrix uses a prefix of that uniform sample.
+- Sample indices are drawn with Floyd's algorithm (bounded by the sample size, streaming-safe);
+  a seeded permutation selects the pairwise subset without favoring low-index rows.
 - `--sample-size` bounds distribution/reduction work; `--pairwise-sample-size` bounds the
   distance matrix; both effective sizes are reported alongside the requested ones.
 - Two runs with identical input, configuration, sample sizes, and seed produce byte-identical
@@ -109,7 +110,7 @@ section.
   non-sensitive metadata.
 - AI credentials come only from environment variables, are transmitted exclusively over https
   in the `Authorization` header, and are never included in reports, command output, or error
-  messages (errors are redacted).
+  messages (errors are redacted). HTTP redirects are rejected so credentials cannot be forwarded.
 
 ## Optional AI-assisted interpretation
 
