@@ -21,6 +21,7 @@
 #include "algorithm/inner_index_interface.h"
 #include "impl/searcher/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
+#include "simd/fp32_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -77,13 +78,43 @@ public:
         return ClassifyDatas(datas, count, buckets_per_data, nullptr);
     }
 
-    /// Buckets of training vectors for codes that depend on their bucket (residuals),
-    /// assigned the way a Build assigns its vectors, so the codes are trained on
-    /// residuals like the ones they will encode. By default every vector goes to its
-    /// nearest bucket.
+    /// Buckets of training vectors for codes that depend on their bucket (residuals):
+    /// the same number per vector, `size() / count`, naming every bucket a Build or Add
+    /// can encode it against, so the codes are trained on residuals like the ones they
+    /// will encode. By default that is the nearest bucket, where both put a vector.
     virtual Vector<BucketIdType>
     ClassifyDatasForTrain(const void* datas, int64_t count) {
         return ClassifyDatas(datas, count, 1, nullptr);
+    }
+
+    /// Writes the residuals of `datas` to their buckets of ClassifyDatasForTrain, with one
+    /// row of `dim_` floats per different bucket of a vector, and returns the row count.
+    uint64_t
+    ResidualsForTrain(const float* datas, int64_t count, Vector<float>& residuals) {
+        residuals.clear();
+        if (count <= 0) {
+            return 0;
+        }
+        const auto buckets = this->ClassifyDatasForTrain(datas, count);
+        const auto vectors = static_cast<uint64_t>(count);
+        const auto buckets_per_data = buckets.size() / vectors;
+        const auto dim = static_cast<uint64_t>(dim_);
+        residuals.resize(buckets.size() * dim);
+        Vector<float> centroid(dim, allocator_);
+        uint64_t rows = 0;
+        for (uint64_t i = 0; i < vectors; ++i) {
+            const auto* own = buckets.data() + i * buckets_per_data;
+            for (uint64_t j = 0; j < buckets_per_data; ++j) {
+                if (j > 0 and own[j] == own[0]) {
+                    continue;
+                }
+                this->GetCentroid(own[j], centroid);
+                FP32Sub(datas + i * dim, centroid.data(), residuals.data() + rows * dim, dim);
+                ++rows;
+            }
+        }
+        residuals.resize(rows * dim);
+        return rows;
     }
 
     virtual void
