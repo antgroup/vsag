@@ -74,16 +74,15 @@ BinaryQuantizer::EncodeBatchImpl(const float* data, uint8_t* codes, uint64_t cou
 
 bool
 BinaryQuantizer::DecodeOneImpl(const uint8_t* codes, float* data) {
-    for (uint64_t d = 0; d < this->dim_; ++d) {
-        data[d] = static_cast<float>((codes[d / 8U] >> (d % 8U)) & 1U);
-    }
+    std::memcpy(static_cast<void*>(data), codes, this->code_size_);
     return true;
 }
 
 bool
 BinaryQuantizer::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
+    auto* output = reinterpret_cast<uint8_t*>(data);
     for (uint64_t i = 0; i < count; ++i) {
-        this->DecodeOneImpl(codes + i * this->code_size_, data + i * this->dim_);
+        std::memcpy(output + i * this->code_size_, codes + i * this->code_size_, this->code_size_);
     }
     return true;
 }

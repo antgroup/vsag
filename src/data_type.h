@@ -22,6 +22,7 @@ enum class DataTypes {
     DATA_TYPE_FP16 = 2,
     DATA_TYPE_BF16 = 3,
     DATA_TYPE_SPARSE = 4,
+    DATA_TYPE_BINARY = 5,
 };
 
 constexpr const char*
@@ -37,6 +38,8 @@ ToString(DataTypes t) noexcept {
             return DATATYPE_SPARSE;
         case DataTypes::DATA_TYPE_BF16:
             return DATATYPE_BFLOAT16;
+        case DataTypes::DATA_TYPE_BINARY:
+            return DATATYPE_BINARY;
     }
     return "unknown";
 }

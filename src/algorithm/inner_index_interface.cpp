@@ -601,6 +601,10 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
             if (query->GetInt8Vectors() != nullptr) {
                 sub->Int8Vectors(query->GetInt8Vectors() + q * query->GetDim());
             }
+            if (query->GetBinaryVectors() != nullptr) {
+                const auto packed_dim = (query->GetDim() + 7) / 8;
+                sub->BinaryVectors(query->GetBinaryVectors() + q * packed_dim);
+            }
             if (query->GetFloat16Vectors() != nullptr) {
                 sub->Float16Vectors(query->GetFloat16Vectors() + q * query->GetDim());
             }
@@ -1350,6 +1354,10 @@ InnerIndexInterface::get_data(const DatasetPtr& dataset, int64_t index) const {
     if (data_type_ == DataTypes::DATA_TYPE_INT8) {
         const auto* ptr = dataset->GetInt8Vectors();
         return ptr != nullptr ? ptr + index * dim_ : nullptr;
+    }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        const auto* ptr = dataset->GetBinaryVectors();
+        return ptr != nullptr ? ptr + index * ((dim_ + 7) / 8) : nullptr;
     }
     if (data_type_ == DataTypes::DATA_TYPE_FP16 || data_type_ == DataTypes::DATA_TYPE_BF16) {
         const auto* ptr = dataset->GetFloat16Vectors();
