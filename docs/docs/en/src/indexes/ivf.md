@@ -166,7 +166,8 @@ and centroid accumulation inside clustering, and the bucket assignment of the
 base vectors afterwards. `ivf_train_type: "random"` does not cluster, so only
 the last one applies to it. `ivf_train_type: "balanced_kmeans"` clusters and
 fills the buckets of a `Build` on the host, so of these passes only the
-assignment of vectors added later applies to it.
+nearest-bucket assignment applies to it: for vectors added later and, with codes
+relative to a bucket, for the training vectors.
 
 The four settings reach the `ivf` partition strategy only. With
 `partition_strategy_type: "gno_imi"` they are accepted and ignored, as the other
