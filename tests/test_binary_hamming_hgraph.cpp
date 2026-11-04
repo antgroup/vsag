@@ -83,6 +83,12 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
             "support_remove": true
         }
     })";
+    const std::string brute_params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 129
+    })";
     const std::string search_params = R"({"hgraph":{"ef_search":200}})";
 
     auto base_data = GeneratePacked(count, dim, 20260102);
@@ -91,10 +97,36 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
 
     auto build_dataset = MakeDataset(base_data, ids, dim);
 
-    auto brute_made = vsag::Factory::CreateIndex("brute_force", params);
+    auto brute_made = vsag::Factory::CreateIndex("brute_force", brute_params);
     REQUIRE(brute_made.has_value());
     auto brute = brute_made.value();
     REQUIRE(brute->Build(build_dataset).has_value());
+
+    const std::vector<int64_t> retrieved_ids = {0, 7, count - 1};
+    auto retrieved = brute->GetDataByIds(retrieved_ids.data(),
+                                         static_cast<int64_t>(retrieved_ids.size()));
+    REQUIRE(retrieved.has_value());
+    REQUIRE(retrieved.value()->GetFloat32Vectors() == nullptr);
+    REQUIRE(retrieved.value()->GetBinaryVectors() != nullptr);
+    for (uint64_t i = 0; i < retrieved_ids.size(); ++i) {
+        const auto* expected = base_data.data() + retrieved_ids[i] * num_bytes;
+        const auto* actual = retrieved.value()->GetBinaryVectors() + i * num_bytes;
+        REQUIRE(std::memcmp(expected, actual, num_bytes) == 0);
+    }
+
+    // Auxiliary float storage must not divert a binary query to the float-only overload.
+    std::vector<float> auxiliary_float(dim, 0.0F);
+    auto mixed_query = vsag::Dataset::Make()
+                           ->NumElements(1)
+                           ->Dim(dim)
+                           ->BinaryVectors(base_data.data())
+                           ->Float32Vectors(auxiliary_float.data())
+                           ->Owner(false);
+    auto mixed_distance = brute->CalcDistanceById(mixed_query, 7);
+    REQUIRE(mixed_distance.has_value());
+    const auto mixed_expected =
+        ReferenceHamming(base_data.data(), base_data.data() + 7 * num_bytes, num_bytes);
+    REQUIRE(mixed_distance.value() == static_cast<float>(mixed_expected));
 
     auto graph_made = vsag::Factory::CreateIndex("hgraph", params);
     REQUIRE(graph_made.has_value());
@@ -124,9 +156,8 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
                 ++recall_hits;
             }
             ++expected_hits;
-            auto expected =
-                ReferenceHamming(query_vec, base_data.data() + static_cast<uint64_t>(id) * num_bytes,
-                                 num_bytes);
+            auto expected = ReferenceHamming(
+                query_vec, base_data.data() + static_cast<uint64_t>(id) * num_bytes, num_bytes);
             REQUIRE(approx.value()->GetDistances()[i] == static_cast<float>(expected));
         }
 
@@ -135,22 +166,36 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
         REQUIRE(range.has_value());
         for (int64_t i = 0; i < range.value()->GetDim(); ++i) {
             const auto id = range.value()->GetIds()[i];
-            auto expected =
-                ReferenceHamming(query_vec, base_data.data() + static_cast<uint64_t>(id) * num_bytes,
-                                 num_bytes);
+            auto expected = ReferenceHamming(
+                query_vec, base_data.data() + static_cast<uint64_t>(id) * num_bytes, num_bytes);
             REQUIRE(expected <= 40);
             REQUIRE(range.value()->GetDistances()[i] == static_cast<float>(expected));
         }
 
         auto dist = graph->CalcDistanceById(query, q * 31);
         REQUIRE(dist.has_value());
-        auto expected = ReferenceHamming(query_vec,
-                                         base_data.data() + static_cast<uint64_t>(q * 31) * num_bytes,
-                                         num_bytes);
+        auto expected = ReferenceHamming(
+            query_vec, base_data.data() + static_cast<uint64_t>(q * 31) * num_bytes, num_bytes);
         REQUIRE(dist.value() == static_cast<float>(expected));
     }
     const auto recall = static_cast<double>(recall_hits) / static_cast<double>(expected_hits);
     REQUIRE(recall >= 0.75);
+
+    // Forced updates must retain packed extraction and encoding.
+    auto replacement = GeneratePacked(1, dim, 999);
+    const std::vector<int64_t> replacement_id = {4};
+    auto replacement_dataset = MakeDataset(replacement, replacement_id, dim);
+    auto updated = graph->UpdateVector(replacement_id[0], replacement_dataset, true);
+    REQUIRE(updated.has_value());
+    REQUIRE(updated.value());
+    auto replacement_query = vsag::Dataset::Make()
+                                 ->NumElements(1)
+                                 ->Dim(dim)
+                                 ->BinaryVectors(replacement.data())
+                                 ->Owner(false);
+    auto updated_distance = graph->CalcDistanceById(replacement_query, replacement_id[0]);
+    REQUIRE(updated_distance.has_value());
+    REQUIRE(updated_distance.value() == 0.0F);
 
     // Incremental add.
     constexpr int64_t extra = 40;
@@ -199,4 +244,61 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
         REQUIRE(restored_result.value()->GetDistances()[i] ==
                 original_result.value()->GetDistances()[i]);
     }
+}
+
+TEST_CASE("(PR) BruteForce Binary Hamming Update And Force Remove", "[ft][bruteforce][pr]") {
+    constexpr int64_t dim = 65;
+    constexpr uint64_t num_bytes = (dim + 7) / 8;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65
+    })";
+    const std::vector<int64_t> ids = {10, 20, 30, 40};
+    auto base_data = GeneratePacked(ids.size(), dim, 1234);
+    auto index_made = vsag::Factory::CreateIndex("brute_force", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    auto replacement = GeneratePacked(1, dim, 5678);
+    replacement.back() ^= 0x80U;  // Unused tail bits must be masked during re-encoding.
+    const std::vector<int64_t> update_id = {20};
+    auto update = index->UpdateVector(update_id[0], MakeDataset(replacement, update_id, dim));
+    REQUIRE(update.has_value());
+    REQUIRE(update.value());
+    auto replacement_query = vsag::Dataset::Make()
+                                 ->NumElements(1)
+                                 ->Dim(dim)
+                                 ->BinaryVectors(replacement.data())
+                                 ->Owner(false);
+    auto updated_distance = index->CalcDistanceById(replacement_query, update_id[0]);
+    REQUIRE(updated_distance.has_value());
+    REQUIRE(updated_distance.value() == 0.0F);
+
+    // Removing a non-last slot decodes and reinserts the last packed row.
+    auto removed = index->Remove(ids.front(), vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(removed.has_value());
+    REQUIRE(removed.value() == 1);
+    auto moved_query = vsag::Dataset::Make()
+                           ->NumElements(1)
+                           ->Dim(dim)
+                           ->BinaryVectors(base_data.data() + 3 * num_bytes)
+                           ->Owner(false);
+    auto moved_distance = index->CalcDistanceById(moved_query, ids.back());
+    REQUIRE(moved_distance.has_value());
+    REQUIRE(moved_distance.value() == 0.0F);
+}
+
+TEST_CASE("(PR) Binary WARP Is Rejected", "[ft][warp][pr]") {
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 64
+    })";
+    auto index = vsag::Factory::CreateIndex("warp", params);
+    REQUIRE_FALSE(index.has_value());
+    REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }

@@ -56,11 +56,8 @@ inline uint64_t
 HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t num_byte) {
     uint64_t distance = 0;
     for (uint64_t i = 0; i < num_byte; ++i) {
-        auto diff = static_cast<uint8_t>(x[i] ^ y[i]);
-        while (diff != 0) {
-            diff = static_cast<uint8_t>(diff & (diff - 1U));
-            ++distance;
-        }
+        const auto diff = static_cast<unsigned int>(x[i] ^ y[i]);
+        distance += static_cast<uint64_t>(__builtin_popcount(diff));
     }
     return distance;
 }
