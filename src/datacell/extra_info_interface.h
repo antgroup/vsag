@@ -42,7 +42,8 @@ public:
     ExtraInfoLease&
     operator=(ExtraInfoLease&& other) noexcept;
 
-    [[nodiscard]] explicit operator bool() const {
+    [[nodiscard]] explicit
+    operator bool() const {
         return data_ != nullptr;
     }
 
@@ -154,10 +155,10 @@ public:
     InMemory() const = 0;
 
     virtual void
-    EnableForceInMemory(){};
+    EnableForceInMemory() {};
 
     virtual void
-    DisableForceInMemory(){};
+    DisableForceInMemory() {};
 
     virtual void
     Move(InnerIdType from, InnerIdType to) {

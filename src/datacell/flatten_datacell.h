@@ -18,6 +18,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <type_traits>
@@ -356,7 +357,9 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
                          allocator_);
         quantizer_->EncodeBatch(static_cast<const float*>(vectors), codes.data, count);
         uint64_t cur_count;
-        { cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel); }
+        {
+            cur_count = total_count_.fetch_add(count, std::memory_order_acq_rel);
+        }
         layout_->WriteRange(cur_count, codes.data, count);
         std::atomic_thread_fence(std::memory_order_release);
     } else {
@@ -429,6 +432,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                               const InnerIdType* idx,
                                               InnerIdType id_count,
                                               QueryContext* ctx) {
+    if (id_count == 0) {
+        return;
+    }
+
     Allocator* search_alloc = select_query_allocator(ctx, allocator_);
 
     const auto total_count = this->TotalCount();
@@ -474,7 +481,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
         }
     }
 
-    memset(result_dists, 0, sizeof(float) * id_count);
+    std::memset(result_dists, 0, sizeof(float) * id_count);
     int64_t i = 0;
     for (; i + 3 < id_count; i += 4) {
         for (int64_t j = 0; j < 4; ++j) {

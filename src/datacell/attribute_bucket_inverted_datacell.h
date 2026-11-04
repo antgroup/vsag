@@ -28,7 +28,7 @@ class AttributeBucketInvertedDataCell : public AttributeInvertedInterface {
 public:
     AttributeBucketInvertedDataCell(
         Allocator* allocator, ComputableBitsetType bitset_type = ComputableBitsetType::FastBitset)
-        : AttributeInvertedInterface(allocator, bitset_type), field_2_value_map_(allocator){};
+        : AttributeInvertedInterface(allocator, bitset_type), field_2_value_map_(allocator) {};
 
     ~AttributeBucketInvertedDataCell() override = default;
 

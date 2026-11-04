@@ -22,7 +22,29 @@ def job_text(workflow: Path, job_name: str) -> str:
     )
     if match is None:
         raise AssertionError(f"job {job_name} not found in {workflow}")
-    return match.group("body")
+    body = match.group("body")
+    # Inspect the actual shared execution steps as well as the entry job envelope.
+    local = re.search(r"(?m)^      - uses: (\./\.github/actions/[^\n]+)\n(?P<call>(?:        .*\n|\n)*)", body)
+    if local:
+        action = (ROOT / local[1][2:] / 'action.yml').read_text()
+        steps = action.split('  steps:\n', 1)[1]
+        parameters = {}
+        for key, value in re.findall(r"(?m)^          ([\w-]+): (.*)$", local['call']):
+            value = value.strip()
+            if value.startswith('${{') and value.endswith('}}'):
+                parameters[key] = value[3:-2].strip()
+            else:
+                parameters[key] = value
+        for key, value in parameters.items():
+            steps = steps.replace('inputs.' + key, '(' + value + ')')
+        # Normalize trivial matrix substitutions for existing executable-shell tests.
+        steps = re.sub(r'\$\{\{ \((matrix\.[\w-]+)\) \}\}', r'${{ \1 }}', steps)
+        # Tests execute extracted commands under an explicit shell; omit redundant
+        # composite shell declarations from the normalized command view.
+        steps = re.sub(r'(?m)^      shell: (?:bash|sh|bash -e \{0\})\n', '', steps)
+        expanded = ''.join('  ' + line if line.strip() else line for line in steps.splitlines(True))
+        body = body[:local.start()] + expanded + body[local.end():]
+    return body
 
 
 class DependencyWorkflowTest(unittest.TestCase):
@@ -51,7 +73,7 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertIn("uses: actions/cache/restore@v4", pr_ci)
         self.assertNotIn("uses: actions/cache@v4", pr_ci)
         self.assertNotIn("uses: actions/cache/save@v4", pr_ci)
-        benchmark = (ROOT / ".github/workflows/build_performance.yml").read_text(encoding="utf-8")
+        benchmark = (ROOT / ".github/workflows/daily_test.yml").read_text(encoding="utf-8")
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:
@@ -86,9 +108,12 @@ class DependencyWorkflowTest(unittest.TestCase):
 
 
 class TsanCleanupTest(unittest.TestCase):
+    workflow_name = "main-ci.yml"
+    job_name = "tsan-build-tsan"
+
     def cleanup_script(self, sandbox: Path) -> str:
-        workflow = ROOT / ".github/workflows/tsan_build_and_test.yml"
-        build = job_text(workflow, "build_tsan")
+        workflow = ROOT / ".github/workflows" / self.workflow_name
+        build = job_text(workflow, self.job_name)
         self.assertIn("        - /opt:/useless\n", build)
         match = re.search(
             r"(?ms)^      - name: Free Disk Space\n        run: \|\n"
@@ -205,7 +230,41 @@ class TsanCleanupTest(unittest.TestCase):
                 self.assertEqual(after.count(f"node --version exit={status}"), 1)
 
 
+class SimdBuildCleanupTest(TsanCleanupTest):
+    workflow_name = "main-ci.yml"
+    job_name = "simd-build-asan-simd"
+
+
+class SimdTestCleanupTest(TsanCleanupTest):
+    workflow_name = "main-ci.yml"
+    job_name = "simd-test-asan-simd"
+
+
 class FailurePropagationTest(unittest.TestCase):
+    def test_tsan_keeps_vsag_concurrency_and_propagates_sanitizer_failures(self):
+        from tests.scripts.test_build_benchmark_workflow import step
+        body = job_text(ROOT / '.github/workflows/main-ci.yml', 'tsan-test-tsan')
+        run = step(body, 'Run TSAN tests')
+        self.assertIn('OPENBLAS_NUM_THREADS: "1"', run)
+        script = textwrap.dedent(run.split('run: |\n', 1)[1])
+        self.assertIn('"[concurrent]~[daily]"', script)
+        self.assertNotIn('race:libopenblas', script)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'build/tests/functests'
+            binary.parent.mkdir(parents=True)
+            binary.write_text(
+                '#!/bin/sh\n'
+                'test "$OPENBLAS_NUM_THREADS" = 1 || exit 99\n'
+                'test "$1" = "[concurrent]~[daily]" || exit 98\n'
+                'exit "$TEST_TSAN_EXIT"\n')
+            for code in [0, 66]:
+                result = subprocess.run(
+                    ['bash', '-e', '-c', script], cwd=root,
+                    env=dict(os.environ, OPENBLAS_NUM_THREADS='1', TEST_TSAN_EXIT=str(code)),
+                    capture_output=True, text=True)
+                self.assertEqual(result.returncode, code, result.stderr)
+
     def test_pytest_exit_status_wins_over_success_looking_log(self):
         import os
         import subprocess
@@ -213,8 +272,8 @@ class FailurePropagationTest(unittest.TestCase):
         import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
         jobs = [('pr-ci-community.yml', 'test-python-x86'),
-                ('python_build_and_test.yml', 'test_python_x86'),
-                ('python_build_and_test.yml', 'test_python_aarch64')]
+                ('main-ci.yml', 'python-test-python-x86'),
+                ('main-ci.yml', 'python-test-python-aarch64')]
         for filename, name in jobs:
             body = job_text(ROOT / '.github/workflows' / filename, name)
             run = step(body, 'Run Python Test')
@@ -242,13 +301,13 @@ class FailurePropagationTest(unittest.TestCase):
         import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
         body = job_text(ROOT / '.github/workflows/pr-ci-community.yml', 'build-asan-x86')
-        self.assertIn("BASE_BRANCH: ${{ github.base_ref || 'main' }}", body)
+        self.assertIn("LINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}", body)
         lint = step(body, 'Run Lint')
         script = textwrap.dedent(lint.split('run: |\n', 1)[1])
         self.assertNotIn('${{', script)
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'scripts/linters').mkdir(parents=True)
-            runner=root/'scripts/linters/run-clang-tidy-15.sh'
+            runner=root/'scripts/linters/run-clang-tidy-20.sh'
             runner.write_text('#!/bin/bash\nprintf "%s\\n" "${@: -1}"\n');runner.chmod(0o755)
             pattern="src/it's $(touch injected).cpp$"
             result=subprocess.run(['bash','-c',script],cwd=root,env=dict(os.environ,LINT_PATTERN=pattern),capture_output=True,text=True)
@@ -258,8 +317,8 @@ class FailurePropagationTest(unittest.TestCase):
 
     def test_compatibility_workflows_fail_closed_and_use_private_input_directory(self):
         from tests.scripts.test_build_benchmark_workflow import step
-        for filename in ['pr-ci-community.yml','check_compatibility.yml']:
-            body=job_text(ROOT/'.github/workflows'/filename,'compatibility')
+        for filename in ['pr-ci-community.yml','main-ci.yml']:
+            body=job_text(ROOT/'.github/workflows'/filename,'compatibility-compatibility' if filename == 'main-ci.yml' else 'compatibility')
             download=step(body,'Download Compatibility Indexes from Release')
             self.assertIn('download_compatibility_inputs.py',download)
             self.assertNotIn('||',download)
@@ -368,6 +427,122 @@ class CompatibilityDownloadTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'digest mismatch'):
             self.module.verify(self.directory, self.expected)
 
+
+
+class LeanPrChecksTest(unittest.TestCase):
+    def test_main_ci_policy_suite(self):
+        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py", "tests/scripts/test_workflow_entries.py"], cwd=ROOT, check=True)
+
+    def selected(self, name, *, base="main", event="pull_request", team=False,
+                 cpp=False, python=False, cmake=False):
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", name)
+        expression = re.search(r"^    if: (.*)$", body, re.M).group(1)
+        values = {"github.base_ref": base, "github.event_name": event,
+                  "inputs.team-linux": team, "needs.changes.outputs.cpp": str(cpp).lower(),
+                  "needs.changes.outputs.python": str(python).lower(),
+                  "needs.changes.outputs.cmake": str(cmake).lower()}
+        for key in sorted(values, key=len, reverse=True):
+            expression = expression.replace(key, repr(values[key]))
+        expression = expression.replace("&&", " and ").replace("||", " or ")
+        expression = re.sub(r"!(?!=)", " not ", expression)
+        return eval(expression, {"__builtins__": {}}, {})
+
+    def test_main_pr_selection_matrix(self):
+        for team in (False, True):
+            self.assertFalse(self.selected("build-asan-macos-arm64", cpp=True, team=team))
+            self.assertFalse(self.selected("build-python-x86", cpp=True, python=True, team=team))
+            for name in ("build-python-x86", "test-python-x86"):
+                for python, cmake in ((True, False), (False, True), (True, True)):
+                    self.assertFalse(self.selected(name, python=python, cmake=cmake, team=team))
+                self.assertFalse(self.selected(name, team=team))
+            self.assertEqual(self.selected("format", cpp=True, team=team), not team)
+            self.assertTrue(self.selected("format", python=True, team=team))
+        body = job_text(ROOT / ".github/workflows/pr-ci-community.yml", "build-python-x86")
+        self.assertIn("needs: [changes, format]", body)
+
+    def test_version_and_dispatch_preserve_legacy_selection(self):
+        for context in ({"base": "0.18"}, {"event": "workflow_dispatch", "base": ""}):
+            self.assertTrue(self.selected("build-asan-macos-arm64", cpp=True, **context))
+            self.assertTrue(self.selected("format", cpp=True, team=True, **context))
+            self.assertTrue(self.selected("build-python-x86", python=True, **context))
+            self.assertTrue(self.selected("test-python-x86", cmake=True, **context))
+            self.assertFalse(self.selected("build-python-x86", **context))
+
+    def test_team_format_coverage(self):
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        team = (ROOT / ".github/workflows/pr-ci-team.yml").read_text()
+        def paths(text, label):
+            section = re.search(r"(?m)^            " + label + r":\n((?:              .*\n)+)", text).group(1)
+            return re.findall(r"- '([^']+)'", section)
+        self.assertEqual(paths(community, "cpp"), paths(team, "cpp"))
+        self.assertIn("./scripts/format/check_format.sh", job_text(ROOT / ".github/workflows/pr-ci-team.yml", "checks"))
+
+    def test_tsan_push_and_version_triggers_retained(self):
+        branch = (ROOT / ".github/workflows/main-ci.yml").read_text()
+        manual = (ROOT / ".github/workflows/manual-checks.yml").read_text()
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        self.assertIn("tsan-build-tsan:", branch)
+        self.assertIn("needs.entry-scope.outputs.version == 'true'", branch)
+        self.assertIn("startsWith(github.base_ref, '0.')", community)
+        self.assertIn("version-tsan-build-tsan:", community)
+        self.assertIn('tsan', manual)
+
+    def test_circleci_only_skips_verified_current_main_prs(self):
+        import importlib.util
+        from unittest.mock import Mock, patch
+        spec = importlib.util.spec_from_file_location("circle_scope", ROOT / "scripts/ci/circleci_pr_scope.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        env = {"CIRCLE_PULL_REQUEST": "https://github.com/antgroup/vsag/pull/123", "CIRCLE_SHA1": "abc"}
+        def pr(base="main", sha="abc", state="open"):
+            return {"state": state, "base": {"ref": base, "repo": {"full_name": "antgroup/vsag"}}, "head": {"sha": sha}}
+        self.assertTrue(module.should_skip(env, lambda _: pr()))
+        for metadata in (pr("0.18"), pr(sha="old"), pr(state="closed"), {}):
+            self.assertFalse(module.should_skip(env, lambda _: metadata))
+        for invalid in ({}, dict(env, CIRCLE_PULL_REQUEST="https://evil.test/pull/123"),
+                        dict(env, CIRCLE_PULL_REQUESTS="https://github.com/antgroup/vsag/pull/124")):
+            api = Mock(side_effect=[pr(), pr("0.18")])
+            self.assertFalse(module.should_skip(invalid, api))
+        with patch.object(module, "fetch_pr", side_effect=TimeoutError), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            run.assert_not_called()
+        with patch.object(module, "fetch_pr", return_value=pr()), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            run.assert_called_once_with(["circleci-agent", "step", "halt"], check=True)
+        config = (ROOT / ".circleci/continue_config.yml").read_text()
+        pr_job = config.split("  pull-request-check:", 1)[1].split("  main-branch-check:", 1)[0]
+        self.assertLess(pr_job.index("circleci_pr_scope.py"), pr_job.index("restore_cache:"))
+        self.assertNotIn("circleci_pr_scope.py", config.split("  main-branch-check:", 1)[1])
+
+    def test_circleci_transport_halt_and_merge_preview(self):
+        import importlib.util
+        from http.client import IncompleteRead
+        from unittest.mock import Mock, patch
+        spec = importlib.util.spec_from_file_location("circle_scope", ROOT / "scripts/ci/circleci_pr_scope.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        env = {"CIRCLE_PULL_REQUEST": "https://github.com/antgroup/vsag/pull/123", "CIRCLE_SHA1": "merge-current"}
+        pr = {"state": "open", "base": {"ref": "main", "repo": {"full_name": "antgroup/vsag"}},
+              "head": {"sha": "head-current"}, "merge_commit_sha": "merge-current"}
+        self.assertTrue(module.should_skip(env, lambda _: pr))
+        self.assertTrue(module.should_skip(dict(env, CIRCLE_SHA1="head-current"), lambda _: pr))
+        self.assertFalse(module.should_skip(dict(env, CIRCLE_SHA1="merge-stale"), lambda _: pr))
+        self.assertFalse(module.should_skip(dict(env, CIRCLE_SHA1=""), lambda _: pr))
+        with patch.object(module.urllib.request, "urlopen", side_effect=IncompleteRead(b"partial")) as request, patch.object(module.time, "sleep") as sleep, patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run") as run:
+            module.main()
+            self.assertEqual(request.call_count, 2)
+            sleep.assert_called_once_with(1)
+            run.assert_not_called()
+        response = Mock()
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+        response.read.return_value = __import__("json").dumps(pr)
+        with patch.object(module.urllib.request, "urlopen", side_effect=[IncompleteRead(b"partial"), response]), patch.object(module.time, "sleep"):
+            self.assertEqual(module.fetch_pr("https://api.github.com/repos/antgroup/vsag/pulls/123"), pr)
+        for error in (subprocess.CalledProcessError(1, "circleci-agent"), FileNotFoundError()):
+            with patch.object(module, "fetch_pr", return_value=pr), patch.dict(os.environ, env, clear=True), patch.object(module.subprocess, "run", side_effect=error) as run:
+                module.main()
+                run.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()

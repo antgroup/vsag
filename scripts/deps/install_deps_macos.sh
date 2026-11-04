@@ -16,7 +16,7 @@ formulae=(
     cmake
     ninja
     ccache
-    llvm@15
+    llvm@20
     libomp
     openblas
     gcc
@@ -32,7 +32,7 @@ for formula in "${formulae[@]}"; do
 done
 
 echo "macOS build dependencies are installed."
-echo "clang-format: $(brew --prefix llvm@15)/bin/clang-format"
-echo "clang-tidy: $(brew --prefix llvm@15)/bin/clang-tidy"
+echo "clang-format: $(brew --prefix llvm@20)/bin/clang-format"
+echo "clang-tidy: $(brew --prefix llvm@20)/bin/clang-tidy"
 echo "libomp: $(brew --prefix libomp)"
 echo "openblas: $(brew --prefix openblas)"

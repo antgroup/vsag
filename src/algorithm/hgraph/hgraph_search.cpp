@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "attr/argparse.h"
 #include "datacell/rabitq_split_datacell.h"
@@ -376,7 +377,7 @@ HGraph::search_one_graph(const void* query,
     }
     const bool parallel_search_requested = inner_search_param.parallel_search_thread_count > 1;
     const bool has_parallel_search_executor =
-        this->thread_pool_ != nullptr and this->parallel_searcher_ != nullptr;
+        this->thread_pool_ != nullptr and static_cast<bool>(this->parallel_searcher_);
     if (result == nullptr and parallel_search_requested and has_parallel_search_executor) {
         result = this->parallel_searcher_->Search(
             graph,

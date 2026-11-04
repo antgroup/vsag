@@ -6,7 +6,7 @@ one, read it top-to-bottom, then adapt it to your data.
 
 ## Prerequisites
 
-- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 15 are
+- A C++17 (or newer) compiler (`clang-format` / `clang-tidy` 20 are
   required only for development, not for running these examples).
 - CMake 3.18+.
 - The build prerequisites listed in
@@ -117,6 +117,7 @@ together when the directory is listed:
 | File | What it shows |
 | --- | --- |
 | [`501_quantization_transform.cpp`](501_quantization_transform.cpp) | Transform Quantizer (TQ) recipe. |
+| [`502_quantization_saq.cpp`](502_quantization_saq.cpp) | Build and query HGraph with SAQ base codes and FP32 reordering. |
 
 ## Where to go next
 

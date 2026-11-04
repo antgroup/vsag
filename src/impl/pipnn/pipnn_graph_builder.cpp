@@ -1435,7 +1435,9 @@ PiPNNPipeline::robust_prune(uint32_t source,
     std::sort(ordered.begin(), ordered.end(), comparator);
 
     const uint64_t max_degree = graph_->MaximumDegree();
-    if (parameter_.adaptive_pruning) {
+    // Use the original arithmetic path for a zero step as well. The adaptive
+    // callback boundary can otherwise change floating-point rounding at a pruning tie.
+    if (parameter_.adaptive_pruning and parameter_.adaptive_pruning_adjust_step != 0.0F) {
         const auto positions = select_pipnn_edges_adaptive(
             ordered,
             max_degree,

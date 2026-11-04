@@ -24,4 +24,4 @@ public:
     virtual ~IteratorContext() = default;
 };
 
-};  // namespace vsag
+}  // namespace vsag

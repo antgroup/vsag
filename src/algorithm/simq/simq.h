@@ -56,7 +56,7 @@ public:
     explicit SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit SIMQ(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param){};
+        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param) {};
 
     ~SIMQ() override;
 
@@ -200,6 +200,9 @@ private:
         pending_split_first_overflow_;
 
     double split_delay_seconds_{0.0};
+
+    bool support_duplicate_{false};
+    bool deduplicate_storage_{false};
 
     float init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};

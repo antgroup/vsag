@@ -31,8 +31,8 @@ docker pull vsaglib/vsag:ubuntu
 - Build Tools: 
   - CMake version 3.18.0 or later
   - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
-  - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
-  - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
+  - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
+  - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
   - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
   - macOS: Xcode Command Line Tools, Homebrew
@@ -221,3 +221,16 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests
 - `tools/`: the tools
+
+## C++ standard and compiler validation
+
+Full VSAG CPU implementation targets require C++20; installed public headers and the `vsag::vsag` target support C++17 clients. CUDA translation units, Node.js bindings, and standalone Lite stay on C++17. Linux development uses GCC 13 as the primary compiler and Clang 20 as the second compiler. Use separate build directories:
+
+```bash
+make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"
+make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"
+```
+
+The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
+
+Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.

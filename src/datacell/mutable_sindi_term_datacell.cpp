@@ -804,10 +804,10 @@ void
 MutableSindiTermDataCell::Compact(MutableSINDIWindow& window) {
     uint32_t compact_term_capacity = 0;
     const uint64_t compactable_capacity =
-        std::min(std::min(static_cast<uint64_t>(window.term_capacity_),
-                          static_cast<uint64_t>(window.term_sizes_.size())),
-                 std::min(static_cast<uint64_t>(window.term_ids_.size()),
-                          static_cast<uint64_t>(window.term_datas_.size())));
+        std::min({static_cast<uint64_t>(window.term_capacity_),
+                  static_cast<uint64_t>(window.term_sizes_.size()),
+                  static_cast<uint64_t>(window.term_ids_.size()),
+                  static_cast<uint64_t>(window.term_datas_.size())});
     for (uint64_t i = 0; i < compactable_capacity; ++i) {
         if (window.term_sizes_[i] != 0) {
             compact_term_capacity = static_cast<uint32_t>(i + 1);

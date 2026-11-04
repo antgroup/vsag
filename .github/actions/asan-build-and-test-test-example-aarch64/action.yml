@@ -1,0 +1,52 @@
+name: asan-build-and-test-test-example-aarch64
+description: Shared test_example_aarch64 execution; callers own runners and dependencies.
+inputs:
+  artifact-name:
+    description: Optional caller-provided build artifact
+    required: false
+    default: ''
+  inputs-smoke:
+    description: Caller inputs.smoke
+    required: false
+    default: 'false'
+runs:
+  using: composite
+  steps:
+    - name: Prepare Env
+      shell: sh
+      run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
+    - name: Clean Env
+      shell: sh
+      run: rm -rf ./build
+    - name: Download Test
+      uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53
+      with:
+        name: ${{ inputs.artifact-name || format('test_aarch64-{0}', github.run_id) }}
+        path: ./build
+    - name: Validate Test Artifact
+      shell: sh
+      run: |
+        if ! test -s ./build/tests/unittests || ! test -s ./build/tests/functests; then
+          echo "::error::Aarch64 test artifact is incomplete; expected tests/unittests and tests/functests"
+          df -h .
+          find ./build -maxdepth 3 -type f -printf '%P %s bytes\n' 2>/dev/null || true
+          exit 1
+        fi
+    - name: Do Test In example
+      shell: sh
+      run: |
+        printf 'leak:libgomp.so\nleak:libgomp.so.1\n' > "$RUNNER_TEMP/asan-example-lsan.supp"
+        export LSAN_OPTIONS="suppressions=$RUNNER_TEMP/asan-example-lsan.supp"
+        if [ "$SMOKE" = "true" ]; then
+          python3 scripts/ci/platform_smoke.py examples
+          exit 0
+        fi
+        python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
+    - name: Upload Smoke Example Logs
+      if: always() && fromJSON(inputs.inputs-smoke)
+      uses: actions/upload-artifact@v5
+      with:
+        name: smoke-examples-aarch64-${{ github.run_id }}
+        path: ./log
+        if-no-files-found: ignore
+        retention-days: 3

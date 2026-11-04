@@ -200,7 +200,7 @@ SparseGraphDataCell::Deserialize(StreamReader& reader) {
 }
 
 void
-SparseGraphDataCell::Resize(InnerIdType new_size){};
+SparseGraphDataCell::Resize(InnerIdType new_size) {};
 
 bool
 SparseGraphDataCell::CheckIdExists(InnerIdType id) const {
@@ -288,6 +288,7 @@ SparseGraphDataCell::GetIds() const {
 
 uint64_t
 SparseGraphDataCell::GetMemoryUsage() const {
+    std::shared_lock rlock(neighbors_map_mutex_);
     auto memory = sizeof(SparseGraphDataCell);
     memory += neighbors_.size() * (sizeof(InnerIdType) + maximum_degree_ * sizeof(InnerIdType) +
                                    sizeof(std::nullptr_t));

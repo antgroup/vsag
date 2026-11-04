@@ -3,6 +3,18 @@ name: Community CI
 on:
   workflow_call:
     inputs:
+      core:
+        type: boolean
+        default: true
+      run-docs:
+        type: boolean
+        default: false
+      run-simd:
+        type: boolean
+        default: false
+      run-lite:
+        type: boolean
+        default: false
       team-linux:
         type: boolean
         default: false
@@ -13,6 +25,7 @@ permissions:
 
 jobs:
   changes:
+    if: inputs.core
     name: Detect Changes
     runs-on: ubuntu-latest
     outputs:
@@ -47,8 +60,9 @@ jobs:
               - 'cmake/**'
             coverage:
               - '.github/codecov.yml'
-              - '.github/workflows/coverage.yml'
-              - '.github/workflows/pr-simd-coverage.yml'
+              - '.github/actions/coverage-*/**'
+              - '.github/workflows/main-ci.yml'
+              - '.github/workflows/daily_test.yml'
               - '.github/workflows/pr-ci.yml'
               - '.github/workflows/pr-ci-community.yml'
               - '.github/workflows/pr-ci-team.yml'
@@ -71,16 +85,19 @@ jobs:
   format:
     name: Format Check
     needs: changes
-    if: needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true'
-    runs-on: ubuntu-22.04
+    # Team checks run the same full-repository formatter for cpp changes.
+    # Python-only changes still need Community formatting.
+    if: (needs.changes.outputs.cpp == 'true' || needs.changes.outputs.python == 'true') && !(github.event_name == 'pull_request' && github.base_ref == 'main' && inputs.team-linux && needs.changes.outputs.cpp == 'true')
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
       - name: Install Clang format
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang-format-15
-          sudo ln -sf /usr/bin/clang-format-15 /usr/bin/clang-format
+          sudo bash scripts/deps/install_toolchain_ubuntu.sh
+          sudo apt-get install -y clang-format-20
+          sudo ln -sf /usr/bin/clang-format-20 /usr/bin/clang-format
           clang-format --version
       - name: Run Clang format check
         run: ./scripts/format/check_format.sh
@@ -89,7 +106,7 @@ jobs:
     name: Coverage Configuration
     needs: changes
     if: needs.changes.outputs.coverage == 'true'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Test coverage configuration
@@ -105,7 +122,7 @@ jobs:
     name: ASan Build X86
     needs: [changes, format]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -117,17 +134,25 @@ jobs:
           persist-credentials: false
       - name: Trust exact workspace for Git tooling
         run: ./scripts/ci/configure-git-safe-directory.sh
+      - name: Get changed source files
+        id: changed-srcs
+        env:
+          LINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          python3 scripts/linters/prepare_lint_base.py
       - name: Test CI helper scripts
         run: |
-          python3 -m unittest discover -s scripts/linters -p 'test_changed_source_filter.py'
+          python3 -m unittest discover -s scripts/linters -p 'test_*.py'
           python3 -m unittest tests/scripts/configure_git_safe_directory_test.py
           python3 -m unittest tests/scripts/test_build_benchmark_workflow.py
           python3 -m unittest tests/scripts/test_collect_build_metrics.py
           python3 -m unittest tests/scripts/test_dependency_workflows.py
+          python3 -m unittest tests/scripts/test_asan_artifact_workflow.py
+          python3 -m unittest tests/scripts/test_toolchain_compatibility.py
       - name: Prepare Host
         run: |
           sudo env VSAG_INSTALL_INTEL_MKL=OFF bash ./scripts/deps/install_deps_ubuntu.sh
-          sudo apt-get install -y ccache clang-tidy-15 time
+          sudo apt-get install -y ccache clang-tidy-20 time
           ninja --version
           cmake --version
           g++ --version
@@ -160,24 +185,14 @@ jobs:
         run: |
           ccache --show-stats --verbose || ccache --show-stats || true
           ccache --print-stats || true
-      - name: Get changed source files
-        id: changed-srcs
-        env:
-          BASE_BRANCH: ${{ github.base_ref || 'main' }}
-        run: |
-          git fetch origin "$BASE_BRANCH" --depth=1
-          if ! PATTERN=$(python3 ./scripts/linters/changed_source_filter.py "origin/$BASE_BRANCH"); then
-            echo "Failed to build changed-source lint filter" >&2
-            exit 1
-          fi
-          echo "pattern=$PATTERN" >> "$GITHUB_OUTPUT"
       - name: Run Lint
         id: changed_source_lint
         if: steps.changed-srcs.outputs.pattern != ''
         env:
           LINT_PATTERN: ${{ steps.changed-srcs.outputs.pattern }}
         run: |
-          ./scripts/linters/run-clang-tidy-15.sh -p build/ -use-color -source-filter '^.*vsag\/src.*(?<!_test)\.cpp$$' -j 4 "$LINT_PATTERN"
+          source_filter=$(python3 -c 'import os, re; print("^" + re.escape(os.getcwd()) + r"/src/.*(?<!_test)\.cpp$")')
+          ./scripts/linters/run-clang-tidy-20.sh -p build/ -use-color -source-filter "$source_filter" -j 4 "$LINT_PATTERN"
       - name: Verify changed-source lint execution
         if: always() && steps.changed-srcs.outcome == 'success'
         env:
@@ -206,7 +221,7 @@ jobs:
   build-asan-macos-arm64:
     name: ASan Build macOS arm64
     needs: [changes, format]
-    if: needs.changes.outputs.cpp == 'true'
+    if: needs.changes.outputs.cpp == 'true' && !(github.event_name == 'pull_request' && github.base_ref == 'main')
     runs-on: macos-15
     steps:
       - name: Free Disk Space
@@ -232,9 +247,11 @@ jobs:
 
   build-python-x86:
     name: Python Build X86
+    # Temporarily disable Python validation on main PRs until the Python rework lands.
+    # Restore PR validation here and in test-python-x86 after that work.
     needs: [changes, format]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
@@ -268,9 +285,9 @@ jobs:
     name: Test X86 Unittests
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -308,11 +325,11 @@ jobs:
     name: Test X86 Functests
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -348,9 +365,9 @@ jobs:
     name: Test Example X86
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -382,12 +399,12 @@ jobs:
     name: Check Compatibility
     needs: [changes, build-asan-x86]
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     env:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -432,11 +449,14 @@ jobs:
   test-python-x86:
     name: Test Python X86
     needs: [changes, build-python-x86]
-    if: needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true'
-    runs-on: ubuntu-22.04
+    if: (github.event_name != 'pull_request' || github.base_ref != 'main') && (needs.changes.outputs.python == 'true' || needs.changes.outputs.cmake == 'true')
+    runs-on: ubuntu-24.04
     steps:
       - name: Free Disk Space
         run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
       - uses: actions/checkout@v4
       - name: Prepare Env
         run: sudo bash ./scripts/deps/install_deps_ubuntu.sh
@@ -464,3 +484,189 @@ jobs:
           path: ./tests/python/test-output.log
           retention-days: 30
           if-no-files-found: ignore
+
+  validate:
+    if: inputs.run-docs
+    name: Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-docs
+
+  simd-coverage:
+    if: inputs.run-simd
+    name: SIMD Coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    container:
+      image: vsaglib/vsag:ci-main-openblas
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test merge-base selection
+        run: python3 tests/scripts/pr_simd_merge_base_test.py
+      - uses: ./.github/actions/prepare-fetchcontent
+        with:
+          include-tests: 'true'
+      - name: Install lcov
+        run: |
+          apt-get update
+          apt-get install -y libcapture-tiny-perl libdatetime-perl curl
+          # lcov v2.3, pinned to its immutable commit and archive checksum.
+          curl --fail --location --retry 3 \
+            https://github.com/linux-test-project/lcov/archive/79595562392671d4a30afbc1100033a8b27dc1c7.tar.gz \
+            --output /tmp/lcov.tar.gz
+          echo '4d567d920cd6e1ae9c941e285f00d0b564733af91c4d0f2482d7481855b9f955  /tmp/lcov.tar.gz' | sha256sum --check --strict
+          mkdir /tmp/lcov
+          tar -xzf /tmp/lcov.tar.gz --strip-components=1 -C /tmp/lcov
+          make -C /tmp/lcov SHELL=/bin/bash install
+      - name: Compare base and merge candidate
+        env:
+          HEAD_SHA: ${{ github.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          # Event base.sha may differ from the parent of the queued merge ref.
+          # Compare the merge candidate with the base actually used to create it.
+          # Trust only this checkout for these commands, not global Git config.
+          base_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^1")
+          merge_pr_sha=$(git -c safe.directory="$(pwd -P)" rev-parse --verify "${HEAD_SHA}^2")
+          if [ "$merge_pr_sha" != "$PR_HEAD_SHA" ]; then
+            echo '::error::Merge candidate does not contain the expected PR head.'
+            exit 1
+          fi
+          bash scripts/coverage/run_simd_coverage.sh "$base_sha" "$HEAD_SHA"
+      - name: Publish scoped result
+        if: always()
+        run: |
+          if [ -f simd-coverage/summary.md ]; then
+            cat simd-coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'SIMD coverage unavailable: build, test, or collection did not finish. No passing result is claimed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pr-simd-coverage
+          path: simd-coverage/
+          retention-days: 14
+          if-no-files-found: warn
+
+  build-test-install:
+    if: inputs.run-lite
+    name: Lite ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default-off, rabitq-on, sanitizer, coverage]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-lite
+        with:
+          mode: ${{ matrix.mode }}
+
+  shared-checks-result:
+    name: Shared Checks Result
+    needs: [validate, simd-coverage, build-test-install]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      RUN_DOCS: ${{ inputs.run-docs }}
+      RUN_SIMD: ${{ inputs.run-simd }}
+      RUN_LITE: ${{ inputs.run-lite }}
+      DOCS_RESULT: ${{ needs.validate.result }}
+      SIMD_RESULT: ${{ needs.simd-coverage.result }}
+      LITE_RESULT: ${{ needs.build-test-install.result }}
+    steps:
+      - name: Require selected shared checks
+        shell: bash
+        run: |
+          check_result() {
+            expected=skipped
+            if [ "$2" = true ]; then expected=success; fi
+            if [ "$3" != "$expected" ]; then
+              echo "::error::$1: expected $expected, got ${3:-unset}"
+              exit 1
+            fi
+          }
+          check_result Docs "$RUN_DOCS" "$DOCS_RESULT"
+          check_result SIMD "$RUN_SIMD" "$SIMD_RESULT"
+          check_result Lite "$RUN_LITE" "$LITE_RESULT"
+  version-tsan-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      non_markdown: ${{ steps.execute.outputs.non_markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-changes
+        id: execute
+    if: ${{ (inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (true) }}
+  version-tsan-build-tsan:
+    name: Build with TSAN
+    needs:
+      - version-tsan-changes
+    if: ${{ ((inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (github.event_name != 'pull_request' || needs.version-tsan-changes.outputs.non_markdown == 'true')) && needs.version-tsan-changes.result == 'success' }}
+    runs-on: ubuntu-24.04
+    env:
+      EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-main-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          cleanup_failed=0
+          for path in /useless/*; do
+            case "$path" in
+              /useless/runner-cache) continue ;;
+            esac
+            rm -rf -- "$path" || cleanup_failed=1
+          done
+          node24_diagnostics after
+          exit "$cleanup_failed"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - uses: ./.github/actions/tsan-build-and-test-build-tsan
+        id: execute
+  version-tsan-test-tsan:
+    name: Run TSAN Tests
+    needs:
+      - version-tsan-changes
+      - version-tsan-build-tsan
+    if: ${{ ((inputs.core && github.event_name == 'pull_request' && startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')) && (github.event_name != 'pull_request' || needs.version-tsan-changes.outputs.non_markdown == 'true')) && needs.version-tsan-changes.result == 'success' && needs.version-tsan-build-tsan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-main-openblas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-test-tsan
+        id: execute

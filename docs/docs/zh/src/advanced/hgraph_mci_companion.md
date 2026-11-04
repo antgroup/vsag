@@ -498,6 +498,7 @@ review 后另补充了反向边恢复及加载后 FORCE_REMOVE 回归。大数�
 
 | 搜索参数 | 默认值 | 含义 |
 | --- | --- | --- |
+| `hybrid_filter_cost_ratio` | `1.0` | 用于 `use_hybrid_traversal`：一次谓词过滤相对于一次距离计算的相对成本（`O_filter / O_dist`）。当 `considered * (hybrid_filter_cost_ratio + local_selectivity)` 达到 `hybrid_vob` 时，虚开销预算提前终止 MCI 部分。 |
 | `mci_packed_filter` | `true` | 从完整的合法 inner ID 或身份映射下的字节位图构造查询私有的单比特位图。静态 CSR 支持运行时选择 AVX512／AVX2 和标量回退，保留成员顺序；没有完整来源时沿用原谓词检查。 |
 | `mci_batch_distance` | `true` | 每批最多对 64 个首次访问的合法点调用距离接口；选择下一父节点和检查收敛前提交剩余批次。FP32 内核可能选择不同的严格等距 ID。 |
 | `mci_activation_cap` | `0` | 每个展开点只考虑其存储顺序中的前若干条团归属，0 表示不限。已经访问过的团仍占用前缀。这会改变搜索图，可能降低召回。 |

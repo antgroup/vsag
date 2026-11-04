@@ -19,6 +19,7 @@
 #include <cstring>
 
 #include "fp32_simd.h"
+#include "kernels/rabitq_compute.h"
 #include "simd_status.h"
 #include "unittest.h"
 
@@ -713,6 +714,51 @@ TEST_CASE("RaBitQ FP32 three-bit centered SIMD Batch4 Compute Codes", "[ut][simd
     }
 }
 
+TEST_CASE("RaBitQ AVX512 three-bit Batch4 covers all weights and unaligned tails",
+          "[ut][simd][rabitq_three_bit_batch4]") {
+    if (not SimdStatus::SupportAVX512()) {
+        return;
+    }
+    const std::vector<uint64_t> dims = {
+        0, 1, 7, 15, 16, 17, 31, 32, 33, 63, 64, 65, 959, 960, 961, 1024, 1025};
+    for (uint64_t dim : dims) {
+        const uint64_t plane_bytes = (dim + 7) / 8;
+        const uint64_t code_size = 3 * plane_bytes;
+        std::vector<float> query(dim);
+        for (uint64_t d = 0; d < dim; ++d) {
+            query[d] = static_cast<float>(static_cast<int>(d % 31) - 15) * 0.0625F;
+        }
+        for (uint64_t pattern = 0; pattern < 8; ++pattern) {
+            std::vector<uint8_t> storage(4 * (code_size + 1) + 1, 0xFF);
+            const uint8_t* codes[4];
+            for (uint64_t lane = 0; lane < 4; ++lane) {
+                auto* code = storage.data() + 1 + lane * (code_size + 1);
+                codes[lane] = code;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const uint64_t value = (d + 3 * lane + pattern) & 7U;
+                    const auto mask = static_cast<uint8_t>(1U << (d & 7));
+                    for (uint64_t plane = 0; plane < 3; ++plane) {
+                        auto& byte = code[plane * plane_bytes + (d >> 3)];
+                        byte = static_cast<uint8_t>(
+                            (byte & ~mask) | (((value >> (2 - plane)) & 1U) != 0U ? mask : 0U));
+                    }
+                }
+            }
+            float expected[4];
+            generic::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), codes[0], codes[1], codes[2], codes[3], dim, expected);
+            float guarded[6] = {12345.0F, 0.0F, 0.0F, 0.0F, 0.0F, -12345.0F};
+            avx512::RaBitQFloatThreeBitCenteredIPBatch4(
+                query.data(), codes[0], codes[1], codes[2], codes[3], dim, guarded + 1);
+            REQUIRE(guarded[0] == 12345.0F);
+            REQUIRE(guarded[5] == -12345.0F);
+            for (uint64_t lane = 0; lane < 4; ++lane) {
+                REQUIRE(guarded[lane + 1] == expected[lane]);
+            }
+        }
+    }
+}
+
 TEST_CASE("RaBitQ FP32 four-bit centered SIMD Batch4 Compute Codes", "[ut][simd]") {
     const std::vector<uint64_t> dims = {0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 959, 960, 961};
 
@@ -1031,6 +1077,11 @@ TEST_CASE("RaBitQ FP32 supplement-code SIMD Compute Codes", "[ut][simd]") {
             }
 
             const auto* supplement = supplement_bits == 0 ? nullptr : supplement_code.data();
+            // Standalone Lite shares this scalar kernel even without AVX512 support.
+            const auto shared_scalar_result = simd::RaBitQFloatSupplementCodeIPScalarImpl(
+                query.data(), supplement, dim, supplement_bits);
+            REQUIRE(std::abs(expected - shared_scalar_result) < 1e-4F);
+
             auto generic_result = generic::RaBitQFloatSupplementCodeIP(
                 query.data(), supplement, dim, supplement_bits);
             REQUIRE(std::abs(expected - generic_result) < 1e-4F);

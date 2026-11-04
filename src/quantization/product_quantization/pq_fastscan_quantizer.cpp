@@ -15,6 +15,8 @@
 
 #include "pq_fastscan_quantizer.h"
 
+#include <cstring>
+
 #include "impl/blas/blas_function.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "index_common_param.h"
@@ -81,15 +83,15 @@ PQFastScanQuantizer<metric>::TrainImpl(const float* data, uint64_t count) {
 
     for (int64_t i = 0; i < pq_dim_; ++i) {
         for (int64_t j = 0; j < count; ++j) {
-            memcpy(slice.data() + j * subspace_dim_,
-                   train_data + j * this->dim_ + i * subspace_dim_,
-                   subspace_dim_ * sizeof(float));
+            std::memcpy(slice.data() + j * subspace_dim_,
+                        train_data + j * this->dim_ + i * subspace_dim_,
+                        subspace_dim_ * sizeof(float));
         }
         KMeansCluster cluster(subspace_dim_, this->allocator_);
         cluster.Run(CENTROIDS_PER_SUBSPACE, slice.data(), count);
-        memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
-               cluster.k_centroids_,
-               CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
+        std::memcpy(this->codebooks_.data() + i * CENTROIDS_PER_SUBSPACE * subspace_dim_,
+                    cluster.k_centroids_,
+                    CENTROIDS_PER_SUBSPACE * subspace_dim_ * sizeof(float));
     }
 
     this->is_trained_ = true;
@@ -106,7 +108,7 @@ PQFastScanQuantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
         Normalize(data, tmp.data(), this->dim_);
         cur = tmp.data();
     }
-    memset(codes, 0, this->code_size_);
+    std::memset(codes, 0, this->code_size_);
     for (int i = 0; i < pq_dim_; ++i) {
         // TODO(LHT): use blas
         float nearest_dis = std::numeric_limits<float>::max();
@@ -156,9 +158,9 @@ PQFastScanQuantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
         } else {
             idx >>= 4L;
         }
-        memcpy(data + i * subspace_dim_,
-               this->get_codebook_data(i, idx),
-               subspace_dim_ * sizeof(float));
+        std::memcpy(data + i * subspace_dim_,
+                    this->get_codebook_data(i, idx),
+                    subspace_dim_ * sizeof(float));
     }
     return true;
 }
@@ -205,7 +207,7 @@ PQFastScanQuantizer<metric>::ScanBatchDistImpl(Computer<PQFastScanQuantizer<metr
         map_int32_to_float(tmp_dist.data(), dists, BLOCK_SIZE_PACKAGE);
         codes += BLOCK_SIZE_PACKAGE * this->code_size_;
         dists += BLOCK_SIZE_PACKAGE;
-        memset(tmp_dist.data(), 0, BLOCK_SIZE_PACKAGE * sizeof(int32_t));
+        std::memset(tmp_dist.data(), 0, BLOCK_SIZE_PACKAGE * sizeof(int32_t));
     }
 
     if (count > block_count * BLOCK_SIZE_PACKAGE) {
@@ -256,7 +258,7 @@ PQFastScanQuantizer<metric>::Package32(const uint8_t* codes,
         }
         return code >> 4L;
     };
-    memset(packaged_codes, 0, this->code_size_ * BLOCK_SIZE_PACKAGE);
+    std::memset(packaged_codes, 0, this->code_size_ * BLOCK_SIZE_PACKAGE);
     for (int i = 0; i < this->pq_dim_; ++i) {
         for (int j = 0; j < BLOCK_SIZE_PACKAGE; ++j) {
             auto code = get_code(MAPPER[j], i);

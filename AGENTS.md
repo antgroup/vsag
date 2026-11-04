@@ -14,7 +14,7 @@ Node.js/TypeScript bindings provided by `vsag`.
 ## Hard Constraints (must hold every change)
 
 - **Tool versions are fixed:** `clang-format` and `clang-tidy` **must be
-  version 15 exactly**. Newer versions are not acceptable; CI enforces this.
+  version 20 exactly**. Newer versions are not acceptable; CI enforces this.
 - **Formatting:** C++ source and header files use 4-space indentation and a
   100-character line limit; Markdown and other non-C++ text files have no line
   width limit. Use the `.cpp` (not `.cc`) suffix, and ensure every committed
@@ -29,6 +29,9 @@ Node.js/TypeScript bindings provided by `vsag`.
 - **Tests:** new features need tests; bug fixes need regression coverage; the
   C++ library (`src/` + `include/`) must maintain **≥ 90 % unit-test
   coverage**.
+- **Before submitting a PR:** run the applicable checks removed from PR CI locally
+  (or in an authorized remote development environment), record results, and follow
+  the [pre-submission validation requirements](docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr).
 - **Commits:** use Conventional Commits (`feat:`, `fix:`, `docs:`,
   `chore:`, …) and DCO sign-off. **AI agents must NOT add their own
   `Signed-off-by:`** — only humans can certify the DCO. **AI agents must

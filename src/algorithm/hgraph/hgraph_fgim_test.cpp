@@ -511,6 +511,43 @@ TEST_CASE_METHOD(HGraphFGIMTest,
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM refinement skips same-source ranges in a reverse hub",
+                 "[ut][hgraph][fgim]") {
+    const uint64_t source_count = GENERATE(2, 3, 4);
+    constexpr uint64_t hub_source_size = 1024;
+    std::vector<std::unique_ptr<HGraph>> owned;
+    Vector<const HGraph*> sources(common.allocator_.get());
+    uint64_t total = 0;
+    for (uint64_t source = 0; source < source_count; ++source) {
+        const auto count = source == 0 ? hub_source_size : 2;
+        owned.push_back(MakeSource(count, source, true));
+        sources.push_back(owned.back().get());
+        total += count;
+    }
+    FGIMKnnGraph graph(total);
+    for (InnerIdType u = 0; u < total; ++u) {
+        graph[u].push_back({u == 0 ? InnerIdType{1} : InnerIdType{0}, 0});
+    }
+    const auto stats = HGraphFGIM::RefineKnnGraph(sources, graph, 1, 8);
+    // The hub consumes the previous pass's reverse-new candidates on pass two.
+    const uint64_t candidates = total - 1;
+    const uint64_t skipped = (hub_source_size - 1) * (hub_source_size - 2) / 2 + source_count - 1;
+    const uint64_t cross_pairs = candidates * (candidates - 1) / 2 - skipped;
+    REQUIRE(stats.iterations == 2);
+    REQUIRE(stats.same_source_pairs_skipped == skipped);
+    REQUIRE(stats.new_new_pairs == cross_pairs);
+    REQUIRE(stats.new_old_pairs == 0);
+    REQUIRE(stats.distance_evaluations == cross_pairs);
+    REQUIRE(stats.neighbor_updates == 0);
+    REQUIRE(stats.indegree_repairs == 0);
+    for (InnerIdType u = 0; u < total; ++u) {
+        REQUIRE(graph[u].size() == 1);
+        REQUIRE(graph[u][0].id == (u == 0 ? 1 : 0));
+        REQUIRE(graph[u][0].distance == 0);
+    }
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM refinement repairs zero indegree without exceeding k",
                  "[ut][hgraph][fgim]") {
     auto lhs = MakeSource(2, 0, true);
@@ -905,6 +942,18 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(result[3].size() == 1);
     REQUIRE(result[3][0].id == 2);
     REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects unsupported destination storage",
+                 "[ut][hgraph][fgim]") {
+    const std::string condition = GENERATE("non-float32", "non-L2", "quantized base");
+    auto destination = MakeSource(2, 0, true, condition == "quantized base" ? "sq8" : "fp32");
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    if (condition != "quantized base") {
+        SetUnsupported(*destination, condition);
+    }
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,

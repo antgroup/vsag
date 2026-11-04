@@ -59,6 +59,7 @@ public:
                  uint64_t k,
                  uint64_t* distance_evaluations = nullptr);
 
+    // Destination storage must satisfy the same float32/L2/fp32 constraints as sources.
     // Destination vectors and labels must already occupy the merged internal ID space.
     // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
     static void

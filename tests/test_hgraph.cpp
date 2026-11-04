@@ -19,16 +19,21 @@
 #include <catch2/generators/catch_generators.hpp>
 #include <chrono>
 #include <cstring>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <limits>
+#include <mutex>
 #include <random>
 #include <sstream>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include "core/test_budget.h"
+#include "framework/daily_test_plan.h"
 #include "framework/test_budget_context.h"
+#include "framework/test_reader.h"
 #include "functest.h"
 #include "impl/filter/iterator_filter.h"
 #include "inner_string_params.h"
@@ -55,6 +60,7 @@ public:
     std::string graph_type{"nsw"};
     bool sample{true};
     uint64_t query_count{100};
+    uint64_t disk_graph_io_start{0};
     fixtures::budget::CaseIdentity identity;
     std::vector<std::pair<std::string, std::string>> tune_cases;
     std::shared_ptr<const budget::CasePlan> budget_plan;
@@ -201,6 +207,113 @@ SelectHGraphValues(const std::vector<T>& values, uint64_t count, uint64_t seed) 
     return selected;
 }
 
+const std::vector<std::string> hgraph_graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
+
+std::vector<std::pair<std::string, std::string>>
+HGraphDiskIOCases(int dim) {
+    std::vector<std::pair<std::string, std::string>> cases = {
+        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
+        {"rabitq,fp16", "rabitq,fp16,async_io"},
+        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
+    };
+    cases.erase(std::remove_if(cases.begin(),
+                               cases.end(),
+                               [&](const auto& value) {
+                                   return HGraphTestIndex::IsRaBitQ(value.first) &&
+                                          dim < fixtures::RABITQ_MIN_RACALL_DIM;
+                               }),
+                cases.end());
+    return cases;
+}
+
+template <typename Callback>
+void
+ForEachHGraphDiskIOCase(const HGraphResourcePtr& resource, Callback callback) {
+    auto select_idx = resource->disk_graph_io_start;
+    for (const auto& metric : resource->metric_types) {
+        for (const auto dim : resource->dims) {
+            for (const auto& [memory_io, disk_io] : HGraphDiskIOCases(dim)) {
+                callback(metric, dim, memory_io, disk_io, hgraph_graph_io_types.at(select_idx));
+                select_idx = (select_idx + 1) % hgraph_graph_io_types.size();
+            }
+        }
+    }
+}
+
+nlohmann::json
+HGraphDailyGroups(const HGraphResourcePtr& resource) {
+    nlohmann::json groups = nlohmann::json::array();
+    uint64_t disk_graph_io_start = 0;
+    const bool disk_io = HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index";
+    for (const auto& metric : resource->metric_types) {
+        for (const auto dim : resource->dims) {
+            nlohmann::json group = {{"metric", metric},
+                                    {"dim", dim},
+                                    {"quantizers", resource->test_cases},
+                                    {"tune_pairs", resource->tune_cases},
+                                    {"base_count", resource->base_count},
+                                    {"query_count", resource->query_count}};
+            if (disk_io) {
+                // Carry the original whole-case cursor across dimensions AND metrics.
+                // Unsupported RaBitQ entries never advance it in the original loop.
+                group["disk_graph_io_start"] = disk_graph_io_start;
+                disk_graph_io_start = (disk_graph_io_start + HGraphDiskIOCases(dim).size()) %
+                                      hgraph_graph_io_types.size();
+            }
+            // These helpers consume test_cases directly. Keep fixed-matrix and disk
+            // helpers intact so their backend sequence and special contracts remain unchanged.
+            const auto title = HGraphCaseTitle(resource->identity);
+            const bool split_quantizers =
+                title == "HGraph Build Test" || title == "HGraph Clone" ||
+                title == "HGraph Build & ContinueAdd Test" ||
+                title == "HGraph Build & ContinueAdd Test With Random Allocator" ||
+                title == "HGraph Concurrent Add" || title == "HGraph Train & Add Test" ||
+                title == "HGraph Export Model" || title == "HGraph Mark Remove" ||
+                title == "HGraph Search Over Time" || title == "HGraph Merge" ||
+                title == "HGraph Hops Limit" || title == "HGraph Duplicate Build" ||
+                title == "HGraph Estimate Memory And Get Memory Usage";
+            if (title == "HGraph Tune") {
+                for (uint64_t i = 0; i < resource->tune_cases.size(); ++i) {
+                    auto part = group;
+                    part["tune_index"] = i;
+                    part["tune_pairs"] = nlohmann::json::array({resource->tune_cases[i]});
+                    groups.push_back(std::move(part));
+                }
+            } else if (split_quantizers) {
+                for (uint64_t i = 0; i < resource->test_cases.size(); ++i) {
+                    auto part = group;
+                    part["quantizer_index"] = i;
+                    part["quantizers"] = nlohmann::json::array({resource->test_cases[i]});
+                    groups.push_back(std::move(part));
+                }
+            } else {
+                groups.push_back(std::move(group));
+            }
+        }
+    }
+    return groups;
+}
+
+void
+SelectHGraphDailyGroup(const HGraphResourcePtr& resource, const nlohmann::json& selected) {
+    const auto groups = HGraphDailyGroups(resource);
+    if (std::find(groups.begin(), groups.end(), selected) == groups.end()) {
+        throw std::invalid_argument("Daily HGraph configuration not in full inventory");
+    }
+    if (HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index") {
+        resource->disk_graph_io_start = selected.at("disk_graph_io_start").get<uint64_t>();
+    }
+    if (selected.contains("quantizer_index")) {
+        resource->test_cases = {
+            resource->test_cases.at(selected.at("quantizer_index").get<uint64_t>())};
+    }
+    if (selected.contains("tune_index")) {
+        resource->tune_cases = {resource->tune_cases.at(selected.at("tune_index").get<uint64_t>())};
+    }
+    resource->metric_types = {selected.at("metric").get<std::string>()};
+    resource->dims = {selected.at("dim").get<int>()};
+}
+
 std::vector<std::pair<std::string, std::string>>
 HGraphTuneCases(bool sample, bool pipnn) {
     if (sample && pipnn) {
@@ -221,6 +334,41 @@ HGraphTuneCases(bool sample, bool pipnn) {
             {"sq4", "sq4,fp32"},
             {"sq4,fp32", "sq4"},
             {"sq4,bf16", "sq4"}};
+}
+
+std::vector<uint64_t>
+HGraphBudgetCounts(uint64_t minimum, uint64_t maximum) {
+    std::vector<uint64_t> counts;
+    // Collect legal sizes directly: GCC 13 + TSan diagnoses the erase/remove_if
+    // form as stringop-overread under -O2 -Werror.
+    for (const uint64_t count : {minimum,
+                                 uint64_t{256},
+                                 uint64_t{400},
+                                 uint64_t{512},
+                                 uint64_t{600},
+                                 uint64_t{1000},
+                                 uint64_t{1800},
+                                 maximum}) {
+        if (count >= minimum && count <= maximum) {
+            counts.push_back(count);
+        }
+    }
+    std::sort(counts.begin(), counts.end());
+    counts.resize(std::unique(counts.begin(), counts.end()) - counts.begin());
+    return counts;
+}
+
+TEST_CASE("HGraph budget candidate counts preserve bounds and coverage", "[test_budget]") {
+    REQUIRE(HGraphBudgetCounts(128, 1000) == std::vector<uint64_t>{128, 256, 400, 512, 600, 1000});
+    REQUIRE(HGraphBudgetCounts(256, 600) == std::vector<uint64_t>{256, 400, 512, 600});
+    REQUIRE(HGraphBudgetCounts(320, 1000) == std::vector<uint64_t>{320, 400, 512, 600, 1000});
+    REQUIRE(HGraphBudgetCounts(512, 1800) == std::vector<uint64_t>{512, 600, 1000, 1800});
+    REQUIRE(HGraphBudgetCounts(1000, 1000) == std::vector<uint64_t>{1000});
+    REQUIRE(HGraphBudgetCounts(128, 200) == std::vector<uint64_t>{128, 200});
+    REQUIRE(HGraphBudgetCounts(512, 256).empty());
+    REQUIRE(HGraphBudgetCounts(0, 0) == std::vector<uint64_t>{0});
+    const auto largest = std::numeric_limits<uint64_t>::max();
+    REQUIRE(HGraphBudgetCounts(largest, largest) == std::vector<uint64_t>{largest});
 }
 
 void
@@ -282,15 +430,7 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource) {
             minimum = std::max(minimum, training_minimum);
         }
     }
-    std::vector<uint64_t> counts{minimum, 256, 400, 512, 600, 1000, 1800, resource->base_count};
-    counts.erase(std::remove_if(counts.begin(),
-                                counts.end(),
-                                [&](uint64_t count) {
-                                    return count < minimum || count > resource->base_count;
-                                }),
-                 counts.end());
-    std::sort(counts.begin(), counts.end());
-    counts.erase(std::unique(counts.begin(), counts.end()), counts.end());
+    const auto counts = HGraphBudgetCounts(minimum, resource->base_count);
 
     std::vector<std::vector<budget::RunSpec>> candidates;
     for (const auto count : counts) {
@@ -495,6 +635,25 @@ HGraphTestIndex::GetResource(bool sample,
         resource->dims = SelectHGraphValues(fixtures::get_common_used_dims(), 1, seed + 3);
     }
     ApplyHGraphBudget(resource);
+    // Keep the original whole-case workload size and assertions. Rotation splits
+    // metric/dimension/quantizer groups; the inventory retains every legal tuple.
+    if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
+        const auto groups = HGraphDailyGroups(resource);
+        if (const auto* path = std::getenv("VSAG_DAILY_ENUMERATE")) {
+            std::ofstream output(path);
+            output << groups.dump(2) << std::endl;
+            if (!output) {
+                throw std::runtime_error("Cannot write Daily configuration inventory");
+            }
+            // Inventory mode is never counted as test execution.
+            SKIP("Daily configuration enumeration only");
+        }
+        if (const auto* text = std::getenv("VSAG_DAILY_HGRAPH")) {
+            const auto selected = nlohmann::json::parse(text);
+            SelectHGraphDailyGroup(resource, selected);
+            std::cerr << "DAILY_HGRAPH " << selected.dump() << std::endl;
+        }
+    }
     return resource;
 }
 
@@ -652,6 +811,7 @@ HGraphTestIndex::TestGeneral(const TestIndex::IndexPtr& index,
                              const std::string& search_param,
                              float recall,
                              bool expect_success) {
+    fixtures::daily::Phase daily_phase("TestGeneral");
     REQUIRE(index->GetIndexType() == vsag::IndexType::HGRAPH);
     TestGetMinAndMaxId(index, dataset);
     TestKnnSearch(index, dataset, search_param, recall, true);
@@ -1337,6 +1497,102 @@ MakeHGraphQueryComputerCountParam(const std::string& quantization,
     }
 
 }  // namespace
+
+TEST_CASE("HGraph Daily quantizer splitting preserves the complete tuple inventory",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    auto whole = std::make_shared<HGraphTestResource>();
+    whole->identity = {"(Daily) HGraph Build Test", "", __FILE__, 0};
+    whole->base_count = 1000;
+    whole->query_count = 100;
+    whole->metric_types = {"l2", "ip"};
+    whole->dims = {32, 128};
+    whole->test_cases = {{"fp32", 0.99F}, {"sq8,fp32", 0.95F}, {"pq,fp32", 0.9F}};
+    const auto groups = HGraphDailyGroups(whole);
+    REQUIRE(groups.size() == 12);
+    uint64_t index = 0;
+    for (const auto& metric : whole->metric_types) {
+        for (const auto dim : whole->dims) {
+            for (const auto& quantizer : whole->test_cases) {
+                auto selected = std::make_shared<HGraphTestResource>(*whole);
+                SelectHGraphDailyGroup(selected, groups.at(index++));
+                REQUIRE(selected->metric_types == std::vector<std::string>{metric});
+                REQUIRE(selected->dims == std::vector<int>{dim});
+                REQUIRE(selected->test_cases.size() == 1);
+                REQUIRE(selected->test_cases.front() == quantizer);
+                REQUIRE(selected->base_count == whole->base_count);
+                REQUIRE(selected->query_count == whole->query_count);
+            }
+        }
+    }
+    whole->identity.name = "(Daily) HGraph Tune";
+    whole->tune_cases = {{"sq8,fp32", "sq8"}, {"sq4,fp32", "sq4"}};
+    const auto tunes = HGraphDailyGroups(whole);
+    REQUIRE(tunes.size() == 8);
+    for (uint64_t i = 0; i < tunes.size(); ++i) {
+        auto selected = std::make_shared<HGraphTestResource>(*whole);
+        SelectHGraphDailyGroup(selected, tunes.at(i));
+        REQUIRE(selected->tune_cases.size() == 1);
+        REQUIRE(selected->tune_cases.front() == whole->tune_cases.at(i % 2));
+    }
+    whole->identity.name = "(Daily) HGraph Build Test";
+    auto invalid = groups.front();
+    invalid["quantizer_index"] = 99;
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+}
+
+TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequence",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    auto whole = std::make_shared<HGraphTestResource>();
+    whole->identity = {"(Daily) HGraph Disk IO Type Index", "", __FILE__, 0};
+    whole->base_count = 600;
+    whole->metric_types = {"l2", "ip"};
+    // Skipped RaBitQ entries make successive groups start at different backends.
+    whole->dims = {64, RABITQ_MIN_RACALL_DIM, 128, RABITQ_MIN_RACALL_DIM + 1};
+    using Record = std::tuple<std::string, int, std::string, std::string, std::string>;
+    std::vector<Record> expected, unsplit, split;
+    const std::vector<std::pair<std::string, std::string>> original_cases = {
+        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
+        {"rabitq,fp16", "rabitq,fp16,async_io"},
+        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
+    };
+    const std::vector<std::string> original_backends = {"block_memory_io", "mmap_io", "async_io"};
+    uint64_t cursor = 0;
+    // Independent oracle: the pre-split nested loop, including its skip semantics.
+    for (const auto& metric : whole->metric_types) {
+        for (const auto dim : whole->dims) {
+            for (const auto& [memory, disk] : original_cases) {
+                if (memory.rfind("rabitq", 0) == 0 && dim < RABITQ_MIN_RACALL_DIM) {
+                    continue;
+                }
+                expected.emplace_back(metric, dim, memory, disk, original_backends[cursor]);
+                cursor = (cursor + 1) % original_backends.size();
+            }
+        }
+    }
+    ForEachHGraphDiskIOCase(whole, [&](const auto&... args) { unsplit.emplace_back(args...); });
+    const auto groups = HGraphDailyGroups(whole);
+    REQUIRE(groups.size() == 8);
+    for (const auto& group : groups) {
+        auto selected = std::make_shared<HGraphTestResource>(*whole);
+        SelectHGraphDailyGroup(selected, group);
+        ForEachHGraphDiskIOCase(selected,
+                                [&](const auto&... args) { split.emplace_back(args...); });
+    }
+    REQUIRE(unsplit == expected);
+    REQUIRE(split == expected);
+    REQUIRE(std::any_of(split.begin(), split.end(), [](const auto& value) {
+        return std::get<2>(value) == "sq8_uniform,bf16" && std::get<4>(value) == "mmap_io";
+    }));
+    auto invalid = groups.at(1);
+    invalid["disk_graph_io_start"] = 0;
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+    invalid.erase("disk_graph_io_start");
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+    REQUIRE(whole->dims.size() == 4);
+    REQUIRE(whole->metric_types.size() == 2);
+}
 
 TEST_CASE("HGraph budget normalizes each quantizer before whole-case accounting",
           "[ft][hgraph][test_budget][pr]") {
@@ -2034,6 +2290,288 @@ TestHGraphFactor(const fixtures::HGraphTestIndexPtr& test_index,
     }
 }
 
+TEST_CASE("HGraph user-defined precise IO builds and searches", "[ft][hgraph][user_defined_io]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+        uint64_t reads{0};
+        uint64_t writes{0};
+        uint64_t resizes{0};
+    };
+    auto make_storage = [](const std::shared_ptr<Store>& store) {
+        return vsag::Factory::CreateUserDefinedIO(
+            [store](uint64_t offset, uint64_t len, void* destination) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                    throw std::runtime_error("read out of bounds");
+                }
+                if (len > 0) {
+                    std::memcpy(destination, store->bytes.data() + offset, len);
+                }
+                ++store->reads;
+            },
+            [store](uint64_t offset, uint64_t len, const void* source) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                if (offset > UINT64_MAX - len) {
+                    throw std::runtime_error("write overflow");
+                }
+                if (offset + len > store->bytes.size()) {
+                    store->bytes.resize(offset + len);
+                }
+                if (len > 0) {
+                    std::memcpy(store->bytes.data() + offset, source, len);
+                }
+                ++store->writes;
+            },
+            [store](uint64_t size) {
+                std::lock_guard<std::mutex> lock(store->mutex);
+                store->bytes.resize(size);
+                ++store->resizes;
+            },
+            0);
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = make_storage(store);
+    vsag::UserDefinedIOSet storages;
+    storages.Set("hgraph_precise", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 256;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    std::mt19937 generator(424242);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = distribution(generator);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    const std::string external_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"hgraph_precise","graph_io_type":"block_memory_io",
+        "graph_type":"odescent","max_degree":32,"ef_construction":100,
+        "build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto external = vsag::Factory::CreateIndex("hgraph", external_param, storages);
+    REQUIRE(external.has_value());
+    REQUIRE(external.value()->Build(base).has_value());
+    REQUIRE(store->writes > 0);
+    REQUIRE(store->resizes > 0);
+    REQUIRE(store->reads > 0);
+    REQUIRE_FALSE(store->bytes.empty());
+
+    const std::string memory_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"block_memory_io",
+        "graph_io_type":"block_memory_io","graph_type":"odescent","max_degree":32,
+        "ef_construction":100,"build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto baseline = vsag::Factory::CreateIndex("hgraph", memory_param).value();
+    REQUIRE(baseline->Build(base).has_value());
+
+    std::vector<float> query_vector(dim);
+    for (int64_t j = 0; j < dim; ++j) {
+        query_vector[j] = vectors[37 * dim + j] + static_cast<float>(j + 1) * 0.0001F;
+    }
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    const auto reads_before_search = store->reads;
+    auto actual = external.value()->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    auto expected = baseline->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+    REQUIRE(actual.has_value());
+    REQUIRE(expected.has_value());
+    REQUIRE(store->reads > reads_before_search);
+    // Search results report their count through GetDim() in this codebase (see the
+    // GetDim() == topk assertions across tests/); GetNumElements() would be the query count.
+    REQUIRE(actual.value()->GetDim() == 10);
+    REQUIRE(expected.value()->GetDim() == 10);
+    for (int64_t i = 0; i < 10; ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(std::abs(actual.value()->GetDistances()[i] - expected.value()->GetDistances()[i]) <
+                0.0001F);
+    }
+
+    SECTION("ReaderSet restore preserves the independent writable pair") {
+        const auto source_bytes = store->bytes;
+        auto serialized = external.value()->Serialize();
+        REQUIRE(serialized.has_value());
+        auto restored_store = std::make_shared<Store>();
+        auto restored_storage = make_storage(restored_store);
+        vsag::UserDefinedIOSet restored_storages;
+        restored_storages.Set("hgraph_precise", restored_storage.reader, restored_storage.writer);
+        auto restored =
+            vsag::Factory::CreateIndex("hgraph", external_param, restored_storages).value();
+        REQUIRE(restored->CheckFeature(vsag::IndexFeature::SUPPORT_DESERIALIZE_READER_SET));
+        {
+            vsag::ReaderSet readers;
+            for (const auto& key : serialized.value().GetKeys()) {
+                readers.Set(key,
+                            std::make_shared<fixtures::TestReader>(serialized.value().Get(key)));
+            }
+            auto result = restored->Deserialize(readers);
+            REQUIRE(result.has_value());
+        }
+        REQUIRE(restored->GetNumElements() == count);
+        REQUIRE(restored_store->writes > 0);
+        REQUIRE(restored_store->bytes == source_bytes);
+        const auto reads_before = restored_store->reads;
+        auto restored_result = restored->KnnSearch(query, 10, R"({"hgraph":{"ef_search":200}})");
+        REQUIRE(restored_result.has_value());
+        REQUIRE(restored_store->reads > reads_before);
+        for (int64_t i = 0; i < 10; ++i) {
+            REQUIRE(restored_result.value()->GetIds()[i] == actual.value()->GetIds()[i]);
+            REQUIRE(std::abs(restored_result.value()->GetDistances()[i] -
+                             actual.value()->GetDistances()[i]) < 0.0001F);
+        }
+        auto appended = vsag::Dataset::Make();
+        int64_t appended_id = 9000;
+        appended->NumElements(1)
+            ->Dim(dim)
+            ->Ids(&appended_id)
+            ->Float32Vectors(query_vector.data())
+            ->Owner(false);
+        const auto writes_before = restored_store->writes;
+        REQUIRE(restored->Add(appended).has_value());
+        REQUIRE(restored_store->writes > writes_before);
+        REQUIRE(restored->GetNumElements() == count + 1);
+        REQUIRE(store->bytes == source_bytes);
+    }
+}
+
+TEST_CASE("HGraph user-defined IO rejects missing pair", "[ft][hgraph][user_defined_io]") {
+    const std::string param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"missing"}}
+    )";
+    vsag::UserDefinedIOSet storages;
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("hgraph", param, storages).has_value());
+}
+
+TEST_CASE("HGraph user-defined IO lifecycle copies are guarded", "[ft][hgraph][user_defined_io]") {
+    struct Store {
+        std::mutex mutex;
+        std::vector<uint8_t> bytes;
+    };
+    auto store = std::make_shared<Store>();
+    auto storage = vsag::Factory::CreateUserDefinedIO(
+        [store](uint64_t offset, uint64_t len, void* destination) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset > store->bytes.size() or len > store->bytes.size() - offset) {
+                throw std::runtime_error("read out of bounds");
+            }
+            if (len > 0) {
+                std::memcpy(destination, store->bytes.data() + offset, len);
+            }
+        },
+        [store](uint64_t offset, uint64_t len, const void* source) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            if (offset + len > store->bytes.size()) {
+                store->bytes.resize(offset + len);
+            }
+            if (len > 0) {
+                std::memcpy(store->bytes.data() + offset, source, len);
+            }
+        },
+        [store](uint64_t size) {
+            std::lock_guard<std::mutex> lock(store->mutex);
+            store->bytes.resize(size);
+        },
+        0);
+    vsag::UserDefinedIOSet storages;
+    storages.Set("hgraph_precise", storage.reader, storage.writer);
+
+    constexpr int64_t dim = 16;
+    constexpr int64_t count = 128;
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    std::mt19937 generator(97);
+    std::uniform_real_distribution<float> distribution(-1.0F, 1.0F);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = 1000 + i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = distribution(generator);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+
+    const std::string param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+        "precise_user_defined_io":"hgraph_precise","graph_io_type":"block_memory_io",
+        "graph_type":"odescent","max_degree":32,"ef_construction":100,
+        "build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto index = vsag::Factory::CreateIndex("hgraph", param, storages).value();
+    REQUIRE(index->Build(base).has_value());
+    const auto size_after_build = store->bytes.size();
+
+    // Clone / ExportModel would re-bind this storage pair into a second HGraph and
+    // resize or overwrite the shared backing bytes; both must stay unsupported.
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE_FALSE(index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    auto cloned = index->Clone();
+    REQUIRE_FALSE(cloned.has_value());
+    REQUIRE(cloned.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    auto model = index->ExportModel();
+    REQUIRE_FALSE(model.has_value());
+    REQUIRE(model.error().type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+
+    // A memory-IO index with the same other parameters keeps lifecycle copies.
+    const std::string memory_param = R"({
+        "dtype":"float32","metric_type":"l2","dim":16,
+        "index_param":{"use_reorder":true,"build_by_base":false,
+        "base_quantization_type":"sq8","base_io_type":"block_memory_io",
+        "precise_quantization_type":"fp32","precise_io_type":"block_memory_io",
+        "graph_io_type":"block_memory_io","graph_type":"odescent","max_degree":32,
+        "ef_construction":100,"build_thread_count":1,"graph_iter_turn":5}}
+    )";
+    auto memory_index = vsag::Factory::CreateIndex("hgraph", memory_param).value();
+    REQUIRE(memory_index->Build(base).has_value());
+    REQUIRE(memory_index->CheckFeature(vsag::IndexFeature::SUPPORT_CLONE));
+    REQUIRE(memory_index->CheckFeature(vsag::IndexFeature::SUPPORT_EXPORT_MODEL));
+    REQUIRE(store->bytes.size() == size_after_build);
+}
+
+TEST_CASE("HGraph user-defined IO rejects invalid binding names", "[ft][hgraph][user_defined_io]") {
+    for (const auto* name : {"null", "42", "false", "[]", "{}", "\"\""}) {
+        const std::string param = std::string(R"({
+            "dtype":"float32","metric_type":"l2","dim":16,
+            "index_param":{"use_reorder":true,"base_quantization_type":"sq8",
+            "precise_quantization_type":"fp32","precise_io_type":"user_defined_io",
+            "precise_user_defined_io":)") +
+                                  name + "}}";
+        vsag::UserDefinedIOSet storages;
+        auto result = vsag::Factory::CreateIndex("hgraph", param, storages);
+        REQUIRE_FALSE(result.has_value());
+        const auto* expected = std::string(name) == "\"\""
+                                   ? "precise_user_defined_io must be non-empty"
+                                   : "precise_user_defined_io must be a string";
+        REQUIRE(result.error().message.find(expected) != std::string::npos);
+    }
+}
+
 TEST_CASE("HGraph Factor Test", "[ft][factory][hgraph][pr]") {
     auto test_index = std::make_shared<fixtures::HGraphTestIndex>();
     auto resource = test_index->GetResource(true, fixtures::budget::CurrentCaseIdentity(__FILE__));
@@ -2589,8 +3127,8 @@ TEST_CASE("(PR) HGraph Reasoning Zero Overhead When Disabled", "[ft][hgraph][rea
     req_no_reasoning.expected_labels_ = {};
 
     for (uint64_t i = 0; i < warmup_rounds; ++i) {
-        index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr));
-        index->SearchWithRequest(req_no_reasoning);
+        REQUIRE(index->KnnSearch(query, 10, search_params, vsag::BitsetPtr(nullptr)).has_value());
+        REQUIRE(index->SearchWithRequest(req_no_reasoning).has_value());
     }
 
     auto measure = [&](const auto& search) {
@@ -4324,47 +4862,36 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
     auto size = 1024 * 1024 * 2;
     auto search_param = fmt::format(fixtures::search_param_tmp, 200, false);
     float recall = 0.98;
-    const std::vector<std::pair<std::string, std::string>> io_cases = {
-        {"sq8_uniform,bf16", "sq8_uniform,bf16,buffer_io"},
-        {"rabitq,fp16", "rabitq,fp16,async_io"},
-        {"rabitq,fp16", "rabitq,fp16,mmap_io"},
-    };
-    const std::vector<std::string> graph_io_types = {"block_memory_io", "mmap_io", "async_io"};
-    auto select_idx = 0;
-    for (auto metric_type : resource->metric_types) {
-        for (auto dim : resource->dims) {
-            for (auto& [memory_io_str, disk_io_str] : io_cases) {
-                INFO(fmt::format("metric_type: {}, dim: {}, memory_io_str: {}, disk_io_str: {}",
-                                 metric_type,
-                                 dim,
-                                 memory_io_str,
-                                 disk_io_str));
-                if (HGraphTestIndex::IsRaBitQ(memory_io_str) &&
-                    (dim < fixtures::RABITQ_MIN_RACALL_DIM)) {
-                    continue;  // Skip invalid RaBitQ configurations
-                }
-                vsag::Options::Instance().set_block_size_limit(size);
-                HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
-                build_param.graph_type = resource->graph_type;
-                auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                auto index = TestIndex::TestFactory(test_index->name, param, true);
-                auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(
-                    dim, resource->base_count, metric_type);
-                TestIndex::TestBuildIndex(index, dataset, true);
-                build_param.quantization_str = disk_io_str;
-
-                auto graph_io_type = graph_io_types[select_idx];
-                build_param.graph_io_type = graph_io_type;
-                param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
-                auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
-                TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
-                HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
-                ++select_idx;
-                select_idx %= graph_io_types.size();
-                vsag::Options::Instance().set_block_size_limit(origin_size);
-            }
-        }
-    }
+    ForEachHGraphDiskIOCase(
+        resource,
+        [&](const auto& metric_type,
+            int dim,
+            const auto& memory_io_str,
+            const auto& disk_io_str,
+            const auto& graph_io_type) {
+            INFO(fmt::format(
+                "metric_type: {}, dim: {}, memory_io_str: {}, disk_io_str: {}, graph_io_type: {}",
+                metric_type,
+                dim,
+                memory_io_str,
+                disk_io_str,
+                graph_io_type));
+            vsag::Options::Instance().set_block_size_limit(size);
+            HGraphTestIndex::HGraphBuildParam build_param(metric_type, dim, memory_io_str);
+            build_param.graph_type = resource->graph_type;
+            auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto index = TestIndex::TestFactory(test_index->name, param, true);
+            auto dataset =
+                HGraphTestIndex::pool.GetDatasetAndCreate(dim, resource->base_count, metric_type);
+            TestIndex::TestBuildIndex(index, dataset, true);
+            build_param.quantization_str = disk_io_str;
+            build_param.graph_io_type = graph_io_type;
+            param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+            auto disk_index = TestIndex::TestFactory(test_index->name, param, true);
+            TestIndex::TestSerializeFile(index, disk_index, dataset, search_param, true);
+            HGraphTestIndex::TestGeneral(disk_index, dataset, search_param, recall);
+            vsag::Options::Instance().set_block_size_limit(origin_size);
+        });
 }
 
 HGRAPH_PR_DAILY_CASE_WITH_PIPNN("HGraph Disk IO Type Index",
@@ -5665,7 +6192,7 @@ TEST_CASE("HGraph Concurrent Tune and CalcDistanceById (single id)",
     for (int i = 0; i < 4; ++i) {
         readers.emplace_back([&]() {
             while (!stop.load(std::memory_order_relaxed)) {
-                index.value()->CalcDistanceById(query.data(), 0);
+                (void)index.value()->CalcDistanceById(query.data(), 0);
                 cal_count.fetch_add(1, std::memory_order_relaxed);
             }
         });
@@ -6086,6 +6613,88 @@ TEST_CASE("(PR) HGraph Batch SearchWithRequest layout and restore", "[ft][hgraph
         REQUIRE_FALSE(result.has_value());
         REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
+    SECTION("ordinary callback relabel with a pinned deletion view") {
+        class RelabelFilter : public vsag::Filter {
+        public:
+            RelabelFilter(vsag::IndexPtr index, int64_t old_label, int64_t new_label)
+                : index_(std::move(index)), old_label_(old_label), new_label_(new_label) {
+            }
+            bool
+            CheckValid(int64_t /*id*/) const override {
+                if (not updated_) {
+                    updated_ = true;
+                    auto result = index_->UpdateId(old_label_, new_label_);
+                    update_ok_ = result.has_value() and result.value();
+                }
+                return true;
+            }
+            bool
+            CheckValid(const char* /*data*/) const override {
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            vsag::IndexPtr index_;
+            int64_t old_label_;
+            int64_t new_label_;
+            mutable bool updated_ = false;
+            mutable bool update_ok_ = false;
+        };
+        const auto old_label = dataset->base_->GetIds()[0];
+        const auto removed_label = dataset->base_->GetIds()[1];
+        REQUIRE(restored->Remove(removed_label, vsag::RemoveMode::MARK_REMOVE).value());
+        auto filter = std::make_shared<RelabelFilter>(restored, old_label, 999999999);
+        request.enable_filter_ = true;
+        request.filter_ = filter;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(filter->updated_);
+        REQUIRE(filter->update_ok_);
+        REQUIRE(result.has_value());
+    }
+    SECTION("callback relabel into a tombstoned label with a pinned deletion view") {
+        class TombstoneRelabelFilter : public vsag::Filter {
+        public:
+            TombstoneRelabelFilter(vsag::IndexPtr index, int64_t old_label, int64_t new_label)
+                : index_(std::move(index)), old_label_(old_label), new_label_(new_label) {
+            }
+            bool
+            CheckValid(int64_t /*id*/) const override {
+                if (not updated_) {
+                    updated_ = true;
+                    auto result = index_->UpdateId(old_label_, new_label_);
+                    update_ok_ = result.has_value() and result.value();
+                }
+                return true;
+            }
+            bool
+            CheckValid(const char* /*data*/) const override {
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            vsag::IndexPtr index_;
+            int64_t old_label_;
+            int64_t new_label_;
+            mutable bool updated_ = false;
+            mutable bool update_ok_ = false;
+        };
+        const auto old_label = dataset->base_->GetIds()[0];
+        const auto removed_label = dataset->base_->GetIds()[1];
+        REQUIRE(restored->Remove(removed_label, vsag::RemoveMode::MARK_REMOVE).value());
+        auto filter = std::make_shared<TombstoneRelabelFilter>(restored, old_label, removed_label);
+        request.enable_filter_ = true;
+        request.filter_ = filter;
+        auto result = restored->SearchWithRequest(request);
+        REQUIRE(filter->updated_);
+        REQUIRE(filter->update_ok_);
+        REQUIRE(result.has_value());
+        REQUIRE(restored->CheckIdExist(removed_label));
+        REQUIRE_FALSE(restored->CheckIdExist(old_label));
+    }
     SECTION("null query on a populated index reports invalid argument") {
         request.query_ = nullptr;
         auto result = restored->SearchWithRequest(request);
@@ -6141,4 +6750,137 @@ TEST_CASE("HGraph empty index distance validation", "[hgraph][distance_contract]
     REQUIRE_FALSE(index->CalcDistancesById(query, ids, 2, true, 0).has_value());
     REQUIRE_FALSE(index->CalcDistancesById(query, nullptr, 2).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(static_cast<const float*>(nullptr), ids[0]).has_value());
+}
+
+TEST_CASE("HGraph concurrent Add with small resize step does not race",
+          "[hgraph][concurrent][tsan]") {
+    // End-to-end counterpart of the LabelTable unit test.  Adding
+    // concurrently from many threads without a prior Build forces
+    // frequent HGraph::resize -> LabelTable::Resize.  With
+    // resize_increase_count_bit:1, every insertion batch can trigger
+    // a reallocation, maximising overlap between the Insert on one
+    // thread and the Resize on another.  TSan must find no data race.
+    constexpr int kThreads = 8;
+    constexpr int64_t kVectorCount = 2000;
+    constexpr int64_t kDim = 32;
+
+    const char* kHgraphParam = R"END(
+        {"dtype":"float32","metric_type":"l2","dim":32,
+         "index_param":{"max_degree":8,"ef_construction":20,
+                        "build_thread_count":1,"resize_increase_count_bit":1}}
+    )END";
+
+    auto index = vsag::Factory::CreateIndex("hgraph", kHgraphParam).value();
+
+    std::vector<float> vectors(static_cast<size_t>(kVectorCount * kDim), 0.5f);
+    for (int64_t i = 0; i < kVectorCount; ++i) {
+        vectors[static_cast<size_t>(i * kDim)] += static_cast<float>(i) * 1e-6f;
+    }
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> add_failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (not go.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            int64_t chunk = kVectorCount / kThreads;
+            int64_t start = t * chunk;
+            int64_t end = (t == kThreads - 1) ? kVectorCount : start + chunk;
+            auto ds = vsag::Dataset::Make();
+            ds->Dim(kDim)->NumElements(1)->Owner(false);
+            for (int64_t i = start; i < end; ++i) {
+                ds->Ids(&i)->Float32Vectors(vectors.data() + i * kDim);
+                auto res = index->Add(ds);
+                if (not res.has_value()) {
+                    add_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    REQUIRE(add_failures.load() == 0);
+    REQUIRE(index->GetNumElements() == kVectorCount);
+}
+
+TEST_CASE("HGraph concurrent Add with force-remove flag does not race in codes storage",
+          "[hgraph][concurrent][tsan]") {
+    // This test targets the flatten-codes storage race that occurs when
+    // support_force_remove is true: insert_persistent_codes skips the
+    // add_mutex_ shared lock in that mode and only serialises on
+    // persistent_codes_mutex_.  resize, in turn, reallocates
+    // basic_flatten_codes_ under global_mutex_ (via add_mutex_ exclusive
+    // in prepare_add_batch).  Before the fix the two paths had no common
+    // lock and a concurrent resize could free storage while InsertVector
+    // was writing into it, yielding garbage offset/size in ByteIO::Write.
+    constexpr int kThreads = 8;
+    constexpr int64_t kVectorCount = 2000;
+    constexpr int64_t kDim = 32;
+
+    const char* kHgraphParam = R"END(
+        {"dtype":"float32","metric_type":"l2","dim":32,
+         "index_param":{"max_degree":8,"ef_construction":20,
+                        "build_thread_count":1,"resize_increase_count_bit":1,
+                        "support_force_remove":true}}
+    )END";
+
+    auto index = vsag::Factory::CreateIndex("hgraph", kHgraphParam).value();
+
+    std::vector<float> vectors(static_cast<size_t>(kVectorCount * kDim), 0.5f);
+    for (int64_t i = 0; i < kVectorCount; ++i) {
+        vectors[static_cast<size_t>(i * kDim)] += static_cast<float>(i) * 1e-6f;
+    }
+
+    std::atomic<bool> go{false};
+    std::atomic<int> ready{0};
+    std::atomic<int> add_failures{0};
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([&, t]() {
+            ready.fetch_add(1, std::memory_order_release);
+            while (not go.load(std::memory_order_acquire)) {
+                std::this_thread::yield();
+            }
+            int64_t chunk = kVectorCount / kThreads;
+            int64_t start = t * chunk;
+            int64_t end = (t == kThreads - 1) ? kVectorCount : start + chunk;
+            auto ds = vsag::Dataset::Make();
+            ds->Dim(kDim)->NumElements(1)->Owner(false);
+            for (int64_t i = start; i < end; ++i) {
+                ds->Ids(&i)->Float32Vectors(vectors.data() + i * kDim);
+                auto res = index->Add(ds);
+                if (not res.has_value()) {
+                    add_failures.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        });
+    }
+
+    while (ready.load(std::memory_order_acquire) < kThreads) {
+        std::this_thread::yield();
+    }
+    go.store(true, std::memory_order_release);
+
+    for (auto& th : threads) {
+        th.join();
+    }
+
+    REQUIRE(add_failures.load() == 0);
+    REQUIRE(index->GetNumElements() == kVectorCount);
 }

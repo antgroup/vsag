@@ -13,13 +13,13 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 PR = (ROOT / '.github/workflows/pr-ci-community.yml').read_text(encoding='utf-8')
-BENCH = (ROOT / '.github/workflows/build_performance.yml').read_text(encoding='utf-8')
+BENCH = (ROOT / '.github/workflows/daily_test.yml').read_text(encoding='utf-8')
 
 
 def block(workflow, header, description):
     """Extract our block-style YAML subset, stopping at the next peer/ancestor."""
     match = re.search(r'^( *)' + header + r'[ \t]*(?:#.*)?$', workflow, re.MULTILINE)
-    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'build_performance.yml' if workflow == BENCH else 'provided workflow'
+    workflow_name = 'pr-ci-community.yml' if workflow == PR else 'daily_test.yml' if workflow == BENCH else 'provided workflow'
     if match is None:
         raise AssertionError(f'Missing {description} in {workflow_name}; check its name and block formatting')
     lines = []
@@ -32,7 +32,7 @@ def block(workflow, header, description):
 
 
 def step(workflow, name):
-    return block(workflow, r'-[ \t]+name:[ \t]+' + re.escape(name), f'step {name!r}')
+    return block(workflow, r'-[ \t]+name:[ \t]+' + re.escape(name), f'step {name!r}').replace('run: &approved-benchmark-ref |', 'run: |')
 
 
 def job(workflow, name):
@@ -156,26 +156,27 @@ class WorkflowContractTest(unittest.TestCase):
         self.assertNotIn('python3 scripts/collect_build_metrics.py', build)
         self.assertNotIn('--clear-ccache', build)
         self.assertIn('ccache --print-stats', build)
-        self.assertIn('clang-tidy-15', step(team, 'Lint changed sources'))
+        self.assertIn('clang-tidy-20', step(team, 'Lint changed sources'))
 
     def test_security_and_isolation(self):
+        benchmark = job(BENCH, "build-performance-benchmark-x86")
         self.assertIn('permissions:\n  contents: read\n', BENCH)
-        self.assertNotIn('secrets.', BENCH)
+        self.assertNotIn('secrets.', benchmark)
         self.assertNotIn('pull_request:', BENCH)
         self.assertNotIn('pull_request_target', BENCH)
         self.assertIn("cron: '23 3 * * 1'", BENCH)
-        self.assertIn('runs-on: ubuntu-22.04', BENCH)
+        self.assertIn('runs-on: ubuntu-24.04', BENCH)
         self.assertIn('timeout-minutes: 180', BENCH)
         self.assertIn('group: build-performance-', BENCH)
         self.assertIn('persist-credentials: false', BENCH)
         self.assertIn('CCACHE_DIR: ${{ github.workspace }}/.benchmark-ccache', BENCH)
-        self.assertNotIn('uses: actions/cache@', BENCH)
-        self.assertNotIn('actions/cache/save', BENCH)
-        self.assertNotIn('ccache-action', BENCH)
+        self.assertNotIn('uses: actions/cache@', benchmark)
+        self.assertNotIn('actions/cache/save', benchmark)
+        self.assertNotIn('ccache-action', benchmark)
         self.assertIn('uses: actions/cache/restore@v4', BENCH)
         self.assertNotIn('install_deps', step(BENCH, 'Prepare trusted Ubuntu host'))
-        self.assertNotIn('/opt/hostedtoolcache', BENCH)
-        self.assertIn("REQUESTED_REF: ${{ github.event.inputs.ref || 'main' }}", BENCH)
+        self.assertNotIn('/opt/hostedtoolcache', benchmark)
+        self.assertIn("REQUESTED_REF: ${{ inputs.ref || 'main' }}", BENCH)
         self.assertIn('if: always()', step(BENCH, 'Upload build metrics'))
         self.assertIn('retention-days: 14', step(BENCH, 'Upload build metrics'))
         collect = step(BENCH, 'Collect isolated cold warm and no-op metrics')
@@ -260,6 +261,45 @@ class WorkflowContractTest(unittest.TestCase):
             path.unlink()
             self.assertNotEqual(self.run_python('Verify benchmark report', root).returncode, 0)
             self.assertIn('FAILED', (root / 'build-metrics/verification.txt').read_text())
+
+    def test_container_workspace_trust_precedes_ref_validation(self):
+        runtime = job(BENCH, 'performance-performance')
+        self.assertLess(runtime.index('name: Configure benchmark workspace trust'),
+                        runtime.index('name: Resolve approved benchmark commit'))
+        trust = step(runtime, 'Configure benchmark workspace trust').split('run: ', 1)[1].strip()
+        validator = textwrap.dedent(
+            step(runtime, 'Resolve approved benchmark commit').split('run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            helper = workspace / 'scripts/ci/configure-git-safe-directory.sh'
+            helper.parent.mkdir(parents=True)
+            helper.write_bytes((ROOT / 'scripts/ci/configure-git-safe-directory.sh').read_bytes())
+            env = dict(os.environ, GIT_CONFIG_GLOBAL=str(root / 'gitconfig'),
+                       GIT_CONFIG_NOSYSTEM='1', GITHUB_ACTIONS='true',
+                       GITHUB_WORKSPACE=str(workspace), REQUESTED_REF='main',
+                       GITHUB_OUTPUT=str(root / 'output'), GITHUB_STEP_SUMMARY=str(root / 'summary'))
+            subprocess.run(['git', 'init', '-q'], cwd=workspace, env=env, check=True)
+            subprocess.run(['git', '-c', 'user.name=Workflow Test',
+                            '-c', 'user.email=workflow-test@example.invalid',
+                            'commit', '--allow-empty', '-qm', 'approved'],
+                           cwd=workspace, env=env, check=True)
+            env['GIT_TEST_ASSUME_DIFFERENT_OWNER'] = '1'
+            def run(script):
+                return subprocess.run(['bash', '-eu', '-c', script], cwd=workspace,
+                                      env=env, text=True, capture_output=True)
+            unsafe = run(validator)
+            self.assertNotEqual(unsafe.returncode, 0)
+            self.assertIn('dubious ownership', unsafe.stderr)
+            configured = run(trust)
+            self.assertEqual(configured.returncode, 0, configured.stderr)
+            safe = run(validator)
+            self.assertEqual(safe.returncode, 0, safe.stderr)
+            trusted = subprocess.check_output(
+                ['git', 'config', '--global', '--get-all', 'safe.directory'],
+                cwd=workspace, env=env, text=True)
+            self.assertEqual(trusted.splitlines(), [str(workspace)])
 
     def test_ref_gate_with_real_git_history(self):
         script = textwrap.dedent(step(BENCH, 'Resolve approved benchmark commit').split('run: |\n', 1)[1])
