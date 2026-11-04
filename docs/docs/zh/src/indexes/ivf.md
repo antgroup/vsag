@@ -35,8 +35,8 @@ IVF 通常是一个更合适的默认选择。
 
 `balanced_kmeans` 保持与 `kmeans` 相同的平方 L2 目标与均值中心更新，但每一步分配都
 受容量约束：`n` 条训练向量、`buckets_count` 个桶时，每个桶最终恰好容纳
-`floor(n / k)` 或 `ceil(n / k)` 条向量。该保证还延伸到 `Build` 的首次桶分配，
-存储的桶继承均衡性；只要 `1 <= k <= n`，就不会出现空桶。
+`floor(n / k)` 或 `ceil(n / k)` 条向量。当 `buckets_per_data: 1` 时，该保证还延伸到
+`Build` 的首次桶分配，存储的桶继承均衡性；均衡分配生效且 `1 <= k <= n` 时不会出现空桶。
 
 每次迭代的流程：
 
@@ -68,8 +68,42 @@ IVF 通常是一个更合适的默认选择。
   k-means。
 - 均衡训练与首次分配在 CPU 上执行，`enable_gpu_build` 不会加速它们。
 - 给定输入与随机种子时结果确定，且与线程数无关。
+- 仅当 `buckets_per_data: 1` 时，`Build` 的首次分配才会均衡；其他取值仍按普通的
+  最近中心路由分配，但均衡中心训练仍然生效。
 - 用可复现的 `cluster_balance_bench` 工具（`tools/cluster_balance_bench`）对比
   均衡度、损失、时间与内存。
+
+#### 基准工具
+
+`cluster_balance_bench` 在带随机种子的合成数据集上分别训练 `KMeansCluster` 和
+`BalancedKMeansCluster`：均匀数据、刻意偏斜的数据、大小不能整除 `k` 的偏斜数据，以及
+含重复向量的数据。工具针对每种训练器和数据集报告：
+
+- 桶大小的最小值、最大值、平均值、标准差和变异系数；
+- 聚类损失（每条向量到其分配中心的平方距离均值；根据返回的标签重新计算，两种训练器
+  使用相同口径）；
+- 训练耗时；以及
+- 训练器在数据集之外分配的峰值内存（通过记录分配器测量），并给出稠密 `n × k` 浮点
+  距离矩阵的大小作为参照。
+
+在 Linux 上，使用 `ENABLE_TOOLS=ON` 和 `ENABLE_CXX11_ABI=ON` 构建工具：
+
+```bash
+make release EXTRA_DEFINED="-DENABLE_TOOLS=ON -DENABLE_CXX11_ABI=ON"
+# 或在已有的构建目录中只构建此目标：
+cmake --build <build-dir> --target cluster_balance_bench
+```
+
+用法：
+
+```text
+cluster_balance_bench [--dataset all|uniform|skewed|indivisible|duplicates]
+                      [--n 50000] [--dim 64] [--k 256] [--iter 25]
+                      [--seed 42] [--threads N]
+```
+
+每次运行都完全由种子控制，普通 k-means 也使用确定性归约。相同参数重复运行时，聚类
+分配、中心和聚类损失均可复现；耗时会因运行环境而异。
 
 ## 快速开始
 
