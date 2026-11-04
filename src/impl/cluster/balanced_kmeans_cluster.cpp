@@ -1651,23 +1651,23 @@ BalancedKMeansCluster::update_centroids(const float* datas,
     }
     const uint64_t task_count = (k + CLUSTERS_PER_TASK - 1) / CLUSTERS_PER_TASK;
     parallel_for(thread_pool_, task_count, [&](uint64_t task) {
-        const SingleThreadedBlas single_threaded;
         const uint64_t end = std::min<uint64_t>(k, (task + 1) * CLUSTERS_PER_TASK);
+        // In double: a float running sum stops absorbing vectors once it grows large.
+        Vector<double> sum(dim, 0.0, allocator_);
         for (uint64_t j = task * CLUSTERS_PER_TASK; j < end; ++j) {
-            float* centroid = k_centroids_ + j * dim;
-            // Never 0: every cluster holds at least floor(count / k) >= 1 vectors.
-            const uint64_t size = offset[j + 1] - offset[j];
-            std::fill_n(centroid, dim, 0.0F);
+            std::fill(sum.begin(), sum.end(), 0.0);
             for (uint64_t m = offset[j]; m < offset[j + 1]; ++m) {
-                BlasFunction::Saxpy(static_cast<int32_t>(dim),
-                                    1.0F,
-                                    datas + static_cast<uint64_t>(members[m]) * dim,
-                                    1,
-                                    centroid,
-                                    1);
+                const float* x = datas + static_cast<uint64_t>(members[m]) * dim;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    sum[d] += static_cast<double>(x[d]);
+                }
             }
-            BlasFunction::Sscal(
-                static_cast<int32_t>(dim), 1.0F / static_cast<float>(size), centroid, 1);
+            // Never 0: every cluster holds at least floor(count / k) >= 1 vectors.
+            const auto size = static_cast<double>(offset[j + 1] - offset[j]);
+            float* centroid = k_centroids_ + j * dim;
+            for (uint64_t d = 0; d < dim; ++d) {
+                centroid[d] = static_cast<float>(sum[d] / size);
+            }
         }
     });
 }
