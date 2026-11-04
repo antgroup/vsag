@@ -9,23 +9,15 @@
 #include <cstring>
 #include <deque>
 #include <exception>
-#include <fstream>
 #include <future>
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <sstream>
 #include <stdexcept>
-#include <thread>
-
-#include "sindi_cpu_timer.h"
-#include "sindi_query_resources.h"
-#ifdef __linux__
-#include <sched.h>
-#endif
 
 #include "impl/allocator/safe_allocator.h"
-#include "impl/thread_pool/default_thread_pool.h"
+#include "impl/searcher/search_execution_context.h"
+#include "sindi_cpu_timer.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -45,64 +37,8 @@ resource_limit(const char* name, uint64_t fallback) {
     return parsed;
 }
 
-uint32_t
-cpu_slots() {
-    uint64_t count = std::max(1U, std::thread::hardware_concurrency());
-#ifdef __linux__
-    cpu_set_t affinity;
-    if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
-        count = std::max(1, CPU_COUNT(&affinity));
-    }
-    const auto read = [](const std::string& path) {
-        std::ifstream file(path);
-        std::ostringstream value;
-        value << file.rdbuf();
-        return value.str();
-    };
-    count = SindiCgroupCpuSlots(read("/proc/self/cgroup"),
-                                read("/proc/self/mountinfo"),
-                                read,
-                                static_cast<uint32_t>(count));
-#endif
-    return static_cast<uint32_t>(std::min<uint64_t>(16, count));
-}
-
-// One dedicated process-wide pool. It never contains index writers or other ANN work.
-struct QueryResources {
-    QueryResources()
-        : slots(cpu_slots()),
-          limit(static_cast<uint32_t>(std::min<uint64_t>(
-              slots - 1, resource_limit("VSAG_SINDI_EXTRA_WORKERS", slots - 1)))),
-          pool(limit == 0
-                   ? nullptr
-                   : std::make_shared<SafeThreadPool>(std::make_shared<DefaultThreadPool>(limit))) {
-    }
-
-    uint32_t
-    TryReserve(uint32_t wanted) {
-        std::lock_guard<std::mutex> guard(mutex);
-        const auto available = slots > callers + busy ? slots - callers - busy : 0;
-        const auto count = std::min({wanted, limit - busy, available});
-        busy += count;
-        return count;
-    }
-
-    uint32_t slots;
-    uint32_t limit;
-    uint32_t callers{0};
-    uint32_t busy{0};
-    std::mutex mutex;
-    SafeThreadPoolPtr pool;
-};
-
-QueryResources&
-resources() {
-    static QueryResources instance;
-    return instance;
-}
-
 struct Reservation {
-    explicit Reservation(QueryResources& resources) : owner(resources) {
+    explicit Reservation(SearchExecutionContext& resources) : owner(resources) {
         std::lock_guard<std::mutex> guard(owner.mutex);
         ++owner.callers;
     }
@@ -111,7 +47,7 @@ struct Reservation {
         owner.busy -= extra;
         --owner.callers;
     }
-    QueryResources& owner;
+    SearchExecutionContext& owner;
     uint32_t extra{0};
 };
 
@@ -146,11 +82,11 @@ struct Partition {
     uint64_t cursor;
     uint64_t end;
     uint64_t capacity;
-    SindiWindowHeap heap;
+    MaxHeap heap;
 };
 
 struct Slot {
-    explicit Slot(const SindiWindowSearchRequest& request, FilterPtr filter)
+    explicit Slot(const SindiPartitionSearchRequest& request, FilterPtr filter)
         : allocator(SafeAllocator::FactoryDefaultAllocator()),
           computer(std::make_shared<SparseTermComputer>(*request.computer, allocator.get())),
           dists(request.window_size, 0.0F, allocator.get()),
@@ -171,14 +107,16 @@ std::string
 SindiExecutionStatistics(std::string summary,
                          const SindiParallelState* parallel,
                          const SindiCpuTime& caller_cpu,
-                         bool profile_cpu) {
-    if (not parallel and not profile_cpu) {
+                         bool profile_cpu,
+                         uint32_t requested_slots) {
+    if (not parallel and not profile_cpu and requested_slots <= 1) {
         return summary;
     }
     auto json = nlohmann::json::parse(summary);
     if (parallel) {
         json["sindi_strategy"] = "accel_v1";
         json["sindi_requested_slots"] = parallel->requested;
+        json["sindi_resources_ready"] = parallel->resources_ready;
         json["sindi_granted_slots"] = parallel->granted;
         json["sindi_filter_slots"] = parallel->filter_slots;
         json["sindi_cpu_slots"] = parallel->cpu_slots;
@@ -204,6 +142,12 @@ SindiExecutionStatistics(std::string summary,
         }
     } else {
         json["sindi_strategy"] = "serial";
+        if (requested_slots > 1) {
+            json["sindi_requested_slots"] = requested_slots;
+            json["sindi_granted_slots"] = 1;
+            json["sindi_resources_ready"] = false;
+            json["sindi_worker_limit"] = 0;
+        }
     }
     const bool cpu_complete =
         profile_cpu and caller_cpu.available and (not parallel or parallel->worker_cpu_available);
@@ -275,7 +219,7 @@ SindiParallelState::ReserveCallback() {
 }
 
 void
-SearchSindiPartitions(const SindiWindowSearchRequest& request,
+SearchSindiPartitions(const SindiPartitionSearchRequest& request,
                       SindiParallelState& state,
                       MaxHeap& output) {
     state.plan = SindiParallelPlan::Make(request.windows.size(), request.search.ef, state.ratio);
@@ -283,7 +227,10 @@ SearchSindiPartitions(const SindiWindowSearchRequest& request,
     if (groups == 0) {
         return;
     }
-    auto& shared = resources();
+    auto* ready = state.resources.get();
+    CHECK_ARGUMENT(ready != nullptr, "SINDI partition executor requires prepared resources");
+    auto& shared = *ready;
+    state.resources_ready = true;
     state.cpu_slots = shared.slots;
     state.worker_limit = shared.limit;
     Reservation reservation(shared);
@@ -302,15 +249,13 @@ SearchSindiPartitions(const SindiWindowSearchRequest& request,
                                lease->evaluators.size() <= maximum,
                            "SINDI parallel filter resources unavailable");
             maximum = static_cast<uint32_t>(lease->evaluators.size());
-            if (state.filter_slots == 0) {
+            if (state.filter_slots == 0)
                 state.filter_slots = maximum;
-            }
         }
         reservation.extra = shared.TryReserve(maximum - 1);
         state.granted = reservation.extra + 1;
-        if (state.granted == maximum || not lease) {
+        if (state.granted == maximum || not lease)
             break;
-        }
         maximum = state.granted;
         {
             std::lock_guard<std::mutex> guard(shared.mutex);
@@ -441,16 +386,11 @@ SearchSindiPartitions(const SindiWindowSearchRequest& request,
     if (SindiParallelState::Clock::now() >= state.deadline) {
         throw std::runtime_error("SINDI parallel search deadline exceeded after drain");
     }
-    MaxHeap merged(CompareByFirst{true}, Vector<std::pair<float, InnerIdType>>(request.allocator));
+    SindiCandidateHeap merged(CompareByFirst{true}, Vector<SindiCandidate>(request.allocator));
     for (auto& part : partitions) {
         while (not part.heap.empty()) {
             const auto candidate = part.heap.top();
-            if (merged.size() < request.search.ef or candidate < merged.top()) {
-                merged.push(candidate);
-                if (merged.size() > request.search.ef) {
-                    merged.pop();
-                }
-            }
+            SindiMergeCandidate(merged, candidate, request.search.ef);
             part.heap.pop();
         }
     }

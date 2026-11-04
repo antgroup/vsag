@@ -83,6 +83,7 @@ InnerIndexInterface::InnerIndexInterface(const InnerIndexParameterPtr& index_par
     }
 
     this->thread_pool_ = common_param.thread_pool_;
+    this->search_resources_ = common_param.search_resources_;
     if (this->build_thread_count_ > 1 and this->thread_pool_ == nullptr) {
         this->thread_pool_ = SafeThreadPool::FactoryDefaultThreadPool();
         this->thread_pool_->SetPoolSize(build_thread_count_);

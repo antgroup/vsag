@@ -26,6 +26,7 @@
 
 #include "algorithm/sparse_distance.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/searcher/search_execution_context.h"
 #include "index_common_param.h"
 #include "simd/fp16_simd.h"
 #include "storage/serialization_tags.h"
@@ -1665,6 +1666,7 @@ TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
     mutable_param->FromJson(vsag::JsonType::Parse(mutable_param_str));
     auto immutable_param = std::make_shared<vsag::SINDIParameter>();
     immutable_param->FromJson(vsag::JsonType::Parse(immutable_param_str));
+    common_param.search_resources_ = std::make_shared<SearchExecutionContext>(15);
     auto mutable_index = std::make_unique<SINDI>(mutable_param, common_param);
     auto immutable_index = std::make_unique<SINDI>(immutable_param, common_param);
 

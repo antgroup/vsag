@@ -7,13 +7,51 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <queue>
 #include <string>
 #include <vector>
 
-#include "impl/searcher/sindi_searcher.h"
+#include "algorithm/sindi_metadata_filter.h"
+#include "datacell/sindi_search_term_datacell.h"
+#include "query_context.h"
 #include "vsag/concurrent_filter.h"
 
 namespace vsag {
+
+class SearchExecutionContext;
+
+using SindiCandidate = std::pair<float, InnerIdType>;
+using SindiCandidateHeap = MaxHeap;
+
+// Construct with CompareByFirst{true}: admission and eviction must use the same
+// distance/id ordering, including ties.
+inline void
+SindiMergeCandidate(SindiCandidateHeap& heap, const SindiCandidate& candidate, uint64_t capacity) {
+    if (capacity == 0) {
+        return;
+    }
+    if (heap.size() < capacity or candidate < heap.top()) {
+        heap.push(candidate);
+        if (heap.size() > capacity) {
+            heap.pop();
+        }
+    }
+}
+
+// Immutable query inputs; each slot owns its mutable scratch and evaluator.
+struct SindiPartitionSearchRequest {
+    const std::vector<uint32_t>& windows;
+    const SindiSearchTermDataCellPtr& datacell;
+    const SparseTermComputerPtr& computer;
+    const InnerSearchParam& search;
+    const SindiMetadataFilter& metadata_filter;
+    const SindiMetadataSearchRoute& route;
+    Allocator* allocator;
+    uint64_t window_size;
+    uint64_t element_count;
+    bool use_term_lists;
+    SearchStatistics* statistics;
+};
 
 struct SindiParallelPlan {
     static SindiParallelPlan
@@ -37,10 +75,11 @@ struct SindiParallelState {
     bool
     ReserveCallback();
 
+    std::shared_ptr<SearchExecutionContext> resources;
     FilterPtr user_filter;
     std::unique_ptr<ConcurrentFilterLease> lease;
     std::function<FilterPtr(const FilterPtr&)> map_filter;
-    double ratio{1};
+    double ratio{2};
     uint32_t requested{1};
     // Internal A/B/C test control, never parsed from request JSON.
     uint32_t execution_limit{16};
@@ -48,6 +87,7 @@ struct SindiParallelState {
     uint32_t filter_slots{0};
     uint32_t cpu_slots{0};
     uint32_t worker_limit{0};
+    bool resources_ready{false};
     bool profile_cpu{false};
     bool worker_cpu_available{true};
     uint64_t worker_cpu_ns{0};
@@ -64,10 +104,11 @@ std::string
 SindiExecutionStatistics(std::string summary,
                          const SindiParallelState* parallel,
                          const SindiCpuTime& caller_cpu,
-                         bool profile_cpu);
+                         bool profile_cpu,
+                         uint32_t requested_slots = 1);
 
 void
-SearchSindiPartitions(const SindiWindowSearchRequest& request,
+SearchSindiPartitions(const SindiPartitionSearchRequest& request,
                       SindiParallelState& state,
                       MaxHeap& output);
 
