@@ -462,18 +462,19 @@ BalancedKMeansCluster::update_centroids(const float* datas,
                                         uint64_t count,
                                         uint32_t k) {
     const uint64_t centroid_values = static_cast<uint64_t>(k) * static_cast<uint64_t>(dim_);
-    Vector<float> sums(centroid_values, 0.0F, allocator_);
+    Vector<double> sums(centroid_values, 0.0, allocator_);
     Vector<uint64_t> sizes(k, 0ULL, allocator_);
-    // Float addition is order-dependent, so the accumulation is one sequential
-    // pass in fixed vector order: the centroids are bit-identical regardless
-    // of how the assignment steps were scheduled.
+    // Double accumulation is order-dependent too, so keep one sequential pass
+    // in fixed vector order. Besides making the result independent of the
+    // assignment workers' schedule, this prevents large clusters from reaching
+    // the binary32 point where adding another finite vector has no effect.
     for (uint64_t i = 0; i < count; ++i) {
         const uint32_t label = static_cast<uint32_t>(labels[i]);
         const float* src = datas + i * static_cast<uint64_t>(dim_);
-        float* dest = sums.data() + static_cast<uint64_t>(label) * static_cast<uint64_t>(dim_);
+        double* dest = sums.data() + static_cast<uint64_t>(label) * static_cast<uint64_t>(dim_);
         ++sizes[label];
         for (int32_t d = 0; d < dim_; ++d) {
-            dest[d] += src[d];
+            dest[d] += static_cast<double>(src[d]);
         }
     }
     for (uint32_t j = 0; j < k; ++j) {
@@ -484,11 +485,11 @@ BalancedKMeansCluster::update_centroids(const float* datas,
             // vectors keeps its previous centroid.
             continue;
         }
-        const float scale = 1.0F / static_cast<float>(sizes[j]);
+        const double scale = 1.0 / static_cast<double>(sizes[j]);
         float* centroid = k_centroids_ + static_cast<uint64_t>(j) * static_cast<uint64_t>(dim_);
-        const float* sum = sums.data() + static_cast<uint64_t>(j) * static_cast<uint64_t>(dim_);
+        const double* sum = sums.data() + static_cast<uint64_t>(j) * static_cast<uint64_t>(dim_);
         for (int32_t d = 0; d < dim_; ++d) {
-            centroid[d] = sum[d] * scale;
+            centroid[d] = static_cast<float>(sum[d] * scale);
         }
     }
 }

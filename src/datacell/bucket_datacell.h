@@ -647,22 +647,26 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
         // stays inside the quantizer's learned range.
         auto build_buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
         auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-        // Keep each Build/nearest pair adjacent so downstream trainers that
-        // retain only a prefix still sample both routes. Iterate backwards:
-        // cosine normalization lives in the first half, and these interleaved
-        // outputs never overwrite normalized values before they are consumed.
-        for (uint64_t i = count; i-- > 0;) {
-            strategy_->GetCentroid(nearest_buckets[i], centroid);
-            for (uint64_t j = 0; j < dim; ++j) {
-                train_data_buffer[(2 * i + 1) * dim + j] = data_ptr[i * dim + j] - centroid[j];
+        // Emit one Build residual for every original row before adding nearest-route
+        // extras. Prefix-limited trainers therefore retain the original sample
+        // coverage, and rows for which both routes agree are not duplicated. Write
+        // each extra before overwriting its source row during cosine normalization.
+        uint64_t train_count = count;
+        for (uint64_t i = 0; i < count; ++i) {
+            if (build_buckets[i] != nearest_buckets[i]) {
+                strategy_->GetCentroid(nearest_buckets[i], centroid);
+                for (uint64_t j = 0; j < dim; ++j) {
+                    train_data_buffer[train_count * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                }
+                ++train_count;
             }
             strategy_->GetCentroid(build_buckets[i], centroid);
             for (uint64_t j = 0; j < dim; ++j) {
-                train_data_buffer[2 * i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
             }
         }
         data = train_data_buffer.data();
-        count *= 2;
+        count = train_count;
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }
