@@ -222,7 +222,20 @@ private:
     shrink_to_fit();
 
     void
-    add_one(const float* data, InnerIdType inner_id);
+    add_one(const void* data, InnerIdType inner_id);
+
+    /// Dense input rows of @p data in the index dtype: packed bytes for binary indexes, float32
+    /// vectors otherwise.
+    const void*
+    dense_vectors(const DatasetPtr& data) const;
+
+    /// Byte distance between two consecutive dense input rows.
+    uint64_t
+    dense_row_bytes() const;
+
+    /// Distance between a query in the index dtype and the vector stored under label @p id.
+    float
+    calc_native_distance_by_id(const void* query, int64_t id) const;
 
     /**
      * @brief Recalculate and cache the memory-usage counter.

@@ -193,7 +193,7 @@ Current serialization and streaming serialization are supported.
 ## Supported input data types
 
 The `dtype` field in the top-level build config selects how `Dataset` interprets the raw vector
-bytes. HGraph supports four input types; the `dtype` value, the corresponding `Dataset` setter,
+bytes. HGraph supports five input types; the `dtype` value, the corresponding `Dataset` setter,
 and the example demonstrating each combination are summarised below.
 
 | `dtype`     | Element type | `Dataset` setter         | Example                                                                                                |
@@ -202,9 +202,11 @@ and the example demonstrating each combination are summarised below.
 | `int8`      | `int8_t`     | `Int8Vectors`            | [`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp) |
 | `float16`   | `uint16_t` (IEEE 754 binary16, bit-pattern packed) | `Float16Vectors` | [`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp) |
 | `bfloat16`  | `uint16_t` (Brain Float, bit-pattern packed) | `Float16Vectors` (shared with FP16) | adapt `321_index_fp16_hgraph.cpp` per the notes below                                                  |
+| `binary`    | `uint8_t` (bit-packed, `ceil(dim / 8)` bytes per vector; requires `metric_type: hamming`) | `BinaryVectors` | [`115_index_binary_hamming.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/115_index_binary_hamming.cpp) |
 
 The `dim` value is the logical vector dimensionality (number of elements), not the byte length, so
-the same `dim` is reused across all four data types.
+the same `dim` is reused across all data types. For `binary`, the elements are bits; see
+[Binary Vectors and Hamming Distance](../guide/binary_vectors.md).
 
 ### `int8` input
 

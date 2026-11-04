@@ -18,6 +18,7 @@
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
 #include "simd/int8_simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "simd/kernels/kernels.h"
 #include "simd/kernels/rabitq_compute.h"
 #include "simd/kernels/rabitq_pack.h"
@@ -1510,5 +1511,37 @@ float
 SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
     return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 4, true>(
         nullptr, a, b, dim);
+}
+
+namespace {
+struct HammingGenericTag {};
+}  // namespace
+
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+    return simd::HammingScalarRange<HammingGenericTag>(x, y, 0, dim);
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+    results[0] = 0;
+    results[1] = 0;
+    results[2] = 0;
+    results[3] = 0;
+    simd::HammingScalarRangeBatch4<HammingGenericTag>(
+        query, codes1, codes2, codes3, codes4, 0, dim, results);
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+    simd::HammingScanByBatch4<HammingGenericTag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
 }
 }  // namespace vsag::generic

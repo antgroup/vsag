@@ -10,6 +10,7 @@
 - [Search Statistics](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
+- [Binary Vectors and Hamming Distance](guide/binary_vectors.md)
 
 # Indexes
 
@@ -94,6 +95,7 @@
 - [Optimizer (Tune)](advanced/optimizer.md)
 - [Benchmarks](resources/performance.md)
 - [Evaluation Tool](resources/eval.md)
+- [Hamming Kernel Benchmark](resources/hamming_benchmark.md)
 - [AutoTune Tool](resources/autotune.md)
   - [AutoTune V1 CLI JSON Contract](resources/autotune_api_v1.md)
 - [HDF5 Dataset Format](resources/dataset_format.md)

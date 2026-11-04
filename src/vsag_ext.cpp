@@ -90,6 +90,17 @@ DatasetHandler::GetFloat32Vectors() const {
     return dataset_->GetFloat32Vectors();
 }
 
+DatasetHandler*
+DatasetHandler::BinaryVectors(const uint8_t* vectors) {
+    dataset_->BinaryVectors(vectors);
+    return this;
+}
+
+const uint8_t*
+DatasetHandler::GetBinaryVectors() const {
+    return dataset_->GetBinaryVectors();
+}
+
 void
 BitsetHandler::Set(int64_t pos, bool value) {
     bitset_->Set(pos, value);

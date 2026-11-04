@@ -168,6 +168,8 @@ VSAG 的搜索结果统一按“距离越小越相似”排序。
 - `l2` 返回 `L2Sqr`，也就是平方 L2 距离。
 - `ip` 返回 `1 - inner_product`。
 - `cosine` 返回 `1 - cosine_similarity`。
+- `hamming` 是[二进制向量](../guide/binary_vectors.md)使用的度量，返回取值不同的 bit 数（精确整数），
+  因此 `radius = 3` 会保留最多相差 3 个 bit 的向量。
 
 为什么 `l2` 返回平方距离？
 平方 L2 距离和 L2 距离的排序完全一致，

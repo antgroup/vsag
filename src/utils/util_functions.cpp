@@ -205,6 +205,9 @@ get_vectors(DataTypes type,
     } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
         *vectors_ptr = (void*)base->GetFloat16Vectors();
         *data_size_ptr = dim * sizeof(uint16_t);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        *vectors_ptr = (void*)base->GetBinaryVectors();
+        *data_size_ptr = BinaryVectorBytes(dim);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("no support for this type: {}", (int)type));
@@ -226,11 +229,54 @@ set_dataset(DataTypes type,
             ->Dim(dim)
             ->Owner(false)
             ->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        base->BinaryVectors(static_cast<const uint8_t*>(vectors_ptr))
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("no support for this type: {}", (int)type));
     }
 }
+
+namespace {
+
+// Dense rows of a dataset in their own element type: the first vector field that is set, in the
+// order float32, binary, int8, float16/bfloat16. Training samples keep the input type, so the
+// quantizers that read them see the same layout as the full dataset.
+struct DenseRows {
+    const uint8_t* data{nullptr};
+    uint64_t row_bytes{0};
+    DataTypes type{DataTypes::DATA_TYPE_FLOAT};
+};
+
+DenseRows
+dense_rows(const DatasetPtr& data, int64_t dim) {
+    const auto elements = static_cast<uint64_t>(dim);
+    if (const auto* vectors = data->GetFloat32Vectors()) {
+        return {reinterpret_cast<const uint8_t*>(vectors),
+                elements * sizeof(float),
+                DataTypes::DATA_TYPE_FLOAT};
+    }
+    if (const auto* vectors = data->GetBinaryVectors()) {
+        return {vectors, BinaryVectorBytes(elements), DataTypes::DATA_TYPE_BINARY};
+    }
+    if (const auto* vectors = data->GetInt8Vectors()) {
+        return {reinterpret_cast<const uint8_t*>(vectors),
+                elements * sizeof(int8_t),
+                DataTypes::DATA_TYPE_INT8};
+    }
+    if (const auto* vectors = data->GetFloat16Vectors()) {
+        return {reinterpret_cast<const uint8_t*>(vectors),
+                elements * sizeof(uint16_t),
+                DataTypes::DATA_TYPE_FP16};
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        "sample_train_data requires float32, binary, int8 or float16 vectors");
+}
+
+}  // namespace
 
 DatasetPtr
 sample_train_data(const vsag::DatasetPtr& data,
@@ -258,7 +304,6 @@ sample_train_data(const vsag::DatasetPtr& data,
         safe_allocator = owned_allocator.get();
     }
 
-    vsag::Vector<float> sampled_data_buffer(safe_allocator);
     vsag::Vector<int64_t> sampled_ids(safe_allocator);
     vsag::Vector<int64_t> sampled_indices(safe_allocator);
     sampled_indices.reserve(sample_count);
@@ -275,22 +320,34 @@ sample_train_data(const vsag::DatasetPtr& data,
             sampled_indices[j] = i;
         }
     }
-    sampled_data_buffer.resize(sample_count * dim);
-    const auto* original_data = data->GetFloat32Vectors();
+
+    // Copy whole rows of the input element type (binary rows are ceil(dim / 8) bytes).
+    const auto rows = dense_rows(data, dim);
+    auto* new_data_buffer = static_cast<uint8_t*>(
+        safe_allocator->Allocate(static_cast<uint64_t>(sample_count) * rows.row_bytes));
     for (int64_t i = 0; i < sample_count; ++i) {
-        std::copy(original_data + sampled_indices[i] * dim,
-                  original_data + (sampled_indices[i] + 1) * dim,
-                  sampled_data_buffer.data() + i * dim);
+        std::memcpy(new_data_buffer + static_cast<uint64_t>(i) * rows.row_bytes,
+                    rows.data + static_cast<uint64_t>(sampled_indices[i]) * rows.row_bytes,
+                    rows.row_bytes);
     }
-    auto* new_data_buffer =
-        static_cast<float*>(safe_allocator->Allocate(sample_count * dim * sizeof(float)));
-    std::copy(sampled_data_buffer.begin(), sampled_data_buffer.end(), new_data_buffer);
 
     auto sampled_dataset = std::make_shared<DatasetImpl>();
-    sampled_dataset->NumElements(sample_count)
-        ->Dim(dim)
-        ->Float32Vectors(new_data_buffer)
-        ->Owner(true, safe_allocator);
+    sampled_dataset->NumElements(sample_count)->Dim(dim)->Owner(true, safe_allocator);
+    switch (rows.type) {
+        case DataTypes::DATA_TYPE_BINARY:
+            sampled_dataset->BinaryVectors(new_data_buffer);
+            break;
+        case DataTypes::DATA_TYPE_INT8:
+            sampled_dataset->Int8Vectors(reinterpret_cast<const int8_t*>(new_data_buffer));
+            break;
+        case DataTypes::DATA_TYPE_FP16:
+        case DataTypes::DATA_TYPE_BF16:
+            sampled_dataset->Float16Vectors(reinterpret_cast<const uint16_t*>(new_data_buffer));
+            break;
+        default:
+            sampled_dataset->Float32Vectors(reinterpret_cast<const float*>(new_data_buffer));
+            break;
+    }
     if (data->GetIds() != nullptr) {
         sampled_ids.reserve(sample_count);
         const auto* original_ids = data->GetIds();

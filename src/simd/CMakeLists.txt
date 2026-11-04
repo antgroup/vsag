@@ -30,6 +30,7 @@ set (SIMD_SRCS
         basic_func.cpp
         bit_simd.cpp
         fp32_simd.cpp
+        hamming_simd.cpp
         fp16_simd.cpp
         int8_simd.cpp
         bf16_simd.cpp

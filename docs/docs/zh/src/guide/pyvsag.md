@@ -105,14 +105,16 @@ removed = index.remove(candidate_ids)
 ```
 
 `add` 接受展开的连续数组或 row-major 二维矩阵。`dtype: "float16"` 时传入
-`numpy.float16`；`dtype: "bfloat16"` 时传入包含 BF16 位模式的 `numpy.uint16` 数组。
+`numpy.float16`；`dtype: "bfloat16"` 时传入包含 BF16 位模式的 `numpy.uint16` 数组；
+`dtype: "binary"` 时传入 C 连续、每个向量 `ceil(dim / 8)` 字节的按位压缩 `numpy.uint8` 数组
+（与 `numpy.packbits` 布局一致），不会做隐式转换，详见[二进制向量](binary_vectors.md)。
 具体操作是否受支持仍取决于索引类型。输入校验以及 `add`、`calc_distances_by_id` 等操作会抛出 Python 异常；
 `remove`、`save` 与 `load` 则使用上述 sentinel 或未检查行为，
 不会统一传播底层操作错误。
 
 ### 距离绑定输入安全
 
-`calc_distances_by_id` 及其旧别名接受一个长度等于索引维度的一维稠密 query 和一维 ID 数组。过短、过长及空 query 由 C++ Dataset 校验拒绝，不会被当作缺失 ID。NumPy 输入按需转为连续的 float32 / int64 数组，正负步长的 query 和 ID 视图均保持逻辑顺序。这不为绑定新增稀疏、多向量或多 query 支持。
+`calc_distances_by_id` 及其旧别名接受一个长度等于索引维度的一维稠密 query 和一维 ID 数组。过短、过长及空 query 由 C++ Dataset 校验拒绝，不会被当作缺失 ID。NumPy 输入按需转为连续的 float32 / int64 数组，正负步长的 query 和 ID 视图均保持逻辑顺序。二进制索引则要求 query 是恰好 `ceil(dim / 8)` 字节、C 连续的 `numpy.uint8` 数组。这不为绑定新增稀疏、多向量或多 query 支持。
 
 Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回 `-1`，不属于操作失败。
 

@@ -64,6 +64,7 @@ index's scalar `dtype` and record-layout `repr`:
 | `Float32Vectors(const float*)` | `GetFloat32Vectors()` | `float` | `dtype: float32` |
 | `Float16Vectors(const uint16_t*)` | `GetFloat16Vectors()` | `uint16_t` | `dtype: float16` **and** `bfloat16` (raw 16-bit payload) |
 | `Int8Vectors(const int8_t*)` | `GetInt8Vectors()` | `int8_t` | `dtype: int8` |
+| `BinaryVectors(const uint8_t*)` | `GetBinaryVectors()` | `uint8_t`, `ceil(dim / 8)` bytes per vector, bits packed MSB-first | `dtype: binary` ([Binary Vectors](../guide/binary_vectors.md)) |
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse` (SINDI) |
 
 Dense vectors are laid out row-major: element `i`, dimension `j` lives at `vectors[i * dim + j]`.

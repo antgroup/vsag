@@ -100,6 +100,31 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) = 0;
 
+    /**
+     * @brief Distances from the query to the vectors with inner ids [begin, begin + count).
+     *
+     * Scans over consecutive ids, such as a brute-force pass, can use this entry point. The
+     * default implementation forwards to Query(); a datacell whose codes are contiguous in memory
+     * may compute the distances directly on the code range.
+     */
+    virtual void
+    QueryRange(float* result_dists,
+               const ComputerInterfacePtr& computer,
+               InnerIdType begin,
+               InnerIdType count,
+               QueryContext* ctx = nullptr) {
+        constexpr InnerIdType chunk = 64;
+        InnerIdType ids[chunk];
+        for (InnerIdType done = 0; done < count;) {
+            const InnerIdType size = std::min(chunk, count - done);
+            for (InnerIdType k = 0; k < size; ++k) {
+                ids[k] = begin + done + k;
+            }
+            this->Query(result_dists + done, computer, ids, size, ctx);
+            done += size;
+        }
+    }
+
     virtual void
     QueryById(float* result_dists,
               InnerIdType query_id,

@@ -78,6 +78,16 @@ public:
     const float*
     GetFloat32Vectors() const;
 
+    /**
+     * @brief Sets bit-packed binary vectors (ceil(dim / 8) bytes per row, MSB-first bit order).
+     * @see Dataset::BinaryVectors
+     */
+    DatasetHandler*
+    BinaryVectors(const uint8_t* vectors);
+
+    const uint8_t*
+    GetBinaryVectors() const;
+
 private:
     DatasetHandler() = default;
 

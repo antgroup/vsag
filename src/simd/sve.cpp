@@ -25,6 +25,7 @@
 
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
 constexpr auto
@@ -1700,5 +1701,83 @@ SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
 float
 SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
+}
+
+#if defined(ENABLE_SVE)
+namespace {
+struct HammingSveTag {};
+
+// Number of differing bits of the bytes selected by `pg`, added to 64-bit lanes. Inactive bytes
+// load as zero, so a predicated tail needs no scalar loop.
+inline svuint64_t
+hamming_accumulate(svuint64_t acc, svbool_t pg, svuint8_t a, const uint8_t* b) {
+    const svuint8_t diff = sveor_u8_z(pg, a, svld1_u8(pg, b));
+    const svbool_t all = svptrue_b64();
+    return svadd_u64_x(all, acc, svcnt_u64_x(all, svreinterpret_u64_u8(diff)));
+}
+}  // namespace
+#endif
+
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+#if defined(ENABLE_SVE)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    const uint64_t step = svcntb();
+    svuint64_t acc = svdup_n_u64(0);
+    for (uint64_t i = 0; i < full_bytes; i += step) {
+        const svbool_t pg = svwhilelt_b8_u64(i, full_bytes);
+        acc = hamming_accumulate(acc, pg, svld1_u8(pg, x + i), y + i);
+    }
+    return svaddv_u64(svptrue_b64(), acc) +
+           simd::HammingScalarRange<HammingSveTag>(x, y, full_bytes, dim);
+#else
+    return neon::HammingDistance(x, y, dim);
+#endif
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+#if defined(ENABLE_SVE)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    const uint64_t step = svcntb();
+    svuint64_t acc1 = svdup_n_u64(0);
+    svuint64_t acc2 = svdup_n_u64(0);
+    svuint64_t acc3 = svdup_n_u64(0);
+    svuint64_t acc4 = svdup_n_u64(0);
+    for (uint64_t i = 0; i < full_bytes; i += step) {
+        const svbool_t pg = svwhilelt_b8_u64(i, full_bytes);
+        const svuint8_t q = svld1_u8(pg, query + i);
+        acc1 = hamming_accumulate(acc1, pg, q, codes1 + i);
+        acc2 = hamming_accumulate(acc2, pg, q, codes2 + i);
+        acc3 = hamming_accumulate(acc3, pg, q, codes3 + i);
+        acc4 = hamming_accumulate(acc4, pg, q, codes4 + i);
+    }
+    const svbool_t all = svptrue_b64();
+    results[0] = svaddv_u64(all, acc1);
+    results[1] = svaddv_u64(all, acc2);
+    results[2] = svaddv_u64(all, acc3);
+    results[3] = svaddv_u64(all, acc4);
+    simd::HammingScalarRangeBatch4<HammingSveTag>(
+        query, codes1, codes2, codes3, codes4, full_bytes, dim, results);
+#else
+    neon::HammingDistanceBatch4(query, codes1, codes2, codes3, codes4, dim, results);
+#endif
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+#if defined(ENABLE_SVE)
+    simd::HammingScanByBatch4<HammingSveTag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
+#else
+    neon::HammingDistanceScan(query, codes, dim, count, dists);
+#endif
 }
 }  // namespace vsag::sve

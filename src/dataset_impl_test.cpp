@@ -1205,3 +1205,104 @@ TEST_CASE("Dataset MultiVector DeepCopy Test", "[ut][dataset]") {
         REQUIRE(dst_mv[1].len_ == dataset->GetMultiVectors()[1].len_);
     }
 }
+
+TEST_CASE("Dataset Binary Vectors Test", "[ut][dataset][binary]") {
+    // 13 bits per vector: ceil(13 / 8) = 2 bytes per row, the last byte has 3 padding bits.
+    constexpr int64_t dim = 13;
+    constexpr int64_t row_bytes = 2;
+    constexpr int64_t count = 5;
+    auto fill = [](uint8_t* bytes, int64_t rows, uint8_t seed) {
+        for (int64_t i = 0; i < rows * row_bytes; ++i) {
+            bytes[i] = static_cast<uint8_t>(seed + 37 * i);
+        }
+    };
+
+    SECTION("setter and getter") {
+        std::vector<uint8_t> bytes(count * row_bytes);
+        fill(bytes.data(), count, 1);
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(count)->Dim(dim)->BinaryVectors(bytes.data())->Owner(false);
+        REQUIRE(dataset->GetBinaryVectors() == bytes.data());
+        REQUIRE(dataset->GetFloat32Vectors() == nullptr);
+        REQUIRE(dataset->GetInt8Vectors() == nullptr);
+        REQUIRE(vsag::Dataset::Make()->GetBinaryVectors() == nullptr);
+    }
+
+    SECTION("owner releases binary vectors with its allocator") {
+        fixtures::MemoryRecordAllocator tracked_allocator;
+        {
+            auto* bytes = static_cast<uint8_t*>(tracked_allocator.Allocate(count * row_bytes));
+            fill(bytes, count, 3);
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(count)->Dim(dim)->BinaryVectors(bytes)->Owner(true,
+                                                                               &tracked_allocator);
+            REQUIRE(tracked_allocator.GetCurrentMemory() > 0);
+        }
+        REQUIRE(tracked_allocator.GetCurrentMemory() == 0);
+    }
+
+    SECTION("owner releases binary vectors with delete[]") {
+        // Sanitizer builds report a leak or an allocation mismatch if ownership is wrong.
+        auto* bytes = new uint8_t[count * row_bytes];
+        fill(bytes, count, 5);
+        auto dataset = vsag::Dataset::Make();
+        dataset->NumElements(count)->Dim(dim)->BinaryVectors(bytes)->Owner(true);
+        REQUIRE(dataset->GetBinaryVectors() == bytes);
+    }
+
+    SECTION("deep copy copies ceil(dim / 8) bytes per row") {
+        auto use_allocator = GENERATE(true, false);
+        fixtures::MemoryRecordAllocator tracked_allocator;
+        {
+            std::vector<uint8_t> bytes(count * row_bytes);
+            fill(bytes.data(), count, 7);
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(count)->Dim(dim)->BinaryVectors(bytes.data())->Owner(false);
+            auto copy = dataset->DeepCopy(use_allocator ? &tracked_allocator : nullptr);
+            REQUIRE(copy->GetNumElements() == count);
+            REQUIRE(copy->GetDim() == dim);
+            REQUIRE(copy->GetBinaryVectors() != nullptr);
+            REQUIRE(copy->GetBinaryVectors() != bytes.data());
+            REQUIRE(std::equal(bytes.begin(), bytes.end(), copy->GetBinaryVectors()));
+            if (use_allocator) {
+                REQUIRE(tracked_allocator.GetCurrentMemory() > 0);
+            }
+        }
+        REQUIRE(tracked_allocator.GetCurrentMemory() == 0);
+    }
+
+    SECTION("append concatenates packed rows") {
+        auto use_allocator = GENERATE(true, false);
+        fixtures::MemoryRecordAllocator tracked_allocator;
+        {
+            constexpr int64_t extra = 3;
+            uint8_t* first = nullptr;
+            if (use_allocator) {
+                first = static_cast<uint8_t*>(tracked_allocator.Allocate(count * row_bytes));
+            } else {
+                first = new uint8_t[count * row_bytes];
+            }
+            fill(first, count, 11);
+            std::vector<uint8_t> expected(first, first + count * row_bytes);
+            auto dataset = vsag::Dataset::Make();
+            dataset->NumElements(count)->Dim(dim)->BinaryVectors(first)->Owner(
+                true, use_allocator ? &tracked_allocator : nullptr);
+
+            std::vector<uint8_t> second(extra * row_bytes);
+            fill(second.data(), extra, 13);
+            expected.insert(expected.end(), second.begin(), second.end());
+            auto other = vsag::Dataset::Make();
+            other->NumElements(extra)->Dim(dim)->BinaryVectors(second.data())->Owner(false);
+
+            dataset->Append(other);
+            REQUIRE(dataset->GetNumElements() == count + extra);
+            REQUIRE(std::equal(expected.begin(), expected.end(), dataset->GetBinaryVectors()));
+
+            auto without_binary = vsag::Dataset::Make();
+            std::vector<float> floats(dim);
+            without_binary->NumElements(1)->Dim(dim)->Float32Vectors(floats.data())->Owner(false);
+            REQUIRE_THROWS(dataset->Append(without_binary));
+        }
+        REQUIRE(tracked_allocator.GetCurrentMemory() == 0);
+    }
+}

@@ -15,7 +15,30 @@
 
 #pragma once
 
+#include "vsag/constants.h"
+
 namespace vsag {
-enum class MetricType { METRIC_TYPE_L2SQR = 0, METRIC_TYPE_IP = 1, METRIC_TYPE_COSINE = 2 };
+enum class MetricType {
+    METRIC_TYPE_L2SQR = 0,
+    METRIC_TYPE_IP = 1,
+    METRIC_TYPE_COSINE = 2,
+    // popcount(a XOR b) over bit-packed binary vectors; only valid with DATA_TYPE_BINARY.
+    METRIC_TYPE_HAMMING = 3,
+};
+
+constexpr const char*
+ToString(MetricType metric) noexcept {
+    switch (metric) {
+        case MetricType::METRIC_TYPE_L2SQR:
+            return METRIC_L2;
+        case MetricType::METRIC_TYPE_IP:
+            return METRIC_IP;
+        case MetricType::METRIC_TYPE_COSINE:
+            return METRIC_COSINE;
+        case MetricType::METRIC_TYPE_HAMMING:
+            return METRIC_HAMMING;
+    }
+    return "unknown";
+}
 
 }  // namespace vsag

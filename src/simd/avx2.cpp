@@ -22,6 +22,7 @@
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
 #include "simd/int8_simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "simd/kernels/rabitq_pack.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
@@ -2402,6 +2403,141 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
         nullptr, a, b, dim);
 #else
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+#if defined(ENABLE_AVX2)
+namespace {
+struct HammingAvx2Tag {};
+
+// Per-byte population count with a 4-bit lookup table (Mula, Kurz and Lemire).
+inline __m256i
+hamming_popcount_epi8(__m256i v) {
+    const __m256i lookup = _mm256_setr_epi8(0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4,
+                                            0,
+                                            1,
+                                            1,
+                                            2,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            1,
+                                            2,
+                                            2,
+                                            3,
+                                            2,
+                                            3,
+                                            3,
+                                            4);
+    const __m256i low_mask = _mm256_set1_epi8(0x0F);
+    const __m256i low = _mm256_and_si256(v, low_mask);
+    const __m256i high = _mm256_and_si256(_mm256_srli_epi16(v, 4), low_mask);
+    return _mm256_add_epi8(_mm256_shuffle_epi8(lookup, low), _mm256_shuffle_epi8(lookup, high));
+}
+
+// Number of differing bits of 32 bytes, as four 64-bit partial sums.
+inline __m256i
+hamming_count_32(__m256i a, const uint8_t* b) {
+    const __m256i diff =
+        _mm256_xor_si256(a, _mm256_loadu_si256(reinterpret_cast<const __m256i*>(b)));
+    return _mm256_sad_epu8(hamming_popcount_epi8(diff), _mm256_setzero_si256());
+}
+
+inline uint64_t
+hamming_reduce_epi64(__m256i v) {
+    const __m128i sum = _mm_add_epi64(_mm256_castsi256_si128(v), _mm256_extracti128_si256(v, 1));
+    return static_cast<uint64_t>(_mm_cvtsi128_si64(sum)) +
+           static_cast<uint64_t>(_mm_extract_epi64(sum, 1));
+}
+}  // namespace
+#endif
+
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+#if defined(ENABLE_AVX2)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    if (full_bytes < 32) {
+        // No complete 32-byte block: POPCNT on 64-bit words, without a vector reduction.
+        return simd::HammingScalarRange<HammingAvx2Tag>(x, y, 0, dim);
+    }
+    __m256i acc = _mm256_setzero_si256();
+    uint64_t i = 0;
+    for (; i + 32 <= full_bytes; i += 32) {
+        const __m256i a = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(x + i));
+        acc = _mm256_add_epi64(acc, hamming_count_32(a, y + i));
+    }
+    return hamming_reduce_epi64(acc) + simd::HammingScalarRange<HammingAvx2Tag>(x, y, i, dim);
+#else
+    return sse::HammingDistance(x, y, dim);
+#endif
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+#if defined(ENABLE_AVX2)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    if (full_bytes < 32) {
+        results[0] = 0;
+        results[1] = 0;
+        results[2] = 0;
+        results[3] = 0;
+        simd::HammingScalarRangeBatch4<HammingAvx2Tag>(
+            query, codes1, codes2, codes3, codes4, 0, dim, results);
+        return;
+    }
+    __m256i acc1 = _mm256_setzero_si256();
+    __m256i acc2 = _mm256_setzero_si256();
+    __m256i acc3 = _mm256_setzero_si256();
+    __m256i acc4 = _mm256_setzero_si256();
+    uint64_t i = 0;
+    for (; i + 32 <= full_bytes; i += 32) {
+        const __m256i q = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(query + i));
+        acc1 = _mm256_add_epi64(acc1, hamming_count_32(q, codes1 + i));
+        acc2 = _mm256_add_epi64(acc2, hamming_count_32(q, codes2 + i));
+        acc3 = _mm256_add_epi64(acc3, hamming_count_32(q, codes3 + i));
+        acc4 = _mm256_add_epi64(acc4, hamming_count_32(q, codes4 + i));
+    }
+    results[0] = hamming_reduce_epi64(acc1);
+    results[1] = hamming_reduce_epi64(acc2);
+    results[2] = hamming_reduce_epi64(acc3);
+    results[3] = hamming_reduce_epi64(acc4);
+    simd::HammingScalarRangeBatch4<HammingAvx2Tag>(
+        query, codes1, codes2, codes3, codes4, i, dim, results);
+#else
+    sse::HammingDistanceBatch4(query, codes1, codes2, codes3, codes4, dim, results);
+#endif
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+#if defined(ENABLE_AVX2)
+    simd::HammingScanByBatch4<HammingAvx2Tag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
+#else
+    sse::HammingDistanceScan(query, codes, dim, count, dists);
 #endif
 }
 }  // namespace vsag::avx2

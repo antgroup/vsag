@@ -26,8 +26,8 @@ VSAG 提供了一系列索引实现，它们共享同一套构建式 API、同�
 | 字段 | 可选值 | 说明 |
 |------|--------|------|
 | `dim` | 正整数 | 向量维度；构建后不可变 |
-| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` | `sparse` 仅 SINDI / SINDI_V2 使用 |
-| `metric_type` | `l2` / `ip` / `cosine` | 查询时必须保持一致（SINDI / SINDI_V2 仅支持 `ip`） |
+| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` / `binary` | `sparse` 仅 SINDI / SINDI_V2 使用；`binary` 仅 BruteForce / HGraph 使用 |
+| `metric_type` | `l2` / `ip` / `cosine` / `hamming` | 查询时必须保持一致（SINDI / SINDI_V2 仅支持 `ip`；`hamming` 与 `binary` 搭配） |
 
 索引特有的构建参数放在 `index_param` 子对象中；查询参数放在以索引名命名的子对象中
 （例如 `hgraph`、`ivf`、`sindi`、`sindi_v2`、`pyramid`）。LazyHGraph 转换到 graph 阶段后也使用

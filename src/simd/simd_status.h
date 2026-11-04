@@ -134,6 +134,19 @@ public:
         return ret;
     }
 
+    // Every SSE4.2 CPU has POPCNT, but POPCNT has its own CPUID bit. The popcount kernels of the
+    // SSE unit check it so that a CPU or VM hiding POPCNT never executes the instruction.
+    static inline bool
+    SupportPOPCNT() {
+        Init();
+        bool ret = false;
+#if defined(ENABLE_SSE)
+        ret = true;
+#endif
+        ret &= cpuinfo_has_x86_popcnt();
+        return ret;
+    }
+
     static inline bool
     SupportNEON() {
         bool ret = false;
