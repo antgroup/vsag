@@ -52,6 +52,10 @@ public:
     void
     GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const;
 
+    // Return false without retaining a partial list when the result exceeds max_ids.
+    bool
+    TryGetSetBits(uint64_t limit, uint64_t max_ids, Vector<InnerIdType>& ids) const;
+
     std::string
     Dump() override;
 

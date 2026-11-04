@@ -404,3 +404,34 @@ TEST_CASE("FastBitset Or operations", "[ut][FastBitset]") {
         }
     }
 }
+
+TEST_CASE("FastBitset bounds enumeration before materializing dense matches",
+          "[ut][FastBitset][bounded_enumeration]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FastBitset bits(allocator.get());
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    CHECK_FALSE(bits.TryGetSetBits(65, 2, ids));
+    CHECK(ids.empty());
+    CHECK(ids.capacity() == 0);
+    REQUIRE(bits.TryGetSetBits(64, 2, ids));
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    REQUIRE(bits.TryGetSetBits(0, 0, ids));
+    CHECK(ids.empty());
+}
+
+TEST_CASE("FastBitset bounds implicit all-one fill without building IDs",
+          "[ut][FastBitset][bounded_enumeration]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    FastBitset bits(allocator.get());
+    bits.Not();
+    Vector<InnerIdType> ids(allocator.get());
+    CHECK_FALSE(bits.TryGetSetBits(1000000, 10, ids));
+    CHECK(ids.empty());
+    CHECK(ids.capacity() == 0);
+    REQUIRE(bits.TryGetSetBits(5, 5, ids));
+    REQUIRE(ids.size() == 5);
+    CHECK(ids.back() == 4);
+}

@@ -1710,3 +1710,133 @@ TEST_CASE("HGraph fused Add drains preencoding tasks before rejecting an enqueue
         REQUIRE_FALSE(index->CheckIdExist(labels[i]));
     }
 }
+
+TEST_CASE("HGraph fused dense attributes retain bounded request memory",
+          "[ft][hgraph][fused][filtered_scan][dense_attributes]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 8192;
+    const bool disable_scan = GENERATE(false, true);
+    auto param = vsag::JsonType::Parse(fixtures::HGraphRaBitQSplitTestIndex::GenerateBuildParam(
+        "l2", dim, "memory_io", "", 3, 5, true));
+    param["index_param"]["graph_type"].SetString("pipnn");
+    param["index_param"]["graph_storage_type"].SetString("flat");
+    param["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param["index_param"]["rabitq_use_fht"].SetBool(true);
+    param["index_param"]["use_attribute_filter"].SetBool(true);
+    param["index_param"]["build_thread_count"].SetInt(2);
+    auto made = vsag::Factory::CreateIndex("hgraph", param.Dump());
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::vector<vsag::AttributeSet> attrs(count);
+    vsag::AttributeValue<int32_t> value;
+    value.name_ = "all_rows";
+    value.GetValue().push_back(1);
+    for (auto& row : attrs) {
+        row.attrs_.push_back(&value);
+    }
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Owner(false)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(vectors.data())
+                    ->AttributeSets(attrs.data());
+    REQUIRE(index->Build(data).has_value());
+    class TrackingAllocator final : public vsag::Allocator {
+    public:
+        std::string
+        Name() override {
+            return "tracking-search";
+        }
+        void*
+        Allocate(uint64_t size) override {
+            maximum = std::max(maximum, size);
+            return base->Allocate(size);
+        }
+        void
+        Deallocate(void* ptr) override {
+            base->Deallocate(ptr);
+        }
+        void*
+        Reallocate(void* ptr, uint64_t size) override {
+            maximum = std::max(maximum, size);
+            return base->Reallocate(ptr, size);
+        }
+        std::shared_ptr<vsag::Allocator> base = vsag::Engine::CreateDefaultAllocator();
+        uint64_t maximum{0};
+    } allocator;
+    vsag::SearchRequest request;
+    request.query_ = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false)->Float32Vectors(
+        vectors.data());
+    request.topk_ = 1;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = "all_rows = 1";
+    request.search_allocator_ = &allocator;
+    request.params_str_ = disable_scan ? R"({"hgraph":{"ef_search":20,"brute_force_threshold":0}})"
+                                       : R"({"hgraph":{"ef_search":20}})";
+    auto found = index->SearchWithRequest(request);
+    REQUIRE(found.has_value());
+    REQUIRE(found.value()->GetDim() == 1);
+    CHECK(found.value()->GetIds()[0] == 0);
+    CHECK(found.value()->GetStatistics({"mci_hybrid_route"})[0] != R"("brute_force")");
+    CAPTURE(allocator.maximum);
+    CHECK(allocator.maximum < count * sizeof(vsag::InnerIdType));
+}
+
+TEST_CASE("HGraph fused automatic scans honor query timeout",
+          "[ft][hgraph][fused][filtered_scan][scan_timeout]") {
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 512;
+    auto param = vsag::JsonType::Parse(fixtures::HGraphRaBitQSplitTestIndex::GenerateBuildParam(
+        "l2", dim, "memory_io", "", 3, 5, true));
+    param["index_param"]["graph_type"].SetString("pipnn");
+    param["index_param"]["graph_storage_type"].SetString("flat");
+    param["index_param"]["rabitq_fused_datacell"].SetBool(true);
+    param["index_param"]["rabitq_use_fht"].SetBool(true);
+    param["index_param"]["use_attribute_filter"].SetBool(true);
+    param["index_param"]["build_thread_count"].SetInt(2);
+    auto made = vsag::Factory::CreateIndex("hgraph", param.Dump());
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 0);
+    std::vector<vsag::AttributeSet> attrs(count);
+    std::vector<vsag::AttributeValue<int32_t>> values(count);
+    for (uint64_t id = 0; id < count; ++id) {
+        values[id].name_ = "allowed";
+        values[id].GetValue().push_back(id < 4 ? 1 : 0);
+        attrs[id].attrs_.push_back(&values[id]);
+    }
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(count)
+                    ->Dim(dim)
+                    ->Owner(false)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(vectors.data())
+                    ->AttributeSets(attrs.data());
+    REQUIRE(index->Build(data).has_value());
+    vsag::SearchRequest request;
+    request.query_ = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false)->Float32Vectors(
+        vectors.data());
+    request.topk_ = 10;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = "allowed = 1";
+    request.params_str_ = R"({"hgraph":{"ef_search":30}})";
+    auto control = index->SearchWithRequest(request);
+    REQUIRE(control.has_value());
+    REQUIRE(control.value()->GetDim() == 4);
+    REQUIRE(control.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+    request.params_str_ = R"({"hgraph":{"ef_search":30,"timeout_ms":0}})";
+    auto timed = index->SearchWithRequest(request);
+    REQUIRE(timed.has_value());
+    CHECK(timed.value()->GetDim() == 0);
+    CHECK(timed.value()->GetStatistics({"is_timeout"})[0] == "true");
+    CHECK(timed.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+    CHECK(
+        vsag::JsonType::Parse(timed.value()->GetStatistics())["distance_evaluations"].GetUint64() ==
+        0);
+}

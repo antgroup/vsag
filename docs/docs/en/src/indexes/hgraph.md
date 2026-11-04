@@ -414,11 +414,13 @@ bitsets and deletion marks are combined with AND. Attribute filtering requires
 For callback predicates, fused queries sample selectivity and enumerate actual matching IDs when a scan may
 be appropriate. Scan routing uses the exact matching fraction, so inaccurate `ValidRatio()`
 hints cannot change predicate correctness. Attribute expressions run once per request;
-batch queries reuse the matching set. Attribute results available as complete bitsets enumerate set IDs directly,
-then apply the ID, bitset and deletion predicates. Graph search can use the resulting validity
-bitmap directly. Scans visit matching IDs without graph routing
+batch queries reuse preparation. Attribute bitsets enumerate IDs only when the set fits the scan budget,
+then apply the ID, bitset and deletion predicates. Dense and explicitly graph-only queries retain the compact
+predicate. Callback enumeration stops as soon as the set exceeds the scan threshold; preparation avoids
+an N-byte bitmap and moves the sparse ID list instead of copying it. Scans visit matching IDs without graph routing
 or a subsequent reorder pass. Attribute expressions and SearchRequest bitset predicates use the HGraph/scan path; MCI fast paths remain limited to the original ID predicate. Distances use the final codes or raw vectors and retain the
-quantization error of the selected codes.
+quantization error of the selected codes. Scans honor `timeout_ms` between distance batches and return
+completed results with `is_timeout=true` when the budget expires; an active distance batch is not interrupted.
 
 How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 
@@ -446,7 +448,7 @@ Picking a value:
 - For highly selective filters, `0.01–0.05` is a reasonable starting point.
   Setting it higher than that effectively turns the index into a brute-force
   scanner whenever a filter is present.
-- Callback preparation uses a sample of at most 256 records and, when needed, a full pass over N indexed records. Complete attribute bitsets enumerate matching IDs directly. Scanning computes distances only for the M vectors passing every predicate; batch queries reuse preparation.
+- Callback preparation uses a sample of at most 256 records and, when needed, a full pass over N indexed records. Attribute bitsets enumerate IDs only within the scan budget; dense graph queries retain compact predicates. Scanning computes distances only for the M vectors passing every predicate; batch queries reuse preparation.
 
 See
 [`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)

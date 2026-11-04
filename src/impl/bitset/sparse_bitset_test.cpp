@@ -398,3 +398,20 @@ TEST_CASE("Roaring Bitmap Test", "[ut][bitset]") {
     Roaring::const_iterator j = rogue.begin();
     j.equalorlarger(4);  // *j == 4
 }
+
+TEST_CASE("SparseBitset bounds enumeration before materializing dense matches",
+          "[ut][bitset][bounded_enumeration]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SparseBitset bits;
+    Vector<InnerIdType> ids(allocator.get());
+    bits.Set(0, true);
+    bits.Set(63, true);
+    bits.Set(64, true);
+    CHECK_FALSE(bits.TryGetSetBits(65, 2, ids));
+    CHECK(ids.empty());
+    CHECK(ids.capacity() == 0);
+    REQUIRE(bits.TryGetSetBits(64, 2, ids));
+    CHECK(ids == Vector<InnerIdType>({0, 63}, allocator.get()));
+    REQUIRE(bits.TryGetSetBits(0, 0, ids));
+    CHECK(ids.empty());
+}
