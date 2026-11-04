@@ -92,7 +92,7 @@ _LEN_SIZE = _LEN_STRUCT.size  # 4
 
 
 def build_term_vocabulary(
-    documents: Sequence[Mapping[str, float]],
+    documents: Iterable[Mapping[str, float]],
 ) -> Dict[str, int]:
     """Assign a stable ``uint32``-compatible ID to every term.
 
@@ -102,9 +102,12 @@ def build_term_vocabulary(
     :func:`term_weights_to_csr` for both documents and queries.
 
     Args:
-        documents: Sequence (or iterable) of term-weight mappings, for
+        documents: Iterable (or sequence) of term-weight mappings, for
             example ``[{"vector": 1.0, "search": 0.8}]``. Only the keys
-            are inspected; weights may be any numeric value.
+            are inspected; weights may be any numeric value. Empty
+            mappings are rejected with ``ValueError`` for the same reason
+            as :func:`term_weights_to_csr`: SINDI silently drops empty
+            documents on ``add`` and rejects empty queries.
 
     Returns:
         A ``dict[str, int]`` whose IDs are contiguous from ``0`` to
@@ -119,8 +122,8 @@ def build_term_vocabulary(
     Raises:
         TypeError: If a document is not a mapping or a term is not a
             string.
-        ValueError: If the number of distinct terms exceeds the ``uint32``
-            ID space.
+        ValueError: If a document is empty or the number of distinct terms
+            exceeds the ``uint32`` ID space.
 
     Example:
         >>> from pyvsag.sparse import build_term_vocabulary
@@ -133,6 +136,12 @@ def build_term_vocabulary(
             raise TypeError(
                 f"documents[{position}] must be a mapping of str to numeric "
                 f"weight, got {type(document).__name__}"
+            )
+        if len(document) == 0:
+            raise ValueError(
+                f"documents[{position}] is empty; empty documents are not "
+                f"supported by SINDI (they are silently dropped during "
+                f"add and rejected by knn_search)"
             )
         for term in document:
             if not isinstance(term, str):
@@ -181,6 +190,15 @@ def _validated_term_ids(vocabulary: Mapping[str, int]) -> Dict[str, int]:
                 f"{term!r} and {previous!r}"
             )
         term_id = _validate_term_id(term, raw_id)
+        # Re-check the *normalized* ID: 0-d integer arrays are unhashable
+        # and objects implementing __index__ may hash by identity, so the
+        # raw-value lookup above cannot see these collisions.
+        normalized_previous = id_to_term.get(term_id)
+        if normalized_previous is not None:
+            raise ValueError(
+                f"vocabulary has duplicate term ID {term_id} for terms "
+                f"{term!r} and {normalized_previous!r}"
+            )
         id_to_term[term_id] = term
         term_to_id[term] = term_id
 

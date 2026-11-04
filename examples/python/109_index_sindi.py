@@ -80,7 +80,7 @@ def print_results(result_ids, result_distances, titles):
         zip(result_ids, result_distances), start=1
     ):
         doc_id = int(doc_id)
-        if doc_id < 0:
+        if doc_id not in titles:
             print(f"  {rank}. <no result>")
             continue
         print(f"  {rank}. {titles[doc_id]} (id={doc_id}, distance={float(distance):.4f})")

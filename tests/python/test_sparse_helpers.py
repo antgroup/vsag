@@ -60,6 +60,11 @@ def test_build_term_vocabulary_empty_input():
     assert build_term_vocabulary([]) == {}
 
 
+def test_build_term_vocabulary_rejects_empty_documents():
+    with pytest.raises(ValueError, match="empty"):
+        build_term_vocabulary([{}, {"term": 1.0}])
+
+
 def test_build_term_vocabulary_accepts_unicode_terms():
     vocabulary = build_term_vocabulary([{"向量": 1.0, "检索": 0.5}])
 
@@ -138,6 +143,38 @@ def test_term_weights_to_csr_rejects_duplicate_ids_across_types():
         term_weights_to_csr([{"a": 1.0}], {"a": 1, "b": 1.0})
     with pytest.raises(ValueError, match="duplicate term ID"):
         term_weights_to_csr([{"a": 1.0}], {"a": 1, "b": True})
+
+
+class _IndexLike:
+    """Integer-like object that hashes by identity (unlike ``int``)."""
+
+    def __init__(self, value):
+        self.value = value
+
+    def __index__(self):
+        return self.value
+
+
+@pytest.mark.parametrize(
+    "duplicate_id",
+    [
+        _IndexLike(0),
+        np.array(0, dtype=np.int64),
+        np.array(0, dtype=np.uint32),
+    ],
+)
+def test_term_weights_to_csr_rejects_duplicate_ids_after_normalization(
+    duplicate_id,
+):
+    # 0-d integer arrays are unhashable and ``__index__`` objects hash by
+    # identity, so the raw-value lookup misses them. The IDs collide once
+    # normalized, so both paths must still reject the vocabulary.
+    vocabulary = {"a": 0, "b": duplicate_id}
+
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        term_weights_to_csr([{"a": 1.0}], vocabulary)
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        TermVocabulary(vocabulary)
 
 
 def test_term_weights_to_csr_reports_invalid_ids_with_descriptive_error():
