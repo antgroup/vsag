@@ -4225,3 +4225,64 @@ TEST_CASE("Pyramid with extra_info: PIPNN dedup path", "[ft][pyramid][extra_info
     TestIndex::TestBuildIndex(index, dataset, true);
     TestIndex::TestGetExtraInfoById(index, dataset, extra_info_size);
 }
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::PyramidTestIndex,
+                             "Pyramid adaptive PiPNN build search Add and restore",
+                             "[ft][pyramid][pipnn][pyramid_pipnn_adaptive]") {
+    const auto root_type = GENERATE(std::string("single_layer"), std::string("multi_layer"));
+    const auto threads = GENERATE(1, 4);
+    const auto mode = GENERATE(0, 1, 2);
+    CAPTURE(root_type, threads, mode);
+    PyramidParam pyramid_param;
+    pyramid_param.graph_type = "pipnn";
+    pyramid_param.root_graph_type = root_type;
+    pyramid_param.no_build_levels = {};
+    auto json =
+        vsag::JsonType::Parse(GeneratePyramidBuildParametersString("l2", 32, pyramid_param));
+    json["index_param"]["build_thread_count"].SetInt(threads);
+    json["index_param"]["index_min_size"].SetInt(0);
+    json["index_param"]["pipnn_adaptive_pruning"].SetBool(mode != 0);
+    json["index_param"]["pipnn_adaptive_pruning_adjust_step"].SetFloat(mode == 1 ? 0.0F : 0.06F);
+    const auto param = json.Dump();
+    auto index = TestFactory("pyramid", param, true);
+    auto dataset = pool.GetDatasetAndCreate(32, 1000, "l2", /*with_path=*/true);
+    const auto search = GeneratePyramidSearchParametersString(200);
+    TestContinueAdd(index, dataset, true);
+    TestKnnSearch(index, dataset, search, 0.94F, true);
+    TestFilterSearch(index, dataset, search, 0.94F, true);
+    TestRangeSearch(index, dataset, search, 0.94F, 10, true);
+    auto restored = TestFactory("pyramid", param, true);
+    TestSerializeBinarySet(index, restored, dataset, search, true);
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto loaded = vsag::Index::Load(stream, "{}");
+    REQUIRE(loaded.has_value());
+    TestKnnSearch(loaded.value(), dataset, search, 0.94F, true);
+    if (mode != 0) {
+        json["index_param"]["pipnn_adaptive_pruning"].SetBool(false);
+        auto wrong = TestFactory("pyramid", json.Dump(), true);
+        auto bytes = index->Serialize();
+        REQUIRE(bytes.has_value());
+        REQUIRE_FALSE(wrong->Deserialize(bytes.value()).has_value());
+    }
+}
+
+TEST_CASE("Pyramid adaptive PiPNN isolates named hierarchy paths",
+          "[ft][pyramid][pipnn][pyramid_pipnn_adaptive]") {
+    MultiHierarchyFixture fixture;
+    auto config = vsag::JsonType::Parse(fixture.build_param("pipnn"));
+    config["index_param"]["pipnn_adaptive_pruning"].SetBool(true);
+    auto created = vsag::Factory::CreateIndex("pyramid", config.Dump());
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    REQUIRE(index->Build(fixture.make_base()).has_value());
+    const auto news = fixture.search_ids(index, "site", "www/news");
+    REQUIRE(news == std::set<int64_t>{100, 102});
+    const auto tech = fixture.search_ids(index, "cat", "tech");
+    REQUIRE(tech == std::set<int64_t>{100, 101});
+    std::stringstream stream;
+    REQUIRE(index->SerializeStreaming(stream).has_value());
+    auto loaded = vsag::Index::Load(stream, "{}");
+    REQUIRE(loaded.has_value());
+    REQUIRE(fixture.search_ids(loaded.value(), "site", "www/news") == news);
+    REQUIRE(fixture.search_ids(loaded.value(), "cat", "tech") == tech);
+}
