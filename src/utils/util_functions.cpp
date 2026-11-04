@@ -245,7 +245,8 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t dim,
                   int64_t train_sample_count,
                   Allocator* allocator,
-                  std::optional<uint64_t> random_seed) {
+                  std::optional<uint64_t> random_seed,
+                  DataTypes data_type) {
     const int64_t min_train_size = 512;
 
     int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));
@@ -282,7 +283,7 @@ sample_train_data(const vsag::DatasetPtr& data,
             sampled_indices[j] = i;
         }
     }
-    const bool is_binary = data->GetBinaryVectors() != nullptr;
+    const bool is_binary = data_type == DataTypes::DATA_TYPE_BINARY;
     const auto bytes_per_vector =
         static_cast<uint64_t>(is_binary ? (dim + 7) / 8 : dim * sizeof(float));
     sampled_data_buffer.resize(static_cast<uint64_t>(sample_count) * bytes_per_vector);

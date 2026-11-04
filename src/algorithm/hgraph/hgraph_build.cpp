@@ -131,9 +131,10 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t dim = base->GetDim();
     if (rabitq_fused_datacell_ != nullptr) {
         return vsag::sample_train_data(
-            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U);
+            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U, data_type_);
     }
-    return vsag::sample_train_data(base, total_elements, dim, train_sample_count_, allocator_);
+    return vsag::sample_train_data(
+        base, total_elements, dim, train_sample_count_, allocator_, std::nullopt, data_type_);
 }
 
 void

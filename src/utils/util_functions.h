@@ -130,6 +130,7 @@ sample_train_data(const DatasetPtr& data,
                   int64_t dim,
                   int64_t train_sample_count,
                   Allocator* allocator = nullptr,
-                  std::optional<uint64_t> random_seed = std::nullopt);
+                  std::optional<uint64_t> random_seed = std::nullopt,
+                  DataTypes data_type = DataTypes::DATA_TYPE_FLOAT);
 
 }  // namespace vsag
