@@ -352,6 +352,7 @@ HGraphAnalyzer::GetQuantizationInversionRatio(const std::string& search_param) {
 
 bool
 HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
+    CHECK_ARGUMENT(query->GetDim() == dim_, "analysis query dimension mismatch");
     if (query_sample_size_ != 0) {
         query_sample_ids_.clear();
         query_sample_datas_.clear();
@@ -596,7 +597,8 @@ HGraphAnalyzer::GetStats() {
 }
 JsonType
 HGraphAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
-    SetQuery(request.query_);
+    CHECK_ARGUMENT(SetQuery(request.query_),
+                   "analysis query representation must match index dtype");
     JsonType stats;
     stats["avg_distance_query"].SetFloat(GetQueryAvgDistance());
     stats["recall_query"].SetFloat(GetQuerySearchRecall(request.params_str_));

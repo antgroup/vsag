@@ -119,8 +119,10 @@ TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]")
         ->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto first = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
-    auto second = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+    auto first = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
+    auto second = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
 
     REQUIRE(first->GetNumElements() == sample_count);
     REQUIRE(second->GetNumElements() == sample_count);
@@ -140,7 +142,8 @@ TEST_CASE("sample_train_data honors configured counts above the default", "[ut][
     data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 0x52425131U);
+    auto sampled = sample_train_data(
+        data, count, dim, sample_count, DataTypes::DATA_TYPE_FLOAT, allocator.get(), 0x52425131U);
 
     REQUIRE(sampled->GetNumElements() == sample_count);
 }
@@ -153,8 +156,12 @@ TEST_CASE("sample_train_data uses all vectors for an unbounded count", "[ut][Uti
     data->NumElements(count)->Dim(dim)->Float32Vectors(vectors.data())->Owner(false);
     auto allocator = std::make_shared<DefaultAllocator>();
 
-    auto sampled =
-        sample_train_data(data, count, dim, std::numeric_limits<int64_t>::max(), allocator.get());
+    auto sampled = sample_train_data(data,
+                                     count,
+                                     dim,
+                                     std::numeric_limits<int64_t>::max(),
+                                     DataTypes::DATA_TYPE_FLOAT,
+                                     allocator.get());
 
     REQUIRE(sampled == data);
     REQUIRE(sampled->GetNumElements() == count);

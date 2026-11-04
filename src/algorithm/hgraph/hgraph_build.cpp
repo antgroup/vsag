@@ -131,10 +131,10 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t dim = base->GetDim();
     if (rabitq_fused_datacell_ != nullptr) {
         return vsag::sample_train_data(
-            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U, data_type_);
+            base, total_elements, dim, train_sample_count_, data_type_, allocator_, 0x52425131U);
     }
     return vsag::sample_train_data(
-        base, total_elements, dim, train_sample_count_, allocator_, std::nullopt, data_type_);
+        base, total_elements, dim, train_sample_count_, data_type_, allocator_, std::nullopt);
 }
 
 void
@@ -1420,8 +1420,8 @@ HGraph::InitFeatures() {
     auto name = this->basic_flatten_codes_->GetQuantizerName();
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-        name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
-        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
+        name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_BINARY and
+        name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({

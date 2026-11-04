@@ -154,6 +154,9 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
     auto graph_made = vsag::Factory::CreateIndex("hgraph", params);
     REQUIRE(graph_made.has_value());
     auto graph = graph_made.value();
+    REQUIRE_FALSE(graph->CheckFeature(vsag::IndexFeature::NEED_TRAIN));
+    REQUIRE(graph->CheckFeature(vsag::IndexFeature::SUPPORT_RANGE_SEARCH));
+    REQUIRE(graph->CheckFeature(vsag::IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER));
     REQUIRE(graph->Build(build_dataset).has_value());
     REQUIRE(graph->GetNumElements() == count);
     auto graph_raw =
@@ -472,6 +475,19 @@ TEST_CASE("(PR) Binary HGraph Analysis Uses Packed Queries", "[ft][hgraph][pr]")
     std::string analysis;
     REQUIRE_NOTHROW(analysis = index->AnalyzeIndexBySearch(request));
     REQUIRE_FALSE(analysis.empty());
+
+    auto short_data = GeneratePacked(4, dim - 1, 8643);
+    auto wrong_dim_queries = vsag::Dataset::Make()
+                                 ->NumElements(4)
+                                 ->Dim(dim - 1)
+                                 ->BinaryVectors(short_data.data())
+                                 ->Owner(false);
+    request.query_ = wrong_dim_queries;
+    REQUIRE_THROWS(index->AnalyzeIndexBySearch(request));
+
+    auto missing_vectors = vsag::Dataset::Make()->NumElements(4)->Dim(dim)->Owner(false);
+    request.query_ = missing_vectors;
+    REQUIRE_THROWS(index->AnalyzeIndexBySearch(request));
 }
 
 TEST_CASE("(PR) Binary HGraph Rejects MCI During Validation", "[ft][hgraph][pr]") {
