@@ -643,6 +643,18 @@ TEST_CASE("BalancedKMeans waits for queued tasks when the pool refuses one",
         std::runtime_error);
 }
 
+TEST_CASE("BalancedKMeans means do not lose small members to a large running sum",
+          "[ut][BalancedKMeansCluster]") {
+    // A float sum would stay at 2^25 and return 32768: adding 1 rounds back to 2^25.
+    constexpr uint64_t count = 1024;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    std::vector<float> datas(count, 1.0F);
+    datas[0] = 33554432.0F;
+    vsag::BalancedKMeansCluster cluster(1, allocator.get());
+    cluster.Run(1, datas.data(), count, vsag::BalancedKMeansOptions{});
+    REQUIRE(cluster.k_centroids_[0] == static_cast<float>((33554432.0 + 1023.0) / 1024.0));
+}
+
 TEST_CASE("BalancedKMeans runs on a worker of its own pool", "[ut][BalancedKMeansCluster]") {
     // The pool's only worker runs the trainer, so a task it queued and joined would
     // never start: this test hangs if the trainer stops running inline there.
@@ -680,10 +692,10 @@ TEST_CASE("BalancedKMeans runs on a worker of its own pool", "[ut][BalancedKMean
 
 TEST_CASE("BalancedKMeans leaves the caller's OpenMP setting alone",
           "[ut][BalancedKMeansCluster]") {
-    // With few clusters the centroid update is one task, which runs on the calling
-    // thread; its single-threaded BLAS setting must not outlive it.
+    // So few vectors are one scoring task, which runs on the calling thread; its
+    // single-threaded BLAS setting must not outlive it.
     constexpr uint64_t dim = 8;
-    constexpr uint64_t count = 400;
+    constexpr uint64_t count = 60;
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     auto datas = uniform_vectors(count, dim, 107);
     const int saved = omp_get_max_threads();
