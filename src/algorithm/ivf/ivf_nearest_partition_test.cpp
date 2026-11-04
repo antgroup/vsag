@@ -885,8 +885,21 @@ TEST_CASE("IVF Nearest Partition balanced_kmeans balances the Build buckets",
     require_balanced(buckets);
 
     // Residual codes are trained on that same assignment, so the residuals a Build
-    // encodes are the ones the codes were trained on.
-    REQUIRE(partition.ClassifyDatasForTrain(vec.data(), data_count) == buckets);
+    // encodes are the ones the codes were trained on, and on the nearest buckets, where
+    // Add puts a vector.
+    const auto nearest = partition.ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    const auto for_train = partition.ClassifyDatasForTrain(vec.data(), data_count);
+    REQUIRE(for_train.size() == 2 * data_count);
+    int64_t moved = 0;
+    for (int64_t i = 0; i < data_count; ++i) {
+        REQUIRE(for_train[2 * i] == buckets[i]);
+        REQUIRE(for_train[2 * i + 1] == nearest[i]);
+        moved += buckets[i] != nearest[i] ? 1 : 0;
+    }
+    REQUIRE(moved > 0);
+    Vector<float> residuals(allocator.get());
+    REQUIRE(partition.ResidualsForTrain(vec.data(), data_count, residuals) == data_count + moved);
+    REQUIRE(residuals.size() == (data_count + moved) * dim);
 
     // With two buckets per vector the first copies are the balanced ones and the second
     // copies go to another bucket.
