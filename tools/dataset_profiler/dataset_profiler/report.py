@@ -37,8 +37,10 @@ DEFINITIONS: Dict[str, str] = {
         "zero ratio over the selected split."
     ),
     "sparsity": (
-        "Count and fraction of exactly-zero entries; for sparse vectors this also "
-        "reports non-zero entries per vector and density = nnz / (count * dim)."
+        "Count and fraction of finite exactly-zero entries; non-zero values and "
+        "density count finite non-zero entries, while NaN/Inf values are reported "
+        "separately in invalid_values. For sparse vectors this also reports non-zero "
+        "entries per vector and density = nnz / (count * dim)."
     ),
     "duplicates": (
         "Exact duplicate detection by hashing each complete vector; near-duplicate "

@@ -408,13 +408,24 @@ def parse_and_validate_response(text: str, report: Dict[str, Any]) -> Dict[str, 
 # Providers
 # ---------------------------------------------------------------------------
 class MockProvider:
-    """Deterministic provider that replays a canned response (tests/demos)."""
+    """Deterministic provider that replays a canned response (tests/demos).
+
+    ``secrets`` implements the same public ``redaction_secrets`` provider
+    contract as network-backed providers, allowing failure-path tests to verify
+    redaction without relying on private implementation attributes.
+    """
 
     name = "mock"
 
-    def __init__(self, response: str, model: str = "mock-model") -> None:
+    def __init__(
+        self,
+        response: str,
+        model: str = "mock-model",
+        secrets: Sequence[str] = (),
+    ) -> None:
         self._response = response
         self.model = model
+        self.redaction_secrets = tuple(secrets)
         self.last_prompt: Optional[str] = None
 
     def complete(self, prompt: str) -> str:
@@ -451,6 +462,9 @@ class OpenAICompatibleProvider:
                 "AI base URL must use https so the API key is never sent in the clear"
             )
         self._api_key = api_key
+        # Public provider contract: analyze_report redacts these literal values
+        # from provider exceptions without inspecting private attributes.
+        self.redaction_secrets = (api_key,)
         self.model = model
         self.base_url = base_url.rstrip("/")
         self.timeout = float(timeout)
@@ -547,7 +561,8 @@ def analyze_report(
 
     Never raises: configuration, transport, and validation failures are folded
     into a ``{"status": "error"}`` block so the deterministic JSON and HTML
-    reports are still written.
+    reports are still written. Providers document literal credentials for error
+    redaction through a public ``redaction_secrets`` sequence attribute.
     """
     if provider is None:
         try:
@@ -556,8 +571,14 @@ def analyze_report(
             return {"status": "error", "provider": None, "error": _redact(str(exc))}
     name = getattr(provider, "name", type(provider).__name__)
     model = getattr(provider, "model", None)
-    configured_key = getattr(provider, "_api_key", None)
-    secrets = [configured_key] if isinstance(configured_key, str) else []
+    configured_secrets = getattr(provider, "redaction_secrets", ())
+    if isinstance(configured_secrets, str):
+        configured_secrets = (configured_secrets,)
+    secrets = (
+        [secret for secret in configured_secrets if isinstance(secret, str)]
+        if isinstance(configured_secrets, Sequence)
+        else []
+    )
     try:
         raw = provider.complete(build_prompt(report))
         block = parse_and_validate_response(raw, report)

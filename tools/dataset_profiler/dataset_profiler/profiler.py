@@ -320,9 +320,10 @@ def _profile_dense(
         invalid_values += invalid_in_block
         if invalid_in_block:
             vectors_with_invalid += int((~finite).any(axis=1).sum())
+        block_zero_values = int(np.count_nonzero((raw == 0) & finite))
         total_values += int(raw.size)
-        zero_values += int(np.count_nonzero((raw == 0) & finite))
-        nonzero_values += int(np.count_nonzero(valid))
+        zero_values += block_zero_values
+        nonzero_values += int(raw.size) - invalid_in_block - block_zero_values
 
         norms = np.sqrt(np.einsum("ij,ij->i", valid, valid))
         norms_parts.append(norms)
@@ -582,6 +583,7 @@ def _profile_sparse(
             dim,
             stored_entries,
             nonzero_entries,
+            invalid_values,
             explicit_zero_entries,
             nnz,
             all_zero_vectors,
@@ -913,12 +915,15 @@ def _sparse_sparsity_metric(
     dim: int,
     stored_entries: int,
     nonzero_entries: int,
+    invalid_values: int,
     explicit_zero_entries: int,
     nnz_per_vector: np.ndarray,
     all_zero_vectors: int,
 ) -> Dict[str, Any]:
     cells = count * dim if dim else None
-    zero_values = cells - nonzero_entries if cells is not None else None
+    zero_values = (
+        cells - nonzero_entries - invalid_values if cells is not None else None
+    )
     density = nonzero_entries / float(cells) if cells else None
     return metric_entry(
         DEFINITIONS["sparsity"],
@@ -932,7 +937,9 @@ def _sparse_sparsity_metric(
         zero_values=int(zero_values) if zero_values is not None else None,
         non_zero_values=int(nonzero_entries),
         explicit_zero_entries=int(explicit_zero_entries),
-        zero_ratio=as_finite_float(1.0 - density) if density is not None else None,
+        zero_ratio=as_finite_float(
+            zero_values / float(cells) if zero_values is not None and cells else None
+        ),
         density=as_finite_float(density),
         nnz_per_vector=summarize(nnz_per_vector),
         nnz_histogram=histogram(nnz_per_vector, bins=min(HISTOGRAM_BINS, 20)),
@@ -1051,9 +1058,14 @@ def _sampled_metrics(
         sparse_sparse_distance_loops=bool(sparse_pairwise),
     )
     nearest = _nearest_neighbor_metric(pair_matrix)
-    anisotropy = _anisotropy_metric(sample_matrix, pair_matrix, metric, warnings)
+    pca_result = (
+        _pca_statistics(sample_matrix) if sample_matrix is not None else None
+    )
+    anisotropy = _anisotropy_metric(
+        sample_matrix, pair_matrix, metric, warnings, pca_result
+    )
     clustering = _clustering_metric(
-        sample_matrix, config.clusters, rng, warnings
+        sample_matrix, config.clusters, rng, warnings, pca_result
     )
     return {
         "pairwise_distances": pairwise,
@@ -1092,6 +1104,7 @@ def _anisotropy_metric(
     pair_matrix: np.ndarray,
     metric: str,
     warnings: List[str],
+    pca_result: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
 ) -> Dict[str, Any]:
     sample_size = (
         int(sample_matrix.shape[0])
@@ -1117,7 +1130,7 @@ def _anisotropy_metric(
             available=False,
             reason="needs at least three sampled vectors with non-zero dimensionality",
         )
-    result = _pca_statistics(sample_matrix)
+    result = pca_result
     if result is None:
         return metric_entry(
             DEFINITIONS["anisotropy"],
@@ -1160,6 +1173,7 @@ def _clustering_metric(
     clusters: int,
     rng: np.random.Generator,
     warnings: List[str],
+    pca_result: Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]],
 ) -> Dict[str, Any]:
     sample_size = 0 if sample_matrix is None else int(sample_matrix.shape[0])
     if sample_matrix is None:
@@ -1178,7 +1192,7 @@ def _clustering_metric(
             available=False,
             reason="needs at least three sampled vectors with non-zero dimensionality",
         )
-    result = _pca_statistics(sample_matrix)
+    result = pca_result
     if result is None:
         return metric_entry(
             DEFINITIONS["clustering"],

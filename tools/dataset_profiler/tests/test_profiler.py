@@ -562,7 +562,10 @@ def test_sparse_nnz_counts_finite_nonzero_values_and_total_zeros(tmp_path):
     assert sparsity["stored_entries"] == 3
     assert sparsity["non_zero_values"] == 1
     assert sparsity["explicit_zero_entries"] == 1
-    assert sparsity["zero_values"] == sparsity["cells"] - 1
+    assert sparsity["zero_values"] == 2
+    assert sparsity["zero_ratio"] == 0.5
+    assert sparsity["density"] == 0.25
+    assert report["metrics"]["invalid_values"]["invalid_values"] == 1
     assert sparsity["nnz_per_vector"]["min"] == 0
     assert sparsity["nnz_per_vector"]["max"] == 1
 
@@ -629,6 +632,35 @@ def test_dense_nonzero_count_excludes_invalid_entries(tmp_path):
     assert report["metrics"]["invalid_values"]["invalid_values"] == 2
 
 
+def test_dense_and_sparse_sparsity_exclude_invalid_entries_consistently(tmp_path):
+    dense_path = tmp_path / "dense_invalid_consistency.hdf5"
+    sparse_path = tmp_path / "sparse_invalid_consistency.hdf5"
+    _write_dense(dense_path, [[np.nan, 0], [np.inf, 2]])
+    records = [
+        (
+            np.array([0, 1], dtype=np.uint32),
+            np.array([np.nan, 0], dtype=np.float32),
+        ),
+        (
+            np.array([0, 1], dtype=np.uint32),
+            np.array([np.inf, 2], dtype=np.float32),
+        ),
+    ]
+    _write_sparse(sparse_path, records)
+
+    reports = [
+        profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+        for path in (dense_path, sparse_path)
+    ]
+    for report in reports:
+        sparsity = report["metrics"]["sparsity"]
+        assert sparsity["zero_values"] == 1
+        assert sparsity["non_zero_values"] == 1
+        assert sparsity["zero_ratio"] == 0.25
+        assert sparsity["density"] == 0.25
+        assert report["metrics"]["invalid_values"]["invalid_values"] == 2
+
+
 @pytest.mark.parametrize("vector_type", ["dense", "sparse"])
 def test_singleton_pairwise_sample_provenance(tmp_path, vector_type):
     path = tmp_path / ("singleton_" + vector_type + ".hdf5")
@@ -664,6 +696,52 @@ def test_pca_uses_covariance_when_it_is_smaller(monkeypatch):
     assert result is not None
     assert result[1].shape == (5, 2)
     assert decomposed_shapes == [(4, 4)]  # not the larger 5-by-5 Gram matrix
+
+    covariance_result = result
+    monkeypatch.setattr(profiler_module, "_PCA_SVD_MAX_DIM", 4096)
+    svd_result = profiler_module._pca_statistics(matrix)
+    assert svd_result is not None
+    np.testing.assert_allclose(
+        np.sort(covariance_result[0])[::-1],
+        np.sort(svd_result[0])[::-1],
+        rtol=1e-9,
+        atol=1e-12,
+    )
+    pair_matrix = np.zeros((matrix.shape[0], matrix.shape[0]), dtype=np.float64)
+    covariance_metric = profiler_module._anisotropy_metric(
+        matrix, pair_matrix, "euclidean", [], covariance_result
+    )
+    svd_metric = profiler_module._anisotropy_metric(
+        matrix, pair_matrix, "euclidean", [], svd_result
+    )
+    for key in (
+        "explained_variance_ratio",
+        "top1_eigenvalue_share",
+        "effective_rank",
+    ):
+        np.testing.assert_allclose(
+            covariance_metric[key], svd_metric[key], rtol=1e-9, atol=1e-12
+        )
+
+
+def test_sampled_metrics_reuse_one_pca_decomposition(tmp_path, monkeypatch):
+    path = tmp_path / "shared_pca.hdf5"
+    matrix = np.arange(36, dtype=np.float32).reshape(12, 3)
+    _write_dense(path, matrix)
+    real_pca_statistics = profiler_module._pca_statistics
+    pca_calls = 0
+
+    def tracking_pca_statistics(sample_matrix):
+        nonlocal pca_calls
+        pca_calls += 1
+        return real_pca_statistics(sample_matrix)
+
+    monkeypatch.setattr(profiler_module, "_pca_statistics", tracking_pca_statistics)
+    report = profile_dataset(
+        str(path), sample_size=12, pairwise_sample_size=12, clusters=0
+    )
+    assert report["metrics"]["anisotropy"]["available"] is True
+    assert pca_calls == 1
 
 
 @pytest.mark.parametrize("value,warning_expected", [(np.nan, True), (np.inf, True), (3.0, False)])

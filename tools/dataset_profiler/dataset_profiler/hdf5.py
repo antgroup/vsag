@@ -139,6 +139,11 @@ class HDF5Dataset:
             )
 
         dset = f[self.split]
+        if vector_type == "dense" and dset.dtype.kind == "u":
+            raise DatasetFormatError(
+                "unsigned dense datasets are not supported; convert values to the "
+                "evaluator's signed INT8 interpretation before profiling"
+            )
         dtype = _describe_dtype(dset.dtype)
         attributes = {}
         for key in ("type", "distance", "multi_vector_dim"):

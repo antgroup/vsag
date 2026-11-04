@@ -329,7 +329,7 @@ def test_analyze_report_redacts_configured_key_in_escaped_exception(dense_path):
     class LeakyProvider:
         name = "leaky"
         model = "m"
-        _api_key = api_key
+        redaction_secrets = (api_key,)
 
         def complete(self, prompt):
             raise ValueError("invalid Authorization value %r" % ("Bearer " + api_key))
@@ -341,3 +341,18 @@ def test_analyze_report_redacts_configured_key_in_escaped_exception(dense_path):
     assert json.dumps(api_key)[1:-1] not in block["error"]
     assert "[redacted]" in block["error"]
     dump_json({"ai_analysis": block})
+
+
+def test_mock_provider_follows_redaction_secrets_contract(dense_path):
+    api_key = "custom-provider-secret"
+
+    class LeakyMockProvider(MockProvider):
+        def complete(self, prompt):
+            raise ValueError("request failed with credential " + api_key)
+
+    provider = LeakyMockProvider("", secrets=(api_key,))
+    block = analyze_report(_report(dense_path), provider=provider)
+    assert provider.redaction_secrets == (api_key,)
+    assert block["status"] == "error"
+    assert api_key not in block["error"]
+    assert "[redacted]" in block["error"]
