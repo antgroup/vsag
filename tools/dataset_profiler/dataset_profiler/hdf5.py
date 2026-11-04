@@ -17,7 +17,8 @@
 Two layouts are supported, matching ``docs/docs/en/src/resources/dataset_format.md``:
 
 * **dense** (``type`` missing or ``"dense"``): ``/<split>`` is an ``(N, D)``
-  matrix of ``INT8`` or ``FLOAT32`` values.
+  matrix of ``INT8`` or ``FLOAT32`` values.  One-byte unsigned integers are
+  reinterpreted as ``INT8`` to match the evaluator's ``ALPHA_I8`` reads.
 * **sparse** (``type="sparse"``): ``/<split>`` is a flat ``INT8`` byte stream.
   Each record is ``uint32 len | uint32 ids[len] | float32 vals[len]`` in
   little-endian order.  ``/<split>_offsets`` is an optional ``UINT64`` array of
@@ -237,7 +238,7 @@ class HDF5Dataset:
         total = int(dset.shape[0])
         for start in range(0, total, block_rows):
             end = min(start + block_rows, total)
-            yield start, np.asarray(dset[start:end])
+            yield start, _evaluator_dense_view(dset[start:end])
 
     def read_dense_rows(self, indices: Sequence[int]) -> np.ndarray:
         """Read selected rows from a dense matrix (indices must be sorted)."""
@@ -249,7 +250,7 @@ class HDF5Dataset:
         if np.any(idx[1:] <= idx[:-1]):
             raise ValueError("dense row indices must be strictly increasing")
         dset = self._file[self.split]
-        return np.asarray(dset[idx.tolist()])
+        return _evaluator_dense_view(dset[idx.tolist()])
 
     # -- sparse --------------------------------------------------------
     def iter_sparse_records(
@@ -354,6 +355,14 @@ class HDF5Dataset:
                 % sorted(missing)[:5]
             )
         return out
+
+
+def _evaluator_dense_view(values) -> np.ndarray:
+    """Match the evaluator's signed interpretation of one-byte dense values."""
+    array = np.asarray(values)
+    if array.dtype.kind == "u" and array.dtype.itemsize == 1:
+        return array.view(np.int8)
+    return array
 
 
 def _describe_dtype(dtype: np.dtype) -> str:

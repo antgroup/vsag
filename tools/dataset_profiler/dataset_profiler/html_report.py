@@ -171,6 +171,12 @@ def _overview_cards(
 def _norms_section(metric: Dict[str, Any]) -> str:
     if not metric:
         return ""
+    if metric.get("available") is False:
+        return _section(
+            "Vector norms",
+            metric,
+            '<p class="muted">%s</p>' % _e(metric.get("reason", "unavailable")),
+        )
     return _section(
         "Vector norms",
         metric,

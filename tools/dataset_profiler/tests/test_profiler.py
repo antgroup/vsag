@@ -772,3 +772,65 @@ def test_sparse_sample_invalid_warning_has_positive_and_negative_cases(
     )
     assert warning_found is warning_expected
 
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_full_split_norm_and_duplicate_state_honors_budget(
+    tmp_path, monkeypatch, vector_type
+):
+    monkeypatch.setattr(profiler_module, "_FULL_SPLIT_STATE_BUDGET_BYTES", 32)
+
+    def unexpected_digest(payload):
+        raise AssertionError("over-budget duplicate detection must not retain hashes")
+
+    monkeypatch.setattr(profiler_module, "_digest", unexpected_digest)
+    path = tmp_path / ("bounded_full_state_" + vector_type + ".hdf5")
+    if vector_type == "dense":
+        _write_dense(path, np.arange(10, dtype=np.float32).reshape(5, 2))
+    else:
+        records = [
+            (np.array([0], dtype=np.uint32), np.array([index + 1], dtype=np.float32))
+            for index in range(5)
+        ]
+        _write_sparse(path, records)
+
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    metrics = report["metrics"]
+    for name in ("norms", "outliers"):
+        assert metrics[name]["available"] is False
+        assert "40 bytes for 5 vectors" in metrics[name]["reason"]
+        assert "32-byte full-split state budget" in metrics[name]["reason"]
+    exact = metrics["duplicates"]["exact"]
+    assert exact["available"] is False
+    assert "480 bytes for 5 vectors" in exact["reason"]
+    assert exact["unique_vectors"] is None
+    assert exact["duplicate_ratio"] is None
+    assert metrics["duplicates"]["near_duplicate"]["available"] is True
+    assert metrics["sparsity"]["count"] == 5
+    assert sum("full-split state budget" in warning for warning in report["warnings"]) == 2
+
+
+def test_unsigned_dense_statistics_match_evaluator_int8_values(tmp_path):
+    import h5py
+
+    matrix = np.array([[0, 127], [128, 255]], dtype=np.uint8)
+    path = tmp_path / "unsigned_dense_statistics.hdf5"
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["distance"] = "euclidean"
+        handle.create_dataset("train", data=matrix)
+
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    expected = matrix.view(np.int8).astype(np.float64)
+    assert report["dataset"]["dtype"] == "INT8"
+    np.testing.assert_allclose(
+        report["metrics"]["norms"]["stats"]["mean"],
+        np.linalg.norm(expected, axis=1).mean(),
+    )
+    per_dimension = report["metrics"]["dimensions"]["per_dimension"]
+    assert per_dimension["min"]["values"] == [-128.0, -1.0]
+    assert per_dimension["max"]["values"] == [0.0, 127.0]
+    assert per_dimension["mean"]["values"] == [-64.0, 63.0]
+    expected_distance = np.linalg.norm(expected[0] - expected[1])
+    assert report["metrics"]["pairwise_distances"]["stats"]["min"] == pytest.approx(
+        expected_distance
+    )
+

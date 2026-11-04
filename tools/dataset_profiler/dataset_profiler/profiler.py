@@ -50,6 +50,13 @@ _MAX_ANISOTROPY_DIM = 50000
 _MAX_ANISOTROPY_BYTES = 256 * 1024 * 1024
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
 _PCA_SVD_MAX_DIM = 4096
+# Exact norm quantiles/outliers and exact duplicate groups need per-row state.
+# Budget each retained structure independently and disable its full-split metric
+# instead of allowing dataset-sized Python/NumPy state to grow without a limit.
+_FULL_SPLIT_STATE_BUDGET_BYTES = 256 * 1024 * 1024
+_NORM_BYTES_PER_VECTOR = 8
+# A 16-byte digest object plus its Counter entry and interpreter overhead.
+_DUPLICATE_BYTES_PER_VECTOR = 96
 # Dense streaming blocks are sized by their working bytes, not by a fixed row
 # count: every row keeps the raw block, a float64 copy, a finite mask, and
 # several float64 temporaries alive at the same time.
@@ -276,6 +283,22 @@ def _dense_sample_size(count: int, dim: int, requested: int) -> int:
     return int(min(dataset_limited, max_rows))
 
 
+def _full_split_state_reason(
+    metric_name: str, count: int, bytes_per_vector: int
+) -> Optional[str]:
+    """Return why a full-split metric exceeds its retained-state budget."""
+    estimated = int(count) * int(bytes_per_vector)
+    budget = int(_FULL_SPLIT_STATE_BUDGET_BYTES)
+    if estimated <= budget:
+        return None
+    return (
+        "%s requires an estimated %d bytes for %d vectors (%d bytes per vector), "
+        "exceeding the %d-byte full-split state budget; this full-split metric is "
+        "unavailable, while streaming and sampled metrics are still reported"
+        % (metric_name, estimated, int(count), int(bytes_per_vector), budget)
+    )
+
+
 def _profile_dense(
     dataset: HDF5Dataset,
     config: ProfilerConfig,
@@ -300,8 +323,19 @@ def _profile_dense(
     dim_min = np.full(dim, np.inf, dtype=np.float64)
     dim_max = np.full(dim, -np.inf, dtype=np.float64)
 
-    hashes: Counter = Counter()
-    norms_parts: List[np.ndarray] = []
+    norms_reason = _full_split_state_reason(
+        "norm distribution and outlier statistics", count, _NORM_BYTES_PER_VECTOR
+    )
+    duplicates_reason = _full_split_state_reason(
+        "exact duplicate detection", count, _DUPLICATE_BYTES_PER_VECTOR
+    )
+    for reason in (norms_reason, duplicates_reason):
+        if reason is not None:
+            warnings.append(reason)
+    hashes: Optional[Counter] = None if duplicates_reason is not None else Counter()
+    norms: Optional[np.ndarray] = (
+        None if norms_reason is not None else np.empty(count, dtype=np.float64)
+    )
     total_values = 0
     zero_values = 0
     nonzero_values = 0
@@ -309,7 +343,7 @@ def _profile_dense(
     vectors_with_invalid = 0
     all_zero_vectors = 0
 
-    for _, block in dataset.iter_dense_blocks(block_rows=_dense_block_rows(dim)):
+    for start, block in dataset.iter_dense_blocks(block_rows=_dense_block_rows(dim)):
         raw = np.asarray(block)
         if raw.dtype.kind == "f":
             finite = np.isfinite(raw)
@@ -325,9 +359,10 @@ def _profile_dense(
         zero_values += block_zero_values
         nonzero_values += int(raw.size) - invalid_in_block - block_zero_values
 
-        norms = np.sqrt(np.einsum("ij,ij->i", valid, valid))
-        norms_parts.append(norms)
-        all_zero_vectors += int(np.count_nonzero(norms == 0))
+        block_norms = np.sqrt(np.einsum("ij,ij->i", valid, valid))
+        if norms is not None:
+            norms[start : start + raw.shape[0]] = block_norms
+        all_zero_vectors += int(np.count_nonzero(block_norms == 0))
 
         # Merge each block with the running per-coordinate Welford state.  In
         # particular, do not subtract E[x]^2 from E[x^2]: that loses small
@@ -359,15 +394,11 @@ def _profile_dense(
         dim_min = np.minimum(dim_min, masked_min)
         dim_max = np.maximum(dim_max, masked_max)
 
-        for row in raw:
-            contiguous = np.ascontiguousarray(row)
-            hashes[_digest(contiguous.tobytes())] += 1
+        if hashes is not None:
+            for row in raw:
+                contiguous = np.ascontiguousarray(row)
+                hashes[_digest(contiguous.tobytes())] += 1
 
-    norms = (
-        np.concatenate(norms_parts)
-        if norms_parts
-        else np.empty(0, dtype=np.float64)
-    )
     sample_matrix = dataset.read_dense_rows(sample_idx).astype(np.float64, copy=True)
     finite_sample = np.isfinite(sample_matrix)
     if not bool(finite_sample.all()):
@@ -390,8 +421,8 @@ def _profile_dense(
         "invalid_values": _invalid_metric(
             invalid_values, vectors_with_invalid, total_values, count
         ),
-        "norms": _norms_metric(norms),
-        "outliers": _outliers_metric(norms),
+        "norms": _norms_metric(norms, norms_reason),
+        "outliers": _outliers_metric(norms, norms_reason),
         "dimensions": _dimensions_metric(
             dim_count,
             dim_mean,
@@ -412,6 +443,7 @@ def _profile_dense(
             config.near_duplicate_relative_epsilon,
             duplicate_metric,
             int(pair_matrix.shape[0]),
+            duplicates_reason,
         ),
     }
     metrics.update(
@@ -460,10 +492,21 @@ def _profile_sparse(
     accumulator: Optional[_DimAccumulator] = _DimAccumulator()
     dimension_stats_reason: Optional[str] = None
     dim = 0
-    hashes: Counter = Counter()
+    norms_reason = _full_split_state_reason(
+        "norm distribution and outlier statistics", count, _NORM_BYTES_PER_VECTOR
+    )
+    duplicates_reason = _full_split_state_reason(
+        "exact duplicate detection", count, _DUPLICATE_BYTES_PER_VECTOR
+    )
+    for reason in (norms_reason, duplicates_reason):
+        if reason is not None:
+            warnings.append(reason)
+    hashes: Optional[Counter] = None if duplicates_reason is not None else Counter()
     # The record count is known before this pass (a no-offsets stream is counted
     # above), so avoid retaining one tiny NumPy array per sparse vector.
-    norms = np.empty(count, dtype=np.float64)
+    norms: Optional[np.ndarray] = (
+        None if norms_reason is not None else np.empty(count, dtype=np.float64)
+    )
     nnz = np.empty(count, dtype=np.int64)
     stored_entries = 0
     nonzero_entries = 0
@@ -499,7 +542,8 @@ def _profile_sparse(
         nonzero_entries += nonzero
         explicit_zero_entries += int(np.count_nonzero((values == 0) & finite))
         norm = float(math.sqrt(float(np.dot(valid, valid))))
-        norms[index] = norm
+        if norms is not None:
+            norms[index] = norm
         nnz[index] = nonzero
         if norm == 0.0:
             all_zero_vectors += 1
@@ -516,7 +560,11 @@ def _profile_sparse(
             accumulator = None
         if accumulator is not None:
             accumulator.add(ids, values, finite)
-        hashes[_digest(ids.astype("<u4", copy=False).tobytes() + values.astype("<f4", copy=False).tobytes())] += 1
+        if hashes is not None:
+            payload = ids.astype("<u4", copy=False).tobytes() + values.astype(
+                "<f4", copy=False
+            ).tobytes()
+            hashes[_digest(payload)] += 1
         if index in sample_set:
             sample_records.append((index, ids.copy(), values.copy()))
 
@@ -575,8 +623,8 @@ def _profile_sparse(
         "invalid_values": _invalid_metric(
             invalid_values, vectors_with_invalid, count * dim if dim else None, count
         ),
-        "norms": _norms_metric(norms),
-        "outliers": _outliers_metric(norms),
+        "norms": _norms_metric(norms, norms_reason),
+        "outliers": _outliers_metric(norms, norms_reason),
         "dimensions": dimensions,
         "sparsity": _sparse_sparsity_metric(
             count,
@@ -595,6 +643,7 @@ def _profile_sparse(
             config.near_duplicate_relative_epsilon,
             duplicate_metric,
             int(pair_matrix.shape[0]),
+            duplicates_reason,
         ),
     }
     metrics.update(
@@ -716,7 +765,17 @@ class _DimAccumulator:
 # ---------------------------------------------------------------------------
 # Shared metric builders
 # ---------------------------------------------------------------------------
-def _norms_metric(norms: np.ndarray) -> Dict[str, Any]:
+def _norms_metric(
+    norms: Optional[np.ndarray], unavailable_reason: Optional[str] = None
+) -> Dict[str, Any]:
+    if norms is None:
+        return metric_entry(
+            DEFINITIONS["norms"],
+            "full",
+            None,
+            available=False,
+            reason=unavailable_reason or "full-split norm state is unavailable",
+        )
     stats = summarize(norms)
     return metric_entry(
         DEFINITIONS["norms"],
@@ -729,7 +788,17 @@ def _norms_metric(norms: np.ndarray) -> Dict[str, Any]:
     )
 
 
-def _outliers_metric(norms: np.ndarray) -> Dict[str, Any]:
+def _outliers_metric(
+    norms: Optional[np.ndarray], unavailable_reason: Optional[str] = None
+) -> Dict[str, Any]:
+    if norms is None:
+        return metric_entry(
+            DEFINITIONS["outliers"],
+            "full",
+            None,
+            available=False,
+            reason=unavailable_reason or "full-split norm state is unavailable",
+        )
     values = np.asarray(norms, dtype=np.float64)
     values = values[np.isfinite(values)]
     if values.size == 0:
@@ -951,29 +1020,54 @@ def _sparse_sparsity_metric(
 
 
 def _duplicates_metric(
-    hashes: Counter,
+    hashes: Optional[Counter],
     count: int,
     pair_values: np.ndarray,
     epsilon: float,
     near_metric: str,
     near_sample_size: int,
+    unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
-    duplicate_vectors = sum(value - 1 for value in hashes.values() if value > 1)
-    duplicate_groups = sum(1 for value in hashes.values() if value > 1)
-    max_group = max(hashes.values()) if hashes else 0
-    exact = {
-        "definition": "Vectors whose complete byte representation is identical.",
-        "scope": "full",
-        "sample_size": None,
-        "count": int(count),
-        "unique_vectors": int(len(hashes)),
-        "duplicate_vectors": int(duplicate_vectors),
-        "duplicate_ratio": as_finite_float(
-            duplicate_vectors / float(count) if count else None
-        ),
-        "duplicate_groups": int(duplicate_groups),
-        "max_group_size": int(max_group),
-    }
+    if hashes is None:
+        exact = {
+            "available": False,
+            "reason": unavailable_reason or "full-split duplicate state is unavailable",
+            "definition": "Vectors whose complete byte representation is identical.",
+            "scope": "full",
+            "sample_size": None,
+            "count": int(count),
+            "unique_vectors": None,
+            "duplicate_vectors": None,
+            "duplicate_ratio": None,
+            "duplicate_groups": None,
+            "max_group_size": None,
+        }
+        scope_note = (
+            "exact duplicate detection is unavailable because the full-split state "
+            "budget was exceeded; the near-duplicate indicator still covers the "
+            "bounded pairwise sample"
+        )
+    else:
+        duplicate_vectors = sum(value - 1 for value in hashes.values() if value > 1)
+        duplicate_groups = sum(1 for value in hashes.values() if value > 1)
+        max_group = max(hashes.values()) if hashes else 0
+        exact = {
+            "definition": "Vectors whose complete byte representation is identical.",
+            "scope": "full",
+            "sample_size": None,
+            "count": int(count),
+            "unique_vectors": int(len(hashes)),
+            "duplicate_vectors": int(duplicate_vectors),
+            "duplicate_ratio": as_finite_float(
+                duplicate_vectors / float(count) if count else None
+            ),
+            "duplicate_groups": int(duplicate_groups),
+            "max_group_size": int(max_group),
+        }
+        scope_note = (
+            "exact duplicate detection covers the full split; the near-duplicate "
+            "indicator covers the bounded pairwise sample"
+        )
     near = _near_duplicate_summary(
         pair_values, epsilon, near_metric, near_sample_size
     )
@@ -983,10 +1077,7 @@ def _duplicates_metric(
         None,
         exact=exact,
         near_duplicate=near,
-        scope_note=(
-            "exact duplicate detection covers the full split; the near-duplicate "
-            "indicator covers the bounded pairwise sample"
-        ),
+        scope_note=scope_note,
     )
 
 

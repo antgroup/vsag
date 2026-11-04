@@ -49,9 +49,14 @@ dataset, and bounded memory for streaming sparse files.
   retain gigabytes per block; sparse files are decoded record-by-record from
   bounded byte chunks (default 64 MiB).
   Full-dataset statistics (norms, per-dimension aggregates, duplicates,
-  invalid counts, sparsity) come from a single streaming pass; nothing beyond
-  the block buffer, the bounded accumulators, and the bounded sample is ever
-  materialized.
+  invalid counts, sparsity) come from a single streaming pass. Norm state is
+  preallocated once (8 bytes per vector), never accumulated as block lists and
+  concatenated. Norm state and exact-duplicate hash state (estimated at 96
+  bytes per vector for the digest object and `Counter` entry) each have an
+  explicit 256 MiB retained-state budget. The row-count estimate is checked
+  before allocation; when it exceeds the budget, the affected full-split
+  norms/outliers or exact-duplicate fields are marked `available: false` with
+  a reason and warning, while streaming and sampled metrics still appear.
 * **Distance computations**: Euclidean pairwise distances use the expanded
   norm/dot form when it is numerically stable and fall back to direct
   coordinate differences for pairs whose norms dwarf their distance (for
@@ -148,7 +153,12 @@ message: deterministic reports are still produced and a warning is printed
 * Near-duplicate detection is a bounded *indicator* over the sample, not a
   full-dataset guarantee.
 * The duplicate hash includes invalid bytes as-is (byte equality, not numeric
-  equality), and treats the file's dtype bytes literally.
+  equality). Dense one-byte unsigned input is viewed as signed `INT8` before
+  hashing and numeric statistics, matching the evaluator's `ALPHA_I8` reads;
+  this preserves the bytes but maps 128..255 to -128..-1.
+* Full norm quantiles/outliers and exact duplicate counts are unavailable when
+  their estimated per-row state exceeds the 256 MiB per-structure budget; the
+  report marks these fields unavailable rather than returning partial results.
 * k-means is an O(n·k) Lloyd loop over the 2-D projection; it is intended for
   structure hints, not production clustering.
 * Sparse dimensionality is inferred as `max(id) + 1`; a file with id gaps at
