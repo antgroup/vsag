@@ -263,6 +263,11 @@ pyvsag-analyze-index --index_path /path/to/index
 - **stderr** 输出可处理的错误信息。
 - 成功时退出码为 `0`；参数校验、加载或分析失败时退出码非零。
 
+使用 `python -m pyvsag.analyze_index_cli` 时，CPython 3.10 及更高版本通过 `sys.orig_argv`
+检测是否需要抑制启动 banner，较旧的 Linux CPython 版本则通过 `/proc` 检测。在较旧的非
+Linux 解释器上，请改用安装后的 `pyvsag-analyze-index` 命令，或在启动 Python 前设置
+`VSAG_SUPPRESS_INIT_BANNER=1`；否则原生库的启动 banner 可能会先于 JSON 报告写入 stdout。
+
 ```bash
 # 仅静态分析（元数据 + 统计信息）
 pyvsag-analyze-index --index_path /path/to/index

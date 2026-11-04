@@ -45,6 +45,16 @@ constexpr const char* kCosineIndexParam = R"({
     }
 })";
 
+constexpr const char* kWarpIndexParam = R"({
+    "type": "warp",
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 4,
+    "index_param": {
+        "base_quantization_type": "fp32"
+    }
+})";
+
 constexpr const char* kSindiIndexParam = R"({
     "dtype": "sparse",
     "metric_type": "ip",
@@ -144,6 +154,25 @@ WriteDenseQueryFile(const std::string& query_path, int64_t rows, int64_t cols) {
     stream.close();
 }
 
+void
+WriteSparseQueryFile(const std::string& query_path) {
+    std::ofstream stream(query_path, std::ios::binary | std::ios::out);
+    REQUIRE(stream.is_open());
+    const std::vector<int64_t> header{2, 128, 2};
+    const std::vector<int64_t> indptr{0, 1, 2};
+    const std::vector<int32_t> indices{0, 1};
+    const std::vector<float> values{1.0F, 1.0F};
+    stream.write(reinterpret_cast<const char*>(header.data()),
+                 static_cast<std::streamsize>(header.size() * sizeof(int64_t)));
+    stream.write(reinterpret_cast<const char*>(indptr.data()),
+                 static_cast<std::streamsize>(indptr.size() * sizeof(int64_t)));
+    stream.write(reinterpret_cast<const char*>(indices.data()),
+                 static_cast<std::streamsize>(indices.size() * sizeof(int32_t)));
+    stream.write(reinterpret_cast<const char*>(values.data()),
+                 static_cast<std::streamsize>(values.size() * sizeof(float)));
+    stream.close();
+}
+
 }  // namespace
 
 TEST_CASE("AnalyzeIndex returns a structured static report", "[analyze_index]") {
@@ -229,6 +258,21 @@ TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[an
     REQUIRE(report["index"]["metadata_source"].GetString() == "build_parameter");
 }
 
+TEST_CASE("AnalyzeIndex does not inject precise IO parameters into WARP", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_warp_external_param");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "warp", kWarpIndexParam);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kWarpIndexParam;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "warp");
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+}
+
 TEST_CASE("AnalyzeIndex loads an empty SINDI with explicit parameters", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_empty_sindi");
     const std::string index_path =
@@ -286,7 +330,7 @@ TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[
     REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
-TEST_CASE("AnalyzeIndex rejects multi-row query files", "[analyze_index]") {
+TEST_CASE("AnalyzeIndex accepts multi-row dense query files", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_multi_row_query");
     const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
     const std::string query_path = temp_dir.path + "queries.bin";
@@ -297,7 +341,29 @@ TEST_CASE("AnalyzeIndex rejects multi-row query files", "[analyze_index]") {
     options.query_path = query_path;
     options.query_data_type = "dense";
 
-    REQUIRE_THROWS_AS(vsag::AnalyzeIndex(options), std::runtime_error);
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+}
+
+TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_multi_row_sparse_query");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteSparseQueryFile(query_path);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiIndexParam;
+    options.query_path = query_path;
+    options.query_data_type = "sparse";
+    options.topk = 2;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["dynamic_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
 TEST_CASE("AnalyzeIndex rejects invalid options", "[analyze_index]") {

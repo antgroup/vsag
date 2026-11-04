@@ -54,7 +54,7 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
 
     parser.add_argument<std::string>("--query_path", "-qp")
         .default_value(EMPTY_QUERY_PATH)
-        .help("The single-query dataset path, if not set, will not do query analysis");
+        .help("The query dataset path, if not set, will not do query analysis");
 
     parser.add_argument<std::string>("--query_data_type")
         .default_value(std::string(QUERY_DATA_TYPE_AUTO))

@@ -184,12 +184,14 @@ PrepareInternalBruteForceParam(const JsonType& serialized_param) {
 }
 
 void
-IsolateExternalBruteForceParam(JsonType& build_param) {
+IsolateExternalBruteForceParam(JsonType& build_param, bool is_warp) {
     JsonType index_param = build_param[INDEX_PARAM];
     index_param[BRUTE_FORCE_BASE_IO_TYPE].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
     index_param.Erase(BRUTE_FORCE_BASE_FILE_PATH);
-    index_param[BRUTE_FORCE_PRECISE_IO_TYPE].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
-    index_param.Erase(BRUTE_FORCE_PRECISE_FILE_PATH);
+    if (not is_warp) {
+        index_param[BRUTE_FORCE_PRECISE_IO_TYPE].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+        index_param.Erase(BRUTE_FORCE_PRECISE_FILE_PATH);
+    }
     build_param[INDEX_PARAM].SetJson(index_param);
 }
 
@@ -241,13 +243,6 @@ LoadDenseQuery(const std::string& query_path) {
         throw std::runtime_error(
             fmt::format("query file '{}' has an invalid shape ({} x {})", query_path, rows, cols));
     }
-    if (rows != 1) {
-        throw std::runtime_error(fmt::format(
-            "query file '{}' must contain exactly one query vector (rows=1), got {} rows",
-            query_path,
-            rows));
-    }
-
     const uint64_t num_elements = static_cast<uint64_t>(rows) * cols;
     if (num_elements > std::numeric_limits<uint64_t>::max() / sizeof(float)) {
         throw std::runtime_error(
@@ -290,12 +285,6 @@ LoadSparseQuery(const std::string& query_path) {
                         rows,
                         cols,
                         nnz));
-    }
-    if (rows != 1) {
-        throw std::runtime_error(
-            fmt::format("sparse query file '{}' must contain exactly one query row, got {} rows",
-                        query_path,
-                        rows));
     }
     if (static_cast<uint64_t>(rows) > std::numeric_limits<uint64_t>::max() / sizeof(SparseVector)) {
         throw std::runtime_error(
@@ -620,7 +609,7 @@ private:
     CreateIndexWithParam(std::istream& stream) {
         JsonType build_param = ParseJsonArgument(options_.build_parameter, "build_parameter");
         if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
-            IsolateExternalBruteForceParam(build_param);
+            IsolateExternalBruteForceParam(build_param, index_name_ == INDEX_WARP);
         }
         auto create_result = Factory::CreateIndex(index_name_, build_param.Dump());
         if (not create_result.has_value()) {
@@ -647,7 +636,7 @@ private:
         } else {
             build_param[INDEX_PARAM].SetJson(index_param_);
             if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
-                IsolateExternalBruteForceParam(build_param);
+                IsolateExternalBruteForceParam(build_param, index_name_ == INDEX_WARP);
             }
         }
 
