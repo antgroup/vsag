@@ -22,6 +22,13 @@ runs:
       run: |
         set -euo pipefail
         python3 scripts/testing/daily_measure.py --name pytest --owner bindings-examples-compatibility --cwd tests/python -- python3 -m pytest . -v --tb=short 2>&1 | tee tests/python/test-output.log
+    - name: Smoke-Test Wheel in Clean Environments
+      shell: bash -e {0}
+      env:
+        VSAG_SMOKE_REQUIRE_DOCKER: "1"
+      run: |
+        sudo apt-get install -y python3-venv
+        bash ./scripts/python/wheel_smoke_test.sh ./wheelhouse python3
     - name: Upload Test Logs
       if: always()
       uses: actions/upload-artifact@v5

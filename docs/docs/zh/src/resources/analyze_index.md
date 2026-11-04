@@ -1,10 +1,17 @@
 # 索引分析（`AnalyzeIndexBySearch` 与 `analyze_index`）
 
 VSAG 提供了对**已构建或已加载索引**进行内省诊断的能力，可以在不重建索引的情况下排查召回率回归、
-量化质量、图结构健康度以及查询性能问题。该能力通过两种方式对外暴露：
+量化质量、图结构健康度以及查询性能问题。该能力通过以下方式对外暴露：
 
-- C++ 接口 `Index::AnalyzeIndexBySearch`（声明在 `include/vsag/index.h`）；
-- 命令行诊断工具 `analyze_index`，位于 `tools/analyze_index/`。
+- C++ 接口 `Index::GetStats` 与 `Index::AnalyzeIndexBySearch`（声明在 `include/vsag/index.h`），
+  用于进程内的索引对象；
+- 针对序列化索引文件的统一实现 `vsag::analyze_index()`（声明在 `include/vsag/analyze_index.h`），
+  它被以下入口复用：
+  - 通过 `pip install pyvsag` 安装的 `pyvsag-analyze-index` 命令与 `pyvsag.analyze_index()`
+    Python API；
+  - 基于 `tools/analyze_index/` 构建的 C++ 命令行工具 `analyze_index`。
+
+基于文件的入口请参见[分析索引文件](#分析索引文件)。
 
 ## `AnalyzeIndexBySearch` 接口
 
@@ -193,14 +200,307 @@ SINDI 动态召回和距离质量指标需要真值集。可通过 `groundtruth_
 静态结构和健康度信息（包括度分布、入口点分析与 Pyramid 子索引质量）请查看
 `GetStats()` 的 JSON 输出。
 
-## `analyze_index` 工具
+## 分析索引文件
 
-`analyze_index` 是上述分析接口的命令行封装。它从磁盘加载一个已序列化的 VSAG 索引，
-打印元数据与 `GetStats()` 结果，并可选地针对查询文件运行 `AnalyzeIndexBySearch`。
+`vsag::analyze_index()` 用于分析一个已序列化的索引文件。它会识别序列化格式，在不构建、不修改索引的
+前提下重新加载索引，输出索引元数据与 `GetStats()` 统计信息；提供查询文件时还会运行
+`AnalyzeIndexBySearch()`。以下三个入口共用这一套实现，并返回相同的 JSON 报告：
 
-### 构建
+| 入口 | 获取方式 | 典型用途 |
+| --- | --- | --- |
+| `pyvsag-analyze-index` 命令 | `pip install pyvsag` | Shell 脚本与 CI 任务 |
+| `pyvsag.analyze_index()` | `pip install pyvsag` | Python 程序与 Notebook |
+| `vsag::analyze_index()` 与 `analyze_index` 工具 | C++ 库；开启工具的源码构建 | C++ 应用 |
 
-`tools/` 默认不会编译，需要显式开启：
+### 安装
+
+```bash
+pip install pyvsag==<version>
+pyvsag-analyze-index --index_path /path/to/index
+```
+
+wheel 内已包含命令、Python API 与原生库，分析时不需要 VSAG 源码、CMake、C++ 编译器或 NumPy。
+wheel 的发布平台与 `pyvsag` 的发布矩阵一致（Linux x86_64 与 aarch64，CPython 3.6 至 3.14）。
+请安装能够读取该索引的 `pyvsag` 版本，即不低于写出该索引的 VSAG 版本；报告中的
+`compatibility.vsag_version` 记录了读取文件所用的版本。
+
+如果 Python 环境的脚本目录不在 `PATH` 中，可使用相同参数运行 `python -m pyvsag_analyze_index`。
+
+### 命令行
+
+```bash
+# 静态分析：元数据与统计信息
+pyvsag-analyze-index --index_path my_index.vsag > report.json
+
+# 静态 + 动态分析：每个 query 评估 10 个近邻，并指定搜索参数
+pyvsag-analyze-index -i my_index.vsag -qp queries.bin -k 10 \
+    -sp '{"hgraph": {"ef_search": 200}}'
+```
+
+| 参数 | 缩写 | 默认值 | 描述 |
+| --- | --- | --- | --- |
+| `--index_path` | `-i` | 必需 | 待分析的序列化索引文件。 |
+| `--build_parameter` | `-bp` | `default` | 重新加载索引时使用的构建参数（JSON）。`default` 表示使用文件中记录的参数；未记录参数的文件需要提供该参数（见[支持的文件](#支持的文件与索引类型)）。 |
+| `--query_path` | `-qp` | 无 | 查询数据集（见[输入文件](#输入文件)）。未提供时只进行静态分析。它不是 Pyramid hierarchy 路径元数据。 |
+| `--query_data_type` | | `auto` | `auto`（稀疏索引按 sparse 读取，其余按 dense 读取）、`dense` 或 `sparse`。 |
+| `--base_path` | | 无 | 仅 SINDI：用于计算精确真值以及需要原始向量的指标的 sparse CSR base 数据集。 |
+| `--groundtruth_path` | | 无 | 仅 SINDI：动态分析复用的已有真值文件，不能与 `--save_groundtruth_path` 同时使用。 |
+| `--save_groundtruth_path` | | 无 | 仅 SINDI：保存动态分析期间生成的真值的路径。 |
+| `--search_parameter` | `-sp` | `default` | 动态分析使用的搜索参数（JSON）。`default` 对 HGraph 与 LazyHGraph 使用 `{"hgraph": {"ef_search": max(100, topk)}}`，对 Pyramid 使用 `{"pyramid": {"ef_search": max(100, topk)}}`，对 SINDI_V2 使用 `{"sindi_v2": {}}`，对其余索引类型使用 `{}`。 |
+| `--topk` | `-k` | `100` | 每个 query 评估的近邻数。 |
+| `--compact` | | 关闭 | 将报告输出为一行，而不是缩进格式。 |
+| `--version` | | | 输出版本号后退出。 |
+
+所有选项都同时接受连字符写法，例如 `--index-path`。stdout 上只有报告；诊断信息
+（包括原生库的启动横幅与日志）写入 stderr，可通过 `VSAG_LOG_LEVEL`（`off`、`error`、`warn`、
+`info` 等）设置其级别。失败时 stderr 输出一行错误，stdout 不输出任何内容：
+
+```text
+pyvsag-analyze-index: error [missing_file]: index_path does not exist: /data/missing.vsag
+```
+
+| 退出码 | 含义 |
+| --- | --- |
+| `0` | 已输出报告。 |
+| `1` | 分析失败，方括号中的[错误码](#错误)说明原因。 |
+| `2` | 命令行无效，例如缺少 `--index_path` 或 `--topk` 不是数字。 |
+
+### Python API
+
+```python
+import pyvsag
+
+report = pyvsag.analyze_index(
+    "my_index.vsag",
+    build_parameter="default",
+    query_path="queries.bin",
+    query_data_type="auto",
+    base_path=None,
+    groundtruth_path=None,
+    save_groundtruth_path=None,
+    search_parameter={"hgraph": {"ef_search": 200}},
+    topk=10,
+)
+print(report["dynamic_analysis"]["result"]["recall_query"])
+```
+
+各参数的含义与命令行选项相同。路径参数接受 `str` 或 `os.PathLike`，`None` 表示未提供；
+`build_parameter` 与 `search_parameter` 接受 JSON 字符串、`dict` 或 `None`（等同于 `"default"`）。
+`index_path` 之后的参数都只能以关键字形式传入。函数返回可被 `json.dumps()` 序列化的 `dict`；
+参数类型错误时抛出 `TypeError`，其余失败均抛出 `pyvsag.IndexAnalysisError`（`RuntimeError` 的
+子类），其 `code` 属性为[错误码](#错误)，`message` 为说明：
+
+```python
+try:
+    report = pyvsag.analyze_index("my_index.vsag")
+except pyvsag.IndexAnalysisError as error:
+    print(error.code, error.message)
+```
+
+`pyvsag.ANALYZE_INDEX_SCHEMA_VERSION` 是报告的 `schema_version`。分析期间会释放 GIL，且不会修改
+日志级别。与命令不同，Python API 不会重定向原生日志：与其他 `pyvsag` 调用一样，`info` 与 `debug`
+日志写入进程的 stdout，警告与错误写入 stderr。设置 `VSAG_LOG_LEVEL=warn` 或调用
+`pyvsag.set_logger_off()` 即可让 stdout 中不出现这些日志。
+
+### C++ API
+
+```cpp
+#include <vsag/vsag.h>
+
+vsag::AnalyzeIndexOptions options;
+options.index_path = "my_index.vsag";
+options.query_path = "queries.bin";
+options.topk = 10;
+auto report = vsag::analyze_index(options);
+if (report.has_value()) {
+    std::cout << report.value() << std::endl;  // JSON 报告
+} else {
+    std::cerr << report.error().message << std::endl;  // report.error().type 说明原因
+}
+```
+
+`AnalyzeIndexOptions` 的每个字段对应一个命令行选项，空字符串表示未提供。`vsag::analyze_index()`
+返回紧凑格式的 JSON 对象字符串；失败时返回 `vsag::Error`，其 `type` 与[错误码](#错误)对应。
+
+### 报告格式
+
+报告是一个 JSON 对象，依次包含以下成员：
+
+| 成员 | 内容 |
+| --- | --- |
+| `schema_version` | 报告格式版本，当前为 `1`。 |
+| `metadata` | 加载结果：索引类型、维度、数据类型、距离度量、规模与参数。 |
+| `static_analysis` | 索引的 `GetStats()` JSON，见[静态指标](#getstats-输出的静态指标)。 |
+| `dynamic_analysis` | 未提供查询文件时为 `null`；否则包含分析输入，以及位于 `result` 下的 `AnalyzeIndexBySearch()` JSON，见[动态指标](#analyzeindexbysearch-输出的动态指标)。 |
+| `warnings` | 由 `code` 与 `message` 组成的对象，说明会影响结果解读的假设与覆盖。 |
+| `compatibility` | 文件的读取方式：格式、读取所用库版本以及元数据是否完整。 |
+
+`static_analysis` 与 `dynamic_analysis.result` 保留各自的 `_analysis` 成员（见
+[公共输出契约](#公共输出契约)），其 `schema_version` 表示这些 analyzer 输出的版本，与顶层
+`schema_version` 相互独立。
+
+| `metadata` 成员 | 含义 |
+| --- | --- |
+| `index_path`、`file_size_bytes` | 被分析的文件。 |
+| `index_type` | 索引的工厂名称，例如 `hgraph` 或 `sindi`。 |
+| `dim` | 向量维度；稀疏索引为 `null`。 |
+| `data_type`、`metric`、`extra_info_size` | 已加载索引的通用构建参数。 |
+| `num_elements`、`memory_usage_bytes` | 已加载索引的 `GetNumElements()` 与 `GetMemoryUsage()`。 |
+| `parameter_source` | 使用文件中记录的参数时为 `file`，使用 `build_parameter` 时为 `user`。 |
+| `index_param` | 文件中记录的索引参数（采用索引参数 `ToJson()` 的布局），或 `build_parameter` 中的 `index_param`。 |
+| `build_parameter` | 传入的 `build_parameter`，未传入时为 `null`。 |
+| `basic_info` | 文件中记录的 `basic_info` 元数据（不含 `index_param`）；legacy 文件为 `null`。 |
+
+| `dynamic_analysis` 成员 | 含义 |
+| --- | --- |
+| `query_path`、`query_data_type` | 查询文件及其读取方式（`dense` 或 `sparse`）。 |
+| `query_count`、`query_dim` 或 `query_cols` | query 数量，以及维度（dense）或列数（sparse）。 |
+| `topk` | 每个 query 评估的近邻数。 |
+| `search_parameter`、`search_parameter_source` | 实际使用的搜索参数，以及它是 `default` 还是 `user` 提供的值。 |
+| `base_path`、`groundtruth_path`、`save_groundtruth_path` | 传入时才会出现。 |
+| `result` | `AnalyzeIndexBySearch()` 的 JSON。 |
+
+| 警告 `code` | 含义 |
+| --- | --- |
+| `metadata_defaults` | 文件未记录索引的数据类型或距离度量，分析器假设为 `float32` 或 `l2`（列于 `compatibility.defaulted_fields`）。BruteForce、WARP 与 SIMQ 的 footer 文件受此影响；若索引使用其他度量或数据类型，请传入 `build_parameter`。 |
+| `build_parameter_override` | 索引使用 `build_parameter` 加载，而不是文件中记录的参数。 |
+| `legacy_format` | 文件没有 VSAG footer，已借助 `build_parameter` 按 legacy 文件加载。 |
+| `memory_io` | 记录的参数使用了文件型 IO（`buffer_io`、`async_io`、`mmap_io`、`uring_io`），或者 footer、chunked、HGraph streaming 文件使用了 `reader_io`。文件内联携带全部数据，因此这些组件改为加载到内存，且不会打开任何记录的文件路径（见 `compatibility.memory_io_overrides`）。使用文件型 IO 的 streaming 文件：HGraph、BruteForce 与 WARP 以同样方式加载，其余索引类型以 `unsupported_index_operation` 拒绝。 |
+| `empty_index` | 索引不包含任何向量。 |
+
+| `compatibility` 成员 | 含义 |
+| --- | --- |
+| `vsag_version` | 读取文件所用的库版本。 |
+| `serialization_format` | `footer`、`chunked`、`streaming` 或 `legacy`，见[支持的文件](#支持的文件与索引类型)。 |
+| `lazy_hgraph_container` | 文件是否由 LazyHGraph 索引写出。 |
+| `metadata_complete`、`defaulted_fields` | 分析器是否需要假设通用参数，以及假设的取值。 |
+| `memory_io_overrides` | 记录的 IO 类型被替换为内存 IO 的参数。 |
+| `chunked_codec`、`chunk_size` | 仅 chunked 文件。 |
+| `streaming_blocks` | 仅 streaming 文件：各 body block 的名称。 |
+
+以下是一个带动态分析的 HGraph 索引报告（已省略部分内容）：
+
+```json
+{
+  "schema_version": 1,
+  "metadata": {
+    "index_path": "my_index.vsag",
+    "file_size_bytes": 169113,
+    "index_type": "hgraph",
+    "dim": 16,
+    "data_type": "float32",
+    "metric": "l2",
+    "extra_info_size": 0,
+    "num_elements": 500,
+    "parameter_source": "file",
+    "index_param": {"type": "hgraph", "...": "..."},
+    "build_parameter": null,
+    "basic_info": {"total_count": 500, "...": "..."}
+  },
+  "static_analysis": {
+    "_analysis": {
+      "analysis_type": "stats",
+      "consistency": "weak_snapshot",
+      "index_type": "hgraph",
+      "schema_version": 1,
+      "skipped": {"build_cache_hit_rate": "index was not built from an imported cache"},
+      "status": "partial"
+    },
+    "connect_components": 5,
+    "recall_base": 0.989,
+    "total_count": 500,
+    "...": "..."
+  },
+  "dynamic_analysis": {
+    "query_path": "queries.bin",
+    "query_data_type": "dense",
+    "query_count": 20,
+    "query_dim": 16,
+    "topk": 10,
+    "search_parameter": {"hgraph": {"ef_search": 100}},
+    "search_parameter_source": "default",
+    "result": {
+      "_analysis": {"analysis_type": "search", "sample_count": 20, "status": "complete", "...": "..."},
+      "recall_query": 0.995,
+      "time_cost_query": 0.788,
+      "...": "..."
+    }
+  },
+  "warnings": [],
+  "compatibility": {
+    "vsag_version": "v1.2.0",
+    "serialization_format": "footer",
+    "lazy_hgraph_container": false,
+    "metadata_complete": true,
+    "defaulted_fields": {},
+    "memory_io_overrides": []
+  }
+}
+```
+
+### 支持的文件与索引类型
+
+分析器读取单个序列化索引文件，并根据文件内容识别其格式：
+
+| 格式 | 写出方式 | 分析支持 |
+| --- | --- | --- |
+| `footer` | `Index::Serialize(std::ostream&)`、`pyvsag.Index.save()` | 支持。除非传入 `build_parameter`，否则使用 footer 中记录的参数。 |
+| `chunked` | `Index::Serialize(SerializeWriter&, chunk_size)` | 支持未压缩文件。压缩文件需要写出它的应用所提供的解压 `DeserializeReader`，会以 `unsupported_index_operation` 失败。 |
+| `streaming` | `Index::SerializeStreaming()` | 支持。使用 `Index::Load()` 与文件中记录的参数加载；不接受 `build_parameter`。 |
+| `legacy` | VSAG 0.15 之前的版本，或没有 footer 的文件 | 仅在传入 `build_parameter` 时支持；文件未记录索引类型时，需在 `"type"` 中指明。 |
+
+`BinarySet` 与 `ReaderSet` 序列化由多个部分组成，不是单个文件，因此不受支持。
+
+| 索引类型 | 仅凭文件即可进行的静态分析 | 动态分析 |
+| --- | --- | --- |
+| `hgraph` | footer、chunked 与 streaming 文件。 | dense float32 query。 |
+| `ivf` | footer 与 streaming 文件。 | dense float32 query。 |
+| `brute_force` | footer 文件假设 `l2` 与 `float32`（`metadata_defaults`）；streaming 文件会记录二者。 | dense float32 query。 |
+| `pyramid` | streaming 文件。footer 文件未记录维度、距离度量与数据类型，需要 `build_parameter`。 | 被搜索 hierarchy 的根节点已构建时支持 dense float32 query。需要按 query 指定路径的 hierarchy 请通过 C++ API 配合 `Dataset::Paths` 分析。 |
+| `sindi` | footer 与 streaming 文件。`base_path` 可补充需要原始向量的指标。 | sparse query；适用 `base_path`、`groundtruth_path` 与 `save_groundtruth_path`。 |
+| `sindi_v2` | footer 与 streaming 文件。 | sparse query（基线指标）。 |
+| `warp`、`simq` | footer 文件，假设 `l2` 与 `float32`（`metadata_defaults`）。 | 不支持：查询文件无法表达多向量 query。 |
+| `lazy_hgraph` | 需要 `build_parameter`：文件未记录 LazyHGraph 参数。 | dense float32 query。 |
+
+dense 查询文件存放 float32 向量，因此 `int8`、`float16` 与 `bfloat16` 索引的动态分析会以
+`unsupported_index_operation` 失败；它们的静态分析可用，但 HGraph 统计目前尚不支持 `float16`
+与 `bfloat16` 索引。
+
+### 错误
+
+| 错误码 | 原因 |
+| --- | --- |
+| `invalid_argument` | 选项或选项组合无效：JSON 格式错误、`topk` 不是正数、只提供 `groundtruth_path` 而没有 `query_path`、对非 SINDI 索引传入 `base_path`、query 维度与索引不一致、对 streaming 文件传入 `build_parameter`，或 `build_parameter` 指明了另一种索引类型。 |
+| `missing_file` | 输入文件或 `save_groundtruth_path` 所在目录不存在。 |
+| `read_error` | 输入文件无法读取，或在加载索引时提前结束。 |
+| `invalid_binary` | 索引文件不是 VSAG 索引、已被截断或损坏（例如 footer 校验和不匹配），或者查询、base、真值文件不符合文档描述的布局。 |
+| `unsupported_index` | 文件未标识受支持的索引类型。 |
+| `unsupported_index_operation` | 文件或分析方式不受支持：压缩的 chunked 文件、未传入 `build_parameter` 的 LazyHGraph 与 Pyramid footer 文件，或索引、查询文件无法支持的动态分析。 |
+| `index_empty` | 文件中的索引在为空时序列化，且未记录参数。 |
+| `no_enough_memory` | 索引或查询无法装入内存。 |
+| `internal_error`、`unknown_error` | 索引内部发生了意外错误。 |
+
+当索引实现返回 `vsag::ErrorType` 中的其他错误时，也可能出现对应的错误码。错误信息会指出相关的
+文件或选项，并尽可能说明修复方法。
+
+### 输入文件
+
+所有整数与浮点数均为小端序。
+
+- **dense 查询文件**：`uint32 rows, uint32 dim`，随后是 `float32 data[rows * dim]`。文件大小必须与
+  文件头严格一致。
+- **sparse CSR 文件**（稀疏 query 与 SINDI base 数据集）：`int64 rows, int64 cols, int64 nnz`，
+  随后是 `int64 indptr[rows + 1]`、`int32 indices[nnz]` 与 `float32 values[nnz]`。`indptr` 必须
+  从 0 开始、单调不减并以 `nnz` 结束；索引必须位于 `[0, cols)`。
+- **真值文件**（`.dev.gt`）：`uint32 rows, uint32 topk`，随后是 `int32 ids[rows * topk]` 与
+  `float32 distances[rows * topk]`。每个 query 需要一行，每行至少包含 `min(topk, num_elements)`
+  个近邻。
+
+输入文件会在加载索引之前完成校验，格式错误的文件会尽早失败。
+
+### C++ `analyze_index` 工具
+
+C++ 工具随其他工具一起从源码构建：
 
 ```bash
 # 通过项目 Makefile
@@ -209,62 +509,26 @@ VSAG_ENABLE_TOOLS=ON make release
 # 也可直接通过 CMake
 cmake -S . -B build-release -DCMAKE_BUILD_TYPE=Release -DENABLE_TOOLS=ON
 cmake --build build-release -j
-# 产物：./build-release/tools/analyze_index/analyze_index
+./build-release/tools/analyze_index/analyze_index --index_path my_index.vsag
 ```
 
-### 命令行参数
+它接受相同的选项（包括连字符写法），输出相同的报告，并使用相同的退出码与错误格式
+（`analyze_index: error [<code>]: <message>`）。旧版本打印日志行，现在改为输出 JSON 报告。
+`--query_path empty` 仍然可用，表示不提供查询文件。在 Linux 上，工具会把库的启动横幅挡在 stdout
+之外；在其他平台上请设置 `VSAG_SUPPRESS_INIT_BANNER=1`。
 
-| 参数 | 缩写 | 是否必需 | 描述 |
-| --- | --- | --- | --- |
-| `--index_path` | `-i` | **是** | 待分析的 VSAG 索引文件路径。 |
-| `--build_parameter` | `-bp` | 否 | 加载索引时使用的构建参数（JSON）。默认使用索引文件内嵌的原始参数。 |
-| `--query_path` | `-qp` | 否 | 查询向量数据集的文件路径，不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
-| `--query_data_type` | | 否 | 查询数据类型：`auto`、`dense` 或 `sparse`。`auto` 会对 SINDI 使用 sparse 加载。 |
-| `--base_path` | | 否 | SINDI 分析可选的 sparse CSR 原始 base 数据集路径。 |
-| `--groundtruth_path` | | 否 | SINDI 可选的 `.dev.gt` 真值集路径；提供后直接复用。 |
-| `--save_groundtruth_path` | | 否 | SINDI 自动生成真值集时的可选保存路径。 |
-| `--search_parameter` | `-sp` | 否 | 动态分析时使用的搜索参数（JSON）。 |
-| `--topk` | `-k` | 否 | 动态分析的 top-K（默认 `100`）。 |
+### 限制
 
-查询文件格式为 `tools/analyze_index/analyze_index.cpp` 中 `load_query()` 所读取的简单二进制
-布局：`(uint32 rows, uint32 cols, float32 data...)`。
-
-该 dense query 格式只包含向量。当前工具无法向加载后的 `Dataset` 附加默认或命名
-Pyramid hierarchy 路径。因此，工具无法表达按路径限定的 Pyramid query，也无法在选中
-hierarchy 的根节点为 `NO_INDEX` 时运行动态分析。通过 `GetStats()` 执行的 Pyramid 静态分析
-仍可正常使用。如需按路径执行动态分析，请调用 C++ 接口并为 query 数据集设置路径。
-
-SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int64 ncol, int64 nnz`，
-随后是 `int64 indptr[nrow + 1]`、`int32 indices[nnz]` 和 `float32 data[nnz]`。SINDI 真值集
-使用 `.dev.gt` 布局：`uint32 query_count, uint32 topk`，随后是展开后的 `int32 ids` 与
-`float32 distances`。如果没有提供 `--groundtruth_path` 但提供了 `--base_path`，SINDI 分析会
-基于原始 sparse base 生成真值集，并可通过 `--save_groundtruth_path` 保存复用。
-
-### 两种分析模式
-
-**1. 仅静态分析（不提供查询文件）**
-
-```bash
-./build-release/tools/analyze_index/analyze_index \
-    --index_path /path/to/my_index.hgraph
-```
-
-输出索引名、维度、数据类型、距离度量、构建参数，以及 `GetStats()` 的 JSON。
-
-**2. 静态 + 动态分析**
-
-```bash
-./build-release/tools/analyze_index/analyze_index \
-    --index_path /path/to/my_index.ivf \
-    --query_path /path/to/queries.bin \
-    --search_parameter '{"ivf":{"scan_buckets_count":16}}' \
-    --topk 50
-```
-
-除静态信息外，还会额外打印由 `AnalyzeIndexBySearch` 产出的 `Search Analyze: { ... }` JSON 块。
-
-当序列化索引只内嵌 `index_param` 时，`analyze_index` 也可以在不提供 `--build_parameter` 的情况下
-加载；缺失的 metadata 字段会尽可能使用 analyzer 默认值补齐。
+- 整个索引以及 query 会被加载到内存中。
+- 使用文件型存储的 streaming 文件，只有在存储可以改为加载到内存时才能分析，目前仅限 HGraph 的基础编码、
+  精确编码与原始向量。其他文件型组件（例如 BruteForce、WARP 的编码，或 RaBitQ 分离存储的 supplement）
+  会返回 `unsupported_index_operation`，因为加载它们会使用文件中记录的路径。
+- 查询文件只包含向量：不支持 Pyramid hierarchy 路径、过滤条件、属性或多向量 query。这些场景
+  请在 C++ 中使用 `AnalyzeIndexBySearch`。
+- 分析是同步的，适用于离线诊断；[公共输出契约](#公共输出契约)中描述的开销同样适用。
+- footer 与 streaming header 会被校验（校验和与布局），但索引主体由该索引自身的反序列化逻辑读取。
+  主体已损坏的文件，或借助 `build_parameter` 加载的无 footer 文件，其健壮性取决于该反序列化逻辑：
+  遇到无效数据时可能以 `no_enough_memory` 失败或占用大量内存。请在有内存限制的环境中分析不可信文件。
 
 ## 典型使用场景
 
@@ -280,6 +544,10 @@ SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int6
 ## 参考
 
 - 接口：`include/vsag/index.h` 中的 `Index::AnalyzeIndexBySearch`
+- 文件分析接口：`include/vsag/analyze_index.h` 中的 `vsag::analyze_index`，实现位于
+  `src/analyze_index.cpp`
+- Python API 与命令：`python/pyvsag/index_analysis.py` 与
+  `python/pyvsag_analyze_index.py`
 - 实现：`src/analyzer/{analyzer,hgraph_analyzer,pyramid_analyzer}.h`
 - 工具源码：`tools/analyze_index/`
 - 本地工具入口：`tools/analyze_index/README_zh.md`

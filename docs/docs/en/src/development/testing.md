@@ -120,6 +120,11 @@ make pyvsag PY_VERSION=3.10
 cd tests/python && pytest -q
 ```
 
+`scripts/python/wheel_smoke_test.sh WHEELHOUSE [PYTHON]` checks `pyvsag.analyze_index()` and
+`pyvsag-analyze-index` from a built wheel in a fresh virtual environment that contains only the
+wheel, and in a `python:<version>-slim` container (no NumPy, CMake or compiler) when Docker is
+available. `make pyvsag` and the wheel CI jobs run it.
+
 ## Report Testcase Budgets and Time
 
 `scripts/testing/test_budget_report.py` reads saved test listings, results and cost records

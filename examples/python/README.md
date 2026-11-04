@@ -40,6 +40,7 @@ across languages. Use the numbered examples for new code.
 | [`106_index_ivf.py`](106_index_ivf.py) | IVF | Inverted file, tuned for large-`k` / batch queries. |
 | [`109_index_sindi.py`](109_index_sindi.py) | SINDI | Sparse vector index (text / inverted retrieval). |
 | [`110_index_sindi_sq8_dmq_reorder.py`](110_index_sindi_sq8_dmq_reorder.py) | SINDI SQ8 + DMQ8 | Sparse vectors with SQ8 quantization + DMQ reranking. |
+| [`333_feature_analyze_index.py`](333_feature_analyze_index.py) | HGraph | Analyze a saved index file with `pyvsag.analyze_index()`, the API behind `pyvsag-analyze-index`. |
 
 ## Where to go next
 

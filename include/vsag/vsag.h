@@ -37,6 +37,7 @@ init();
 }  // namespace vsag
 
 #include "vsag/allocator.h"
+#include "vsag/analyze_index.h"
 #include "vsag/attribute.h"
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"

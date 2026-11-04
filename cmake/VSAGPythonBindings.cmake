@@ -33,6 +33,7 @@ include (extern/pybind11/pybind11.cmake)
 
 pybind11_add_module (_pyvsag
     python_bindings/module.cpp
+    python_bindings/analysis_binding.cpp
     python_bindings/index_binding.cpp
     python_bindings/logging_binding.cpp)
 target_compile_options (_pyvsag PRIVATE -fopenmp)
