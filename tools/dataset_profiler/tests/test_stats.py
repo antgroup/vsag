@@ -20,6 +20,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 
 from dataset_profiler.stats import (
     as_finite_float,
@@ -72,6 +73,19 @@ def test_histogram_is_json_safe():
     json.dumps(hist)  # must not raise
     empty = histogram([math.nan])
     assert empty == {"bins": [], "counts": [], "bin_count": 0}
+
+
+@pytest.mark.parametrize(
+    "value", [float(np.finfo(np.float64).max), 0.9995 * np.finfo(np.float64).max]
+)
+def test_constant_histogram_near_float_limit_has_finite_splittable_edges(value):
+    result = histogram([value, value])
+    edges = np.asarray(result["bins"], dtype=np.float64)
+    assert result["bin_count"] == 20
+    assert edges.size == 21
+    assert np.all(np.isfinite(edges))
+    assert np.all(np.diff(edges) > 0)
+    assert sum(result["counts"]) == 2
 
 
 def test_downsample_keeps_small_arrays_and_buckets_large_ones():

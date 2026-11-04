@@ -18,9 +18,12 @@ from __future__ import annotations
 
 import re
 
-from dataset_profiler.html_report import render_html
+import numpy as np
+
+from dataset_profiler.html_report import _chart_line, _sparsity_section, render_html
 from dataset_profiler.profiler import profile_dataset
 from dataset_profiler.report import DEFINITIONS
+from dataset_profiler.stats import downsample
 
 
 def _dense_report(dense_path):
@@ -201,4 +204,34 @@ def test_downsampled_points_use_exact_nonuniform_source_ranges(tmp_path):
     assert "dimensions 2-4" in text
     assert "dimensions 0-2" not in text
     assert "dimensions 3-4" not in text
+
+
+def test_downsampled_points_use_the_exact_linspace_partition():
+    data = downsample(np.arange(784, dtype=np.float64), max_points=768)
+    text = _chart_line(data, "dimension mean", "Coordinate", "Mean", "#2563eb")
+    # Bucket 240 is where exact integer division and integer linspace disagree.
+    assert "dimensions 244-245" in text
+    assert "dimension 245:" not in text
+
+
+def test_sparse_zero_total_includes_implicit_zeros(sparse_path):
+    report = profile_dataset(str(sparse_path), sample_size=8, pairwise_sample_size=4)
+    sparsity = report["metrics"]["sparsity"]
+    expected = sparsity["cells"] - sparsity["non_zero_values"]
+    assert sparsity["zero_values"] == expected
+    assert sparsity["explicit_zero_entries"] == 0
+    text = render_html(report)
+    assert "<th>Zero values</th><td>%d</td>" % expected in text
+
+
+def test_dense_zero_count_is_not_rendered_as_unavailable():
+    text = _sparsity_section(
+        {
+            "representation": "dense",
+            "total_values": 1,
+            "zero_values": 0,
+            "non_zero_values": 1,
+        }
+    )
+    assert "<th>Zero values</th><td>0</td>" in text
 

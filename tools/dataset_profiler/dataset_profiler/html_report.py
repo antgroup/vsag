@@ -26,6 +26,8 @@ import html
 import math
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
+import numpy as np
+
 _PALETTE = (
     "#2563eb",
     "#dc2626",
@@ -215,10 +217,20 @@ def _dimensions_section(metric: Dict[str, Any]) -> str:
 def _sparsity_section(metric: Dict[str, Any]) -> str:
     if not metric:
         return ""
+    total_cells = (
+        metric.get("cells") if "cells" in metric else metric.get("total_values")
+    )
+    # Sparse zero_values includes implicit zeros; explicit_zero_entries is only
+    # a legacy fallback.  Checking key presence also preserves a dense count 0.
+    zero_values = (
+        metric.get("zero_values")
+        if "zero_values" in metric
+        else metric.get("explicit_zero_entries")
+    )
     rows = [
         ("Representation", str(metric.get("representation"))),
-        ("Total cells", _fmt(metric.get("cells") or metric.get("total_values"))),
-        ("Zero values", _fmt(metric.get("zero_values") or metric.get("explicit_zero_entries"))),
+        ("Total cells", _fmt(total_cells)),
+        ("Zero values", _fmt(zero_values)),
         ("Non-zero values", _fmt(metric.get("non_zero_values"))),
         ("Density", _pct(metric.get("density"))),
         ("Zero ratio", _pct(metric.get("zero_ratio"))),
@@ -579,10 +591,9 @@ def _chart_line(
     # Match stats.downsample's integer-linspace partition exactly.  A single
     # ceiling bucket size is wrong when source_length is not divisible by the
     # number of output points.
-    boundaries = [
-        (position * source_length) // len(values)
-        for position in range(len(values) + 1)
-    ]
+    boundaries = np.linspace(
+        0, source_length, len(values) + 1, dtype=np.int64
+    )
 
     def source_range(index: int):
         if not downsampled:

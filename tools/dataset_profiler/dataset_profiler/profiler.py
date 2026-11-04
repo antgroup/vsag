@@ -58,6 +58,9 @@ _DENSE_BLOCK_MAX_ROWS = 65536
 # Relative tolerance under which the expanded Euclidean formula (||a||²+||b||²-2a·b)
 # has lost every significant digit; such pairs are recomputed from differences.
 _EUCLIDEAN_GRAM_REL_TOL = 1e-8
+# Normalization and dot products can leave identical angular vectors a few ulps
+# from zero.  Canonicalize that numerical residue before duplicate thresholds.
+_ANGULAR_ZERO_TOL = 32 * np.finfo(np.float64).eps
 # Row budget for the streaming mean-cosine reduction (normalized blocks only).
 _MEAN_COSINE_BLOCK_ROWS = 8192
 
@@ -419,10 +422,13 @@ def _profile_sparse(
     dimension_stats_reason: Optional[str] = None
     dim = 0
     hashes: Counter = Counter()
-    norms_parts: List[np.ndarray] = []
-    nnz_parts: List[np.ndarray] = []
+    # The record count is known before this pass (a no-offsets stream is counted
+    # above), so avoid retaining one tiny NumPy array per sparse vector.
+    norms = np.empty(count, dtype=np.float64)
+    nnz = np.empty(count, dtype=np.int64)
     stored_entries = 0
     nonzero_entries = 0
+    explicit_zero_entries = 0
     invalid_values = 0
     vectors_with_invalid = 0
     all_zero_vectors = 0
@@ -438,6 +444,11 @@ def _profile_sparse(
         else:
             ids = raw_ids
             values = raw_values
+        if ids.size > 1 and np.any(ids[1:] == ids[:-1]):
+            # Pairwise/PCA materialization keeps one value per feature, while
+            # duplicate observations would corrupt full per-dimension means.
+            # Reject the ambiguous encoding instead of mixing both semantics.
+            raise ValueError("sparse record %d contains repeated feature IDs" % index)
         length = int(ids.size)
         stored_entries += length
         finite = np.isfinite(values)
@@ -445,11 +456,13 @@ def _profile_sparse(
         invalid_values += int((~finite).sum())
         if not bool(finite.all()):
             vectors_with_invalid += 1
-        nonzero_entries += int(np.count_nonzero(valid))
-        norms = float(math.sqrt(float(np.dot(valid, valid))))
-        norms_parts.append(np.array([norms], dtype=np.float64))
-        nnz_parts.append(np.array([length], dtype=np.int64))
-        if norms == 0.0:
+        nonzero = int(np.count_nonzero(valid))
+        nonzero_entries += nonzero
+        explicit_zero_entries += int(np.count_nonzero((values == 0) & finite))
+        norm = float(math.sqrt(float(np.dot(valid, valid))))
+        norms[index] = norm
+        nnz[index] = nonzero
+        if norm == 0.0:
             all_zero_vectors += 1
         if ids.size:
             dim = max(dim, int(ids[-1]) + 1)
@@ -504,9 +517,6 @@ def _profile_sparse(
             reason=dimension_stats_reason,
             dim=int(dim),
         )
-    norms = np.concatenate(norms_parts) if norms_parts else np.empty(0)
-    nnz = np.concatenate(nnz_parts) if nnz_parts else np.empty(0, dtype=np.int64)
-
     pair_matrix = _pairwise_sparse(pair_records, metric)
     pair_values = _upper_triangle(pair_matrix)
     duplicate_pair_values = pair_values
@@ -530,6 +540,7 @@ def _profile_sparse(
             dim,
             stored_entries,
             nonzero_entries,
+            explicit_zero_entries,
             nnz,
             all_zero_vectors,
         ),
@@ -856,10 +867,12 @@ def _sparse_sparsity_metric(
     dim: int,
     stored_entries: int,
     nonzero_entries: int,
+    explicit_zero_entries: int,
     nnz_per_vector: np.ndarray,
     all_zero_vectors: int,
 ) -> Dict[str, Any]:
     cells = count * dim if dim else None
+    zero_values = cells - nonzero_entries if cells is not None else None
     density = nonzero_entries / float(cells) if cells else None
     return metric_entry(
         DEFINITIONS["sparsity"],
@@ -870,8 +883,9 @@ def _sparse_sparsity_metric(
         dim=int(dim),
         cells=cells,
         stored_entries=int(stored_entries),
+        zero_values=int(zero_values) if zero_values is not None else None,
         non_zero_values=int(nonzero_entries),
-        explicit_zero_entries=int(max(0, stored_entries - nonzero_entries)),
+        explicit_zero_entries=int(explicit_zero_entries),
         zero_ratio=as_finite_float(1.0 - density) if density is not None else None,
         density=as_finite_float(density),
         nnz_per_vector=summarize(nnz_per_vector),
@@ -1189,6 +1203,7 @@ def _pairwise_dense(matrix: np.ndarray, metric: str) -> np.ndarray:
             distances[zero_norms, :] = 1.0
             distances[:, zero_norms] = 1.0
             distances[np.ix_(zero_norms, zero_norms)] = 0.0
+        distances[np.abs(distances) <= _ANGULAR_ZERO_TOL] = 0.0
         return distances
     raise ValueError("unsupported metric %r" % metric)
 
@@ -1235,6 +1250,8 @@ def _pairwise_sparse(
                     distance = 1.0 - cosine
             else:
                 raise ValueError("unsupported metric %r" % metric)
+            if metric == "angular" and abs(distance) <= _ANGULAR_ZERO_TOL:
+                distance = 0.0
             matrix[i, j] = distance
             matrix[j, i] = distance
     return matrix

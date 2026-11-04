@@ -86,10 +86,22 @@ def histogram(values: Iterable[float], bins: int = HISTOGRAM_BINS) -> Dict[str, 
         padding = max(abs(value) * 1e-3, math.ulp(value) * 4.0, 0.5)
         lower = value - padding
         upper = value + padding
-        if not (math.isfinite(lower) and math.isfinite(upper) and lower < upper):
-            lower = float(np.nextafter(value, -np.inf))
-            upper = float(np.nextafter(value, np.inf))
-        counts, edges = np.histogram(array, bins=bin_count, range=(lower, upper))
+        if math.isfinite(lower) and math.isfinite(upper) and lower < upper:
+            counts, edges = np.histogram(
+                array, bins=bin_count, range=(lower, upper)
+            )
+        else:
+            # A one-ulp range cannot be split into ``bin_count`` bins.  Build
+            # explicit, one-sided edges instead, always stepping toward the
+            # finite interior so even +/-DBL_MAX cannot overflow.
+            direction = -np.inf if value > 0 else np.inf
+            edges = np.empty(bin_count + 1, dtype=np.float64)
+            edges[0] = value
+            for index in range(1, bin_count + 1):
+                edges[index] = np.nextafter(edges[index - 1], direction)
+            if direction == -np.inf:
+                edges = edges[::-1]
+            counts, edges = np.histogram(array, bins=edges)
     else:
         counts, edges = np.histogram(array, bins=bin_count)
     return {

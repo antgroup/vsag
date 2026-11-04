@@ -500,3 +500,62 @@ def test_dense_euclidean_skips_direct_fallback_for_self_distances(monkeypatch):
     np.fill_diagonal(expected, 0.0)
     np.testing.assert_allclose(distances, expected)
 
+
+def test_sparse_repeated_feature_ids_are_rejected(tmp_path):
+    path = tmp_path / "repeated_ids.hdf5"
+    records = [
+        (
+            np.array([0, 0], dtype=np.uint32),
+            np.array([1, 2], dtype=np.float32),
+        )
+    ]
+    _write_sparse(path, records)
+    with pytest.raises(ValueError, match="record 0 contains repeated feature IDs"):
+        profile_dataset(str(path), sample_size=1, pairwise_sample_size=1)
+
+
+def test_sparse_nnz_counts_finite_nonzero_values_and_total_zeros(tmp_path):
+    path = tmp_path / "sparse_nnz.hdf5"
+    records = [
+        (
+            np.array([0, 1], dtype=np.uint32),
+            np.array([2, 0], dtype=np.float32),
+        ),
+        (np.array([1], dtype=np.uint32), np.array([np.nan], dtype=np.float32)),
+    ]
+    _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    sparsity = report["metrics"]["sparsity"]
+    assert sparsity["stored_entries"] == 3
+    assert sparsity["non_zero_values"] == 1
+    assert sparsity["explicit_zero_entries"] == 1
+    assert sparsity["zero_values"] == sparsity["cells"] - 1
+    assert sparsity["nnz_per_vector"]["min"] == 0
+    assert sparsity["nnz_per_vector"]["max"] == 1
+
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_angular_identical_vectors_are_near_duplicates(tmp_path, vector_type):
+    path = tmp_path / ("angular_duplicates_" + vector_type + ".hdf5")
+    if vector_type == "dense":
+        _write_dense(path, [[1, 1], [1, 1], [1, 1]], metric="angular")
+    else:
+        records = [
+            (
+                np.array([0, 1], dtype=np.uint32),
+                np.array([1, 1], dtype=np.float32),
+            )
+            for _ in range(3)
+        ]
+        _write_sparse(path, records, metric="angular")
+    report = profile_dataset(
+        str(path), metric="angular", sample_size=3, pairwise_sample_size=3
+    )
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert pairwise["min"] == 0.0
+    assert pairwise["max"] == 0.0
+    assert near["median_pairwise_distance"] == 0.0
+    assert near["threshold"] == 0.0
+    assert near["near_duplicate_pairs"] == 3
+
