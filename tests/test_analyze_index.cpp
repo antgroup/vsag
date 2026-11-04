@@ -222,7 +222,7 @@ TEST_CASE("AnalyzeIndex does not modify brute-force backing files", "[analyze_in
     REQUIRE(ReadBinaryFile(backing_path) == backing_before);
 }
 
-TEST_CASE("Brute-force internal parameter reload keeps validation", "[analyze_index]") {
+TEST_CASE("Brute-force public parameters reject internal reload bypass", "[analyze_index]") {
     const std::string int8_param = R"({
         "dtype": "int8",
         "metric_type": "l2",
@@ -246,6 +246,12 @@ TEST_CASE("Brute-force internal parameter reload keeps validation", "[analyze_in
     unknown_key_param["index_param"].Erase("_analyzer_deserialize");
     unknown_key_param["index_param"].Erase("unknown_key");
     REQUIRE_FALSE(vsag::Factory::CreateIndex("brute_force", unknown_key_param.Dump()).has_value());
+
+    vsag::JsonType unsupported_io_param = vsag::JsonType::Parse(int8_param);
+    unsupported_io_param["dtype"].SetString("float32");
+    unsupported_io_param["index_param"]["base_codes"]["io_params"]["type"].SetString("unsupported");
+    REQUIRE_FALSE(
+        vsag::Factory::CreateIndex("brute_force", unsupported_io_param.Dump()).has_value());
 }
 
 TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[analyze_index]") {
@@ -262,6 +268,27 @@ TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[an
     REQUIRE(report["index"]["name"].GetString() == "brute_force");
     REQUIRE(report["index"]["metric"].GetString() == "cosine");
     REQUIRE(report["index"]["metadata_source"].GetString() == "build_parameter");
+}
+
+TEST_CASE("AnalyzeIndex restores cosine for raw-vector brute-force reload", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_cosine_raw_vector");
+    vsag::JsonType build_param = vsag::JsonType::Parse(kCosineIndexParam);
+    build_param["index_param"]["store_raw_vector"].SetBool(true);
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", build_param.Dump());
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteDenseQueryFile(query_path, 1, kDim);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.query_path = query_path;
+    options.topk = 2;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["metric"].GetString() == "cosine");
+    REQUIRE(report["dynamic_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
 TEST_CASE("AnalyzeIndex does not inject precise IO parameters into WARP", "[analyze_index]") {
