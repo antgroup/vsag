@@ -63,7 +63,7 @@ are pure Python and only require NumPy, which `pyvsag` already uses.
 
 | Helper | Result | Notes |
 | --- | --- | --- |
-| `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32`. |
+| `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32`. Empty mappings are rejected with `ValueError` (SINDI cannot store empty rows). |
 | `TermVocabulary(vocabulary)` | reusable mapping | Wraps a vocabulary produced by `build_term_vocabulary` and validates its IDs once. Pass it instead of the raw dict when the same vocabulary converts many queries, so query-time conversion scans the query terms rather than the whole vocabulary. |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
 
