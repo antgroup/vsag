@@ -16,7 +16,9 @@
 
 from __future__ import annotations
 
+import json
 import re
+from pathlib import Path
 
 import numpy as np
 
@@ -234,4 +236,16 @@ def test_dense_zero_count_is_not_rendered_as_unavailable():
         }
     )
     assert "<th>Zero values</th><td>0</td>" in text
+
+
+def test_bundled_sparse_example_has_consistent_zero_total():
+    output_dir = Path(__file__).resolve().parents[1] / "examples" / "output"
+    report = json.loads(
+        (output_dir / "toy_sparse.profile.json").read_text(encoding="utf-8")
+    )
+    sparsity = report["metrics"]["sparsity"]
+    expected = sparsity["cells"] - sparsity["non_zero_values"]
+    assert sparsity["zero_values"] == expected == 9966
+    html = (output_dir / "toy_sparse.profile.html").read_text(encoding="utf-8")
+    assert "<th>Zero values</th><td>9966</td>" in html
 

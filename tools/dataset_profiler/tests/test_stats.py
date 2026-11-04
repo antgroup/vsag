@@ -76,7 +76,13 @@ def test_histogram_is_json_safe():
 
 
 @pytest.mark.parametrize(
-    "value", [float(np.finfo(np.float64).max), 0.9995 * np.finfo(np.float64).max]
+    "value",
+    [
+        float(np.finfo(np.float64).max),
+        0.9995 * np.finfo(np.float64).max,
+        -0.9995 * np.finfo(np.float64).max,
+        float(np.finfo(np.float64).min),
+    ],
 )
 def test_constant_histogram_near_float_limit_has_finite_splittable_edges(value):
     result = histogram([value, value])
