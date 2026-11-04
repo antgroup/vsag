@@ -18,6 +18,9 @@ set (THREAD_POOL_SRC
     default_thread_pool.cpp
     default_thread_pool.h
     safe_thread_pool.h
+    cpu_resource.cpp
+    cpu_resource.h
+    thread_pool_startup.h
 )
 
 add_library (thread_pool OBJECT ${THREAD_POOL_SRC})

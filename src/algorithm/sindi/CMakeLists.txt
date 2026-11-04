@@ -18,7 +18,6 @@ set (SINDI_SRCS
         sindi.cpp
         sindi_parameter.cpp
         sindi_parallel_search.cpp
-        sindi_query_resources.cpp
         term_id_mapper.cpp
 )
 

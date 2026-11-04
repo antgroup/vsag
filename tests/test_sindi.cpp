@@ -23,6 +23,8 @@
 #include "allocator/memory_record_allocator.h"
 #include "functest.h"
 #include "test_index.h"
+#include "vsag/engine.h"
+#include "vsag/search_resource.h"
 
 namespace fixtures {
 
@@ -748,7 +750,14 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     fixtures::SINDIParam param;
     param.use_reorder = false;
     auto build_param = fixtures::SINDITestIndex::GenerateBuildParameter(param);
-    auto index = TestFactory("sindi", build_param, true);
+    vsag::Resource common(vsag::Engine::CreateDefaultAllocator(), nullptr);
+    vsag::SearchResourceOptions queryOptions;
+    queryOptions.max_background_workers = 15;
+    vsag::SearchResource resources(common, queryOptions);
+    vsag::Engine engine(&resources);
+    auto created = engine.CreateIndex("sindi", build_param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
     auto dataset = pool.GetSparseDatasetAndCreate(base_count, 128, 0.8);
     TestBuildIndex(index, dataset, true);
 
@@ -783,18 +792,15 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
         "query_prune_ratio":0.0,"term_prune_ratio":0.0,
         "window_parallelism":2,"timeout_ms":0}})";
     auto parallel = index->KnnSearch(query, 5, parallel_timeout_param);
-    REQUIRE(parallel.has_value());
-    REQUIRE(parallel.value()->GetStatistics({"is_timeout"})[0] == "false");
-    REQUIRE(parallel.value()->GetDim() == result.value()->GetDim());
+    // Parallel search must not silently ignore an already expired deadline.
+    REQUIRE_FALSE(parallel.has_value());
 
     vsag::SearchRequest request;
     request.query_ = query;
     request.topk_ = 5;
     request.params_str_ = parallel_timeout_param;
     auto parallel_request = index->SearchWithRequest(request);
-    REQUIRE(parallel_request.has_value());
-    REQUIRE(parallel_request.value()->GetStatistics({"is_timeout"})[0] == "false");
-    REQUIRE(parallel_request.value()->GetDim() == result.value()->GetDim());
+    REQUIRE_FALSE(parallel_request.has_value());
 
     auto range = index->RangeSearch(query, 100.0F, timeout_param, 5);
     REQUIRE(range.has_value());
@@ -805,8 +811,7 @@ TEST_CASE_PERSISTENT_FIXTURE(fixtures::SINDITestIndex,
     REQUIRE(range.value()->GetDim() <= 5);
 
     auto parallel_range = index->RangeSearch(query, 100.0F, parallel_timeout_param, 5);
-    REQUIRE(parallel_range.has_value());
-    REQUIRE(parallel_range.value()->GetStatistics({"is_timeout"})[0] == "true");
+    REQUIRE_FALSE(parallel_range.has_value());
 
     auto normal_range =
         index->RangeSearch(query, 100.0F, fixtures::SINDITestIndex::search_param, 5);

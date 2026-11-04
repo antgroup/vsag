@@ -1,7 +1,7 @@
 // Copyright 2024-present the vsag project
 // SPDX-License-Identifier: Apache-2.0
 
-#include "sindi_query_resources.h"
+#include "cpu_resource.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -35,10 +35,10 @@ unescape_mount(const std::string& path) {
 }  // namespace
 
 uint32_t
-SindiCgroupCpuSlots(const std::string& membership,
-                    const std::string& mountinfo,
-                    const std::function<std::string(const std::string&)>& read,
-                    uint32_t affinity) {
+CgroupCpuSlots(const std::string& membership,
+               const std::string& mountinfo,
+               const std::function<std::string(const std::string&)>& read,
+               uint32_t affinity) {
     uint64_t slots = std::max(1U, affinity);
     std::istringstream members(membership);
     std::string member;
@@ -110,7 +110,7 @@ SindiCgroupCpuSlots(const std::string& membership,
             }
         }
     }
-    return static_cast<uint32_t>(std::min<uint64_t>(16, slots));
+    return static_cast<uint32_t>(slots);
 }
 
 }  // namespace vsag

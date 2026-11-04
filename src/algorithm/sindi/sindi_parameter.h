@@ -20,7 +20,6 @@
 
 #include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
-#include "impl/searcher/sindi_search_options.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
 
@@ -101,11 +100,10 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
-    uint32_t worker_n_candidate{0};
     uint32_t window_parallelism{1};
-    double parallel_n_candidate_ratio{1.0};
+    static constexpr double DEFAULT_PARALLEL_N_CANDIDATE_RATIO = 2.0;
+    double parallel_n_candidate_ratio{DEFAULT_PARALLEL_N_CANDIDATE_RATIO};
     bool profile_cpu{false};
-    SindiSearchOptions execution_options;
     uint64_t filter_callback_limit{0};
 
     // data cell
