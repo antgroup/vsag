@@ -16,6 +16,7 @@
 
 #include <argparse/argparse.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -29,6 +30,15 @@ constexpr const char* DEFAULT_SEARCH_PARAM = "default";
 constexpr const char* EMPTY_QUERY_PATH = "";
 constexpr const char* QUERY_DATA_TYPE_AUTO = "auto";
 constexpr const char* EMPTY_OPTIONAL_PATH = "";
+
+// The library reads this variable during static initialization, before main can adjust logging.
+const bool init_banner_suppressed = [] {
+#if defined(_WIN32)
+    return _putenv_s("VSAG_SUPPRESS_INIT_BANNER", "1") == 0;
+#else
+    return ::setenv("VSAG_SUPPRESS_INIT_BANNER", "1", 1) == 0;
+#endif
+}();
 
 void
 parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
@@ -44,7 +54,7 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
 
     parser.add_argument<std::string>("--query_path", "-qp")
         .default_value(EMPTY_QUERY_PATH)
-        .help("The query dataset path, if not set, will not do query analysis");
+        .help("The single-query dataset path, if not set, will not do query analysis");
 
     parser.add_argument<std::string>("--query_data_type")
         .default_value(std::string(QUERY_DATA_TYPE_AUTO))
@@ -84,6 +94,11 @@ main(int argc, char** argv) {
     } catch (const std::exception& error) {
         std::cerr << "analyze_index: " << error.what() << std::endl;
         std::cerr << parser;
+        return 1;
+    }
+
+    if (not init_banner_suppressed) {
+        std::cerr << "analyze_index: failed to suppress the initialization banner" << std::endl;
         return 1;
     }
 

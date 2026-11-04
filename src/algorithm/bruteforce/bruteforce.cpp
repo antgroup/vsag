@@ -23,6 +23,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <tuple>
+#include <unordered_set>
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
@@ -51,6 +52,7 @@ namespace vsag {
 namespace {
 
 constexpr const char* WARP_MODE_MARKER = "_warp_mode";
+constexpr const char* ANALYZER_DESERIALIZATION_MARKER = "_analyzer_deserialize";
 
 void
 require_string_member(const JsonType& json, const std::string& key) {
@@ -1250,16 +1252,59 @@ build_default_brute_force_param(const JsonType& external_param, bool warp) {
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
-    // Serialized footers contain already-mapped internal parameters. Accept them directly so
-    // deserializing clients do not feed internal keys back through the external-parameter mapper.
-    if (external_param.Contains(BASE_CODES_KEY)) {
-        auto brute_force_parameter = std::make_shared<BruteForceParameter>();
-        brute_force_parameter->FromJson(external_param);
-        return brute_force_parameter;
-    }
-
     // Detect if this is a WARP (multi-vector) index request
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
+
+    // Only the index analyzer may bypass external-to-internal mapping, and only after it has
+    // isolated every file-backed IO parameter. A public caller supplying base_codes still goes
+    // through the normal mapper and receives the same unknown-key rejection as before.
+    if (external_param.Contains(ANALYZER_DESERIALIZATION_MARKER)) {
+        if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+            const auto* index_name = is_warp ? "WARP" : "BruteForce";
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                fmt::format("{} not support {} datatype", index_name, DATATYPE_INT8));
+        }
+        CHECK_ARGUMENT(external_param[ANALYZER_DESERIALIZATION_MARKER].IsBool() and
+                           external_param[ANALYZER_DESERIALIZATION_MARKER].GetBool(),
+                       "analyzer deserialization marker must be true");
+        CHECK_ARGUMENT(external_param.Contains(BASE_CODES_KEY),
+                       "analyzer deserialization parameters must contain base_codes");
+
+        static const std::unordered_set<std::string> internal_param_keys{
+            TYPE_KEY,
+            USE_REORDER_KEY,
+            REORDER_SOURCE_KEY,
+            BUILD_THREAD_COUNT_KEY,
+            LABEL_REMAP_TYPE_KEY,
+            USE_ATTRIBUTE_FILTER_KEY,
+            PRECISE_CODES_KEY,
+            STORE_RAW_VECTOR_KEY,
+            RAW_VECTOR_KEY,
+            EXTRA_INFO_KEY,
+            ATTR_PARAMS_KEY,
+            TRAIN_SAMPLE_COUNT_KEY,
+            RESIZE_INCREASE_COUNT_BIT,
+            BASE_CODES_KEY,
+        };
+        for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
+            (void)value;
+            if (key == ANALYZER_DESERIALIZATION_MARKER or key == WARP_MODE_MARKER) {
+                continue;
+            }
+            if (internal_param_keys.count(key) == 0) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    fmt::format("invalid config param: {}", key));
+            }
+        }
+
+        JsonType internal_param = external_param;
+        internal_param.Erase(ANALYZER_DESERIALIZATION_MARKER);
+        internal_param.Erase(WARP_MODE_MARKER);
+        auto brute_force_parameter = std::make_shared<BruteForceParameter>();
+        brute_force_parameter->FromJson(internal_param);
+        return brute_force_parameter;
+    }
 
     if (is_warp) {
         // Remove the marker key before mapping (it would cause "invalid config param" error)

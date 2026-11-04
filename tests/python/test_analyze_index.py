@@ -15,6 +15,7 @@
 """Tests for the pyvsag index analysis API and the pyvsag-analyze-index command."""
 
 import json
+import os
 import shutil
 import struct
 import subprocess
@@ -44,12 +45,13 @@ def _index_params():
     )
 
 
-def _run(command):
+def _run(command, env=None):
     process = subprocess.Popen(
         command,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=True,
+        env=env,
     )
     stdout, stderr = process.communicate()
     return process.returncode, stdout, stderr
@@ -162,6 +164,20 @@ def test_analyze_index_damaged_file(tmp_path):
 
     with pytest.raises(RuntimeError):
         pyvsag.analyze_index(index_path=str(damaged))
+
+
+def test_library_import_does_not_change_banner_environment():
+    env = os.environ.copy()
+    env.pop("VSAG_SUPPRESS_INIT_BANNER", None)
+    code = (
+        "import os, pyvsag; "
+        "assert 'VSAG_SUPPRESS_INIT_BANNER' not in os.environ, "
+        "import pyvsag mutated the host environment"
+    )
+
+    returncode, stdout, stderr = _run([sys.executable, "-c", code], env=env)
+
+    assert returncode == 0, stderr
 
 
 def test_cli_writes_json_to_stdout(saved_index):

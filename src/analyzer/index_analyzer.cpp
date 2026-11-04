@@ -41,6 +41,7 @@ constexpr const char* EMPTY_QUERY_PATH = "empty";
 constexpr const char* QUERY_DATA_TYPE_AUTO = "auto";
 constexpr const char* QUERY_DATA_TYPE_DENSE = "dense";
 constexpr const char* QUERY_DATA_TYPE_SPARSE = "sparse";
+constexpr const char* ANALYZER_DESERIALIZATION_MARKER = "_analyzer_deserialize";
 
 std::streamsize
 ToStreamSize(uint64_t bytes) {
@@ -148,6 +149,50 @@ MakeStringArray(const std::vector<std::string>& values) {
     return array;
 }
 
+void
+ReplaceWithMemoryIO(JsonType& io_params) {
+    io_params[TYPE_KEY].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    io_params.Erase(IO_FILE_PATH_KEY);
+}
+
+void
+IsolateDataCellStorage(JsonType& parent, const std::string& key) {
+    JsonType data_cell_params = parent[key];
+    if (data_cell_params.Contains(IO_PARAMS_KEY)) {
+        JsonType io_params = data_cell_params[IO_PARAMS_KEY];
+        ReplaceWithMemoryIO(io_params);
+        data_cell_params[IO_PARAMS_KEY].SetJson(io_params);
+    }
+    if (data_cell_params.Contains(SUPPLEMENT_IO_PARAMS_KEY)) {
+        JsonType io_params = data_cell_params[SUPPLEMENT_IO_PARAMS_KEY];
+        ReplaceWithMemoryIO(io_params);
+        data_cell_params[SUPPLEMENT_IO_PARAMS_KEY].SetJson(io_params);
+    }
+    parent[key].SetJson(data_cell_params);
+}
+
+JsonType
+PrepareInternalBruteForceParam(const JsonType& serialized_param) {
+    JsonType isolated_param = serialized_param;
+    for (const auto* key : {BASE_CODES_KEY, PRECISE_CODES_KEY, RAW_VECTOR_KEY, EXTRA_INFO_KEY}) {
+        if (isolated_param.Contains(key)) {
+            IsolateDataCellStorage(isolated_param, key);
+        }
+    }
+    isolated_param[ANALYZER_DESERIALIZATION_MARKER].SetBool(true);
+    return isolated_param;
+}
+
+void
+IsolateExternalBruteForceParam(JsonType& build_param) {
+    JsonType index_param = build_param[INDEX_PARAM];
+    index_param[BRUTE_FORCE_BASE_IO_TYPE].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    index_param.Erase(BRUTE_FORCE_BASE_FILE_PATH);
+    index_param[BRUTE_FORCE_PRECISE_IO_TYPE].SetString(IO_TYPE_VALUE_BLOCK_MEMORY_IO);
+    index_param.Erase(BRUTE_FORCE_PRECISE_FILE_PATH);
+    build_param[INDEX_PARAM].SetJson(index_param);
+}
+
 JsonType
 ParseJsonOrThrow(const std::string& text, const std::string& what) {
     try {
@@ -196,6 +241,12 @@ LoadDenseQuery(const std::string& query_path) {
         throw std::runtime_error(
             fmt::format("query file '{}' has an invalid shape ({} x {})", query_path, rows, cols));
     }
+    if (rows != 1) {
+        throw std::runtime_error(fmt::format(
+            "query file '{}' must contain exactly one query vector (rows=1), got {} rows",
+            query_path,
+            rows));
+    }
 
     const uint64_t num_elements = static_cast<uint64_t>(rows) * cols;
     if (num_elements > std::numeric_limits<uint64_t>::max() / sizeof(float)) {
@@ -239,6 +290,12 @@ LoadSparseQuery(const std::string& query_path) {
                         rows,
                         cols,
                         nnz));
+    }
+    if (rows != 1) {
+        throw std::runtime_error(
+            fmt::format("sparse query file '{}' must contain exactly one query row, got {} rows",
+                        query_path,
+                        rows));
     }
     if (static_cast<uint64_t>(rows) > std::numeric_limits<uint64_t>::max() / sizeof(SparseVector)) {
         throw std::runtime_error(
@@ -413,11 +470,16 @@ private:
             this->CreateIndexFromMetadata(reopen);
         }
 
-        if (not options_.base_path.empty() and index_name_ != INDEX_SINDI and
-            index_name_ != INDEX_SINDI_V2) {
-            warnings_.emplace_back(fmt::format(
-                "base_path is only used by SINDI indexes; it is ignored for index type '{}'",
-                index_name_));
+        if (not options_.base_path.empty()) {
+            if (index_name_ != INDEX_SINDI and index_name_ != INDEX_SINDI_V2) {
+                warnings_.emplace_back(fmt::format(
+                    "base_path is only used by SINDI indexes; it is ignored for index type '{}'",
+                    index_name_));
+            } else if (index_name_ == INDEX_SINDI_V2 and not this->HasQuery()) {
+                warnings_.emplace_back(
+                    "base_path is ignored for static-only SINDI_V2 analysis; provide query_path "
+                    "to use it during dynamic analysis");
+            }
         }
     }
 
@@ -556,7 +618,11 @@ private:
 
     void
     CreateIndexWithParam(std::istream& stream) {
-        auto create_result = Factory::CreateIndex(index_name_, options_.build_parameter);
+        JsonType build_param = ParseJsonArgument(options_.build_parameter, "build_parameter");
+        if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
+            IsolateExternalBruteForceParam(build_param);
+        }
+        auto create_result = Factory::CreateIndex(index_name_, build_param.Dump());
         if (not create_result.has_value()) {
             throw std::runtime_error(fmt::format(
                 "failed to create index '{}': {}", index_name_, create_result.error().message));
@@ -575,7 +641,15 @@ private:
         if (extra_info_size_ > 0) {
             build_param["extra_info_size"].SetInt64(extra_info_size_);
         }
-        build_param[INDEX_PARAM].SetJson(index_param_);
+        if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) and
+            index_param_.Contains(BASE_CODES_KEY)) {
+            build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
+        } else {
+            build_param[INDEX_PARAM].SetJson(index_param_);
+            if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
+                IsolateExternalBruteForceParam(build_param);
+            }
+        }
 
         auto create_result = Factory::CreateIndex(index_name_, build_param.Dump());
         if (not create_result.has_value()) {
