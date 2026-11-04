@@ -1,0 +1,8 @@
+build*/
+data/
+__pycache__/
+*.bin
+*.graph
+*.fvecs
+*.ivecs
+*.u32

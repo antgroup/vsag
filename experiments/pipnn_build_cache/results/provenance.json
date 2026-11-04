@@ -1,0 +1,13 @@
+{
+  "measured_builder_commit": "bc2b520c4e99dc23104c7d842f6f8ea81871db9c",
+  "base_main_commit": "64b7f203ddbedbb398020f324ad3432b3b3870bf",
+  "platform": "Apple M4 16 GiB, macOS arm64, AppleClang 21 Release -O3, OpenBLAS 0.3.32",
+  "builder_threads": 1,
+  "blas_threads": 1,
+  "dataset": "SIFT base 1M x 128 + SIFT learn prefix",
+  "seed": 20261104,
+  "timing_scope": "memory-resident construction core; not complete HGraph ImportCache/Build",
+  "search_scope": "custom bottom-graph best-first; not HGraph KnnSearch",
+  "measurements": "one paired construction run per ratio; 512 queries and four paired timed rounds per ef; outputs remain original measured artifacts before packaging/formatting",
+  "learn_sha256": "331bc82b6a0e89465776a3ba0c2113e0bd0cceaa014ec3ed639bc8b981af72ea"
+}
