@@ -19,6 +19,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <random>
 #include <string>
 #include <thread>
@@ -954,4 +955,54 @@ TEST_CASE("vsag_c_api logger callback", "[vsag_c_api][ut]") {
     REQUIRE_OK(vsag_set_logger(nullptr, nullptr));
     REQUIRE_OK(vsag_index_serialize_file(index.get(), paths[0].c_str()));
     REQUIRE(records.count.load() == before);
+}
+
+TEST_CASE("vsag_c_api analyze index files", "[vsag_c_api][ut]") {
+    TestData data;
+    auto index = data.BuildIndex();
+    auto dir = fixtures::TempDir("vsag_c_api_analysis");
+    auto path = dir.GenerateRandomFile();
+    REQUIRE_OK(vsag_index_serialize_file(index.get(), path.data()));
+    const auto analyze = [](const nlohmann::json& options, vsag_index_analysis_t** analysis) {
+        return vsag_analyze_index(options.dump().c_str(), analysis);
+    };
+
+    vsag_index_analysis_t* analysis = nullptr;
+    REQUIRE_OK(analyze({{"index_path", path}}, &analysis));
+    REQUIRE(analysis != nullptr);
+    auto report = nlohmann::json::parse(vsag_index_analysis_report(analysis));
+    vsag_index_analysis_destroy(analysis);
+    REQUIRE(report["schema_version"] == VSAG_ANALYZE_INDEX_SCHEMA_VERSION);
+    REQUIRE(report["metadata"]["index_type"] == index_name);
+    REQUIRE(report["metadata"]["num_elements"] == num_vectors);
+    REQUIRE(report["dynamic_analysis"].is_null());
+
+    // Parameters may be JSON objects or strings.
+    REQUIRE_OK(analyze({{"index_path", path},
+                        {"build_parameter", "default"},
+                        {"search_parameter", {{"hgraph", {{"ef_search", 50}}}}},
+                        {"topk", 10}},
+                       &analysis));
+    vsag_index_analysis_destroy(analysis);
+
+    analysis = nullptr;
+    REQUIRE(code_of(analyze({{"index_path", "/nonexistent_dir/index.bin"}}, &analysis)) ==
+            VSAG_MISSING_FILE);
+    REQUIRE(analysis == nullptr);
+    REQUIRE(code_of(analyze(nlohmann::json::object(), &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(analyze({{"index_path", 1}}, &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(analyze({{"index_path", path}, {"topk", "10"}}, &analysis)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(analyze({{"index_path", path}, {"topk", UINT64_MAX}}, &analysis)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(analyze({{"index_path", path}, {"query_path", nlohmann::json::array()}},
+                            &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(analyze({{"index_path", path}, {"unknown", 1}}, &analysis)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_analyze_index("[]", &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_analyze_index("{", &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_analyze_index(nullptr, &analysis)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_analyze_index("{}", nullptr)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(std::string(vsag_index_analysis_report(nullptr)).empty());
+    vsag_index_analysis_destroy(nullptr);
 }

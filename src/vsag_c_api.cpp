@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <vsag/analyze_index.h>
 #include <vsag/engine.h>
 #include <vsag/factory.h>
 #include <vsag/filter.h>
@@ -23,6 +24,7 @@
 #include <vsag/vsag_c_api.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <cstring>
@@ -33,6 +35,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <nlohmann/json.hpp>
 #include <stdexcept>
 #include <streambuf>
 #include <string>
@@ -69,7 +72,14 @@ struct vsag_search_result {
     std::string statistics;
 };
 
+struct vsag_index_analysis {
+    std::string report;
+};
+
 namespace {
+
+static_assert(VSAG_ANALYZE_INDEX_SCHEMA_VERSION == vsag::ANALYZE_INDEX_SCHEMA_VERSION,
+              "the C and C++ analysis report versions must match");
 
 class IdListFilter : public vsag::Filter {
 public:
@@ -446,6 +456,57 @@ make_result(const tl::expected<vsag::DatasetPtr, vsag::Error>& searched,
     result->count = result->dataset->GetDim();
     *out_result = result.release();
     return nullptr;
+}
+
+// The members of an options_json object, as vsag::AnalyzeIndexOptions.
+vsag::AnalyzeIndexOptions
+parse_analyze_index_options(const char* options_json) {
+    const auto json = nlohmann::json::parse(options_json, nullptr, false);
+    if (json.is_discarded() or not json.is_object()) {
+        throw std::invalid_argument("options_json must be a JSON object");
+    }
+    using Member = std::string vsag::AnalyzeIndexOptions::*;
+    const std::array<std::pair<const char*, Member>, 8> string_members = {{
+        {"index_path", &vsag::AnalyzeIndexOptions::index_path},
+        {"build_parameter", &vsag::AnalyzeIndexOptions::build_parameter},
+        {"query_path", &vsag::AnalyzeIndexOptions::query_path},
+        {"query_data_type", &vsag::AnalyzeIndexOptions::query_data_type},
+        {"base_path", &vsag::AnalyzeIndexOptions::base_path},
+        {"groundtruth_path", &vsag::AnalyzeIndexOptions::groundtruth_path},
+        {"save_groundtruth_path", &vsag::AnalyzeIndexOptions::save_groundtruth_path},
+        {"search_parameter", &vsag::AnalyzeIndexOptions::search_parameter},
+    }};
+    vsag::AnalyzeIndexOptions options;
+    for (const auto& [key, value] : json.items()) {
+        if (key == "topk") {
+            if (not value.is_number_integer() or
+                (value.is_number_unsigned() and
+                 value.get<uint64_t>() > static_cast<uint64_t>(INT64_MAX))) {
+                throw std::invalid_argument("options_json member \"topk\" must be an int64");
+            }
+            options.topk = value.get<int64_t>();
+            continue;
+        }
+        Member member = nullptr;
+        for (const auto& [name, field] : string_members) {
+            if (key == name) {
+                member = field;
+            }
+        }
+        if (member == nullptr) {
+            throw std::invalid_argument("options_json has an unknown member \"" + key + "\"");
+        }
+        const bool parameter = key == "build_parameter" or key == "search_parameter";
+        if (parameter and value.is_object()) {
+            options.*member = value.dump();
+        } else if (value.is_string()) {
+            options.*member = value.get<std::string>();
+        } else {
+            throw std::invalid_argument("options_json member \"" + key + "\" must be a string" +
+                                        (parameter ? " or a JSON object" : ""));
+        }
+    }
+    return options;
 }
 
 }  // namespace
@@ -1148,6 +1209,31 @@ vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_
         *out_max_id = range.value().second;
         return nullptr;
     });
+}
+
+vsag_error_t*
+vsag_analyze_index(const char* options_json, vsag_index_analysis_t** out_analysis) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_analysis != nullptr, "out_analysis is NULL");
+        *out_analysis = nullptr;
+        VSAG_REQUIRE(options_json != nullptr, "options_json is NULL");
+        auto report = vsag::analyze_index(parse_analyze_index_options(options_json));
+        if (not report.has_value()) {
+            return make_error(report.error());
+        }
+        *out_analysis = new vsag_index_analysis{std::move(report.value())};
+        return nullptr;
+    });
+}
+
+const char*
+vsag_index_analysis_report(const vsag_index_analysis_t* analysis) {
+    return analysis == nullptr ? "" : analysis->report.c_str();
+}
+
+void
+vsag_index_analysis_destroy(vsag_index_analysis_t* analysis) {
+    delete analysis;
 }
 
 }  // extern "C"
