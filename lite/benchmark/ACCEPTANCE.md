@@ -13,6 +13,11 @@ See [evidence identities](results/manifest.json) and the [reproduction guide](..
 | At least two datasets/scales; package/snapshot/load/peak/CRUD/P50/P99/recall | Three-dataset resident CRUD, native Full comparison and dynamic stability |
 | At least one resource improvement, functional correctness and stable retrieval | Bounded runtime-package gain and explicit dynamic quality limitations |
 
+This table maps requirements to available evidence; it does not declare every
+requirement passed. The measured report separates delivery, results and acceptance
+judgments, including unresolved dynamic recall loss. Its metric-to-file index
+locates the original samples without relabeling their measured source.
+
 ## Resident protocol
 
 Use SIFT128, GIST960 and Cohere768, each with 10000 live vectors and 1000 query rows.

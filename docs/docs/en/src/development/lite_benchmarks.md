@@ -7,6 +7,13 @@ Functionality and API are described by the [Lite guide](lite_first.md).
 Measurements remain bound to their recorded source, library, compiler and inputs.
 Building another integration commit does not relabel the recorded Full results.
 
+In the measured report, start with the four-output evidence/result/conclusion
+table. Chapter 6 maps required metrics to original archive members; chapters 4–5
+explain resource tradeoffs and unresolved dynamic quality. The package breakdown
+is recomputed from the existing inventory, not a new measurement. The proposed
+Update-only, Remove/Add-only and rebuild controls are future verification steps,
+not completed fixes or a claim that all acceptance requirements passed.
+
 ## Build and test quick start
 
 Run from a clean Linux x86_64 checkout with C++17, CMake, Ninja, Python3/pip and
