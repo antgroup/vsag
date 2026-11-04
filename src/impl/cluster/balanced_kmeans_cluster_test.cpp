@@ -643,6 +643,41 @@ TEST_CASE("BalancedKMeans waits for queued tasks when the pool refuses one",
         std::runtime_error);
 }
 
+TEST_CASE("BalancedKMeans runs on a worker of its own pool", "[ut][BalancedKMeansCluster]") {
+    // The pool's only worker runs the trainer, so a task it queued and joined would
+    // never start: this test hangs if the trainer stops running inline there.
+    constexpr uint64_t dim = 8;
+    constexpr uint64_t count = 2000;
+    constexpr uint32_t k = 16;
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto datas = uniform_vectors(count, dim, 113);
+    vsag::BalancedKMeansOptions options;
+    options.random_seed = 127;
+    options.iterations = 3;
+    if (GENERATE(false, true)) {
+        options.work_budget = 0.0;  // the two-level path
+    }
+
+    auto pool = make_pool(1);
+    vsag::BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator.get(), pool);
+    const auto labels =
+        pool->GeneralEnqueue([&]() { return cluster.Run(k, datas.data(), count, options); }).get();
+    require_balanced(labels, count, k);
+
+    // Running inline changes where the work happens, not its result.
+    vsag::BalancedKMeansCluster outside(static_cast<int32_t>(dim), allocator.get(), make_pool(4));
+    REQUIRE(outside.Run(k, datas.data(), count, options) == labels);
+
+    const std::vector<float> centroids(cluster.k_centroids_, cluster.k_centroids_ + k * dim);
+    const auto assigned =
+        pool->GeneralEnqueue([&]() {
+                return cluster.Assign(
+                    centroids.data(), k, datas.data(), count, vsag::BalancedAssignMetric::L2SQR);
+            })
+            .get();
+    require_balanced(assigned, count, k);
+}
+
 TEST_CASE("BalancedKMeans leaves the caller's OpenMP setting alone",
           "[ut][BalancedKMeansCluster]") {
     // With few clusters the centroid update is one task, which runs on the calling
