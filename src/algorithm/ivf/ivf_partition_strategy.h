@@ -78,8 +78,9 @@ public:
     }
 
     /// Buckets of training vectors for codes that depend on their bucket (residuals),
-    /// placed the way a Build places vectors, so the codes are trained on the
-    /// residuals they will encode. By default every vector goes to its nearest bucket.
+    /// assigned the way a Build assigns its vectors, so the codes are trained on
+    /// residuals like the ones they will encode. By default every vector goes to its
+    /// nearest bucket.
     virtual Vector<BucketIdType>
     ClassifyDatasForTrain(const void* datas, int64_t count) {
         return ClassifyDatas(datas, count, 1, nullptr);
