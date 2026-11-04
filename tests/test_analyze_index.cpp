@@ -14,6 +14,7 @@
 
 #include <cstdint>
 #include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -34,6 +35,7 @@ constexpr const char* kIndexParam = R"({
 })";
 
 constexpr const char* kCosineIndexParam = R"({
+    "type": "brute_force",
     "dtype": "float32",
     "metric_type": "cosine",
     "dim": 4,
@@ -121,6 +123,13 @@ SaveEmptyIndex(const std::string& index_path,
     return index_path;
 }
 
+std::string
+ReadBinaryFile(const std::string& path) {
+    std::ifstream stream(path, std::ios::binary | std::ios::in);
+    REQUIRE(stream.is_open());
+    return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
 void
 WriteDenseQueryFile(const std::string& query_path, int64_t rows, int64_t cols) {
     std::ofstream stream(query_path, std::ios::binary | std::ios::out);
@@ -157,6 +166,51 @@ TEST_CASE("AnalyzeIndex returns a structured static report", "[analyze_index]") 
     REQUIRE(report["warnings"].IsArray());
     REQUIRE(report["compatibility"]["schema_version"].GetString() ==
             vsag::INDEX_ANALYSIS_SCHEMA_VERSION);
+}
+
+TEST_CASE("AnalyzeIndex does not modify brute-force backing files", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_isolated_io");
+    const std::string backing_path = temp_dir.path + "base-codes.bin";
+
+    vsag::JsonType build_param = vsag::JsonType::Parse(kIndexParam);
+    build_param["index_param"]["base_io_type"].SetString("buffer_io");
+    build_param["index_param"]["base_file_path"].SetString(backing_path);
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", build_param.Dump());
+    const std::string backing_before = ReadBinaryFile(backing_path);
+    REQUIRE_FALSE(backing_before.empty());
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    REQUIRE_NOTHROW(vsag::AnalyzeIndex(options));
+
+    REQUIRE(ReadBinaryFile(backing_path) == backing_before);
+}
+
+TEST_CASE("Brute-force internal parameter reload keeps validation", "[analyze_index]") {
+    const std::string int8_param = R"({
+        "dtype": "int8",
+        "metric_type": "l2",
+        "dim": 4,
+        "index_param": {
+            "_analyzer_deserialize": true,
+            "base_codes": {
+                "codes_type": "flatten_codes",
+                "io_params": {"type": "memory_io"},
+                "quantization_params": {"type": "int8"}
+            }
+        }
+    })";
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("brute_force", int8_param).has_value());
+
+    vsag::JsonType unknown_key_param = vsag::JsonType::Parse(int8_param);
+    unknown_key_param["dtype"].SetString("float32");
+    unknown_key_param["index_param"]["unknown_key"].SetBool(true);
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("brute_force", unknown_key_param.Dump()).has_value());
+
+    unknown_key_param["index_param"].Erase("_analyzer_deserialize");
+    unknown_key_param["index_param"].Erase("unknown_key");
+    REQUIRE_FALSE(vsag::Factory::CreateIndex("brute_force", unknown_key_param.Dump()).has_value());
 }
 
 TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[analyze_index]") {
@@ -208,6 +262,8 @@ TEST_CASE("AnalyzeIndex keeps SINDI V2 base-path static analysis on GetStats", "
     REQUIRE(report["static_analysis"]["supported"].GetBool());
     REQUIRE(report["static_analysis"]["statistics"]["_analysis"]["analysis_type"].GetString() ==
             "stats");
+    REQUIRE(report["warnings"].Dump().find(
+                "base_path is ignored for static-only SINDI_V2 analysis") != std::string::npos);
 }
 
 TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[analyze_index]") {
@@ -228,6 +284,20 @@ TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[
     REQUIRE(report["dynamic_analysis"]["topk"].GetInt() == 2);
     REQUIRE(report["dynamic_analysis"]["query_data_type"].GetString() == "dense");
     REQUIRE(report["dynamic_analysis"]["results"].IsObject());
+}
+
+TEST_CASE("AnalyzeIndex rejects multi-row query files", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_multi_row_query");
+    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteDenseQueryFile(query_path, 2, kDim);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.query_path = query_path;
+    options.query_data_type = "dense";
+
+    REQUIRE_THROWS_AS(vsag::AnalyzeIndex(options), std::runtime_error);
 }
 
 TEST_CASE("AnalyzeIndex rejects invalid options", "[analyze_index]") {
