@@ -33,6 +33,43 @@ constexpr const char* kIndexParam = R"({
     }
 })";
 
+constexpr const char* kCosineIndexParam = R"({
+    "dtype": "float32",
+    "metric_type": "cosine",
+    "dim": 4,
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "precise_quantization_type": "fp32"
+    }
+})";
+
+constexpr const char* kSindiIndexParam = R"({
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 128,
+    "index_param": {
+        "term_id_limit": 1000,
+        "window_size": 100,
+        "doc_prune_ratio": 0.0,
+        "use_quantization": false,
+        "use_reorder": false
+    }
+})";
+
+constexpr const char* kSindiV2IndexParam = R"({
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 128,
+    "index_param": {
+        "term_id_limit": 1000,
+        "window_size": 100,
+        "doc_prune_ratio": 0.0,
+        "use_quantization": false,
+        "use_reorder": false,
+        "term_io": {"type": "memory_io"}
+    }
+})";
+
 constexpr int64_t kDim = 4;
 constexpr int64_t kNumElements = 8;
 
@@ -49,8 +86,8 @@ MakeVectors() {
 }
 
 std::string
-BuildAndSaveIndex(const std::string& index_path) {
-    auto index = vsag::Factory::CreateIndex("brute_force", kIndexParam);
+BuildAndSaveIndex(const std::string& index_path, const std::string& index_param = kIndexParam) {
+    auto index = vsag::Factory::CreateIndex("brute_force", index_param);
     REQUIRE(index.has_value());
 
     auto vectors = MakeVectors();
@@ -62,6 +99,20 @@ BuildAndSaveIndex(const std::string& index_path) {
     auto base = vsag::Dataset::Make();
     base->NumElements(kNumElements)->Dim(kDim)->Float32Vectors(vectors.data())->Ids(ids.data());
     REQUIRE(index.value()->Build(base).has_value());
+
+    std::ofstream stream(index_path, std::ios::binary | std::ios::out);
+    REQUIRE(stream.is_open());
+    REQUIRE(index.value()->Serialize(stream).has_value());
+    stream.close();
+    return index_path;
+}
+
+std::string
+SaveEmptyIndex(const std::string& index_path,
+               const std::string& index_name,
+               const std::string& index_param) {
+    auto index = vsag::Factory::CreateIndex(index_name, index_param);
+    REQUIRE(index.has_value());
 
     std::ofstream stream(index_path, std::ios::binary | std::ios::out);
     REQUIRE(stream.is_open());
@@ -108,11 +159,62 @@ TEST_CASE("AnalyzeIndex returns a structured static report", "[analyze_index]") 
             vsag::INDEX_ANALYSIS_SCHEMA_VERSION);
 }
 
+TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_explicit_metric");
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", kCosineIndexParam);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kCosineIndexParam;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "brute_force");
+    REQUIRE(report["index"]["metric"].GetString() == "cosine");
+    REQUIRE(report["index"]["metadata_source"].GetString() == "build_parameter");
+}
+
+TEST_CASE("AnalyzeIndex loads an empty SINDI with explicit parameters", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_empty_sindi");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiIndexParam;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "sindi");
+    REQUIRE(report["index"]["data_type"].GetString() == "sparse");
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["static_analysis"]["statistics"]["total_count"].GetInt() == 0);
+}
+
+TEST_CASE("AnalyzeIndex keeps SINDI V2 base-path static analysis on GetStats", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_sindi_v2_base_path");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi_v2", kSindiV2IndexParam);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiV2IndexParam;
+    options.base_path = temp_dir.path + "unused-base.bin";
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "sindi_v2");
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["static_analysis"]["statistics"]["_analysis"]["analysis_type"].GetString() ==
+            "stats");
+}
+
 TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_dynamic");
     const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
     const std::string query_path = temp_dir.path + "queries.bin";
-    WriteDenseQueryFile(query_path, 2, kDim);
+    WriteDenseQueryFile(query_path, 1, kDim);
 
     vsag::IndexAnalysisOptions options;
     options.index_path = index_path;

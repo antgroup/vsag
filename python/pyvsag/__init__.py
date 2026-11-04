@@ -19,6 +19,10 @@ import sys
 _cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(_cur_file_dir)
 
+# The native module emits its initialization banner while it is being loaded. Suppress it before
+# that import so API consumers and the JSON CLI do not get unexpected stdout output.
+os.environ.setdefault("VSAG_SUPPRESS_INIT_BANNER", "1")
+
 from _pyvsag import *
 from ._version import __version__
 from .analyzer import ANALYSIS_SCHEMA_VERSION, analyze_index

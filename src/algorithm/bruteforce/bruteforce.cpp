@@ -1250,6 +1250,14 @@ build_default_brute_force_param(const JsonType& external_param, bool warp) {
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {
+    // Serialized footers contain already-mapped internal parameters. Accept them directly so
+    // deserializing clients do not feed internal keys back through the external-parameter mapper.
+    if (external_param.Contains(BASE_CODES_KEY)) {
+        auto brute_force_parameter = std::make_shared<BruteForceParameter>();
+        brute_force_parameter->FromJson(external_param);
+        return brute_force_parameter;
+    }
+
     // Detect if this is a WARP (multi-vector) index request
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
 
