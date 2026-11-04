@@ -945,6 +945,18 @@ TEST_CASE_METHOD(HGraphFGIMTest,
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects unsupported destination storage",
+                 "[ut][hgraph][fgim]") {
+    const std::string condition = GENERATE("non-float32", "non-L2", "quantized base");
+    auto destination = MakeSource(2, 0, true, condition == "quantized base" ? "sq8" : "fp32");
+    const FGIMKnnGraph graph{{{1, 0}}, {{0, 0}}};
+    if (condition != "quantized base") {
+        SetUnsupported(*destination, condition);
+    }
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM bottom writing rejects a missing destination label table",
                  "[ut][hgraph][fgim]") {
     auto destination = MakeSource(2, 0, true);

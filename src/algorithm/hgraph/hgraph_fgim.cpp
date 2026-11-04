@@ -576,6 +576,7 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
 
 void
 HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k) {
+    ValidateStorage(destination);
     ValidateKnnGraph(graph, k, destination.GetNumElements());
     const bool valid_condition_2 = destination.bottom_graph_ != nullptr &&
                                    destination.bottom_graph_->MaximumDegree() >= k &&
