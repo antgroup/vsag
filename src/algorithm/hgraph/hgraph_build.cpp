@@ -1589,13 +1589,12 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     const uint64_t final_memory = this->EstimateMemory(num_elements);
     uint64_t build_memory = 0;
 
-    // (1) Quantizer training sample. sample_train_data() only copies when the input is
+    // (1) HGraph's outer training sample. sample_train_data() only copies when the input is
     //     larger than the sample budget: for num_elements <= max(512, train_sample_count)
     //     it returns the caller's dataset as-is and allocates none of these buffers, so
-    //     caller-owned input memory stays excluded (FP32Quantizer::TrainImpl allocates
-    //     nothing either). When sampling does happen, the staging buffer and the returned
-    //     dataset coexist, so the peak is two float32 copies of the sample plus its id
-    //     and index arrays.
+    //     caller-owned input memory stays excluded. When sampling does happen, the staging
+    //     buffer and the returned dataset coexist, so the peak is two float32 copies of the
+    //     sample plus its id and index arrays.
     constexpr uint64_t kMinTrainSampleCount = 512;
     const uint64_t max_train_sample_count =
         std::max<uint64_t>(kMinTrainSampleCount, static_cast<uint64_t>(this->train_sample_count_));
@@ -1605,6 +1604,20 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         build_memory += train_sample_count * (sizeof(int64_t) + sizeof(int64_t));
     }
 
+    // (2) The SQ8 quantizers train through ScalarQuantizationTrainer, which unconditionally
+    //     copies min(train_count, 100000) rows into a default-allocator std::vector. This is
+    //     independent of HGraph's outer sampler: in particular, it also happens when that
+    //     sampler returns the caller's dataset without copying. FP32 training has no such copy.
+    const auto quantizer_name = this->basic_flatten_codes_->GetQuantizerName();
+    if (quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+        quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+        constexpr uint64_t kScalarQuantizerMaxTrainSampleCount = 100000;
+        const uint64_t quantizer_train_sample_count =
+            std::min<uint64_t>(train_sample_count, kScalarQuantizerMaxTrainSampleCount);
+        build_memory +=
+            quantizer_train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float);
+    }
+
     // Workers that may hold construction scratch at the same time. A single-threaded build has
     // no thread pool and inserts on the calling thread.
     const uint64_t build_threads =
@@ -1612,7 +1625,7 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
             ? 1
             : std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(num_elements));
 
-    // (2) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
+    // (3) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
     //     the pool and runs one KNN search with ef_construct as the candidate budget: the
     //     visited list is one tag word plus one bit word per 64 nodes held by the graph, and the
     //     search keeps a result heap and a candidate heap of up to ef_construct entries each.
@@ -1622,11 +1635,11 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         2 * this->ef_construct_ * sizeof(std::pair<float, InnerIdType>);
     build_memory += build_threads * (visited_list_bytes + probe_heap_bytes);
 
-    // (3) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
+    // (4) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
     //     before writing it into the persistent flatten storage.
     build_memory += build_threads * static_cast<uint64_t>(this->basic_flatten_codes_->code_size_);
 
-    // (4) Per-element build bookkeeping, retained by the allocator for the whole insertion
+    // (5) Per-element build bookkeeping, retained by the allocator for the whole insertion
     //     phase and independent of the worker count: prepare_add_batch() keeps one AddRow per
     //     accepted input in the batch's row vector and one entry per element in
     //     pending_code_writes_ until insertion completes. Both containers grow by
@@ -1634,6 +1647,17 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     //     at twice its final per-element size to cover the growth transient.
     build_memory += 2 * num_elements * sizeof(AddRow);
     build_memory += 2 * num_elements * sizeof(std::pair<const InnerIdType, uint8_t>);
+
+    if (this->thread_pool_ != nullptr) {
+        // (6) insert_add_batch() reserves one future per row and calls GeneralEnqueue for every
+        //     accepted row. Each future retains its packaged-task state until the whole batch is
+        //     joined. The standard library does not expose the size of that state or its
+        //     type-erased queue wrappers, so include a conservative per-task allowance as well
+        //     as the concrete future vector storage.
+        constexpr uint64_t kParallelTaskStateBytes = 512;
+        const uint64_t future_bytes = static_cast<uint64_t>(sizeof(std::future<void>));
+        build_memory += num_elements * (kParallelTaskStateBytes + future_bytes);
+    }
 
     return final_memory + build_memory;
 }

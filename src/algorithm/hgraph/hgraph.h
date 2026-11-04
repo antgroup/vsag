@@ -162,19 +162,26 @@ public:
       * count, including a separate in-memory raw-vector store when one exists) plus the
       * build-only temporaries that exist while an in-memory NSW graph is constructed:
       *
-      *   1. the quantizer training sample, but only when sample_train_data() actually
-      *      samples, i.e. when the element count exceeds max(512, train_sample_count);
-      *      the sampler then holds a staging buffer and the returned dataset at the same
-      *      time (two float32 copies of the sample) plus its id and index arrays, while
-      *      for smaller inputs it returns the caller's dataset without copying;
-      *   2. the per-worker construction probe scratch: one pool visited list over the graph's
+      *   1. HGraph's outer quantizer training sample, but only when sample_train_data()
+      *      actually samples, i.e. when the element count exceeds
+      *      max(512, train_sample_count); the sampler then holds a staging buffer and the
+      *      returned dataset at the same time (two float32 copies of the sample) plus its
+      *      id and index arrays, while for smaller inputs it returns the caller's dataset
+      *      without copying;
+      *   2. the SQ8/SQ8-uniform quantizer's independent ScalarQuantizationTrainer copy of
+      *      min(train_count, 100000) float32 rows, including when the outer sampler does
+      *      not copy;
+      *   3. the per-worker construction probe scratch: one pool visited list over the graph's
       *      nodes and the result/candidate heaps bounded by ef_construction;
-      *   3. one temporary encode row per worker, used by InsertVector() before the code is
+      *   4. one temporary encode row per worker, used by InsertVector() before the code is
       *      written into the persistent flatten storage;
-      *   4. the per-element build bookkeeping prepare_add_batch() retains until insertion
+      *   5. the per-element build bookkeeping prepare_add_batch() retains until insertion
       *      completes: one AddRow per accepted input and one pending_code_writes_ entry per
       *      element, each charged at twice its final size because both containers grow by
-      *      reallocation where the old and the new storage coexist.
+      *      reallocation where the old and the new storage coexist;
+      *   6. for parallel add, one future per element and a 512-byte-per-task allowance for
+      *      the packaged-task state and type-erased scheduler wrappers retained until the
+      *      batch completes.
       *
       * The estimate deliberately excludes memory held by the caller for the input data vectors.
       * Only the persistent flatten storage (base, precise and separate raw-vector), graph,

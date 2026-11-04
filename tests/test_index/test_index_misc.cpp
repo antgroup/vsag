@@ -14,6 +14,8 @@
 
 #include "test_index_common.h"
 
+#include "json_types.h"
+
 namespace fixtures {
 
 void
@@ -77,6 +79,48 @@ TestIndex::TestEstimateBuildMemory(const std::string& index_name,
             // bounded per-element and per-worker terms over the block-rounded retained
             // footprint, so a twofold overshoot means a term is double-counted.
             REQUIRE(estimate_build_memory <= real_peak_memory * 2);
+
+            if (index_name == "hgraph") {
+                // Exercise estimator terms that a recording index allocator cannot observe:
+                // ScalarQuantizationTrainer and the thread pool allocate from the default heap.
+                auto serial_param = vsag::JsonType::Parse(build_param);
+                serial_param["index_param"]["build_thread_count"].SetInt(1);
+                auto serial_index = engine.CreateIndex(index_name, serial_param.Dump()).value();
+                REQUIRE(serial_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+                auto parallel_param = serial_param;
+                parallel_param["index_param"]["build_thread_count"].SetInt(2);
+                auto parallel_index = engine.CreateIndex(index_name, parallel_param.Dump()).value();
+                REQUIRE(parallel_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+                const auto serial_estimate = serial_index->EstimateBuildMemory(data_size);
+                const auto parallel_estimate = parallel_index->EstimateBuildMemory(data_size);
+                // Apart from extra worker scratch, parallel add must charge O(N) task/future
+                // state. Use a lower bound below the model's allowance to avoid testing a
+                // particular standard library's allocation layout.
+                constexpr uint64_t kMinParallelTaskStateBytes = 256;
+                REQUIRE(parallel_estimate >=
+                        serial_estimate + data_size * kMinParallelTaskStateBytes);
+
+                const auto quantizer =
+                    serial_param["index_param"]["base_quantization_type"].GetString();
+                if (quantizer == "sq8" or quantizer == "sq8_uniform") {
+                    // At this count HGraph's outer sampler returns the caller dataset. Increasing
+                    // the dimension must nevertheless grow the build-only estimate by at least
+                    // one float per row: the quantizer's own training copy is always made.
+                    const uint64_t estimate_count =
+                        std::min<uint64_t>(static_cast<uint64_t>(data_size), 512);
+                    auto wider_param = serial_param;
+                    wider_param["dim"].SetInt(dataset->base_->GetDim() + 1);
+                    auto wider_index = engine.CreateIndex(index_name, wider_param.Dump()).value();
+                    REQUIRE(wider_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+                    const auto serial_build_only =
+                        serial_index->EstimateBuildMemory(estimate_count) -
+                        serial_index->EstimateMemory(estimate_count);
+                    const auto wider_build_only = wider_index->EstimateBuildMemory(estimate_count) -
+                                                  wider_index->EstimateMemory(estimate_count);
+                    REQUIRE(wider_build_only >= serial_build_only + estimate_count * sizeof(float));
+                }
+            }
         }
     }
 }
