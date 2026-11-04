@@ -2,6 +2,10 @@
 
 [验收协议](../../../../../lite/benchmark/ACCEPTANCE.md)、[综合报告](../../../../../lite/benchmark/ACCEPTANCE_REPORT.md)和[证据清单](../../../../../lite/benchmark/results/manifest.json)共同说明条件与结论。功能与 API 见[Lite 指南](lite_first.md)。测量绑定记录中的源码、库、编译配置和输入；集成提交通过测试不等于已有数据被重新测量。
 
+阅读综合报告时，先看四项产出的要求、证据、结果与结论；第 6 章提供规定指标到原始归档成员的索引，
+第 4–5 章解释资源取舍与尚未闭环的动态质量。包体分解来自已有 inventory 复算，不是新增测量。
+Update-only、Remove/Add-only 和同最终向量重建是下一步核对方法，不是已完成修复或全部验收通过的声明。
+
 ## 构建与回归
 
 在干净的 Linux x86_64 仓库运行，需要 C++17、CMake、Ninja、Python3/pip 和仓库固定版本的 Catch2。资源测量需要 `/proc`、`/dev/shm`、`taskset` 和 `/usr/bin/time`。构建和输出放在仓库外的新目录。
