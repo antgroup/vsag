@@ -437,6 +437,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
                 create_new_raw_vector_ = false;
             }
         }
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                              this->can_estimate_build_memory());
     }
     return true;
 }
@@ -953,6 +955,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
     if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = basic_flatten_codes_;
+        create_new_raw_vector_ = false;
         has_raw_vector_ = true;
         return;
     }
@@ -960,6 +963,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = high_precise_codes_;
+        create_new_raw_vector_ = false;
         has_raw_vector_ = true;
         return;
     }

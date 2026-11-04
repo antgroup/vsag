@@ -28,6 +28,7 @@
 
 #include "datacell/flatten_build_utils.h"
 #include "datacell/flatten_datacell_parameter.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "dataset_impl.h"
@@ -866,6 +867,10 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
         this->insert_one_logical_point(vector_data, row, context);
     };
 
+    // A supplied pool may have more workers than build_thread_count_. Keep no more unfinished
+    // tasks than the configured limit so construction scratch is bounded for any pool.
+    const uint64_t max_in_flight = std::max<uint64_t>(this->build_thread_count_, 1);
+    uint64_t next_future_to_drain = 0;
     for (const auto& row : batch.rows) {
         const auto* extra_info =
             extra_infos == nullptr ? nullptr : extra_infos + row.input_idx * extra_info_size_;
@@ -874,6 +879,10 @@ HGraph::insert_add_batch(const DatasetPtr& data, const AddContext& context, cons
             cur_attr_set = attr_sets + row.input_idx;
         }
         if (effective_parallel) {
+            if (futures.size() - next_future_to_drain >= max_in_flight) {
+                futures[next_future_to_drain].wait();
+                ++next_future_to_drain;
+            }
             auto future = this->thread_pool_->GeneralEnqueue(
                 add_func, get_data(data, row.input_idx), row, extra_info, cur_attr_set);
             futures.emplace_back(std::move(future));
@@ -1570,10 +1579,9 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     if (this->index_feature_list_ == nullptr or
         not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) or
         not this->can_estimate_build_memory()) {
-        // The feature bit is computed once by InitFeatures() at construction time.
-        // Recheck the live eligibility as well: ImportCache() can switch Build() onto
-        // the warm-start/refine path after construction (the bit is also refreshed
-        // there), and the feature bit must never make this method describe a build
+        // InitFeatures() computes the feature bit at construction time, and Tune() and
+        // ImportCache() refresh it after changing the active build configuration. Recheck the
+        // live eligibility as well so the feature bit never makes this method describe a build
         // path Build() would not take.
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "HGraph doesn't support EstimateBuildMemory for the current build "
@@ -1633,12 +1641,14 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
             quantizer_train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float);
     }
 
-    // Workers that may hold construction scratch at the same time. A single-threaded build has
-    // no thread pool and inserts on the calling thread.
+    // Workers that may hold construction scratch at the same time. insert_add_batch() keeps at
+    // most build_thread_count_ unfinished tasks even when the supplied pool has more workers.
+    // Without a pool, insertion runs on the calling thread.
     const uint64_t build_threads =
         this->thread_pool_ == nullptr
             ? 1
-            : std::min<uint64_t>(this->build_thread_count_, static_cast<uint64_t>(num_elements));
+            : std::min<uint64_t>(std::max<uint64_t>(this->build_thread_count_, 1),
+                                 static_cast<uint64_t>(num_elements));
 
     // (3) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
     //     the pool and runs one KNN search with ef_construct as the candidate budget: the
@@ -1675,9 +1685,9 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     }
 
     // (7) MemoryIO grows through Allocator::Reallocate(), whose copy-based growth can keep the
-    //     old and new contiguous stores alive together. HGraph::resize() grows the code stores
-    //     sequentially, so only the largest previous store is needed beyond the final footprint.
-    //     BlockMemoryIO grows by adding independent blocks and has no whole-store transient.
+    //     old and new contiguous stores alive together. HGraph::resize() grows the bottom graph
+    //     and code stores sequentially, so only the largest previous store is needed beyond the
+    //     final footprint. BlockMemoryIO grows by adding independent blocks and has no transient.
     const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
     const uint64_t resize_batch_size = uint64_t{1} << this->resize_increase_count_bit_;
     const uint64_t current_capacity = this->max_capacity_.load();
@@ -1706,6 +1716,16 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     }
     if (this->create_new_raw_vector_) {
         account_contiguous_store(this->raw_vector_, hgraph_param->raw_vector_param);
+    }
+    const auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (grows_code_stores and graph_param != nullptr and graph_param->io_parameter_ != nullptr and
+        graph_param->io_parameter_->Kind() == IOKind::MEMORY) {
+        const uint64_t graph_record_size =
+            (static_cast<uint64_t>(this->bottom_graph_->maximum_degree_) + 1) * sizeof(InnerIdType);
+        const uint64_t previous_graph_bytes =
+            std::max<uint64_t>(previous_element_count * graph_record_size, 1);
+        resize_transient = std::max(resize_transient, previous_graph_bytes);
     }
     build_memory += resize_transient;
 
