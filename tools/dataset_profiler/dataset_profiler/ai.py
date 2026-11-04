@@ -44,7 +44,7 @@ import os
 import re
 import urllib.error
 import urllib.request
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 AI_SCHEMA_VERSION = "1.0"
 DEFAULT_BASE_URL = "https://api.openai.com/v1"
@@ -436,6 +436,14 @@ class OpenAICompatibleProvider:
     ) -> None:
         if not api_key:
             raise AIAnalysisError("AI analysis enabled but no API key was found in the environment")
+        if any(ord(character) < 33 or ord(character) > 126 for character in api_key):
+            # HTTP authentication headers require visible ASCII.  Reject an
+            # accidentally retained newline before urllib can include the full
+            # Authorization value in a transport exception.
+            raise AIAnalysisError(
+                "AI API key must contain only visible ASCII characters; remove "
+                "any accidental whitespace or control characters"
+            )
         if not model:
             raise AIAnalysisError("AI analysis enabled but no model was configured (set VSAG_AI_MODEL or pass --ai-model)")
         if not base_url.startswith("https://"):
@@ -506,7 +514,24 @@ def provider_from_env(
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
-def _redact(message: str) -> str:
+def _redact(message: str, secrets: Sequence[str] = ()) -> str:
+    # Provider exceptions can contain either the literal header value or its
+    # repr/JSON-escaped form.  Redact the configured credential itself instead
+    # of relying on a provider-specific token prefix or character set.
+    variants = set()
+    for secret in secrets:
+        if not secret:
+            continue
+        candidates = (
+            secret,
+            secret.strip(),
+            json.dumps(secret, ensure_ascii=True)[1:-1],
+            repr(secret)[1:-1],
+            secret.encode("unicode_escape").decode("ascii"),
+        )
+        variants.update(candidate for candidate in candidates if candidate)
+    for secret in sorted(variants, key=len, reverse=True):
+        message = message.replace(secret, "[redacted]")
     for pattern in _ERROR_REDACTIONS:
         message = pattern.sub("[redacted]", message)
     return message[:500]
@@ -531,6 +556,8 @@ def analyze_report(
             return {"status": "error", "provider": None, "error": _redact(str(exc))}
     name = getattr(provider, "name", type(provider).__name__)
     model = getattr(provider, "model", None)
+    configured_key = getattr(provider, "_api_key", None)
+    secrets = [configured_key] if isinstance(configured_key, str) else []
     try:
         raw = provider.complete(build_prompt(report))
         block = parse_and_validate_response(raw, report)
@@ -539,7 +566,7 @@ def analyze_report(
             "status": "error",
             "provider": name,
             "model": model,
-            "error": _redact(str(exc)),
+            "error": _redact(str(exc), secrets),
         }
     except Exception as exc:  # defensive: providers may raise transport errors
         return {
@@ -547,7 +574,8 @@ def analyze_report(
             "provider": name,
             "model": model,
             "error": _redact(
-                "unexpected AI failure: %s: %s" % (type(exc).__name__, exc)
+                "unexpected AI failure: %s: %s" % (type(exc).__name__, exc),
+                secrets,
             ),
         }
     block.update(

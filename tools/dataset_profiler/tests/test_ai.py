@@ -309,3 +309,35 @@ def test_openai_request_body_excludes_credentials_and_vectors(monkeypatch, dense
     # the key must never reach the persisted report either
     report["ai_analysis"] = block
     assert "sk-supersecretvalue123" not in dump_json(report)
+
+
+@pytest.mark.parametrize("api_key", ["abc+defghijklmnop\n", "abc/defghijkl\n"])
+def test_malformed_configured_keys_are_rejected_without_leaking(dense_path, api_key):
+    block = analyze_report(
+        _report(dense_path),
+        env={"VSAG_AI_API_KEY": api_key, "VSAG_AI_MODEL": "m"},
+    )
+    assert block["status"] == "error"
+    assert "visible ASCII" in block["error"]
+    assert api_key.strip() not in block["error"]
+    assert json.dumps(api_key)[1:-1] not in block["error"]
+
+
+def test_analyze_report_redacts_configured_key_in_escaped_exception(dense_path):
+    api_key = "abc/defghijkl\n"
+
+    class LeakyProvider:
+        name = "leaky"
+        model = "m"
+        _api_key = api_key
+
+        def complete(self, prompt):
+            raise ValueError("invalid Authorization value %r" % ("Bearer " + api_key))
+
+    block = analyze_report(_report(dense_path), provider=LeakyProvider())
+    assert block["status"] == "error"
+    assert api_key not in block["error"]
+    assert api_key.strip() not in block["error"]
+    assert json.dumps(api_key)[1:-1] not in block["error"]
+    assert "[redacted]" in block["error"]
+    dump_json({"ai_analysis": block})

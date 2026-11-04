@@ -49,6 +49,7 @@ _DEFAULT_SPARSE_METRIC = "ip"
 _MAX_ANISOTROPY_DIM = 50000
 _MAX_ANISOTROPY_BYTES = 256 * 1024 * 1024
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
+_PCA_SVD_MAX_DIM = 4096
 # Dense streaming blocks are sized by their working bytes, not by a fixed row
 # count: every row keeps the raw block, a float64 copy, a finite mask, and
 # several float64 temporaries alive at the same time.
@@ -166,12 +167,23 @@ def profile_dataset(
 
         requested_sample = int(config.sample_size)
         requested_pairwise = int(config.pairwise_sample_size)
-        effective_sample = min(requested_sample, int(metadata.count or 0))
+        dataset_count = int(metadata.count or 0)
+        dataset_limited_sample = min(requested_sample, dataset_count)
+        effective_sample = dataset_limited_sample
+        if metadata.vector_type == "dense":
+            effective_sample = _dense_sample_size(
+                dataset_count, int(metadata.dim or 0), requested_sample
+            )
         effective_pairwise = min(requested_pairwise, effective_sample)
-        if effective_sample < requested_sample:
+        if dataset_limited_sample < requested_sample:
             warnings.append(
                 "sample_size reduced from %d to %d to stay within the dataset size"
-                % (requested_sample, effective_sample)
+                % (requested_sample, dataset_limited_sample)
+            )
+        if effective_sample < dataset_limited_sample:
+            warnings.append(
+                "sample_size reduced from %d to %d to stay within the dense "
+                "sample memory budget" % (dataset_limited_sample, effective_sample)
             )
         if effective_pairwise < requested_pairwise:
             warnings.append(
@@ -255,6 +267,15 @@ def _dense_block_rows(dim: int) -> int:
     return int(max(1, min(_DENSE_BLOCK_MAX_ROWS, rows)))
 
 
+def _dense_sample_size(count: int, dim: int, requested: int) -> int:
+    """Cap the dense float64 sample by its materialized byte size."""
+    dataset_limited = min(int(requested), int(count))
+    if dim <= 0:
+        return int(dataset_limited)
+    max_rows = _MAX_ANISOTROPY_BYTES // (int(dim) * 8)
+    return int(min(dataset_limited, max_rows))
+
+
 def _profile_dense(
     dataset: HDF5Dataset,
     config: ProfilerConfig,
@@ -265,7 +286,8 @@ def _profile_dense(
     metadata = dataset.metadata
     count = int(metadata.count or 0)
     dim = int(metadata.dim or 0)
-    sample_idx = sample_indices(count, min(config.sample_size, count), rng)
+    sample_size = _dense_sample_size(count, dim, config.sample_size)
+    sample_idx = sample_indices(count, sample_size, rng)
     pair_n = min(config.pairwise_sample_size, sample_idx.size)
     # Sorting only restores row order after selection; the subset itself comes
     # from a seeded permutation and is not biased toward low dataset indices.
@@ -282,6 +304,7 @@ def _profile_dense(
     norms_parts: List[np.ndarray] = []
     total_values = 0
     zero_values = 0
+    nonzero_values = 0
     invalid_values = 0
     vectors_with_invalid = 0
     all_zero_vectors = 0
@@ -299,6 +322,7 @@ def _profile_dense(
             vectors_with_invalid += int((~finite).any(axis=1).sum())
         total_values += int(raw.size)
         zero_values += int(np.count_nonzero((raw == 0) & finite))
+        nonzero_values += int(np.count_nonzero(valid))
 
         norms = np.sqrt(np.einsum("ij,ij->i", valid, valid))
         norms_parts.append(norms)
@@ -344,11 +368,12 @@ def _profile_dense(
         else np.empty(0, dtype=np.float64)
     )
     sample_matrix = dataset.read_dense_rows(sample_idx).astype(np.float64, copy=True)
-    if not bool(np.isfinite(sample_matrix).all()):
+    finite_sample = np.isfinite(sample_matrix)
+    if not bool(finite_sample.all()):
         warnings.append(_INVALID_SAMPLE_WARNING)
-    # Invalid (NaN/Inf) entries are excluded from numeric summaries and treated
-    # as zero, matching the semantics of the norms metric.
-    sample_matrix = np.where(np.isfinite(sample_matrix), sample_matrix, 0.0)
+        # Replace invalid entries in place to avoid a second full sample-sized
+        # allocation; full-dataset numeric summaries continue to exclude them.
+        sample_matrix[~finite_sample] = 0.0
     pair_matrix = sample_matrix[pair_positions]
     pair_distances = _pairwise_dense(pair_matrix, metric)
     pair_values = _upper_triangle(pair_distances)
@@ -377,7 +402,7 @@ def _profile_dense(
             warnings,
         ),
         "sparsity": _dense_sparsity_metric(
-            total_values, zero_values, all_zero_vectors, count
+            total_values, zero_values, nonzero_values, all_zero_vectors, count
         ),
         "duplicates": _duplicates_metric(
             hashes,
@@ -385,6 +410,7 @@ def _profile_dense(
             duplicate_pair_values,
             config.near_duplicate_relative_epsilon,
             duplicate_metric,
+            int(pair_matrix.shape[0]),
         ),
     }
     metrics.update(
@@ -566,6 +592,7 @@ def _profile_sparse(
             duplicate_pair_values,
             config.near_duplicate_relative_epsilon,
             duplicate_metric,
+            int(pair_matrix.shape[0]),
         ),
     }
     metrics.update(
@@ -856,10 +883,13 @@ def _dimensions_metric(
 
 
 def _dense_sparsity_metric(
-    total_values: int, zero_values: int, all_zero_vectors: int, count: int
+    total_values: int,
+    zero_values: int,
+    nonzero_values: int,
+    all_zero_vectors: int,
+    count: int,
 ) -> Dict[str, Any]:
-    nonzero = max(0, total_values - zero_values)
-    density = nonzero / float(total_values) if total_values else None
+    density = nonzero_values / float(total_values) if total_values else None
     return metric_entry(
         DEFINITIONS["sparsity"],
         "full",
@@ -868,7 +898,7 @@ def _dense_sparsity_metric(
         count=count,
         total_values=int(total_values),
         zero_values=int(zero_values),
-        non_zero_values=int(nonzero),
+        non_zero_values=int(nonzero_values),
         zero_ratio=as_finite_float(zero_values / float(total_values) if total_values else None),
         density=as_finite_float(density),
         all_zero_vectors=int(all_zero_vectors),
@@ -919,6 +949,7 @@ def _duplicates_metric(
     pair_values: np.ndarray,
     epsilon: float,
     near_metric: str,
+    near_sample_size: int,
 ) -> Dict[str, Any]:
     duplicate_vectors = sum(value - 1 for value in hashes.values() if value > 1)
     duplicate_groups = sum(1 for value in hashes.values() if value > 1)
@@ -936,7 +967,9 @@ def _duplicates_metric(
         "duplicate_groups": int(duplicate_groups),
         "max_group_size": int(max_group),
     }
-    near = _near_duplicate_summary(pair_values, epsilon, near_metric)
+    near = _near_duplicate_summary(
+        pair_values, epsilon, near_metric, near_sample_size
+    )
     return metric_entry(
         DEFINITIONS["duplicates"],
         "mixed",
@@ -951,14 +984,14 @@ def _duplicates_metric(
 
 
 def _near_duplicate_summary(
-    pair_values: np.ndarray, epsilon: float, metric: str
+    pair_values: np.ndarray, epsilon: float, metric: str, sample_size: int
 ) -> Dict[str, Any]:
     if pair_values.size == 0:
         return {
             "available": False,
             "reason": "fewer than two sampled vectors",
             "scope": "sample",
-            "sample_size": 0,
+            "sample_size": int(sample_size),
             "pair_count": 0,
         }
     finite = pair_values[np.isfinite(pair_values)]
@@ -967,7 +1000,7 @@ def _near_duplicate_summary(
             "available": False,
             "reason": "no finite sampled pairwise distances",
             "scope": "sample",
-            "sample_size": 0,
+            "sample_size": int(sample_size),
             "pair_count": int(pair_values.size),
         }
     median = float(np.median(finite))
@@ -981,7 +1014,7 @@ def _near_duplicate_summary(
         ),
         "metric": metric,
         "scope": "sample",
-        "sample_size": int(_sample_size_from_pair_count(pair_values.size)),
+        "sample_size": int(sample_size),
         "pair_count": int(finite.size),
         "relative_epsilon": as_finite_float(epsilon),
         "median_pairwise_distance": as_finite_float(median),
@@ -989,13 +1022,6 @@ def _near_duplicate_summary(
         "near_duplicate_pairs": near_count,
         "near_duplicate_ratio": as_finite_float(near_count / float(finite.size)),
     }
-
-
-def _sample_size_from_pair_count(pair_count: int) -> int:
-    # pair_count = M * (M - 1) / 2
-    if pair_count <= 0:
-        return 0
-    return int((1 + math.isqrt(1 + 8 * pair_count)) // 2)
 
 
 def _sampled_metrics(
@@ -1009,7 +1035,7 @@ def _sampled_metrics(
     warnings: List[str],
     sparse_pairwise: bool = False,
 ) -> Dict[str, Any]:
-    sample_size = int(_sample_size_from_pair_count(pair_values.size))
+    sample_size = int(pair_matrix.shape[0])
     pair_count = int(pair_values.size)
     pairwise = metric_entry(
         DEFINITIONS["pairwise_distances"],
@@ -1335,14 +1361,16 @@ def _pca_statistics(
     if not np.any(np.isfinite(centered)) or not np.any(centered != 0.0):
         return None
     rows, dim = centered.shape
-    if dim <= 4096:
+    if dim <= _PCA_SVD_MAX_DIM:
         _, singular, vt = np.linalg.svd(centered, full_matrices=False)
         eigenvalues = (singular * singular) / float(max(rows - 1, 1))
         total = float(np.sum(eigenvalues))
         explained = eigenvalues / total if total > 0 else np.zeros_like(eigenvalues)
         components = vt[:2] if vt.shape[0] >= 2 else vt
         projection = centered @ components.T
-    else:
+    elif rows <= dim:
+        # For tall-enough wide inputs the row Gram matrix is the smaller square
+        # decomposition and avoids a dim-by-dim covariance allocation.
         gram = centered @ centered.T
         eigenvalues_raw, eigenvectors = np.linalg.eigh(gram)
         order = np.argsort(eigenvalues_raw)[::-1]
@@ -1351,6 +1379,17 @@ def _pca_statistics(
         explained = eigenvalues / total if total > 0 else np.zeros_like(eigenvalues)
         scores = eigenvectors[:, order[:2]] * np.sqrt(np.maximum(eigenvalues_raw[order[:2]], 0.0))
         projection = scores
+    else:
+        # When rows outnumber a wide feature dimension, the feature covariance
+        # is smaller than the rows-by-rows Gram matrix.
+        covariance = centered.T @ centered
+        eigenvalues_raw, eigenvectors = np.linalg.eigh(covariance)
+        order = np.argsort(eigenvalues_raw)[::-1]
+        eigenvalues = np.maximum(eigenvalues_raw[order], 0.0) / float(max(rows - 1, 1))
+        total = float(np.sum(eigenvalues))
+        explained = eigenvalues / total if total > 0 else np.zeros_like(eigenvalues)
+        components = eigenvectors[:, order[:2]]
+        projection = centered @ components
     if projection.shape[1] < 2:
         projection = np.pad(projection, ((0, 0), (0, 2 - projection.shape[1])))
     if projection.shape[0] == 0:

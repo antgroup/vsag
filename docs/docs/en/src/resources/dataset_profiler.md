@@ -84,7 +84,7 @@ section.
 | Dataset summary | full | Count, dimensionality, element type, file attributes. |
 | `norms` | full | L2 norm distribution of every vector. |
 | `dimensions` | full | Per-coordinate mean, std, min, max, zero ratio; top-variance and top-zero dimensions listed separately; long series are bucket-averaged and flagged. |
-| `sparsity` | full | Zero/non-zero counts and density; for sparse files also stored entries and nnz-per-vector distribution. |
+| `sparsity` | full | Zero/non-zero counts and density; NaN/Inf are excluded from finite non-zero counts and reported separately. For sparse files also stored entries and nnz-per-vector distribution. |
 | `invalid_values` | full | NaN/Inf counts (values and affected vectors). Invalid entries are excluded from numeric summaries and treated as zero elsewhere. |
 | `outliers` | full | Robust norm outliers via modified z-score (median/MAD, IQR fallback). |
 | `duplicates` | mixed | Exact duplicates (full, byte-identical) plus a near-duplicate indicator over sampled pairs (`distance ≤ epsilon × median sampled distance`); inner-product inputs use non-negative Euclidean distance for this indicator. |
@@ -100,7 +100,9 @@ section.
 - Sample indices are drawn with Floyd's algorithm (bounded by the sample size, streaming-safe);
   a seeded permutation selects the pairwise subset without favoring low-index rows.
 - `--sample-size` bounds distribution/reduction work; `--pairwise-sample-size` bounds the
-  distance matrix; both effective sizes are reported alongside the requested ones.
+  distance matrix; both effective sizes are reported alongside the requested ones. Dense sample
+  materialization is additionally capped at 256 MiB for its float64 matrix; reaching that cap
+  produces a warning and reduced or unavailable sampled metrics.
 - Two runs with identical input, configuration, sample sizes, and seed produce byte-identical
   JSON reports (keys sorted, fixed indent). Sparse results are identical whether or not the
   file provides `*_offsets`.

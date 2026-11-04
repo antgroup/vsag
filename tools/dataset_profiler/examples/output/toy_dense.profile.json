@@ -951,8 +951,8 @@
       "all_zero_vectors": 1,
       "count": 120,
       "definition": "Count and fraction of exactly-zero entries; for sparse vectors this also reports non-zero entries per vector and density = nnz / (count * dim).",
-      "density": 0.9916666666666667,
-      "non_zero_values": 1904,
+      "density": 0.9911458333333333,
+      "non_zero_values": 1903,
       "representation": "dense",
       "sample_size": null,
       "scope": "full",
@@ -966,5 +966,7 @@
     "name": "vsag-dataset-profiler",
     "version": "0.1.0"
   },
-  "warnings": []
+  "warnings": [
+    "sampled vectors contain NaN/Inf entries; sampled metrics replace them with 0.0, which can distort pairwise, nearest-neighbor, anisotropy, and clustering results"
+  ]
 }

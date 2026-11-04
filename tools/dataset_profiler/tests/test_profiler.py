@@ -22,6 +22,7 @@ import math
 import numpy as np
 import pytest
 
+import dataset_profiler.profiler as profiler_module
 from dataset_profiler.profiler import (
     _DENSE_BLOCK_BYTES,
     _DENSE_BLOCK_BYTES_PER_VALUE,
@@ -590,4 +591,92 @@ def test_angular_identical_vectors_are_near_duplicates(tmp_path, vector_type):
     assert near["median_pairwise_distance"] == 0.0
     assert near["threshold"] == 0.0
     assert near["near_duplicate_pairs"] == 3
+
+
+def test_dense_sample_size_is_capped_by_materialized_bytes(tmp_path, monkeypatch):
+    monkeypatch.setattr(profiler_module, "_MAX_ANISOTROPY_BYTES", 64)
+    path = tmp_path / "bounded_dense_sample.hdf5"
+    _write_dense(path, np.arange(24, dtype=np.float32).reshape(6, 4))
+    report = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
+    assert report["config"]["effective_sample_size"] == 2
+    assert report["config"]["effective_pairwise_sample_size"] == 2
+    assert report["metrics"]["pairwise_distances"]["sample_size"] == 2
+    assert report["metrics"]["pairwise_distances"]["pair_count"] == 1
+    assert (
+        "sample_size reduced from 6 to 2 to stay within the dense sample memory budget"
+        in report["warnings"]
+    )
+
+    monkeypatch.setattr(profiler_module, "_MAX_ANISOTROPY_BYTES", 16)
+    unavailable = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
+    assert unavailable["config"]["effective_sample_size"] == 0
+    assert unavailable["config"]["effective_pairwise_sample_size"] == 0
+    assert unavailable["metrics"]["pairwise_distances"]["sample_size"] == 0
+    assert unavailable["metrics"]["anisotropy"]["available"] is False
+
+
+def test_dense_nonzero_count_excludes_invalid_entries(tmp_path):
+    path = tmp_path / "dense_invalid_sparsity.hdf5"
+    _write_dense(path, [[np.nan, 0], [np.inf, 2]])
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    sparsity = report["metrics"]["sparsity"]
+    assert sparsity["total_values"] == 4
+    assert sparsity["zero_values"] == 1
+    assert sparsity["non_zero_values"] == 1
+    assert sparsity["zero_ratio"] == 0.25
+    assert sparsity["density"] == 0.25
+    assert sparsity["all_zero_vectors"] == 1
+    assert report["metrics"]["invalid_values"]["invalid_values"] == 2
+
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_singleton_pairwise_sample_provenance(tmp_path, vector_type):
+    path = tmp_path / ("singleton_" + vector_type + ".hdf5")
+    if vector_type == "dense":
+        _write_dense(path, [[3, 4]])
+    else:
+        records = [(np.array([0], dtype=np.uint32), np.array([1], dtype=np.float32))]
+        _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=1, pairwise_sample_size=1)
+    assert report["config"]["effective_pairwise_sample_size"] == 1
+    pairwise = report["metrics"]["pairwise_distances"]
+    assert pairwise["sample_size"] == 1
+    assert pairwise["pair_count"] == 0
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert near["available"] is False
+    assert near["sample_size"] == 1
+    assert near["pair_count"] == 0
+    assert report["metrics"]["nearest_neighbor_distances"]["sample_size"] == 1
+
+
+def test_pca_uses_covariance_when_it_is_smaller(monkeypatch):
+    monkeypatch.setattr(profiler_module, "_PCA_SVD_MAX_DIM", 2)
+    decomposed_shapes = []
+    real_eigh = np.linalg.eigh
+
+    def tracking_eigh(matrix):
+        decomposed_shapes.append(matrix.shape)
+        return real_eigh(matrix)
+
+    monkeypatch.setattr(np.linalg, "eigh", tracking_eigh)
+    matrix = np.arange(20, dtype=np.float64).reshape(5, 4)
+    result = profiler_module._pca_statistics(matrix)
+    assert result is not None
+    assert result[1].shape == (5, 2)
+    assert decomposed_shapes == [(4, 4)]  # not the larger 5-by-5 Gram matrix
+
+
+@pytest.mark.parametrize("value,warning_expected", [(np.nan, True), (np.inf, True), (3.0, False)])
+def test_sparse_sample_invalid_warning_has_positive_and_negative_cases(
+    tmp_path, value, warning_expected
+):
+    path = tmp_path / ("sparse_sample_warning_%s.hdf5" % value)
+    records = [(np.array([0], dtype=np.uint32), np.array([value], dtype=np.float32))]
+    _write_sparse(path, records)
+    report = profile_dataset(str(path), sample_size=1, pairwise_sample_size=1)
+    warning_found = any(
+        "sampled vectors contain NaN/Inf entries" in warning
+        for warning in report["warnings"]
+    )
+    assert warning_found is warning_expected
 
