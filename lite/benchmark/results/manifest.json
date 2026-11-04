@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "measurement_source": "cba340660f2ea479b316d7b73a27f34186b8a1d9",
+  "records": [
+    {
+      "id": "resident-crud",
+      "source_sha": "cba340660f2ea479b316d7b73a27f34186b8a1d9",
+      "path": "resident-crud/raw.tar.gz",
+      "bytes": 7383654,
+      "sha256": "982d46aee54495eaf6c28519c9f0fe7991bfc705530085d333e7895b7a1622ab",
+      "members": 20
+    },
+    {
+      "id": "full-comparison",
+      "source_sha": "cba340660f2ea479b316d7b73a27f34186b8a1d9",
+      "path": "full-comparison/raw.tar.gz",
+      "bytes": 5747575,
+      "sha256": "a55e94502adee7d423755987c87509a519ea494af419e687e49f436f10ba971f",
+      "members": 45
+    },
+    {
+      "id": "dynamic-stability",
+      "source_sha": "cba340660f2ea479b316d7b73a27f34186b8a1d9",
+      "path": "dynamic-stability/raw.tar.gz",
+      "bytes": 12670867,
+      "sha256": "0e79f434ae6a7b8583ac6de3011c57a41811fc700747433ff91f9711b3b6cb35",
+      "members": 15
+    }
+  ]
+}
