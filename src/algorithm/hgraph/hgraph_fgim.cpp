@@ -441,12 +441,34 @@ HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
                                                      new_ids.begin(), new_ids.end(), v);
                                              }),
                               old_ids.end());
+                // Sorted merged IDs are contiguous by source. Skip same-source ranges
+                // without changing the order of any cross-source comparison.
+                uint64_t new_group_end = 0;
+                auto old_group_begin = old_ids.begin();
+                auto old_group_end = old_ids.begin();
                 for (uint64_t i = 0; i < new_ids.size(); ++i) {
-                    for (uint64_t j = i + 1; j < new_ids.size(); ++j) {
+                    if (i == new_group_end) {
+                        const auto source = source_ids[new_ids[i]];
+                        new_group_end = std::lower_bound(new_ids.begin() + static_cast<int64_t>(i),
+                                                         new_ids.end(),
+                                                         offsets[source + 1]) -
+                                        new_ids.begin();
+                        old_group_begin =
+                            std::lower_bound(old_group_end, old_ids.end(), offsets[source]);
+                        old_group_end =
+                            std::lower_bound(old_group_begin, old_ids.end(), offsets[source + 1]);
+                    }
+                    stats.same_source_pairs_skipped +=
+                        new_group_end - i - 1 +
+                        static_cast<uint64_t>(old_group_end - old_group_begin);
+                    for (uint64_t j = new_group_end; j < new_ids.size(); ++j) {
                         compare(new_ids[i], new_ids[j], true);
                     }
-                    for (const auto old_id : old_ids) {
-                        compare(new_ids[i], old_id, false);
+                    for (auto it = old_ids.begin(); it != old_group_begin; ++it) {
+                        compare(new_ids[i], *it, false);
+                    }
+                    for (auto it = old_group_end; it != old_ids.end(); ++it) {
+                        compare(new_ids[i], *it, false);
                     }
                 }
             }
