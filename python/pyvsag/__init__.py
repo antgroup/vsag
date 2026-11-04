@@ -13,6 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
+import sys
+
+_cur_file_dir = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(_cur_file_dir)
+
+# The native module emits its initialization banner while it is being loaded. Suppress it before
+# that import so API consumers and the JSON CLI do not get unexpected stdout output.
+os.environ.setdefault("VSAG_SUPPRESS_INIT_BANNER", "1")
+
 from ._index import Index, _check
 from ._lib import lib as _lib
 from ._version import __version__

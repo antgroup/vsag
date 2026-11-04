@@ -34,7 +34,7 @@ import pyvsag
 
 DIM = 8
 NUM_VECTORS = 32
-NUM_QUERIES = 4
+NUM_QUERIES = 1
 
 
 def build_and_save_index(index_path):

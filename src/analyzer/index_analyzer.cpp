@@ -106,6 +106,20 @@ MetricTypeToString(MetricType type) {
     return "unknown";
 }
 
+MetricType
+MetricTypeFromString(const std::string& metric) {
+    if (metric == "l2") {
+        return MetricType::METRIC_TYPE_L2SQR;
+    }
+    if (metric == "ip") {
+        return MetricType::METRIC_TYPE_IP;
+    }
+    if (metric == "cosine") {
+        return MetricType::METRIC_TYPE_COSINE;
+    }
+    throw std::invalid_argument(fmt::format("unsupported metric_type '{}'", metric));
+}
+
 std::string
 DataTypesToString(DataTypes type) {
     switch (type) {
@@ -433,6 +447,12 @@ private:
 
         basic_info_ = metadata->Get(BASIC_INFO);
         if (not basic_info_.IsObject()) {
+            if (metadata->EmptyIndex() and options_.build_parameter != DEFAULT_BUILD_PARAM) {
+                warnings_.emplace_back(
+                    "serialized empty index has no basic_info metadata; loading metadata uses "
+                    "build_parameter");
+                return;
+            }
             throw std::runtime_error(
                 fmt::format("serialized index '{}' is missing its '{}' metadata block",
                             options_.index_path,
@@ -481,8 +501,13 @@ private:
                 if (parsed.Contains(DIM)) {
                     dim_ = parsed[DIM].GetInt();
                 }
-            } else if (dim_ == 0 and parsed.Contains(DIM)) {
-                dim_ = parsed[DIM].GetInt();
+            } else {
+                if (parsed.Contains("metric_type")) {
+                    metric_type_ = MetricTypeFromString(parsed["metric_type"].GetString());
+                }
+                if (dim_ == 0 and parsed.Contains(DIM)) {
+                    dim_ = parsed[DIM].GetInt();
+                }
             }
             if (index_name_.empty()) {
                 throw std::invalid_argument(
@@ -637,8 +662,7 @@ private:
 
         std::string statistics;
         try {
-            if (options_.base_path.empty() or
-                (index_name_ != INDEX_SINDI and index_name_ != INDEX_SINDI_V2)) {
+            if (options_.base_path.empty() or index_name_ != INDEX_SINDI) {
                 statistics = index_->GetStats();
             } else {
                 if (not index_->CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
@@ -679,10 +703,6 @@ private:
         } catch (const std::exception& error) {
             throw std::runtime_error(fmt::format(
                 "failed to load query dataset '{}': {}", options_.query_path, error.what()));
-        }
-        if (not query) {
-            throw std::runtime_error(
-                fmt::format("failed to load query dataset '{}'", options_.query_path));
         }
 
         std::string analysis;

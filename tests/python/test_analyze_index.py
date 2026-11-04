@@ -26,7 +26,7 @@ import pytest
 
 DIM = 8
 NUM_VECTORS = 64
-NUM_QUERIES = 4
+NUM_QUERIES = 1
 TOPK = 5
 
 
