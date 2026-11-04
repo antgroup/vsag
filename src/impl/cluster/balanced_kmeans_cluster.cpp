@@ -309,14 +309,33 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
     };
 
     std::vector<std::future<void>> futures;
-    for (uint64_t i = 0; i < count; i += block_size) {
-        const uint64_t begin = i;
-        const uint64_t end = std::min(i + block_size, count);
-        if (thread_pool_->IsCurrentThread()) {
-            scan_block(begin, end);
-        } else {
-            futures.emplace_back(thread_pool_->GeneralEnqueue(scan_block, begin, end));
+    std::future<void> pending_future;
+    auto wait_for_submissions = [&]() {
+        // If emplace_back throws, the just-submitted block is still owned by
+        // pending_future rather than by futures. Drain it as well.
+        if (pending_future.valid()) {
+            pending_future.wait();
         }
+        for (auto& future : futures) {
+            future.wait();
+        }
+    };
+    try {
+        for (uint64_t i = 0; i < count; i += block_size) {
+            const uint64_t begin = i;
+            const uint64_t end = std::min(i + block_size, count);
+            if (thread_pool_->IsCurrentThread()) {
+                scan_block(begin, end);
+            } else {
+                pending_future = thread_pool_->GeneralEnqueue(scan_block, begin, end);
+                futures.emplace_back(std::move(pending_future));
+            }
+        }
+    } catch (...) {
+        // Submission may fail after earlier blocks have started. Those blocks
+        // reference stack state, so none may outlive this function.
+        wait_for_submissions();
+        throw;
     }
     std::exception_ptr scan_exception;
     for (auto& future : futures) {

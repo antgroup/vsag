@@ -16,18 +16,23 @@
 #include "balanced_kmeans_cluster.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <future>
 #include <limits>
 #include <new>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/thread_pool/default_thread_pool.h"
 #include "unittest.h"
 
 namespace {
@@ -151,6 +156,56 @@ public:
 
 private:
     std::thread::id owner_;
+};
+
+class SubmitFailThreadPool : public vsag::ThreadPool {
+public:
+    SubmitFailThreadPool() : worker_(1), release_future_(release_.get_future()) {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        if (submission_count_++ != 0) {
+            rejected_.set_value();
+            throw std::runtime_error("submission rejected by test");
+        }
+        return worker_.Enqueue([this, task = std::move(task)]() mutable {
+            release_future_.wait();
+            task();
+        });
+    }
+
+    void
+    WaitUntilEmpty() override {
+        worker_.WaitUntilEmpty();
+    }
+
+    void
+    SetQueueSizeLimit(std::uint64_t limit) override {
+        worker_.SetQueueSizeLimit(limit);
+    }
+
+    void
+    SetPoolSize(std::uint64_t limit) override {
+        worker_.SetPoolSize(limit);
+    }
+
+    void
+    WaitForRejectedSubmission() {
+        rejected_.get_future().wait();
+    }
+
+    void
+    ReleaseWorker() {
+        release_.set_value();
+    }
+
+private:
+    vsag::DefaultThreadPool worker_;
+    uint64_t submission_count_{0};
+    std::promise<void> rejected_;
+    std::promise<void> release_;
+    std::shared_future<void> release_future_;
 };
 
 }  // namespace
@@ -461,6 +516,36 @@ TEST_CASE("BalancedKMeans propagates candidate worker exceptions", "[ut][Balance
     vsag::BalancedKMeansCluster cluster(dim, &allocator, pool);
 
     REQUIRE_THROWS_AS(cluster.Assign(k, centroids.data(), data.data(), count), std::bad_alloc);
+}
+
+TEST_CASE("BalancedKMeans drains workers when submission fails", "[ut][BalancedKMeansCluster]") {
+    constexpr uint32_t k = 2;
+    constexpr int32_t dim = 1;
+    constexpr uint64_t count = 2048;  // The second block is rejected.
+    const std::vector<float> centroids = {0.0F, 1.0F};
+    const std::vector<float> data(count, 0.0F);
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto rejecting_pool = std::make_shared<SubmitFailThreadPool>();
+    auto pool = std::make_shared<vsag::SafeThreadPool>(rejecting_pool);
+    vsag::BalancedKMeansCluster cluster(dim, allocator.get(), pool);
+
+    auto assign_result = std::async(std::launch::async, [&]() {
+        try {
+            cluster.Assign(k, centroids.data(), data.data(), count);
+        } catch (const std::runtime_error&) {
+            return true;
+        }
+        return false;
+    });
+    rejecting_pool->WaitForRejectedSubmission();
+    // The first task remains gated. Assign must be draining it, rather than
+    // unwinding the stack state referenced by that task.
+    const bool waited_for_worker =
+        assign_result.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout;
+    rejecting_pool->ReleaseWorker();
+    const bool threw_submission_error = assign_result.get();
+    REQUIRE(waited_for_worker);
+    REQUIRE(threw_submission_error);
 }
 
 TEST_CASE("BalancedKMeans Assign with fewer vectors than clusters spreads them",

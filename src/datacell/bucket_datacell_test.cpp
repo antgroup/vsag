@@ -805,7 +805,8 @@ TEST_CASE("BucketDataCell batch query", "[ut][BucketDataCell]") {
     }
 }
 
-TEST_CASE("BucketDataCell residual training uses build assignments", "[ut][BucketDataCell]") {
+TEST_CASE("BucketDataCell residual training uses build and nearest assignments",
+          "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 1;
     constexpr uint64_t bucket_count = 2;
@@ -824,17 +825,20 @@ TEST_CASE("BucketDataCell residual training uses build assignments", "[ut][Bucke
     common_param.dim_ = dim;
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
     auto bucket = BucketInterface::MakeInstance(param, common_param);
-    // Centroids are 50 and 100. Plain training assigns both rows to bucket 0
-    // and learns residuals [0, 50], which clips the -50 residual needed when
-    // Build places the first row in bucket 1. Build-aware training learns it.
+    // Centroids are 50 and 100. Build assigns both rows to bucket 1, producing
+    // residuals [-50, 0], while nearest routing assigns both to bucket 0,
+    // producing [0, 50]. Each one-sided training set clips the other path.
     auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
         common_param, bucket_count, /*centroid_scale=*/5000.0F);
     bucket->SetStrategy(strategy);
     bucket->Train(vectors.data(), vectors.size());
     bucket->InsertVector(vectors.data(), 1, 0);
+    bucket->InsertVector(vectors.data() + dim, 0, 1);
 
-    auto computer = bucket->FactoryComputer(vectors.data());
-    REQUIRE(std::abs(bucket->QueryOneById(computer, 1, 0)) < 1e-4F);
+    auto build_computer = bucket->FactoryComputer(vectors.data());
+    REQUIRE(std::abs(bucket->QueryOneById(build_computer, 1, 0)) < 1e-4F);
+    auto nearest_computer = bucket->FactoryComputer(vectors.data() + dim);
+    REQUIRE(std::abs(bucket->QueryOneById(nearest_computer, 0, 0)) < 1e-4F);
 }
 
 TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][BucketDataCell]") {

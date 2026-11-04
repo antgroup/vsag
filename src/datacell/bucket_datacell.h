@@ -626,26 +626,39 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
-        auto dim = this->quantizer_->GetDim();
-        train_data_buffer.resize(count * dim);
+        const uint64_t dim = static_cast<uint64_t>(this->quantizer_->GetDim());
+        if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / 2) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "residual training size overflow");
+        }
+        train_data_buffer.resize(2 * count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            for (int i = 0; i < count; ++i) {
+            for (uint64_t i = 0; i < count; ++i) {
                 Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
             }
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        // Residuals must cover the same capacity-constrained assignments used by
-        // the initial Build; nearest-centroid training can otherwise clip the
-        // residuals of vectors that balancing moves to another bucket.
-        auto buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
-        for (int i = 0; i < count; ++i) {
-            strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+        // Build uses capacity-constrained assignments, while later Add calls still
+        // use nearest-centroid routing. Train on both residual sets so either path
+        // stays inside the quantizer's learned range.
+        auto build_buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
+        auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
+        // Keep each Build/nearest pair adjacent so downstream trainers that
+        // retain only a prefix still sample both routes. Iterate backwards:
+        // cosine normalization lives in the first half, and these interleaved
+        // outputs never overwrite normalized values before they are consumed.
+        for (uint64_t i = count; i-- > 0;) {
+            strategy_->GetCentroid(nearest_buckets[i], centroid);
+            for (uint64_t j = 0; j < dim; ++j) {
+                train_data_buffer[(2 * i + 1) * dim + j] = data_ptr[i * dim + j] - centroid[j];
+            }
+            strategy_->GetCentroid(build_buckets[i], centroid);
+            for (uint64_t j = 0; j < dim; ++j) {
+                train_data_buffer[2 * i * dim + j] = data_ptr[i * dim + j] - centroid[j];
             }
         }
         data = train_data_buffer.data();
+        count *= 2;
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);
 }
