@@ -280,3 +280,12 @@ shows exact segment details in tables.
 
 See `examples/cpp/403_persistent_streaming_load.cpp` for runnable examples of streaming
 serialization and `Index::Load`.
+
+## RaBitQ persisted-format support
+
+The intentional retirement in PR #2932 applies to ordinary seekable and streaming
+loads alike: split payloads must include `supplement_io_type` (an explicit empty
+string is valid), and attached fused storage requires model-only v1 rather than
+detached split codes. See [supported RaBitQ persisted forms](../quantization/rabitq_split.md#supported-persisted-forms)
+for the exact markers, independent payload/block versions, and rebuild guidance.
+Existing writers and version constants are unchanged.

@@ -495,10 +495,11 @@ auto deserialized = loaded->Deserialize(in);
 
 split datacell 按以下顺序序列化：
 
-1. datacell 基础状态和 supplement IO type。
-2. filter storage。
-3. supplement storage。
-4. RaBitQ quantizer 状态。
+1. datacell 基础状态和显式的 supplement IO type 字符串。
+2. supplement layout 描述符（标记、版本、维度、位宽、record 大小）。
+3. filter storage。
+4. supplement storage。
+5. RaBitQ quantizer 状态。
 
 创建目标索引时必须使用与序列化索引兼容的参数，尤其是 `dim`、`metric_type`、
 x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜索参数
@@ -507,6 +508,36 @@ x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜�
 对于 fused 索引，codec model 随 split datacell 序列化，每个节点的 code 只在
 bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该布局，
 不会再生成一份随节点数增长的 split code 副本。
+
+### 支持的持久化形式
+
+根据维护者于 2026-11-04 作出的兼容性决定，PR #2932 有意停止读取两种旧形式。
+普通可 seek 的 `Deserialize` 和 `DeserializeStreaming`/`Load` 使用相同的
+RaBitQ split parser，因此均受影响，也包括 Pyramid 的缓冲 streaming 路径。
+
+| 目标存储 | datacell 基础状态之后接受的 payload | 拒绝的旧形式 |
+| --- | --- | --- |
+| 普通 split storage | 显式 `supplement_io_type` 字符串、supplement 描述符 v1、两份 code layout、quantizer | 省略 IO type 字段，基础状态后直接出现描述符 |
+| 已挂接的 fused storage | model-only 标记 `0x524246534D4F444C`、model 版本 **1**、匹配的 code 大小、quantizer，并配套 fused bottom-graph slab | detached split code layout，即使配有匹配的 fused graph slab 也拒绝 |
+
+IO 字符串由 `uint64_t` 长度和对应数量的字节组成。长度为零是显式的共享 IO 值，
+仍然支持；非空值必须是已知 IO type，且不超过 64 字节。supplement 描述符以
+`SUPPLEMENT_STORAGE_MAGIC = 0x3150505553514252` 和版本 **1** 开始。
+省略 IO 字段时，该标记会出现在字符串长度的位置，现在明确返回 `INVALID_BINARY`，
+不再解释为共享 IO。已挂接 fused storage 时，非 model-only 前缀同样返回
+`INVALID_BINARY`，不会重试可 seek 的兼容解码器。
+
+这是按 payload 结构划定的支持边界，并非新的发行版本或容器版本边界。
+现有 serializer 已经写出上述支持形式；本次停止兼容不改变序列化字节或版本常量。
+特别是 supplement 描述符 v1 本身**不能**区分省略字段和显式字段。
+fused model-only v1 标记独立于 fused graph slab 的 wire version（**2**）。
+streaming `base_codes` 和 `bottom_graph` 的 TLV block version 仍为 **1**；
+通过容器或 block 版本检查不代表其内部的旧 payload 仍受支持。
+此次移除旧读取形式不需要修改写入格式或提升 wire version。
+
+请使用原始向量和当前支持的配置重建旧产物，再由本实现加载。
+不再支持在反序列化时直接将旧 split payload 转换为 fused storage。
+加载失败后应丢弃目标索引。
 
 ## 实现位置
 

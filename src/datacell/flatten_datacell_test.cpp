@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <catch2/matchers/catch_matchers_predicate.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -1181,7 +1182,9 @@ TEST_CASE("RaBitQSplitDataCell fused zero residual metadata",
 }
 
 TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
-          "[ut][RaBitQSplitDataCell][serialize]") {
+          "[ut][RaBitQSplitDataCell][serialize][rabitq_format_policy]") {
+    const bool forward_only = GENERATE(false, true);
+    CAPTURE(forward_only);
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr uint64_t dim = 64;
     constexpr uint32_t cluster_count = 16;
@@ -1233,16 +1236,35 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
         value->Serialize(writer);
         return stream.str();
     };
-    auto deserialize_flatten = [](const FlattenInterfacePtr& value, const std::string& payload) {
+    auto deserialize_flatten = [forward_only](const FlattenInterfacePtr& value,
+                                              const std::string& payload) {
         std::stringstream stream(payload);
-        IOStreamReader reader(stream);
-        value->Deserialize(reader);
+        if (forward_only) {
+            ForwardStreamReader source(stream);
+            BoundedForwardReader reader(&source, payload.size());
+            value->Deserialize(reader);
+            REQUIRE(reader.GetCursor() == payload.size());
+            REQUIRE(source.GetCursor() == payload.size());
+        } else {
+            IOStreamReader reader(stream);
+            value->Deserialize(reader);
+            REQUIRE(reader.GetCursor() == payload.size());
+        }
     };
-    auto deserialize_graph = [](const HGraphRaBitQFusedDataCellPtr& value,
-                                const std::string& payload) {
+    auto deserialize_graph = [forward_only](const HGraphRaBitQFusedDataCellPtr& value,
+                                            const std::string& payload) {
         std::stringstream stream(payload);
-        IOStreamReader reader(stream);
-        value->Deserialize(reader);
+        if (forward_only) {
+            ForwardStreamReader source(stream);
+            BoundedForwardReader reader(&source, payload.size());
+            value->Deserialize(reader);
+            REQUIRE(reader.GetCursor() == payload.size());
+            REQUIRE(source.GetCursor() == payload.size());
+        } else {
+            IOStreamReader reader(stream);
+            value->Deserialize(reader);
+            REQUIRE(reader.GetCursor() == payload.size());
+        }
     };
 
     auto flatten = FlattenInterface::MakeInstance(param, common_param);
@@ -1252,19 +1274,47 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     REQUIRE(split != nullptr);
     split->TrainFusedCodec(vectors.data(), count, cluster_count);
 
-    const auto legacy_payload = serialize_flatten(flatten);
-    // The current split format remains supported without fused storage. Invalid IO fields must
-    // fail instead of rewinding to the unpublished format that omitted the field.
+    const auto split_payload = serialize_flatten(flatten);
+    // Detached split codes remain supported in split storage with an explicit IO field.
     auto ordinary_restored = FlattenInterface::MakeInstance(param, common_param);
-    REQUIRE_NOTHROW(deserialize_flatten(ordinary_restored, legacy_payload));
+    REQUIRE_NOTHROW(deserialize_flatten(ordinary_restored, split_payload));
     const uint64_t io_offset = 2 * sizeof(InnerIdType) + sizeof(uint32_t);
+    uint64_t io_length = 1;
+    std::memcpy(&io_length, split_payload.data() + io_offset, sizeof(io_length));
+    REQUIRE(io_length == 0);  // Explicit empty field means shared IO.
+    REQUIRE(serialize_flatten(ordinary_restored) == split_payload);
+
+    // Also roundtrip a known, nonempty IO type with the same in-memory layouts.
+    auto explicit_io_payload = split_payload;
+    const std::string io_type = "memory_io";
+    io_length = io_type.size();
+    std::memcpy(explicit_io_payload.data() + io_offset, &io_length, sizeof(io_length));
+    explicit_io_payload.insert(io_offset + sizeof(uint64_t), io_type);
+    auto explicit_io_restored = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE_NOTHROW(deserialize_flatten(explicit_io_restored, explicit_io_payload));
+    REQUIRE(serialize_flatten(explicit_io_restored) == explicit_io_payload);
+
+    // Removing only the field recreates the retired form: descriptor v1 now starts here.
+    auto missing_io_payload = split_payload;
+    missing_io_payload.erase(io_offset, sizeof(uint64_t));
+    uint64_t descriptor_magic = 0;
+    std::memcpy(&descriptor_magic, missing_io_payload.data() + io_offset, sizeof(descriptor_magic));
+    REQUIRE(descriptor_magic == 0x3150505553514252ULL);
+    auto missing_io_restored = FlattenInterface::MakeInstance(param, common_param);
+    REQUIRE_THROWS_MATCHES(
+        deserialize_flatten(missing_io_restored, missing_io_payload),
+        VsagException,
+        Catch::Matchers::Predicate<VsagException>([](const VsagException& error) {
+            return error.error_.type == ErrorType::INVALID_BINARY and
+                   std::string(error.what()) == "RaBitQ split snapshot requires supplement_io_type";
+        }));
     for (uint64_t invalid_length : {uint64_t{65}, std::numeric_limits<uint64_t>::max()}) {
-        auto invalid = legacy_payload;
+        auto invalid = split_payload;
         std::memcpy(invalid.data() + io_offset, &invalid_length, sizeof(invalid_length));
         auto rejected = FlattenInterface::MakeInstance(param, common_param);
         REQUIRE_THROWS_AS(deserialize_flatten(rejected, invalid), VsagException);
     }
-    auto invalid_type = legacy_payload;
+    auto invalid_type = split_payload;
     const uint64_t invalid_type_length = 3;
     std::memcpy(invalid_type.data() + io_offset, &invalid_type_length, sizeof(invalid_type_length));
     std::memcpy(invalid_type.data() + io_offset + sizeof(uint64_t), "bad", invalid_type_length);
@@ -1304,13 +1354,13 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     const auto model_payload = serialize_flatten(flatten);
     const auto graph_payload = serialize_graph(graph);
     REQUIRE(memory_with_split_codes == flatten->GetMemoryUsage() + code_payload_size);
-    // The detached (legacy) payload also stores the split supplement layout descriptor
+    // The detached split payload also stores the supplement layout descriptor
     // (magic, version, dim, reorder bits and supplement code size); the fused model-only
     // payload omits it together with the codes.
     constexpr uint64_t kSupplementLayoutDescriptorSize = sizeof(uint64_t) + sizeof(uint32_t) +
                                                          sizeof(uint64_t) + sizeof(uint32_t) +
                                                          sizeof(uint64_t);
-    REQUIRE(static_cast<uint64_t>(legacy_payload.size()) + sizeof(uint32_t) ==
+    REQUIRE(static_cast<uint64_t>(split_payload.size()) + sizeof(uint32_t) ==
             static_cast<uint64_t>(model_payload.size()) + code_payload_size +
                 kSupplementLayoutDescriptorSize);
 
@@ -1332,6 +1382,8 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
     deserialize_flatten(model_flatten, model_payload);
     deserialize_graph(model_graph, graph_payload);
     model_split->ImportFusedCodec(model_graph->CodecModel());
+    REQUIRE(serialize_flatten(model_flatten) == model_payload);
+    REQUIRE(serialize_graph(model_graph) == graph_payload);
     REQUIRE(model_split->DecodeFusedById(0, decoded.data()));
     for (uint64_t d = 0; d < dim; ++d) {
         REQUIRE(std::abs(decoded[d] - expected_decoded[d]) <= 1e-6F);
@@ -1346,38 +1398,29 @@ TEST_CASE("RaBitQSplitDataCell fused model-only serialization",
         value->Query(distances.data(), computer, ids.data(), count);
         return distances;
     };
+    const auto split_distances = query_all(ordinary_restored);
+    const auto explicit_io_distances = query_all(explicit_io_restored);
+    REQUIRE(split_distances == explicit_io_distances);
+    auto fresh_split = FlattenInterface::MakeInstance(param, common_param);
+    deserialize_flatten(fresh_split, split_payload);
+    REQUIRE(query_all(fresh_split) == split_distances);
     const auto expected_distances = query_all(flatten);
     const auto model_distances = query_all(model_flatten);
     for (InnerIdType id = 0; id < count; ++id) {
         REQUIRE(std::abs(expected_distances[id] - model_distances[id]) <= 1e-6F);
     }
 
-    // Review pending (#2582): the legacy split-to-fused fallback is disabled for forward-only
-    // loading. Preserve the old compatibility assertions until its removal is confirmed.
-    /*
-    auto [legacy_flatten, legacy_split, legacy_graph] = make_attached_pair();
-    deserialize_flatten(legacy_flatten, legacy_payload);
-    deserialize_graph(legacy_graph, graph_payload);
-    legacy_split->ImportFusedCodec(legacy_graph->CodecModel());
-    REQUIRE(legacy_split->DecodeFusedById(0, decoded.data()));
-    for (uint64_t d = 0; d < dim; ++d) {
-        REQUIRE(std::abs(decoded[d] - expected_decoded[d]) <= 1e-6F);
-    }
-    REQUIRE(legacy_split->UsesExternalFusedCodeStorage());
-    using MemorySplitDataCell =
-        RaBitQSplitDataCell<MetricType::METRIC_TYPE_L2SQR, MemoryIO, MemoryIO>;
-    auto legacy_memory_split = std::dynamic_pointer_cast<MemorySplitDataCell>(legacy_flatten);
-    REQUIRE(legacy_memory_split != nullptr);
-    REQUIRE(legacy_memory_split->x_bit_layout_->GetMemoryUsage() == 0);
-    REQUIRE(legacy_memory_split->supplement_layout_->GetMemoryUsage() == 0);
-    REQUIRE(legacy_flatten->GetMemoryUsage() == model_flatten->GetMemoryUsage());
-    const auto legacy_distances = query_all(legacy_flatten);
-    for (InnerIdType id = 0; id < count; ++id) {
-        REQUIRE(std::abs(expected_distances[id] - legacy_distances[id]) <= 1e-6F);
-    }
-    */
+    // A matching fused graph no longer makes detached split codes a supported model payload.
     auto rejected = make_attached_pair();
-    REQUIRE_THROWS_AS(deserialize_flatten(std::get<0>(rejected), legacy_payload), VsagException);
+    deserialize_graph(std::get<2>(rejected), graph_payload);
+    REQUIRE_THROWS_MATCHES(
+        deserialize_flatten(std::get<0>(rejected), split_payload),
+        VsagException,
+        Catch::Matchers::Predicate<VsagException>([](const VsagException& error) {
+            return error.error_.type == ErrorType::INVALID_BINARY and
+                   std::string(error.what()) ==
+                       "legacy split payload is unsupported for fused RaBitQ storage";
+        }));
 }
 
 TEST_CASE("RaBitQSplitDataCell supports MRLE transform quantizer",

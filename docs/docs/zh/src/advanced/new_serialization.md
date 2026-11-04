@@ -251,3 +251,12 @@ CLI 输出包含按真实字节比例展示的 raw horizontal layout，以及高
 
 streaming serialization 和 `Index::Load` 的可运行示例见
 `examples/cpp/403_persistent_streaming_load.cpp`。
+
+## RaBitQ 持久化格式支持
+
+PR #2932 有意停止兼容的两种旧形式对普通可 seek 加载和 streaming 加载同样生效：
+split payload 必须包含 `supplement_io_type`（显式空字符串仍然有效），
+已挂接 fused storage 必须使用 model-only v1，不能加载 detached split code。
+确切标记、独立的 payload/block 版本和重建说明见
+[RaBitQ 支持的持久化形式](../quantization/rabitq_split.md#支持的持久化形式)。
+现有写入格式和版本常量不变。
