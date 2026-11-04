@@ -157,7 +157,9 @@ make_dataset(const std::string& kind,
         cur = cur / 3 + 1;
     }
     actual_n = total;
-    if (kind == "indivisible" and total % k == 0) {
+    // With one cluster every size is divisible; in particular, do not turn the
+    // valid n=1, k=1 case into an empty dataset.
+    if (kind == "indivisible" and k > 1 and total % k == 0) {
         actual_n = total - 1;
     }
     std::vector<float> centroids(static_cast<uint64_t>(k) * dim);
@@ -274,7 +276,8 @@ run_bench(const std::string& dataset,
                                         false,
                                         1e-6F,
                                         vsag::KMeansInitMethod::KMEANS_PLUS_PLUS,
-                                        seed);
+                                        seed,
+                                        /*deterministic_reduction=*/true);
         const auto end = std::chrono::steady_clock::now();
         results.push_back(measure("kmeans",
                                   dataset,

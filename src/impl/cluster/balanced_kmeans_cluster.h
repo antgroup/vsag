@@ -135,7 +135,9 @@ public:
     /// Assigns `count` vectors to fixed centroids under the balanced capacity
     /// constraint, without updating the centroids. `metric` selects the
     /// ordering key: squared L2 for `METRIC_TYPE_L2SQR`, `1 - <x, c>` for IP
-    /// and cosine, matching the IVF scan routing key. Unlike `Run`, this
+    /// and cosine, matching the IVF scan routing key. Cosine input rows are
+    /// normalized internally before their assignment costs are compared.
+    /// Unlike `Run`, this
     /// accepts `k > count`: then `count` clusters receive one vector each and
     /// the remaining clusters stay empty, which is the best achievable
     /// balance when there are fewer vectors than clusters.
