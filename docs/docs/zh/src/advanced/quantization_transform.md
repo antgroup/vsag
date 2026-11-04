@@ -20,13 +20,10 @@
 
 ## 快速上手
 
-`tq` 目前作为**对外可配置**的量化类型，只有 **HGraph** 真正暴露了它。HGraph 通过外部参数映射把
-顶层键 `tq_chain` 和 `rabitq_pca_dim` 写到嵌套的 `base_codes.quantization_params`
-（`src/algorithm/hgraph.cpp:370-385`）。IVF、BruteForce、Pyramid、WARP 虽然在内部 JSON 模板中
-也会渲染 `tq_chain` 字段，但它们的外部参数映射里**都没有** `tq_chain`（或其它 TQ 参数）。
-`CheckAndMappingExternalParam` 遇到未映射的外部键会直接抛 `invalid config param`
-（`src/utils/util_functions.cpp:50-53`），因此在这些索引的 `index_param` JSON 中传 `tq_chain`
-会在构建时报错。在非 HGraph 索引上启用 TQ 目前需要在代码侧补一条外部映射。
+`tq` 已作为对外可配置的量化类型暴露给 **HGraph** 和 **Pyramid**。两者都会把
+`tq_chain` 与降维参数映射到 `base_codes.quantization_params`。MRLE + RaBitQ x+y split
+组合在两个索引中均可用，并自动从 base split datacell 重排。IVF、BruteForce 与 WARP
+目前仍未通过外部参数映射暴露 `tq_chain`。
 
 ```cpp
 std::string params = R"({
@@ -74,6 +71,7 @@ token 两侧的空白会被自动 trim
 | `"pca, rom, sq8_uniform"` | 先 PCA 降维，再随机旋转，再 8 位均匀量化 —— 即示例 501。 |
 | `"pca, rom, rabitq"` | PCA + 旋转后喂给 RaBitQ 二值量化器。 |
 | `"mrle, fp32"` | MRLE 投影再以 fp32 存储（MRLE 必须放在最前）。 |
+| `"mrle, rabitq"` | 先做 MRLE 降维，再由 RaBitQ 编码；使用 x+y split 存储时，filter 与 supplement 编码仍由末端 RaBitQ 生成。 |
 
 约束（`transform_quantizer_parameter.cpp:33-45`）：
 
@@ -86,6 +84,8 @@ token 两侧的空白会被自动 trim
   `is_transform_quantizer=true` 时显式拒绝 `sparse`
   （`src/datacell/flatten_interface.cpp:166`），因此这三个不能用作 TQ 末端，否则会在构建索引时
   以 "unsupported quantization type" 失败。
+- RaBitQ x+y split 存储仅支持精确链 `"mrle, rabitq"`。split datacell 复用末端
+  RaBitQ 编码器，并保留 RaBitQ 内部的 FHT/ROM 随机旋转；其他带变换的 split 链会被拒绝。
 - 未识别的变换名会抛 `INVALID_ARGUMENT: invalid transformer name`
   （`transform_quantizer.h:225-227`）。
 
@@ -120,16 +120,19 @@ token 两侧的空白会被自动 trim
 
 ### HGraph 顶层映射
 
-使用 HGraph 时，两个顶层快捷键会被映射到嵌套的量化器参数中
-（`src/algorithm/hgraph.cpp:370-385`）：
+使用 HGraph 时，顶层快捷键会被映射到嵌套的量化器参数中：
 
 - `tq_chain` → `base_codes.quantization_params.tq_chain`
 - `rabitq_pca_dim` → `base_codes.quantization_params.pca_dim`
+- `mrle_dim` → `base_codes.quantization_params.mrle_dim`
 
 `rabitq_pca_dim` 这个名字早于 Transform Quantizer 引入；当链中包含 `pca` 时，它实际
 驱动的是 **`pca` 变换的输出维**（与 RaBitQ 无关）。如果链以 `rabitq` 结尾且未使用
 `pca`，则同一个键会配置 RaBitQ 自身的 PCA 预处理
 （`src/quantization/rabitq_quantization/rabitq_quantizer_parameter.cpp:30`）。
+
+`mrle_dim` 接受 `[0, dim]` 内的整数；`0` 表示输入维度。它在 `tq_chain` 包含
+`mrle` 时生效，且 `mrle` 必须保持为链中的第一个变换。
 
 ## Reorder 与精确码存储
 

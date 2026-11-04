@@ -59,16 +59,6 @@ Options::set_block_size_limit(uint64_t size) {
 }
 
 void
-Options::set_num_threads_io(uint64_t num_threads) {
-    if (num_threads < 1 || num_threads > 200) {
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format("num_threads must be set between 1 and 200, but found {}.", num_threads));
-    }
-    num_threads_io_.store(num_threads, std::memory_order_release);
-}
-
-void
 Options::set_num_threads_building(uint64_t num_threads) {
     if (num_threads < 1 || num_threads > 200) {
         throw VsagException(

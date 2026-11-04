@@ -2,6 +2,12 @@
 
 ![磁盘版 HGraph：图结构与紧凑 base 编码留在内存中用于遍历，更高精度的 precise 副本存于磁盘，仅在重排阶段为 ef_search 入围候选读取](../figures/resources/disk-index-overview.svg)
 
+## 用户自定义 IO 回调
+
+将 `precise_io_type` 设置为 `"user_defined_io"` 并通过 `Factory::CreateUserDefinedIO`
+注册回调。详细的回调约定、配置表和可运行示例请参阅
+**[用户自定义 IO](../advanced/user_defined_io.md)**。
+
 当数据规模增长到内存放不下全量向量时，把最冷、最大的那部分索引下沉到 SSD，是控制成本最直接的
 手段。VSAG 让索引的每个部分各自选择存储后端，从而实现热数据留内存、冷数据从磁盘读取。本文介绍
 **[HGraph](../indexes/hgraph.md) + 磁盘 IO**，给出可直接复制的配置、容量模型与调优
@@ -55,12 +61,60 @@ HGraph 把一个索引拆成若干个相互独立的 **cell（数据单元）**�
 | `buffer_io` | 磁盘（带缓冲 `pread`） | 是 | 通用磁盘读取，各平台可用 |
 | `mmap_io` | 磁盘（mmap + 页缓存） | 是 | 工作集能放入页缓存时接近内存速度 |
 | `async_io` | 磁盘（Linux libaio） | 是 | 高并发磁盘读；**仅限 Linux + libaio**，否则回退 `buffer_io` |
+| `uring_io` | 磁盘（Linux io_uring） | 是 | 可选 io_uring 后端；需以 `ENABLE_LIBURING=ON` 构建，否则回退 `buffer_io` |
 | `reader_io` | 自定义 `Reader` | 否 | 加载期通过用户 `ReaderSet` 读取（如远程 / 对象存储） |
 
 每个 cell 通过一组扁平参数配置：`graph_io_type` / `graph_file_path`、`base_io_type` /
 `base_file_path`、`precise_io_type` / `precise_file_path`，以及 `raw_vector_io_type` /
 `raw_vector_file_path`。当对应的 `*_io_type` 为磁盘型（`buffer_io`、`mmap_io`、`async_io`）时，
-`*_file_path` **必填**；内存型后端会忽略它。所有 cell 默认均为 `block_memory_io`（全内存）。
+`*_file_path` **必填**；这里的磁盘型后端包括 `buffer_io`、`mmap_io`、`async_io` 与
+`uring_io`。内存型后端会忽略路径。所有 cell 默认均为 `block_memory_io`（全内存）。
+
+### 启用 `uring_io`
+
+`uring_io` 是可选的 Linux 后端。安装 liburing，并在配置 CMake 时开启：
+
+```bash
+cmake -S . -B build-release \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENABLE_LIBURING=ON \
+    -DENABLE_EXAMPLES=ON
+cmake --build build-release --target 325_feature_uring_io -j
+```
+
+它可以用于支持磁盘 IO 的 cell，例如：
+
+```json
+{
+    "index_param": {
+        "base_io_type": "uring_io",
+        "base_file_path": "/data/vsag/hgraph_base.data",
+        "base_direct_read": true
+    }
+}
+```
+
+HGraph 的 `base_direct_read` 与 `precise_direct_read` 默认都是 `false`。将对应参数设为
+`true`，可让 `uring_io` 通过 direct IO 打开文件并绕过页缓存。请确认目标文件系统支持
+direct IO，并针对实际负载对比两种模式。
+
+如果 VSAG 构建时没有找到 liburing，相同配置仍可加载，但会打印一次性告警并回退到
+`buffer_io`。回退后功能保持可用，但不具备 io_uring 的提交/完成批处理能力。完整加载示例见
+`examples/cpp/325_feature_uring_io.cpp`。
+
+### 可选的页缓存预取提示
+
+文件型 IO 参数支持 `enable_prefetch_hint`（默认 `false`）。开启后，已有的搜索期 `Prefetch`
+调用会向操作系统发出尽力而为的提示：`buffer_io` 与带缓冲的 `uring_io` 使用文件预读提示，
+`mmap_io` 使用映射页提示，`reader_io` 转发到可选的 `ReaderPrefetcher::Prefetch` hook。
+如果 Reader 没有实现 `ReaderPrefetcher`，即使开启该参数也只会安全地忽略预取提示，原有读取
+行为保持兼容。远程 Reader 可同时继承 `Reader` 与 `ReaderPrefetcher` 来启用此能力；其
+`Prefetch` 实现应快速返回、将失败视为非致命，并且不得改变后续正式读取结果。该选项仅是
+性能提示，不影响正确性；direct IO 会绕过页缓存，因此忽略此提示。在公开的 HGraph/IVF 构建参数
+或 `Index::Load` 参数中，精确码使用 `reader_io` 时通过组件形式
+`precise_enable_prefetch_hint: true` 开启；可运行示例
+`examples/cpp/408_feature_reader_prefetch.cpp` 展示了完整配置。频繁提示可能增加调用开销，
+请在真实负载上完成基准测试后再开启。
 
 ## 推荐配置：base 留内存，precise 落磁盘
 
@@ -106,6 +160,9 @@ HGraph 把一个索引拆成若干个相互独立的 **cell（数据单元）**�
   Makefile 也会自动传入 `VSAG_ENABLE_LIBAIO=ON`；只有当此前的构建关闭过 libaio 时，才需要用这些
   开关把它重新打开。当 libaio 缺失时（包括 macOS），`async_io` 会打印一次性告警并回退
   `buffer_io`，配置因此保持可移植但失去异步批量能力。生产吞吐场景请在 Linux 上编译进 libaio。
+- **`uring_io` 需要 Linux + liburing，且默认关闭。** 使用
+  `-DENABLE_LIBURING=ON` 开启；否则会回退到 `buffer_io`。请在目标内核、队列深度和 SSD
+  上实测 `uring_io` 与 `async_io`，不要假定其中一个始终更快。
 - **预热页缓存。** 对 `mmap_io` 的 cell，加载后先做一次预热（如顺序读一遍文件、或跑一轮预热
   查询），避免最初的查询承担冷未命中延迟。
 - **规划文件路径与生命周期。** 磁盘型 cell 会写入你提供的 `*_file_path`；请放在快速、专用、
@@ -149,7 +206,7 @@ HGraph 把一个索引拆成若干个相互独立的 **cell（数据单元）**�
 ## 参见
 
 - [HGraph](../indexes/hgraph.md)——旗舰索引及其完整参数表
-- [量化总览](../quantization/README.md)——如何选择 base/precise 量化器
+- [量化总览](../quantization/)——如何选择 base/precise 量化器
 - [最佳实践](best_practices.md)——通用生产建议
 - [序列化格式](../advanced/serialization.md)——索引的持久化与加载
 - [性能评估工具](eval.md) 与 [优化器](../advanced/optimizer.md)——度量与调优

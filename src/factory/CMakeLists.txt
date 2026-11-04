@@ -25,7 +25,6 @@ set (FACTORY_SRC
 
 add_library (factory OBJECT ${FACTORY_SRC})
 target_link_libraries (factory PRIVATE coverage_config vsag_src_common)
-maybe_add_dependencies (factory diskann)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE FACTORY_TESTS "*_test.cpp")

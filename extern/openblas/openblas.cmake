@@ -172,30 +172,43 @@ if (NOT OPENBLAS_FOUND)
     message (STATUS "Building OpenBLAS from source")
 
     set (openblas_urls
-        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.23/OpenBLAS-0.3.23.tar.gz
-        # this url is maintained by the vsag project, if it's broken, please try
-        #  the latest commit or contact the vsag project
-        https://vsagcache.oss-rg-china-mainland.aliyuncs.com/openblas/OpenBLAS-0.3.23.tar.gz
+        https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz
+        https://sourceforge.net/projects/openblas/files/v0.3.34/OpenBLAS-0.3.34.tar.gz/download
     )
-    if (DEFINED ENV{VSAG_THIRDPARTY_OPENBLAS})
-        message (STATUS "Using local path for openblas: $ENV{VSAG_THIRDPARTY_OPENBLAS}")
-        list (PREPEND openblas_urls "$ENV{VSAG_THIRDPARTY_OPENBLAS}")
-    endif ()
+    vsag_resolve_thirdparty_override (OPENBLAS v0.3.34 openblas_urls)
 
     # OpenBLAS build tools (getarch) require strict FP semantics; -Ofast
     # (which implies -ffast-math) breaks CPU detection. Replace with -O2.
     string (REPLACE "-Ofast" "-O2" _openblas_c_flags "${VSAG_THIRDPARTY_C_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_c_flags "${_openblas_c_flags}")
+    # GCC 15 defaults to GNU C23, where an empty parameter list means that a function takes
+    # no arguments. OpenBLAS' f2c-generated LAPACK sources use empty parameter lists with the
+    # pre-C23 "unspecified arguments" meaning, so compile the bundled release as GNU C17.
+    if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+        string (APPEND _openblas_c_flags
+                " -std=gnu17 -Wno-error=incompatible-pointer-types")
+    endif ()
     string (REPLACE "-Ofast" "-O2" _openblas_cxx_flags "${VSAG_THIRDPARTY_CXX_FLAGS}")
     string (REPLACE "-ffast-math" "" _openblas_cxx_flags "${_openblas_cxx_flags}")
     string (STRIP "${_openblas_c_flags}" _openblas_c_flags)
     string (STRIP "${_openblas_cxx_flags}" _openblas_cxx_flags)
 
+    set (_openblas_target_arg)
+    if (DEFINED ENV{VSAG_OPENBLAS_TARGET} AND NOT "$ENV{VSAG_OPENBLAS_TARGET}" STREQUAL "")
+        string (STRIP "$ENV{VSAG_OPENBLAS_TARGET}" _openblas_target)
+        if (NOT _openblas_target MATCHES "^[A-Za-z0-9_]+$")
+            message (FATAL_ERROR
+                     "VSAG_OPENBLAS_TARGET must contain only letters, digits, or underscores; "
+                     "got '$ENV{VSAG_OPENBLAS_TARGET}'.")
+        endif ()
+        list (APPEND _openblas_target_arg "TARGET=${_openblas_target}")
+    endif ()
+
     ExternalProject_Add (
         ${name}
         URL ${openblas_urls}
-        URL_HASH MD5=115634b39007de71eb7e75cf7591dfb2
-        DOWNLOAD_NAME OpenBLAS-v0.3.23.tar.gz
+        URL_HASH SHA256=cd7e129868320cc2d033afa920e31202dfe0b8066a5b66661900ccc0f197dfed
+        DOWNLOAD_NAME OpenBLAS-v0.3.34.tar.gz
         PREFIX ${CMAKE_CURRENT_BINARY_DIR}/${name}
         TMP_DIR ${BUILD_INFO_DIR}
         STAMP_DIR ${BUILD_INFO_DIR}
@@ -209,13 +222,17 @@ if (NOT OPENBLAS_FOUND)
             OMP_NUM_THREADS=1
             PATH=/usr/lib/ccache:$ENV{PATH}
             LD_LIBRARY_PATH=/opt/alibaba-cloud-compiler/lib64/:$ENV{LD_LIBRARY_PATH}
-            make USE_THREAD=0 USE_LOCKING=1 DYNAMIC_ARCH=1 NOFORTRAN=1 -j${NUM_BUILDING_JOBS}
+            make USE_THREAD=0 USE_LOCKING=1 ${_openblas_target_arg} DYNAMIC_ARCH=1
+                 NOFORTRAN=1 -j1
         INSTALL_COMMAND
-            make DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir} install
+            make ${_openblas_target_arg} DYNAMIC_ARCH=1 NOFORTRAN=1 PREFIX=${install_dir}
+                 install
         BUILD_IN_SOURCE 1
         LOG_CONFIGURE TRUE
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
+        LOG_MERGED_STDOUTERR TRUE
+        LOG_OUTPUT_ON_FAILURE TRUE
         DOWNLOAD_NO_PROGRESS 1
         INACTIVITY_TIMEOUT 5
         TIMEOUT 30

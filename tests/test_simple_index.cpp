@@ -96,6 +96,100 @@ public:
     }
 };
 
+// Overrides the CANONICAL batch name. Deprecated alias forwards here.
+class CanonicalBatchIndex : public SimpleIndex {
+public:
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool precise = true,
+                      int64_t topk = -1) const override {
+        REQUIRE(ids != nullptr);
+        REQUIRE(count == 3);
+        REQUIRE_FALSE(precise);
+        REQUIRE(topk == 2);
+        return Dataset::Make()->Owner(false)->Distances(const_cast<float*>(query));
+    }
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool precise = true,
+                      int64_t topk = -1) const override {
+        return CalcDistancesById(query->GetFloat32Vectors(), ids, count, precise, topk);
+    }
+};
+
+// Defines only the deprecated batch alias (which is now a non-virtual
+// forwarding helper on the base). After the layout change this does not
+// participate in the canonical CalcDistancesById dispatch. The deprecated
+// name hides the base and is unreachable when the caller sends a generic
+// Index pointer to CalcDistancesById.
+class DeprecatedOnlyBatchIndex : public SimpleIndex {
+public:
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const float* query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool precise = true,
+                    int64_t topk = -1) const {
+        REQUIRE(ids != nullptr);
+        REQUIRE(count == 3);
+        REQUIRE(precise);
+        REQUIRE(topk == -1);
+        return Dataset::Make()->Owner(false)->Distances(const_cast<float*>(query));
+    }
+    tl::expected<DatasetPtr, Error>
+    CalDistanceById(const DatasetPtr& query,
+                    const int64_t* ids,
+                    int64_t count,
+                    bool precise = true,
+                    int64_t topk = -1) const {
+        return CalDistanceById(query->GetFloat32Vectors(), ids, count, precise, topk);
+    }
+};
+
+TEST_CASE("Canonical batch virtual dispatch and deprecated aliases",
+          "[ft][simple_index][distance_contract]") {
+    // 1) Canonical override -> canonical + deprecated both work
+    IndexPtr canonical_index = std::make_shared<CanonicalBatchIndex>();
+    float distance = 1.0F;
+    int64_t ids[] = {1, 2, 3};
+    auto query = Dataset::Make()->Owner(false)->NumElements(1)->Float32Vectors(&distance);
+    auto raw = canonical_index->CalcDistancesById(&distance, ids, 3, false, 2);
+    auto native = canonical_index->CalcDistancesById(query, ids, 3, false, 2);
+    REQUIRE(raw.has_value());
+    REQUIRE(native.has_value());
+    REQUIRE(raw.value()->GetDistances() == &distance);
+    REQUIRE(native.value()->GetDistances() == &distance);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto legacy_raw = canonical_index->CalDistanceById(&distance, ids, 3, false, 2);
+    auto legacy_native = canonical_index->CalDistanceById(query, ids, 3, false, 2);
+#pragma GCC diagnostic pop
+    REQUIRE(legacy_raw.has_value());
+    REQUIRE(legacy_native.has_value());
+    REQUIRE(legacy_raw.value()->GetDistances() == &distance);
+    REQUIRE(legacy_native.value()->GetDistances() == &distance);
+
+    // 2) Index that only defines the deprecated alias (now non-virtual).
+    //    The deprecated name is reachable through the static type but the
+    //    canonical CalcDistancesById dispatch never sees it.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+    auto deprecated_index = std::make_shared<DeprecatedOnlyBatchIndex>();
+    auto dep_legacy = deprecated_index->CalDistanceById(&distance, ids, 3, true);
+    REQUIRE(dep_legacy.has_value());
+#pragma GCC diagnostic pop
+    // Canonical dispatch through the Index* pointer hits the base
+    // UNSUPPORTED fallback because DeprecatedOnlyBatchIndex does not
+    // override CalcDistancesById.
+    IndexPtr base_ptr = deprecated_index;
+    auto dep_canonical = base_ptr->CalcDistancesById(&distance, ids, 3, true);
+    REQUIRE_FALSE(dep_canonical.has_value());
+}
+
 TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     IndexPtr index = std::make_shared<SimpleIndex>();
     auto pool = std::make_shared<fixtures::TestDatasetPool>();
@@ -127,7 +221,7 @@ TEST_CASE("Test Simple Index", "[ft][simple_index]") {
     REQUIRE_FALSE(index->CalcDistanceById(dataset->base_->GetFloat32Vectors(), 1).has_value());
     REQUIRE_FALSE(index->CalcDistanceById(dataset->query_, 1).has_value());
     REQUIRE_FALSE(
-        index->CalDistanceById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
+        index->CalcDistancesById(dataset->base_->GetFloat32Vectors(), nullptr, 1).has_value());
     REQUIRE_FALSE(index->GetMinAndMaxId().has_value());
     REQUIRE_FALSE(index->GetExtraInfoByIds(nullptr, 1, nullptr).has_value());
     REQUIRE_FALSE(index->UpdateExtraInfo(dataset->query_).has_value());

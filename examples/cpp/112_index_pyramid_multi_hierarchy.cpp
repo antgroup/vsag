@@ -63,12 +63,16 @@ main(int argc, char** argv) {
         vectors[i] = distrib_real(rng);
     }
 
-    // Generate two independent sets of paths — one per hierarchy.
+    // Generate independent path inputs for both hierarchies. The category hierarchy uses
+    // structured paths so selected vectors can also belong to the "featured" path.
     auto site_paths = new std::string[num_vectors];
-    auto category_paths = new std::string[num_vectors];
+    std::vector<std::vector<std::string>> category_paths(num_vectors);
     for (int64_t i = 0; i < num_vectors; ++i) {
         site_paths[i] = generate_site_path(rng);
-        category_paths[i] = generate_category_path(rng);
+        category_paths[i].push_back(generate_category_path(rng));
+        if (i % 10 == 0) {
+            category_paths[i].push_back("featured");
+        }
     }
 
     auto base = vsag::Dataset::Make();
@@ -157,8 +161,8 @@ main(int argc, char** argv) {
             for (int64_t i = 0; i < result->GetDim(); ++i) {
                 auto id = result->GetIds()[i];
                 std::cout << "  id=" << id << "  dist=" << result->GetDistances()[i]
-                          << "  site=" << site_paths[id] << "  category=" << category_paths[id]
-                          << std::endl;
+                          << "  site=" << site_paths[id]
+                          << "  primary category=" << category_paths[id].front() << std::endl;
             }
         } else {
             std::cerr << "Search error: " << knn_result.error().message << std::endl;
@@ -199,8 +203,8 @@ main(int argc, char** argv) {
             for (int64_t i = 0; i < result->GetDim(); ++i) {
                 auto id = result->GetIds()[i];
                 std::cout << "  id=" << id << "  dist=" << result->GetDistances()[i]
-                          << "  site=" << site_paths[id] << "  category=" << category_paths[id]
-                          << std::endl;
+                          << "  site=" << site_paths[id]
+                          << "  primary category=" << category_paths[id].front() << std::endl;
             }
         } else {
             std::cerr << "Search error: " << knn_result.error().message << std::endl;
@@ -214,11 +218,14 @@ main(int argc, char** argv) {
         auto add_ids = new int64_t[add_count];
         auto add_vectors = new float[dim * add_count];
         auto add_site_paths = new std::string[add_count];
-        auto add_cat_paths = new std::string[add_count];
+        std::vector<std::vector<std::string>> add_cat_paths(add_count);
         for (int64_t i = 0; i < add_count; ++i) {
             add_ids[i] = num_vectors + i;
             add_site_paths[i] = generate_site_path(rng);
-            add_cat_paths[i] = generate_category_path(rng);
+            add_cat_paths[i].push_back(generate_category_path(rng));
+            if (i % 10 == 0) {
+                add_cat_paths[i].push_back("featured");
+            }
         }
         for (int64_t i = 0; i < dim * add_count; ++i) {
             add_vectors[i] = distrib_real(rng);
@@ -239,7 +246,6 @@ main(int argc, char** argv) {
         delete[] add_ids;
         delete[] add_vectors;
         delete[] add_site_paths;
-        delete[] add_cat_paths;
     }
 
     /******************* RangeSearch on "category" Hierarchy *****************/
@@ -340,6 +346,5 @@ main(int argc, char** argv) {
     delete[] ids;
     delete[] vectors;
     delete[] site_paths;
-    delete[] category_paths;
     return 0;
 }

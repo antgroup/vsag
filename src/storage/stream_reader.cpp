@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -82,8 +83,6 @@ ReadFuncStreamReader::~ReadFuncStreamReader() {
 
 void
 IOStreamReader::Read(char* data, uint64_t size) {
-    auto offset = std::to_string(istream_.tellg());
-    // vsag::logger::trace("io read offset {} size {}", offset, size);
     this->istream_.read(data, static_cast<int64_t>(size));
     if (istream_.fail()) {
         auto remaining = std::streamsize(this->istream_.gcount());
@@ -185,7 +184,7 @@ BufferStreamReader::Read(char* data, uint64_t size) {
         // If there is available data in buffer_, copy it to dest
         if (available_in_src > 0) {
             uint64_t bytes_to_copy = std::min<uint64_t>(size - total_copied, available_in_src);
-            memcpy(data + total_copied, buffer_ + buffer_cursor_, bytes_to_copy);
+            std::memcpy(data + total_copied, buffer_ + buffer_cursor_, bytes_to_copy);
             total_copied += bytes_to_copy;
             buffer_cursor_ += bytes_to_copy;
         }

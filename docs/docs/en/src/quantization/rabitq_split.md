@@ -1,9 +1,10 @@
 # RaBitQ x+y Split
 
-RaBitQ x+y split is an HGraph storage and search mode for low-bit base codes.
+RaBitQ x+y split is an HGraph, IVF, and Pyramid storage and search mode for
+low-bit base codes.
 Each vector is divided into two records:
 
-- `x` filter bits are read during graph traversal and lower-bound filtering.
+- `x` filter bits are read during graph traversal or IVF bucket scanning.
 - `y` supplement bits are fetched only for candidates that reach reorder.
 - The final reorder distance uses all `x+y` bits.
 
@@ -13,7 +14,8 @@ memory while the colder supplement record is stored on disk.
 
 ## Enable split mode
 
-HGraph selects split mode when both quantization types are `rabitq` and
+HGraph, IVF, and Pyramid select split mode when both quantization types are
+`rabitq` and
 `rabitq_bits_per_dim_precise` is present:
 
 ```json
@@ -46,6 +48,8 @@ The relevant parameters are:
 | `rabitq_bits_per_dim_query` | Must be `32` for split storage. |
 | `rabitq_error_rate` | Default positive multiplier applied to the lower-bound error term. |
 | `use_reorder` | Should be `true` so candidates are ranked with the `x+y` distance. |
+| `rabitq_fused_datacell` | HGraph only; enables fused graph/code layout. Default: `false`. |
+| `train_sample_count` | Maximum HGraph training sample size. The default is `65536`; the minimum explicit value is `512`. |
 
 The constraints are:
 
@@ -55,8 +59,69 @@ The constraints are:
 x + y <= 8
 ```
 
-If `rabitq_bits_per_dim_precise` is omitted, HGraph uses the standard RaBitQ
+If `rabitq_bits_per_dim_precise` is omitted, HGraph, IVF, and Pyramid use the standard RaBitQ
 path instead of split storage.
+
+### HGraph fused in-memory layout
+
+For HGraph only, set `rabitq_fused_datacell` to `true` to store each
+bottom-layer node's neighbors, cluster id, label, x-bit code, and y-bit
+supplement in one cache-line-aligned record. Pyramid uses ordinary split
+storage; `rabitq_fused_datacell` is not a Pyramid parameter. The specialized
+HGraph search loop reads the record directly and prefetches graph links and
+quantized codes together. The codec uses 16 reproducibly trained residual
+clusters.
+
+For latency-sensitive single-query searches, `rabitq_use_fht: true` selects
+FHT/Kac rotation in place of the dense random orthogonal matrix. This option
+is independent of `rabitq_fused_datacell`. Both options must be set before
+`Build`; changing an existing dense-rotation or ordinary split index requires
+a rebuild. They cannot be enabled through search parameters.
+
+By default, fused HGraph trains the base RaBitQ quantizer and fused KMeans codec on at most 65,536
+vectors. When `train_sample_count` is smaller than the dataset, it selects that many vectors using
+fixed-seed uniform reservoir sampling. Increasing the value can improve cluster-centroid quality at
+the cost of build time and temporary training memory; set it to at least the dataset size to train
+on all vectors.
+
+This option creates an incrementally mutable in-memory index. After `Build` or
+Deserialize, it supports `Add`, mark remove, vector/id/attribute/extra-info
+updates, search (including filters, iterators, range search, and concurrent
+queries), distance-by-id, memory statistics, and serialization/deserialization.
+Force remove, merge, tune, clone, model export, and build-cache import/export
+remain unsupported. `Build` and Deserialize leave the index mutable and retain
+the search and per-node locks. Call `SetImmutable` explicitly when no more
+mutations are needed; this terminal transition removes those locks from the
+search path, and later mutations are rejected.
+
+Each record starts with a 4-byte neighbor count followed by plain
+`InnerIdType` neighbor IDs. There is no node version and no version encoding in
+neighbor IDs. Cluster id, aligned external label, filter code, and supplement
+follow; the record stride remains rounded up to a 64-byte boundary. Storage can
+grow during `Build` and later `Add` operations.
+
+The optimized build uses temporary SQ8 scalar codes for symmetric base-to-base
+graph construction, then discards them. The completed index keeps only the
+fused RaBitQ records. Post-build `Add` decodes fused records on demand for
+pairwise graph updates, so it does not retain an SQ8 or raw-vector copy; batch
+adds are preferable when insertion throughput matters.
+
+The fused layout is opt-in and has stricter constraints than ordinary split
+storage:
+
+- `1 <= x <= 4`, `y >= 1`, and `x + y <= 8`.
+- The metric must be L2 or inner product.
+- The graph, filter codes, and supplement codes must all use memory IO.
+- MCI, `deduplicate_storage`, removal metadata, reverse edges, and force remove
+  must be disabled.
+- PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.
+- The legacy v0.14 serialization format is not supported.
+- The fused slab wire format is versioned independently. The current format
+  intentionally rejects earlier development formats that contained node
+  versions and remove flags.
+
+Indexes created without this option keep their existing layout, behavior, and
+serialization format.
 
 Enable the filter/lower-bound search path with:
 
@@ -71,28 +136,44 @@ Enable the filter/lower-bound search path with:
 }
 ```
 
+For Pyramid, put the equivalent search controls under `pyramid`:
+
+```json
+{
+    "pyramid": {
+        "ef_search": 200,
+        "rabitq_one_bit_search": true,
+        "rabitq_error_rate": 1.9
+    }
+}
+```
+
 The external search key is named `rabitq_one_bit_search`, but on a split index
 it uses all `x` filter bits configured by `rabitq_bits_per_dim_base`.
-`hgraph.rabitq_error_rate` overrides the index default for that search. It can
-be swept without rebuilding because the stored record contains the geometric
-error scale before this multiplier is applied.
+`hgraph.rabitq_error_rate` and `pyramid.rabitq_error_rate` override the index
+default for their respective searches without requiring a rebuild. Native
+fused HGraph records store the geometric error scale before this multiplier is
+applied. HNSW-compatible fused `1+7` records retain metadata scaled by the
+canonical default and apply an override as a ratio at query time.
 
+IVF bucket scans use the configured `x` filter bits automatically; no
+`rabitq_one_bit_search` switch is needed. The `ivf.factor` parameter controls
+how many filter-stage candidates (`factor * topk`) proceed to supplement
+reranking.
 ## Search pipeline
 
 The split search path has four stages:
 
-1. The query is transformed and normalized once. For supported filter widths,
-   a byte lookup table is also built once per query.
-2. Graph traversal reads only the filter record. It computes an x-bit distance
-   estimate and a conservative lower bound for each visited vector.
-3. Reorder discards candidates whose lower bound cannot enter the result set.
-   It fetches the y-bit supplement record only for the remaining candidates.
-4. The final distance combines the filter contribution and supplement
-   contribution into one `x+y`-bit RaBitQ estimate.
-
-The HGraph heap is therefore not populated with an `x+y` distance for every
-visited vector. The inexpensive x-bit distance drives traversal; the more
-accurate distance is evaluated only during candidate reorder.
+1. The query is transformed and normalized once. Residual IVF builds one shared
+   HighAcc lookup table from the original transformed query.
+2. IVF bucket scanning reads only the packed x-bit filter record and emits a
+   distance estimate plus the reusable quantized filter inner product.
+3. IVF retains `factor * topk` candidates by filter distance. The candidate heap
+   carries the source bucket, offset, and version needed to validate the saved
+   inner product under concurrent updates.
+4. Reranking reads only the y-bit supplement on the valid fast path and combines
+   it with the saved filter contribution. Packed x bits are reread only by the
+   correctness fallback for an invalid or stale candidate.
 
 ## Encoding and bit planes
 
@@ -224,6 +305,116 @@ cosine apply the corresponding metric conversion to the error term.
 The lower bound is used only to reject candidates safely. `D_x` remains the
 traversal estimate, while the final ranking uses the `x+y` distance.
 
+## IVF 1-bit, 2-bit, and 3-bit 32-vector FastScan layout
+
+When IVF split storage uses `x` from 1 through 3, `RaBitQSplitBucketDataCell`
+packages each bucket in groups of 32 candidates. These bucket-local packed
+blocks are the only persistent filter-code layout and contain the SIMD-oriented
+filter planes plus compact metadata. Single-lane x bits are unpacked from the
+block only for correctness fallback or full-code access by ID. Supplement
+reranking normally reads only the separate y-bit record.
+
+Let `G = ceil(d / 8) * 2` be the number of four-dimensional groups in one
+bitplane. Each group stores one four-bit mask per candidate. For every group,
+the 32 masks are transposed into 16 bytes. The low nibbles represent candidates
+`0..15`, the high nibbles represent candidates `16..31`, and both halves use
+the lane order `0, 8, 1, 9, ..., 7, 15`. Multiple bitplanes remain separate
+and contiguous in plane-major order.
+
+For `x = 1`, each group has the 16-entry subset-sum table:
+
+```text
+LUT_g[m] = sum(q_(4g+j) for j in [0, 3] when bit_j(m) is set)
+```
+
+For `x = 2` or `x = 3`, let bitplane zero be the most significant plane. The
+centered lookup table is:
+
+```text
+weight(x, p) = 2^(x - p - 2)
+LUT_(p,g)[m] = weight(x, p) * sum((2 * bit_j(m) - 1) * q_(4g+j))
+```
+
+The plane weights are `{1, 0.5}` for two bits and `{2, 1, 0.5}` for three
+bits. Coordinates beyond `d` are zero.
+
+One-bit and two-bit scans use one query-wide unsigned-byte quantizer. Three-bit
+scans quantize each plane independently, preventing the low-weight plane from
+losing effective precision to the four-times-wider range of the high plane:
+
+```text
+delta[p] = (v_max[p] - v_min[p]) / 255
+plane_sum[p] ~= G * v_min[p] + delta[p] * sum LUT_u8[p][code]
+centered_ip ~= plane_sum[0] + plane_sum[1] + plane_sum[2]
+```
+
+The three-bit scanner invokes `PQFastScanLookUp32` once for each contiguous
+plane. This keeps the same `3 * G` total shuffle groups and packed-code size as
+a single combined scan, while allowing separate dequantization scales.
+
+For one bit, the lookup sum is converted to the normalized binary inner
+product with `sum(q)` and `sqrt(d)`. For two and three bits, it is already the
+centered inner product and is divided by the stored filter-code norm. All paths
+then use the stored RaBitQ norm and error metadata to recover the filter-stage
+distance.
+
+The packed filter planes are followed by the metadata for all 32 candidates.
+A final bucket block with fewer than 32 vectors is zero-padded, while the
+scanner returns only valid candidates. Runtime dispatch selects generic, SSE,
+AVX2, or AVX-512 code. The dequantized byte-LUT result is saved as `S_x` and reused in the final
+`x+y` estimate, so filtering and reranking share the same LUT quantization error. Wider filter widths continue to use the
+bit-plane batch paths.
+
+Example configurations are:
+
+```json
+{
+    "rabitq_bits_per_dim_base": 1,
+    "rabitq_bits_per_dim_precise": 7,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 2,
+    "rabitq_bits_per_dim_precise": 6,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+### GIST1M comparison
+
+The following results compare traditional 8-bit IVF RaBitQ with the split
+layouts on `gist-960-euclidean.hdf5` (1,000,000 base vectors, 960 dimensions,
+L2). The index used 1,024 buckets, 100,000 training samples, 16 build threads,
+and `rabitq_bits_per_dim_query = 32`. Search used one thread, 32 scanned
+buckets, `factor = 10`, top-10, and 5,000 measured queries. The split search
+results include the 32-vector FastScan layout described above.
+
+| Layout | Build time (s) | Build TPS | Index memory (bytes) | Search QPS | Avg latency (ms) | Recall@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Traditional RaBitQ 8-bit | 150.742 | 6,633.840 | 1,284,595,208 | 17.767 | 56.280 | 0.9197 |
+| Split RaBitQ 1+7 | 551.701 | 1,812.576 | 1,450,355,304 | 118.333 | 8.447 | 0.9019 |
+| Split RaBitQ 2+6 | 509.431 | 1,962.974 | 1,582,237,512 | 74.786 | 13.368 | 0.9128 |
+| Split RaBitQ 3+5 | 496.873 | 2,012.589 | 1,702,580,248 | 67.892 | 14.726 | 0.9094 |
+
+These numbers are a single-machine comparison rather than a universal
+performance guarantee. Split storage spends more time building two code
+streams and keeps a bucket-local FastScan copy in memory. In return, its
+filter scan avoids reading the full 8-bit code for every candidate. On this
+workload, 2+6 provides the closest recall to traditional 8-bit RaBitQ while
+improving search throughput by about 4.2 times; 1+7 maximizes throughput with
+a larger recall trade-off.
+
 ## Query lookup table and SIMD
 
 For `x = 2` and `x = 3`, the query computer builds a FastScan-style byte
@@ -260,19 +451,28 @@ sum_i q_i * u_i
       + sum_i q_i * s_i
 ```
 
-For L2 with an x-bit lookup filter, HGraph passes the previously computed
-filter distance to reorder as a hint. `ComputeDistWithSplitCodeAndFilterDist`
-recovers the first term from that hint and computes only the second term from
-the y supplement planes:
+For `x >= 2`, the dedicated fused HGraph search/reorder path carries the exact
+x-bit filter inner product from traversal to reorder. It consumes the hint
+while reading codes directly from the node record, so full rerank computes only
+the second term from the y supplement planes. For L2 with an x-bit lookup
+filter, HGraph, IVF, and Pyramid pass the previously computed filter distance to
+reorder as a hint. `ComputeDistWithSplitCodeAndFilterDist` recovers the first
+term from that hint and computes only the second term from the y supplement
+planes:
 
 ```text
 full contribution = shifted filter contribution + supplement contribution
 ```
 
-Thus a `3+5` index reuses the 3-bit filter result and scans only 5 new bit
-planes for each reordered candidate. If the hint is unavailable or cannot be
-used, the code falls back to `ComputeDistWithSplitCode`, which computes the
-same final distance directly from both split records.
+Thus fused `2+y`, `3+y`, and `4+y` indexes reuse the exact x-bit filter inner
+product and scan only the y supplement planes for each reranked candidate. The
+richer filter-IP/full-distance candidate record is private to HGraph's fused
+search path; generic HGraph searchers, Pyramid, and `ReorderInterface` retain
+the original distance/id candidate protocol. The fused `1+y` traversal uses a four-bit query bit-plane and
+popcount approximation; precise reranking recomputes its exact one-bit
+contribution because the approximate value is not an exact full-distance
+hint. If a usable hint is unavailable, the code computes the same final
+distance directly from both split records.
 
 ## Memory, disk, and hybrid IO
 
@@ -338,30 +538,53 @@ The split datacell serializes, in order:
 Create the destination index with parameters compatible with the serialized
 index, especially `dim`, `metric_type`, x/y bit widths, and query bits.
 Changing an encoded parameter requires rebuilding the index. Tuning only the
-search-time `hgraph.rabitq_error_rate` does not.
+search-time `hgraph.rabitq_error_rate` or `pyramid.rabitq_error_rate` does not.
+
+For a fused index, the codec model is serialized with the split datacell and
+the per-node codes are serialized once as part of the bottom-graph slab.
+Ordinary and streaming round trips preserve this layout without creating a
+second count-scaled copy of the split codes.
 
 ## Implementation map
 
 | Area | File / entry point |
 | --- | --- |
-| External x/y parameter mapping | `src/algorithm/hgraph/hgraph_param_mapping.cpp` |
+| External x/y parameter mapping | `hgraph_param_mapping.cpp`, `pyramid.cpp` |
 | Split record ownership and IO | `src/datacell/rabitq_split_datacell.h` |
 | Plane layout and code splitting | `RaBitQuantizer::StoredPlaneIndex`, `SplitCode` |
 | Filter estimate and lower bound | `ComputeDistWithOneBitLowerBound` |
 | Direct split distance | `ComputeDistWithSplitCode` |
-| Reorder using the filter hint | `ComputeDistWithSplitCodeAndFilterDist` |
+| Reorder using the filter-distance hint | `ComputeDistWithSplitCodeAndFilterDist`, `ComputeDistWithSplitCodeAndFilterIP` |
 | SIMD dispatch | `src/simd/rabitq_simd.cpp` |
 | AVX2 / AVX512 lookup kernels | `src/simd/avx2.cpp`, `src/simd/avx512.cpp` |
 | Runnable memory/disk/hybrid example | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
 
 ## Operational notes
 
-- Split storage is currently an HGraph feature and requires fp32 query codes.
-- `l2`, `ip`, and `cosine` are supported. The filter-hint reorder shortcut is
-  currently specialized for L2.
+- Pyramid incremental `Add` reuses decoded scalar codes in bounded, operation-local
+  caches during graph traversal and pruning, including after model deserialization.
+  No additional parameter is needed; persisted split records remain unchanged.
+- Split storage is currently available on HGraph, IVF, and Pyramid and requires
+  fp32 query codes. Pyramid enables the one-bit split search path by default for
+  split indexes; pass `rabitq_one_bit_search: false` under `pyramid` to force the
+  standard search path.
+- `l2`, `ip`, and `cosine` are supported. For `x >= 2`, the canonical ordinary
+  split and fused HGraph paths directly reuse the exact filter inner product
+  for L2 and inner product. Other cases safely compute the full split distance.
+- The fused datacell supports only L2 and inner product and only the in-memory
+  configuration described above.
+- Fused HGraph remains mutable after `Build` and deserialize. It supports
+  post-build `Add`, mark remove, and vector/id/attribute/extra-info updates, but
+  not force remove. Call `SetImmutable` explicitly for the lock-free read-only
+  search path.
+- With `support_duplicate: true`, duplicate build probes and alias-expanding
+  queries use the canonical HGraph searcher; the fused slab remains the code
+  and graph storage.
 - Keep `use_reorder: true` unless x-bit traversal accuracy alone has been
   validated for the dataset.
 - Changing x, y, metric, or transform parameters requires rebuilding the
-  index. A search-time `hgraph.rabitq_error_rate` override does not.
+  index. A search-time `hgraph.rabitq_error_rate` or
+  `pyramid.rabitq_error_rate` override does not.
 - Use [RaBitQ](rabitq.md) for the general quantizer description and
-  [HGraph](../indexes/hgraph.md) for the complete index parameter table.
+  [HGraph](../indexes/hgraph.md) and [Pyramid](../indexes/pyramid.md) for the
+  complete index parameter tables.

@@ -43,7 +43,7 @@ enum class ErrorType {
     // [runtime errors]
     NO_ENOUGH_MEMORY,  // failed to alloc memory
     READ_ERROR,        // cannot read from binary
-    MISSING_FILE,      // some file missing in index diskann deserialization
+    MISSING_FILE,      // a required index file is missing during deserialization
     INVALID_BINARY,    // the content of binary is invalid
 };
 

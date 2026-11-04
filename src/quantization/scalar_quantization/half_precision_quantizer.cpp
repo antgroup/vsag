@@ -14,6 +14,8 @@
 
 #include "half_precision_quantizer.h"
 
+#include <cstring>
+
 #include "simd/normalize.h"
 #include "typing.h"
 #include "vsag_exception.h"
@@ -68,6 +70,50 @@ HalfPrecisionQuantizer<Format, metric>::EncodeOneImpl(const float* data, uint8_t
         }
     }
     return true;
+}
+
+template <typename Format, MetricType metric>
+bool
+HalfPrecisionQuantizer<Format, metric>::EncodeOneHalf(const uint16_t* data, uint8_t* codes) const {
+    if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
+        Vector<float> values(this->dim_, this->allocator_);
+        for (uint64_t i = 0; i < this->dim_; ++i) {
+            values[i] = Format::HalfToFloat(data[i]);
+        }
+        return this->EncodeOneImpl(values.data(), codes);
+    } else {
+        std::memcpy(codes, data, this->code_size_);
+        return true;
+    }
+}
+
+template <typename Format, MetricType metric>
+bool
+HalfPrecisionQuantizer<Format, metric>::EncodeBatchHalf(const uint16_t* data,
+                                                        uint8_t* codes,
+                                                        uint64_t count) const {
+    for (uint64_t i = 0; i < count; ++i) {
+        if (!this->EncodeOneHalf(data + i * this->dim_, codes + i * this->code_size_)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+template <typename Format, MetricType metric>
+void
+HalfPrecisionQuantizer<Format, metric>::ProcessQueryHalf(
+    const uint16_t* query, Computer<HalfPrecisionQuantizer<Format, metric>>& computer) const {
+    try {
+        if (computer.buf_ == nullptr) {
+            computer.buf_ =
+                reinterpret_cast<uint8_t*>(this->allocator_->Allocate(this->query_code_size_));
+        }
+        this->EncodeOneHalf(query, computer.buf_);
+    } catch (const std::bad_alloc& e) {
+        throw VsagException(
+            ErrorType::NO_ENOUGH_MEMORY, "bad alloc when init computer buf", e.what());
+    }
 }
 
 template <typename Format, MetricType metric>

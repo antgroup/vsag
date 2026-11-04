@@ -62,6 +62,15 @@ TEST_CASE("Transform Quantizer Parameter CheckCompatibility", "[ut][TransformQua
     TEST_COMPATIBILITY_CASE("different length", param_pca_fp32, param_pca_fht_fp32, false);
     TEST_COMPATIBILITY_CASE(
         "different space", param_pca_fht_fp32_no_space, param_pca_fht_fp32, true);
+    TEST_COMPATIBILITY_CASE("different transform parameter",
+                            R"({"tq_chain":"mrle,rabitq","mrle_dim":64})",
+                            R"({"tq_chain":"mrle,rabitq","mrle_dim":32})",
+                            false);
+    TEST_COMPATIBILITY_CASE(
+        "different bottom parameter",
+        R"({"tq_chain":"mrle,rabitq","mrle_dim":64,"rabitq_bits_per_dim_base":3})",
+        R"({"tq_chain":"mrle,rabitq","mrle_dim":64,"rabitq_bits_per_dim_base":5})",
+        false);
 }
 
 TEST_CASE("TQ Parameter ToJson Test", "[ut][TransformQuantizerParameter]") {
@@ -84,6 +93,19 @@ TEST_CASE("TQ parameter Split Merge String Test", "[ut][TransformQuantizerParame
     auto chain_str = TransformQuantizerParameter::SplitString(str);
     auto recover_str = TransformQuantizerParameter::MergeStrings(chain_str);
     REQUIRE(str == recover_str);
+}
+
+TEST_CASE("Generic quantizer CreateDefault rejects TQ without a chain",
+          "[ut][TransformQuantizerParameter]") {
+    REQUIRE_THROWS(QuantizerParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_TQ));
+}
+
+TEST_CASE("TQ CreateDefault normalizes chain whitespace", "[ut][TransformQuantizerParameter]") {
+    const auto compact = TransformQuantizerParameter::CreateDefault("mrle,rabitq")->ToJson();
+    const auto spaced = TransformQuantizerParameter::CreateDefault(" mrle, rabitq ")->ToJson();
+    REQUIRE(spaced[TQ_CHAIN_KEY].GetString() == "mrle,rabitq");
+    REQUIRE(spaced[TYPE_KEY].GetString() == QUANTIZATION_TYPE_VALUE_TQ);
+    REQUIRE(spaced.Dump() == compact.Dump());
 }
 
 TEST_CASE("Invalid Cases Test", "[ut][TransformQuantizerParameter]") {

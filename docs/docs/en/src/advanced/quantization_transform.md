@@ -27,16 +27,11 @@ Quantizer)**.
 
 ## Quick start
 
-`tq` is currently exposed as a **public, externally configurable** quantization type only by
-**HGraph**. HGraph maps the top-level keys `tq_chain` and `rabitq_pca_dim` into the nested
-`base_codes.quantization_params` JSON via its external-parameter mapping
-(`src/algorithm/hgraph.cpp:370-385`). IVF, BruteForce, Pyramid and WARP all internally render
-a `tq_chain` field into their inner JSON template, but none of them expose `tq_chain` (or any
-other TQ parameter) in their external mapping today. `CheckAndMappingExternalParam` rejects
-unknown external keys with `invalid config param`
-(`src/utils/util_functions.cpp:50-53`), so passing `tq_chain` in the `index_param` JSON of
-those indexes will fail at index construction. Configuring TQ on non-HGraph indexes
-therefore requires code-side changes to add the external mapping.
+`tq` is exposed as a public, externally configurable quantization type by **HGraph** and
+**Pyramid**. Both map `tq_chain` and dimension parameters into
+`base_codes.quantization_params`. The MRLE + RaBitQ x+y split combination is available in both
+indexes and automatically reorders from the base split datacell. IVF, BruteForce and WARP do
+not currently expose `tq_chain` through their external parameter mapping.
 
 ```cpp
 std::string params = R"({
@@ -85,6 +80,7 @@ Examples:
 | `"pca, rom, sq8_uniform"` | PCA reduction, random rotation, then 8-bit uniform — the example chain. |
 | `"pca, rom, rabitq"` | PCA + rotation feeding the RaBitQ binary quantizer. |
 | `"mrle, fp32"` | MRLE projection then store as fp32 (MRLE must be first). |
+| `"mrle, rabitq"` | MRLE reduction followed by RaBitQ; with x+y split storage, filter and supplement codes are produced by the terminal RaBitQ. |
 
 Constraints (`transform_quantizer_parameter.cpp:33-45`):
 
@@ -98,6 +94,9 @@ Constraints (`transform_quantizer_parameter.cpp:33-45`):
   when `is_transform_quantizer` is true (`src/datacell/flatten_interface.cpp:166`), so using
   any of those three as the terminal quantizer fails at index construction with an
   "unsupported quantization type" error.
+- RaBitQ x+y split storage supports TQ only for the exact chain `"mrle, rabitq"`. The split
+  datacell reuses the terminal RaBitQ encoder and keeps RaBitQ internal FHT/ROM rotation
+  behavior unchanged. Other transformed split chains are rejected.
 - Any unrecognized transformer name raises `INVALID_ARGUMENT: invalid transformer name`
   (`transform_quantizer.h:225-227`).
 
@@ -133,16 +132,19 @@ The transformer JSON is read by `VectorTransformerParameter::FromJson`
 
 ### HGraph external mapping
 
-When using HGraph, two top-level shortcuts are mapped into the nested quantizer params
-(`src/algorithm/hgraph.cpp:370-385`):
+When using HGraph, top-level shortcuts are mapped into the nested quantizer params:
 
 - `tq_chain` → `base_codes.quantization_params.tq_chain`
 - `rabitq_pca_dim` → `base_codes.quantization_params.pca_dim`
+- `mrle_dim` → `base_codes.quantization_params.mrle_dim`
 
 The name `rabitq_pca_dim` predates Transform Quantizer; when the chain includes `pca`, it
 drives the **`pca` transformer's output dim** (it is not RaBitQ-specific). When the chain
 ends in `rabitq` without `pca`, the same key configures RaBitQ's own PCA preprocessing
 (`src/quantization/rabitq_quantization/rabitq_quantizer_parameter.cpp:30`).
+
+`mrle_dim` accepts an integer in `[0, dim]`; `0` means the input dimension. It has an effect when
+`tq_chain` includes `mrle`, which must remain the first transform in the chain.
 
 ## Reordering and the precise codes store
 

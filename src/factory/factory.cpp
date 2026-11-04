@@ -42,6 +42,8 @@
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
 #include "common.h"
 #include "data_type.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -65,14 +67,12 @@ namespace {
 
 IndexCommonParam
 make_streaming_common_param(const MetadataPtr& metadata, Allocator* allocator) {
-    auto resource = allocator == nullptr
-                        ? std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr)
-                        : std::make_shared<Resource>(allocator, nullptr);
+    auto resource = allocator == nullptr ? Resource(Engine::CreateDefaultAllocator(), nullptr)
+                                         : Resource(allocator, nullptr);
 
     IndexCommonParam common_param;
-    common_param.allocator_ = resource->GetAllocator();
-    common_param.thread_pool_ =
-        std::dynamic_pointer_cast<SafeThreadPool>(resource->GetThreadPool());
+    common_param.allocator_ = resource.GetAllocator();
+    common_param.thread_pool_ = std::dynamic_pointer_cast<SafeThreadPool>(resource.GetThreadPool());
 
     auto basic_info = metadata->Get("basic_info");
     if (basic_info.Contains("dim")) {
@@ -101,7 +101,8 @@ is_valid_streaming_io_type(const char* io_type) {
     const std::string_view type(io_type);
     return type == IO_TYPE_VALUE_MEMORY_IO || type == IO_TYPE_VALUE_BLOCK_MEMORY_IO ||
            type == IO_TYPE_VALUE_BUFFER_IO || type == IO_TYPE_VALUE_ASYNC_IO ||
-           type == IO_TYPE_VALUE_MMAP_IO || type == IO_TYPE_VALUE_READER_IO;
+           type == IO_TYPE_VALUE_MMAP_IO || type == IO_TYPE_VALUE_READER_IO ||
+           type == IO_TYPE_VALUE_URING_IO;
 }
 
 void
@@ -153,6 +154,30 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
                                   nullptr,
                                   load_json[HGRAPH_PRECISE_FILE_PATH].GetString().c_str());
     }
+    if (load_json.Contains(HGRAPH_BASE_DIRECT_READ)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_BASE_DIRECT_READ].IsBool(),
+                       "base_direct_read must be a boolean");
+        if (index_param.Contains(BASE_CODES_KEY)) {
+            index_param[BASE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetBool(
+                load_json[HGRAPH_BASE_DIRECT_READ].GetBool());
+        }
+    }
+    if (load_json.Contains(HGRAPH_PRECISE_DIRECT_READ)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_PRECISE_DIRECT_READ].IsBool(),
+                       "precise_direct_read must be a boolean");
+        if (index_param.Contains(PRECISE_CODES_KEY)) {
+            index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_DIRECT_READ_KEY].SetBool(
+                load_json[HGRAPH_PRECISE_DIRECT_READ].GetBool());
+        }
+    }
+    if (load_json.Contains(HGRAPH_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        if (index_param.Contains(PRECISE_CODES_KEY)) {
+            index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+                load_json[HGRAPH_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
+        }
+    }
     if (load_json.Contains(RAW_VECTOR_IO_TYPE)) {
         require_string_load_parameter(load_json, RAW_VECTOR_IO_TYPE);
         set_streaming_io_override(index_param,
@@ -166,6 +191,52 @@ apply_hgraph_streaming_load_parameters(JsonType& index_param, const std::string&
                                   RAW_VECTOR_KEY,
                                   nullptr,
                                   load_json[RAW_VECTOR_FILE_PATH].GetString().c_str());
+    }
+}
+
+void
+apply_ivf_streaming_load_parameters(JsonType& index_param, const LoadParameters& parameters) {
+    constexpr const char* precise_reader_key = "precise_reader";
+    auto parameter_string = parameters.Dump();
+    auto load_json = JsonType::Parse(parameter_string.empty() ? "{}" : parameter_string);
+
+    const bool has_precise_reader = parameters.HasReader(precise_reader_key);
+    bool requests_reader_io = false;
+    if (load_json.Contains(IVF_PRECISE_IO_TYPE)) {
+        require_string_load_parameter(load_json, IVF_PRECISE_IO_TYPE);
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_IO_TYPE].GetString() == IO_TYPE_VALUE_READER_IO,
+                       "IVF precise streaming load only supports reader_io");
+        requests_reader_io = true;
+    }
+    if (not has_precise_reader and not requests_reader_io) {
+        return;
+    }
+
+    CHECK_ARGUMENT(has_precise_reader, "IVF precise_io_type=reader_io requires precise_reader");
+    CHECK_ARGUMENT(parameters.GetReader(precise_reader_key) != nullptr, "precise_reader is null");
+    CHECK_ARGUMENT(requests_reader_io, "precise_reader requires precise_io_type=reader_io");
+    CHECK_ARGUMENT(index_param.Contains(USE_REORDER_KEY) && index_param[USE_REORDER_KEY].IsBool() &&
+                       index_param[USE_REORDER_KEY].GetBool(),
+                   "IVF precise_reader requires use_reorder=true");
+    set_streaming_io_override(index_param, PRECISE_CODES_KEY, IO_TYPE_VALUE_READER_IO, nullptr);
+
+    if (load_json.Contains(IVF_PRECISE_ENABLE_READ_CACHE)) {
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_ENABLE_READ_CACHE].IsBool(),
+                       "precise_enable_read_cache must be a boolean");
+        index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetBool(
+            load_json[IVF_PRECISE_ENABLE_READ_CACHE].GetBool());
+    }
+    if (load_json.Contains(IVF_PRECISE_ENABLE_PREFETCH_HINT)) {
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].IsBool(),
+                       "precise_enable_prefetch_hint must be a boolean");
+        index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][IO_PREFETCH_HINT_KEY].SetBool(
+            load_json[IVF_PRECISE_ENABLE_PREFETCH_HINT].GetBool());
+    }
+    if (load_json.Contains(IVF_PRECISE_CACHE_TOTAL_SIZE)) {
+        CHECK_ARGUMENT(load_json[IVF_PRECISE_CACHE_TOTAL_SIZE].IsNumberUnsigned(),
+                       "precise_cache_total_size must be a non-negative integer");
+        index_param[PRECISE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(
+            load_json[IVF_PRECISE_CACHE_TOTAL_SIZE].GetUint64());
     }
 }
 
@@ -185,7 +256,7 @@ create_streaming_index(const JsonType& index_param, const IndexCommonParam& comm
 
 tl::expected<StreamingIndexLoadTarget, Error>
 create_streaming_index_from_metadata(const MetadataPtr& metadata,
-                                     const std::string& parameters,
+                                     const LoadParameters& parameters,
                                      Allocator* allocator) {
     auto index_name_json = metadata->Get("index_name");
     if (!index_name_json.IsString()) {
@@ -226,10 +297,11 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
         return create_streaming_index<BruteForce, BruteForceParameter>(index_param, common_param);
     }
     if (index_name == INDEX_HGRAPH) {
-        apply_hgraph_streaming_load_parameters(index_param, parameters);
+        apply_hgraph_streaming_load_parameters(index_param, parameters.Dump());
         return create_streaming_index<HGraph, HGraphParameter>(index_param, common_param);
     }
     if (index_name == INDEX_IVF) {
+        apply_ivf_streaming_load_parameters(index_param, parameters);
         return create_streaming_index<IVF, IVFParameter>(index_param, common_param);
     }
     if (index_name == INDEX_PYRAMID) {
@@ -237,6 +309,9 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
     }
     if (index_name == INDEX_SINDI) {
         return create_streaming_index<SINDI, SINDIParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_SINDI_V2) {
+        return create_streaming_index<SINDIV2, SINDIV2Parameter>(index_param, common_param);
     }
 
     LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -258,6 +333,21 @@ Factory::CreateIndex(const std::string& origin_name,
     }
     Engine e(resource.get());
     return e.CreateIndex(origin_name, parameters);
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
+Factory::CreateIndex(const std::string& origin_name,
+                     const std::string& parameters,
+                     const UserDefinedIOSet& user_defined_ios,
+                     Allocator* allocator) {
+    std::shared_ptr<Resource> resource{nullptr};
+    if (allocator == nullptr) {
+        resource = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
+    } else {
+        resource = std::make_shared<Resource>(allocator, nullptr);
+    }
+    Engine e(resource.get());
+    return e.CreateIndex(origin_name, parameters, user_defined_ios);
 }
 
 tl::expected<StreamingIndexMetadata, Error>
@@ -391,7 +481,7 @@ Index::Load(std::istream& in_stream, const LoadParameters& parameters, Allocator
         ForwardStreamReader reader(in_stream);
         auto metadata = StreamHeader::Read(reader);
 
-        auto index = create_streaming_index_from_metadata(metadata, parameter_string, allocator);
+        auto index = create_streaming_index_from_metadata(metadata, parameters, allocator);
         if (not index.has_value()) {
             return tl::unexpected(index.error());
         }
@@ -462,7 +552,7 @@ public:
         });
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return size_;
     }
@@ -494,7 +584,12 @@ public:
     void
     Read(uint64_t offset, uint64_t len, void* dest) override {
         if (offset > size_ || len > size_ - offset) {
+            // Preserve the original runtime_error type: callers catching it for I/O failures
+            // must keep working.
             throw std::runtime_error("ReadFuncReader: read range is out of bounds");
+        }
+        if (len > 0 and dest == nullptr) {
+            throw std::invalid_argument("ReadFuncReader: read destination is null");
         }
         std::lock_guard<std::mutex> lock(read_mutex_);
         read_func_(base_offset_ + offset, len, dest);
@@ -510,7 +605,7 @@ public:
         }
     }
 
-    uint64_t
+    [[nodiscard]] uint64_t
     Size() const override {
         return size_;
     }
@@ -522,6 +617,108 @@ private:
     std::mutex read_mutex_;
 };
 
+class CallbackStorage final : public Reader, public Writer {
+public:
+    CallbackStorage(ReadFunc read_func,
+                    WriteFunc write_func,
+                    ResizeFunc resize_func,
+                    uint64_t initial_size)
+        : read_func_(std::move(read_func)),
+          write_func_(std::move(write_func)),
+          resize_func_(std::move(resize_func)),
+          size_(initial_size) {
+        if (!read_func_ or !write_func_ or !resize_func_) {
+            throw std::invalid_argument("user defined IO callbacks must not be empty");
+        }
+    }
+
+    void
+    Read(uint64_t offset, uint64_t len, void* dest) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (offset > size_ or len > size_ - offset) {
+            // Runtime state violation rather than a malformed argument, unlike the
+            // constructor and null-pointer checks below.
+            throw std::runtime_error("user defined IO read range is out of bounds");
+        }
+        if (len > 0 and dest == nullptr) {
+            throw std::invalid_argument("user defined IO read destination is null");
+        }
+        if (len > 0) {
+            read_func_(offset, len, dest);
+        }
+    }
+
+    void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) override {
+        if (!callback) {
+            throw std::invalid_argument("user defined IO completion callback must not be empty");
+        }
+        auto code = IOErrorCode::IO_SUCCESS;
+        std::string message = "success";
+        try {
+            Read(offset, len, dest);
+        } catch (const std::exception& error) {
+            code = IOErrorCode::IO_ERROR;
+            message = error.what();
+        } catch (...) {
+            code = IOErrorCode::IO_ERROR;
+            message = "user defined IO read failed";
+        }
+        // Completion exceptions propagate to the caller; they indicate a callback contract
+        // violation and must not be silently swallowed.
+        callback(code, message);
+    }
+
+    [[nodiscard]] uint64_t
+    Size() const override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return size_;
+    }
+
+    void
+    Write(uint64_t offset, uint64_t len, const void* source) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (len > 0 and source == nullptr) {
+            throw std::invalid_argument("user defined IO write source is null");
+        }
+        if (offset > UINT64_MAX - len) {
+            // Range arithmetic overflow is a runtime state violation, not a malformed argument.
+            throw std::runtime_error("user defined IO write range overflows");
+        }
+        if (len == 0) {
+            // A zero-length write only ever extends the logical extent; it never shrinks it, so it
+            // is not ftruncate semantics. Growth contents are defined by resize_func_ and are
+            // intentionally not zero-filled.
+            if (offset > size_) {
+                resize_locked(offset);
+            }
+            return;
+        }
+        write_func_(offset, len, source);
+        size_ = std::max(size_, offset + len);
+    }
+
+    void
+    Resize(uint64_t size) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        resize_locked(size);
+    }
+
+private:
+    // The caller holds mutex_; publish the logical size only after the callback succeeds.
+    void
+    resize_locked(uint64_t size) {
+        resize_func_(size);
+        size_ = size;
+    }
+
+    ReadFunc read_func_;
+    WriteFunc write_func_;
+    ResizeFunc resize_func_;
+    mutable std::mutex mutex_;
+    uint64_t size_{0};
+};
+
 std::shared_ptr<Reader>
 Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t size) {
     return std::make_shared<ReadFuncReader>(std::move(read_func), 0, size);
@@ -530,6 +727,16 @@ Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t size) {
 std::shared_ptr<Reader>
 Factory::CreateReadFuncReader(ReadFunc read_func, uint64_t base_offset, uint64_t size) {
     return std::make_shared<ReadFuncReader>(std::move(read_func), base_offset, size);
+}
+
+UserDefinedIOPair
+Factory::CreateUserDefinedIO(ReadFunc read_func,
+                             WriteFunc write_func,
+                             ResizeFunc resize_func,
+                             uint64_t initial_size) {
+    auto storage = std::make_shared<CallbackStorage>(
+        std::move(read_func), std::move(write_func), std::move(resize_func), initial_size);
+    return UserDefinedIOPair{storage, storage};
 }
 
 }  // namespace vsag

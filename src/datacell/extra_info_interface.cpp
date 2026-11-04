@@ -27,18 +27,18 @@ template <typename IOTemp>
 static ExtraInfoInterfacePtr
 make_instance(const ExtraInfoDataCellParamPtr& param, const IndexCommonParam& common_param) {
     auto& io_param = param->io_parameter;
-    return std::make_shared<ExtraInfoDataCell<IOTemp>>(io_param, common_param);
+    return std::make_shared<ExtraInfoDataCell<FixedLayout<IOTemp>>>(io_param, common_param);
 }
 
 ExtraInfoInterfacePtr
 ExtraInfoInterface::MakeInstance(const ExtraInfoDataCellParamPtr& param,
                                  const IndexCommonParam& common_param) {
-    auto io_type_name = param->io_parameter->GetTypeName();
-    if (io_type_name == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
+    if (param->io_parameter->Kind() == IOKind::BLOCK_MEMORY) {
         return make_instance<MemoryBlockIO>(param, common_param);
     }
-    throw VsagException(ErrorType::INVALID_ARGUMENT,
-                        fmt::format("Extra Info not support {} IO type", io_type_name));
+    throw VsagException(
+        ErrorType::INVALID_ARGUMENT,
+        fmt::format("Extra Info not support {} IO type", param->io_parameter->GetTypeName()));
 }
 
 }  // namespace vsag

@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <cmath>
+
 #include "impl/logger/logger.h"
 
 // Cast `other` to the target parameter type; log and return false on type mismatch.
@@ -30,6 +32,15 @@
     if ((self).field != (other).field) {   \
         logger::error(#field " mismatch"); \
         return false;                      \
+    }
+
+// Compare a float field with a tolerance; log the field name and return false on
+// mismatch. Mathematically equal values can differ in the last bits after a
+// serialization round-trip, so exact comparison can reject a valid index.
+#define CHECK_FIELD_NEAR(self, other, field, tolerance)          \
+    if (std::fabs((self).field - (other).field) > (tolerance)) { \
+        logger::error(#field " mismatch");                       \
+        return false;                                            \
     }
 
 // Recursively check a sub-parameter; log the field name and return false on incompatibility.

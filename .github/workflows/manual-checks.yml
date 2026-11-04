@@ -1,0 +1,133 @@
+name: Manual Checks
+
+on:
+  workflow_dispatch:
+    inputs:
+      check:
+        description: Check to run
+        type: choice
+        default: full-pr
+        options: [full-pr, full-branch, format, docs, lite, asan, tsan, python, lint, coverage, compatibility, simd, toolchain, performance, build-performance]
+      ref:
+        description: Toolchain ref or approved main benchmark SHA
+        type: string
+        default: main
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  pr:
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    name: Manual PR
+    if: inputs.check == 'full-pr'
+    uses: ./.github/workflows/pr-ci.yml
+  branch:
+    name: Manual Branch
+    if: ${{ contains(fromJSON('["full-branch","asan","tsan","python","lint","coverage","compatibility","simd"]'), inputs.check) }}
+    uses: ./.github/workflows/main-ci.yml
+
+    with:
+      profile: ${{ inputs.check }}
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  validate:
+    if: inputs.check == 'docs'
+    name: Manual Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-docs
+
+  clang-format-check:
+    if: inputs.check == 'format'
+    name: Manual Format
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-format
+
+  build-test-install:
+    if: inputs.check == 'lite'
+    name: Manual Lite ${{ matrix.mode }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [default-off, rabitq-on, sanitizer, coverage]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-lite
+        with:
+          mode: ${{ matrix.mode }}
+
+  performance:
+    permissions:
+      contents: read
+      actions: read
+    if: ${{ inputs.check == 'performance' || inputs.check == 'build-performance' }}
+    uses: ./.github/workflows/daily_test.yml
+    with:
+      profile: ${{ inputs.check }}
+      ref: ${{ inputs.ref }}
+    secrets:
+      PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
+      PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}
+    name: Manual Performance
+  toolchain-installed-client:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc13
+          - clang20
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-installed-client
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ inputs.ref || github.sha || github.sha }}
+    if: ${{ (inputs.check == 'toolchain') && (true) }}
+    permissions:
+      contents: read
+    name: Manual Toolchain Installed Client
+  toolchain-source-baseline:
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc9
+          - clang13
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-source-baseline
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ inputs.ref || github.sha || github.sha }}
+    if: ${{ (inputs.check == 'toolchain') && (true) }}
+    permissions:
+      contents: read
+    name: Manual Toolchain Source Baseline

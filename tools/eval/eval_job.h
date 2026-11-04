@@ -23,8 +23,8 @@
 
 namespace vsag::eval {
 
-struct exporter {
-    static exporter
+struct ExporterConfig {
+    static ExporterConfig
     Load(YAML::Node&);
 
     std::string format{"json"};  // json, text/table, line_protocol
@@ -38,15 +38,15 @@ struct HttpServer {
     int port = 8080;  // default port
 };
 
-// a eval_job contains multiple eval cases
-struct eval_job {
+// a EvalJob contains multiple eval cases
+struct EvalJob {
     using eval_case = YAML::Node;
     using name2case = std::pair<std::string, eval_case>;
 
     std::vector<name2case> cases;
 
     // global options
-    std::vector<exporter> exporters;
+    std::vector<ExporterConfig> exporters;
     std::optional<int32_t> num_threads_building;
     std::optional<int32_t> num_threads_searching;
     std::optional<HttpServer> http_server;

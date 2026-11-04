@@ -15,53 +15,17 @@
 
 #include "util_functions.h"
 
+#include <cstring>
 #include <iomanip>
-#include <nlohmann/json.hpp>
+#include <limits>
 #include <random>
 
+#include "common.h"
 #include "container_types.h"
 #include "dataset_impl.h"
 #include "impl/allocator/safe_allocator.h"
 #include "vsag_exception.h"
 namespace vsag {
-
-std::string
-format_map(const std::string& str, const std::unordered_map<std::string, std::string>& mappings) {
-    std::string result = str;
-
-    for (const auto& [key, value] : mappings) {
-        uint64_t pos = result.find("{" + key + "}");
-        while (pos != std::string::npos) {
-            result.replace(pos, key.length() + 2, value);
-            pos = result.find("{" + key + "}");
-        }
-    }
-    return result;
-}
-
-void
-mapping_external_param_to_inner(const JsonType& external_json,
-                                ConstParamMap& param_map,
-                                JsonType& inner_json) {
-    auto* external_raw_json = external_json.GetInnerJson();
-    auto* inner_raw_json = inner_json.GetInnerJson();
-    for (const auto& [key, value] : external_raw_json->items()) {
-        auto ranges = param_map.equal_range(key);
-        if (ranges.first == ranges.second) {
-            // key not found in param_map
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("invalid config param: {}", key));
-        }
-        for (auto iter = ranges.first; iter != ranges.second; ++iter) {
-            const auto& vec = iter->second;
-            auto* json = inner_raw_json;
-            for (const auto& str : vec) {
-                json = &(json->operator[](str));
-            }
-            *json = value;
-        }
-    }
-}
 
 std::tuple<DatasetPtr, float*, int64_t*>
 create_fast_dataset(int64_t dim, Allocator* allocator) {
@@ -103,6 +67,8 @@ next_multiple_of_power_of_two(uint64_t x, uint64_t n) {
                             fmt::format("n is larger than 63, n is {}", n));
     }
     uint64_t y = uint64_t{1} << n;
+    CHECK_ARGUMENT(x <= std::numeric_limits<uint64_t>::max() - (y - 1),
+                   "next multiple of power of two exceeds uint64_t range");
     auto result = (x + y - 1) & ~(y - 1);
     return result;
 }
@@ -271,12 +237,11 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
-                  Allocator* allocator) {
+                  Allocator* allocator,
+                  std::optional<uint64_t> random_seed) {
     const int64_t min_train_size = 512;
-    const int64_t max_train_size = 65536;
 
-    int64_t sample_count =
-        std::min({max_train_size, total_elements, std::max(min_train_size, train_sample_count)});
+    int64_t sample_count = std::min(total_elements, std::max(min_train_size, train_sample_count));
 
     // If no sampling is needed, return the original dataset
     if (sample_count >= total_elements) {
@@ -302,7 +267,7 @@ sample_train_data(const vsag::DatasetPtr& data,
     sampled_indices.resize(actual_size);
     std::iota(sampled_indices.begin(), sampled_indices.end(), 0);
     std::random_device rd;
-    std::mt19937_64 gen(rd());
+    std::mt19937_64 gen(random_seed.has_value() ? *random_seed : rd());
     for (int64_t i = sample_count; i < total_elements; ++i) {
         std::uniform_int_distribution<int64_t> dist(0, i);
         int64_t j = dist(gen);

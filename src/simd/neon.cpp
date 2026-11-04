@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #include "simd/int8_simd.h"
+#include "simd/kernels/rabitq_pack.h"
 #if defined(ENABLE_NEON)
 #include <arm_neon.h>
 
@@ -23,7 +24,10 @@
 #include <cmath>
 #include <cstdint>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::neon {
 
@@ -71,7 +75,8 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const float16x4x3_t a) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_f16(const float16x4x3_t a) {
     float32x4x3_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
@@ -79,14 +84,16 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_f16(const fl
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_f16(const float16x4x2_t a) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_f16(const float16x4x2_t a) {
     float32x4x2_t c;
     c.val[0] = vcvt_f32_f16(a.val[0]);
     c.val[1] = vcvt_f32_f16(a.val[1]);
     return c;
 }
 
-__inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const uint16x4x3_t x) {
+__inline float32x4x3_t __attribute__((__always_inline__))
+vcvt3_f32_half(const uint16x4x3_t x) {
     float32x4x3_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
@@ -94,13 +101,15 @@ __inline float32x4x3_t __attribute__((__always_inline__)) vcvt3_f32_half(const u
     return c;
 }
 
-__inline float32x4x2_t __attribute__((__always_inline__)) vcvt2_f32_half(const uint16x4x2_t x) {
+__inline float32x4x2_t __attribute__((__always_inline__))
+vcvt2_f32_half(const uint16x4x2_t x) {
     float32x4x2_t c;
     c.val[0] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[0]), 16));
     c.val[1] = vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x.val[1]), 16));
     return c;
 }
-__inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint16x4_t x) {
+__inline float32x4_t __attribute__((__always_inline__))
+vcvt_f32_half(const uint16x4_t x) {
     return vreinterpretq_f32_u32(vshlq_n_u32(vmovl_u16(x), 16));
 }
 
@@ -110,7 +119,7 @@ __inline float32x4_t __attribute__((__always_inline__)) vcvt_f32_half(const uint
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_NEON)
-    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::NeonTag>>(
         single_dim_centers, single_dim_val, result, &generic::PQDistanceFloat256);
 #else
     return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
@@ -120,7 +129,7 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 float
 FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ComputeIPImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::NeonTag>>(
         query, codes, dim, &generic::FP32ComputeIP);
 #else
     return generic::FP32ComputeIP(query, codes, dim);
@@ -130,7 +139,7 @@ FP32ComputeIP(const float* query, const float* codes, uint64_t dim) {
 float
 FP32ComputeL2Sqr(const float* query, const float* codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::NeonTag>>(
         query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
@@ -158,7 +167,7 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_NEON)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::IP>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NeonTag>, simd::Batch4Kind::IP>(
         query,
         dim,
         codes1,
@@ -188,7 +197,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_NEON)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NEON_Tag>, simd::Batch4Kind::L2>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::NeonTag>, simd::Batch4Kind::L2>(
         query,
         dim,
         codes1,
@@ -209,7 +218,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Sub>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Sub>(
         x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
@@ -219,7 +228,7 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Add>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Add>(
         x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
@@ -229,7 +238,7 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Mul>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Mul>(
         x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
@@ -239,7 +248,7 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::NEON_Tag>, simd::BinaryOp::Div>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::NeonTag>, simd::BinaryOp::Div>(
         x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
@@ -249,14 +258,15 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::ReduceAddImpl<simd::SimdTraits<simd::NEON_Tag>>(x, dim, &generic::FP32ReduceAdd);
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::NeonTag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif
 }
 
 #if defined(ENABLE_NEON)
-__inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline uint16x8_t __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     uint16_t tmp[] = {data[3], 0, data[2], 0, data[1], 0, data[0], 0};
     return vld1q_u16(tmp);
 }
@@ -265,7 +275,7 @@ __inline uint16x8_t __attribute__((__always_inline__)) load_4_short(const uint16
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::NEON_BF16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::NeonBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeIP);
 #else
     return generic::BF16ComputeIP(query, codes, dim);
@@ -275,7 +285,7 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::NEON_BF16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::NeonBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeL2Sqr);
 #else
     return generic::BF16ComputeL2Sqr(query, codes, dim);
@@ -285,7 +295,7 @@ BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, u
 float
 FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::NEON_FP16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::FP16Traits<simd::NeonFP16Tag>>(
         query, codes, dim, &generic::FP16ComputeIP);
 #else
     return generic::FP16ComputeIP(query, codes, dim);
@@ -295,7 +305,7 @@ FP16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 FP16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::NEON_FP16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::FP16Traits<simd::NeonFP16Tag>>(
         query, codes, dim, &generic::FP16ComputeL2Sqr);
 #else
     return generic::FP16ComputeL2Sqr(query, codes, dim);
@@ -312,7 +322,8 @@ FP16SparseAccumulate(float* RESTRICT dists,
 }
 
 #if defined(ENABLE_NEON)
-__inline float32x4_t __attribute__((__always_inline__)) load_4_uint8_to_float(const uint8_t* data) {
+__inline float32x4_t __attribute__((__always_inline__))
+load_4_uint8_to_float(const uint8_t* data) {
     uint32x4_t code_values = {data[0], data[1], data[2], data[3]};
     return vcvtq_f32_u32(code_values);
 }
@@ -327,7 +338,8 @@ load_8_uint8_to_float(const uint8_t* data, float32x4_t& low, float32x4_t& high) 
     high = vcvtq_f32_u32(code_32_high);
 }
 
-__inline void __attribute__((__always_inline__)) load_16_uint8_to_float(
+__inline void __attribute__((__always_inline__))
+load_16_uint8_to_float(
     const uint8_t* data, float32x4_t& f0, float32x4_t& f1, float32x4_t& f2, float32x4_t& f3) {
     uint8x16_t code_vec = vld1q_u8(data);
     uint16x8_t code_16_low = vmovl_u8(vget_low_u8(code_vec));
@@ -363,7 +375,7 @@ load_12_uint8_to_float(const uint8_t* data, float32x4_t& f0, float32x4_t& f1, fl
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::NEON_Int8_Tag>>(
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::NeonInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeL2Sqr);
 #else
     return generic::INT8ComputeL2Sqr(query, codes, dim);
@@ -373,7 +385,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::NEON_Int8_Tag>>(
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::NeonInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeIP);
 #else
     return generic::INT8ComputeIP(query, codes, dim);
@@ -387,7 +399,7 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeIP);
 #else
     return generic::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
@@ -401,7 +413,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeL2Sqr);
 #else
     return generic::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -415,7 +427,7 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesIP);
 #else
     return generic::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -429,7 +441,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::NEON_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesL2Sqr);
 #else
     return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -452,7 +464,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeIP);
 #else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
@@ -466,7 +478,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeL2Sqr);
 #else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -480,7 +492,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesIP);
 #else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -494,7 +506,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::NEON_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::NeonSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesL2Sqr);
 #else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -632,11 +644,12 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
 }
 
 #if defined(ENABLE_NEON)
-__inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const uint8_t* bits,
-                                                                         uint64_t bit_offset,
-                                                                         uint32x4_t& mask0,
-                                                                         uint32x4_t& mask1,
-                                                                         uint32x4_t& mask2) {
+__inline void __attribute__((__always_inline__))
+extract_12_bits_to_mask(const uint8_t* bits,
+                        uint64_t bit_offset,
+                        uint32x4_t& mask0,
+                        uint32x4_t& mask1,
+                        uint32x4_t& mask2) {
     uint64_t byte_idx = bit_offset / 8;
     uint64_t bit_start = bit_offset % 8;
 
@@ -668,10 +681,11 @@ __inline void __attribute__((__always_inline__)) extract_12_bits_to_mask(const u
                          (mask_bits & 0x800) ? 0xFFFFFFFF : 0};
 }
 
-__inline void __attribute__((__always_inline__)) extract_8_bits_to_mask(const uint8_t* bits,
-                                                                        uint64_t bit_offset,
-                                                                        uint32x4_t& mask0,
-                                                                        uint32x4_t& mask1) {
+__inline void __attribute__((__always_inline__))
+extract_8_bits_to_mask(const uint8_t* bits,
+                       uint64_t bit_offset,
+                       uint32x4_t& mask0,
+                       uint32x4_t& mask1) {
     uint64_t byte_idx = bit_offset / 8;
     uint64_t bit_start = bit_offset % 8;
 
@@ -713,6 +727,75 @@ extract_4_bits_to_mask(const uint8_t* bits, uint64_t bit_offset) {
                         (mask_bits & 0x8) ? 0xFFFFFFFF : 0};
 }
 #endif
+float
+RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::RaBitQFloatScalarIPImpl<simd::SQ8Traits<simd::NeonSQ8Tag>>(
+        vector, codes, dim, &generic::RaBitQFloatSQIP);
+#else
+    return generic::RaBitQFloatSQIP(vector, codes, dim);
+#endif
+}
+
+uint64_t
+RaBitQCodeCodeIP(const uint8_t* codes1, const uint8_t* codes2, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    constexpr uint64_t kBytesPerIteration = 16;
+    constexpr uint64_t kIterationsPerBlock = 128;
+    uint64_t result = 0;
+    uint64_t i = 0;
+    while (i + kBytesPerIteration <= dim) {
+        uint32x4_t sum = vdupq_n_u32(0);
+        uint64_t iterations = 0;
+        for (; iterations < kIterationsPerBlock and i + kBytesPerIteration <= dim;
+             ++iterations, i += kBytesPerIteration) {
+            const uint8x16_t code1 = vld1q_u8(codes1 + i);
+            const uint8x16_t code2 = vld1q_u8(codes2 + i);
+            sum = vpadalq_u16(sum, vmull_u8(vget_low_u8(code1), vget_low_u8(code2)));
+            sum = vpadalq_u16(sum, vmull_high_u8(code1, code2));
+        }
+        result += static_cast<uint64_t>(vaddvq_u32(sum));
+    }
+    return result + generic::RaBitQCodeCodeIP(codes1 + i, codes2 + i, dim - i);
+#else
+    return generic::RaBitQCodeCodeIP(codes1, codes2, dim);
+#endif
+}
+void
+RaBitQPackScalarToSplitPlanes(const uint8_t* scalar_codes,
+                              uint8_t* filter_planes,
+                              uint8_t* supplement_planes,
+                              uint64_t dim,
+                              uint32_t total_bits,
+                              uint32_t filter_bits) {
+#if defined(ENABLE_NEON)
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t weights_data[8] = {1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x8_t weights = vld1_u8(weights_data);
+    const uint8x8_t one = vdup_n_u8(1);
+    uint64_t d = 0;
+    for (; d + 8 <= dim; d += 8) {
+        const uint8x8_t values = vld1_u8(scalar_codes + d);
+        const uint64_t byte_index = d / 8;
+        for (uint32_t bit = 0; bit < total_bits; ++bit) {
+            const int8x8_t shift = vdup_n_s8(-static_cast<int8_t>(bit));
+            const uint8x8_t bits = vand_u8(vshl_u8(values, shift), one);
+            const uint16x4_t sum16 = vpaddl_u8(vmul_u8(bits, weights));
+            const uint32x2_t sum32 = vpaddl_u16(sum16);
+            const uint64x1_t sum64 = vpaddl_u32(sum32);
+            auto* plane = simd::RaBitQGetSplitPlane(
+                filter_planes, supplement_planes, plane_bytes, total_bits, filter_bits, bit);
+            plane[byte_index] = static_cast<uint8_t>(vget_lane_u64(sum64, 0));
+        }
+    }
+    simd::RaBitQPackScalarToSplitPlanesTail(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits, d);
+#else
+    generic::RaBitQPackScalarToSplitPlanes(
+        scalar_codes, filter_planes, supplement_planes, dim, total_bits, filter_bits);
+#endif
+}
+
 uint32_t
 RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
 #if defined(ENABLE_NEON)
@@ -765,10 +848,12 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
 
     uint64_t d = 0;
     float32x4_t sum = vdupq_n_f32(0.0f);
-    const float32x4_t inv_sqrt_d_vec =
-        inv_sqrt_d < 1e-3 ? vdupq_n_f32(1.0f) : vdupq_n_f32(inv_sqrt_d);
-    const float32x4_t neg_inv_sqrt_d_vec =
-        inv_sqrt_d < 1e-3 ? vdupq_n_f32(0.0f) : vdupq_n_f32(-inv_sqrt_d);
+    // A small scale selects the raw 0/1 dot product. Use the same weights
+    // for vectorized blocks and tail lanes (not +/-0 when the scale is zero).
+    const float positive = inv_sqrt_d > 1e-3 ? inv_sqrt_d : 1.0F;
+    const float negative = inv_sqrt_d > 1e-3 ? -inv_sqrt_d : 0.0F;
+    const float32x4_t inv_sqrt_d_vec = vdupq_n_f32(positive);
+    const float32x4_t neg_inv_sqrt_d_vec = vdupq_n_f32(negative);
 
     for (; d + 11 < dim; d += 12) {
         __builtin_prefetch(vector + d + 24, 0, 1);
@@ -826,7 +911,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 2);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 2);
         d++;
         remaining--;
     }
@@ -836,7 +921,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 1);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 1);
         d++;
         remaining--;
     }
@@ -846,7 +931,7 @@ RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, floa
         uint64_t byte_idx = d / 8;
         uint64_t bit_idx = d % 8;
         bool bit_set = (bits[byte_idx] & (1 << bit_idx)) != 0;
-        res_b = vsetq_lane_f32(bit_set ? inv_sqrt_d : -inv_sqrt_d, res_b, 0);
+        res_b = vsetq_lane_f32(bit_set ? positive : negative, res_b, 0);
     }
 
     if (dim > d) {
@@ -906,7 +991,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_NEON)
-    simd::DivScalarImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::DivScalarImpl<simd::SimdTraits<simd::NeonTag>>(
         from, to, dim, scalar, &generic::DivScalar);
 #else
     generic::DivScalar(from, to, dim, scalar);
@@ -948,6 +1033,21 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
     for (uint64_t i = 0; i < 4; ++i) {
         sum[i] = vdupq_n_u32(0);
     }
+    // Each 16-bit lane accumulates one lookup byte (<= 255) per iteration and
+    // would overflow after ~258 of them, so periodically drain the int16
+    // partials into the int32 result and reset the accumulators.
+    constexpr uint64_t kFlushInterval = 32;
+    uint64_t since_flush = 0;
+    auto flush = [&]() {
+        alignas(16) uint16_t temp[8];
+        for (int64_t k = 0; k < 4; ++k) {
+            vst1q_u16(temp, vreinterpretq_u16_u32(sum[k]));
+            for (int64_t j = 0; j < 8; j++) {
+                result[k * 8 + j] += temp[j];
+            }
+            sum[k] = vdupq_n_u32(0);
+        }
+    };
     const auto sign4 = vdupq_n_u8(0x0F);
     const auto sign8 = vdupq_n_u16(0xFF);
 
@@ -965,23 +1065,78 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         sum[1] = vaddq_u32(sum[1], vreinterpretq_u32_u16(vshrq_n_u16(res1, 8)));
         sum[2] = vaddq_u32(sum[2], vreinterpretq_u32_u16(vandq_u16(res2, sign8)));
         sum[3] = vaddq_u32(sum[3], vreinterpretq_u32_u16(vshrq_n_u16(res2, 8)));
-    }
-    alignas(128) uint16_t temp[8];
-    for (int64_t i = 0; i < 4; ++i) {
-        vst1q_u16(temp, vreinterpretq_u16_u32(sum[i]));
-        for (int64_t j = 0; j < 8; j++) {
-            result[i * 8 + j] += temp[j];
+        if (++since_flush == kFlushInterval) {
+            flush();
+            since_flush = 0;
         }
     }
+    flush();
 #else
     generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
 #endif
 }
 
 void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    generic::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    for (uint64_t lane = 0; lane < 32; ++lane) {
+        result[lane] = 0;
+    }
+    PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+    return generic::FP32LessThan32Mask(values, limit);
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    return generic::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                        filter_bits,
+                                                        delta,
+                                                        sum_vl,
+                                                        query_sum,
+                                                        query_norm,
+                                                        query_bucket_norm_sqr,
+                                                        inv_sqrt_d,
+                                                        f_add,
+                                                        f_scale,
+                                                        filter_norm_codes,
+                                                        valid_size,
+                                                        dists,
+                                                        filter_inner_products);
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitAndImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitAnd);
+    simd::BitAndImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitAnd);
 #else
     return generic::BitAnd(x, y, num_byte, result);
 #endif
@@ -990,7 +1145,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitOrImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitOr);
+    simd::BitOrImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitOr);
 #else
     return generic::BitOr(x, y, num_byte, result);
 #endif
@@ -999,7 +1154,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitXorImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, y, num_byte, result, &generic::BitXor);
+    simd::BitXorImpl<simd::BitTraits<simd::NeonBitTag>>(x, y, num_byte, result, &generic::BitXor);
 #else
     return generic::BitXor(x, y, num_byte, result);
 #endif
@@ -1008,7 +1163,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_NEON)
-    simd::BitNotImpl<simd::BitTraits<simd::NEON_Bit_Tag>>(x, num_byte, result, &generic::BitNot);
+    simd::BitNotImpl<simd::BitTraits<simd::NeonBitTag>>(x, num_byte, result, &generic::BitNot);
 #else
     return generic::BitNot(x, num_byte, result);
 #endif
@@ -1016,7 +1171,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_NEON)
-    simd::KacsWalkImpl<simd::SimdTraits<simd::NEON_Tag>>(data, len, &generic::KacsWalk);
+    simd::KacsWalkImpl<simd::SimdTraits<simd::NeonTag>>(data, len, &generic::KacsWalk);
 #else
     generic::KacsWalk(data, len);
 #endif
@@ -1061,7 +1216,7 @@ FlipSign(const uint8_t* flip, float* data, uint64_t dim) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_NEON)
-    simd::VecRescaleImpl<simd::SimdTraits<simd::NEON_Tag>>(data, dim, val, &generic::VecRescale);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::NeonTag>>(data, dim, val, &generic::VecRescale);
 #else
     generic::VecRescale(data, dim, val);
 #endif
@@ -1070,7 +1225,7 @@ VecRescale(float* data, uint64_t dim, float val) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_NEON)
-    simd::RotateOpImpl<simd::SimdTraits<simd::NEON_Tag>>(data, idx, dim_, step);
+    simd::RotateOpImpl<simd::SimdTraits<simd::NeonTag>>(data, idx, dim_, step);
 #else
     generic::RotateOp(data, idx, dim_, step);
 #endif
@@ -1097,7 +1252,7 @@ FHTRotate(float* data, uint64_t dim_) {
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_NEON)
-    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::NeonTag>>(
         from, centroid, to, dim, &generic::NormalizeWithCentroid);
 #else
     return generic::NormalizeWithCentroid(from, centroid, to, dim);
@@ -1108,11 +1263,89 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_NEON)
-    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::NEON_Tag>>(
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::NeonTag>>(
         from, centroid, to, dim, norm, &generic::InverseNormalizeWithCentroid);
 #else
     generic::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
 #endif
 }
 
+}  // namespace vsag::neon
+
+namespace vsag::neon {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 8, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 8, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 8, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 8, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 4, false, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 4, false, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, true, 4, true, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_NEON)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::NeonSQ8Tag>, false, 4, true, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::neon

@@ -17,6 +17,16 @@
 set (SEARCHER_SRC
     basic_searcher.cpp
     basic_searcher.h
+    hgraph_rabitq_searcher.cpp
+    hgraph_rabitq_searcher.h
+    hybrid_mci_searcher.cpp
+    hybrid_mci_searcher.h
+    mci_searcher.cpp
+    mci_searcher.h
+    sindi_searcher.cpp
+    sindi_searcher.h
+    sindi_search_options.h
+    sindi_query_profile.h
     parallel_searcher.cpp
     parallel_searcher.h
 )

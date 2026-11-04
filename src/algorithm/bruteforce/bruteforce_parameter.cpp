@@ -30,6 +30,23 @@ BruteForceParameter::BruteForceParameter() : base_codes_param(nullptr) {
 void
 BruteForceParameter::FromJson(const JsonType& json) {
     InnerIndexParameter::FromJson(json);
+    if (json.Contains(RESIZE_INCREASE_COUNT_BIT)) {
+        CHECK_ARGUMENT(json[RESIZE_INCREASE_COUNT_BIT].IsNumberInteger(),
+                       "resize_increase_count_bit must be an integer (log2 of slot count)");
+        CHECK_ARGUMENT(json[RESIZE_INCREASE_COUNT_BIT].IsNumberUnsigned(),
+                       "resize_increase_count_bit must be in range [1, 31] (log2 of slot count)");
+        this->resize_increase_count_bit = json[RESIZE_INCREASE_COUNT_BIT].GetUint64();
+        CHECK_ARGUMENT(
+            this->resize_increase_count_bit >= MIN_RESIZE_INCREASE_COUNT_BIT,
+            fmt::format("resize_increase_count_bit must be in range [{}, {}] (log2 of slot count)",
+                        MIN_RESIZE_INCREASE_COUNT_BIT,
+                        MAX_RESIZE_INCREASE_COUNT_BIT));
+        CHECK_ARGUMENT(
+            this->resize_increase_count_bit <= MAX_RESIZE_INCREASE_COUNT_BIT,
+            fmt::format("resize_increase_count_bit must be in range [{}, {}] (log2 of slot count)",
+                        MIN_RESIZE_INCREASE_COUNT_BIT,
+                        MAX_RESIZE_INCREASE_COUNT_BIT));
+    }
     CHECK_ARGUMENT(json.Contains(BASE_CODES_KEY),
                    fmt::format("bruteforce parameters must contains {}", BASE_CODES_KEY));
     const auto& base_codes_json = json[BASE_CODES_KEY];
@@ -41,6 +58,7 @@ BruteForceParameter::ToJson() const {
     JsonType json = InnerIndexParameter::ToJson();
     json[TYPE_KEY].SetString(INDEX_TYPE_BRUTE_FORCE);
     json[BASE_CODES_KEY].SetJson(this->base_codes_param->ToJson());
+    json[RESIZE_INCREASE_COUNT_BIT].SetUint64(this->resize_increase_count_bit);
     return json;
 }
 

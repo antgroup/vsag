@@ -19,9 +19,9 @@
 
 namespace vsag::eval {
 
-exporter
-exporter::Load(YAML::Node& node) {
-    exporter ret;
+ExporterConfig
+ExporterConfig::Load(YAML::Node& node) {
+    ExporterConfig ret;
     ret.format = check_and_get_value(node, "format");
     ret.to = check_and_get_value(node, "to");
     if (not node["vars"].IsDefined()) {

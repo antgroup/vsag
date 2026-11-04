@@ -23,7 +23,7 @@ namespace vsag {
 class InnerIdWrapperFilter : public Filter {
 public:
     InnerIdWrapperFilter(const FilterPtr filter_impl, const LabelTable& label_table)
-        : filter_impl_(filter_impl), label_table_(label_table){};
+        : filter_impl_(filter_impl), label_table_(label_table) {};
 
     [[nodiscard]] bool
     CheckValid(int64_t inner_id) const override {
@@ -43,6 +43,19 @@ public:
     void
     GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
         filter_impl_->GetValidIds(valid_ids, count);
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        // The wrapped filter observes labels, so the bitmap it can offer is indexed by label. It is
+        // usable as an inner-id bitmap only when labels and inner ids are the same ids.
+        if (not label_table_.IsIdentityMapping()) {
+            if (size != nullptr) {
+                *size = 0;
+            }
+            return nullptr;
+        }
+        return filter_impl_->GetValidBitmap(size);
     }
 
 private:

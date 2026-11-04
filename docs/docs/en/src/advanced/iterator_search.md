@@ -163,3 +163,81 @@ relying on this capability — coverage may expand in future releases.
   iteration.
 - **Thread safety.** A single `IteratorContext` must not be used concurrently from multiple
   threads. Different queries should each have their own context.
+
+## Native HGraph SearchSession (experimental)
+
+`OpenSearchSession(query, allocator = nullptr)` fixes only query/index/resources and returns an owning,
+single-consumer session (`SUPPORT_CONTINUE_SEARCH_SESSION`). This API is separate from
+`IteratorContext`; the legacy iterator implementation is unchanged.
+
+Open deep-copies the query without creating computers, routing or scoring. The first
+`Next(SearchSessionNextOptions)` creates reusable computers and routes through the upper graphs. Later calls resume
+the retained bottom-graph frontier, reusing scores, visited/expanded state and computers.
+Each call expands at least `max(ef_search, max_candidates)` remaining vertices,
+or exhausts the frontier; restrictive filters may require more expansion to fill a page.
+It is not a page sliced from a larger precomputed KNN result. Results are ordered within
+each page, not necessarily across pages. Exhaustion covers the reachable graph, not a
+promise to enumerate disconnected vectors. `HasMore()` is conservative before filtering.
+
+```cpp
+#include <vsag/search_session.h>
+auto opened = index->OpenSearchSession(query);
+vsag::SearchSessionNextOptions options{10, R"({"hgraph":{"ef_search":64}})", nullptr};
+if (!opened.has_value()) { /* handle error */ }
+else {
+    auto session = std::move(opened.value());
+    while (session->HasMore()) {
+        auto page = session->Next(options);
+        if (!page.has_value()) { /* handle error */ break; }
+        if (page.value()->GetDim() == 0) break; // Current conditions exhausted, not necessarily session.
+        // Consume page.value(); every result is returned at most once.
+    }
+    session->Close(); // optional; destruction also closes
+}
+```
+
+`SearchSessionNextOptions` defaults to HGraph JSON because HGraph is currently the only supported
+session backend; future backends must document their accepted parameters.
+
+`Next` options replace `max_candidates`, `filter` (nullptr means accept all) and `search_parameters`
+for that call only. Filters may be replaced or mutated **between** calls, including the same object;
+conditions must remain stable during a call. All discovered undelivered IDs are re-evaluated,
+including previous filter/threshold rejects and ordinary duplicate aliases. Thresholds may tighten
+or relax. Reorder may toggle: precise scores are computed lazily once per ID and cached separately
+from coarse traversal scores. Neither changing ef/demand nor eligibility reroutes or recomputes
+existing distances. Delivered IDs are never returned again.
+
+`HasMore()` ignores current eligibility: it is true while routing/frontier work or discovered
+undelivered IDs remain. An empty filtered batch does **not** close the session; a later wider filter
+may return results after traversal is exhausted. Stop on empty for the current request; a loop using
+only `HasMore()` can run forever under unsatisfiable conditions. `session_traversal_exhausted` and
+`session_undelivered_nodes` distinguish traversal exhaustion from retained rejects.
+Permanently unreturnable NaN IDs are excluded from `HasMore` once no alternate output cell can
+rescue them (no distinct reorder cell, or both cached scores are NaN); they still serve as traversal
+bridges. An unevaluated alternate reorder cell conservatively keeps such an ID available.
+Non-finite upper-route recovery has a safety cap of 65536 visited vertices per level; exceeding it returns an execution error and closes the session rather than silently truncating routing.
+Parameters are a full replacement, not a JSON patch. Eligibility rebuilding scans the O(N) dense ID
+domain and sorts eligible candidates; this POC retains O(N) score/state arrays.
+On nonterminal calls, invalid parameters or demand outside `[1, INT64_MAX]` are retryable without losing valid state.
+Demand is an upper bound, not an allocation size: only actual results are allocated. Actual result-size overflow or allocation failure closes the session, as do other traversal exceptions.
+IDs marked removed before Open are permanently excluded from delivery but remain traversal bridges; user-filter rejects remain eligible for later calls.
+
+The legacy `OpenSearchSession(query, k_per_call, parameters, filter, allocator)` plus `Next(max)`
+remains a convenience: Open supplies defaults, with minimum effort `max(k_per_call, ef_search)`.
+Explicit `Next(options)` replaces those defaults for that call; it does not change later legacy calls.
+
+Do not mutate the index/query metric or call session methods concurrently while a session is open. The public index and query may be destroyed after Open; the session retains
+backend resources. A caller-supplied allocator and any external allocator/thread pool borrowed by
+its index Resource must outlive the session. Results have independent
+buffer ownership and survive Close, session destruction and index destruction. Close is idempotent;
+Terminal/closed Next returns an empty dataset with cumulative work statistics preserved and
+zero per-round work, without demand validation. Close releases traversal storage.
+
+Supported: ordinary label/extra-info filtering, returned extra info, output-distance thresholds,
+and ordinary precise reorder. Filter-rejected vertices remain traversable bridges. Unsupported
+configurations are rejected: shared duplicate storage/force removal, active MCI/conjugate search,
+specialized RaBitQ, parallel/timed/factored/brute-force/hop-limited search and explicit skip strategies.
+The session uses standard-library storage for its persistent frontier and score cache; the optional
+allocator is used for query copying and graph neighbor scratch, not all session allocations.
+Cumulative diagnostic statistics `session_routing_runs`, `session_computers`, `session_scored`,
+`session_reordered` and `session_expanded` expose actual traversal work.

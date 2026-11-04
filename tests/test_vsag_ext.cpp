@@ -80,18 +80,20 @@ TEST_CASE("Test IndexHandler With Exception", "[ft][ext]") {
 TEST_CASE("Test IndexHandler", "[ft][ext]") {
     int num_vectors = 100;
     int dim = 16;
+    // Keep the extension lifecycle coverage on the maintained HGraph schema with FP32 storage.
     auto parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "ip",
         "dim": 16,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
             "ef_construction": 100
         }
     }
     )";
-    auto make_indexhandler = vsag::ext::IndexHandler::Make("hnsw", parameters);
+    auto make_indexhandler = vsag::ext::IndexHandler::Make("hgraph", parameters);
     REQUIRE(make_indexhandler.has_value());
     vsag::ext::IndexHandler* index_handler = make_indexhandler.value();
 
@@ -117,7 +119,7 @@ TEST_CASE("Test IndexHandler", "[ft][ext]") {
     query_handler->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
     auto search_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 100
         }
     }
@@ -159,7 +161,7 @@ TEST_CASE("Test IndexHandler", "[ft][ext]") {
 
         auto bs = serialize.value();
 
-        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hnsw", parameters);
+        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hgraph", parameters);
         REQUIRE(new_make_indexhandler.has_value());
         vsag::ext::IndexHandler* new_index_handler = new_make_indexhandler.value();
         REQUIRE(new_index_handler->Deserialize(bs).has_value());
@@ -177,7 +179,7 @@ TEST_CASE("Test IndexHandler", "[ft][ext]") {
         for (const auto& key : bs.GetKeys()) {
             rs.Set(key, std::make_shared<fixtures::TestReader>(bs.Get(key)));
         }
-        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hnsw", parameters);
+        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hgraph", parameters);
         REQUIRE(new_make_indexhandler.has_value());
         vsag::ext::IndexHandler* new_index_handler = new_make_indexhandler.value();
         REQUIRE(new_index_handler->Deserialize(rs).has_value());
@@ -191,7 +193,7 @@ TEST_CASE("Test IndexHandler", "[ft][ext]") {
         out_file.close();
 
         std::fstream in_file(dir.path + "index.bin", std::ios::in | std::ios::binary);
-        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hnsw", parameters);
+        auto new_make_indexhandler = vsag::ext::IndexHandler::Make("hgraph", parameters);
         REQUIRE(new_make_indexhandler.has_value());
         vsag::ext::IndexHandler* new_index_handler = new_make_indexhandler.value();
         auto deserialize = new_index_handler->Deserialize(in_file);

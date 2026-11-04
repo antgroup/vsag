@@ -15,6 +15,8 @@
 
 #include "sq4_uniform_quantizer_parameter.h"
 
+#include <cmath>
+
 #include "inner_string_params.h"
 #include "utils/param_compat_macros.h"
 
@@ -26,8 +28,18 @@ SQ4UniformQuantizerParameter::SQ4UniformQuantizerParameter()
 void
 SQ4UniformQuantizerParameter::FromJson(const JsonType& json) {
     if (json.Contains(SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY)) {
-        this->trunc_rate_ =
-            json[SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY].GetFloat();  // TODO(LHT): Check value
+        this->trunc_rate_ = json[SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY].GetFloat();
+    }
+    ValidateTruncRate(this->trunc_rate_);
+}
+
+void
+SQ4UniformQuantizerParameter::ValidateTruncRate(float trunc_rate) {
+    if (!std::isfinite(trunc_rate) || trunc_rate < 0.0F || trunc_rate > 0.5F) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("sq4_uniform_trunc_rate must be finite and in [0, 0.5], but got {}",
+                        trunc_rate));
     }
 }
 

@@ -14,6 +14,7 @@
 // limitations under the License.
 
 #include <iostream>
+#include <mutex>
 
 #include "nlohmann/json.hpp"
 #include "vsag/logger.h"
@@ -33,18 +34,26 @@ public:
     Allocate(uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("allocate " + std::to_string(size) + " bytes.");
         auto addr = (void*)malloc(size);
-        sizes_[addr] = size;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            sizes_[addr] = size;
+        }
         return addr;
     }
 
     void
     Deallocate(void* p) override {
-        if (sizes_.find(p) == sizes_.end()) {
-            return;
+        uint64_t size = 0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            auto iter = sizes_.find(p);
+            if (iter == sizes_.end()) {
+                return;
+            }
+            size = iter->second;
+            sizes_.erase(iter);
         }
-        vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(sizes_[p]) +
-                                                  " bytes.");
-        sizes_.erase(p);
+        vsag::Options::Instance().logger()->Debug("deallocate " + std::to_string(size) + " bytes.");
         return free(p);
     }
 
@@ -52,16 +61,19 @@ public:
     Reallocate(void* p, uint64_t size) override {
         vsag::Options::Instance().logger()->Debug("reallocate " + std::to_string(size) + " bytes.");
         if (p == nullptr) {
-            sizes_[p] = size;
             return Allocate(size);
         }
         auto addr = (void*)realloc(p, size);
-        sizes_.erase(p);
-        sizes_[addr] = size;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            sizes_.erase(p);
+            sizes_[addr] = size;
+        }
         return addr;
     }
 
 private:
+    std::mutex mutex_;
     std::unordered_map<void*, uint64_t> sizes_;
 };
 
@@ -79,14 +91,16 @@ main() {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 4,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 5,
-            "ef_construction": 20
+            "ef_construction": 20,
+            "alpha": 1.2
         }
     }
     )";
     std::cout << "create index" << std::endl;
-    auto index = engine.CreateIndex("hnsw", paramesters).value();
+    auto index = engine.CreateIndex("hgraph", paramesters).value();
 
     std::cout << "prepare data" << std::endl;
     int64_t num_vectors = 100;
@@ -123,10 +137,10 @@ main() {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
 
-    /******************* HNSW Search *****************/
+    /******************* HGraph Search *****************/
     {
         nlohmann::json search_parameters = {
-            {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
+            {"hgraph", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
 
         std::string param_str = search_parameters.dump();
@@ -141,10 +155,10 @@ main() {
         }
     }
 
-    /******************* HNSW Iterator Filter *****************/
+    /******************* HGraph Iterator Filter *****************/
     {
         nlohmann::json search_parameters = {
-            {"hnsw", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
+            {"hgraph", {{"ef_search", 100}, {"skip_ratio", 0.7f}}},
         };
         std::string param_str = search_parameters.dump();
         vsag::SearchParam search_param(true, param_str, nullptr, &allocator, nullptr, false);

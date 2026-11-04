@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <functional>
 #include <shared_mutex>
 #include <unordered_map>
 #include <vector>
@@ -27,6 +28,7 @@
 #include "datacell/flatten_interface.h"
 #include "dataset_impl.h"
 #include "impl/heap/distance_heap.h"
+#include "impl/label_table/label_table.h"
 #include "inner_index_parameter.h"
 #include "json_types.h"
 #include "metric_type.h"
@@ -39,15 +41,31 @@
 #include "utils/pointer_define.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/search_session.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
+
+// Apply top-k selection with structural validity mask per row.
+// validity has num_rows * per_row_count entries, row-major.
+// Invalid distances are ranked last.
+DatasetPtr
+ApplyTopkWithValidity(const float* distances,
+                      const int64_t* ids,
+                      int64_t per_row_count,
+                      int64_t num_rows,
+                      int64_t topk,
+                      const std::vector<bool>& validity,
+                      Allocator* allocator);
 
 DEFINE_POINTER2(InnerIndex, InnerIndexInterface);
 DEFINE_POINTER(LabelTable);
 DEFINE_POINTER(IndexFeatureList);
 DEFINE_POINTER(SafeThreadPool);
+DEFINE_POINTER(AnalyzerBase);
 
 class IndexCommonParam;
+struct AnalyzerParam;
 
 class InnerIndexInterface {
 public:
@@ -67,10 +85,10 @@ public:
     Add(const DatasetPtr& base) = 0;
 
     virtual std::string
-    AnalyzeIndexBySearch(const SearchRequest& request) {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support analyze index by search");
-    }
+    AnalyzeIndexBySearch(const SearchRequest& request);
+
+    [[nodiscard]] virtual AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const;
 
     virtual std::vector<int64_t>
     Build(const DatasetPtr& base);
@@ -78,13 +96,9 @@ public:
     /**
      * @brief Calculate distance by ID using DatasetPtr.
      *
-        * Suitable for sparse vector indexes (SINDI) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes, this overload is also available via default
-     * implementation that calls GetFloat32Vectors().
-     *
-     * Default implementation throws exception; indexes must override appropriately.
+     * The default adapter accepts exactly one dense Float32Vectors query with matching dimension
+     * and delegates to the float-pointer overload. Sparse and multi-vector indexes override this
+     * method for their native representations.
      *
      * @param vector DatasetPtr containing the query vector (sparse or dense format).
      * @param id The unique identifier of the vector in the index.
@@ -96,16 +110,20 @@ public:
     CalcDistanceById(const DatasetPtr& vector,
                      int64_t id,
                      bool calculate_precise_distance = true) const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support calculate distance by id");
-    };
+        CHECK_ARGUMENT(vector != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(vector->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(vector->GetFloat32Vectors() != nullptr,
+                       "distance query must contain float32 vectors");
+        CHECK_ARGUMENT(vector->GetDim() == dim_, "distance query dimension mismatch");
+        return this->CalcDistanceById(vector->GetFloat32Vectors(), id, calculate_precise_distance);
+    }
 
     /**
      * @brief Calculate distance by ID using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-        * For sparse vector indexes (SINDI), this overload is not applicable.
+     * For sparse vector indexes (SINDI, SINDI_V2), this overload is not applicable.
      *
      * Default implementation throws exception; dense indexes must override.
      *
@@ -124,12 +142,11 @@ public:
     /**
      * @brief Calculate distances by IDs (batch) using raw float pointer.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array. For sparse vector indexes,
      * this overload is not applicable.
      *
-     * Default implementation loops through IDs calling CalcDistanceById.
-     * Dense indexes may override for batch optimization.
+     * Canonical batch distance-by-ID interface. Dense indexes override the float* overload; sparse and multi-vector indexes override the DatasetPtr overload.
      *
      * @param query Pointer to the float32 query vector (dense format).
      * @param ids Array of unique identifiers of vectors to be calculated.
@@ -138,34 +155,46 @@ public:
      * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
      */
     virtual DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true) const;
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const;
 
     /**
-     * @brief Calculate distances by IDs (batch) using DatasetPtr.
+     * @brief Calculate distances by IDs (batch) using DatasetPtr, supports multi-query.
      *
-        * Suitable for sparse vector indexes (SINDI) where vectors
+     * Suitable for sparse vector indexes (SINDI, SINDI_V2) where vectors
      * cannot be represented as a simple float pointer. The Dataset should
      * contain sparse vectors via GetSparseVectors().
      * For dense vector indexes, this overload is also available via default
      * implementation that calls GetFloat32Vectors().
      *
-     * Default implementation loops through IDs calling CalcDistanceById.
+     * When the query DatasetPtr contains multiple vectors (NumElements > 1),
+     * this method computes distances for each query against its own row of IDs.
+     * Both the input IDs and result distances use row-major layout with count IDs
+     * per query: ids[i * count + j] is the j-th ID for query i, and
+     * distances[i * count + j] is the distance from query i to that ID.
+     * '-1' indicates an invalid ID.
+     *
+     * Default implementation loops through queries and IDs calling CalcDistanceById (single-ID).
      * Sparse indexes must override for proper sparse vector handling.
      *
-     * @param query DatasetPtr containing the query vector (sparse or dense format).
+     * @param query DatasetPtr containing query vector(s) (sparse or dense format).
+     *        When NumElements() > 1, each element is a separate query.
      * @param ids Array of unique identifiers of vectors to be calculated.
      * @param count Number of IDs in the array.
-     * @param calculate_precise_distance If true, use high-precision vectors for computation.
-     * @return DatasetPtr containing distances. '-1' indicates an invalid ID.
+     * @param calculate_precise_distance If true, use high-precision vectors.
+     * @return DatasetPtr containing distances. Single query: size is count.
+     *         Multi-query (NumElements=N): size is N * count, row-major layout.
+     *         '-1' indicates an invalid ID.
      */
     virtual DatasetPtr
-    CalDistanceById(const DatasetPtr& query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true) const;
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const;
 
     virtual uint64_t
     CalSerializeSize() const;
@@ -198,6 +227,15 @@ public:
 
     virtual void
     Deserialize(std::istream& in_stream);
+
+    /// parallel deserialization using the thread pool bound to this index
+    /// (via Resource); implementations fall back to an internal default
+    /// pool when none is bound
+    virtual void
+    ParallelDeserialize(DeserializeReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support parallel deserialization");
+    }
 
     virtual void
     DeserializeStreaming(std::istream& in_stream);
@@ -299,6 +337,13 @@ public:
     [[nodiscard]] virtual int64_t
     GetNumElements() const = 0;
 
+    /// Diagnostic: a content fingerprint of the built graph, for tests that need to tell a
+    /// changed graph apart from changed search behaviour. Zero means "not implemented".
+    [[nodiscard]] virtual uint64_t
+    GraphChecksum() const {
+        return 0;
+    }
+
     [[nodiscard]] virtual int64_t
     GetNumberRemoved() const {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -306,10 +351,7 @@ public:
     }
 
     [[nodiscard]] virtual std::string
-    GetStats() const {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Index doesn't support GetStats");
-    }
+    GetStats() const;
 
     virtual void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const {
@@ -330,6 +372,17 @@ public:
 
     virtual void
     InitFeatures() = 0;
+
+    virtual std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index does not support SearchSession");
+    }
 
     [[nodiscard]] virtual DatasetPtr
     KnnSearch(const DatasetPtr& query,
@@ -441,6 +494,14 @@ public:
                             "Index doesn't support SearchWithRequest");
     }
 
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        if (this->attr_filter_index_ == nullptr) {
+            return nullptr;
+        }
+        return &this->attr_filter_index_->field_type_map_;
+    }
+
     virtual void
     Serialize(std::ostream& out_stream) const;
 
@@ -452,6 +513,13 @@ public:
 
     virtual void
     Serialize(StreamWriter& writer) const = 0;
+
+    /// serialize in the chunked format (see Index::Serialize(SerializeWriter&, uint64_t))
+    virtual void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "index does not support chunked serialization");
+    }
 
     [[nodiscard]] virtual BinarySet
     Serialize() const;
@@ -479,7 +547,13 @@ public:
     }
 
     virtual void
-    Train(const DatasetPtr& base){};
+    RebuildBucketGraphs() {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "Index doesn't support RebuildBucketGraphs");
+    }
+
+    virtual void
+    Train(const DatasetPtr& base) {};
 
     virtual void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) {
@@ -506,6 +580,12 @@ public:
     }
 
 protected:
+    DatasetPtr
+    get_data_by_ids_with_flag(const int64_t* ids,
+                              int64_t count,
+                              uint64_t selected_data_flag,
+                              Vector<InnerIdType>& inner_ids) const;
+
     virtual MetadataPtr
     collect_streaming_header() const;
 
@@ -530,14 +610,64 @@ protected:
     virtual DetailDataPtr
     get_detail_data_by_info(const IndexDetailInfo& info) const;
 
+    template <typename CalcFn>
+    void
+    compute_distances_for_ids(CalcFn&& calc_fn,
+                              const int64_t* ids,
+                              int64_t count,
+                              float* distances,
+                              std::vector<bool>* validity = nullptr) const {
+        if (validity != nullptr) {
+            validity->assign(count, false);
+        }
+        auto set_missing_distance = [&](int64_t index) -> bool {
+            std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+            if (not this->label_table_->TryGetIdByLabel(ids[index]).first) {
+                distances[index] = -1.0F;
+                return true;
+            }
+            if (validity != nullptr) {
+                (*validity)[index] = true;
+            }
+            return false;
+        };
+        auto handle_exception = [&](int64_t index) {
+            if (set_missing_distance(index)) {
+                if (validity != nullptr) {
+                    (*validity)[index] = false;
+                }
+                return;
+            }
+            throw;
+        };
+        for (int64_t i = 0; i < count; ++i) {
+            if (set_missing_distance(i)) {
+                continue;
+            }
+            try {
+                distances[i] = calc_fn(ids[i]);
+                // A valid IP distance can also equal -1. Recheck the label rather than
+                // inferring validity from the distance value after a concurrent removal.
+                if (distances[i] == -1.0F and validity != nullptr) {
+                    (*validity)[i] = not set_missing_distance(i);
+                }
+            } catch (const VsagException&) {
+                handle_exception(i);
+            } catch (const std::exception&) {
+                handle_exception(i);
+            }
+        }
+    }
+
     float
     calc_distance_by_id(const float* query, int64_t id, const FlattenInterfacePtr& data) const;
 
     DatasetPtr
-    cal_distance_by_id(const float* query,
-                       const int64_t* ids,
-                       int64_t count,
-                       const FlattenInterfacePtr& data) const;
+    calc_distance_by_id(const float* query,
+                        const int64_t* ids,
+                        int64_t count,
+                        const FlattenInterfacePtr& data,
+                        std::vector<bool>* validity = nullptr) const;
 
     // ========== Search Helper Methods ==========
     // Common filter composition: combines DeletedIdsFilter with user filter
@@ -578,6 +708,23 @@ protected:
     void
     validate_range_args(const DatasetPtr& query, float radius, int64_t limited_size) const;
 
+    /**
+     * @brief Extract a pointer to the data vector at the given index.
+     *
+     * Dispatches on data_type_ to the correct typed getter on the dataset and
+     * offsets by `index * dim_`. Returns nullptr if the underlying pointer is
+     * absent. The returned pointer keeps the representation implied by
+     * data_type_: float32 vectors stay float32, int8 vectors stay int8, and
+     * fp16/bf16 inputs are exposed as their raw 16-bit halves.
+     */
+    [[nodiscard]] const void*
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const;
+
+    static void
+    filter_search_result_by_threshold(DistHeapPtr& result,
+                                      const std::optional<float>& threshold,
+                                      Allocator* allocator);
+
 public:
     LabelTablePtr label_table_{nullptr};
     mutable std::shared_mutex label_lookup_mutex_{};  // lock for label_lookup_ & labels_
@@ -592,13 +739,14 @@ public:
 
     IndexFeatureListUPtr index_feature_list_{nullptr};
 
-    const InnerIndexParameterPtr create_param_ptr_{nullptr};
+    InnerIndexParameterPtr create_param_ptr_{nullptr};
     std::atomic<bool> immutable_{false};
 
 protected:
     std::atomic<uint64_t> total_count_{0};
 
-    std::atomic<uint64_t> current_memory_usage_{0};
+    // Mutable so a `const` query path can refresh the cache on demand.
+    mutable std::atomic<uint64_t> current_memory_usage_{0};
     mutable std::shared_mutex memory_usage_mutex_{};
 
     bool has_raw_vector_{false};

@@ -6,7 +6,7 @@ Apache 2.0 license.
 
 ## Features
 
-- **Multiple index types**: `hgraph`, `ivf`, `pyramid`, `sindi`, `brute_force`,
+- **Multiple index types**: `hgraph`, `ivf`, `pyramid`, `sindi`, `sindi_v2`, `brute_force`,
   covering in-memory, sparse and multi-tenant scenarios.
 - **Rich quantization**: fp32 / fp16 / bf16 / int8 / sq8 / sq4 / pq, with SIMD dispatch on x86_64
   and AArch64.

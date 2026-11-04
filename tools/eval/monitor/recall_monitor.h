@@ -22,7 +22,7 @@ namespace vsag::eval {
 
 class RecallMonitor : public Monitor {
 public:
-    explicit RecallMonitor(uint64_t max_record_counts = 0);
+    explicit RecallMonitor(uint64_t max_record_counts = 0, bool use_id_based_recall = false);
 
     ~RecallMonitor() override = default;
 
@@ -55,6 +55,7 @@ private:
     std::vector<double> recall_records_;
 
     std::vector<std::string> metrics_;
+    bool use_id_based_recall_{false};
 };
 
 }  // namespace vsag::eval

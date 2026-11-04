@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>VSAG 1.0 索引矩阵</title>
+  <desc>
+    Pyramid 与 LazyHGraph 是组合或自适应索引。
+    五个核心索引族分别是 BruteForce、HGraph、IVF、SINDI 和 SIMQ。
+  </desc>
+
+  <style>
+    .title { fill: #1f2937; font-size: 22px; font-weight: 700; }
+    .subtitle { fill: #64748b; font-size: 13px; }
+    .group { fill: #fff7ed; stroke: #f97316; stroke-width: 2; }
+    .group-label { fill: #c2410c; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+    .card { fill: #ffffff; stroke: #fb923c; stroke-width: 2; }
+    .core-card { fill: #ffffff; stroke: #e2e8f0; stroke-width: 2; }
+    .accent { fill: #f97316; }
+    .name { fill: #1f2937; font-size: 17px; font-weight: 700; }
+    .kind { fill: #c2410c; font-size: 12px; font-weight: 600; }
+    .detail { fill: #64748b; font-size: 12px; }
+  </style>
+
+  <rect width="1000" height="520" fill="#ffffff"/>
+  <text class="title" x="40" y="36">VSAG 1.0 索引矩阵</text>
+  <text class="subtitle" x="40" y="58">组合与自适应索引，以及覆盖不同数据形态的核心索引族</text>
+
+  <rect class="group" x="40" y="82" width="920" height="154" rx="14"/>
+  <text class="group-label" x="60" y="108">组合 / 自适应索引</text>
+
+  <g transform="translate(80,126)">
+    <rect class="card" width="380" height="82" rx="10"/>
+    <text class="name" x="24" y="31">Pyramid</text>
+    <text class="kind" x="24" y="52">路径分区</text>
+    <text class="detail" x="170" y="32">多租户与层级检索</text>
+    <text class="detail" x="170" y="52">命名的独立路径树</text>
+  </g>
+
+  <g transform="translate(540,126)">
+    <rect class="card" width="380" height="82" rx="10"/>
+    <text class="name" x="24" y="31">LazyHGraph</text>
+    <text class="kind" x="24" y="52">自适应</text>
+    <text class="detail" x="170" y="32">从精确 BruteForce 起步</text>
+    <text class="detail" x="170" y="52">达到阈值后转换为 HGraph</text>
+  </g>
+
+  <text class="group-label" x="40" y="274">核心索引族</text>
+
+  <g transform="translate(40,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">BruteForce</text>
+    <text class="kind" x="18" y="68">精确检索</text>
+    <text class="detail" x="18" y="100">稠密向量</text>
+    <text class="detail" x="18" y="122">多向量模式</text>
+    <text class="detail" x="18" y="154">全量扫描基线</text>
+  </g>
+
+  <g transform="translate(228,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">HGraph</text>
+    <text class="kind" x="18" y="68">图索引</text>
+    <text class="detail" x="18" y="100">稠密向量</text>
+    <text class="detail" x="18" y="122">高召回 ANN</text>
+    <text class="detail" x="18" y="154">内存 + 磁盘</text>
+  </g>
+
+  <g transform="translate(416,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">IVF</text>
+    <text class="kind" x="18" y="68">空间划分</text>
+    <text class="detail" x="18" y="100">稠密向量</text>
+    <text class="detail" x="18" y="122">可扩展分桶</text>
+    <text class="detail" x="18" y="154">批量 + 大 top-k</text>
+  </g>
+
+  <g transform="translate(604,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">SINDI</text>
+    <text class="kind" x="18" y="68">稀疏向量</text>
+    <text class="detail" x="18" y="100">BM25 风格</text>
+    <text class="detail" x="18" y="122">学习型稀疏表示</text>
+    <text class="detail" x="18" y="154">倒排表</text>
+  </g>
+
+  <g transform="translate(792,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">SIMQ</text>
+    <text class="kind" x="18" y="68">多向量</text>
+    <text class="detail" x="18" y="100">Token 向量</text>
+    <text class="detail" x="18" y="122">文档检索</text>
+    <text class="detail" x="18" y="154">Late interaction</text>
+  </g>
+</svg>

@@ -36,6 +36,7 @@ public:
 
 public:
     FlattenInterfaceParamPtr base_codes_param{nullptr};
+    uint64_t resize_increase_count_bit{DEFAULT_RESIZE_INCREASE_COUNT_BIT};
 };
 
 DEFINE_POINTER(BruteForceParameter);

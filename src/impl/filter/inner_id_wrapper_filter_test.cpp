@@ -15,6 +15,7 @@
 #include "inner_id_wrapper_filter.h"
 
 #include <memory>
+#include <vector>
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/bitset/fast_bitset.h"
@@ -22,6 +23,32 @@
 #include "unittest.h"
 #include "white_list_filter.h"
 using namespace vsag;
+
+namespace {
+
+class BitmapWhitelistFilter : public vsag::Filter {
+public:
+    explicit BitmapWhitelistFilter(uint64_t size) : bitmap_(size, 1) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return id >= 0 and static_cast<uint64_t>(id) < bitmap_.size() and bitmap_[id] != 0;
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetValidBitmap(uint64_t* size) const override {
+        if (size != nullptr) {
+            *size = bitmap_.size();
+        }
+        return bitmap_.data();
+    }
+
+private:
+    std::vector<uint8_t> bitmap_;
+};
+
+}  // namespace
 
 TEST_CASE("InnerIdWrapperFilter Basic Test", "[ut][InnerIdWrapperFilter]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -64,4 +91,33 @@ TEST_CASE("InnerIdWrapperFilter ValidRatio Test", "[ut][InnerIdWrapperFilter]") 
     float ratio = wrapper.ValidRatio();
     REQUIRE(ratio > 0.0F);
     REQUIRE(ratio <= 1.0F);
+}
+
+TEST_CASE("InnerIdWrapperFilter forwards a bitmap only for identity labels",
+          "[ut][InnerIdWrapperFilter]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t max_count = 8;
+    auto bitmap_filter = std::make_shared<BitmapWhitelistFilter>(max_count);
+
+    SECTION("identity labels keep the wrapped bitmap") {
+        LabelTable label_table(allocator.get());
+        for (int64_t i = 0; i < max_count; i++) {
+            label_table.Insert(i, i);
+        }
+        InnerIdWrapperFilter wrapper(bitmap_filter, label_table);
+        uint64_t size = 0;
+        REQUIRE(wrapper.GetValidBitmap(&size) == bitmap_filter->GetValidBitmap(nullptr));
+        REQUIRE(size == max_count);
+    }
+
+    SECTION("shifted labels drop the wrapped bitmap") {
+        LabelTable label_table(allocator.get());
+        for (int64_t i = 0; i < max_count; i++) {
+            label_table.Insert(i, 1000 + i);
+        }
+        InnerIdWrapperFilter wrapper(bitmap_filter, label_table);
+        uint64_t size = 123;
+        REQUIRE(wrapper.GetValidBitmap(&size) == nullptr);
+        REQUIRE(size == 0);
+    }
 }

@@ -36,11 +36,23 @@ endif ()
 
 message (STATUS "CPU ARCH: ${Yellow}${VSAG_TARGET_PROCESSOR}${CR}")
 
+if (ENABLE_CUDA)
+    # nvcc's host pass uses the tree's C++ compiler so both halves agree on ABI.
+    if (NOT CMAKE_CUDA_HOST_COMPILER)
+        set (CMAKE_CUDA_HOST_COMPILER "${CMAKE_CXX_COMPILER}")
+    endif ()
+    # Language first, so the toolkit search anchors on the compiler picked.
+    # 11.8 is the oldest toolkit that targets every entry of the default list.
+    enable_language (CUDA)
+    find_package (CUDAToolkit 11.8 REQUIRED)
+    message (STATUS "CUDA backend: ${Yellow}ON${CR} (toolkit ${CUDAToolkit_VERSION}, arch ${VSAG_CUDA_ARCHITECTURES})")
+endif ()
+
 include (cmake/VSAGCompilerConfig.cmake)        # Compiler, ABI, sanitizer, and linker setup.
 include (cmake/VSAGSystemDeps.cmake)            # System dependency discovery.
 include (cmake/DarwinDep.cmake)                 # macOS-specific dependency handling.
 include (cmake/VSAGExternalProjectConfig.cmake) # Shared ExternalProject flags and env.
-include (cmake/VSAGThirdParty.cmake)            # Third-party dependency declarations.
+vsag_include_without_directory_options (cmake/VSAGThirdParty.cmake) # Third-party dependencies.
 include (cmake/VSAGDependencyTargets.cmake)     # Shared interface/header dependency targets.
 include (cmake/VSAGVersion.cmake)               # Resolve VSAG_VERSION_{MAJOR,MINOR,PATCH}.
 
@@ -54,17 +66,32 @@ if (ENABLE_TESTS)
 endif ()
 
 add_subdirectory (src)
-if (ENABLE_MOCKIMPL)
-    add_subdirectory (mockimpl)
-endif ()
-if (ENABLE_EXAMPLES)
-    add_subdirectory (examples/cpp)
+if (ENABLE_TESTS AND NOT CMAKE_DISABLE_PRECOMPILE_HEADERS)
+    # Keep the PCH target-local: compile options and definitions differ for OpenMP, SIMD, and
+    # platform-specific configurations. These high-fan-out targets amortize the extra PCH object.
+    foreach (_target IN ITEMS
+            algorithm_test
+            datacell_test
+            impl_test
+            io_test
+            quantizer_test
+            simd_test)
+        target_precompile_headers (${_target} PRIVATE
+            "$<$<COMPILE_LANGUAGE:CXX>:${PROJECT_SOURCE_DIR}/tests/fixtures/unittest.h>")
+    endforeach ()
+    unset (_target)
 endif ()
 if (ENABLE_TOOLS AND ENABLE_CXX11_ABI)
     add_subdirectory (tools)
 endif ()
+if (ENABLE_EXAMPLES)
+    add_subdirectory (examples/cpp)
+endif ()
 if (ENABLE_TESTS)
     add_subdirectory (tests)
+    # Preserve the shared target's existing private definition and apply it to the common
+    # compilation. Production sources do not branch on ENABLE_TESTS.
+    target_compile_definitions (vsag_objects PRIVATE ENABLE_TESTS)
     target_compile_definitions (vsag PRIVATE ENABLE_TESTS)
 endif ()
 

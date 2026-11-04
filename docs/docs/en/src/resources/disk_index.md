@@ -2,6 +2,12 @@
 
 ![Disk-backed HGraph: the graph and compact base codes stay in memory for traversal, while a higher-precision precise copy on disk is read only for the ef_search finalists during reorder](../figures/resources/disk-index-overview.svg)
 
+## User-defined IO callbacks
+
+Assign `precise_io_type` to `"user_defined_io"` and register callbacks through
+`Factory::CreateUserDefinedIO`. See **[User-Defined IO](../advanced/user_defined_io.md)**
+for the full callback contract, configuration table, and runnable example.
+
 When a corpus grows past the point where every vector fits in RAM, moving the coldest,
 largest part of the index onto an SSD is the most direct way to control cost. VSAG does
 this by letting each part of an index choose its own storage backend, so hot data stays
@@ -63,13 +69,62 @@ The IO backends you can assign to a cell:
 | `buffer_io` | Disk (buffered `pread`) | Yes | Portable disk reads; works everywhere |
 | `mmap_io` | Disk (mmap + page cache) | Yes | Near-memory speed when the working set fits the page cache |
 | `async_io` | Disk (Linux libaio) | Yes | High-concurrency disk reads; **Linux + libaio only**, otherwise falls back to `buffer_io` |
+| `uring_io` | Disk (Linux io_uring) | Yes | Optional io_uring backend; requires a build with `ENABLE_LIBURING=ON`, otherwise falls back to `buffer_io` |
 | `reader_io` | Custom `Reader` | No | Read through a user `ReaderSet` at load time (e.g. remote / object storage) |
 
 Each cell is wired with a flat pair of build parameters: `graph_io_type` / `graph_file_path`,
 `base_io_type` / `base_file_path`, `precise_io_type` / `precise_file_path`, and
 `raw_vector_io_type` / `raw_vector_file_path`. A `*_file_path` is **required** whenever the
-matching `*_io_type` is disk-backed (`buffer_io`, `mmap_io`, or `async_io`); the in-memory
+matching `*_io_type` is disk-backed (`buffer_io`, `mmap_io`, `async_io`, or `uring_io`); the in-memory
 backends ignore it. All cells default to `block_memory_io` (fully in memory).
+
+### Enabling `uring_io`
+
+`uring_io` is an optional Linux backend. Install liburing and enable it when configuring CMake:
+
+```bash
+cmake -S . -B build-release \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DENABLE_LIBURING=ON \
+    -DENABLE_EXAMPLES=ON
+cmake --build build-release --target 325_feature_uring_io -j
+```
+
+Select it with any supported disk cell parameter, for example:
+
+```json
+{
+    "index_param": {
+        "base_io_type": "uring_io",
+        "base_file_path": "/data/vsag/hgraph_base.data",
+        "base_direct_read": true
+    }
+}
+```
+
+For HGraph, `base_direct_read` and `precise_direct_read` default to `false`. Set the matching flag
+to `true` to open a `uring_io` file with direct IO and bypass the page cache. Confirm that the
+target filesystem supports direct IO and benchmark both modes for the workload.
+
+When VSAG is built without liburing, the same configuration remains loadable but logs a one-time
+warning and uses `buffer_io`. This fallback is functional, but it does not provide io_uring
+submission/completion batching. See `examples/cpp/325_feature_uring_io.cpp` for an end-to-end load
+example.
+
+### Optional page-cache prefetch hints
+
+File-backed IO parameters accept `enable_prefetch_hint` (default: `false`). When enabled, existing
+search-time `Prefetch` calls issue best-effort operating-system hints: `buffer_io` and buffered
+`uring_io` use file read-ahead advice, `mmap_io` uses mapped-page advice, and `reader_io`
+forwards to the optional `ReaderPrefetcher::Prefetch` hook. A `reader_io` Reader that does not
+implement `ReaderPrefetcher` remains fully compatible: enabled hints are simply ignored. A remote
+Reader can opt in by inheriting from both `Reader` and `ReaderPrefetcher`; its `Prefetch` method
+should return promptly, treat failures as non-fatal, and must not change subsequent read results.
+The option is hint-only and does not affect correctness. Direct-IO paths ignore it because they
+bypass the page cache. In public HGraph/IVF build or `Index::Load` parameters, use the component
+form `precise_enable_prefetch_hint: true` for precise-code `reader_io`; the runnable
+`examples/cpp/408_feature_reader_prefetch.cpp` demonstrates this setup. Enable it only
+after benchmarking the target workload, since frequent hint calls can add overhead.
 
 ## Recommended configuration: base in memory, precise on disk
 
@@ -121,6 +176,9 @@ only a bounded number of reads per query rather than one read per hop.
   (including on macOS), `async_io` logs a one-time warning and falls back to `buffer_io`, so
   configs remain portable but lose asynchronous batching. For production throughput, build on
   Linux with libaio.
+- **`uring_io` requires Linux with liburing and is opt-in.** Configure with
+  `-DENABLE_LIBURING=ON`; otherwise it falls back to `buffer_io`. Benchmark `uring_io` and
+  `async_io` with the target kernel, queue depth, and SSD rather than assuming one always wins.
 - **Warm the page cache** for `mmap_io` cells after load (e.g. a sequential read of the file,
   or a warm-up query pass) so early queries do not pay cold-miss latency.
 - **Plan file paths and lifecycle.** Disk-backed cells write to the `*_file_path` you supply;
@@ -168,7 +226,7 @@ settle search-time parameters automatically.
 ## See also
 
 - [HGraph](../indexes/hgraph.md) — the flagship index and its full parameter table
-- [Quantization Overview](../quantization/README.md) — choosing a base/precise quantizer
+- [Quantization Overview](../quantization/) — choosing a base/precise quantizer
 - [Best Practices](best_practices.md) — general production guidance
 - [Serialization](../advanced/serialization.md) — persisting and loading indexes
 - [Evaluation Tool](eval.md) and [Optimizer (Tune)](../advanced/optimizer.md) — measuring and

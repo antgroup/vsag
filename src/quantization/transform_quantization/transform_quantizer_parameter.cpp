@@ -15,9 +15,27 @@
 
 #include "transform_quantizer_parameter.h"
 
+#include "impl/transform/vector_transformer_parameter.h"
 #include "utils/param_compat_macros.h"
 
 namespace vsag {
+
+TransformQuantizerParamPtr
+TransformQuantizerParameter::CreateDefault(const std::string& chain) {
+    auto chain_items = SplitString(chain);
+    CHECK_ARGUMENT(chain_items.size() > 1,
+                   "tq_chain must contain at least one transformer and one quantizer");
+    const auto& bottom_type = chain_items.back();
+    auto json = QuantizerParameter::CreateDefault(bottom_type)->ToJson();
+    const auto transformer_json = VectorTransformerParameter().ToJson();
+    json[INPUT_DIM_KEY].SetJson(transformer_json[INPUT_DIM_KEY]);
+    json[PCA_DIM_KEY].SetJson(transformer_json[PCA_DIM_KEY]);
+    json[MRLE_DIM_KEY].SetJson(transformer_json[MRLE_DIM_KEY]);
+    json[TQ_CHAIN_KEY].SetString(chain);
+    auto parameter = std::make_shared<TransformQuantizerParameter>();
+    parameter->FromJson(json);
+    return parameter;
+}
 
 TransformQuantizerParameter::TransformQuantizerParameter()
     : QuantizerParameter(QUANTIZATION_TYPE_VALUE_TQ) {
@@ -99,7 +117,18 @@ bool
 TransformQuantizerParameter::CheckCompatibility(const ParamPtr& other) const {
     PARAM_CAST_OR_RETURN(TransformQuantizerParameter, p, other);
     CHECK_FIELD_EQ(*this, *p, tq_chain_);
-    return this->base_quantizer_json_[TYPE_KEY].GetString() ==
-           p->base_quantizer_json_[TYPE_KEY].GetString();
+
+    auto transformer_param = std::make_shared<VectorTransformerParameter>();
+    transformer_param->FromJson(this->base_quantizer_json_);
+    auto other_transformer_param = std::make_shared<VectorTransformerParameter>();
+    other_transformer_param->FromJson(p->base_quantizer_json_);
+    if (not transformer_param->CheckCompatibility(other_transformer_param)) {
+        return false;
+    }
+
+    auto bottom_param = QuantizerParameter::GetQuantizerParameterByJson(this->base_quantizer_json_);
+    auto other_bottom_param =
+        QuantizerParameter::GetQuantizerParameterByJson(p->base_quantizer_json_);
+    return bottom_param->CheckCompatibility(other_bottom_param);
 }
 }  // namespace vsag

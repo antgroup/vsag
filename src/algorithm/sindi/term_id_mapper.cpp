@@ -17,6 +17,7 @@
 
 #include <fmt/format.h>
 
+#include "common.h"
 #include "vsag_exception.h"
 
 namespace vsag {
@@ -75,16 +76,28 @@ TermIdMapper::Serialize(StreamWriter& writer) const {
 
 void
 TermIdMapper::Deserialize(StreamReader& reader) {
-    StreamReader::ReadObj(reader, next_id_);
-    StreamReader::ReadObj(reader, term_id_limit_);
-    StreamReader::ReadVector(reader, compact_to_orig_);
+    uint32_t next_id = 0;
+    uint32_t term_id_limit = 0;
+    Vector<uint32_t> compact_to_orig(allocator_);
+    StreamReader::ReadObj(reader, next_id);
+    StreamReader::ReadObj(reader, term_id_limit);
+    StreamReader::ReadVector(reader, compact_to_orig);
 
-    // Rebuild the forward map from the deserialized reverse map
-    orig_to_compact_.clear();
-    orig_to_compact_.reserve(compact_to_orig_.size());
-    for (uint32_t i = 0; i < compact_to_orig_.size(); ++i) {
-        orig_to_compact_[compact_to_orig_[i]] = i;
+    CHECK_ARGUMENT(term_id_limit == term_id_limit_, "term id mapper limit does not match index");
+    CHECK_ARGUMENT(next_id <= term_id_limit_, "term id mapper size exceeds configured limit");
+    CHECK_ARGUMENT(next_id == compact_to_orig.size(),
+                   "term id mapper size does not match reverse table");
+
+    // Rebuild the forward map from the deserialized reverse map.
+    UnorderedMap<uint32_t, uint32_t> orig_to_compact(allocator_);
+    orig_to_compact.reserve(compact_to_orig.size());
+    for (uint32_t i = 0; i < compact_to_orig.size(); ++i) {
+        const auto inserted = orig_to_compact.emplace(compact_to_orig[i], i).second;
+        CHECK_ARGUMENT(inserted, "term id mapper reverse table contains duplicate terms");
     }
+    next_id_ = next_id;
+    orig_to_compact_ = std::move(orig_to_compact);
+    compact_to_orig_ = std::move(compact_to_orig);
 }
 
 }  // namespace vsag

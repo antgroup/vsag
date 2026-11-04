@@ -1,12 +1,17 @@
 set(HGRAPH_SRCS
     hgraph.cpp
     hgraph_build.cpp
+    hgraph_fgim.cpp
+    hgraph_fast_build.cpp
     hgraph_modify.cpp
+    hgraph_mci.cpp
     hgraph_parameter.cpp
     hgraph_param_mapping.cpp
     hgraph_search.cpp
+    hgraph_continue_session.cpp
     hgraph_serialize.cpp
-    hgraph_cache.cpp
+    hgraph_enhance.cpp
+    hgraph_parallel_deserialize.cpp
 )
 
 add_library(hgraph OBJECT ${HGRAPH_SRCS})

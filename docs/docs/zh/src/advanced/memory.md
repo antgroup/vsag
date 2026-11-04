@@ -66,7 +66,7 @@ if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
 uint64_t peak = index->EstimateBuildMemory(1000000);  // 字节
 ```
 
-目前仅 DiskANN 提供了有效实现，其他索引类型默认抛出异常。
+目前维护中的索引均未提供有效实现；调用方需处理默认的“不支持操作”异常。
 
 ### `GetMemoryUsage()`
 

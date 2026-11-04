@@ -17,9 +17,11 @@
 
 #include "io/async_io/async_io.h"
 #include "io/buffer_io/buffer_io.h"
-#include "io/common/basic_io.h"
+#include "io/common/io_type_dispatch.h"
 #include "io/memory_block_io/memory_block_io.h"
 #include "io/memory_io/memory_io.h"
 #include "io/mmap_io/mmap_io.h"
 #include "io/noncontinuous_io/noncontinuous_io.h"
 #include "io/reader_io/reader_io.h"
+#include "io/uring_io/uring_io.h"
+#include "io/user_defined_io/user_defined_io.h"

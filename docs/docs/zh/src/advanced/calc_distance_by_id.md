@@ -6,17 +6,22 @@
 接口分为两种形式：
 
 - `CalcDistanceById`  — 单个 ID，返回单个距离值。
-- `CalDistanceById`   — 一批 ID，返回一个包含距离数组的 `DatasetPtr`。
+- `CalcDistancesById` — 一批 ID，返回一个包含距离数组的 `DatasetPtr`。
 
 每种形式都有两个重载：一个接收 `const float*`（稠密向量），另一个接收 `DatasetPtr`
 （稠密或稀疏均可）。
 
-> **关于命名的说明。** 批量接口目前拼作 `CalDistanceById`（`Calc` 少了一个 `c`）。
-> 这是批量重载最初加入时遗留的拼写笔误，两个名字**并不表示语义差异**，区别仅在于
-> *单个 vs. 批量*。出于向后兼容当前仍保留这一拼写，预计未来某个版本会将其
-> **标记为弃用（deprecated）**，并改用拼写正确的新名（建议为
-> `CalcDistancesById`）。建议新代码通过一层薄封装来调用，方便后续迁移。跟踪请见
+> **迁移说明。** `CalDistanceById` 是批量接口的历史拼写。为兼容已有代码，1.1 迁移窗口内
+> 仍保留该弃用别名；新代码应使用 `CalcDistancesById`。两者语义完全相同。详情参见
 > [issue #2068](https://github.com/antgroup/vsag/issues/2068)。
+
+HGraph 还支持配置为稀疏或非 FP32 数据类型。这些配置应使用包含原生 query 字段的 Dataset（`SparseVectors`、`Int8Vectors`，以及 FP16/BF16 对应的 `Float16Vectors`）；只有 float32 索引才能使用普通 `float*` 距离查询。Dataset 表示必须匹配索引配置，不能只检查向量维度。
+
+### C++ 实现迁移
+
+`CalcDistancesById` 是正式的批量虚函数接口，包含完整 `topk` 参数。公共包装层和内部索引实现直接通过该名称派发；公共弃用别名 `CalDistanceById` 只转发到正式接口，不再反向依赖旧入口。
+
+自定义索引实现应 override 对应的 `CalcDistancesById` 重载，不能再依赖仅 override 历史拼写。普通调用旧别名仍保持源码兼容，但仅覆盖旧别名不再构成正式批量接口的实现。此次虚函数接口布局发生变化，不保证与此前编译的 `Index` 子类二进制兼容；请使用匹配的头文件和库重新编译自定义子类及相关 C++ 组件。
 
 ## 接口概览
 
@@ -35,33 +40,61 @@ CalcDistanceById(const DatasetPtr& vector,
 
 // 批量 ID，稠密浮点指针
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const float* query,
+CalcDistancesById(const float* query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 
 // 批量 ID，DatasetPtr（稠密或稀疏）
 tl::expected<DatasetPtr, Error>
-CalDistanceById(const DatasetPtr& query,
+CalcDistancesById(const DatasetPtr& query,
                 const int64_t* ids,
                 int64_t count,
-                bool calculate_precise_distance = true) const;
+                bool calculate_precise_distance = true,
+                int64_t topk = -1) const;
 ```
+对于 `NumElements() > 1` 的 `DatasetPtr` 查询，请先检查
+`SUPPORT_BATCH_CALC_DISTANCE_BY_ID`。`count` 表示每个 query 的 ID 数，`ids` 需要包含
+`NumElements() * count` 个 row-major ID，返回距离使用相同布局。当 `topk > 0` 时，
+每个 query 返回按距离升序排列的 `min(topk, count)` 个结果，并同时返回对应 ID。
+
 
 声明位于
 [`include/vsag/index.h`](https://github.com/antgroup/vsag/blob/main/include/vsag/index.h)。
 
 ### `calculate_precise_distance`
 
-- `true`（默认）：尽量使用**高精度**向量表示（如完整 float32）来计算距离。当索引仅保留
-  量化编码时，获取精确值可能开销更大。
-- `false`：可以使用索引内存中已有的**量化 / 近似**表示，速度更快但距离是近似值。
+- `true`（默认）优先使用已保留的高精度/重排表示，**不会还原已经丢弃的原始向量**。没有独立精确表示时使用存储表示，结果仍可能受量化或剪枝影响。
+- `false` 使用基础表示。两种模式都是对指定 ID 计算距离，不执行近似候选检索；磁盘存储下两种模式均可能产生 I/O。
+- BruteForce/WARP 和 SIMQ 的两种模式使用同一套存储距离后端。HGraph/Pyramid 优先使用保留的原始向量，其次是重排编码；IVF 使用配置的重排编码/桶；SINDI/SINDI_V2 在配置重排时使用 rerank 向量。
+
+### 各索引的原生 query 表示
+
+| 索引 | 单 ID query | 多 query 批量输入 |
+|---|---|---|
+| BruteForce、HGraph、IVF、Pyramid、LazyHGraph | `float*`，或含 `Float32Vectors` 的单行 `DatasetPtr` | 含 `Float32Vectors` 的 `DatasetPtr` |
+| SINDI、SINDI_V2 | 含 `SparseVectors` 的单行 `DatasetPtr` | 含 `SparseVectors` 的 `DatasetPtr` |
+| WARP、SIMQ | 含 `MultiVectors`、`MultiVectorDim` 的单行 `DatasetPtr` | 含 `MultiVectors`、`MultiVectorDim` 的 `DatasetPtr` |
+
+SINDI immutable 存储也支持单 ID 和批量距离，包括反序列化后的索引。WARP/SIMQ 使用与搜索距离后端一致的多向量聚合，不经过粗排候选选择。普通 float 指针不能表示稀疏或多向量 query。
+
+N 行 query、每行 `count` 个候选 ID 时，必须按行优先提供 N × count 个 ID（`ids[q * count + j]`），不会隐式广播一份候选列表。新代码推荐使用 `CalcDistancesById`；`CalDistanceById` 保留为兼容别名。
+
+缺失 label 返回 `-1`，但有效内积距离也可能为负数（包括 `-1`）。top-k 根据 label 是否有效判断排序优先级，而不是根据距离的符号或数值判断。
+
+IVF PQFS 支持单 ID 和批量距离，复用整桶扫描所用的打包编码查表。单 ID 查询会读取所在的 32 向量数据包并取出对应结果，因此工作量可能高于标量量化的单 ID 查询，磁盘存储下尤其如此。
+
+PQFS 可用于 IVF 基础桶编码，但不能用于 flat 重排编码，因为该存储不维护 PQFS 数据包。非法 PQFS 重排配置会在创建索引时被拒绝；请选用 FP32 等受支持的精确量化类型。
 
 ### 返回值含义
 
 - 单 ID 重载返回 `float` 距离值。
-- 批量重载返回 `DatasetPtr`，其 `GetDistances()` 数组长度为 `count`，与输入 `ids` 一一
-  对应。值为 **`-1`** 表示对应的 ID **无效**（如该 ID 不在索引中）。
+- `topk == -1` 时，裸指针批量重载返回一行 `count` 个距离；`DatasetPtr` 重载返回
+  `NumElements()` 行、每行 `count` 个距离。两者都保持输入顺序，且不返回 ID。
+- `topk > 0` 时，批量重载每个 query 返回按距离升序排列的最小 `min(topk, count)` 个
+  距离，`GetIds()` 包含对应 ID。缺失 ID（距离为 `-1`）排在所有有效距离之后，不受有效距离的符号影响，仅在有效 ID
+  不足时才出现在结果中。
 - 距离的语义由建索引时设置的 `metric_type`（IP / L2 / cosine）决定，参见
   [度量语义](../resources/metric_semantics.md)。
 
@@ -82,7 +115,7 @@ if (d.has_value()) {
 
 // 3. 批量 ID 距离
 std::vector<int64_t> ids = { 1, 2, 3, 4, 5 };
-auto result = index->CalDistanceById(query_vector.data(), ids.data(), ids.size());
+auto result = index->CalcDistancesById(query_vector.data(), ids.data(), ids.size());
 if (result.has_value()) {
     const float* dists = result.value()->GetDistances();
     for (size_t i = 0; i < ids.size(); ++i) {
@@ -94,6 +127,44 @@ if (result.has_value()) {
     }
 }
 ```
+
+## 多查询
+
+当索引公布 `SUPPORT_BATCH_CALC_DISTANCE_BY_ID` 能力时，`DatasetPtr` 批量重载可以一次接收
+多个 query。候选 ID 和输出都采用 row-major 布局。对于 LazyHGraph，调用会委托给当前生效的
+内部索引；即使 wrapper 公布了该能力，实际支持也可能在 phase 切换后改变，因此仍需处理返回错误：
+
+```cpp
+// 两个稠密 query，每个 query 三个候选 ID。
+auto queries = vsag::Dataset::Make()
+                   ->NumElements(2)
+                   ->Dim(dim)
+                   ->Float32Vectors(query_vectors.data())
+                   ->Owner(false);
+std::vector<int64_t> candidate_ids = {
+    10, 11, 12,  // query 0 的候选
+    20, 21, 22   // query 1 的候选
+};
+
+if (index->CheckFeature(vsag::SUPPORT_BATCH_CALC_DISTANCE_BY_ID)) {
+    auto result = index->CalcDistancesById(queries, candidate_ids.data(), 3, true, /*topk=*/2);
+    if (result.has_value()) {
+        auto batch = result.value();
+        // batch 的 NumElements() == 2，Dim() == 2。
+        for (int64_t q = 0; q < batch->GetNumElements(); ++q) {
+            for (int64_t j = 0; j < batch->GetDim(); ++j) {
+                const int64_t offset = q * batch->GetDim() + j;
+                std::cout << batch->GetIds()[offset] << ": "
+                          << batch->GetDistances()[offset] << '\n';
+            }
+        }
+    }
+}
+```
+
+`topk == -1` 时，`GetDim()` 等于 `count`，位置 `q * count + j` 对应输入 ID
+`ids[q * count + j]`。`topk` 为正数时，行跨度为 `GetDim()`；每行先放最近的有效候选，
+只有有效 ID 少于 `topk` 时才会在行尾保留无效 ID。
 
 可运行的完整示例见
 [`examples/cpp/306_feature_calculate_distance_by_id.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/306_feature_calculate_distance_by_id.cpp)。
@@ -112,13 +183,14 @@ auto d = index->CalcDistanceById(query, /*id=*/42);
 
 ## 支持矩阵
 
-| 索引类型     | 稠密重载（`const float*`） | DatasetPtr 重载 | 说明 |
-|--------------|----------------------------|------------------|------|
-| hgraph       | 支持                       | 支持             | 遵循 `calculate_precise_distance`。 |
-| ivf          | 支持                       | 支持（默认循环） | |
-| brute_force  | 支持                       | 支持（默认循环） | 总是精确（无量化）。 |
-| pyramid      | 支持                       | 支持（默认循环） | |
-| sindi        | 不支持                     | 支持             | 仅稀疏向量。 |
+| 索引类型 | 单 ID 稠密重载（`const float*`） | 单 ID DatasetPtr | 多查询 DatasetPtr 批量重载 | 说明 |
+|----------|---------------------------------|------------------|---------------------------|------|
+| hgraph | 支持 | 支持 | 公布能力时支持 | 遵循 `calculate_precise_distance`。 |
+| ivf | 支持 | 支持 | 公布能力时支持 | 可用性取决于是否保留精确存储。 |
+| brute_force | 支持 | 支持 | 公布能力时支持 | 仅稠密单向量索引。 |
+| pyramid | 支持 | 支持 | 支持 | |
+| lazy_hgraph | 支持 | 不支持 | 取决于当前生效的内部索引 | DatasetPtr 批量调用会委托给当前 BruteForce/HGraph；可用性可能在 phase 切换后改变。 |
+| sindi | 不支持 | 支持 | 支持 | 仅稀疏向量。 |
 
 对于未实现某重载的索引，调用会返回 `UNSUPPORTED_INDEX_OPERATION` 错误。
 

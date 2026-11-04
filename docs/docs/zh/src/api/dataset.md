@@ -10,7 +10,8 @@ using DatasetPtr = std::shared_ptr<Dataset>;
 ## Builder 模式
 
 `Dataset` 采用流式 builder：`Make()` 创建实例，每个 setter 都返回同一个 `DatasetPtr`，因此调用可以链式
-书写。setter 只存储指针/值 —— 它们**不会**拷贝你的缓冲区。
+书写。指针 setter 只保存传入的缓冲区，不会复制；按值传入的 setter（例如 Pyramid 的结构化路径重载）
+会在 Dataset 内保存自己的值。
 
 ```cpp
 auto base = vsag::Dataset::Make()
@@ -54,7 +55,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 
 ## 向量负载
 
-一个 dataset 只携带一种向量表示，需与索引的 `dtype` 匹配：
+一个 dataset 只携带一种向量表示。需要同时根据索引的标量 `dtype` 与记录布局 `repr`
+选择对应的 payload setter：
 
 | Setter | Getter | 元素类型 | 配合使用 |
 |--------|--------|----------|----------|
@@ -64,6 +66,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse`（SINDI） |
 
 稠密向量按行主序排列：元素 `i` 的维度 `j` 位于 `vectors[i * dim + j]`。
+多向量数据集使用 `repr: multi_vector`，并配合标量 `dtype`（通常为 `float32`）及下文的
+多向量 payload。
 
 ### 多向量负载
 
@@ -84,10 +88,21 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | 每个 extra-info 数据块的字节数。 |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | 层级路径（Pyramid）。默认层级。 |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | 命名层级的路径。 |
-| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 可选的来源标识。 |
+| `Paths(const std::string& hierarchy, std::vector<std::vector<std::string>>)` | `GetPaths(const std::string& hierarchy, std::vector<std::vector<std::string>>& paths)` | 结构化路径 | 每个元素在 Pyramid 层级中的一条或多条路径。 |
+| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | 每个元素可选的稳定来源标识；HGraph 用它跨快照匹配构建缓存条目。 |
 
-见 [属性过滤（混合搜索）](../advanced/attribute_filter.md) 与
-[Extra Info（附加信息）](../advanced/extra_info.md)。
+结构化 `Paths` 重载的外层 vector 必须正好包含 `NumElements()` 个条目，每个内层 vector
+必须列出至少一条对应元素的独立路径。空的内层 vector 非法；只包含一个空字符串（`{""}`）
+的内层 vector 表示将元素挂到层级根节点。重复路径或共享前缀不会让同一向量在节点或搜索
+结果中重复出现。
+
+结构化容器会被复制或移动到 `Dataset` 内，因此其生命周期不受 `Owner()` 控制。结构化
+`GetPaths` 重载会将旧表示或新表示复制到输出容器；hierarchy 不存在时会清空输出并返回
+`false`。
+
+见 [属性过滤（混合搜索）](../advanced/attribute_filter.md)、
+[Extra Info（附加信息）](../advanced/extra_info.md)与
+[HGraph 构建缓存](../advanced/build_cache.md)。
 
 ## 诊断负载
 
@@ -111,8 +126,14 @@ if (result.has_value()) {
 }
 ```
 
-对 KNN，`GetNumElements()` 为 `1`，ids/distances 数组长度为 `k`。对范围搜索，命中数通过结果的维度报告。
-见 [k-近邻搜索](../guide/knn_search.md)。
+单查询 KNN 的 `GetNumElements()` 为 `1`，`GetDim()` 表示实际结果数。HGraph 和 IVF 的批量 KNN
+结果为按行主序排列的 `GetNumElements() x GetDim()` 矩阵；HGraph 的不足项以 `id == -1` 和无穷距离
+填充。对范围搜索，命中数通过结果的维度报告。见 [k-近邻搜索](../guide/knn_search.md)。
+
+
+HGraph 批量 KNN 在空索引（包括所有元素均已删除）上返回 `NumElements = 查询数`、
+`Dim = 请求的 k`，所有槽位均填充 `-1` 和 `+infinity`。非空索引的结果宽度为
+`min(请求的 k, 有效元素数)`；过滤造成的不足仍在该宽度内填充。单查询空结果保持 `Dim = 0`。
 
 ## `SparseVector`
 
@@ -142,8 +163,43 @@ struct MultiVector {
 当设置了 `Owner(true)` 时，每个元素的 `vectors_` 必须各自独立分配，因为析构函数会分别释放每个
 `vectors_`。
 
+## 命名 metadata
+
+`UInt32Metadata(name, values)` 为每个 dataset 元素附加一个无符号整数，
+`GetUInt32Metadata` 返回对应命名数组，不存在时返回 `nullptr`。`Int64Metadata(name, values)` 与
+`GetInt64Metadata(name)` 提供命名的有符号 64 位整数数组；`StringMetadata(name, values)` 与
+`GetStringMetadata(name)` 提供命名字符串数组。SINDI 和 SINDI_V2 使用名为 `host` 的字符串
+metadata 进行 host 过滤，使用名为 `publish_time_stamp` 的 int64 metadata 进行 UTC 日粒度时间
+过滤。单元素查询 Dataset 的时间范围使用 `publish_time_stamp_begin` 与
+`publish_time_stamp_end`。对于 SINDI 和 SINDI_V2 的 base dataset，`publish_time_stamp == 0`
+保留为缺失时间戳，且永远不会匹配时间 selector。这些数组均须为每个 dataset 元素提供一个值，
+并遵循 Dataset 通用的 ownership、深拷贝和 Append 规则。
+
 ## 参见
 
 - [Index](index_class.md) —— 消费并返回 dataset 的方法。
 - [搜索请求与过滤器](search.md) —— 把查询 dataset 包进 `SearchRequest`。
 - [辅助类型](types.md) —— `AttributeSet` 与属性值类型。
+
+## 单次搜索距离统计
+
+维护中的 HGraph、BruteForce、IVF、Pyramid、SINDI 和 SIMQ 搜索结果会在 `GetStatistics()` 中附加
+统计信息。一次逻辑 query-to-candidate 距离或边界评估计数一次；批量 `N` 个候选计为 `N`，
+重复评估每次计数，而距离调用之前被拒绝的候选、过滤检查、图边、预取、堆操作和跳过的下界不计数。
+下界与之后的精确重排分别计数。阶段为 `routing`、`approximate`、`rerank`，backend 是 `fp32`、
+`fp16`、`bf16`、`int8`、`sq8`、`sq4`、`pq`、`pq_fastscan`、`rabitq`、`binary`
+和稀疏表示族，不包含 ISA 或批量变体。
+
+`distance_evaluations` 等于阶段之和；已知 backend 之和等于总数。未知工作记入 `unknown` 并使
+`complete` 为 `false`。数值是无符号 64 位 JSON 整数，加法饱和。
+`SINDI` 和 `SINDI_V2` 为避免在搜索热路径中逐 posting ID 跟踪，不统计 approximate 阶段的
+evaluation；其他已测量阶段仍会返回，但发生 approximate evaluation 时 `complete` 为 `false`。
+旧的 `dist_cmp` 与
+`reorder_distance_count` 保持兼容且含义不变。Python 保留 `(ids, distances)` 解包方式；可通过
+`knn_search_with_statistics` 显式获取统计信息：稠密重载返回一个统计 JSON 字符串，稀疏 CSR
+重载为每个查询返回一个字符串。`range_search_with_statistics` 返回范围搜索数组及一个统计
+JSON 字符串。C 保留
+`SearchResult_t` 布局，统计信息通过新增的显式访问方式提供：C 调用
+`vsag_search_result_enable_statistics()` 后获取统计信息，并用
+`vsag_search_result_destroy_statistics()` 释放；未选择统计的旧调用保留 `other_result` 所有权，
+不会产生统计分配。旧版 HNSW 和 DiskANN 不在此合约内。

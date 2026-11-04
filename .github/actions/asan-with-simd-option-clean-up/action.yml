@@ -1,0 +1,21 @@
+name: asan-with-simd-option-clean-up
+description: Shared clean_up execution; callers own runners and dependencies.
+inputs:
+  matrix-simd-key:
+    description: Caller matrix.simd_key
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Create Empty File
+      shell: bash -e {0}
+      run: touch /tmp/clean_up
+    - name: Overwrite Test Artifact
+      uses: actions/upload-artifact@v5
+      with:
+        path: /tmp/clean_up
+        name: test-x86-${{ inputs.matrix-simd-key }}-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 3
+        overwrite: 'true'

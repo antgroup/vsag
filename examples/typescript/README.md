@@ -24,15 +24,15 @@ official Node.js binding.
 ## Run
 
 ```bash
-npx ts-node examples/typescript/101_index_hnsw.ts
+npx ts-node examples/typescript/103_index_hgraph.ts
 ```
 
 …or compile first and run with plain `node`:
 
 ```bash
-npx tsc examples/typescript/101_index_hnsw.ts \
+npx tsc examples/typescript/103_index_hgraph.ts \
     --target es2020 --module commonjs --esModuleInterop
-node examples/typescript/101_index_hnsw.js
+node examples/typescript/103_index_hgraph.js
 ```
 
 ## File naming convention
@@ -45,7 +45,7 @@ across languages.
 
 | File | Index | Notes |
 | --- | --- | --- |
-| [`101_index_hnsw.ts`](101_index_hnsw.ts) | HNSW | Shortest "build + KNN" round-trip in TypeScript. |
+| [`103_index_hgraph.ts`](103_index_hgraph.ts) | HGraph | Shortest "build + KNN" round-trip in TypeScript. |
 
 ## Where to go next
 

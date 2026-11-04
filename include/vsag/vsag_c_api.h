@@ -48,6 +48,22 @@ typedef struct SearchResult {
     void* other_result; /** The other result of the search. */
 } SearchResult_t;       /** The search result. */
 
+/** Opt in to statistics for the next search writing @p search_result. */
+Error_t
+vsag_search_result_enable_statistics(SearchResult_t* search_result);
+
+/**
+ * Get statistics after a search for which statistics were explicitly enabled.
+ * The returned pointer remains valid until vsag_search_result_destroy_statistics() is called for
+ * the same result. Callers must synchronize concurrent get/destroy operations.
+ */
+const char*
+vsag_search_result_get_statistics(const SearchResult_t* search_result);
+
+/** Release statistics owned by @p search_result. */
+void
+vsag_search_result_destroy_statistics(SearchResult_t* search_result);
+
 /**
  * @brief Create a index factory object.
  *

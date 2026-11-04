@@ -1,25 +1,24 @@
 # Release Notes
 
-VSAG's official release history and change notes are maintained on GitHub Releases:
+VSAG website release notes are maintained by `MAJOR.MINOR` series. Each series page covers the
+first release and every later patch release in that line. GitHub Releases remains the source for
+the complete per-patch pull request list, assets, and contributor credits.
 
-- [Releases on GitHub](https://github.com/antgroup/vsag/releases)
+## Release Series
 
-Each release includes:
+- [VSAG 1.0](release_notes/v1.0.md)
+  - First release: [v1.0.0](https://github.com/antgroup/vsag/releases/tag/v1.0.0),
+    July 12, 2026
+  - Latest patch: `v1.0.0`
+  - Status: stable
 
-- **Features** — new functionality
-- **Improvements**
-- **Bug Fixes**
-- **Breaking Changes** (when applicable)
-- **Contributor credits**
+Future release notes follow the same layout: `v1.1`, `v1.2`, `v2.0`, and so on. Patch releases
+update their existing series page instead of creating a separate website page.
 
-## Versioning
+## Version and Note Grouping
 
-VSAG follows [Semantic Versioning 2.0](https://semver.org/):
-
-- `MAJOR.MINOR.PATCH`
-- `MAJOR` generally comes with incompatible API or serialization changes.
-- `MINOR` adds functionality while remaining backward compatible.
-- `PATCH` contains only bug fixes and performance improvements.
+Release tags use the `vMAJOR.MINOR.PATCH` form. The website groups them by `MAJOR.MINOR` so each
+page can explain the full series, while GitHub Releases records the exact contents of each tag.
 
 ## Getting a Specific Version
 
@@ -32,24 +31,24 @@ make release
 
 ### Python
 
+Check [PyPI](https://pypi.org/project/pyvsag/) for an available binding version, then install that
+exact version:
+
 ```bash
 pip install pyvsag==X.Y.Z
 ```
 
-### Node.js / TypeScript
-
-```bash
-npm install vsag@X.Y.Z
-```
+Binding releases may not match every core C++ tag. The repository also contains C and
+Node.js/TypeScript bindings. See the corresponding release series page and repository examples for
+their support and packaging state.
 
 ## Upgrade Guidance
 
-- Read the **Breaking Changes** section of the corresponding release before upgrading across major
-  versions.
-- When the serialization format changes, validate deserialization compatibility in a staging
-  environment first.
-- For SINDI, the legacy `use_term_lists_heap_insert` search parameter is ignored. SINDI
-  now derives the heap-insertion strategy from `doc_prune_ratio` and `query_prune_ratio`;
-  update configs that relied on forcing this path directly.
+- Read the compatibility section of the target release series before upgrading.
+- When a serialization format changes, validate old artifacts with the
+  [compatibility check tool](check_compatibility.md) in a staging environment.
 - Roll out gradually in production and use the
-  [performance evaluation tool](eval.md) to compare recall and latency.
+  [performance evaluation tool](eval.md) to compare recall, latency, and resource use.
+
+For complete patch-level history, see
+[all VSAG releases on GitHub](https://github.com/antgroup/vsag/releases).

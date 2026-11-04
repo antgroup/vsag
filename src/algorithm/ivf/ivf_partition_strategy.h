@@ -50,7 +50,7 @@ public:
           thread_pool_(common_param.thread_pool_),
           bucket_count_(bucket_count),
           dim_(common_param.dim_),
-          metric_type_(common_param.metric_){};
+          metric_type_(common_param.metric_) {};
 
     virtual void
     Train(const DatasetPtr dataset) = 0;
@@ -80,7 +80,7 @@ public:
     }
 
     virtual void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         StreamReader::ReadObj(reader, this->is_trained_);
         StreamReader::ReadObj(reader, this->bucket_count_);
         StreamReader::ReadObj(reader, this->dim_);

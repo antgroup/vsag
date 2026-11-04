@@ -17,12 +17,17 @@
 #include <algorithm>
 #include <array>
 #include <limits>
+#include <nlohmann/json.hpp>
 
+#include "common.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
-#include "hgraph.h"  // IWYU pragma: keep
+#include "hgraph.h"
+#include "hgraph_component_names.h"  // IWYU pragma: keep
 #include "impl/heap/standard_heap.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pruning_strategy.h"
+#include "storage/chunked_stream_writer.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
@@ -35,9 +40,11 @@ namespace vsag {
 
 namespace {
 
+constexpr uint64_t K_MCI_FORMAT_VERSION = 2;
+
 std::string
 dump_basic_info_for_log(const JsonType& basic_info) {
-    JsonType log_basic_info = basic_info;
+    JsonType log_basic_info = basic_info;  // NOLINT(performance-unnecessary-copy-initialization)
     if (log_basic_info.Contains(INDEX_PARAM) and log_basic_info[INDEX_PARAM].IsString()) {
         auto index_param = JsonType::Parse(log_basic_info[INDEX_PARAM].GetString(), false);
         if (not index_param.IsDiscarded() and index_param.IsObject()) {
@@ -104,13 +111,13 @@ public:
 private:
     void
     checksum_range(uint64_t offset, uint64_t size) {
-        constexpr uint64_t kBufferSize = 8192;
-        std::array<char, kBufferSize> buffer{};
+        constexpr uint64_t k_buffer_size = 8192;
+        std::array<char, k_buffer_size> buffer{};
         const auto original_cursor = reader_.GetCursor();
         reader_.Seek(offset);
         uint64_t remaining = size;
         while (remaining > 0) {
-            const auto read_size = std::min<uint64_t>(remaining, kBufferSize);
+            const auto read_size = std::min<uint64_t>(remaining, k_buffer_size);
             reader_.Read(buffer.data(), read_size);
             crc_ = StreamHeader::UpdateChecksum(crc_, std::string_view(buffer.data(), read_size));
             remaining -= read_size;
@@ -196,9 +203,24 @@ HGraph::serialize_basic_info() const {
     jsonify_basic_info["extra_info_size"].SetUint64(this->extra_info_size_);
     jsonify_basic_info["data_type"].SetInt(static_cast<int64_t>(this->data_type_));
     jsonify_basic_info["persist_source_id"].SetBool(this->persist_source_id_);
+    jsonify_basic_info[HGRAPH_USE_MCI].SetBool(this->mci_parameters_.enabled);
+    if (this->mci_parameters_.enabled) {
+        jsonify_basic_info["mci_format_version"].SetUint64(K_MCI_FORMAT_VERSION);
+    }
     // logger::debug("mult: {}", this->mult_);
     TO_JSON_BASE64(jsonify_basic_info, mult);
     jsonify_basic_info["max_capacity"].SetUint64(this->max_capacity_.load());
+    jsonify_basic_info["total_count"].SetUint64(this->total_count_.load());
+    {
+        std::shared_lock codes_lock(this->persistent_codes_mutex_);
+        if (not this->pending_code_writes_.empty()) {
+            nlohmann::json pending = nlohmann::json::array();
+            for (const auto& [id, mask] : this->pending_code_writes_) {
+                pending.push_back({id, mask});
+            }
+            jsonify_basic_info["pending_code_writes"].SetJson(JsonType::Parse(pending.dump()));
+        }
+    }
     jsonify_basic_info["max_level"].SetUint64(this->route_graphs_.size());
     jsonify_basic_info[INDEX_PARAM].SetString(this->create_param_ptr_->ToString());
 
@@ -218,6 +240,15 @@ HGraph::serialize_basic_info() const {
 void
 HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     logger::debug("jsonify_basic_info:\n{}", dump_basic_info_for_log(jsonify_basic_info));
+    this->pending_code_writes_.clear();
+    if (jsonify_basic_info.Contains("pending_code_writes")) {
+        const auto pending =
+            nlohmann::json::parse(jsonify_basic_info["pending_code_writes"].Dump());
+        for (const auto& entry : pending) {
+            this->pending_code_writes_.emplace(entry.at(0).get<InnerIdType>(),
+                                               entry.at(1).get<uint8_t>());
+        }
+    }
     FROM_JSON(jsonify_basic_info, use_reorder, Bool);
     this->reorder_by_base_ = false;
     FROM_JSON(jsonify_basic_info, reorder_by_base, Bool);
@@ -234,13 +265,27 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
     if (jsonify_basic_info.Contains("persist_source_id")) {
         this->persist_source_id_ = jsonify_basic_info["persist_source_id"].GetBool();
     }
+    if (jsonify_basic_info.Contains("use_mci")) {
+        this->mci_parameters_.enabled = jsonify_basic_info[HGRAPH_USE_MCI].GetBool();
+        if (this->mci_parameters_.enabled and this->mci_cliques_ == nullptr) {
+            this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
+        }
+    }
     FROM_JSON_BASE64(jsonify_basic_info, mult);
     // logger::debug("mult: {}", this->mult_);
     auto max_capacity = jsonify_basic_info["max_capacity"].GetUint64();
     if (max_capacity > std::numeric_limits<InnerIdType>::max()) {
         throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
+            ErrorType::INVALID_BINARY,
             fmt::format("HGraph max_capacity {} exceeds InnerIdType limit", max_capacity));
+    }
+    if (jsonify_basic_info.Contains("total_count")) {
+        const auto reserved_count = jsonify_basic_info["total_count"].GetUint64();
+        if (reserved_count > max_capacity or
+            reserved_count > std::numeric_limits<InnerIdType>::max()) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "HGraph total_count exceeds capacity or InnerIdType limit");
+        }
     }
     this->max_capacity_.store(static_cast<InnerIdType>(max_capacity));
 
@@ -260,6 +305,11 @@ HGraph::deserialize_basic_info(const JsonType& jsonify_basic_info) {
             logger::error(message);
             throw VsagException(ErrorType::INVALID_ARGUMENT, message);
         }
+        auto effective_param = std::make_shared<HGraphParameter>(
+            *std::static_pointer_cast<HGraphParameter>(this->create_param_ptr_));
+        effective_param->resize_increase_count_bit = index_param->resize_increase_count_bit;
+        this->create_param_ptr_ = effective_param;
+        this->resize_increase_count_bit_ = index_param->resize_increase_count_bit;
     }
 }
 
@@ -314,6 +364,7 @@ HGraph::deserialize_label_info(StreamReader& reader) const {
             this->label_table_->InsertRemap(key, value);
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
+        this->label_table_->RebuildActivePaddingLabelIdsFromRemap();
     }
 
     // Optional source_id_table_ block. If the next 8 bytes don't match
@@ -357,6 +408,20 @@ HGraph::Serialize(StreamWriter& writer) const {
 
     // FIXME(wxyu): this option is used for special purposes, like compatibility testing
     if (this->use_old_serial_format_) {
+        if (this->use_conjugate_graph_) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "HGraph conjugate graph does not support v0.14 serialization");
+        }
+        if (this->using_dedup_storage()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph duplicate code slot mapping does not support v0.14 "
+                                "serialization");
+        }
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph RaBitQ fused datacell does not support v0.14 "
+                                "serialization");
+        }
         this->serialize_basic_info_v0_14(writer);
         this->basic_flatten_codes_->Serialize(writer);
         this->bottom_graph_->Serialize(writer);
@@ -376,6 +441,9 @@ HGraph::Serialize(StreamWriter& writer) const {
     }
 
     this->serialize_label_info(writer);
+    if (this->using_dedup_storage()) {
+        this->code_slot_map_->Serialize(writer);
+    }
     this->basic_flatten_codes_->Serialize(writer);
     this->bottom_graph_->Serialize(writer);
     if (this->has_precise_reorder()) {
@@ -393,6 +461,13 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (create_new_raw_vector_) {
         this->raw_vector_->Serialize(writer);
     }
+    if (this->mci_parameters_.enabled and this->mci_cliques_ != nullptr) {
+        this->mci_cliques_->Serialize(writer);
+    }
+    if (this->use_conjugate_graph_) {
+        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        this->conjugate_graph_->Serialize(writer);
+    }
 
     // serialize footer (introduced since v0.15)
     auto jsonify_basic_info = this->serialize_basic_info();
@@ -401,14 +476,157 @@ HGraph::Serialize(StreamWriter& writer) const {
     if (this->support_duplicate_) {
         metadata->Set("duplicate_format_version", 1);
     }
+    metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
     logger::debug(jsonify_basic_info.Dump());
 
     auto footer = std::make_shared<Footer>(metadata);
     footer->Write(writer);
 }
 
+// head = interface fields measured by a base-class-restricted dry run
+// (covers optional fields like the graph duplicate tracker) + the 8B io
+// size field written by ByteIO::Serialize
+//
+// The base class is qualified on purpose: it writes only the fixed
+// interface-level fields (total_count, max_capacity, code_size, ...), while the
+// derived Serialize would also emit the io data segment that the chunked stream
+// writer records separately as its own frames. Calling the virtual form here
+// would measure the whole component instead of just its head.
+// ByteIO::Serialize emits the io size as one WriteObj and then the data, so a
+// head frame is the interface-level fields plus that field. Measure the field
+// rather than assuming sizeof(uint64_t): an encoding change in WriteObj would
+// otherwise shift every recorded head boundary silently. The framing this
+// relies on is pinned by the "ByteIO serialize framing" test in
+// hgraph_chunked_serialize_test.cpp; if ByteIO::Serialize ever changes how it
+// writes the size field, that test fails and this measurement must follow.
+static uint64_t
+io_size_field_bytes() {
+    CountingStreamWriter counter;
+    uint64_t io_size = 0;
+    StreamWriter::WriteObj(counter, io_size);
+    return counter.GetCursor();
+}
+
+static uint64_t
+measure_head_size(const FlattenInterfacePtr& flatten) {
+    CountingStreamWriter counter;
+    flatten->FlattenInterface::Serialize(counter);
+    return counter.GetCursor() + io_size_field_bytes();
+}
+
+static uint64_t
+measure_head_size(const GraphInterfacePtr& graph) {
+    CountingStreamWriter counter;
+    graph->GraphInterface::Serialize(counter);
+    return counter.GetCursor() + io_size_field_bytes();
+}
+
+void
+HGraph::Serialize(SerializeWriter& writer, uint64_t chunk_size) const {
+    if (this->ignore_reorder_) {
+        this->use_reorder_ = false;
+    }
+    if (this->use_old_serial_format_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "chunked serialization does not support v0.14 format");
+    }
+
+    ChunkedStreamWriter chunked_writer(writer, chunk_size);
+
+    auto serialize_whole = [&chunked_writer](const char* name, const auto& serialize_func) {
+        chunked_writer.BeginWholeComponent(name);
+        serialize_func();
+        chunked_writer.EndComponent();
+    };
+    // split a component into head / io data / tail frames when the
+    // implementation exposes the strict three-part form (GetIOSize() > 0),
+    // otherwise fall back to a single whole frame
+    auto serialize_maybe_chunked =
+        [&](const char* name, const auto& component, uint64_t head_size) {
+            auto io_size = component->GetIOSize();
+            if (io_size == 0) {
+                serialize_whole(name, [&]() { component->Serialize(chunked_writer); });
+                return;
+            }
+            chunked_writer.BeginChunkedComponent(name, head_size, io_size);
+            component->Serialize(chunked_writer);
+            chunked_writer.EndComponent();
+        };
+
+    // component order mirrors Serialize(StreamWriter&)
+    serialize_whole(COMPONENT_LABEL_TABLE,
+                    [this, &chunked_writer]() { this->serialize_label_info(chunked_writer); });
+    if (this->using_dedup_storage()) {
+        serialize_whole(COMPONENT_CODE_SLOT_MAP, [this, &chunked_writer]() {
+            this->code_slot_map_->Serialize(chunked_writer);
+        });
+    }
+    serialize_maybe_chunked(
+        COMPONENT_BASE_CODES, basic_flatten_codes_, measure_head_size(basic_flatten_codes_));
+    serialize_maybe_chunked(
+        COMPONENT_BOTTOM_GRAPH, bottom_graph_, measure_head_size(bottom_graph_));
+    if (this->has_precise_reorder()) {
+        serialize_maybe_chunked(
+            COMPONENT_PRECISE_CODES, high_precise_codes_, measure_head_size(high_precise_codes_));
+    }
+    serialize_whole(COMPONENT_ROUTE_GRAPHS, [this, &chunked_writer]() {
+        for (const auto& route_graph : this->route_graphs_) {
+            route_graph->Serialize(chunked_writer);
+        }
+    });
+    if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
+        serialize_whole(COMPONENT_EXTRA_INFOS, [this, &chunked_writer]() {
+            this->extra_infos_->Serialize(chunked_writer);
+        });
+    }
+    if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
+        serialize_whole(COMPONENT_ATTR_FILTER, [this, &chunked_writer]() {
+            this->attr_filter_index_->Serialize(chunked_writer);
+        });
+    }
+    if (create_new_raw_vector_) {
+        serialize_maybe_chunked(COMPONENT_RAW_VECTOR, raw_vector_, measure_head_size(raw_vector_));
+    }
+    if (this->mci_parameters_.enabled and this->mci_cliques_ != nullptr) {
+        serialize_whole(COMPONENT_MCI_CLIQUES, [this, &chunked_writer]() {
+            this->mci_cliques_->Serialize(chunked_writer);
+        });
+    }
+    // the conjugate graph is a tag adjacency map with no io extent behind it,
+    // so it can only be a whole frame; the layout path still restores it as its
+    // own concurrent task. Sparse under hand-fed Feedback, but Pretrain touches
+    // one entry per searched tag, so treat its size as O(elements) rather than
+    // small (uint32_t memory accounting caps it at 4 GiB)
+    if (this->use_conjugate_graph_) {
+        serialize_whole(COMPONENT_CONJUGATE_GRAPH, [this, &chunked_writer]() {
+            std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+            this->conjugate_graph_->Serialize(chunked_writer);
+        });
+    }
+
+    // footer: plaintext, outside any component/frame
+    auto jsonify_basic_info = this->serialize_basic_info();
+    auto metadata = std::make_shared<Metadata>();
+    metadata->Set(BASIC_INFO, jsonify_basic_info);
+    if (this->support_duplicate_) {
+        metadata->Set("duplicate_format_version", 1);
+    }
+    metadata->Set("has_conjugate_graph", this->use_conjugate_graph_);
+    // physical bytes before the footer (same coordinate as the layout
+    // offsets); chunked readers take the truth from the layout instead, the
+    // key is recorded for formats and tools that consume the body as a whole
+    metadata->Set("body_size", static_cast<int64_t>(chunked_writer.GetPhysicalCursor()));
+    metadata->Set(CHUNKED_LAYOUT_KEY, chunked_writer.GetManifest().ToJson());
+    auto footer = std::make_shared<Footer>(metadata);
+    footer->Write(chunked_writer);
+}
+
 MetadataPtr
 HGraph::collect_streaming_header() const {
+    if (this->mci_parameters_.enabled) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph MCI does not support streaming serialization");
+    }
     auto metadata = std::make_shared<Metadata>();
     metadata->Set("format", "vsag_stream_v1");
     metadata->Set("index_name", this->GetName());
@@ -433,6 +651,10 @@ HGraph::collect_streaming_header() const {
     auto bottom_graph_tag = static_cast<uint32_t>(StreamSerializationTag::BOTTOM_GRAPH);
     auto route_graphs_tag = static_cast<uint32_t>(StreamSerializationTag::ROUTE_GRAPHS);
     append_manifest(label_table_tag, StreamSerializationTagCritical(label_table_tag));
+    if (this->using_dedup_storage()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CODE_SLOT_MAP);
+        append_manifest(tag, StreamSerializationTagCritical(tag));
+    }
     append_manifest(base_codes_tag, StreamSerializationTagCritical(base_codes_tag));
     append_manifest(bottom_graph_tag, StreamSerializationTagCritical(bottom_graph_tag));
     if (include_precise_codes) {
@@ -450,6 +672,10 @@ HGraph::collect_streaming_header() const {
     }
     if (create_new_raw_vector_) {
         auto tag = static_cast<uint32_t>(StreamSerializationTag::RAW_VECTOR);
+        append_manifest(tag, StreamSerializationTagCritical(tag));
+    }
+    if (this->use_conjugate_graph_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CONJUGATE_GRAPH);
         append_manifest(tag, StreamSerializationTagCritical(tag));
     }
     metadata->Set("block_manifest", manifest);
@@ -471,6 +697,13 @@ HGraph::serialize_streaming_body(StreamWriter& writer) const {
         label_table_tag,
         StreamSerializationTagCritical(label_table_tag),
         [this](StreamWriter& block_writer) { this->serialize_label_info(block_writer); });
+    if (this->using_dedup_storage()) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CODE_SLOT_MAP);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                this->code_slot_map_->Serialize(block_writer);
+            });
+    }
     WriteStreamingBlock(writer,
                         base_codes_tag,
                         StreamSerializationTagCritical(base_codes_tag),
@@ -518,6 +751,14 @@ HGraph::serialize_streaming_body(StreamWriter& writer) const {
                 this->raw_vector_->Serialize(block_writer);
             });
     }
+    if (this->use_conjugate_graph_) {
+        auto tag = static_cast<uint32_t>(StreamSerializationTag::CONJUGATE_GRAPH);
+        WriteStreamingBlock(
+            writer, tag, StreamSerializationTagCritical(tag), [this](StreamWriter& block_writer) {
+                std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+                this->conjugate_graph_->Serialize(block_writer);
+            });
+    }
 }
 
 void
@@ -537,6 +778,7 @@ HGraph::deserialize_label_info_streaming(StreamReader& reader) const {
             this->label_table_->InsertRemap(key, value);
         }
         this->label_table_->total_count_.store(static_cast<int64_t>(size));
+        this->label_table_->RebuildActivePaddingLabelIdsFromRemap();
     }
 
     if (this->persist_source_id_) {
@@ -580,7 +822,25 @@ HGraph::read_streaming_body(StreamReader& reader,
                             const MetadataPtr& metadata,
                             const LoadParameters* load_parameters) {
     auto basic_info = metadata->Get(BASIC_INFO);
+    auto has_serialized_index_param = basic_info.Contains(INDEX_PARAM);
+    auto has_serialized_total_count = basic_info.Contains("total_count");
+    uint64_t serialized_total_count = 0;
+    if (has_serialized_total_count) {
+        serialized_total_count = basic_info["total_count"].GetUint64();
+    }
     this->deserialize_basic_info(basic_info);
+    if (this->mci_parameters_.enabled) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "HGraph MCI does not support streaming deserialization");
+    }
+    if (not has_serialized_index_param && this->using_dedup_storage()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage requires serialized index parameter");
+    }
+    if (not has_serialized_total_count && this->using_dedup_storage()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage requires serialized total_count");
+    }
 
     int64_t dup_version = 0;
     if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
@@ -589,6 +849,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
 
     bool loaded_label_table = false;
+    bool loaded_code_slot_map = false;
     bool loaded_base_codes = false;
     bool loaded_bottom_graph = false;
     bool loaded_high_precision_codes = false;
@@ -596,6 +857,7 @@ HGraph::read_streaming_body(StreamReader& reader,
     bool loaded_extra_info = false;
     bool loaded_attribute_filter = false;
     bool loaded_raw_vector = false;
+    bool loaded_conjugate_graph = false;
 
     while (true) {
         auto block_header = StreamBlockHeader::Read(reader);
@@ -627,6 +889,17 @@ HGraph::read_streaming_body(StreamReader& reader,
                 });
                 loaded_label_table = true;
                 break;
+            case StreamSerializationTag::CODE_SLOT_MAP:
+                if (not this->using_dedup_storage()) {
+                    throw VsagException(
+                        ErrorType::INVALID_BINARY,
+                        "HGraph streaming serialization has an unexpected code slot map block");
+                }
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    this->code_slot_map_->Deserialize(block);
+                });
+                loaded_code_slot_map = true;
+                break;
             case StreamSerializationTag::BASE_CODES:
                 ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
                     this->basic_flatten_codes_->Deserialize(block);
@@ -641,9 +914,10 @@ HGraph::read_streaming_body(StreamReader& reader,
                 break;
             case StreamSerializationTag::HIGH_PRECISION_CODES:
                 if (this->has_precise_reorder()) {
-                    constexpr const char* kPreciseReader = "precise_reader";
-                    if (load_parameters != nullptr && load_parameters->HasReader(kPreciseReader)) {
-                        auto reader_ptr = load_parameters->GetReader(kPreciseReader);
+                    constexpr const char* k_precise_reader = "precise_reader";
+                    if (load_parameters != nullptr &&
+                        load_parameters->HasReader(k_precise_reader)) {
+                        auto reader_ptr = load_parameters->GetReader(k_precise_reader);
                         if (reader_ptr == nullptr) {
                             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                                 "precise_reader is null");
@@ -709,6 +983,21 @@ HGraph::read_streaming_body(StreamReader& reader,
                     loaded_raw_vector = true;
                 }
                 break;
+            case StreamSerializationTag::CONJUGATE_GRAPH:
+                if (not this->use_conjugate_graph_) {
+                    throw VsagException(
+                        ErrorType::INVALID_ARGUMENT,
+                        "serialized HGraph uses conjugate graph but the target does not");
+                }
+                ReadSeekableBlockPayload(block_reader, block_header, [this](StreamReader& block) {
+                    std::unique_lock graph_lock(this->conjugate_graph_mutex_);
+                    auto result = this->conjugate_graph_->Deserialize(block);
+                    if (not result) {
+                        throw VsagException(result.error().type, result.error().message);
+                    }
+                });
+                loaded_conjugate_graph = true;
+                break;
             default:
                 if (block_header.IsCritical()) {
                     throw VsagException(
@@ -730,6 +1019,10 @@ HGraph::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "HGraph streaming serialization required block is missing");
     }
+    if (this->using_dedup_storage() && !loaded_code_slot_map) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "HGraph streaming serialization code slot map block is missing");
+    }
     if (this->has_precise_reorder() && !loaded_high_precision_codes) {
         throw VsagException(ErrorType::READ_ERROR,
                             "HGraph streaming serialization high precision block is missing");
@@ -747,19 +1040,91 @@ HGraph::read_streaming_body(StreamReader& reader,
         throw VsagException(ErrorType::READ_ERROR,
                             "HGraph streaming serialization raw vector block is missing");
     }
-
     auto new_size = max_capacity_.load();
+    if (this->using_dedup_storage()) {
+        auto logical_count = this->code_slot_map_->PublishedLogicalCount();
+        auto physical_count = this->code_slot_map_->PhysicalCount();
+        if (logical_count != serialized_total_count) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                fmt::format("deduplicated HGraph logical count mismatch: {} != {}",
+                                            logical_count,
+                                            serialized_total_count));
+        }
+        if (logical_count > new_size) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("deduplicated HGraph logical count exceeds capacity: {} > {}",
+                            logical_count,
+                            new_size));
+        }
+        if (this->label_table_->label_table_.size() < logical_count) {
+            throw VsagException(
+                ErrorType::INVALID_BINARY,
+                fmt::format("deduplicated HGraph label table is smaller than logical count: "
+                            "{} < {}",
+                            this->label_table_->label_table_.size(),
+                            logical_count));
+        }
+
+        auto physical_capacity = std::numeric_limits<CodeSlotIdType>::max();
+        auto validate_physical_flatten = [physical_count, &physical_capacity](
+                                             const FlattenInterfacePtr& flatten, const char* name) {
+            auto physical_flatten = GetCodeSlotPhysicalFlatten(flatten);
+            auto actual_count = physical_flatten->TotalCount();
+            if (actual_count != physical_count) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("deduplicated HGraph {} physical count mismatch: {} != {}",
+                                name,
+                                actual_count,
+                                physical_count));
+            }
+            auto capacity = static_cast<CodeSlotIdType>(physical_flatten->max_capacity_);
+            if (capacity < physical_count) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("deduplicated HGraph {} physical capacity is smaller than "
+                                "physical count: {} < {}",
+                                name,
+                                capacity,
+                                physical_count));
+            }
+            physical_capacity = std::min(physical_capacity, capacity);
+        };
+        validate_physical_flatten(this->basic_flatten_codes_, "base codes");
+        if (this->has_precise_reorder()) {
+            validate_physical_flatten(this->high_precise_codes_, "precise codes");
+        }
+        if (this->create_new_raw_vector_) {
+            validate_physical_flatten(this->raw_vector_, "raw vectors");
+        }
+        for (InnerIdType inner_id = 0; inner_id < logical_count; ++inner_id) {
+            (void)this->code_slot_map_->Resolve(inner_id);
+        }
+
+        this->physical_code_capacity_.store(physical_capacity, std::memory_order_release);
+        this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+        this->total_count_.store(logical_count, std::memory_order_release);
+        this->PublishThroughTotalCount();
+    }
     this->neighbors_mutex_->Resize(new_size);
     pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
-    this->total_count_ = this->basic_flatten_codes_->TotalCount();
+    if (not this->using_dedup_storage()) {
+        // Keep reservation and visibility separate: a failed Add may have reserved IDs
+        // beyond the written codes. Older metadata without total_count uses the code count.
+        const auto written_count = this->basic_flatten_codes_->TotalCount();
+        this->total_count_ = std::max<uint64_t>(serialized_total_count, written_count);
+        this->published_count_.store(written_count, std::memory_order_release);
+    }
     if (this->raw_vector_ != nullptr) {
         this->has_raw_vector_ = true;
     }
-    this->cal_memory_usage();
+    this->restore_fused_codec();
 
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    this->cal_memory_usage();
 }
 
 void
@@ -771,12 +1136,21 @@ HGraph::Deserialize(StreamReader& reader) {
         logger::debug("parse with v0.14 version format");
 
         this->deserialize_basic_info_v0_14(reader);
+        if (this->using_dedup_storage()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph duplicate code slot mapping does not support v0.14 "
+                                "serialization");
+        }
 
         this->basic_flatten_codes_->Deserialize(reader);
         this->bottom_graph_->Deserialize(reader);
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(reader);
         }
+        this->physical_code_capacity_.store(
+            static_cast<InnerIdType>(
+                GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->max_capacity_),
+            std::memory_order_release);
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(reader);
@@ -790,6 +1164,7 @@ HGraph::Deserialize(StreamReader& reader) {
             this->extra_infos_->Deserialize(reader);
         }
         this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        this->PublishThroughTotalCount();
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(reader);
@@ -797,39 +1172,52 @@ HGraph::Deserialize(StreamReader& reader) {
     } else {  // create like `else if ( ver in [v0.15, v0.17] )` here if need in the future
         logger::debug("parse with new version format");
 
+        auto metadata = footer->GetMetadata();
+        // a compressed chunked body is a sequence of per-chunk frames and cannot
+        // be consumed as one sequential stream
+        auto layout_json = metadata->Get(CHUNKED_LAYOUT_KEY);
+        if (layout_json.IsObject() and ChunkedManifest::FromJson(layout_json).codec_ != "none") {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "compressed chunked index requires ParallelDeserialize");
+        }
+
         BufferStreamReader buffer_reader(
             &reader, std::numeric_limits<uint64_t>::max(), this->allocator_);
 
-        auto metadata = footer->GetMetadata();
-        // metadata should NOT be nullptr if footer is not nullptr
-        this->deserialize_basic_info(metadata->Get(BASIC_INFO));
-
-        int64_t dup_version = 0;
-        if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
-            dup_version = metadata->Get("duplicate_format_version").GetInt();
-        }
-        this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
+        const auto serialized_total_count = this->apply_footer_metadata(metadata);
+        const auto basic_info = metadata->Get(BASIC_INFO);
 
         this->deserialize_label_info(buffer_reader);
+        if (this->using_dedup_storage()) {
+            this->code_slot_map_->Deserialize(buffer_reader);
+            this->validate_and_publish_dedup_state(serialized_total_count);
+            // The deduplicated path fills code slots directly, so the visibility mark has to
+            // follow the logical count explicitly (nothing goes through the per-node Add flow).
+            this->PublishThroughTotalCount();
+        }
 
         this->basic_flatten_codes_->Deserialize(buffer_reader);
         this->bottom_graph_->Deserialize(buffer_reader);
         if (this->has_precise_reorder()) {
             this->high_precise_codes_->Deserialize(buffer_reader);
         }
+        this->publish_physical_code_capacity();
 
         for (auto& route_graph : this->route_graphs_) {
             route_graph->Deserialize(buffer_reader);
         }
-        auto new_size = max_capacity_.load();
-        this->neighbors_mutex_->Resize(new_size);
-
-        pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+        this->initialize_deserialized_runtime_state();
 
         if (this->extra_info_size_ > 0 && this->extra_infos_ != nullptr) {
             this->extra_infos_->Deserialize(buffer_reader);
         }
-        this->total_count_ = this->basic_flatten_codes_->TotalCount();
+        if (not this->using_dedup_storage()) {
+            // Preserve reserved IDs without publishing the unwritten tail. Missing legacy
+            // total_count metadata falls back to the written code count.
+            const auto written_count = this->basic_flatten_codes_->TotalCount();
+            this->total_count_ = std::max<uint64_t>(serialized_total_count, written_count);
+            this->published_count_.store(written_count, std::memory_order_release);
+        }
 
         if (this->use_attribute_filter_ and this->attr_filter_index_ != nullptr) {
             this->attr_filter_index_->Deserialize(buffer_reader);
@@ -838,16 +1226,197 @@ HGraph::Deserialize(StreamReader& reader) {
         if (create_new_raw_vector_) {
             this->raw_vector_->Deserialize(buffer_reader);
         }
+        if (this->mci_parameters_.enabled) {
+            this->deserialize_mci_cliques(buffer_reader, basic_info);
+            this->restore_mci_label_state(basic_info);
+        }
+        if (metadata->Get("has_conjugate_graph").IsBool() &&
+            metadata->Get("has_conjugate_graph").GetBool()) {
+            CHECK_ARGUMENT(this->use_conjugate_graph_,
+                           "serialized HGraph uses conjugate graph but the target does not");
+            std::unique_lock graph_lock(this->conjugate_graph_mutex_);
+            auto result = this->conjugate_graph_->Deserialize(buffer_reader);
+            if (not result) {
+                throw VsagException(result.error().type, result.error().message);
+            }
+        }
         if (this->raw_vector_ != nullptr) {
             this->has_raw_vector_ = true;
         }
     }
-    this->cal_memory_usage();
+    this->finish_deserialize();
+}
+
+void
+HGraph::deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info) {
+    const auto version = basic_info.Contains("mci_format_version")
+                             ? basic_info["mci_format_version"].GetUint64()
+                             : 1;
+    const auto total = basic_info.Contains("total_count") ? basic_info["total_count"].GetUint64()
+                                                          : std::numeric_limits<uint64_t>::max();
+    if (this->mci_cliques_ == nullptr) {
+        this->mci_cliques_ = std::make_shared<CliqueDataCell>(this->allocator_);
+    }
+    // Parallel component tasks must not read or modify the label table here.
+    this->mci_cliques_->Deserialize(reader, version, total);
+    this->mci_pending_mutations_ = 0;
+}
+
+void
+HGraph::restore_mci_label_state(const JsonType& basic_info) {
+    const auto total = this->total_count_.load();
+    // Labels may have spare capacity or omit shadowed MARK_REMOVE + Add slots.
+    if ((basic_info.Contains("total_count") and basic_info["total_count"].GetUint64() != total) or
+        this->label_table_->label_table_.size() < total or
+        this->label_table_->GetRemapSize() > total or this->mci_cliques_ == nullptr or
+        this->mci_cliques_->GetTotalNodes() != total) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "serialized HGraph MCI node and label counts are inconsistent");
+    }
+    if (this->support_force_remove()) {
+        const auto removed_ids = this->mci_cliques_->GetInactiveNodeIds();
+        this->label_table_->RestoreDeletedIds(removed_ids, total);
+        this->delete_count_.store(static_cast<int64_t>(removed_ids.size()));
+    }
+}
+
+uint64_t
+HGraph::apply_footer_metadata(const MetadataPtr& metadata) {
+    // metadata should NOT be nullptr if footer is not nullptr
+    auto basic_info = metadata->Get(BASIC_INFO);
+    const auto has_serialized_index_param = basic_info.Contains(INDEX_PARAM);
+    const auto has_serialized_total_count = basic_info.Contains("total_count");
+    uint64_t serialized_total_count = 0;
+    if (has_serialized_total_count) {
+        serialized_total_count = basic_info["total_count"].GetUint64();
+    }
+    this->deserialize_basic_info(basic_info);
+    if (not has_serialized_index_param && this->using_dedup_storage()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage requires serialized index parameter");
+    }
+    if (not has_serialized_total_count && this->using_dedup_storage()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage requires serialized total_count");
+    }
+
+    int64_t dup_version = 0;
+    if (metadata->Get("duplicate_format_version").IsNumberInteger()) {
+        dup_version = metadata->Get("duplicate_format_version").GetInt();
+    }
+    // runs on the orchestrating thread, before any parallel task may touch
+    // the label table
+    this->label_table_->is_legacy_duplicate_format_ = (dup_version == 0);
+    return serialized_total_count;
+}
+
+void
+HGraph::validate_and_publish_dedup_state(uint64_t serialized_total_count) {
+    if (not this->using_dedup_storage()) {
+        return;
+    }
+    auto logical_count = this->code_slot_map_->PublishedLogicalCount();
+    if (logical_count != serialized_total_count) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            fmt::format("deduplicated HGraph logical count mismatch: {} != {}",
+                                        logical_count,
+                                        serialized_total_count));
+    }
+    if (this->label_table_->label_table_.size() < logical_count) {
+        throw VsagException(
+            ErrorType::INVALID_BINARY,
+            fmt::format("deduplicated HGraph label table is smaller than logical count: {} < {}",
+                        this->label_table_->label_table_.size(),
+                        logical_count));
+    }
+    this->total_count_.store(logical_count, std::memory_order_release);
+}
+
+void
+HGraph::publish_physical_code_capacity() {
+    this->physical_code_capacity_.store(
+        static_cast<InnerIdType>(
+            GetCodeSlotPhysicalFlatten(this->basic_flatten_codes_)->max_capacity_),
+        std::memory_order_release);
+}
+
+void
+HGraph::initialize_deserialized_runtime_state() {
+    auto new_size = max_capacity_.load();
+    this->neighbors_mutex_->Resize(new_size);
+    if (this->using_dedup_storage()) {
+        this->code_slot_map_->ReserveLogicalSize(static_cast<InnerIdType>(new_size));
+    }
+    pool_ = std::make_shared<VisitedListPool>(1, allocator_, new_size, allocator_);
+}
+
+void
+HGraph::finish_deserialize() {
+    // Ordinary snapshots can contain reservations beyond the written code range.
+    // Publish written codes only; deduplicated snapshots validate all logical mappings below.
+    this->published_count_.store(this->using_dedup_storage()
+                                     ? this->total_count_.load()
+                                     : this->basic_flatten_codes_->TotalCount(),
+                                 std::memory_order_release);
+    if (this->using_dedup_storage()) {
+        auto logical_count = this->code_slot_map_->PublishedLogicalCount();
+        auto physical_count = this->code_slot_map_->PhysicalCount();
+        auto validate_physical_count = [physical_count](const FlattenInterfacePtr& flatten,
+                                                        const char* name) {
+            auto actual_count = GetCodeSlotPhysicalFlatten(flatten)->TotalCount();
+            if (actual_count != physical_count) {
+                throw VsagException(
+                    ErrorType::INVALID_BINARY,
+                    fmt::format("deduplicated HGraph {} physical count mismatch: {} != {}",
+                                name,
+                                actual_count,
+                                physical_count));
+            }
+        };
+        validate_physical_count(this->basic_flatten_codes_, "base codes");
+        if (this->has_precise_reorder()) {
+            validate_physical_count(this->high_precise_codes_, "precise codes");
+        }
+        if (this->create_new_raw_vector_) {
+            validate_physical_count(this->raw_vector_, "raw vectors");
+        }
+        for (InnerIdType inner_id = 0; inner_id < logical_count; ++inner_id) {
+            (void)this->code_slot_map_->Resolve(inner_id);
+        }
+    }
+    this->restore_fused_codec();
 
     // post serialize procedure
     if (use_elp_optimizer_) {
         elp_optimize();
     }
+    this->cal_memory_usage();
+}
+
+void
+HGraph::restore_fused_codec() {
+    if (rabitq_fused_datacell_ == nullptr) {
+        return;
+    }
+    CHECK_ARGUMENT(rabitq_split_codes_ != nullptr, "fused HGraph lost its RaBitQ split codes");
+    CHECK_ARGUMENT(rabitq_split_codes_->UsesExternalFusedCodeStorage(),
+                   "fused HGraph split codes are not bound to the node slab");
+    CHECK_ARGUMENT(  // NOLINT(readability-simplify-boolean-expr)
+        rabitq_split_codes_->OneBitCodeSize() == rabitq_fused_datacell_->OneBitCodeSize() and
+            rabitq_split_codes_->SupplementCodeSize() ==
+                rabitq_fused_datacell_->FusedSupplementCodeSize(),
+        "fused HGraph split-code sizes do not match the serialized node layout");
+    const auto base_count = basic_flatten_codes_->TotalCount();
+    const auto graph_count = rabitq_fused_datacell_->TotalCount();
+    CHECK_ARGUMENT(graph_count <= base_count,
+                   "fused HGraph node count exceeds its base-code count");
+    CHECK_ARGUMENT(rabitq_fused_datacell_->MaxCapacity() >= base_count,
+                   "fused HGraph node capacity is smaller than its base-code count");
+    if (rabitq_fused_datacell_->CodecModel().empty()) {
+        CHECK_ARGUMENT(base_count == 0, "non-empty fused HGraph is missing its codec model");
+        return;
+    }
+    rabitq_split_codes_->ImportFusedCodec(rabitq_fused_datacell_->CodecModel());
 }
 
 std::unordered_map<std::string, uint64_t>
@@ -857,6 +1426,9 @@ HGraph::GetMemoryUsageDetail() const {
     memory_usage["pool"] = this->pool_->GetMemoryUsage();
     memory_usage["label_table"] = this->label_table_->GetMemoryUsage();
     memory_usage["basic_flatten_codes"] = this->basic_flatten_codes_->GetMemoryUsage();
+    if (this->code_slot_map_ != nullptr) {
+        memory_usage["code_slot_map"] = this->code_slot_map_->GetMemoryUsage();
+    }
     memory_usage["bottom_graph"] = this->bottom_graph_->GetMemoryUsage();
     uint64_t route_graph_memory = 0;
     for (const auto& route_graph : this->route_graphs_) {
@@ -871,6 +1443,13 @@ HGraph::GetMemoryUsageDetail() const {
     }
     if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
         memory_usage["raw_vector"] = this->raw_vector_->GetMemoryUsage();
+    }
+    if (this->mci_cliques_ != nullptr) {
+        memory_usage["mci_cliques"] = this->mci_cliques_->GetMemoryUsage();
+    }
+    if (this->conjugate_graph_ != nullptr) {
+        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        memory_usage["conjugate_graph"] = this->conjugate_graph_->GetMemoryUsage();
     }
     return memory_usage;
 }

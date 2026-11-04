@@ -20,6 +20,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "hash_types.h"
+#include "impl/distance_provider_for_graph.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/inner_search_param.h"
 #include "impl/label_table/label_table.h"
@@ -43,6 +44,8 @@ public:
     explicit BasicSearcher(const IndexCommonParam& common_param,
                            MutexArrayPtr mutex_array = nullptr);
 
+    explicit BasicSearcher(Allocator* allocator, MutexArrayPtr mutex_array = nullptr);
+
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
@@ -53,6 +56,17 @@ public:
            QueryContext* ctx,
            DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
 
+    DistHeapPtr
+    SearchWithPresetComputer(const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& flatten,
+                             const VisitedListPtr& vl,
+                             const void* query,
+                             const InnerSearchParam& inner_search_param,
+                             const LabelTablePtr& label_table,
+                             QueryContext* ctx,
+                             DistanceRecordVector* rabitq_lower_bound_candidates,
+                             const ComputerInterfacePtr& preset_computer) const;
+
     virtual DistHeapPtr
     Search(const GraphInterfacePtr& graph,
            const FlattenInterfacePtr& flatten,
@@ -62,6 +76,14 @@ public:
            IteratorFilterContext* iter_ctx,
            QueryContext* ctx,
            DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
+    DistHeapPtr
+    Search(const GraphInterfacePtr& graph,
+           const DistanceProviderForGraph& distance_provider,
+           const VisitedListPtr& vl,
+           const InnerSearchParam& inner_search_param,
+           Filter* attr_filter,
+           QueryContext* ctx) const;
 
     virtual bool
     SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params);
@@ -92,7 +114,7 @@ private:
           Vector<InnerIdType>& to_be_visited_id,
           Vector<InnerIdType>& neighbors) const;
 
-    template <InnerSearchMode mode = KNN_SEARCH>
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,
@@ -101,9 +123,10 @@ private:
                 const InnerSearchParam& inner_search_param,
                 const LabelTablePtr& label_table,
                 QueryContext* ctx,
-                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                DistanceRecordVector* rabitq_lower_bound_candidates,
+                const ComputerInterfacePtr& preset_computer) const;
 
-    template <InnerSearchMode mode = KNN_SEARCH>
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
     search_impl(const GraphInterfacePtr& graph,
                 const FlattenInterfacePtr& flatten,
@@ -113,6 +136,15 @@ private:
                 IteratorFilterContext* iter_ctx,
                 QueryContext* ctx,
                 DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    search_impl(const GraphInterfacePtr& graph,
+                const DistanceProviderForGraph& distance_provider,
+                const VisitedListPtr& vl,
+                const InnerSearchParam& inner_search_param,
+                Filter* attr_filter,
+                QueryContext* ctx) const;
 
 private:
     Allocator* allocator_{nullptr};

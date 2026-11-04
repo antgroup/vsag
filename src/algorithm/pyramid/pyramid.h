@@ -15,10 +15,18 @@
 
 #pragma once
 
+#include <functional>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <shared_mutex>
 #include <utility>
 
 #include "algorithm/inner_index_interface.h"
+#include "algorithm/pyramid/pyramid_build_cache.h"
+#include "algorithm/pyramid/pyramid_fast_build.h"
+#include "algorithm/pyramid/pyramid_path_store.h"
+#include "datacell/flatten_optimized_build_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "impl/allocator/safe_allocator.h"
@@ -27,8 +35,10 @@
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "index_common_param.h"
 #include "index_feature_list.h"
 #include "io/memory_io/memory_io_parameter.h"
+#include "pyramid_index_node.h"
 #include "pyramid_zparameters.h"
 #include "quantization/fp32_quantizer_parameter.h"
 #include "query_context.h"
@@ -36,79 +46,8 @@
 
 namespace vsag {
 
-class IndexNode;
-using SearchFunc = std::function<DistHeapPtr(const IndexNode* node, const VisitedListPtr& vl)>;
-
 std::vector<std::string>
 split(const std::string& str, char delimiter);
-
-/**
- * @brief IndexNode: a tree node in the Pyramid hierarchy.
- *
- * Each IndexNode optionally holds a small graph (when the number of ids
- * exceeds index_min_size_) and a map of child nodes keyed by path segment.
- * The tree structure mirrors the hierarchical path labels (e.g. "a/b/c")
- * assigned to vectors at insertion time.
- */
-class IndexNode {
-public:
-    enum class Status { NO_INDEX = 0, GRAPH = 1, FLAT = 2 };
-
-public:
-    IndexNode(Allocator* allocator_, GraphInterfaceParamPtr graph_param, uint32_t index_min_size);
-
-    /// Build the internal graph using ODescent over the stored ids.
-    void
-    Build(ODescent& odescent);
-
-    /// Allocate the graph storage if not yet done.
-    void
-    Init();
-
-    /**
-     * @brief Recursively search this node and its matching children.
-     *
-     * @param search_func  functor that searches a single node's graph;
-     *                     typically bound to the caller's query and ef.
-     * @param vl           visited-list for dedup across the recursion.
-     * @param search_result  output heap accumulating candidates.
-     * @param ef_search    expansion factor passed to the graph search.
-     */
-    void
-    Search(const SearchFunc& search_func,
-           const VisitedListPtr& vl,
-           const DistHeapPtr& search_result,
-           uint64_t ef_search) const;
-
-    void
-    AddChild(const std::string& key);
-
-    IndexNode*
-    GetChild(const std::string& key, bool need_init = false);
-
-    void
-    Serialize(StreamWriter& writer) const;
-
-    void
-    Deserialize(StreamReader& reader);
-
-    friend class PyramidAnalyzer;
-
-public:
-    GraphInterfacePtr graph_{nullptr};  // graph over the ids in this node
-    InnerIdType entry_point_{0};        // entry point for graph search
-    uint32_t level_{0};                 // depth in the tree (root = 0)
-    mutable std::shared_mutex mutex_;   // per-node lock for concurrent add/search
-
-    Vector<InnerIdType> ids_;          // internal ids stored at this node
-    uint32_t index_min_size_{0};       // threshold to trigger graph build
-    Status status_{Status::NO_INDEX};  // current build state
-
-private:
-    UnorderedMap<std::string, std::unique_ptr<IndexNode>> children_;  // keyed by path segment
-    Allocator* allocator_{nullptr};
-    GraphInterfaceParamPtr graph_param_{nullptr};
-};
 
 /**
  * @brief Pyramid: hierarchical graph index for path-labeled vectors.
@@ -126,11 +65,46 @@ public:
 public:
     Pyramid(const PyramidParamPtr& pyramid_param, const IndexCommonParam& common_param)
         : InnerIndexInterface(pyramid_param, common_param),
+          common_param_(common_param),
           hierarchies_(common_param.allocator_.get()),
           odescent_param_(pyramid_param->odescent_param),
+          pipnn_param_(pyramid_param->pipnn_param),
           index_min_size_(pyramid_param->index_min_size),
           graph_type_(pyramid_param->graph_type),
-          support_duplicate_(pyramid_param->support_duplicate) {
+          adaptive_pruning_(pyramid_param->adaptive_pruning),
+          default_rabitq_one_bit_search_(pyramid_param->use_reorder and
+                                         pyramid_param->base_codes_param->name ==
+                                             RABITQ_SPLIT_DATA_CELL),
+          support_duplicate_(pyramid_param->support_duplicate),
+          persist_source_id_(pyramid_param->persist_source_id),
+          store_paths_(pyramid_param->store_paths),
+          cache_(std::make_unique<PyramidBuildCache>(common_param.allocator_.get())) {
+        // No-op unless adaptive pruning is enabled.
+        adaptive_pruning_.Validate(pyramid_param->alpha);
+        if (adaptive_pruning_.enabled) {
+            CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                           "adaptive_pruning currently supports only nsw graph construction");
+            CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                           "adaptive_pruning currently supports only L2 distance");
+            for (const auto& hierarchy : pyramid_param->hierarchies) {
+                adaptive_pruning_.Validate(hierarchy.alpha);
+            }
+        }
+        // Only admit input representations covered by Pyramid's public contract.
+        // The shared get_data helper also supports int8 for other index types.
+        if (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT &&
+            common_param.data_type_ != DataTypes::DATA_TYPE_FP16 &&
+            common_param.data_type_ != DataTypes::DATA_TYPE_BF16) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("Pyramid does not support this data type: {}",
+                                            static_cast<int>(common_param.data_type_)));
+        }
+        if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN and
+            (common_param.repr_ != RecordRepr::DENSE or
+             common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Pyramid PiPNN only supports dense float32 indexes");
+        }
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -141,36 +115,53 @@ public:
                     new_gp->max_degree_ = h_param.max_degree;
                     graph_param = new_gp;
                 }
-                auto root =
-                    std::make_unique<IndexNode>(allocator_, graph_param, h_param.index_min_size);
+                auto root = create_root_node(graph_param,
+                                             h_param.index_min_size,
+                                             h_param.root_graph_type,
+                                             pyramid_param->root_graph_storage_type);
                 auto h = std::make_unique<Hierarchy>(h_param.name, std::move(root), allocator_);
                 h->no_build_levels.assign(h_param.no_build_levels.begin(),
                                           h_param.no_build_levels.end());
                 h->ef_construction = h_param.ef_construction;
                 h->alpha = h_param.alpha;
+                if (store_paths_) {
+                    h->path_store = std::make_unique<PyramidPathStore>(allocator_);
+                }
                 hierarchies_.insert({h_param.name, std::move(h)});
             }
         } else {
-            auto root = std::make_unique<IndexNode>(
-                allocator_, pyramid_param->graph_param, index_min_size_);
+            auto root = create_root_node(pyramid_param->graph_param,
+                                         index_min_size_,
+                                         pyramid_param->root_graph_type,
+                                         pyramid_param->root_graph_storage_type);
             auto h = std::make_unique<Hierarchy>("", std::move(root), allocator_);
             h->no_build_levels.assign(pyramid_param->no_build_levels.begin(),
                                       pyramid_param->no_build_levels.end());
             h->ef_construction = pyramid_param->ef_construction;
             h->alpha = pyramid_param->alpha;
+            if (store_paths_) {
+                h->path_store = std::make_unique<PyramidPathStore>(allocator_);
+            }
             hierarchies_.insert({"", std::move(h)});
         }
         points_mutex_ = std::make_shared<PointsMutex>(max_capacity_, allocator_);
         searcher_ = std::make_unique<BasicSearcher>(common_param, points_mutex_);
-        if (use_reorder_) {
+        if (has_precise_reorder()) {
             precise_codes_ =
                 FlattenInterface::MakeInstance(pyramid_param->precise_codes_param, common_param);
-            reorder_ = std::make_shared<FlattenReorder>(precise_codes_, allocator_);
+        }
+        if (use_reorder_) {
+            reorder_ = std::make_shared<FlattenReorder>(get_reorder_codes(), allocator_);
+        }
+        if (pyramid_param->store_raw_vector) {
+            raw_vector_ =
+                FlattenInterface::MakeInstance(pyramid_param->raw_vector_param, common_param);
+            has_raw_vector_ = true;
         }
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
-        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
+        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param) {};
 
     ~Pyramid() override = default;
 
@@ -181,15 +172,33 @@ public:
     Build(const DatasetPtr& base) override;
 
     float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
+    float
     CalcDistanceById(const float* query,
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true) const override;
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
+    DatasetPtr
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override;
 
     void
     Deserialize(StreamReader& reader) override;
@@ -218,11 +227,23 @@ public:
     int64_t
     GetNumberRemoved() const override;
 
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
+
+    [[nodiscard]] std::unordered_map<std::string, uint64_t>
+    GetMemoryUsageDetail() const override;
+
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode) override;
 
     std::string
     GetStats() const override;
+
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     void
     InitFeatures() override;
@@ -240,6 +261,9 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -250,11 +274,27 @@ public:
     Train(const vsag::DatasetPtr& base) override;
 
     void
+    ExportCache(std::ostream& out_stream) const override;
+
+    void
+    ImportCache(std::istream& in_stream) override;
+
+    void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
 
     friend class PyramidAnalyzer;
+    friend class PyramidDuplicateTestPeer;
+    friend class PyramidOptimizedBuildSession;
 
 private:
+    void
+    validate_input_vectors(const DatasetPtr& base) const;
+
+    float
+    calc_native_distance_by_id(const void* query,
+                               int64_t id,
+                               bool calculate_precise_distance) const;
+
     MetadataPtr
     collect_streaming_header() const override;
 
@@ -278,6 +318,41 @@ private:
     void
     deserialize_hierarchies(StreamReader& reader, const JsonType& basic_info);
 
+    void
+    serialize_paths(StreamWriter& writer) const;
+
+    void
+    deserialize_paths(StreamReader& reader, uint64_t max_count);
+
+    // RAII guard that returns the VisitedList to the pool on scope exit,
+    // ensuring no leak if the search throws.
+    class VisitedListGuard {
+    public:
+        explicit VisitedListGuard(VisitedListPool* pool) : pool_(pool), vl_(pool->TakeOne()) {
+        }
+        ~VisitedListGuard() {
+            if (vl_ != nullptr) {
+                pool_->ReturnOne(vl_);
+            }
+        }
+        VisitedListGuard(const VisitedListGuard&) = delete;
+        VisitedListGuard&
+        operator=(const VisitedListGuard&) = delete;
+        [[nodiscard]] const VisitedListPtr&
+        get() const {
+            return vl_;
+        }
+
+    private:
+        VisitedListPool* pool_;
+        VisitedListPtr vl_;
+    };
+    void
+    serialize_source_id_table(StreamWriter& writer) const;
+
+    void
+    deserialize_source_id_table(StreamReader& reader);
+
     /// One named hierarchy with its own root IndexNode and build parameters.
     struct Hierarchy {
         std::string name;                          // hierarchy name (empty = default)
@@ -285,23 +360,56 @@ private:
         Vector<int32_t> no_build_levels;           // depths where graph build is skipped
         uint64_t ef_construction{400};             // expansion factor during graph build
         float alpha{1.2F};  // Relative Neighborhood Graph pruning coefficient
+        std::unique_ptr<PyramidPathStore> path_store{nullptr};
 
         Hierarchy(const std::string& n, std::unique_ptr<IndexNode> r, Allocator* alloc)
             : name(n), root(std::move(r)), no_build_levels(alloc) {
         }
     };
 
+    struct AddBatch {
+        explicit AddBatch(Allocator* allocator) : input_indices(allocator) {
+        }
+
+        int64_t first_inner_id{0};
+        Vector<int64_t> input_indices;
+        std::vector<int64_t> failed_ids;
+        bool storage_preallocated{false};
+    };
+
+    AddBatch
+    prepare_add_batch(const DatasetPtr& base);
+
+    void
+    encode_add_batch(const DatasetPtr& base, const AddBatch& batch);
+
+    void
+    insert_add_batch(const DatasetPtr& base, const AddBatch& batch);
+
     /// Pre-create the IndexNode tree structure from the path labels.
     static void
-    populate_path_tree(Hierarchy& h, const std::string* paths, int64_t count);
+    populate_path_tree(Hierarchy& h,
+                       const DatasetPtr& dataset,
+                       const std::string& hierarchy_name,
+                       int64_t count,
+                       const Vector<int64_t>* input_indices = nullptr);
+
+    /// Resolve path strings to unique tree nodes, preserving first-seen order.
+    static std::vector<IndexNode*>
+    collect_path_nodes(Hierarchy& h, const std::string* paths, uint64_t path_count);
+
+    void
+    populate_hierarchy_trees(const DatasetPtr& base,
+                             const Vector<int64_t>* input_indices = nullptr);
 
     /// Insert vectors and their path labels into the hierarchy tree.
     void
     add_to_hierarchy(Hierarchy& h,
-                     const float* data_vectors,
-                     const std::string* paths,
-                     const Vector<int64_t>& data_biases,
-                     int64_t local_cur_element_count);
+                     const void* data_vectors,
+                     const DatasetPtr& dataset,
+                     const std::string& hierarchy_name,
+                     const Vector<int64_t>& input_indices,
+                     int64_t first_inner_id);
 
     /// Search a single hierarchy along a path prefix, accumulating candidates.
     void
@@ -309,8 +417,9 @@ private:
                      const SearchFunc& search_func,
                      const VisitedListPtr& vl,
                      DistHeapPtr& search_result,
-                     const std::string& path,
-                     const InnerSearchParam& search_param) const;
+                     const std::vector<std::vector<std::string>>& parsed_paths,
+                     const InnerSearchParam& search_param,
+                     ReasoningContext* reasoning_ctx) const;
 
     /// Grow internal storage to accommodate new_max_capacity vectors.
     void
@@ -321,7 +430,17 @@ private:
     search_impl(const DatasetPtr& query,
                 const SearchFunc& search_func,
                 InnerSearchParam& search_param,
-                const std::string& hierarchy_name = "") const;
+                int64_t final_topk,
+                std::optional<int64_t> reorder_candidate_limit,
+                QueryContext& ctx,
+                const std::string& hierarchy_name,
+                const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
+    InnerSearchParam
+    create_knn_search_param(const PyramidSearchParameters& parsed_param,
+                            int64_t k,
+                            const FilterPtr& filter,
+                            const std::optional<float>& threshold = std::nullopt) const;
 
     /// Probabilistic check: should total_count trigger a new entry-point update?
     bool
@@ -331,15 +450,156 @@ private:
         return static_cast<double>(total_count) * rand_value < 1.0;
     }
 
-    /// Build all hierarchy graphs via ODescent in batch mode.
+    /// Offset a vector block produced by `get_data` by `element_index` elements.
+    ///
+    /// The stride follows the dataset representation, not a fixed float32 width:
+    /// fp16 and bf16 inputs are two bytes per dimension. `block` must come from
+    /// `get_data(base, 0)` for the same dataset, and this helper is the only
+    /// legal way to advance it.
+    [[nodiscard]] const void*
+    element_ptr(const void* block, int64_t element_index) const {
+        if (block == nullptr) {
+            return nullptr;
+        }
+        CHECK_ARGUMENT(element_index >= 0, "element index must be non-negative");
+        CHECK_ARGUMENT(dim_ >= 0, "vector dimension must be non-negative");
+        const auto element_size = data_type_element_size();
+        const auto max_offset = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+        CHECK_ARGUMENT(static_cast<uint64_t>(dim_) <= max_offset / element_size,
+                       "vector byte stride exceeds int64_t range");
+        const auto stride = static_cast<uint64_t>(dim_) * element_size;
+        const bool offset_in_range =
+            stride == 0 || static_cast<uint64_t>(element_index) <= max_offset / stride;
+        CHECK_ARGUMENT(offset_in_range, "vector byte offset exceeds int64_t range");
+        return static_cast<const uint8_t*>(block) + static_cast<uint64_t>(element_index) * stride;
+    }
+
+    /// Byte width of one dimension for the configured dataset representation.
+    [[nodiscard]] uint64_t
+    data_type_element_size() const {
+        switch (data_type_) {
+            case DataTypes::DATA_TYPE_FLOAT:
+                return sizeof(float);
+            case DataTypes::DATA_TYPE_INT8:
+                return sizeof(int8_t);
+            case DataTypes::DATA_TYPE_FP16:
+            case DataTypes::DATA_TYPE_BF16:
+                return sizeof(uint16_t);
+            default:
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Pyramid does not support this data type");
+        }
+    }
+
+    /// Build all hierarchy graphs in batch mode.
     std::vector<int64_t>
-    build_by_odescent(const DatasetPtr& base);
+    build_by_batch_graph(const DatasetPtr& base);
+
+    static GraphInterfaceParamPtr
+    make_route_graph_param(const GraphInterfaceParamPtr& bottom_graph_param);
+
+    static GraphInterfaceParamPtr
+    make_root_graph_param(const GraphInterfaceParamPtr& child_graph_param,
+                          GraphStorageTypes storage_type);
+
+    std::unique_ptr<IndexNode>
+    create_root_node(const GraphInterfaceParamPtr& child_graph_param,
+                     uint32_t index_min_size,
+                     const std::string& root_graph_type,
+                     GraphStorageTypes root_graph_storage_type);
+
+    int
+    draw_route_level(uint64_t max_degree);
+
+    Vector<int>
+    sample_route_levels(const IndexNode& node, uint64_t count);
+
+    void
+    insert_route_graph_point(const Hierarchy& hierarchy,
+                             const GraphInterfacePtr& graph,
+                             const FlattenInterfacePtr& codes,
+                             InnerIdType& entry_point,
+                             InnerIdType inner_id,
+                             const void* vector);
+
+    DistHeapPtr
+    search_graph_for_add(const GraphInterfacePtr& graph,
+                         const FlattenInterfacePtr& codes,
+                         InnerIdType inner_id,
+                         const void* vector,
+                         InnerSearchParam& search_param);
+
+    void
+    connect_cached_graph_point(InnerIdType inner_id,
+                               const void* vector,
+                               const DistHeapPtr& candidates,
+                               const GraphInterfacePtr& graph,
+                               const FlattenInterfacePtr& codes,
+                               float alpha);
+
+    InnerIdType
+    add_routed_point(const Hierarchy& hierarchy,
+                     IndexNode& node,
+                     InnerIdType inner_id,
+                     const void* vector,
+                     uint64_t ef_construction,
+                     bool use_self_as_entry,
+                     int sampled_level);
+
+    // Build-only barrier: restore directed reachability without changing alias ownership.
+    void
+    repair_duplicate_connectivity(IndexNode& node,
+                                  const Vector<InnerIdType>* cached_representatives = nullptr);
+
+    void
+    add_graph_point(const Hierarchy& hierarchy,
+                    IndexNode& node,
+                    InnerIdType inner_id,
+                    const void* vector,
+                    uint64_t ef_construction,
+                    bool use_self_as_entry,
+                    int sampled_route_level);
+
+    struct BottomGraphBuildOperations;
+
+    InnerIdType
+    add_bottom_graph_point(const Hierarchy& hierarchy,
+                           IndexNode& node,
+                           InnerIdType inner_id,
+                           const void* vector,
+                           uint64_t ef_construction,
+                           bool use_self_as_entry);
+
+    void
+    run_parallel_insertions(const IndexNode& node,
+                            uint64_t count,
+                            const std::function<void(uint64_t index, int sampled_level)>& task);
+
+    /// Resolve the bottom-graph entry for a node. The caller holds node.mutex_.
+    InnerIdType
+    resolve_entry_point(const IndexNode& node,
+                        const VisitedListPtr& vl,
+                        const void* query,
+                        const FlattenInterfacePtr& codes,
+                        const ComputerInterfacePtr& computer,
+                        const InnerSearchParam& search_param,
+                        QueryContext& ctx) const;
 
     /// Recursively insert a single vector into the hierarchy tree.
     void
-    add_one_point(const Hierarchy& h, IndexNode* node, InnerIdType inner_id, const float* vector);
+    add_one_point(const Hierarchy& h,
+                  IndexNode* node,
+                  InnerIdType inner_id,
+                  const void* vector,
+                  uint64_t ef_construction = 0,
+                  bool use_self_as_entry = false,
+                  int sampled_route_level = std::numeric_limits<int>::min());
 
-    /// Split a path string into its hierarchical segments.
+    /// Split one atomic path string into its hierarchical segments.
+    static std::vector<std::string>
+    parse_atomic_path(const std::string& path);
+
+    /// Split a legacy path string into independent paths and hierarchical segments.
     static std::vector<std::vector<std::string>>
     parse_path(const std::string& path);
 
@@ -351,13 +611,57 @@ private:
                 const DatasetPtr& query,
                 const FlattenInterfacePtr& codes,
                 QueryContext& ctx,
-                uint64_t subindex_ef_search) const;
+                uint64_t subindex_ef_search,
+                DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+
+    [[nodiscard]] bool
+    has_precise_reorder() const {
+        return use_reorder_ and not base_codes_->SupportSplitCodeStorage();
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    get_reorder_codes() const {
+        return base_codes_->SupportSplitCodeStorage() ? base_codes_ : precise_codes_;
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    construction_codes() const {
+        return has_precise_reorder() ? precise_codes_ : base_codes_;
+    }
+
+    [[nodiscard]] FlattenInterfacePtr
+    decodable_codes() const {
+        return raw_vector_ != nullptr ? raw_vector_
+                                      : (has_precise_reorder() ? precise_codes_ : base_codes_);
+    }
+
+    bool
+    has_loaded_cache() const {
+        return this->cache_ != nullptr && not this->cache_->Empty();
+    }
+
+    void
+    fulfill_cache(PyramidBuildCache& cache_snapshot) const;
+
+    std::vector<int64_t>
+    build_with_cache(const DatasetPtr& base);
+
+    static void
+    collect_graph_nodes(IndexNode* node,
+                        const std::string& node_path,
+                        std::vector<std::pair<std::string, IndexNode*>>& out);
+
+    void
+    init_index_nodes_with_ids(IndexNode* node) const;
 
 private:
+    IndexCommonParam common_param_;
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
     UnorderedMap<std::string, std::unique_ptr<Hierarchy>> hierarchies_;  // named hierarchies
-    FlattenInterfacePtr base_codes_{nullptr};          // coarse codes for graph build/search
-    FlattenInterfacePtr precise_codes_{nullptr};       // precise codes for reorder (if enabled)
+    FlattenOptimizedBuildInterfacePtr optimized_build_codes_{nullptr};
+    FlattenInterfacePtr base_codes_{nullptr};     // coarse codes for online graph traversal
+    FlattenInterfacePtr precise_codes_{nullptr};  // default construction/reorder codes when present
+    FlattenInterfacePtr raw_vector_{nullptr};     // original vectors for decode-only paths
     std::unique_ptr<VisitedListPool> pool_ = nullptr;  // pool of visited-lists for search
 
     MutexArrayPtr points_mutex_{nullptr};                // per-point locks for concurrent access
@@ -366,18 +670,32 @@ private:
     int64_t cur_element_count_{0};                       // number of vectors currently stored
     std::atomic<int64_t> delete_count_{0};               // number of deleted vectors
     bool support_duplicate_{false};                      // whether to allow duplicate ids
+    mutable std::shared_mutex resize_mutex_;             // guards flatten storage resize/write/read
+    mutable std::mutex cur_element_count_mutex_;         // guards cur_element_count_ updates
+    mutable std::once_flag parallel_without_pool_warned_;  // one-shot latch for the pool warning
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};         // graph algorithm type
+    PiPNNGraphBuilderParameter pipnn_param_{};             // PiPNN build parameters
+    AdaptivePruningParameter adaptive_pruning_;            // bottom-layer adaptive NSW policy
+    bool default_rabitq_one_bit_search_{false};            // default split lower-bound search
 
-    mutable std::shared_mutex resize_mutex_;        // guards resize operations
-    std::mutex cur_element_count_mutex_;            // guards cur_element_count_ updates
-    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
-
-    std::mutex entry_point_mutex_;  // guards entry-point selection
+    std::mutex random_generator_mutex_;
     std::default_random_engine level_generator_{
         2021};                              // random number generator for level promotion
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper (if use_reorder_)
 
     uint32_t index_min_size_{0};  // min node size before graph is built
-    bool immutable_{false};       // true after SetImmutable()
+
+    bool persist_source_id_{false};  // whether to persist source_id in serialization
+    bool store_paths_{false};        // whether to retain paths for ID-based retrieval
+
+    std::unique_ptr<PyramidBuildCache> cache_{nullptr};  // per-graph caches for warm-start build
+
+    float build_cache_hit_rate_{-1.0F};           // cache hit rate from last cache-based build
+    uint64_t build_cache_hit_nodes_{0};           // number of nodes with cache hit
+    uint64_t build_cache_missed_nodes_{0};        // number of nodes without cache hit
+    uint64_t build_cache_hit_memberships_{0};     // cache-hit hierarchy graph memberships
+    uint64_t build_cache_missed_memberships_{0};  // cache-miss hierarchy graph memberships
+    uint64_t build_cache_restored_edges_{0};      // outgoing edges loaded before refinement
 };
 
 }  // namespace vsag

@@ -26,11 +26,8 @@
 #include "algorithm/pyramid/pyramid_zparameters.h"
 #include "algorithm/simq/simq.h"
 #include "algorithm/sindi/sindi.h"
+#include "algorithm/sindi_v2/sindi_v2.h"
 #include "common.h"
-#include "index/diskann.h"
-#include "index/diskann_zparameters.h"
-#include "index/hnsw.h"
-#include "index/hnsw_zparameters.h"
 #include "index/index_impl.h"
 #include "index_registry.h"
 #include "inner_string_params.h"
@@ -50,48 +47,10 @@ get_index_param_or_empty(const JsonType& parsed_params) {
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
-create_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    CHECK_ARGUMENT(parsed_params.Contains(INDEX_HNSW),
-                   fmt::format("parameters must contain {}", INDEX_HNSW));
-    auto hnsw_param_obj = parsed_params[INDEX_HNSW];
-    auto hnsw_params = HnswParameters::FromJson(hnsw_param_obj, index_common_params);
-    logger::debug("created a hnsw index");
-    auto index = std::make_shared<HNSW>(hnsw_params, index_common_params);
-    if (auto result = index->InitMemorySpace(); not result.has_value()) {
-        return tl::unexpected(result.error());
-    }
-    return index;
-}
-
-tl::expected<std::shared_ptr<Index>, Error>
-create_fresh_hnsw_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    CHECK_ARGUMENT(parsed_params.Contains(INDEX_FRESH_HNSW),
-                   fmt::format("parameters must contain {}", INDEX_FRESH_HNSW));
-    auto hnsw_param_obj = parsed_params[INDEX_FRESH_HNSW];
-    auto hnsw_params = FreshHnswParameters::FromJson(hnsw_param_obj, index_common_params);
-    logger::debug("created a fresh-hnsw index");
-    auto index = std::make_shared<HNSW>(hnsw_params, index_common_params);
-    if (auto result = index->InitMemorySpace(); not result.has_value()) {
-        return tl::unexpected(result.error());
-    }
-    return index;
-}
-
-tl::expected<std::shared_ptr<Index>, Error>
 create_brute_force_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     logger::debug("created a brute_force index");
     return {std::make_shared<IndexImpl<BruteForce>>(get_index_param_or_empty(parsed_params),
                                                     index_common_params)};
-}
-
-tl::expected<std::shared_ptr<Index>, Error>
-create_diskann_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
-    CHECK_ARGUMENT(parsed_params.Contains(INDEX_DISKANN),
-                   fmt::format("parameters must contain {}", INDEX_DISKANN));
-    auto diskann_param_obj = parsed_params[INDEX_DISKANN];
-    auto diskann_params = DiskannParameters::FromJson(diskann_param_obj, index_common_params);
-    logger::debug("created a diskann index");
-    return std::make_shared<DiskANN>(diskann_params, index_common_params);
 }
 
 template <typename T>
@@ -140,6 +99,12 @@ create_sindi_index(JsonType& parsed_params, const IndexCommonParam& index_common
 }
 
 tl::expected<std::shared_ptr<Index>, Error>
+create_sindi_v2_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
+    return create_index_impl_with_param_log<SINDIV2>(
+        "created a sindi_v2 index", parsed_params, index_common_params);
+}
+
+tl::expected<std::shared_ptr<Index>, Error>
 create_warp_index(JsonType& parsed_params, const IndexCommonParam& index_common_params) {
     // WARP is now implemented as BruteForce with multi-vector data cell
     logger::debug("created a warp index (via BruteForce multi-vector mode)");
@@ -161,15 +126,13 @@ void
 register_all_index_creators() {
     static std::once_flag registration_once;
     std::call_once(registration_once, []() {
-        register_index_creator(INDEX_HNSW, &create_hnsw_index);
-        register_index_creator(INDEX_FRESH_HNSW, &create_fresh_hnsw_index);
         register_index_creator(INDEX_BRUTE_FORCE, &create_brute_force_index);
-        register_index_creator(INDEX_DISKANN, &create_diskann_index);
         register_index_creator(INDEX_HGRAPH, &create_hgraph_index);
         register_index_creator(INDEX_LAZY_HGRAPH, &create_lazy_hgraph_index);
         register_index_creator(INDEX_IVF, &create_ivf_index);
         register_index_creator(INDEX_PYRAMID, &create_pyramid_index);
         register_index_creator(INDEX_SINDI, &create_sindi_index);
+        register_index_creator(INDEX_SINDI_V2, &create_sindi_v2_index);
         register_index_creator(INDEX_WARP, &create_warp_index);
         register_index_creator(INDEX_SIMQ, &create_simq_index);
     });

@@ -13,14 +13,15 @@
 # limitations under the License.
 
 
-add_subdirectory (hnswlib)
 add_subdirectory (sindi)
+add_subdirectory (sindi_v2)
 add_subdirectory (hgraph)
 add_subdirectory (lazy_hgraph)
 add_subdirectory (bruteforce)
 add_subdirectory (ivf)
 add_subdirectory (pyramid)
 add_subdirectory (simq)
+add_subdirectory (mci)
 
 file (GLOB ALGORITHM_SRCS "*.cpp")
 list (FILTER ALGORITHM_SRCS EXCLUDE REGEX "_test.cpp")
@@ -32,18 +33,20 @@ maybe_add_dependencies (algorithm antlr4)
 
 set (ALGORITHM_LIBS
         algorithm
-        hnswlib
         sindi
+        sindi_v2
         hgraph
         lazy_hgraph
         bruteforce
         ivf
         pyramid
         simq
+        mci
         PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE ALGORITHM_TESTS "*_test.cpp")
+    list (APPEND ALGORITHM_TESTS "${PROJECT_SOURCE_DIR}/test/hgraph_fgim_test.cpp")
     add_library (algorithm_test STATIC ${ALGORITHM_TESTS})
     target_link_libraries (algorithm_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
     vsag_link_openmp_private (algorithm_test)

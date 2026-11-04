@@ -19,6 +19,7 @@
 #include "vsag/allocator.h"
 #include "vsag/dataset.h"
 #include "vsag/index.h"
+#include "vsag/readerset.h"
 #include "vsag/resource.h"
 #include "vsag/thread_pool.h"
 
@@ -58,7 +59,7 @@ public:
      * It returns a result which may either contain a shared pointer to the created `Index`
      * or an `Error` object indicating failure conditions.
      *
-     * @param name The name assigned to the index type, like "hnsw", "diskann", "hgraph" ...
+     * @param name The name assigned to the index type, like "hgraph", "ivf", or "sindi".
      * @param parameters A JSON-like string containing various parameters required for index creation.
      * @return tl::expected<std::shared_ptr<Index>, Error> An expected value that contains either
      * a shared pointer to the successfully created `Index` or an `Error` detailing
@@ -67,6 +68,11 @@ public:
      */
     [[nodiscard]] tl::expected<std::shared_ptr<Index>, Error>
     CreateIndex(const std::string& name, const std::string& parameters);
+
+    [[nodiscard]] tl::expected<std::shared_ptr<Index>, Error>
+    CreateIndex(const std::string& name,
+                const std::string& parameters,
+                const UserDefinedIOSet& user_defined_ios);
 
     /**
      * @brief Creates a memory allocator instance managed by the engine.

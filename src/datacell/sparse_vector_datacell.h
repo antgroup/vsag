@@ -16,10 +16,15 @@
 #pragma once
 
 #include <limits>
+#include <type_traits>
 
+#include "flatten_datacell.h"
 #include "flatten_interface.h"
-#include "io/common/basic_io.h"
+#include "inner_string_params.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "io/mmap_io/mmap_io.h"
+#include "layout/variable_record_layout.h"
+#include "quantization/sparse_quantization/sparse_quantizer.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
@@ -27,6 +32,8 @@ namespace vsag {
 template <typename QuantTmpl, typename IOTmpl>
 class SparseVectorDataCell : public FlattenInterface {
 public:
+    using ReadLease = typename IOTmpl::Lease;
+
     SparseVectorDataCell() = default;
 
     SparseVectorDataCell(const QuantizerParamPtr& quantization_param,
@@ -40,7 +47,11 @@ public:
           InnerIdType id_count,
           QueryContext* ctx = nullptr) override {
         auto comp = std::static_pointer_cast<Computer<QuantTmpl>>(computer);
-        this->query(result_dists, comp, idx, id_count);
+        this->query(result_dists, comp, idx, id_count, ctx);
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
+            id_count > 0) {
+            ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
+        }
     }
 
     ComputerInterfacePtr
@@ -76,19 +87,29 @@ public:
 
     void
     Resize(InnerIdType new_capacity) override {
-        if (new_capacity <= this->max_capacity_) {
+        std::lock_guard lock(mutex_);
+        const InnerIdType effective_capacity =
+            std::max(new_capacity, total_count_.load(std::memory_order_relaxed));
+        if (effective_capacity <= this->max_capacity_) {
             return;
         }
-        std::scoped_lock lock(mutex_, current_offset_mutex_);
-        uint64_t io_size =
-            static_cast<uint64_t>(new_capacity - total_count_) * max_code_size_ + current_offset_;
-        this->io_->Resize(io_size);
-        this->offset_io_->Resize(static_cast<uint64_t>(new_capacity) * sizeof(DocLocation));
-        this->max_capacity_ = new_capacity;
+        const uint64_t additional_count = static_cast<uint64_t>(
+            effective_capacity - total_count_.load(std::memory_order_relaxed));
+        const uint64_t current_size = layout_.GetNextOffset();
+        if (max_code_size_ != 0 &&
+            additional_count >
+                (std::numeric_limits<uint64_t>::max() - current_size) / max_code_size_) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "SparseVectorDataCell resize payload size overflow");
+        }
+        const uint64_t io_size = additional_count * max_code_size_ + current_size;
+        layout_.ReservePayload(io_size);
+        layout_.ResizeLocations(effective_capacity);
+        this->max_capacity_ = effective_capacity;
     }
 
     void
-    Prefetch(InnerIdType id) override{};
+    Prefetch(InnerIdType id) override {};
 
     void
     ExportModel(const FlattenInterfacePtr& other) const override {
@@ -97,7 +118,8 @@ public:
         this->quantizer_->Serialize(writer);
         ss.seekg(0, std::ios::beg);
         IOStreamReader reader(ss);
-        auto ptr = std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, IOTmpl>>(other);
+        auto ptr =
+            std::dynamic_pointer_cast<FlattenDataCell<QuantTmpl, FixedLayout<IOTmpl>>>(other);
         if (ptr == nullptr) {
             throw VsagException(ErrorType::INTERNAL_ERROR,
                                 "Export model's sparse flatten datacell failed");
@@ -132,7 +154,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     inline void
     SetQuantizer(std::shared_ptr<Quantizer<QuantTmpl>> quantizer) {
@@ -140,19 +162,31 @@ public:
     }
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
-        this->io_ = io;
+    SetIO(std::shared_ptr<IOTmpl> io) {
+        layout_.Payload().SetIO(std::move(io));
+    }
+
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        layout_.Payload().InitIO(io_param);
     }
 
     uint64_t
     GetMemoryUsage() const override;
 
 private:
+    enum class QueryIOStrategy : uint8_t {
+        DIRECT_READ,
+        SORTED_DIRECT_READ,
+        MULTI_READ,
+    };
+
     inline void
     query(float* result_dists,
           const std::shared_ptr<Computer<QuantTmpl>>& computer,
           const InnerIdType* idx,
-          InnerIdType id_count);
+          InnerIdType id_count,
+          QueryContext* ctx);
 
     ComputerInterfacePtr
     factory_computer(const float* query) {
@@ -161,14 +195,22 @@ private:
         return computer;
     }
 
+    const uint8_t*
+    get_codes_by_id_no_lock(InnerIdType id, bool& need_release) const;
+
+    [[nodiscard]] ReadLease
+    acquire_codes_by_id_no_lock(InnerIdType id) const;
+
+    [[nodiscard]] const QuantTmpl&
+    typed_quantizer() const {
+        return static_cast<const QuantTmpl&>(*quantizer_);
+    }
+
 private:
-    // Packed so each entry is exactly 12 bytes on disk and in the offset_io_
-    // buffer. The unpacked layout would round sizeof up to 16 due to the
-    // uint64 alignment requirement, wasting 33% of the offset table.
-    struct __attribute__((packed)) DocLocation {
-        uint64_t offset{0};
-        uint32_t size{0};
-    };
+    // Packed so each entry is exactly 12 bytes on disk and in the layout location table. The
+    // unpacked layout would round sizeof up to 16 due to the uint64 alignment requirement,
+    // wasting 33% of the location table.
+    using DocLocation = OffsetAndLengthLocationPolicy::Entry;
     static_assert(sizeof(DocLocation) == 12, "DocLocation must be 12 bytes on disk");
 
     // Legacy on-disk layout: kept for backward-compatible deserialization of indexes
@@ -190,15 +232,14 @@ private:
     // overflowed, since the modulo-2^32 value remains 4-byte aligned.
     static constexpr uint32_t SERIALIZE_FORMAT_SENTINEL = std::numeric_limits<uint32_t>::max();
     static constexpr uint32_t SERIALIZE_FORMAT_VERSION_V2 = 2;
+    static constexpr uint32_t SERIALIZE_FORMAT_VERSION_V3 = 3;
 
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    QueryIOStrategy query_io_strategy_{QueryIOStrategy::MULTI_READ};
 
     Allocator* const allocator_{nullptr};
-    std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
-    uint64_t current_offset_{0};
+    VariableRecordLayout<OffsetAndLengthLocationPolicy, MemoryBlockIO, IOTmpl> layout_{};
     uint64_t max_code_size_{0};
-    std::mutex current_offset_mutex_;
 };
 
 }  // namespace vsag

@@ -1,34 +1,80 @@
-name: Build and Publish Release
+name: Release
 
 on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'The branch, tag, or commit SHA to release from'
+        description: The branch, tag, or commit SHA to release from
         required: true
-        default: 'main'
+        default: main
         type: string
       tag_name:
-        description: 'The tag for the new release (e.g., v1.0.0)'
-        required: true
+        description: The tag for the new release (e.g., v1.0.0)
+        required: false
         type: string
       prerelease:
-        description: 'Mark this release as a prerelease'
+        description: Mark this release as a prerelease
         required: false
         default: false
         type: boolean
 
+      operation:
+        description: Release operation
+        type: choice
+        default: release
+        options:
+          - release
+          - wheels
+          - index
+      python-version:
+        description: Python version to build (e.g., 3.10). If empty, builds all.
+        required: false
+        type: string
+      arch:
+        description: Architecture to build (x86_64 or aarch64). If empty, builds all.
+        required: false
+        type: string
+      version:
+        description: 'Enter the version tag number, eg: v0.14.2'
+        required: false
+        type: string
+        default: v0.14.0
+  release:
+    types:
+      - published
+  push:
+    tags:
+      - v*.*.*
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ inputs.tag_name }}
+  group: release-${{ inputs.operation || github.event_name }}-${{ inputs.tag_name || github.ref }}
   cancel-in-progress: false
 
 jobs:
+  resolve-source:
+    name: Pin release source
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          persist-credentials: false
+      - name: Resolve immutable release commit
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'release' }}
   build-and-release:
     name: Build, Test, and Publish Release
-    runs-on: ubuntu-22.04
+    needs:
+      - resolve-source
+      - toolchain-installed-client
+      - toolchain-source-baseline
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Free Disk Space (Ubuntu)
@@ -45,7 +91,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: ${{ needs.resolve-source.outputs.sha }}
           fetch-depth: 0
 
       - name: Validate release target
@@ -139,3 +185,406 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.operation == 'release' }}
+  toolchain-installed-client:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc13
+          - clang20
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-installed-client
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ needs.resolve-source.outputs.sha || github.sha }}
+    needs:
+      - resolve-source
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.operation == 'release') && (true) }}
+    permissions:
+      contents: read
+  toolchain-source-baseline:
+    runs-on: ubuntu-24.04
+    container: ubuntu:22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler:
+          - gcc9
+          - clang13
+        abi: [0, 1]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/toolchain-compatibility-source-baseline
+        id: execute
+        with:
+          matrix-compiler: ${{ matrix.compiler }}
+          matrix-abi: ${{ matrix.abi }}
+          target-ref: ${{ needs.resolve-source.outputs.sha || github.sha }}
+    needs:
+      - resolve-source
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.operation == 'release') && (true) }}
+    permissions:
+      contents: read
+  wheels-setup-matrix:
+    name: Determine Build Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      modern_matrix: ${{ steps.set-matrix.outputs.modern_matrix }}
+      legacy_matrix: ${{ steps.set-matrix.outputs.legacy_matrix }}
+      py36_matrix: ${{ steps.set-matrix.outputs.py36_matrix }}
+    steps:
+      - id: set-matrix
+        name: Generate Matrix Configuration
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
+          py_ver="${{ github.event.inputs.python-version }}"
+          arch="${{ github.event.inputs.arch }}"
+
+          # --- Define Full Matrix for Modern Python ---
+          # --- Modern: Python 3.8-3.14 (cibuildwheel 3.x) ---
+          full_modern_matrix='[
+            {"python-version": "3.14", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp314-*"},
+            {"python-version": "3.13", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp313-*"},
+            {"python-version": "3.12", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp312-*"},
+            {"python-version": "3.11", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp311-*"},
+            {"python-version": "3.10", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp310-*"},
+            {"python-version": "3.9", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp39-*"},
+            {"python-version": "3.8", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp38-*"},
+            {"python-version": "3.14", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp314-*"},
+            {"python-version": "3.13", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp313-*"},
+            {"python-version": "3.12", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp312-*"},
+            {"python-version": "3.11", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp311-*"},
+            {"python-version": "3.10", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp310-*"},
+            {"python-version": "3.9", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp39-*"},
+            {"python-version": "3.8", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp38-*"}
+          ]'
+
+          # --- Legacy: Python 3.7 (cibuildwheel 2.x, since 3.x dropped <3.8) ---
+          full_legacy_matrix='[
+            {"python-version": "3.7", "arch": "x86_64", "runner": "ubuntu-latest", "cibw-build-id": "cp37-*"},
+            {"python-version": "3.7", "arch": "aarch64", "runner": "ubuntu-24.04-arm", "cibw-build-id": "cp37-*"}
+          ]'
+
+          # --- Python 3.6 (cibuildwheel 2.11.x) ---
+          full_py36_matrix='[
+            {"arch": "x86_64", "runner": "ubuntu-latest"},
+            {"arch": "aarch64", "runner": "ubuntu-24.04-arm"}
+          ]'
+
+          # --- Filter logic ---
+          filter_matrix() {
+            local matrix_json="$1" py="$2" ar="$3"
+            local expr="."
+            if [[ -n "$py" ]]; then expr+=" | map(select(.\"python-version\" == \"$py\"))"; fi
+            if [[ -n "$ar" ]]; then expr+=" | map(select(.arch == \"$ar\"))"; fi
+            echo "$matrix_json" | jq -c "$expr"
+          }
+
+          if [[ "${{ github.event_name }}" != "workflow_dispatch" || ( -z "$py_ver" && -z "$arch" ) ]]; then
+            echo "Running full matrix for all versions."
+            echo "modern_matrix=$(echo $full_modern_matrix | jq -c .)" >> $GITHUB_OUTPUT
+            echo "legacy_matrix=$(echo $full_legacy_matrix | jq -c .)" >> $GITHUB_OUTPUT
+            echo "py36_matrix=$(echo $full_py36_matrix | jq -c .)" >> $GITHUB_OUTPUT
+          else
+            echo "Filtering matrix based on inputs: python-version='${py_ver}', arch='${arch}'"
+
+            # Modern matrix (3.8+)
+            if [[ -z "$py_ver" || ( "$py_ver" != "3.6" && "$py_ver" != "3.7" ) ]]; then
+              echo "modern_matrix=$(filter_matrix "$full_modern_matrix" "$py_ver" "$arch")" >> $GITHUB_OUTPUT
+            else
+              echo "modern_matrix=[]" >> $GITHUB_OUTPUT
+            fi
+
+            # Legacy matrix (3.7)
+            if [[ -z "$py_ver" || "$py_ver" == "3.7" ]]; then
+              echo "legacy_matrix=$(filter_matrix "$full_legacy_matrix" "$py_ver" "$arch")" >> $GITHUB_OUTPUT
+            else
+              echo "legacy_matrix=[]" >> $GITHUB_OUTPUT
+            fi
+
+            # Python 3.6 matrix
+            if [[ -z "$py_ver" || "$py_ver" == "3.6" ]]; then
+              filter_expression="."
+              if [[ -n "$arch" ]]; then filter_expression+=" | map(select(.arch == \"$arch\"))"; fi
+              echo "py36_matrix=$(echo "$full_py36_matrix" | jq -c "$filter_expression")" >> $GITHUB_OUTPUT
+            else
+              echo "py36_matrix=[]" >> $GITHUB_OUTPUT
+            fi
+          fi
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (true) }}
+  wheels-build_wheels_modern:
+    name: Build wheels for Python ${{ matrix.python-version }} on ${{ matrix.arch }}
+    needs:
+      - wheels-setup-matrix
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (fromJson(needs.wheels-setup-matrix.outputs.modern_matrix) != '[]') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.wheels-setup-matrix.outputs.modern_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare build environment
+        run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v3.3.1
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: ${{ matrix.cibw-build-id }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_TEST_COMMAND: pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+  wheels-build_wheels_legacy:
+    name: Build wheels for Python ${{ matrix.python-version }} on ${{ matrix.arch }}
+    needs:
+      - wheels-setup-matrix
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (fromJson(needs.wheels-setup-matrix.outputs.legacy_matrix) != '[]') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.wheels-setup-matrix.outputs.legacy_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare build environment
+        run: bash ./scripts/python/prepare_python_build.sh ${{ matrix.python-version }}
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.23.3
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: ${{ matrix.cibw-build-id }}
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_TEST_COMMAND: |
+            pip install numpy pytest && \
+            echo "=== Running VSAG Python Tests ===" && \
+            python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
+            if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \
+              echo "❌ Tests failed!" && \
+              grep -A 5 "FAILED\|ERROR" /tmp/test-output.log && \
+              exit 1; \
+            elif grep -q "passed" /tmp/test-output.log; then \
+              echo "✅ All tests passed!" && \
+              exit 0; \
+            else \
+              echo "⚠️ Test results unclear" && \
+              exit 1; \
+            fi
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+  wheels-build_wheels_py36:
+    name: Build wheels for Python 3.6 on ${{ matrix.arch }}
+    needs:
+      - wheels-setup-matrix
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (fromJson(needs.wheels-setup-matrix.outputs.py36_matrix) != '[]') }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.wheels-setup-matrix.outputs.py36_matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Prepare build environment for Python 3.6
+        run: bash ./scripts/python/prepare_python_build.sh 3.6
+      - name: Build wheels for Python 3.6
+        uses: pypa/cibuildwheel@v2.11.4
+        with:
+          package-dir: python
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: cp36-*
+          CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
+          CIBW_TEST_COMMAND: |
+            pip install numpy pytest && \
+            echo "=== Running VSAG Python Tests ===" && \
+            python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
+            if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \
+              echo "❌ Tests failed!" && \
+              grep -A 5 "FAILED\|ERROR" /tmp/test-output.log && \
+              exit 1; \
+            elif grep -q "passed" /tmp/test-output.log; then \
+              echo "✅ All tests passed!" && \
+              exit 0; \
+            else \
+              echo "⚠️ Test results unclear" && \
+              exit 1; \
+            fi
+      - uses: actions/upload-artifact@v5
+        with:
+          name: wheels-3.6-${{ matrix.arch }}
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+  wheels-publish:
+    name: Publish packages
+    needs:
+      - wheels-build_wheels_modern
+      - wheels-build_wheels_legacy
+      - wheels-build_wheels_py36
+    runs-on: ubuntu-latest
+    if: ${{ (github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'wheels')) && (github.event_name == 'release' && github.event.action == 'published' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')) }}
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: List distribution files
+        id: list_files
+        run: |
+          if [ -z "$(ls -A dist)" ]; then
+            echo "No build artifacts found. Skipping publish."
+            echo "should_publish=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found artifacts to publish."
+            ls -la dist/
+            echo "should_publish=true" >> $GITHUB_OUTPUT
+          fi
+      - name: Publish to PyPI
+        if: steps.list_files.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          verbose: true
+      - name: Upload to GitHub Release
+        if: steps.list_files.outputs.should_publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.whl
+  index-generate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    steps:
+      - name: Get Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - name: Determine version to use
+        id: set-version
+        run: |
+          git config --global --add safe.directory /__w/vsag/vsag
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION=$(git for-each-ref --sort=-committerdate refs/tags --format='%(refname:short)' | head -n 1)
+          else
+            VERSION=${{ github.event.inputs.version }}
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          cd ${GITHUB_WORKSPACE}
+      - name: Install GitHub CLI
+        env:
+          GH_VERSION: 2.75.0
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            gh --version
+            exit 0
+          fi
+          wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
+      - name: Download Test Dataset from Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download compatibility-indexes \
+            --repo antgroup/vsag \
+            --pattern "random_512d_10K.bin" \
+            || echo "Test dataset not found in release, will be generated"
+      - name: Fetch Tag Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.set-version.outputs.version }}
+          path: vsag_tag
+          fetch-depth: '0'
+          fetch-tags: 'true'
+      - name: Prepare And Build
+        run: |
+          echo ${{ steps.set-version.outputs.version }}
+          cd vsag_tag
+          cp ../random_512d_10K.bin . || true
+          make release
+      - name: Generate Index
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+          ./build-release/tools/create_old_version_index ${{ steps.set-version.outputs.version }}
+      - name: Upload to Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.set-version.outputs.version }}
+        run: |
+          cd ${GITHUB_WORKSPACE}/vsag_tag
+
+          files=()
+          for algo in hgraph; do
+            for ext in index build.json search.json; do
+              file="${VERSION}_${algo}_${ext}"
+              if [ -f "$file" ]; then
+                files+=("$file")
+              fi
+            done
+          done
+
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No index files found to upload"
+            exit 0
+          fi
+
+          echo "Files to upload: ${files[*]}"
+
+          release_error=$(gh release view compatibility-indexes --repo antgroup/vsag 2>&1)
+          if [ $? -eq 0 ]; then
+            echo "Uploading to existing release..."
+            if ! gh release upload compatibility-indexes "${files[@]}" --repo antgroup/vsag --clobber; then
+              echo "Error: Failed to upload files to release"
+              exit 1
+            fi
+          else
+            if echo "$release_error" | grep -qi "404\|not found\|notfound"; then
+              echo "Creating new release..."
+              if ! gh release create compatibility-indexes "${files[@]}" \
+                --repo antgroup/vsag \
+                --title "VSAG Compatibility Test Indexes" \
+                --notes "Index files for backward compatibility testing" \
+                --prerelease; then
+                echo "Error: Failed to create release"
+                exit 1
+              fi
+            else
+              echo "Error checking release existence: $release_error"
+              exit 1
+            fi
+          fi
+
+          echo "Successfully uploaded ${#files[@]} file(s)"
+    if: ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.operation == 'index')) && (true) }}

@@ -16,15 +16,18 @@
 #pragma once
 
 #include "flatten_interface.h"
-#include "io/common/basic_io.h"
 #include "io/memory_block_io/memory_block_io.h"
+#include "layout/variable_record_layout.h"
 #include "quantization/multi_vector_computer.h"
+#include "quantization/quantizer.h"
+#include "token_code_interface.h"
+#include "typing.h"
 #include "vsag/dataset.h"
 
 namespace vsag {
 
 template <typename QuantTmpl, typename IOTmpl>
-class MultiVectorDataCell : public FlattenInterface {
+class MultiVectorDataCell : public FlattenInterface, public TokenCodeInterface {
 public:
     MultiVectorDataCell() = default;
 
@@ -44,8 +47,19 @@ public:
 
     bool
     Decode(const uint8_t* codes, float* vector) override {
-        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                            "Decode is not supported for MultiVectorDataCell");
+        this->quantizer_->DecodeOne(codes, vector);
+        return true;
+    }
+
+    void
+    EncodeToken(const float* token, uint8_t* code) const override {
+        CHECK_ARGUMENT(this->quantizer_->EncodeOne(token, code),
+                       "multi-vector token encoding failed");
+    }
+
+    float
+    ComputeTokenCodes(const uint8_t* lhs, const uint8_t* rhs) const override {
+        return this->quantizer_->Compute(lhs, rhs);
     }
 
     bool
@@ -85,6 +99,11 @@ public:
     [[nodiscard]] std::string
     GetQuantizerName() override;
 
+    [[nodiscard]] uint64_t
+    GetQuantizerCodeSize() const override {
+        return this->quantizer_->GetCodeSize();
+    }
+
     [[nodiscard]] MetricType
     GetMetricType() override;
 
@@ -107,22 +126,25 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     uint64_t
     GetMemoryUsage() const override;
 
 private:
     std::shared_ptr<Quantizer<QuantTmpl>> quantizer_{nullptr};
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
 
     Allocator* const allocator_{nullptr};
-    std::shared_ptr<MemoryBlockIO> offset_io_{nullptr};
-    uint64_t current_offset_{0};
-    std::mutex current_offset_mutex_;
+    VariableRecordLayout<HeaderLengthLocationPolicy, MemoryBlockIO, IOTmpl> layout_{};
 
     uint32_t multi_vector_dim_{0};
     MetricType metric_{MetricType::METRIC_TYPE_L2SQR};
+
+    // Per-doc token count cache, populated during InsertVector (Build / incremental Add)
+    // and rebuilt during Deserialize via batched MultiRead. Allows Query to skip the
+    // io_->MultiRead that would otherwise fetch the 4-byte token count from disk for
+    // every candidate, eliminating one io_submit + io_getevents round trip per query.
+    Vector<uint32_t> token_counts_{allocator_};
 };
 
 }  // namespace vsag

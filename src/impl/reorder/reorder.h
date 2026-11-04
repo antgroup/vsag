@@ -15,7 +15,10 @@
 
 #pragma once
 
+#include <optional>
+
 #include "impl/heap/distance_heap.h"
+#include "quantization/computer.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -31,7 +34,9 @@ public:
             int64_t topk,
             QueryContext& ctx,
             IteratorFilterContext* iter_ctx = nullptr,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) = 0;
+            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt,
+            const ComputerInterfacePtr& preset_computer = nullptr) = 0;
 };
 
 }  // namespace vsag

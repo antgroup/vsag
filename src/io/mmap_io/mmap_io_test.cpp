@@ -19,7 +19,7 @@
 
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
-#include "io/common/basic_io_test.h"
+#include "io/common/io_contract_test.h"
 #include "unittest.h"
 
 using namespace vsag;
@@ -78,10 +78,10 @@ TEST_CASE("MMapIO resize shrink", "[ut][MMapIO]") {
     io->Write(data.data(), data.size(), 0);
 
     io->Resize(8192);
-    REQUIRE(io->size_ >= 8192);
+    REQUIRE(io->Size() >= 8192);
 
     io->Resize(2048);
-    REQUIRE(io->size_ == 2048);
+    REQUIRE(io->Size() == 2048);
 
     std::vector<uint8_t> read_buf(2048);
     REQUIRE(io->Read(2048, 0, read_buf.data()) == true);
@@ -131,4 +131,26 @@ TEST_CASE("MMapIO existing file", "[ut][MMapIO]") {
     for (uint64_t i = 0; i < 64; ++i) {
         REQUIRE(read_buf[i] == 0xEF);
     }
+}
+
+TEST_CASE("MMapIO enabled prefetch hint preserves reads", "[ut][MMapIO]") {
+    fixtures::TempDir dir("mmap_io_prefetch");
+    auto path = dir.GenerateRandomFile(false);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto parameter = std::make_shared<MMapIOParameter>();
+    parameter->path_ = path;
+    parameter->enable_prefetch_hint_ = true;
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    IOParamPtr io_parameter = parameter;
+    MMapIO io(io_parameter, common_param);
+
+    std::vector<uint8_t> data(8192, 0xAB);
+    io.Write(data.data(), data.size(), 0);
+    io.Prefetch(123, 256);
+    io.Prefetch(data.size(), 64);
+
+    std::vector<uint8_t> result(256);
+    REQUIRE(io.Read(result.size(), 123, result.data()));
+    REQUIRE(std::all_of(result.begin(), result.end(), [](uint8_t value) { return value == 0xAB; }));
 }

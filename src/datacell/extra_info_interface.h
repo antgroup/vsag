@@ -28,6 +28,45 @@
 namespace vsag {
 DEFINE_POINTER(ExtraInfoInterface);
 
+class ExtraInfoLease {
+public:
+    ExtraInfoLease() = default;
+
+    ~ExtraInfoLease();
+
+    ExtraInfoLease(const ExtraInfoLease&) = delete;
+    ExtraInfoLease&
+    operator=(const ExtraInfoLease&) = delete;
+
+    ExtraInfoLease(ExtraInfoLease&& other) noexcept;
+    ExtraInfoLease&
+    operator=(ExtraInfoLease&& other) noexcept;
+
+    [[nodiscard]] explicit
+    operator bool() const {
+        return data_ != nullptr;
+    }
+
+    [[nodiscard]] const char*
+    Data() const {
+        return data_;
+    }
+
+private:
+    friend class ExtraInfoInterface;
+
+    ExtraInfoLease(const ExtraInfoInterface* source, const char* data, bool needs_release) noexcept
+        : source_(source), data_(data), needs_release_(needs_release) {
+    }
+
+    void
+    Reset() noexcept;
+
+    const ExtraInfoInterface* source_{nullptr};
+    const char* data_{nullptr};
+    bool needs_release_{false};
+};
+
 class ExtraInfoInterface {
 public:
     ExtraInfoInterface() = default;
@@ -54,7 +93,7 @@ public:
     Resize(InnerIdType capacity) = 0;
 
     virtual void
-    Release(const char* extra_info) = 0;
+    Release(const char* extra_info) const = 0;
 
 public:
     InnerIdType
@@ -64,6 +103,13 @@ public:
 
     virtual const char*
     GetExtraInfoById(InnerIdType id, bool& need_release) const = 0;
+
+    [[nodiscard]] ExtraInfoLease
+    AcquireExtraInfoById(InnerIdType id) const {
+        bool needs_release = false;
+        const char* data = this->GetExtraInfoById(id, needs_release);
+        return ExtraInfoLease(this, data, needs_release);
+    }
 
     virtual bool
     GetExtraInfoById(InnerIdType id, char* extra_info) const = 0;
@@ -109,10 +155,10 @@ public:
     InMemory() const = 0;
 
     virtual void
-    EnableForceInMemory(){};
+    EnableForceInMemory() {};
 
     virtual void
-    DisableForceInMemory(){};
+    DisableForceInMemory() {};
 
     virtual void
     Move(InnerIdType from, InnerIdType to) {
@@ -129,5 +175,40 @@ public:
     InnerIdType max_capacity_{0};
     uint64_t extra_info_size_{0};
 };
+
+inline ExtraInfoLease::~ExtraInfoLease() {
+    Reset();
+}
+
+inline ExtraInfoLease::ExtraInfoLease(ExtraInfoLease&& other) noexcept
+    : source_(other.source_), data_(other.data_), needs_release_(other.needs_release_) {
+    other.source_ = nullptr;
+    other.data_ = nullptr;
+    other.needs_release_ = false;
+}
+
+inline ExtraInfoLease&
+ExtraInfoLease::operator=(ExtraInfoLease&& other) noexcept {
+    if (this != &other) {
+        Reset();
+        source_ = other.source_;
+        data_ = other.data_;
+        needs_release_ = other.needs_release_;
+        other.source_ = nullptr;
+        other.data_ = nullptr;
+        other.needs_release_ = false;
+    }
+    return *this;
+}
+
+inline void
+ExtraInfoLease::Reset() noexcept {
+    if (needs_release_ and source_ != nullptr and data_ != nullptr) {
+        source_->Release(data_);
+    }
+    source_ = nullptr;
+    data_ = nullptr;
+    needs_release_ = false;
+}
 
 }  // namespace vsag

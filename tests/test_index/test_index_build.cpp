@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include "framework/daily_test_plan.h"
 #include "test_index_common.h"
 
 namespace fixtures {
@@ -20,6 +21,7 @@ void
 TestIndex::TestBuildIndex(const IndexPtr& index,
                           const TestDatasetPtr& dataset,
                           bool expected_success) {
+    fixtures::daily::Phase daily_phase("Build");
     if (not index->CheckFeature(vsag::SUPPORT_BUILD)) {
         return;
     }
@@ -142,7 +144,10 @@ TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
         ->Paths(dataset->base_->GetPaths())
         ->Float32Vectors(dataset->base_->GetFloat32Vectors())
         ->Owner(false);
-    index->Build(temp_dataset);
+    auto build_result = index->Build(temp_dataset);
+    if (not build_result.has_value()) {
+        return;
+    }
     for (uint64_t j = temp_count; j < base_count; ++j) {
         auto data_one = vsag::Dataset::Make();
         data_one->Dim(dim)
@@ -152,6 +157,9 @@ TestIndex::TestContinueAddIgnoreRequire(const TestIndex::IndexPtr& index,
             ->Float32Vectors(dataset->base_->GetFloat32Vectors() + j * dim)
             ->Owner(false);
         auto add_index = index->Add(data_one);
+        if (not add_index.has_value()) {
+            return;
+        }
     }
 }
 

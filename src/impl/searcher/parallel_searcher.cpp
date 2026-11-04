@@ -16,6 +16,7 @@
 #include "parallel_searcher.h"
 
 #include <atomic>
+#include <cmath>
 #include <future>
 #include <limits>
 #include <tuple>
@@ -24,8 +25,11 @@
 
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/query_computer_pool.h"
+#include "impl/searcher/searcher_utils.h"
 #include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
+#include "vsag_exception.h"
 
 namespace vsag {
 
@@ -66,11 +70,8 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
             }
             if (not vl->Get(neighbors[i][j])) {
                 vl->Set(neighbors[i][j]);
-                // Removed filter->CheckValid() to eliminate duplicate filter checking.
-                // Filter is applied at result-collection stage.
-                // ShouldVisit() probabilistically gates traversal to preserve graph connectivity.
                 if (not filter || count_no_visited == 0 || skip_strategy == nullptr ||
-                    skip_strategy->ShouldVisit()) {
+                    skip_strategy->ShouldVisit() || filter->CheckValid(neighbors[i][j])) {
                     to_be_visited_id[count_no_visited] = neighbors[i][j];
                     count_no_visited++;
                 }
@@ -128,8 +129,17 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     if (not graph or not flatten) {
         return top_candidates;
     }
+    if (inner_search_param.parallel_search_thread_count <= 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "parallel search thread count must be positive");
+    }
+    if (inner_search_param.parallel_search_thread_count > 1 and this->pool == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "parallel search requires a non-null thread pool");
+    }
 
-    auto computer = flatten->FactoryComputer(query);
+    auto computer_lease = AcquireQueryComputer(flatten, query, ctx);
+    const auto& computer = computer_lease.computer;
 
     auto is_id_allowed = inner_search_param.is_inner_id_allowed;
     auto ep = inner_search_param.ep;
@@ -176,19 +186,35 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     } else {
         flatten->Query(&dist, computer, &ep, 1, ctx);
     }
-    if (check_func(ep)) {
+    if (check_func(ep) and is_result_distance_eligible<mode>(dist, inner_search_param)) {
         top_candidates->Push(dist, ep);
-        lower_bound = top_candidates->Top().first;
+    }
+    // See BasicSearcher: the entry point's duplicate labels are only expanded from this seed block.
+    if (inner_search_param.consider_duplicate and
+        is_result_distance_eligible<mode>(dist, inner_search_param)) {
+        for (const auto duplicate_id : graph->GetDuplicateIds(ep)) {
+            if (check_func(duplicate_id)) {
+                top_candidates->Push(dist, duplicate_id);
+            }
+        }
+        if constexpr (mode == KNN_SEARCH) {
+            while (top_candidates->Size() > ef) {
+                top_candidates->Pop();
+            }
+        }
     }
     if constexpr (mode == InnerSearchMode::RANGE_SEARCH) {
-        if (dist > inner_search_param.radius and not top_candidates->Empty()) {
+        while (dist > inner_search_param.radius and not top_candidates->Empty()) {
             top_candidates->Pop();
         }
+    }
+    if (not top_candidates->Empty()) {
+        lower_bound = top_candidates->Top().first;
     }
     if (dist < THRESHOLD_ERROR) {
         inner_search_param.duplicate_id = ep;
     }
-    candidate_set->Push(-dist, ep);
+    candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
     auto num_threads = inner_search_param.parallel_search_thread_count - 1;
@@ -200,6 +226,7 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
 
     auto task = [&](uint64_t thread_id) {
         auto worker_computer = flatten->FactoryComputer(query);
+        RecordQueryComputerCreation(ctx == nullptr ? nullptr : ctx->stats);
         SearchTask item;
         while (true) {
             if (queues[thread_id].Pop(item)) {
@@ -311,6 +338,33 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         for (uint64_t i = 0; i < count_no_visited; i++) {
             dist = line_dists[i];
             const auto cur_id = to_be_visited_id[i];
+            if (not is_finite_distance(dist)) {
+                auto push_result = [&](InnerIdType result_id) {
+                    if (not is_result_distance_eligible<mode>(dist, inner_search_param) or
+                        not check_func(result_id)) {
+                        return;
+                    }
+                    top_candidates->Push(dist, result_id);
+                    if constexpr (mode == KNN_SEARCH) {
+                        while (top_candidates->Size() > ef) {
+                            top_candidates->Pop();
+                        }
+                    } else if (dist > inner_search_param.radius) {
+                        top_candidates->Pop();
+                    }
+                };
+                push_result(cur_id);
+                if (inner_search_param.consider_duplicate) {
+                    for (const auto duplicate_id : graph->GetDuplicateIds(cur_id)) {
+                        push_result(duplicate_id);
+                    }
+                }
+                candidate_set->Push(traversal_priority(dist), cur_id);
+                if (not top_candidates->Empty()) {
+                    lower_bound = top_candidates->Top().first;
+                }
+                continue;
+            }
             if constexpr (mode == KNN_SEARCH) {
                 if (collect_rabitq_lower_bound and lower_bound_dists[i] < lower_bound and
                     check_func(cur_id)) {

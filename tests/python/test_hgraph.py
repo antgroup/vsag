@@ -71,6 +71,49 @@ def test_hgraph_build(dim, metric, quantization_type, expect_recall, dataset_fac
     verify_knn_search(index, dataset, search_params, expect_recall=expect_recall)
 
 
+def test_hgraph_knn_search_with_statistics(dataset_factory):
+    """Test opt-in statistics results and error propagation."""
+    dim = 32
+    dataset = dataset_factory(dim=dim, num_vectors=64, metric="ip")
+    index = create_index(TYPE_NAME, _create_index_params(dim, "ip", "fp32"))
+    build_index(index, dataset)
+    query = dataset.query_vectors[:dim]
+    search_params = json.dumps({"hgraph": {"ef_search": 32}})
+
+    ids, distances, statistics_json = index.knn_search_with_statistics(
+        query, 5, search_params
+    )
+    statistics = json.loads(statistics_json)
+    assert ids.shape == (5,)
+    assert distances.shape == (5,)
+    assert statistics["distance_evaluations"] > 0
+
+    with pytest.raises(RuntimeError, match="knn search failed"):
+        index.knn_search_with_statistics(query, 5, "not valid JSON")
+
+
+def test_hgraph_range_search_with_statistics(dataset_factory):
+    """Test opt-in range statistics without changing legacy tuple unpacking."""
+    dim = 32
+    dataset = dataset_factory(dim=dim, num_vectors=64, metric="ip")
+    index = create_index(TYPE_NAME, _create_index_params(dim, "ip", "fp32"))
+    build_index(index, dataset)
+    query = dataset.query_vectors[:dim]
+    search_params = json.dumps({"hgraph": {"ef_search": 32}})
+
+    legacy_ids, legacy_distances = index.range_search(query, 1.0, search_params)
+    ids, distances, statistics_json = index.range_search_with_statistics(
+        query, 1.0, search_params
+    )
+    statistics = json.loads(statistics_json)
+    assert ids.shape == legacy_ids.shape
+    assert distances.shape == legacy_distances.shape
+    assert statistics["distance_evaluations"] > 0
+
+    with pytest.raises(RuntimeError, match="range search failed"):
+        index.range_search_with_statistics(query, 1.0, "not valid JSON")
+
+
 @pytest.mark.parametrize("metric", ["ip"])
 @pytest.mark.parametrize("dim", [128, 256, 1024])
 @pytest.mark.parametrize("quantization_type,expect_recall", [

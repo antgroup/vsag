@@ -52,11 +52,12 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
 public:
     IVFNearestPartitionTrainerType trainer_type_{IVFNearestPartitionTrainerType::KMeansTrainer};
     IndexCommonParam common_param_;
+    IVFPartitionStrategyParametersPtr ivf_partition_strategy_param_{nullptr};
     std::shared_ptr<BruteForceParameter> param_ptr_{nullptr};
     BucketIdType bucket_count_s_{0};
     BucketIdType bucket_count_t_{0};

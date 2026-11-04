@@ -73,8 +73,8 @@ blocks. The parameters object can be built from a JSON string and can also carry
 with `SetReader`. Unsupported policies return an error instead of silently falling back. The API
 currently supports streaming BruteForce, HGraph, IVF, SINDI, and Pyramid indexes. BruteForce
 supports limited block placement policies. HGraph can bind `high_precision_codes` to an external
-reader through `precise_reader`. IVF, SINDI, and Pyramid currently load all emitted streaming
-blocks into memory.
+reader through `precise_reader`. IVF can do the same for either precise-code layout. SINDI and
+Pyramid currently load all emitted streaming blocks into memory.
 
 ## File Layout
 
@@ -177,11 +177,21 @@ IVF writes these streaming blocks in order:
 | `ivf_bucket` | bucket datacell payloads for inverted lists | yes |
 | `ivf_partition_strategy` | partition strategy state, such as trained centroids | yes |
 | `label_table` | external labels and label remap | yes |
-| `high_precision_codes` | reorder codes when IVF reorder is enabled | conditional |
+| `high_precision_codes` | flat reorder codes when IVF reorder uses the `flat` layout | conditional |
+| `ivf_precise_bucket` | bucket-aligned reorder codes when IVF uses the `bucket` layout | conditional |
 | `attribute_filter` | optional attribute filter index | conditional |
 
+`Load` can bind either precise-code block to an external reader. Set `precise_io_type` to
+`reader_io`, provide `precise_reader`, and make the reader expose exactly the
+`high_precision_codes` payload for `flat` or the `ivf_precise_bucket` payload for `bucket`. `Load`
+validates its size and checksum before the returned index can query it.
+`precise_enable_read_cache` and `precise_cache_total_size` configure the normal read cache for
+the remote precise codes.
+
 `DeserializeStreaming` restores the full in-memory IVF index. `Index::Load` can create the IVF
-index directly from streaming metadata and currently loads all emitted IVF blocks into memory.
+index directly from streaming metadata. It loads IVF blocks into memory by default; reader-backed
+precise codes remain external. The two precise-code blocks are mutually exclusive and are selected
+by `precise_codes_layout`.
 
 ## SINDI Blocks
 
@@ -193,10 +203,36 @@ SINDI writes these streaming blocks in order:
 | `label_table` | external labels and label remap | yes |
 | `sindi_rerank_index` | optional rerank flat index when rerank is enabled | conditional |
 | `sindi_term_id_mapper` | optional term-id remapping table | conditional |
+| `sindi_host_metadata` | optional host dictionary and one-or-more inner-ID ranges per host | conditional |
+| `sindi_time_metadata` | optional per-document UTC days and time-partition/host directories | conditional |
 
 `DeserializeStreaming` restores the full in-memory SINDI index. `Index::Load` can create the SINDI
 index directly from streaming metadata and currently loads all emitted SINDI blocks into memory.
-Immutable SINDI runtime serialization is not supported by this streaming path.
+Mutable and immutable SINDI runtimes both support this streaming path. Legacy serialization stores
+standalone host metadata, including its persisted string-to-ID dictionary, or publish-time routing
+metadata for mutable and immutable indexes. These top-level payloads are mutually exclusive;
+combined time-and-host routing stores its host directory inside the time payload. A restored
+mutable time-aware index rejects incremental `Add()`.
+
+## SINDI_V2 Blocks
+
+SINDI_V2 writes these streaming blocks in order:
+
+| Block | Contents | Required |
+| --- | --- | --- |
+| `sindi_v2_term_layout` | term-first posting layout, element count, and quantization state | yes |
+| `label_table` | external labels and label remap | yes |
+| `sindi_rerank_index` | optional rerank index when rerank is enabled | conditional |
+| `extra_info` | optional per-document extra information | conditional |
+| `sindi_term_id_mapper` | optional term-id remapping table | conditional |
+| `sindi_host_metadata` | optional host dictionary and one-or-more inner-ID ranges per host | conditional |
+| `sindi_time_metadata` | optional per-document UTC days and time-partition/host directories | conditional |
+
+`DeserializeStreaming` and `Index::Load` restore mutable or immutable SINDI_V2 runtimes from these
+blocks. Legacy serialization stores standalone host metadata, including its persisted string-to-ID
+dictionary, or publish-time routing metadata for mutable and immutable indexes. These top-level
+payloads are mutually exclusive; combined time-and-host routing stores its host dictionary and
+directory inside the time payload. A restored mutable time-aware index rejects incremental `Add()`.
 
 ## Pyramid Blocks
 

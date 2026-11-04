@@ -330,10 +330,8 @@ TestIndex::TestMarkRemoveIndex(const TestIndex::IndexPtr& index,
                                const TestDatasetPtr& dataset,
                                const std::string& search_param,
                                bool expected_success) {
-    if (index->GetIndexType() != vsag::IndexType::HNSW) {
-        auto train_result = index->Train(dataset->base_);
-        REQUIRE(train_result.has_value());
-    }
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
 
     auto base_num = dataset->base_->GetNumElements();
     auto base_dim = dataset->base_->GetDim();
@@ -353,13 +351,8 @@ TestIndex::TestMarkRemoveIndex(const TestIndex::IndexPtr& index,
     {
         // test mark remove operation with invalid id
         auto wrong_result = index->Remove(-1, vsag::RemoveMode::MARK_REMOVE);
-        if (index->GetIndexType() == vsag::IndexType::HNSW) {
-            REQUIRE(wrong_result.has_value());
-            REQUIRE_FALSE(wrong_result.value());
-        } else {
-            REQUIRE(wrong_result.has_value());
-            REQUIRE(wrong_result.value() == 0);
-        }
+        REQUIRE(wrong_result.has_value());
+        REQUIRE(wrong_result.value() == 0);
 
         // delete half of the base data
         int64_t remove_count = base_num / 2;
@@ -412,10 +405,8 @@ void
 TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
                            const TestDatasetPtr& dataset,
                            bool expected_success) {
-    if (index->GetIndexType() != vsag::IndexType::HNSW) {
-        auto train_result = index->Train(dataset->base_);
-        REQUIRE(train_result.has_value());
-    }
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
     auto base_num = dataset->base_->GetNumElements();
     auto base_dim = dataset->base_->GetDim();
     for (int64_t i = 0; i < base_num; ++i) {
@@ -443,12 +434,7 @@ TestIndex::TestRemoveIndex(const TestIndex::IndexPtr& index,
         REQUIRE(index->GetNumberRemoved() == i + 1);
         REQUIRE(remove_results.has_value());
         remove_results = index->Remove(i + base_num);
-        if (index->GetIndexType() != vsag::IndexType::HNSW) {
-            REQUIRE_FALSE(remove_results.has_value());
-        } else {
-            REQUIRE(remove_results.has_value());
-            REQUIRE_FALSE(remove_results.value());
-        }
+        REQUIRE_FALSE(remove_results.has_value());
         REQUIRE(index->GetNumElements() == dataset->base_->GetNumElements());
     }
 }
@@ -463,10 +449,8 @@ TestIndex::TestRecoverRemoveIndex(const IndexPtr& index,
     auto ids = dataset->base_->GetIds();
 
     // [step 0] build
-    if (index->GetIndexType() != vsag::IndexType::HNSW) {
-        auto train_result = index->Train(dataset->base_);
-        REQUIRE(train_result.has_value());
-    }
+    auto train_result = index->Train(dataset->base_);
+    REQUIRE(train_result.has_value());
     auto add_results = index->Add(dataset->base_);
     REQUIRE(add_results.has_value());
     REQUIRE(add_results.value().size() == 0);
@@ -488,12 +472,7 @@ TestIndex::TestRecoverRemoveIndex(const IndexPtr& index,
 
     {
         auto wrong_result = index->Remove(-1);
-        if (index->GetIndexType() == vsag::IndexType::HNSW) {
-            REQUIRE(wrong_result.has_value());
-            REQUIRE_FALSE(wrong_result.value());
-        } else {
-            REQUIRE_FALSE(wrong_result.has_value());
-        }
+        REQUIRE_FALSE(wrong_result.has_value());
     }
 
     {  // Test of removing and then inserting for successful recovery

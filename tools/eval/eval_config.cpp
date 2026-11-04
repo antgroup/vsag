@@ -71,7 +71,7 @@ EvalConfig::Load(argparse::ArgumentParser& parser) {
 }
 
 EvalConfig
-EvalConfig::Load(YAML::Node& yaml_node, const eval_job& global_options) {
+EvalConfig::Load(YAML::Node& yaml_node, const EvalJob& global_options) {
     EvalConfig config;
 
     // set global options at first

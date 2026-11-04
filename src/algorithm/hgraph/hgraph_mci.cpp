@@ -1,0 +1,2610 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <fstream>
+#include <functional>
+#include <future>
+#include <limits>
+#include <memory>
+#include <vector>
+
+#include "../mci/mci_builder.h"
+#include "../mci/mci_clique_activation.h"
+#include "../mci/mci_coverage.h"
+#include "../mci/mci_local_builder.h"
+#include "datacell/graph_interface.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
+#include "hgraph.h"
+#include "hgraph_mci_add.h"
+#include "impl/filter/filter_headers.h"
+#include "impl/logger/logger.h"
+#include "impl/odescent/odescent_graph_builder.h"
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "index_common_param.h"
+#include "simd/fp32_simd.h"
+#include "utils/search_lock.h"
+
+namespace vsag {
+namespace {
+
+constexpr uint64_t K_MCI_MIN_CLIQUE_SIZE = 2;
+constexpr uint64_t K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER = 64;
+constexpr uint64_t K_MCI_MIN_BITSET_SEED_SAMPLES = 4096;
+
+// Detach the cached buffer while a query owns it. A nested search on the same worker can
+// then borrow another buffer without invalidating this query's prepared predicate.
+class MCIValidIdScratch {
+public:
+    MCIValidIdScratch() {
+        ids.swap(cached_ids);
+        ids.clear();
+    }
+
+    ~MCIValidIdScratch() {
+        // A nested query may already have returned a buffer; keep the larger capacity.
+        if (ids.capacity() > cached_ids.capacity()) {
+            ids.swap(cached_ids);
+        }
+    }
+
+    MCIValidIdScratch(const MCIValidIdScratch&) = delete;
+    MCIValidIdScratch&
+    operator=(const MCIValidIdScratch&) = delete;
+
+    std::vector<InnerIdType> ids;
+
+private:
+    inline static thread_local std::vector<InnerIdType> cached_ids;
+};
+
+// Unlike seed sampling, predicate packing needs the entire mapped set, including real
+// labels after unknown entries. Identity labels need no reverse-map lookup or stride division.
+void
+collect_mci_valid_inner_ids(const FilterPtr& filter,
+                            const LabelTablePtr& labels,
+                            std::vector<InnerIdType>& inner_ids) {
+    const int64_t* valid_labels = nullptr;
+    int64_t valid_count = 0;
+    filter->GetValidIds(&valid_labels, valid_count);
+    if (valid_labels == nullptr or valid_count <= 0) {
+        return;
+    }
+    inner_ids.reserve(static_cast<uint64_t>(valid_count));
+    if (labels->IsIdentityMapping()) {
+        const auto total = static_cast<uint64_t>(labels->GetTotalCount());
+        const auto deleted_ids = labels->GetDeletedIdsReadView();
+        for (int64_t i = 0; i < valid_count; ++i) {
+            const auto label = valid_labels[i];
+            if (label >= 0 and static_cast<uint64_t>(label) < total and
+                (deleted_ids == nullptr or deleted_ids->CheckValid(label))) {
+                inner_ids.push_back(static_cast<InnerIdType>(label));
+            }
+        }
+    } else {
+        for (int64_t i = 0; i < valid_count; ++i) {
+            const auto [found, inner_id] = labels->TryGetIdByLabel(valid_labels[i]);
+            if (found) {
+                inner_ids.push_back(inner_id);
+            }
+        }
+    }
+    if (not std::is_sorted(inner_ids.begin(), inner_ids.end())) {
+        std::sort(inner_ids.begin(), inner_ids.end());
+    }
+    inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
+}
+
+Vector<InnerIdType>
+collect_seed_inner_ids(const FilterPtr& filter,
+                       const LabelTablePtr& label_table,
+                       uint64_t seed_count,
+                       Allocator* allocator,
+                       bool* enumerates_all_valid = nullptr) {
+    Vector<InnerIdType> inner_ids(allocator);
+    if (enumerates_all_valid != nullptr) {
+        *enumerates_all_valid = false;
+    }
+    if (filter == nullptr or label_table == nullptr or seed_count == 0) {
+        return inner_ids;
+    }
+
+    const int64_t* valid_labels = nullptr;
+    int64_t valid_count = 0;
+    filter->GetValidIds(&valid_labels, valid_count);
+    if (valid_labels == nullptr or valid_count <= 0) {
+        return inner_ids;
+    }
+
+    const auto sampled_count = std::min<uint64_t>(seed_count, static_cast<uint64_t>(valid_count));
+    inner_ids.reserve(sampled_count);
+    const bool identity = label_table->IsIdentityMapping();
+    const auto total = static_cast<uint64_t>(label_table->GetTotalCount());
+    const auto deleted = identity ? label_table->GetDeletedIdsReadView() : nullptr;
+    for (uint64_t i = 0; i < sampled_count; ++i) {
+        const auto offset = i * static_cast<uint64_t>(valid_count) / sampled_count;
+        const auto label = valid_labels[offset];
+        if (identity) {
+            if (label >= 0 and static_cast<uint64_t>(label) < total and
+                (deleted == nullptr or deleted->CheckValid(label))) {
+                inner_ids.push_back(static_cast<InnerIdType>(label));
+            }
+        } else {
+            auto [found, inner_id] = label_table->TryGetIdByLabel(label);
+            if (found) {
+                inner_ids.push_back(inner_id);
+            }
+        }
+    }
+    if (not std::is_sorted(inner_ids.begin(), inner_ids.end())) {
+        std::sort(inner_ids.begin(), inner_ids.end());
+    }
+    inner_ids.erase(std::unique(inner_ids.begin(), inner_ids.end()), inner_ids.end());
+    if (enumerates_all_valid != nullptr) {
+        // `sampled_count == valid_count` means the whole valid-label list was visited (no
+        // stride sampling) and every label resolved to a distinct inner id, so the seed
+        // list is exactly the valid set and the traversal cannot add anything to it.
+        *enumerates_all_valid = sampled_count == static_cast<uint64_t>(valid_count) and
+                                inner_ids.size() == static_cast<uint64_t>(valid_count);
+    }
+    return inner_ids;
+}
+
+bool
+has_valid_id_source(const FilterPtr& filter) {
+    if (filter == nullptr) {
+        return false;
+    }
+    const int64_t* valid_ids = nullptr;
+    int64_t valid_count = 0;
+    filter->GetValidIds(&valid_ids, valid_count);
+    return valid_ids != nullptr and valid_count > 0;
+}
+
+bool
+has_bitset_source(const FilterPtr& filter) {
+    const auto bitset_filter = std::dynamic_pointer_cast<BlackListFilter>(filter);
+    return bitset_filter != nullptr and bitset_filter->IsBitsetFilter();
+}
+
+Vector<InnerIdType>
+collect_bitset_seed_inner_ids(const FilterPtr& inner_filter,
+                              uint64_t total,
+                              uint64_t seed_count,
+                              Allocator* allocator) {
+    Vector<InnerIdType> inner_ids(allocator);
+    if (inner_filter == nullptr or total == 0 or seed_count == 0) {
+        return inner_ids;
+    }
+    inner_ids.reserve(std::min(total, seed_count));
+    const auto scaled_sample_count = seed_count > total / K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER
+                                         ? total
+                                         : seed_count * K_MCI_BITSET_SEED_SAMPLE_MULTIPLIER;
+    const auto sample_count =
+        std::min(total, std::max(K_MCI_MIN_BITSET_SEED_SAMPLES, scaled_sample_count));
+    const auto id_step = total / sample_count;
+    const auto id_remainder = total % sample_count;
+    uint64_t id = 0;
+    uint64_t accumulated_remainder = 0;
+    for (uint64_t sample = 0; sample < sample_count and inner_ids.size() < seed_count; ++sample) {
+        const auto inner_id = static_cast<InnerIdType>(id);
+        if (inner_filter->CheckValid(inner_id)) {
+            inner_ids.push_back(inner_id);
+        }
+        id += id_step;
+        accumulated_remainder += id_remainder;
+        if (accumulated_remainder >= sample_count) {
+            ++id;
+            accumulated_remainder -= sample_count;
+        }
+    }
+    return inner_ids;
+}
+
+float
+// NOLINTNEXTLINE(readability-identifier-naming)
+ExpandMCIDistanceLimit(float nearest_distance, float alpha, MetricType metric) {
+    if (metric != MetricType::METRIC_TYPE_IP) {
+        return nearest_distance * alpha;
+    }
+    const auto nearest_similarity = 1.0F - nearest_distance;
+    const auto similarity_limit =
+        nearest_similarity >= 0.0F ? nearest_similarity / alpha : nearest_similarity * alpha;
+    return 1.0F - similarity_limit;
+}
+
+// Temporary KNN graph used during MCI companion-index construction. Rows may come from an
+// external KNNG file or from per-vector searches over the current HGraph.
+// NOLINTNEXTLINE(readability-identifier-naming)
+struct MCIKNNGraph {
+    explicit MCIKNNGraph(Allocator* allocator)
+        : neighbors(allocator), counts(allocator), allocator(allocator) {
+    }
+
+    MCIKNNGraph(const MCIKNNGraph&) = delete;
+    MCIKNNGraph&
+    operator=(const MCIKNNGraph&) = delete;
+
+    MCIKNNGraph(MCIKNNGraph&& other) noexcept
+        : neighbors(std::move(other.neighbors)),
+          counts(std::move(other.counts)),
+          raw_neighbors(other.raw_neighbors),
+          raw_neighbor_count(other.raw_neighbor_count),
+          row_stride(other.row_stride),
+          uniform_count(other.uniform_count),
+          total(other.total),
+          allocator(other.allocator) {
+        other.raw_neighbors = nullptr;
+        other.raw_neighbor_count = 0;
+    }
+
+    MCIKNNGraph&
+    operator=(MCIKNNGraph&& other) noexcept {
+        if (this != &other) {
+            this->ReleaseRawNeighbors();
+            neighbors = std::move(other.neighbors);
+            counts = std::move(other.counts);
+            raw_neighbors = other.raw_neighbors;
+            raw_neighbor_count = other.raw_neighbor_count;
+            row_stride = other.row_stride;
+            uniform_count = other.uniform_count;
+            total = other.total;
+            allocator = other.allocator;
+            other.raw_neighbors = nullptr;
+            other.raw_neighbor_count = 0;
+        }
+        return *this;
+    }
+
+    ~MCIKNNGraph() {
+        this->ReleaseRawNeighbors();
+    }
+
+    Vector<InnerIdType> neighbors;
+    Vector<uint32_t> counts;
+    InnerIdType* raw_neighbors{nullptr};
+    uint64_t raw_neighbor_count{0};
+    uint64_t row_stride{0};
+    uint64_t uniform_count{0};
+    uint64_t total{0};
+    Allocator* allocator{nullptr};
+
+    // Visit valid neighbors in one row and hide whether the backing storage is raw or Vector based.
+    template <typename Fn>
+    void
+    ForEachNeighbor(InnerIdType inner_id, Fn&& fn) const {
+        if (inner_id >= total or row_stride == 0) {
+            return;
+        }
+        const auto count = counts.empty() ? uniform_count : counts[inner_id];
+        const auto* base = raw_neighbors != nullptr ? raw_neighbors : neighbors.data();
+        const auto* row = base + static_cast<uint64_t>(inner_id) * row_stride;
+        for (uint64_t rank = 0; rank < count; ++rank) {
+            const auto neighbor = row[rank];
+            if (neighbor >= total or neighbor == inner_id) {
+                continue;
+            }
+            if (not fn(neighbor)) {
+                break;
+            }
+        }
+    }
+
+    // Allocate a raw neighbor buffer for an external KNNG file.
+    void
+    AllocateRawNeighbors(uint64_t count) {
+        this->ReleaseRawNeighbors();
+        raw_neighbors = static_cast<InnerIdType*>(allocator->Allocate(count * sizeof(InnerIdType)));
+        raw_neighbor_count = count;
+    }
+
+    // Release only the optional raw buffer; Vector storage is managed by Vector itself.
+    void
+    ReleaseRawNeighbors() {
+        if (raw_neighbors != nullptr) {
+            allocator->Deallocate(raw_neighbors);
+            raw_neighbors = nullptr;
+            raw_neighbor_count = 0;
+        }
+    }
+};
+
+// Run local CCR-MCE around one seed neighborhood. Returned clique members are local indices into
+// local_nodes; the caller maps them back to HGraph inner ids.
+Vector<Vector<uint64_t>>
+run_local_ccr_mce(const Vector<InnerIdType>& local_nodes,
+                  const Vector<uint8_t>& local_edges,
+                  const std::vector<std::atomic<uint32_t>>& num_cliques_per_node,
+                  uint64_t threshold,
+                  uint64_t max_saved_cliques,
+                  Allocator* allocator) {
+    Vector<Vector<uint64_t>> saved_cliques(allocator);
+    const auto local_count = local_nodes.size();
+    if (local_count < threshold or max_saved_cliques == 0) {
+        return saved_cliques;
+    }
+    auto has_local_edge = [&](uint64_t lhs, uint64_t rhs) {
+        return local_edges[lhs * local_count + rhs] != 0;
+    };
+
+    Vector<uint64_t> degree(local_count, 0, allocator);
+    for (uint64_t i = 0; i < local_count; ++i) {
+        for (uint64_t j = 0; j < local_count; ++j) {
+            if (has_local_edge(i, j)) {
+                ++degree[i];
+            }
+        }
+    }
+
+    Vector<uint64_t> active_to_local(allocator);
+    Vector<uint64_t> local_to_active(local_count, local_count, allocator);
+    active_to_local.reserve(local_count);
+    for (uint64_t local_id = 0; local_id < local_count; ++local_id) {
+        if (degree[local_id] == 0) {
+            continue;
+        }
+        local_to_active[local_id] = active_to_local.size();
+        active_to_local.push_back(local_id);
+    }
+    if (active_to_local.size() < threshold) {
+        return saved_cliques;
+    }
+
+    Vector<uint64_t> active_degree(allocator);
+    active_degree.reserve(active_to_local.size());
+    for (auto local_id : active_to_local) {
+        active_degree.push_back(degree[local_id]);
+    }
+
+    Vector<uint64_t> order_to_local(allocator);
+    Vector<uint64_t> local_to_order(local_count, local_count, allocator);
+    Vector<uint8_t> removed(active_to_local.size(), 0, allocator);
+    order_to_local.reserve(active_to_local.size());
+    for (uint64_t order = 0; order < active_to_local.size(); ++order) {
+        uint64_t best = active_to_local.size();
+        uint64_t best_degree = std::numeric_limits<uint64_t>::max();
+        for (uint64_t active_id = 0; active_id < active_to_local.size(); ++active_id) {
+            const auto local_id = active_to_local[active_id];
+            if (removed[active_id] == 0 and
+                (active_degree[active_id] < best_degree or
+                 (active_degree[active_id] == best_degree and
+                  (best == active_to_local.size() or local_id < active_to_local[best])))) {
+                best = active_id;
+                best_degree = active_degree[active_id];
+            }
+        }
+        if (best == active_to_local.size()) {
+            break;
+        }
+        const auto best_local = active_to_local[best];
+        removed[best] = 1;
+        order_to_local.push_back(best_local);
+        local_to_order[best_local] = order;
+        for (uint64_t active_id = 0; active_id < active_to_local.size(); ++active_id) {
+            const auto neighbor = active_to_local[active_id];
+            if (removed[active_id] == 0 and has_local_edge(best_local, neighbor) and
+                active_degree[active_id] > 0) {
+                --active_degree[active_id];
+            }
+        }
+    }
+    if (order_to_local.size() < threshold) {
+        return saved_cliques;
+    }
+
+    const auto core_count = order_to_local.size();
+    Vector<uint8_t> core_edges(core_count * core_count, 0, allocator);
+    auto has_core_edge = [&](uint64_t lhs, uint64_t rhs) {
+        return core_edges[lhs * core_count + rhs] != 0;
+    };
+    auto set_core_edge = [&](uint64_t lhs, uint64_t rhs) {
+        core_edges[lhs * core_count + rhs] = 1;
+    };
+    Vector<uint8_t> must_contain(core_count, 0, allocator);
+    uint64_t remaining_must = 0;
+    for (uint64_t lhs = 0; lhs < local_count; ++lhs) {
+        const auto core_lhs = local_to_order[lhs];
+        if (core_lhs >= core_count) {
+            continue;
+        }
+        if (num_cliques_per_node[local_nodes[lhs]].load(std::memory_order_relaxed) == 0) {
+            must_contain[core_lhs] = 1;
+            ++remaining_must;
+        }
+        for (uint64_t rhs = lhs + 1; rhs < local_count; ++rhs) {
+            if (not has_local_edge(lhs, rhs)) {
+                continue;
+            }
+            const auto core_rhs = local_to_order[rhs];
+            if (core_rhs < core_count) {
+                set_core_edge(core_lhs, core_rhs);
+                set_core_edge(core_rhs, core_lhs);  // NOLINT(readability-suspicious-call-argument)
+            }
+        }
+    }
+    if (remaining_must == 0) {
+        return saved_cliques;
+    }
+
+    // Keep only branches that can still cover at least one node not already assigned to a clique.
+    auto state_has_must = [&](const Vector<uint64_t>& current, const Vector<uint64_t>& candidates) {
+        for (auto node : current) {
+            if (must_contain[node] != 0) {
+                return true;
+            }
+        }
+        for (auto node : candidates) {
+            if (must_contain[node] != 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Save a qualifying local clique and mark its uncovered nodes as covered for this seed.
+    auto save_clique = [&](const Vector<uint64_t>& current) {
+        if (current.size() < threshold or saved_cliques.size() >= max_saved_cliques) {
+            return false;
+        }
+        bool has_must = false;
+        for (auto node : current) {
+            if (must_contain[node] != 0) {
+                has_must = true;
+                break;
+            }
+        }
+        if (not has_must) {
+            return false;
+        }
+
+        saved_cliques.emplace_back(allocator);
+        auto& saved = saved_cliques.back();
+        saved.reserve(current.size());
+        for (auto node : current) {
+            saved.push_back(order_to_local[node]);
+            if (must_contain[node] != 0) {
+                must_contain[node] = 0;
+                --remaining_must;
+            }
+        }
+        return remaining_must == 0 or saved_cliques.size() >= max_saved_cliques;
+    };
+
+    // Bron-Kerbosch expansion with pivoting and coverage/size pruning.
+    std::function<void(Vector<uint64_t>&, Vector<uint64_t>&, Vector<uint64_t>&)> expand =
+        [&](Vector<uint64_t>& current, Vector<uint64_t>& candidates, Vector<uint64_t>& excluded) {
+            if (remaining_must == 0 or saved_cliques.size() >= max_saved_cliques) {
+                return;
+            }
+            if (current.size() + candidates.size() < threshold) {
+                return;
+            }
+            if (not state_has_must(current, candidates)) {
+                return;
+            }
+            if (candidates.empty() and excluded.empty()) {
+                save_clique(current);
+                return;
+            }
+
+            uint64_t pivot = core_count;
+            uint64_t pivot_degree = 0;
+            auto update_pivot = [&](uint64_t node) {
+                uint64_t node_degree = 0;
+                for (auto candidate : candidates) {
+                    if (has_core_edge(node, candidate)) {
+                        ++node_degree;
+                    }
+                }
+                if (pivot == core_count or node_degree > pivot_degree) {
+                    pivot = node;
+                    pivot_degree = node_degree;
+                }
+            };
+            for (auto node : candidates) {
+                update_pivot(node);
+            }
+            for (auto node : excluded) {
+                update_pivot(node);
+            }
+
+            Vector<uint64_t> branches(allocator);
+            branches.reserve(candidates.size());
+            for (auto node : candidates) {
+                if (pivot == core_count or not has_core_edge(pivot, node)) {
+                    branches.push_back(node);
+                }
+            }
+
+            for (auto node : branches) {
+                auto iter = std::find(candidates.begin(), candidates.end(), node);
+                if (iter == candidates.end()) {
+                    continue;
+                }
+
+                current.push_back(node);
+                Vector<uint64_t> next_candidates(allocator);
+                Vector<uint64_t> next_excluded(allocator);
+                next_candidates.reserve(candidates.size());
+                next_excluded.reserve(excluded.size());
+                for (auto candidate : candidates) {
+                    if (has_core_edge(node, candidate)) {
+                        next_candidates.push_back(candidate);
+                    }
+                }
+                for (auto excluded_node : excluded) {
+                    if (has_core_edge(node, excluded_node)) {
+                        next_excluded.push_back(excluded_node);
+                    }
+                }
+                expand(current, next_candidates, next_excluded);
+                current.pop_back();
+
+                iter = std::find(candidates.begin(), candidates.end(), node);
+                if (iter != candidates.end()) {
+                    candidates.erase(iter);
+                    excluded.push_back(node);
+                }
+                if (remaining_must == 0 or saved_cliques.size() >= max_saved_cliques) {
+                    return;
+                }
+            }
+        };
+
+    for (uint64_t root = 0; root < core_count; ++root) {
+        if (remaining_must == 0 or saved_cliques.size() >= max_saved_cliques) {
+            break;
+        }
+        Vector<uint64_t> current(allocator);
+        Vector<uint64_t> candidates(allocator);
+        Vector<uint64_t> excluded(allocator);
+        current.push_back(root);
+        for (uint64_t node = 0; node < core_count; ++node) {
+            if (not has_core_edge(root, node)) {
+                continue;
+            }
+            if (node > root) {
+                candidates.push_back(node);
+            } else {
+                excluded.push_back(node);
+            }
+        }
+        if (current.size() + candidates.size() < threshold) {
+            continue;
+        }
+        if (not state_has_must(current, candidates)) {
+            continue;
+        }
+        expand(current, candidates, excluded);
+    }
+    return saved_cliques;
+}
+
+}  // namespace
+
+HGraph::MCIHybridSearchResult::MCIHybridSearchResult(const HGraphSearchParameters& params,
+                                                     const FilterPtr& filter)
+    : valid_ratio(filter != nullptr ? filter->ValidRatio() : 1.0F),
+      threshold(params.mci_hgraph_valid_ratio_threshold),
+      seed_ratio(params.mci_seed_ratio) {
+}
+
+JsonType
+HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) const {
+    auto json = stats.ToJson();
+    json["mci_hybrid_route"].SetString(this->route);
+    json["mci_hybrid_valid_ratio"].SetFloat(this->valid_ratio);
+    json["mci_hybrid_threshold"].SetFloat(this->threshold);
+    json["mci_seed_count"].SetInt(static_cast<int64_t>(this->seed_count));
+    json["mci_seed_ratio"].SetFloat(this->seed_ratio);
+    json["mci_raw_float_csr"].SetBool(this->used_precise_float_csr);
+    json["mci_bitmap_fast_path"].SetBool(this->used_bitmap_fast_path);
+    json["hybrid_expanded_nodes"].SetUint64(this->hybrid_stats.expanded_nodes);
+    json["hybrid_expansion_skipped"].SetBool(this->hybrid_stats.expansion_skipped);
+    json["hybrid_seed_budget"].SetUint64(this->hybrid_seed_budget);
+    json["hybrid_seeded_entries"].SetUint64(this->hybrid_stats.seeded_entries);
+    json["hybrid_sparse_neighbors_visited"].SetUint64(this->hybrid_stats.sparse_neighbors_visited);
+    json["hybrid_mci_members_considered"].SetUint64(this->hybrid_stats.mci_members_considered);
+    json["hybrid_mci_members_satisfied"].SetUint64(this->hybrid_stats.mci_members_satisfied);
+    json["hybrid_mci_cliques_expanded"].SetUint64(this->hybrid_stats.mci_cliques_expanded);
+    json["hybrid_dist_computations"].SetUint64(this->hybrid_stats.dist_computations);
+    json["hybrid_mci_stopped_early"].SetBool(this->hybrid_stats.mci_stopped_early);
+    return json;
+}
+
+HGraph::MCIHybridSearchResult
+HGraph::try_mci_search(const SearchRequest& request,
+                       const HGraphSearchParameters& params,
+                       const FilterPtr& inner_filter,
+                       const void* query,
+                       const InnerSearchParam& search_param,
+                       QueryContext* ctx) const {
+    MCIHybridSearchResult result(params, inner_filter);
+    const bool bitset_seed_source = has_bitset_source(request.filter_);
+    const bool can_use_mci = params.use_mci and this->mci_parameters_.enabled and
+                             search_param.executors.empty() and
+                             (has_valid_id_source(request.filter_) or bitset_seed_source) and
+                             this->mci_cliques_ != nullptr and
+                             this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
+    if (not can_use_mci) {
+        return result;
+    }
+
+    result.route = "hgraph";
+    if (request.mode_ == SearchMode::RANGE_SEARCH or result.valid_ratio >= result.threshold) {
+        return result;
+    }
+
+    MCISearcherParam mci_param;
+    const auto total_count = this->total_count_.load();
+    const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
+                                             static_cast<double>(params.mci_seed_ratio));
+    mci_param.seed_count = scaled_seed_count >= static_cast<double>(total_count)
+                               ? total_count
+                               : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
+    mci_param.hops_limit = search_param.hops_limit;
+    mci_param.packed_filter = params.mci_packed_filter;
+    mci_param.revalidate_predicate =
+        not params.search_no_lock and not this->immutable_.load(std::memory_order_acquire);
+    mci_param.batch_distance = params.mci_batch_distance;
+    mci_param.activation_cap = params.mci_activation_cap;
+    mci_param.depth_limit = params.mci_hops_limit;
+    mci_param.expansion_idle_window = params.mci_expansion_idle_window;
+
+    bool exhaustive_seeds = false;
+    auto seed_inner_ids = this->collect_hybrid_seeds(
+        request, inner_filter, params, total_count, nullptr, &exhaustive_seeds, ctx->alloc);
+    MCIValidIdScratch valid_inner_ids;
+    {
+        // Both seed collection and GetValidBitmap() read the label table: seed collection maps valid
+        // labels to inner ids, and InnerIdWrapperFilter only exposes a bitmap when the labels are the
+        // inner ids. Label mutations take this mutex exclusively, so they have to be excluded while
+        // those reads happen. The lock is taken before persistent_codes_mutex_ below, which keeps the
+        // lock order this function and the index already use.
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+        // A deletion CombinedFilter hides the user's bitmap. Obtain it through the label wrapper
+        // directly, retaining its identity-mapping check; the pinned deletion filter below remains
+        // an independent constraint. Extra-info filters do not use the label/inner-id bitmap space.
+        if (request.filter_ != nullptr and
+            not(params.use_extra_info_filter and this->extra_infos_ != nullptr)) {
+            InnerIdWrapperFilter bitmap_filter(request.filter_, *this->label_table_);
+            uint64_t bitmap_size = 0;
+            const auto* bitmap = bitmap_filter.GetValidBitmap(&bitmap_size);
+            if (bitmap != nullptr and bitmap_size >= total_count) {
+                mci_param.valid_bitmap = bitmap;
+                mci_param.valid_bitmap_size = bitmap_size;
+                mci_param.used_bitmap_fast_path = &result.used_bitmap_fast_path;
+            }
+        }
+    }
+    if (params.mci_packed_filter and not bitset_seed_source and not params.use_extra_info_filter and
+        not exhaustive_seeds and not seed_inner_ids.empty() and params.mci_hops_limit > 1) {
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+        collect_mci_valid_inner_ids(request.filter_, this->label_table_, valid_inner_ids.ids);
+        mci_param.valid_inner_ids = valid_inner_ids.ids.data();
+        mci_param.valid_inner_count = valid_inner_ids.ids.size();
+    }
+    result.seed_count = seed_inner_ids.size();
+    mci_param.seed_count = result.seed_count;
+    mci_param.enumerated_valid_count = exhaustive_seeds ? result.seed_count : 0;
+    mci_param.seed_inner_ids = &seed_inner_ids;
+    if (seed_inner_ids.empty()) {
+        return result;
+    }
+
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+    auto precise_flatten = this->get_precise_codes();
+    if (precise_flatten != nullptr) {
+        uint64_t precise_vector_stride = 0;
+        mci_param.precise_vectors =
+            precise_flatten->TryGetContiguousRawFloatData(&precise_vector_stride);
+        mci_param.dim = this->dim_;
+        mci_param.precise_vector_stride = precise_vector_stride;
+        mci_param.metric = this->metric_;
+        mci_param.used_precise_float_csr = &result.used_precise_float_csr;
+    }
+    // Keep the deletion set stable throughout traversal; no per-visited-node reader lock.
+    // This is acquired after seed label lookup and released before result label conversion.
+    auto query_filter = std::make_shared<CombinedFilter>();
+    if (params.use_extra_info_filter and this->extra_infos_ != nullptr) {
+        query_filter->AppendFilter(
+            std::make_shared<ExtraInfoWrapperFilter>(request.filter_, this->extra_infos_));
+    } else {
+        query_filter->AppendFilter(
+            std::make_shared<InnerIdWrapperFilter>(request.filter_, *this->label_table_));
+    }
+    mci_param.deleted_ids_filter = this->label_table_->GetDeletedIdsReadView();
+    query_filter->AppendFilter(mci_param.deleted_ids_filter);
+    auto mci_search_param = search_param;
+    mci_search_param.is_inner_id_allowed = query_filter;
+    result.result = this->mci_searcher_->Search(
+        this->mci_cliques_, precise_flatten, query, mci_search_param, mci_param, ctx);
+    if (result.result == nullptr or result.result->Empty()) {
+        // A concurrent mutation may have unpublished the companion before the view was pinned.
+        return result;
+    }
+    result.route = "mci";
+    return result;
+}
+
+Vector<InnerIdType>
+HGraph::collect_hybrid_seeds(const SearchRequest& request,
+                             const FilterPtr& inner_filter,
+                             const HGraphSearchParameters& params,
+                             uint64_t total_count,
+                             uint64_t* seed_budget_out,
+                             bool* seeds_are_exhaustive_out,
+                             Allocator* alloc) const {
+    Vector<InnerIdType> seeds(alloc);
+    if (seed_budget_out != nullptr) {
+        *seed_budget_out = 0;
+    }
+    if (seeds_are_exhaustive_out != nullptr) {
+        *seeds_are_exhaustive_out = false;
+    }
+    // total_count is the caller's snapshot of the index size. Using it instead of loading
+    // total_count_ a second time keeps this budget, the caller's non-empty guard and the
+    // companion availability check on one count even when an Add lands mid-search.
+    if (total_count == 0) {
+        return seeds;
+    }
+
+    // Seed budget, identical to the two-route MCI seeding so that the seed strategy cannot
+    // confound a comparison between the two: the sqrt term is the floor, and the
+    // coverage term raises it to (a fraction of) the valid set only when that target fits
+    // into mci_seed_max_count and does not exceed N. A target that misses the cap is
+    // dropped entirely rather than truncated, so a wide filter never turns into a scan.
+    const auto scaled_seed_count = std::ceil(std::sqrt(static_cast<double>(total_count)) *
+                                             static_cast<double>(params.mci_seed_ratio));
+    uint64_t seed_budget = scaled_seed_count >= static_cast<double>(total_count)
+                               ? total_count
+                               : std::max<uint64_t>(1, static_cast<uint64_t>(scaled_seed_count));
+    // Detection needs the concrete filter type: inner_filter may already be wrapped (for
+    // example by InnerIdWrapperFilter) and would no longer cast to BlackListFilter. The
+    // sampler below instead needs that wrapper, because it probes ids through CheckValid()
+    // and therefore requires an inner-id-indexed view. try_mci_search splits them the same way.
+    const bool bitset_seed_source = has_bitset_source(request.filter_);
+    if (params.mci_seed_coverage > 0.0F and not bitset_seed_source and request.filter_ != nullptr) {
+        const int64_t* valid_labels = nullptr;
+        int64_t valid_label_count = 0;
+        request.filter_->GetValidIds(&valid_labels, valid_label_count);
+        if (valid_label_count > 0) {
+            const auto covered = std::ceil(static_cast<double>(params.mci_seed_coverage) *
+                                           static_cast<double>(valid_label_count));
+            const bool fits_cap = params.mci_seed_max_count == 0 or
+                                  covered <= static_cast<double>(params.mci_seed_max_count);
+            // Oversized coverage is ignored, not clamped. Check it while still floating
+            // point, before converting a potentially unrepresentable target to uint64_t.
+            if (covered <= static_cast<double>(total_count) and fits_cap and
+                covered < static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+                seed_budget = std::max(seed_budget, static_cast<uint64_t>(covered));
+            }
+        }
+    }
+    if (seed_budget_out != nullptr) {
+        *seed_budget_out = seed_budget;
+    }
+    if (seed_budget == 0) {
+        return seeds;
+    }
+
+    // Both samplers read the label table: id-based sampling maps labels to inner ids, and
+    // the bitmap sampler relies on the filter being indexed by inner id. Label mutations
+    // take label_lookup_mutex_ exclusively, so exclude them while those reads happen.
+    auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+    if (bitset_seed_source) {
+        // The bitset sampler strides over the id space and stops at the budget, so it cannot
+        // prove exhaustiveness here. Reporting false only forgoes the skip, never correctness.
+        seeds = collect_bitset_seed_inner_ids(inner_filter, total_count, seed_budget, alloc);
+    } else {
+        seeds = collect_seed_inner_ids(
+            request.filter_, this->label_table_, seed_budget, alloc, seeds_are_exhaustive_out);
+    }
+    return seeds;
+}
+
+// Build the MCI KNN candidate graph from an external KNNG file when available. Otherwise, search
+// the completed HGraph once per vector and materialize the returned inner ids into fixed-width
+// rows. SearchFn receives the query inner id and worker id so callers can reuse per-worker buffers.
+template <typename SearchFn>
+MCIKNNGraph
+build_mci_knn_graph(uint64_t total,
+                    uint64_t mcs,
+                    const std::string& knng_path,
+                    uint64_t thread_count,
+                    Allocator* allocator,
+                    SearchFn&& search_neighbors) {
+    MCIKNNGraph graph(allocator);
+    graph.total = total;
+    if (total <= 1) {
+        return graph;
+    }
+
+    const auto candidate_limit = std::min<uint64_t>(mcs, total - 1);
+    if (not knng_path.empty()) {
+        std::ifstream input(knng_path, std::ios::binary | std::ios::ate);
+        CHECK_ARGUMENT(input.good(), fmt::format("failed to open knng file: {}", knng_path));
+        const auto file_size = static_cast<uint64_t>(input.tellg());
+        CHECK_ARGUMENT(file_size > 0, fmt::format("knng file is empty: {}", knng_path));
+        CHECK_ARGUMENT(file_size % sizeof(InnerIdType) == 0,
+                       fmt::format("invalid knng file size: {}", knng_path));
+        const auto entry_count = file_size / sizeof(InnerIdType);
+        CHECK_ARGUMENT(entry_count % total == 0,
+                       fmt::format("knng entries are not divisible by total count: {}", knng_path));
+        const auto file_degree = entry_count / total;
+        CHECK_ARGUMENT(file_degree > 0, fmt::format("knng degree is zero: {}", knng_path));
+        logger::info(
+            "hgraph mci external knng load started, total={}, file_degree={}, "
+            "candidate_limit={}, path={}",
+            total,
+            file_degree,
+            candidate_limit,
+            knng_path);
+
+        graph.row_stride = file_degree;
+        graph.uniform_count = std::min<uint64_t>(file_degree, candidate_limit);
+        graph.AllocateRawNeighbors(entry_count);
+        input.seekg(0, std::ios::beg);
+        input.read(reinterpret_cast<char*>(graph.raw_neighbors),
+                   static_cast<std::streamsize>(file_size));
+        CHECK_ARGUMENT(input.good(), fmt::format("failed to read knng file: {}", knng_path));
+        logger::info("hgraph mci external knng load finished, total={}, path={}", total, knng_path);
+        return graph;
+    }
+
+    graph.row_stride = candidate_limit;
+    graph.neighbors.assign(total * candidate_limit, total);
+    graph.counts.assign(total, 0);
+
+    const auto worker_count = std::max<uint64_t>(1, std::min(thread_count, total));
+    std::atomic<uint64_t> next_inner_id{0};
+    std::vector<std::future<void>> workers;
+    workers.reserve(worker_count);
+    logger::info("hgraph mci knn graph search started, total={}, candidate_count={}, threads={}",
+                 total,
+                 candidate_limit,
+                 worker_count);
+    for (uint64_t worker_id = 0; worker_id < worker_count; ++worker_id) {
+        workers.emplace_back(std::async(std::launch::async, [&, worker_id]() {
+            while (true) {
+                const auto raw_inner_id = next_inner_id.fetch_add(1, std::memory_order_relaxed);
+                if (raw_inner_id >= total) {
+                    break;
+                }
+                const auto inner_id = static_cast<InnerIdType>(raw_inner_id);
+                const auto neighbors = search_neighbors(inner_id, worker_id);
+                auto* row = graph.neighbors.data() + raw_inner_id * graph.row_stride;
+                uint64_t count = 0;
+                for (const auto neighbor : neighbors) {
+                    if (neighbor >= total or neighbor == inner_id or count >= candidate_limit) {
+                        continue;
+                    }
+                    if (std::find(row, row + count, neighbor) != row + count) {
+                        continue;
+                    }
+                    row[count++] = neighbor;
+                }
+                graph.counts[inner_id] = static_cast<uint32_t>(count);
+            }
+        }));
+    }
+    for (auto& worker : workers) {
+        worker.get();
+    }
+    logger::info("hgraph mci knn graph search finished, total={}", total);
+    return graph;
+}
+
+// Build the MCI KNN candidate graph with a dedicated ODescent graph.
+MCIKNNGraph
+build_mci_knn_graph_by_odescent(const FlattenInterfacePtr& build_codes,
+                                uint64_t total,
+                                uint64_t mcs,
+                                float alpha,
+                                MetricType metric,
+                                DataTypes data_type,
+                                int64_t dim,
+                                int64_t extra_info_size,
+                                const std::shared_ptr<SafeThreadPool>& thread_pool,
+                                Allocator* allocator) {
+    MCIKNNGraph graph(allocator);
+    graph.total = total;
+    if (total <= 1) {
+        return graph;
+    }
+
+    const auto candidate_limit = std::min<uint64_t>(mcs, total - 1);
+    auto graph_param = std::make_shared<SparseGraphDatacellParameter>();
+    graph_param->max_degree_ = candidate_limit;
+    graph_param->support_delete_ = false;
+    graph.row_stride = candidate_limit;
+    graph.neighbors.assign(total * candidate_limit, total);
+    graph.counts.assign(total, 0);
+
+    IndexCommonParam graph_common_param;
+    graph_common_param.metric_ = metric;
+    graph_common_param.data_type_ = data_type;
+    graph_common_param.dim_ = dim;
+    graph_common_param.extra_info_size_ = extra_info_size;
+    graph_common_param.thread_pool_ = thread_pool;
+    graph_common_param.allocator_ = std::shared_ptr<Allocator>(allocator, [](Allocator*) {});
+    auto graph_storage = GraphInterface::MakeInstance(graph_param, graph_common_param);
+
+    auto odescent_param = std::make_shared<ODescentParameter>();
+    odescent_param->max_degree = static_cast<int64_t>(candidate_limit);
+    odescent_param->alpha = alpha;
+    odescent_param->sample_rate = 0.2F;
+    odescent_param->turn = 30;
+    odescent_param->min_in_degree = 1;
+    ODescent odescent_builder(odescent_param, build_codes, allocator, thread_pool.get());
+    odescent_builder.Build();
+    odescent_builder.SaveGraph(graph_storage);
+
+    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
+        Vector<InnerIdType> neighbors(allocator);
+        graph_storage->GetNeighbors(inner_id, neighbors);
+        std::sort(neighbors.begin(), neighbors.end());
+        neighbors.erase(std::unique(neighbors.begin(), neighbors.end()), neighbors.end());
+        const auto count = std::min<uint64_t>(neighbors.size(), candidate_limit);
+        graph.counts[inner_id] = static_cast<uint32_t>(count);
+        auto* row = graph.neighbors.data() + static_cast<uint64_t>(inner_id) * graph.row_stride;
+        std::copy_n(neighbors.data(), count, row);
+    }
+    return graph;
+}
+
+// Convert selected cliques into the compact clique-member and node-to-clique layout.
+void
+// NOLINTNEXTLINE(readability-identifier-naming)
+AssignMCICliquesToDatacell(CliqueDataCellPtr& mci_cliques,
+                           Vector<Vector<InnerIdType>>& cliques,
+                           uint64_t total,
+                           Allocator* allocator,
+                           const MCIGraphView* activation_graph = nullptr,
+                           uint64_t thread_count = 1) {
+    Vector<InnerIdType> p_maxc(allocator);
+    Vector<InnerIdType> maxcs(allocator);
+    Vector<Vector<InnerIdType>> node_to_clique(total, Vector<InnerIdType>(allocator), allocator);
+    p_maxc.push_back(0);
+    for (InnerIdType clique_id = 0; clique_id < cliques.size(); ++clique_id) {
+        for (auto inner_id : cliques[clique_id]) {
+            maxcs.push_back(inner_id);
+            node_to_clique[inner_id].push_back(clique_id);
+        }
+        p_maxc.push_back(static_cast<InnerIdType>(maxcs.size()));
+    }
+
+    // Increasing clique IDs already give ascending rows. Normalize before ranking so
+    // both default and ranked builds retain one incidence per (node, clique) pair.
+    for (auto& ids : node_to_clique) {
+        ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    }
+    if (activation_graph != nullptr) {
+        rank_mci_clique_activation(*activation_graph, cliques, node_to_clique, thread_count);
+    }
+    Vector<InnerIdType> p_node_to_cid(allocator);
+    Vector<InnerIdType> node_to_cids(allocator);
+    p_node_to_cid.push_back(0);
+    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
+        auto& ids = node_to_clique[inner_id];
+        // Rows are already unique (one incidence per clique); keep their activation order.
+        node_to_cids.insert(node_to_cids.end(), ids.begin(), ids.end());
+        p_node_to_cid.push_back(static_cast<InnerIdType>(node_to_cids.size()));
+    }
+
+    mci_cliques->Assign(std::move(p_maxc),
+                        std::move(maxcs),
+                        std::move(p_node_to_cid),
+                        std::move(node_to_cids),
+                        total);
+}
+
+// Build or rebuild the full MCI companion clique index for the current HGraph contents.
+void
+HGraph::build_mci_clique_index(const void* vectors) {
+    if (not mci_parameters_.enabled or mci_cliques_ == nullptr) {
+        return;
+    }
+    std::scoped_lock build_lock(this->mci_build_mutex_);
+    this->mci_pending_mutations_ = 0;
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+
+    const auto total = this->total_count_.load();
+    if (total == 0) {
+        mci_cliques_->Clear(0);
+        this->cal_memory_usage();
+        return;
+    }
+
+    logger::info("hgraph mci knn graph build started, total={}, mcs={}, source={}, knng_path={}",
+                 total,
+                 mci_parameters_.mcs,
+                 mci_parameters_.knng_source,
+                 mci_parameters_.knng_path);
+    const auto precise_codes = this->get_precise_codes();
+    CHECK_ARGUMENT(precise_codes != nullptr, "hgraph mci requires available vector codes");
+    const bool use_hgraph_knng = mci_parameters_.knng_path.empty() and
+                                 mci_parameters_.knng_source == HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
+    const auto worker_count = std::max<uint64_t>(
+        1, std::min<uint64_t>(static_cast<uint64_t>(this->build_thread_count_), total));
+    Vector<Vector<float>> decoded_queries(this->allocator_);
+    const float* contiguous_vectors = nullptr;
+    uint64_t contiguous_stride = 0;
+    if (use_hgraph_knng) {
+        if (vectors == nullptr) {
+            CHECK_ARGUMENT(this->data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                           "hgraph mci requires source vectors for non-float input");
+            contiguous_vectors = precise_codes->TryGetContiguousRawFloatData(&contiguous_stride);
+            if (contiguous_vectors == nullptr or contiguous_stride != this->dim_) {
+                contiguous_vectors = nullptr;
+                decoded_queries.reserve(worker_count);
+                for (uint64_t worker_id = 0; worker_id < worker_count; ++worker_id) {
+                    decoded_queries.emplace_back(this->dim_, 0.0F, this->allocator_);
+                }
+            }
+        }
+    }
+    auto search_neighbors = [&](InnerIdType inner_id, uint64_t worker_id) {
+        const void* query = nullptr;
+        if (vectors != nullptr) {
+            if (this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+                query = static_cast<const float*>(vectors) +
+                        static_cast<uint64_t>(inner_id) * this->dim_;
+            } else if (this->data_type_ == DataTypes::DATA_TYPE_INT8) {
+                query = static_cast<const int8_t*>(vectors) +
+                        static_cast<uint64_t>(inner_id) * this->dim_;
+            } else if (this->data_type_ == DataTypes::DATA_TYPE_FP16 or
+                       this->data_type_ == DataTypes::DATA_TYPE_BF16) {
+                query = static_cast<const uint16_t*>(vectors) +
+                        static_cast<uint64_t>(inner_id) * this->dim_;
+            } else if (this->data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+                query = static_cast<const SparseVector*>(vectors) + inner_id;
+            }
+        } else if (contiguous_vectors != nullptr) {
+            query = contiguous_vectors + static_cast<uint64_t>(inner_id) * contiguous_stride;
+        } else {
+            auto codes = precise_codes->AcquireCodesById(inner_id);
+            CHECK_ARGUMENT(codes, "failed to read hgraph mci query vector");
+            const auto decoded =
+                precise_codes->Decode(codes.Data(), decoded_queries[worker_id].data());
+            CHECK_ARGUMENT(decoded, "failed to decode hgraph mci query vector");
+            query = decoded_queries[worker_id].data();
+        }
+        CHECK_ARGUMENT(query != nullptr, "failed to prepare hgraph mci query vector");
+        return this->search_mci_knn(inner_id, query, total);
+    };
+    MCIKNNGraph graph(this->allocator_);
+    if (this->mci_parameters_.knng_path.empty() and
+        this->mci_parameters_.knng_source == HGRAPH_MCI_KNNG_SOURCE_ODESCENT) {
+        graph = build_mci_knn_graph_by_odescent(this->basic_flatten_codes_,
+                                                total,
+                                                this->mci_parameters_.mcs,
+                                                this->mci_parameters_.alpha,
+                                                this->metric_,
+                                                this->data_type_,
+                                                this->dim_,
+                                                static_cast<int64_t>(this->extra_info_size_),
+                                                this->thread_pool_,
+                                                this->allocator_);
+    } else {
+        graph = build_mci_knn_graph(total,
+                                    this->mci_parameters_.mcs,
+                                    this->mci_parameters_.knng_path,
+                                    worker_count,
+                                    this->allocator_,
+                                    search_neighbors);
+    }
+    logger::info("hgraph mci knn graph build finished, total={}, row_stride={}, candidate_count={}",
+                 total,
+                 graph.row_stride,
+                 graph.uniform_count);
+    // Fast float32 path delegates clique construction to the dedicated MCI builder. Prefer
+    // persistent codes because their rows always follow assigned inner IDs, including builds that
+    // skipped duplicate labels in the input batch.
+    const float* float_vectors = this->data_type_ == DataTypes::DATA_TYPE_FLOAT
+                                     ? static_cast<const float*>(vectors)
+                                     : nullptr;
+    uint64_t persistent_stride = 0;
+    if (this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+        const auto* const persistent_vectors =
+            precise_codes->TryGetContiguousRawFloatData(&persistent_stride);
+        if (persistent_vectors != nullptr and persistent_stride == this->dim_) {
+            float_vectors = persistent_vectors;
+        }
+    }
+    if (float_vectors != nullptr) {
+        const auto graph_max_degree =
+            this->bottom_graph_ == nullptr ? 32U : this->bottom_graph_->MaximumDegree();
+        const auto* graph_neighbors =
+            graph.raw_neighbors != nullptr ? graph.raw_neighbors : graph.neighbors.data();
+        MCIGraphView graph_view;
+        graph_view.neighbors = graph_neighbors;
+        graph_view.counts = graph.counts.empty() ? nullptr : graph.counts.data();
+        graph_view.total = graph.total;
+        graph_view.row_stride = graph.row_stride;
+        graph_view.uniform_count = graph.uniform_count;
+        MCIV3BuildParams build_params;
+        build_params.total = total;
+        build_params.dim = this->dim_;
+        build_params.candidate_limit = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
+        build_params.clique_max = this->mci_parameters_.clique_max;
+        build_params.max_degree = graph_max_degree;
+        build_params.alpha = this->mci_parameters_.alpha;
+        build_params.thread_count = static_cast<uint64_t>(this->build_thread_count_);
+        build_params.metric = this->metric_;
+        auto cliques = BuildMCICliques(float_vectors, graph_view, build_params, this->allocator_);
+        AssignMCICliquesToDatacell(
+            this->mci_cliques_,
+            cliques,
+            total,
+            this->allocator_,
+            this->mci_parameters_.clique_activation_order ? &graph_view : nullptr,
+            worker_count);
+        logger::info("hgraph mci v3 clique build finished, total_cliques={}", cliques.size());
+        this->cal_memory_usage();
+        return;
+    }
+
+    // Generic path for quantized or non-float data: enumerate cliques from local seed graphs.
+    logger::info("hgraph mci clique enumeration started, total={}", total);
+    Vector<Vector<InnerIdType>> cliques(this->allocator_);
+    // C++17 atomic default construction does not initialize the counter values.
+    std::vector<std::atomic<uint32_t>> num_cliques_per_node(total);
+    for (auto& count : num_cliques_per_node) {
+        count.store(0, std::memory_order_relaxed);
+    }
+
+    auto get_clique_count = [&](InnerIdType inner_id) {
+        return num_cliques_per_node[inner_id].load(std::memory_order_relaxed);
+    };
+
+    auto normalize_clique = [&](const Vector<InnerIdType>& clique) {
+        Vector<InnerIdType> normalized(this->allocator_);
+        if (clique.empty()) {
+            return normalized;
+        }
+        const auto anchor = clique.front();
+        normalized.assign(clique.begin(), clique.end());
+        std::sort(normalized.begin(), normalized.end());
+        normalized.erase(std::unique(normalized.begin(), normalized.end()), normalized.end());
+        // mci_clique_max is a minimum size, not a storage cap: the maximal clique enumerated for
+        // this seed is kept in full. Its size cannot exceed the candidate pool (mcs neighbours plus
+        // the seed), so this bound only rejects an inconsistent result.
+        const auto clique_cap = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1) + 1;
+        if (normalized.size() > clique_cap) {
+            normalized.resize(clique_cap);
+            if (std::find(normalized.begin(), normalized.end(), anchor) == normalized.end()) {
+                normalized.back() = anchor;
+            }
+        }
+        return normalized;
+    };
+
+    // Append a selected clique to the final output list.
+    auto append_selected_clique = [&](const Vector<InnerIdType>& clique) {
+        if (clique.empty()) {
+            return;
+        }
+        cliques.emplace_back(this->allocator_);
+        cliques.back().assign(clique.begin(), clique.end());
+    };
+
+    // Accept a clique only if it covers at least one previously uncovered node.
+    auto try_select_clique = [&](const Vector<InnerIdType>& clique,
+                                 Vector<Vector<InnerIdType>>& output) {
+        auto normalized = normalize_clique(clique);
+        if (normalized.empty()) {
+            return false;
+        }
+        bool has_uncovered = false;
+        for (auto inner_id : normalized) {
+            if (get_clique_count(inner_id) == 0) {
+                has_uncovered = true;
+                break;
+            }
+        }
+        if (not has_uncovered) {
+            return false;
+        }
+        for (auto inner_id : normalized) {
+            num_cliques_per_node[inner_id].fetch_add(1, std::memory_order_relaxed);
+        }
+        output.push_back(std::move(normalized));
+        return true;
+    };
+
+    const auto candidate_limit = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
+    // Same meaning as in the float path (mci_builder.cpp): mci_clique_max is the minimum size of a
+    // clique the enumeration has to report, so it stays meaningful for quantized data too.
+    const auto clique_min = std::min<uint64_t>(
+        {std::max<uint64_t>(K_MCI_MIN_CLIQUE_SIZE, this->mci_parameters_.clique_max),
+         candidate_limit + 1,
+         total});
+    const auto node_clique_limit = std::max<uint32_t>(3, static_cast<uint32_t>(total / 100));
+    const auto graph_max_degree =
+        this->bottom_graph_ == nullptr ? 32U : this->bottom_graph_->MaximumDegree();
+    const auto max_saved_per_seed =
+        std::min<uint64_t>(candidate_limit, static_cast<uint64_t>(graph_max_degree + 2));
+
+    // Collect one seed's candidate neighborhood and sort neighbors by distance from the seed.
+    auto collect_candidates = [&](InnerIdType seed,
+                                  Vector<InnerIdType>& local_nodes,
+                                  Vector<float>& seed_distances) {
+        local_nodes.clear();
+        seed_distances.clear();
+        local_nodes.push_back(seed);
+        seed_distances.push_back(0.0F);
+        graph.ForEachNeighbor(seed, [&](InnerIdType neighbor) {
+            if (get_clique_count(neighbor) >= node_clique_limit) {
+                return true;
+            }
+            if (std::find(local_nodes.begin(), local_nodes.end(), neighbor) != local_nodes.end()) {
+                return true;
+            }
+            local_nodes.push_back(neighbor);
+            seed_distances.push_back(precise_codes->ComputePairVectors(seed, neighbor));
+            return local_nodes.size() <= candidate_limit;
+        });
+        Vector<uint64_t> order(this->allocator_);
+        order.reserve(local_nodes.size() - 1);
+        for (uint64_t i = 1; i < local_nodes.size(); ++i) {
+            order.push_back(i);
+        }
+        std::sort(order.begin(), order.end(), [&](uint64_t lhs, uint64_t rhs) {
+            if (seed_distances[lhs] != seed_distances[rhs]) {
+                return seed_distances[lhs] < seed_distances[rhs];
+            }
+            return local_nodes[lhs] < local_nodes[rhs];
+        });
+        Vector<InnerIdType> sorted_nodes(this->allocator_);
+        Vector<float> sorted_distances(this->allocator_);
+        sorted_nodes.reserve(local_nodes.size());
+        sorted_distances.reserve(seed_distances.size());
+        sorted_nodes.push_back(seed);
+        sorted_distances.push_back(0.0F);
+        for (auto idx : order) {
+            sorted_nodes.push_back(local_nodes[idx]);
+            sorted_distances.push_back(seed_distances[idx]);
+        }
+        local_nodes.swap(sorted_nodes);
+        seed_distances.swap(sorted_distances);
+    };
+
+    // Materialize the seed-local adjacency matrix using the alpha-scaled distance limit.
+    auto build_local_edges = [&](float now_alpha,
+                                 Vector<InnerIdType>& local_nodes,
+                                 Vector<float>& seed_distances,
+                                 Vector<uint8_t>& local_edges) {
+        const auto local_count = local_nodes.size();
+        local_edges.assign(local_count * local_count, 0);
+        auto set_local_edge = [&](uint64_t lhs, uint64_t rhs) {
+            local_edges[lhs * local_count + rhs] = 1;
+        };
+        uint64_t edge_count = 0;
+        if (local_nodes.size() <= 1) {
+            return edge_count;
+        }
+        const auto distance_limit =
+            ExpandMCIDistanceLimit(seed_distances[1], now_alpha, this->metric_);
+        for (uint64_t i = 1; i < local_nodes.size(); ++i) {
+            if (seed_distances[i] <= distance_limit) {
+                set_local_edge(0, i);
+                set_local_edge(i, 0);
+                ++edge_count;
+            }
+        }
+        for (uint64_t i = 1; i < local_nodes.size(); ++i) {
+            for (uint64_t j = i + 1; j < local_nodes.size(); ++j) {
+                if (precise_codes->ComputePairVectors(local_nodes[i], local_nodes[j]) <=
+                    distance_limit) {
+                    set_local_edge(i, j);
+                    set_local_edge(j, i);
+                    ++edge_count;
+                }
+            }
+        }
+        return edge_count;
+    };
+
+    // At very high alpha, emit a simple fallback clique so the build continues making progress.
+    auto append_high_alpha_fallback = [&](float now_alpha,
+                                          const Vector<InnerIdType>& local_nodes,
+                                          Vector<Vector<InnerIdType>>& output) {
+        if (now_alpha <= 100.0F or local_nodes.empty()) {
+            return false;
+        }
+        Vector<InnerIdType> fallback(this->allocator_);
+        fallback.reserve(local_nodes.size());
+        fallback.push_back(local_nodes.front());
+        for (uint64_t i = 1; i < local_nodes.size(); ++i) {
+            if (get_clique_count(local_nodes[i]) > 0) {
+                fallback.push_back(local_nodes[i]);
+            }
+        }
+        return try_select_clique(fallback, output);
+    };
+
+    // Process a single seed through candidate collection, local edge construction, and clique save.
+    auto solve_seed = [&](InnerIdType seed,
+                          float now_alpha,
+                          Vector<Vector<InnerIdType>>& output,
+                          Vector<InnerIdType>& local_nodes,
+                          Vector<float>& seed_distances,
+                          Vector<uint8_t>& local_edges) {
+        collect_candidates(seed, local_nodes, seed_distances);
+        if (local_nodes.size() < clique_min) {
+            append_high_alpha_fallback(now_alpha, local_nodes, output);
+            return;
+        }
+        const auto edge_count =
+            build_local_edges(now_alpha, local_nodes, seed_distances, local_edges);
+        if (edge_count < clique_min * (clique_min - 1) / 2) {
+            append_high_alpha_fallback(now_alpha, local_nodes, output);
+            return;
+        }
+        auto local_cliques = run_local_ccr_mce(local_nodes,
+                                               local_edges,
+                                               num_cliques_per_node,
+                                               clique_min,
+                                               max_saved_per_seed,
+                                               this->allocator_);
+        if (local_cliques.empty()) {
+            append_high_alpha_fallback(now_alpha, local_nodes, output);
+            return;
+        }
+
+        uint64_t selected = 0;
+        for (const auto& local_clique : local_cliques) {
+            Vector<InnerIdType> clique(this->allocator_);
+            clique.reserve(local_clique.size());
+            for (auto local_id : local_clique) {
+                clique.push_back(local_nodes[local_id]);
+            }
+            bool has_uncovered = false;
+            for (auto node : clique) {
+                if (get_clique_count(node) == 0) {
+                    has_uncovered = true;
+                    break;
+                }
+            }
+            if (has_uncovered and try_select_clique(clique, output)) {
+                if (++selected >= graph_max_degree) {
+                    break;
+                }
+            }
+        }
+    };
+
+    // Log coarse progress within a long MCI build round.
+    auto log_round_progress =
+        [&](uint64_t round_id, float now_alpha, uint64_t scanned, uint64_t& next_progress_percent) {
+            while (next_progress_percent <= 100 and
+                   scanned * 100 >= total * next_progress_percent) {
+                logger::info(
+                    "hgraph_mci_build_round_progress round={} alpha={} scanned={} total={} "
+                    "progress={}%",
+                    round_id,
+                    now_alpha,
+                    scanned,
+                    total,
+                    next_progress_percent);
+                next_progress_percent += 10;
+            }
+        };
+
+    // Single-threaded round executor used directly or as a fallback.
+    auto solve_serial_round = [&](uint64_t round_id, float now_alpha) {
+        Vector<InnerIdType> local_nodes(this->allocator_);
+        Vector<float> seed_distances(this->allocator_);
+        Vector<uint8_t> local_edges(this->allocator_);
+        Vector<Vector<InnerIdType>> seed_cliques(this->allocator_);
+        uint64_t next_progress_percent = 10;
+        for (InnerIdType seed = 0; seed < total; ++seed) {
+            if (get_clique_count(seed) != 0) {
+                log_round_progress(round_id, now_alpha, seed + 1, next_progress_percent);
+                continue;
+            }
+            seed_cliques.clear();
+            solve_seed(seed, now_alpha, seed_cliques, local_nodes, seed_distances, local_edges);
+            for (const auto& clique : seed_cliques) {
+                append_selected_clique(clique);
+            }
+            log_round_progress(round_id, now_alpha, seed + 1, next_progress_percent);
+        }
+    };
+
+    // Parallel round executor: batch uncovered seeds, solve them in workers, then merge results.
+    auto solve_parallel_round = [&](uint64_t round_id, float now_alpha) {
+        if (this->thread_pool_ == nullptr or this->build_thread_count_ <= 1 or
+            this->thread_pool_->IsCurrentThread()) {
+            solve_serial_round(round_id, now_alpha);
+            return;
+        }
+
+        const auto thread_count = this->build_thread_count_;
+        const auto batch_seed_limit = std::max<uint64_t>(thread_count, thread_count * 1024);
+        constexpr uint64_t seed_grain = 32;
+        Vector<InnerIdType> batch_seeds(this->allocator_);
+        batch_seeds.reserve(batch_seed_limit);
+
+        std::vector<Vector<Vector<InnerIdType>>> thread_cliques;
+        thread_cliques.reserve(thread_count);
+        for (uint64_t thread_id = 0; thread_id < thread_count; ++thread_id) {
+            thread_cliques.emplace_back(this->allocator_);
+        }
+
+        // Keep per-worker scratch buffers local to reduce allocation churn and data sharing.
+        auto worker = [&](uint64_t thread_id,
+                          const Vector<InnerIdType>& seeds,
+                          std::atomic<uint64_t>& seed_cursor) {
+            Vector<InnerIdType> local_nodes(this->allocator_);
+            Vector<float> seed_distances(this->allocator_);
+            Vector<uint8_t> local_edges(this->allocator_);
+            auto& output = thread_cliques[thread_id];
+            while (true) {
+                const auto begin = seed_cursor.fetch_add(seed_grain, std::memory_order_relaxed);
+                if (begin >= seeds.size()) {
+                    break;
+                }
+                const auto end = std::min<uint64_t>(begin + seed_grain, seeds.size());
+                for (uint64_t i = begin; i < end; ++i) {
+                    if (get_clique_count(seeds[i]) != 0) {
+                        continue;
+                    }
+                    solve_seed(
+                        seeds[i], now_alpha, output, local_nodes, seed_distances, local_edges);
+                }
+            }
+        };
+
+        InnerIdType next_seed = 0;
+        uint64_t next_progress_percent = 10;
+        while (next_seed < total) {
+            batch_seeds.clear();
+            while (next_seed < total and batch_seeds.size() < batch_seed_limit) {
+                if (get_clique_count(next_seed) == 0) {
+                    batch_seeds.push_back(next_seed);
+                }
+                ++next_seed;
+            }
+            if (batch_seeds.empty()) {
+                continue;
+            }
+
+            for (auto& one_thread_cliques : thread_cliques) {
+                one_thread_cliques.clear();
+            }
+            const auto active_thread_count = std::min<uint64_t>(
+                thread_count, (batch_seeds.size() + seed_grain - 1) / seed_grain);
+            std::atomic<uint64_t> seed_cursor{0};
+            std::vector<std::future<void>> futures;
+            futures.reserve(active_thread_count);
+            for (uint64_t thread_id = 0; thread_id < active_thread_count; ++thread_id) {
+                futures.emplace_back(this->thread_pool_->GeneralEnqueue(
+                    worker, thread_id, std::cref(batch_seeds), std::ref(seed_cursor)));
+            }
+            for (auto& future : futures) {
+                future.get();
+            }
+            for (const auto& one_thread_cliques : thread_cliques) {
+                for (const auto& clique : one_thread_cliques) {
+                    append_selected_clique(clique);
+                }
+            }
+            log_round_progress(round_id, now_alpha, next_seed, next_progress_percent);
+        }
+    };
+
+    // Re-run rounds with increasing alpha until every node is covered or progress stalls out.
+    float now_alpha = std::max(1.2F, this->mci_parameters_.alpha);
+    uint64_t previous_uncovered = total;
+    for (uint64_t round = 0; round < 16; ++round) {
+        const auto round_id = round + 1;
+        const auto cliques_before_round = cliques.size();
+        logger::info("hgraph_mci_build_round_start round={} alpha={} total={} total_cliques={}",
+                     round_id,
+                     now_alpha,
+                     total,
+                     cliques.size());
+        solve_parallel_round(round_id, now_alpha);
+
+        uint64_t uncovered = 0;
+        for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
+            if (get_clique_count(inner_id) == 0) {
+                ++uncovered;
+            }
+        }
+        logger::info(
+            "hgraph_mci_build_round round={} alpha={} uncovered={} round_cliques={} "
+            "total_cliques={}",
+            round_id,
+            now_alpha,
+            uncovered,
+            cliques.size() - cliques_before_round,
+            cliques.size());
+        if (uncovered == 0) {
+            break;
+        }
+        const auto previous_alpha = now_alpha;
+        if (uncovered < previous_uncovered * 9 / 10) {
+            now_alpha += std::max(1.2F, this->mci_parameters_.alpha);
+        } else {
+            now_alpha *= 2.0F;
+        }
+        logger::info(
+            "hgraph_mci_build_alpha_update round={} previous_alpha={} next_alpha={} uncovered={} "
+            "previous_uncovered={}",
+            round_id,
+            previous_alpha,
+            now_alpha,
+            uncovered,
+            previous_uncovered);
+        previous_uncovered = uncovered;
+    }
+
+    const auto repaired = EnsureMCICliqueCoverage(
+        total,
+        graph_max_degree,
+        this->mci_parameters_.clique_max,
+        num_cliques_per_node,
+        [&](InnerIdType seed, auto visitor) { graph.ForEachNeighbor(seed, visitor); },
+        cliques,
+        this->allocator_);
+    logger::info("hgraph mci final coverage repair, fallback_cliques={}", repaired);
+
+    uint64_t max_membership = 0;
+    uint64_t total_memberships = 0;
+    for (InnerIdType inner_id = 0; inner_id < total; ++inner_id) {
+        const auto membership = static_cast<uint64_t>(get_clique_count(inner_id));
+        total_memberships += membership;
+        max_membership = std::max(max_membership, membership);
+    }
+
+    const auto* graph_neighbors =
+        graph.raw_neighbors != nullptr ? graph.raw_neighbors : graph.neighbors.data();
+    MCIGraphView activation_graph{graph_neighbors,
+                                  graph.counts.empty() ? nullptr : graph.counts.data(),
+                                  graph.total,
+                                  graph.row_stride,
+                                  graph.uniform_count};
+    AssignMCICliquesToDatacell(
+        this->mci_cliques_,
+        cliques,
+        total,
+        this->allocator_,
+        this->mci_parameters_.clique_activation_order ? &activation_graph : nullptr,
+        worker_count);
+    logger::info(
+        "hgraph mci clique build finished, total_cliques={}, total_memberships={}, "
+        "avg_membership={}, max_membership={}",
+        cliques.size(),
+        total_memberships,
+        static_cast<double>(total_memberships) / static_cast<double>(total),
+        max_membership);
+    this->cal_memory_usage();
+}
+
+Vector<InnerIdType>
+HGraph::search_mci_knn(InnerIdType query_inner_id,
+                       const void* vector,
+                       uint64_t visible_total) const {
+    Vector<InnerIdType> knn_ids(this->allocator_);
+    const auto precise_codes = this->get_precise_codes();
+    const auto total = this->total_count_.load();
+    if (total <= 1 or this->bottom_graph_ == nullptr or this->basic_flatten_codes_ == nullptr) {
+        return knn_ids;
+    }
+
+    visible_total = std::min(visible_total, total);
+    if (visible_total <= 1) {
+        return knn_ids;
+    }
+
+    const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, visible_total - 1);
+    if (k == 0) {
+        return knn_ids;
+    }
+
+    if (this->entry_point_id_ != INVALID_ENTRY_POINT and vector != nullptr and
+        this->GetNumElements() > 0) {
+        auto query = Dataset::Make();
+        query->NumElements(1)->Dim(static_cast<int64_t>(this->dim_))->Owner(false);
+        if (this->data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            query->Float32Vectors(static_cast<const float*>(vector));
+        } else if (this->data_type_ == DataTypes::DATA_TYPE_INT8) {
+            query->Int8Vectors(static_cast<const int8_t*>(vector));
+        } else if (this->data_type_ == DataTypes::DATA_TYPE_FP16 or
+                   this->data_type_ == DataTypes::DATA_TYPE_BF16) {
+            query->Float16Vectors(static_cast<const uint16_t*>(vector));
+        } else if (this->data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+            query->SparseVectors(static_cast<const SparseVector*>(vector));
+        }
+
+        const auto hgraph_total =
+            std::min<uint64_t>(total, static_cast<uint64_t>(this->GetNumElements()));
+        auto query_k = std::min<uint64_t>(k + 1, hgraph_total);
+        while (query_k > 0) {
+            const auto hgraph_ef = std::max<uint64_t>(query_k, 100);
+            const auto hgraph_search_params = std::string(R"({"hgraph":{"ef_search":)") +
+                                              std::to_string(hgraph_ef) + R"(,"use_mci":false}})";
+            auto result = this->KnnSearch(
+                query, static_cast<int64_t>(query_k), hgraph_search_params, nullptr);
+            if (result == nullptr) {
+                break;
+            }
+
+            knn_ids.clear();
+            const auto* labels = result->GetIds();
+            const auto count = result->GetDim();
+            knn_ids.reserve(static_cast<uint64_t>(count));
+            auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+            for (int64_t i = 0; i < count; ++i) {
+                auto [found, inner_id] = this->label_table_->TryGetIdByLabel(labels[i]);
+                if (found and inner_id < visible_total and inner_id != query_inner_id) {
+                    knn_ids.push_back(inner_id);
+                }
+            }
+
+            std::sort(knn_ids.begin(), knn_ids.end());
+            knn_ids.erase(std::unique(knn_ids.begin(), knn_ids.end()), knn_ids.end());
+            if (knn_ids.size() >= k or query_k == hgraph_total) {
+                break;
+            }
+            const auto next_query_k = std::min<uint64_t>(query_k * 2, hgraph_total);
+            if (next_query_k == query_k) {
+                break;
+            }
+            query_k = next_query_k;
+        }
+    }
+
+    if (knn_ids.size() > k) {
+        Vector<std::pair<float, InnerIdType>> sorted_neighbors(this->allocator_);
+        sorted_neighbors.reserve(knn_ids.size());
+        for (auto neighbor : knn_ids) {
+            sorted_neighbors.emplace_back(
+                precise_codes->ComputePairVectors(query_inner_id, neighbor), neighbor);
+        }
+        std::sort(
+            sorted_neighbors.begin(),
+            sorted_neighbors.end(),
+            [](const std::pair<float, InnerIdType>& lhs, const std::pair<float, InnerIdType>& rhs) {
+                if (lhs.first != rhs.first) {
+                    return lhs.first < rhs.first;
+                }
+                return lhs.second < rhs.second;
+            });
+        knn_ids.clear();
+        knn_ids.reserve(k);
+        for (uint64_t i = 0; i < k; ++i) {
+            knn_ids.push_back(sorted_neighbors[i].second);
+        }
+    }
+    return knn_ids;
+}
+
+void
+HGraph::repair_mci_clique(InnerIdType node_id) {
+    const auto precise_codes = this->get_precise_codes();
+    const auto total = this->total_count_.load();
+    if (node_id >= total or this->label_table_->IsRemoved(node_id)) {
+        return;
+    }
+    CHECK_ARGUMENT(precise_codes != nullptr, "hgraph mci repair requires available vector codes");
+
+    const bool use_fp32_add_pipeline =
+        this->data_type_ == DataTypes::DATA_TYPE_FLOAT and
+        this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32 and
+        precise_codes->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32;
+    if (not use_fp32_add_pipeline) {
+        // Preserve exact non-FP32 candidates, but retain only the nearest mcs entries.
+        // Distance work is O(total); scratch space is O(mcs), not O(total).
+        const auto k = std::min<uint64_t>(this->mci_parameters_.mcs, total - 1);
+        Vector<std::pair<float, InnerIdType>> candidates(this->allocator_);
+        candidates.reserve(k);
+        // QueryById preserves stored-code pair semantics; codecs may reuse the seed code
+        // and prefetch a batch without reconstructing an approximate raw query vector.
+        constexpr InnerIdType batch_size = 64;
+        InnerIdType batch_ids[batch_size];
+        float batch_distances[batch_size];
+        for (InnerIdType candidate = 0; k > 0 and candidate < total;) {
+            InnerIdType count = 0;
+            while (candidate < total and count < batch_size) {
+                if (candidate != node_id and not this->label_table_->IsRemoved(candidate)) {
+                    batch_ids[count++] = candidate;
+                }
+                ++candidate;
+            }
+            if (count == 0) {
+                continue;
+            }
+            precise_codes->QueryById(batch_distances, node_id, batch_ids, count);
+            for (InnerIdType i = 0; i < count; ++i) {
+                const auto value = std::make_pair(batch_distances[i], batch_ids[i]);
+                if (candidates.size() < k) {
+                    candidates.push_back(value);
+                    std::push_heap(candidates.begin(), candidates.end());
+                } else if (value < candidates.front()) {
+                    std::pop_heap(candidates.begin(), candidates.end());
+                    candidates.back() = value;
+                    std::push_heap(candidates.begin(), candidates.end());
+                }
+            }
+        }
+        std::sort_heap(candidates.begin(), candidates.end());
+        Vector<InnerIdType> knn_ids(this->allocator_);
+        knn_ids.reserve(candidates.size());
+        for (const auto& candidate : candidates) {
+            knn_ids.push_back(candidate.second);
+        }
+        this->incremental_update_mci_clique(node_id, knn_ids, total);
+        return;
+    }
+
+    uint64_t stride = 0;
+    const auto* raw = precise_codes->TryGetContiguousRawFloatData(&stride);
+    if (raw != nullptr and stride == this->dim_) {
+        this->incremental_update_mci_clique(
+            node_id, raw + static_cast<uint64_t>(node_id) * stride, total);
+        return;
+    }
+
+    // FP32 storage need not be contiguous (for example block_memory_io).
+    Vector<uint8_t> codes(precise_codes->code_size_, this->allocator_);
+    precise_codes->GetCodesById(node_id, codes.data());
+    Vector<float> query(this->dim_, this->allocator_);
+    CHECK_ARGUMENT(precise_codes->Decode(codes.data(), query.data()),
+                   "failed to decode hgraph mci repair query vector");
+    this->incremental_update_mci_clique(node_id, query.data(), total);
+}
+
+// Read-only companion access shared by the serial update and the lock-free planning pass. A null
+// view means "live": the accessor takes the cell lock, which is what a single-threaded update
+// needs. A non-null view is the frozen read session a planning chunk holds. Both report the same
+// clique ids, so the update rules below cannot drift between the two paths.
+void
+HGraph::mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
+                              InnerIdType node_id,
+                              Vector<InnerIdType>& clique_ids) const {
+    if (view != nullptr) {
+        this->mci_cliques_->CollectNodeCliqueIdsUnlocked(node_id, clique_ids);
+        return;
+    }
+    this->mci_cliques_->CollectNodeCliqueIds(node_id, clique_ids);
+}
+
+void
+HGraph::mci_read_clique_members(const std::shared_lock<std::shared_mutex>* view,
+                                InnerIdType clique_id,
+                                Vector<InnerIdType>& members) const {
+    if (view != nullptr) {
+        this->mci_cliques_->GetCliqueMembersUnlocked(clique_id, members);
+        return;
+    }
+    this->mci_cliques_->GetCliqueMembers(clique_id, members);
+}
+
+uint64_t
+HGraph::mci_read_clique_member_count(const std::shared_lock<std::shared_mutex>* view,
+                                     InnerIdType clique_id) const {
+    if (view != nullptr) {
+        return this->mci_cliques_->GetCliqueMemberCountUnlocked(clique_id);
+    }
+    return this->mci_cliques_->GetCliqueMemberCount(clique_id);
+}
+
+uint64_t
+HGraph::mci_read_logical_clique_count(const std::shared_lock<std::shared_mutex>* view) const {
+    if (view != nullptr) {
+        return this->mci_cliques_->TotalLogicalCliqueCountUnlocked();
+    }
+    return this->mci_cliques_->TotalLogicalCliqueCount();
+}
+
+// Candidate cliques worth joining for one seed, ordered by overlapping members. The serial update
+// then appends to them and the planning pass only records them, so the JOIN predicate itself lives
+// here once.
+void
+HGraph::collect_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 Vector<std::pair<uint64_t, InnerIdType>>& targets) const {
+    targets.clear();
+    if (this->mci_cliques_ == nullptr or knn_ids.empty()) {
+        return;
+    }
+
+    Vector<InnerIdType> candidate_cliques(this->allocator_);
+    for (auto neighbor : knn_ids) {
+        if (neighbor >= this->total_count_.load()) {
+            continue;
+        }
+        this->mci_read_node_cliques(view, neighbor, candidate_cliques);
+    }
+    if (candidate_cliques.empty()) {
+        return;
+    }
+    std::sort(candidate_cliques.begin(), candidate_cliques.end());
+
+    const auto logical_clique_count = this->mci_read_logical_clique_count(view);
+    auto iter = candidate_cliques.begin();
+    while (iter != candidate_cliques.end()) {
+        const auto clique_id = *iter;
+        auto next = iter;
+        while (next != candidate_cliques.end() and *next == clique_id) {
+            ++next;
+        }
+        const auto inter = static_cast<uint64_t>(std::distance(iter, next));
+        iter = next;
+        if (clique_id >= logical_clique_count) {
+            continue;
+        }
+
+        const auto member_count = this->mci_read_clique_member_count(view, clique_id);
+        if (member_count == 0 or member_count >= this->mci_parameters_.incremental_clique_max) {
+            continue;
+        }
+        const auto ratio = static_cast<float>(inter) / static_cast<float>(member_count);
+        if (ratio >= this->mci_parameters_.incremental_join_ratio_threshold) {
+            targets.emplace_back(inter, clique_id);
+        }
+    }
+    std::sort(targets.begin(),
+              targets.end(),
+              [](const std::pair<uint64_t, InnerIdType>& lhs,
+                 const std::pair<uint64_t, InnerIdType>& rhs) {
+                  if (lhs.first != rhs.first) {
+                      return lhs.first > rhs.first;
+                  }
+                  return lhs.second < rhs.second;
+              });
+}
+
+// Walk the JOIN targets in gain order. With apply set, each accepted target is appended to the
+// live structure through the same predicates as before; without it the walk only counts the
+// neighbors a plan would gain, which keeps a planning view that is older than the live structure a
+// lower bound instead of an over-estimate.
+void
+HGraph::apply_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                               InnerIdType new_inner_id,
+                               const Vector<std::pair<uint64_t, InnerIdType>>& targets,
+                               uint64_t degree_target,
+                               UnorderedSet<InnerIdType>& neighbors,
+                               bool apply) {
+    if (this->mci_cliques_ == nullptr or targets.empty()) {
+        return;
+    }
+    const auto total = this->total_count_.load();
+    Vector<InnerIdType> members(this->allocator_);
+    for (const auto& target : targets) {
+        if (neighbors.size() >= degree_target) {
+            break;
+        }
+        const auto clique_id = target.second;
+        members.clear();
+        this->mci_read_clique_members(view, clique_id, members);
+        const auto adds_neighbor = std::any_of(members.begin(), members.end(), [&](auto id) {
+            return id != new_inner_id and not this->label_table_->IsRemoved(id) and
+                   neighbors.find(id) == neighbors.end();
+        });
+        if (not adds_neighbor) {
+            continue;
+        }
+        if (apply and
+            not this->mci_cliques_->AppendNodeToClique(
+                new_inner_id, clique_id, total, this->mci_parameters_.incremental_clique_max)) {
+            continue;
+        }
+        for (auto id : members) {
+            if (id != new_inner_id and not this->label_table_->IsRemoved(id)) {
+                neighbors.insert(id);
+            }
+        }
+    }
+}
+
+// Try to attach a new node to existing cliques that strongly overlap its KNN set.
+void
+HGraph::try_join_mci_clique(InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t degree_target,
+                            UnorderedSet<InnerIdType>& neighbors) {
+    Vector<std::pair<uint64_t, InnerIdType>> targets(this->allocator_);
+    this->collect_mci_join_targets(nullptr, knn_ids, targets);
+    this->apply_mci_join_targets(nullptr, new_inner_id, targets, degree_target, neighbors, true);
+}
+
+// Contiguous FP32 rows usable for lock-free L2 pair distances. The codec pair API takes the
+// flatten storage lock once per distance, which serializes the many pair evaluations of a local
+// MCE; the contiguous path is what the full clique build already uses. Returns nullptr for any
+// other data type, metric or storage layout so callers fall back to the codec API.
+const float*
+HGraph::mci_contiguous_l2_vectors(uint64_t* row_stride) const {
+    if (row_stride != nullptr) {
+        *row_stride = 0;
+    }
+    if (this->data_type_ != DataTypes::DATA_TYPE_FLOAT or
+        this->metric_ != MetricType::METRIC_TYPE_L2SQR) {
+        return nullptr;
+    }
+    uint64_t stride = 0;
+    const auto precise_codes = this->get_precise_codes();
+    const float* vectors = precise_codes->TryGetContiguousRawFloatData(&stride);
+    if (vectors == nullptr or stride != this->dim_) {
+        return nullptr;
+    }
+    if (row_stride != nullptr) {
+        *row_stride = stride;
+    }
+    return vectors;
+}
+
+// Build around a required seed with the same local MCE and expansion rules as full Build. The view
+// selects which companion state is read and `emit` receives every produced clique in global inner
+// IDs, so the caller decides whether it is written to the cell or recorded in a plan.
+void
+HGraph::build_local_mci_cliques(const std::shared_lock<std::shared_mutex>* view,
+                                InnerIdType new_inner_id,
+                                const Vector<InnerIdType>& knn_ids,
+                                uint64_t visible_total,
+                                const std::function<void(const Vector<InnerIdType>&)>& emit) {
+    if (this->mci_cliques_ == nullptr) {
+        return;
+    }
+    const auto total = this->total_count_.load();
+    visible_total = std::min(visible_total, total);
+    Vector<InnerIdType> local_to_inner(this->allocator_);
+    local_to_inner.push_back(new_inner_id);
+    UnorderedSet<InnerIdType> seen(this->allocator_);
+    seen.reserve(knn_ids.size());
+    for (auto id : knn_ids) {
+        if (id < visible_total and id != new_inner_id and not this->label_table_->IsRemoved(id) and
+            seen.insert(id).second) {
+            local_to_inner.push_back(id);
+        }
+    }
+    // Only the seed requires fresh coverage. In particular, a repair seed may still have
+    // old memberships: treating it as already covered would skip the requested repair.
+    // Fixed-size construction needs no atomic copies/moves. Explicitly initialize every slot
+    // before the shared builder loads it; never resize this vector or alias plain ints as atomics.
+    // C++17 atomic default construction does not initialize the counter values.
+    std::vector<std::atomic<int>> coverage(local_to_inner.size());
+    coverage[0].store(0, std::memory_order_relaxed);
+    Vector<InnerIdType> neighbors(this->allocator_);
+    Vector<InnerIdType> memberships(this->allocator_);
+    for (uint64_t i = 1; i < local_to_inner.size(); ++i) {
+        memberships.clear();
+        this->mci_read_node_cliques(view, local_to_inner[i], memberships);
+        coverage[i].store(static_cast<int>(std::max<uint64_t>(1, memberships.size())),
+                          std::memory_order_relaxed);
+        neighbors.push_back(static_cast<InnerIdType>(i));
+    }
+    MCIV3BuildParams params;
+    // Coverage uses compact local IDs, but its values are global live membership counts,
+    // not memberships within this neighborhood. Keep the full-build global skip threshold.
+    params.total = visible_total;
+    params.candidate_limit = this->mci_parameters_.mcs;
+    params.clique_max = this->mci_parameters_.incremental_clique_max;
+    params.clique_size_cap = this->mci_parameters_.incremental_clique_max;
+    params.max_degree = this->bottom_graph_->MaximumDegree();
+    params.alpha = this->mci_parameters_.alpha;
+    params.metric = this->metric_;
+    MCILocalCliqueBuilder builder(params, this->allocator_);
+    const auto precise_codes = this->get_precise_codes();
+    uint64_t contiguous_stride = 0;
+    const float* contiguous_vectors = this->mci_contiguous_l2_vectors(&contiguous_stride);
+    auto distance = [&](InnerIdType lhs, InnerIdType rhs) {
+        const auto inner_lhs = local_to_inner[lhs];
+        const auto inner_rhs = local_to_inner[rhs];
+        if (contiguous_vectors != nullptr) {
+            return FP32ComputeL2Sqr(contiguous_vectors + inner_lhs * contiguous_stride,
+                                    contiguous_vectors + inner_rhs * contiguous_stride,
+                                    this->dim_);
+        }
+        return precise_codes->ComputePairVectors(inner_lhs, inner_rhs);
+    };
+    // The stored-code API exposes pairwise distances, not four-pair distances. Each pair
+    // retains the codec's SIMD/metric handling across FP32, INT8 and non-contiguous storage;
+    // group four calls here rather than assume the full-build contiguous FP32 layout.
+    auto scalar_batch_distance = [&](InnerIdType lhs,
+                                     InnerIdType a,
+                                     InnerIdType b,
+                                     InnerIdType c,
+                                     InnerIdType d,
+                                     float* values) {
+        const InnerIdType ids[]{a, b, c, d};
+        for (uint64_t i = 0; i < 4; ++i) {
+            values[i] = distance(lhs, ids[i]);
+        }
+    };
+    auto emit_global = [&](const auto& clique) {
+        Vector<InnerIdType> members(this->allocator_);
+        members.reserve(clique.size());
+        for (auto id : clique) {
+            members.push_back(local_to_inner[id]);
+        }
+        emit(members);
+    };
+    float alpha = params.alpha;
+    while (coverage[0].load(std::memory_order_relaxed) == 0) {
+        builder.Build<false>(0,
+                             neighbors.data(),
+                             neighbors.size(),
+                             alpha,
+                             coverage,
+                             distance,
+                             scalar_batch_distance,
+                             emit_global);
+        // Only this seed needs coverage: every unsuccessful round has 1 -> 1 uncovered
+        // seeds, so the shared no-progress rule doubles alpha. Success exits the loop.
+        alpha = next_mci_alpha(alpha, params.alpha, 1, 1);
+    }
+}
+
+void
+HGraph::build_incremental_mci_clique(InnerIdType new_inner_id,
+                                     const Vector<InnerIdType>& knn_ids,
+                                     uint64_t visible_total) {
+    const auto total = this->total_count_.load();
+    this->build_local_mci_cliques(
+        nullptr, new_inner_id, knn_ids, visible_total, [&](const Vector<InnerIdType>& members) {
+            this->mci_cliques_->AppendNewClique(members, total);
+        });
+}
+
+namespace {
+// Minimum Add batch size before the per-row MCI update is planned over workers; below it the
+// scheduling overhead outweighs the parallel win.
+constexpr uint64_t K_MCI_PLAN_MIN_ROWS = 256;
+// Automatic compaction interval, in successful vector mutations.
+constexpr uint64_t K_MCI_COMPACTION_INTERVAL = 100;
+// Rows planned per chunk. One chunk takes a single frozen read view, so compaction - which may
+// renumber clique ids - can only run between chunks; the chunk size therefore also bounds how much
+// dead delta one view can accumulate before the next flush.
+constexpr uint64_t K_MCI_PLAN_CHUNK = 1024;
+}  // namespace
+
+// Plan one row against a frozen read view: no shared state is written here, so workers only share
+// the row cursor their caller owns.
+void
+MciIncrementalAddExecutor::plan_incremental_mci_clique(
+    const std::shared_lock<std::shared_mutex>& view,
+    const Vector<InnerIdType>& knn_ids,
+    uint64_t visible_total,
+    uint64_t degree_target,
+    MciAddPlan& plan) {
+    if (hgraph_.mci_cliques_ == nullptr) {
+        return;
+    }
+    plan.visible_total = visible_total;
+    // N counts live vectors (including this Add batch), not physical capacity or marked IDs. The
+    // caller holds mci_mutation_mutex_, so N is stable for the whole batch and the target is
+    // computed once per batch instead of once per row per worker.
+    plan.degree_target = degree_target;
+    UnorderedSet<InnerIdType> neighbors(hgraph_.allocator_);
+    Vector<InnerIdType> clique_ids(hgraph_.allocator_);
+    hgraph_.mci_read_node_cliques(&view, plan.inner_id, clique_ids);
+    plan.memberships_empty = clique_ids.empty();
+    Vector<InnerIdType> members(hgraph_.allocator_);
+    for (auto cid : clique_ids) {
+        members.clear();
+        hgraph_.mci_read_clique_members(&view, cid, members);
+        for (auto id : members) {
+            // Count only live neighbors, even while label and clique masks are being updated.
+            if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
+                neighbors.insert(id);
+            }
+        }
+    }
+    plan.live_neighbor_count = neighbors.size();
+    if (not plan.memberships_empty and neighbors.size() >= plan.degree_target) {
+        plan.knn_empty = knn_ids.empty();
+        return;
+    }
+    if (knn_ids.empty()) {
+        plan.knn_empty = true;
+        return;
+    }
+    plan.knn_ids.assign(knn_ids.begin(), knn_ids.end());
+    hgraph_.collect_mci_join_targets(&view, knn_ids, plan.join_targets);
+    hgraph_.apply_mci_join_targets(
+        &view, plan.inner_id, plan.join_targets, plan.degree_target, neighbors, false);
+    // JOIN success alone is insufficient. Reuse the shared builder on neighbors that do not
+    // already contribute to the seed's degree, so additional cliques make measurable progress.
+    // The planned cliques are not visible in the frozen view yet, so track them locally.
+    Vector<InnerIdType> remaining(hgraph_.allocator_);
+    while (neighbors.size() < plan.degree_target) {
+        remaining.clear();
+        for (auto id : knn_ids) {
+            if (id != plan.inner_id and id < visible_total and
+                not hgraph_.label_table_->IsRemoved(id) and neighbors.find(id) == neighbors.end()) {
+                remaining.push_back(id);
+            }
+        }
+        if (remaining.empty()) {
+            break;
+        }
+        const auto previous_degree = neighbors.size();
+        const auto planned_before = plan.new_cliques.size();
+        hgraph_.build_local_mci_cliques(
+            &view, plan.inner_id, remaining, visible_total, [&](const Vector<InnerIdType>& clique) {
+                plan.new_cliques.emplace_back(clique.begin(), clique.end(), hgraph_.allocator_);
+            });
+        for (uint64_t i = planned_before; i < plan.new_cliques.size(); ++i) {
+            for (auto id : plan.new_cliques[i]) {
+                if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
+                    neighbors.insert(id);
+                }
+            }
+        }
+        if (neighbors.size() == previous_degree) {
+            // Coverage limits or exhausted candidates may make the target unattainable.
+            break;
+        }
+    }
+}
+
+// Apply one chunk of plans in inner-ID order with the serial predicates, so the structure does not
+// depend on the planning schedule. Returns how many rows needed the serial repair fallback.
+uint64_t
+MciIncrementalAddExecutor::merge_incremental_mci_clique_plans(Vector<MciAddPlan>& plans,
+                                                              uint64_t plan_count,
+                                                              uint64_t total) {
+    Vector<uint64_t> order(hgraph_.allocator_);
+    order.reserve(plan_count);
+    for (uint64_t i = 0; i < plan_count; ++i) {
+        order.push_back(i);
+    }
+    std::sort(order.begin(), order.end(), [&](uint64_t lhs, uint64_t rhs) {
+        return plans[lhs].inner_id < plans[rhs].inner_id;
+    });
+
+    UnorderedSet<InnerIdType> neighbors(hgraph_.allocator_);
+    Vector<InnerIdType> members(hgraph_.allocator_);
+    Vector<InnerIdType> clique_ids(hgraph_.allocator_);
+    uint64_t repaired_rows = 0;
+    for (auto index : order) {
+        auto& plan = plans[index];
+        // live_neighbor_count is the degree the frozen view already gave this row, so a row that
+        // met the target there has nothing left to write and can be skipped. It deliberately
+        // excludes the neighbors the plan only projects through JOIN and local MCE: those cliques
+        // are not in the live structure yet, and this row is exactly the one that has to apply
+        // them, so counting them here would skip the writes that produce the planned coverage.
+        if (not plan.memberships_empty and plan.live_neighbor_count >= plan.degree_target) {
+            continue;
+        }
+        if (plan.knn_empty) {
+            if (not plan.memberships_empty) {
+                continue;
+            }
+            Vector<InnerIdType> singleton(hgraph_.allocator_);
+            singleton.push_back(plan.inner_id);
+            hgraph_.mci_cliques_->AppendNewClique(singleton, total);
+            continue;
+        }
+        neighbors.clear();
+        if (not plan.memberships_empty) {
+            // Only a duplicate or pre-existing row can already carry memberships in the planning
+            // view, and only there may the live superset matter for the degree target.
+            clique_ids.clear();
+            hgraph_.mci_cliques_->CollectNodeCliqueIds(plan.inner_id, clique_ids);
+            for (auto cid : clique_ids) {
+                members.clear();
+                hgraph_.mci_cliques_->GetCliqueMembers(cid, members);
+                for (auto id : members) {
+                    if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
+                        neighbors.insert(id);
+                    }
+                }
+            }
+        }
+        for (const auto& target : plan.join_targets) {
+            if (neighbors.size() >= plan.degree_target) {
+                break;
+            }
+            const auto clique_id = target.second;
+            members.clear();
+            hgraph_.mci_cliques_->GetCliqueMembers(clique_id, members);
+            const auto adds_neighbor = std::any_of(members.begin(), members.end(), [&](auto id) {
+                return id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id) and
+                       neighbors.find(id) == neighbors.end();
+            });
+            if (not adds_neighbor or not hgraph_.mci_cliques_->AppendNodeToClique(
+                                         plan.inner_id,
+                                         clique_id,
+                                         total,
+                                         hgraph_.mci_parameters_.incremental_clique_max)) {
+                continue;
+            }
+            for (auto id : members) {
+                if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
+                    neighbors.insert(id);
+                }
+            }
+        }
+        for (const auto& clique : plan.new_cliques) {
+            if (neighbors.size() >= plan.degree_target) {
+                break;
+            }
+            hgraph_.mci_cliques_->AppendNewClique(clique, total);
+            for (auto id : clique) {
+                if (id != plan.inner_id and not hgraph_.label_table_->IsRemoved(id)) {
+                    neighbors.insert(id);
+                }
+            }
+        }
+        if (neighbors.size() < plan.degree_target) {
+            // The plan ran out of candidates. Re-run the serial update for this row so a planning
+            // view that is older than the live structure can never leave a row less covered than
+            // the serial path would; when the target is genuinely unreachable this is a no-op.
+            ++repaired_rows;
+            hgraph_.incremental_update_mci_clique(plan.inner_id, plan.knn_ids, plan.visible_total);
+        }
+    }
+    return repaired_rows;
+}
+
+void
+MciIncrementalAddExecutor::Run(const HGraph::AddBatch& batch, const DatasetPtr& data) {
+    const auto row_count = static_cast<uint64_t>(batch.rows.size());
+    const auto thread_count = std::max<uint64_t>(
+        1, std::min<uint64_t>(static_cast<uint64_t>(hgraph_.build_thread_count_), row_count));
+    const bool use_workers =
+        thread_count > 1 and row_count >= K_MCI_PLAN_MIN_ROWS and
+        not(hgraph_.thread_pool_ != nullptr and hgraph_.thread_pool_->IsCurrentThread());
+    logger::info("hgraph mci incremental add started, added={}, threads={}",
+                 row_count,
+                 use_workers ? thread_count : 1);
+    if (not use_workers) {
+        for (const auto& row : batch.rows) {
+            hgraph_.incremental_update_mci_clique(row.inner_id,
+                                                  hgraph_.get_data(data, row.input_idx));
+            hgraph_.maybe_compact_mci(1);
+        }
+        logger::info("hgraph mci incremental add finished, total={}", hgraph_.total_count_.load());
+        return;
+    }
+    const auto total = hgraph_.total_count_.load();
+    // One reusable plan slot per row of a chunk; plans are reset instead of reallocated so the
+    // planning buffers are only ever grown to the chunk size.
+    const auto plan_capacity = std::min<uint64_t>(K_MCI_PLAN_CHUNK, row_count);
+    Vector<MciAddPlan> plans(hgraph_.allocator_);
+    plans.reserve(plan_capacity);
+    for (uint64_t i = 0; i < plan_capacity; ++i) {
+        plans.emplace_back(hgraph_.allocator_);
+    }
+    uint64_t repair_fallbacks = 0;
+    // Planning and merge wall time, logged once per batch so the split stays observable.
+    uint64_t plan_wall_ns = 0;
+    uint64_t merge_wall_ns = 0;
+    // mci_mutation_mutex_ is held by the caller and a batch only appends, so the live count is
+    // stable across the whole batch: the incremental degree target is a batch constant and does
+    // not need an atomic load per row per worker.
+    const auto degree_target = hgraph_.mci_parameters_.IncrementalDegreeTarget(
+        static_cast<uint64_t>(hgraph_.GetNumElements()));
+    for (uint64_t begin = 0; begin < row_count; begin += K_MCI_PLAN_CHUNK) {
+        const auto end = std::min<uint64_t>(row_count, begin + K_MCI_PLAN_CHUNK);
+        const auto chunk_rows = end - begin;
+        const auto workers_here = std::min<uint64_t>(thread_count, chunk_rows);
+        for (uint64_t i = 0; i < chunk_rows; ++i) {
+            plans[i].Reset();
+        }
+        const auto phase_t0 = std::chrono::steady_clock::now();
+        // Planning shares nothing but the atomic row cursor and one frozen read view of the
+        // companion structure, so no worker ever waits on a clique lock. The view must be released
+        // before the merge mutates the cell, and compaction may renumber clique ids, so it stays
+        // between chunks.
+        {
+            auto view = hgraph_.mci_cliques_->AcquireReadLock();
+            std::atomic<uint64_t> next_row{begin};
+            std::vector<std::future<void>> workers;
+            workers.reserve(workers_here);
+            auto plan_one_row = [&, begin, end, data]() {
+                while (true) {
+                    const auto index = next_row.fetch_add(1, std::memory_order_relaxed);
+                    if (index >= end) {
+                        break;
+                    }
+                    const auto& row = batch.rows[index];
+                    auto& plan = plans[index - begin];
+                    plan.inner_id = row.inner_id;
+                    // Add retains its insertion-prefix visibility; the frozen view is shared, the
+                    // candidate bound is per row.
+                    const auto visible_total = static_cast<uint64_t>(row.inner_id) + 1;
+                    const auto knn_ids = hgraph_.search_mci_knn(
+                        row.inner_id, hgraph_.get_data(data, row.input_idx), visible_total);
+                    plan_incremental_mci_clique(view, knn_ids, visible_total, degree_target, plan);
+                }
+            };
+            for (uint64_t worker_id = 0; worker_id < workers_here; ++worker_id) {
+                if (hgraph_.thread_pool_ != nullptr) {
+                    workers.emplace_back(hgraph_.thread_pool_->GeneralEnqueue(plan_one_row));
+                } else {
+                    workers.emplace_back(std::async(std::launch::async, plan_one_row));
+                }
+            }
+            for (auto& worker : workers) {
+                worker.get();
+            }
+        }
+        const auto phase_t1 = std::chrono::steady_clock::now();
+        repair_fallbacks += merge_incremental_mci_clique_plans(plans, chunk_rows, total);
+        const auto phase_t2 = std::chrono::steady_clock::now();
+        plan_wall_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(phase_t1 - phase_t0).count());
+        merge_wall_ns += static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(phase_t2 - phase_t1).count());
+        // The counter is not atomic and mutation serialization is already held by the caller, so
+        // the chunk is accounted once its workers have joined.
+        hgraph_.maybe_compact_mci(chunk_rows);
+    }
+    // Planning is the parallel phase, the merge is the single-threaded ordered commit, and
+    // repair_fallbacks counts rows that needed the serial fallback.
+    logger::info(
+        "hgraph mci incremental add finished, total={}, planned={}, repair_fallbacks={}, "
+        "plan_wall_s={:.3f}, merge_wall_s={:.3f}",
+        hgraph_.total_count_.load(),
+        row_count,
+        repair_fallbacks,
+        static_cast<double>(plan_wall_ns) / 1e9,
+        static_cast<double>(merge_wall_ns) / 1e9);
+}
+
+// Update the MCI companion index after one vector is inserted into HGraph.
+void
+HGraph::incremental_update_mci_clique(InnerIdType node_id,
+                                      const void* vector,
+                                      uint64_t visible_total) {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
+        return;
+    }
+    // Add retains its insertion-prefix visibility; existing repair points see the whole graph.
+    if (visible_total == 0) {
+        visible_total = static_cast<uint64_t>(node_id) + 1;
+    }
+    const auto knn_ids = this->search_mci_knn(node_id, vector, visible_total);
+    this->incremental_update_mci_clique(node_id, knn_ids, visible_total);
+}
+
+void
+HGraph::incremental_update_mci_clique(InnerIdType node_id,
+                                      const Vector<InnerIdType>& knn_ids,
+                                      uint64_t visible_total) {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr) {
+        return;
+    }
+    UnorderedSet<InnerIdType> neighbors(this->allocator_);
+    Vector<InnerIdType> clique_ids(this->allocator_);
+    auto collect_neighbors = [&]() {
+        clique_ids.clear();
+        this->mci_cliques_->CollectNodeCliqueIds(node_id, clique_ids);
+        Vector<InnerIdType> members(this->allocator_);
+        for (auto cid : clique_ids) {
+            members.clear();
+            this->mci_cliques_->GetCliqueMembers(cid, members);
+            for (auto id : members) {
+                // Count only live neighbors, even while label and clique masks are being updated.
+                if (id != node_id and not this->label_table_->IsRemoved(id)) {
+                    neighbors.insert(id);
+                }
+            }
+        }
+    };
+    collect_neighbors();
+    // N counts live vectors (including this Add batch), not physical capacity or marked IDs.
+    const auto degree_target = this->mci_parameters_.IncrementalDegreeTarget(
+        static_cast<uint64_t>(this->GetNumElements()));
+    if (not clique_ids.empty() and neighbors.size() >= degree_target) {
+        return;
+    }
+    if (knn_ids.empty()) {
+        if (not clique_ids.empty()) {
+            return;
+        }
+        Vector<InnerIdType> singleton(this->allocator_);
+        singleton.push_back(node_id);
+        this->mci_cliques_->AppendNewClique(singleton, this->total_count_.load());
+        return;
+    }
+    this->try_join_mci_clique(node_id, knn_ids, degree_target, neighbors);
+    // JOIN success alone is insufficient. Reuse the shared builder on neighbors that do not
+    // already contribute to the seed's degree, so additional cliques make measurable progress.
+    Vector<InnerIdType> remaining(this->allocator_);
+    while (neighbors.size() < degree_target) {
+        remaining.clear();
+        for (auto id : knn_ids) {
+            if (id != node_id and id < visible_total and not this->label_table_->IsRemoved(id) and
+                neighbors.find(id) == neighbors.end()) {
+                remaining.push_back(id);
+            }
+        }
+        if (remaining.empty()) {
+            break;
+        }
+        const auto previous_degree = neighbors.size();
+        this->build_incremental_mci_clique(node_id, remaining, visible_total);
+        collect_neighbors();
+        if (neighbors.size() == previous_degree) {
+            // Coverage limits or exhausted candidates may make the target unattainable.
+            break;
+        }
+    }
+}
+
+bool
+HGraph::repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships) {
+    if (this->label_table_->IsRemoved(node_id)) {
+        return false;
+    }
+    memberships.clear();
+    this->mci_cliques_->CollectNodeCliqueIds(node_id, memberships);
+    if (memberships.size() >= this->mci_parameters_.delete_node_mct_threshold) {
+        return false;
+    }
+    this->repair_mci_clique(node_id);
+    return true;
+}
+
+void
+HGraph::remove_from_mci(const Vector<InnerIdType>& removed_inner_ids) {
+    if (not this->mci_parameters_.enabled or this->mci_cliques_ == nullptr or
+        removed_inner_ids.empty()) {
+        return;
+    }
+    auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+    // Project the whole batch before repairing: no temporary cliques for later deletions.
+    const auto snapshot =
+        this->mci_cliques_->PrepareDelete(removed_inner_ids,
+                                          this->mci_parameters_.delete_clique_size_threshold,
+                                          this->mci_parameters_.delete_node_mct_threshold);
+    this->mci_cliques_->CommitDelete(
+        removed_inner_ids, snapshot.retired_clique_ids, this->total_count_.load());
+    uint64_t repaired_node_count = 0;
+    Vector<InnerIdType> memberships(this->allocator_);
+    for (auto repair_node_id : snapshot.repair_node_ids) {
+        if (this->repair_mci_clique_if_undercovered(repair_node_id, memberships)) {
+            ++repaired_node_count;
+        }
+    }
+    logger::info(
+        "hgraph mci mark remove repaired, removed={}, affected_cliques={}, retired_cliques={}, "
+        "repair_candidates={}, repaired_nodes={}",
+        removed_inner_ids.size(),
+        snapshot.affected_clique_ids.size(),
+        snapshot.retired_clique_ids.size(),
+        snapshot.repair_node_ids.size(),
+        repaired_node_count);
+}
+
+uint32_t
+HGraph::force_remove_with_mci(const std::vector<int64_t>& ids) {
+    // Same lock order as Add: mutation serialization, then vector-ID lifetime protection.
+    std::unique_lock<std::mutex> mutation_lock(this->mci_mutation_mutex_);
+    std::unique_lock<std::shared_mutex> force_lock(this->force_remove_mutex_);
+    const auto old_total = this->total_count_.load();
+    Vector<std::pair<InnerIdType, int64_t>> targets(this->allocator_);
+    {
+        auto label_lock = make_search_read_lock(this->label_lookup_mutex_);
+        for (auto label : ids) {
+            auto [found, id] = this->label_table_->TryGetIdByLabel(label, true);
+            if (found) {
+                targets.emplace_back(id, label);
+            }
+        }
+    }
+    std::sort(targets.begin(), targets.end(), std::greater<>());
+    targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    if (targets.empty()) {
+        return 0;
+    }
+    Vector<InnerIdType> removed(this->allocator_);
+    Vector<InnerIdType> old_to_new(this->allocator_);
+    Vector<InnerIdType> current_to_old(this->allocator_);
+    old_to_new.reserve(old_total);
+    current_to_old.reserve(old_total);
+    for (uint64_t id = 0; id < old_total; ++id) {
+        old_to_new.emplace_back(static_cast<InnerIdType>(id));
+        current_to_old.emplace_back(static_cast<InnerIdType>(id));
+    }
+    for (const auto& target : targets) {
+        removed.push_back(target.first);
+    }
+    const auto snapshot =
+        this->mci_cliques_->PrepareDelete(removed,
+                                          this->mci_parameters_.delete_clique_size_threshold,
+                                          this->mci_parameters_.delete_node_mct_threshold);
+    this->mci_cliques_->MarkUnavailable();
+    // On failure, never expose the old CSR under moved vector IDs. Physical deletions, like
+    // the existing HGraph FORCE_REMOVE operation, are not transactionally rolled back.
+    this->mci_cliques_->CommitDelete(removed, snapshot.retired_clique_ids, old_total);
+    uint32_t count = 0;
+    for (const auto& [id, label] : targets) {
+        // Descending original IDs ensure earlier tail moves cannot relocate a pending target.
+        const auto tail = this->total_count_.load() - 1;
+        count += this->force_remove_one(label);
+        old_to_new[current_to_old[id]] = LabelTable::INVALID_ID;
+        if (id != tail) {
+            current_to_old[id] = current_to_old[tail];
+            old_to_new[current_to_old[id]] = id;
+        }
+    }
+    const auto total = this->total_count_.load();
+    this->mci_cliques_->RemapNodes(old_to_new, total);
+    this->bottom_graph_->SetTotalCount(total);
+    // Graph repair and ID remapping are complete. As in Add, public HGraph search must
+    // acquire its own force-remove read lock. Mutation serialization still excludes Add,
+    // MARK_REMOVE and FORCE_REMOVE, and MCI remains unpublished until repair is complete.
+    force_lock.unlock();
+    {
+        auto codes_lock = make_search_read_lock(this->persistent_codes_mutex_);
+        Vector<InnerIdType> memberships(this->allocator_);
+        for (auto old_id : snapshot.repair_node_ids) {
+            // The snapshot precedes compaction: never use its IDs in the new slot space.
+            const auto id = old_to_new[old_id];
+            if (id == LabelTable::INVALID_ID) {
+                continue;
+            }
+            this->repair_mci_clique_if_undercovered(id, memberships);
+        }
+    }
+    force_lock.lock();
+    this->mci_cliques_->Flush(total);
+    this->mci_pending_mutations_ = 0;
+    {
+        std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+        // A later Add must resize all slot-indexed storage, including graph version rows.
+        // Publish the logical watermark first: a failed shrink may leave some buffers smaller
+        // than others, so retaining the old watermark would let Add skip necessary growth.
+        this->max_capacity_.store(total);
+        this->shrink_to_fit();
+    }
+    this->mci_cliques_->MarkAvailable(total);
+    this->cal_memory_usage();
+    return count;
+}
+
+void
+HGraph::maybe_compact_mci(uint64_t changed_count) {
+    if (changed_count == 0) {
+        return;
+    }
+    // Saturate instead of adding: a very large batch must neither overflow the counter nor reset
+    // it to 0, which would delay the next compaction by a full interval. The batch that reaches the
+    // threshold is compacted in full, so the excess is not carried over and the effective mutation
+    // span between two compactions is at most 2 * K_MCI_COMPACTION_INTERVAL - 1.
+    // A failed compaction keeps the count and retries on the next successful change.
+    this->mci_pending_mutations_ +=
+        std::min(changed_count, K_MCI_COMPACTION_INTERVAL - this->mci_pending_mutations_);
+    if (this->mci_pending_mutations_ < K_MCI_COMPACTION_INTERVAL) {
+        return;
+    }
+    try {
+        // The caller already serializes mutations. Storage replacement pins out query views.
+        this->mci_cliques_->Flush(this->total_count_.load());
+        this->mci_pending_mutations_ = 0;
+    } catch (const std::bad_alloc&) {
+        // Automatic compaction is optional maintenance: preserve a completed Add/Remove and
+        // its valid delta if replacement allocation fails. Flush publishes only after allocation.
+        logger::warn("MCI automatic compaction deferred: allocation failed");
+    } catch (const VsagException& e) {
+        if (e.error_.type != ErrorType::NO_ENOUGH_MEMORY) {
+            throw;
+        }
+        logger::warn("MCI automatic compaction deferred: allocation failed");
+    }
+}
+
+}  // namespace vsag

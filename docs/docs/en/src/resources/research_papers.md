@@ -32,7 +32,7 @@ HNSWlib.
 > Integrated into VSAG; enabled through the [`Tune`](../advanced/optimizer.md) API (historically
 > called the "ELP Optimizer" and implemented behind the `use_elp_optimizer` key).
 
-## 3. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [[arxiv]](https://arxiv.org/abs/2506.13144)
+## 3. EnhanceGraph: A Continuously Enhanced Graph-based Index for High-dimensional Approximate Nearest Neighbor Search [[TKDE]](https://ieeexplore.ieee.org/document/11663430)
 
 Driven by rapid progress in deep learning, high-dimensional ANNS has received growing attention.
 We observe that graph-based indexes generate large amounts of search and construction logs over

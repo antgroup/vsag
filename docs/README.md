@@ -46,3 +46,15 @@ published documentation.
 
 The remaining top-level markdown files in `docs/` are design notes that have not been fully
 merged into the website source yet. Keep new user-facing documentation in `docs/docs/{en,zh}/src/`.
+
+## Validation
+
+Before submitting documentation changes, run:
+
+```bash
+node .github/scripts/check-docs.mjs
+```
+
+The checker verifies English/Chinese file parity, `SUMMARY.md` coverage, local links and anchors,
+mdBook-safe overview links, and backticked references to repository files. To verify rendering as
+well, build each affected book with `mdbook build`.

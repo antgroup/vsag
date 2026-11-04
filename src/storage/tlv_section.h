@@ -19,6 +19,7 @@
 
 #include "stream_reader.h"
 #include "stream_writer.h"
+#include "vsag/readerset.h"
 
 namespace vsag {
 
@@ -66,6 +67,11 @@ ValidateAndSkipBlockPayload(StreamReader& reader, const StreamBlockHeader& heade
 
 void
 ReadSeekableBlockPayload(StreamReader& reader,
+                         const StreamBlockHeader& header,
+                         const std::function<void(StreamReader&)>& deserialize);
+
+void
+ReadExternalBlockPayload(const ReaderPtr& reader,
                          const StreamBlockHeader& header,
                          const std::function<void(StreamReader&)>& deserialize);
 

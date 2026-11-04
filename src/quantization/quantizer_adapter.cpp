@@ -20,8 +20,10 @@
 #include <type_traits>
 
 #include "quantization/computer.h"
+#include "quantization/fp32_quantizer.h"
 #include "quantization/quantizer.h"
 #include "quantization/scalar_quantization/half_precision_quantizer.h"
+#include "quantization/scalar_quantization/scalar_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
 
@@ -31,6 +33,20 @@ using generic::BF16ToFloat;
 using generic::FloatToBF16;
 using generic::FloatToFP16;
 using generic::FP16ToFloat;
+
+namespace {
+template <typename QuantT>
+struct HalfInputTraits {
+    static constexpr bool ENABLED = false;
+};
+
+template <typename Format, MetricType metric>
+struct HalfInputTraits<HalfPrecisionQuantizer<Format, metric>> {
+    static constexpr bool ENABLED = true;
+    static constexpr DataTypes DATA_TYPE =
+        std::is_same_v<Format, FP16Format> ? DataTypes::DATA_TYPE_FP16 : DataTypes::DATA_TYPE_BF16;
+};
+}  // namespace
 
 template <typename QuantT, typename DataT>
 QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param,
@@ -85,6 +101,11 @@ QuantizerAdapter<QuantT, DataT>::EncodeOneImpl(const float* data, uint8_t* codes
         return this->inner_quantizer_->EncodeOneImpl(vec.data(), codes);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        if constexpr (HalfInputTraits<QuantT>::ENABLED) {
+            if (data_type_ == HalfInputTraits<QuantT>::DATA_TYPE) {
+                return this->inner_quantizer_->EncodeOneHalf(data_fp16, codes);
+            }
+        }
         Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
@@ -113,6 +134,11 @@ QuantizerAdapter<QuantT, DataT>::EncodeBatchImpl(const float* data,
         return this->inner_quantizer_->EncodeBatchImpl(vec.data(), codes, count);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
+        if constexpr (HalfInputTraits<QuantT>::ENABLED) {
+            if (data_type_ == HalfInputTraits<QuantT>::DATA_TYPE) {
+                return this->inner_quantizer_->EncodeBatchHalf(data_fp16, codes, count);
+            }
+        }
         Vector<float> vec(this->dim_ * count, this->allocator_);
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
@@ -223,6 +249,12 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
         this->inner_quantizer_->ProcessQueryImpl(vec.data(), inner_computer);
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* query_int16 = reinterpret_cast<const uint16_t*>(query);
+        if constexpr (HalfInputTraits<QuantT>::ENABLED) {
+            if (data_type_ == HalfInputTraits<QuantT>::DATA_TYPE) {
+                this->inner_quantizer_->ProcessQueryHalf(query_int16, inner_computer);
+                return;
+            }
+        }
         Vector<float> vec(this->dim_, this->allocator_);
         for (int64_t i = 0; i < this->dim_; i++) {
             if (data_type_ == DataTypes::DATA_TYPE_FP16) {
@@ -268,4 +300,6 @@ TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
 TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, uint16_t);
 TEMPLATE_QUANTIZER_ADAPTER(FP16Quantizer, uint16_t);
 TEMPLATE_QUANTIZER_ADAPTER(BF16Quantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(SQ8Quantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(FP32Quantizer, uint16_t);
 }  // namespace vsag

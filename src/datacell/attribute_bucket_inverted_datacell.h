@@ -28,7 +28,7 @@ class AttributeBucketInvertedDataCell : public AttributeInvertedInterface {
 public:
     AttributeBucketInvertedDataCell(
         Allocator* allocator, ComputableBitsetType bitset_type = ComputableBitsetType::FastBitset)
-        : AttributeInvertedInterface(allocator, bitset_type), field_2_value_map_(allocator){};
+        : AttributeInvertedInterface(allocator, bitset_type), field_2_value_map_(allocator) {};
 
     ~AttributeBucketInvertedDataCell() override = default;
 
@@ -53,7 +53,7 @@ public:
     Serialize(StreamWriter& writer) override;
 
     void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) override;
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override;
 
     void
     GetAttribute(BucketIdType bucket_id, InnerIdType inner_id, AttributeSet* attr) override;

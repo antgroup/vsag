@@ -18,13 +18,9 @@ include (FetchContent)
 # cpp-httplib is a header-only library, we only need the main header
 set (httplib_urls
     https://github.com/yhirose/cpp-httplib/archive/refs/tags/v0.35.0.tar.gz
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpp-httplib/v0.35.0.tar.gz
 )
 
-if (DEFINED ENV{VSAG_THIRDPARTY_HTTPLIB})
-    message (STATUS "Using local path for httplib: $ENV{VSAG_THIRDPARTY_HTTPLIB}")
-    list (PREPEND httplib_urls "$ENV{VSAG_THIRDPARTY_HTTPLIB}")
-endif ()
+vsag_resolve_thirdparty_override (HTTPLIB v0.35.0 httplib_urls)
 
 FetchContent_Declare (
     httplib

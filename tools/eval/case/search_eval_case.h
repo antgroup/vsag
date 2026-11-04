@@ -23,17 +23,23 @@
 
 namespace vsag::eval {
 
+class LatencyMonitor;
+
 class SearchEvalCase : public EvalCase {
 public:
     SearchEvalCase(const std::string& dataset_path,
                    const std::string& index_path,
                    vsag::IndexPtr index,
-                   EvalConfig config);
+                   EvalConfig config,
+                   EvalDatasetPtr dataset = nullptr);
 
     ~SearchEvalCase() override = default;
 
     JsonType
     Run() override;
+
+    JsonType
+    RunInMemory();
 
 private:
     enum SearchType {
@@ -84,6 +90,8 @@ private:
 
 private:
     std::vector<MonitorPtr> monitors_{};
+
+    std::shared_ptr<LatencyMonitor> latency_monitor_{nullptr};
 
     SearchType search_type_{SearchType::KNN};
 

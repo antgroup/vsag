@@ -39,7 +39,7 @@ public:
 
 public:
     AttributeInvertedInterface(Allocator* allocator, ComputableBitsetType bitset_type)
-        : allocator_(allocator), field_type_map_(allocator), bitset_type_(bitset_type){};
+        : allocator_(allocator), field_type_map_(allocator), bitset_type_(bitset_type) {};
 
     virtual ~AttributeInvertedInterface() = default;
 
@@ -74,7 +74,7 @@ public:
     }
 
     virtual void
-    Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+    Deserialize(LvalueOrRvalue<StreamReader> reader) {
         this->field_type_map_.Deserialize(reader);
     }
 

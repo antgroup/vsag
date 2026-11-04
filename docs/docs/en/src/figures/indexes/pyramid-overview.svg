@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
   <title>Pyramid index overview</title>
-  <desc>Pyramid stores every vector along a path string like "a/d/f" and builds one proximity sub-graph per node in the resulting path tree. A query is tagged with a path prefix; the search walks down the tree to the most specific matching sub-graph, then runs ef_search inside the leaf graph. Levels listed in no_build_levels are passthrough containers and fall back to linear scan.</desc>
+  <desc>Pyramid stores every vector along one or multiple paths like "a/d/f" and builds one proximity sub-graph per node in the resulting path tree. A query is tagged with a path prefix; the search walks down the tree to the most specific matching sub-graph, then runs ef_search inside the leaf graph. Levels listed in no_build_levels are passthrough containers and fall back to linear scan.</desc>
 
   <defs>
     <marker id="arrow-search" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

@@ -17,6 +17,7 @@
 
 #include <cstring>
 #include <memory>
+#include <type_traits>
 
 namespace vsag {
 

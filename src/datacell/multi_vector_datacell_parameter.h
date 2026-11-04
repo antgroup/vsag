@@ -20,6 +20,7 @@
 #include "flatten_interface_parameter.h"
 #include "inner_string_params.h"
 #include "quantization/fp32_quantizer_parameter.h"
+#include "quantization/quantizer_parameter.h"
 #include "utils/param_compat_macros.h"
 #include "utils/pointer_define.h"
 
@@ -31,13 +32,29 @@ public:
     explicit MultiVectorDataCellParameter() : FlattenInterfaceParameter(MULTI_VECTOR_DATA_CELL) {
     }
 
+    static MultiVectorDataCellParamPtr
+    CreateDefault(const std::string& io_type) {
+        auto parameter = std::make_shared<MultiVectorDataCellParameter>();
+        parameter->io_parameter = IOParameter::CreateDefault(io_type);
+        parameter->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+        return parameter;
+    }
+
     void
     FromJson(const JsonType& json) override {
         CHECK_ARGUMENT(
             json.Contains(IO_PARAMS_KEY),
             fmt::format("multi-vector datacell parameters must contain {}", IO_PARAMS_KEY));
         this->io_parameter = IOParameter::GetIOParameterByJson(json[IO_PARAMS_KEY]);
-        this->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+
+        // Quantizer selection: defaults to FP32 (no compression).
+        // Supported values: "fp32", "fp16", "bf16", "sq8_uniform", "int8", etc.
+        if (json.Contains(QUANTIZATION_PARAMS_KEY)) {
+            this->quantizer_parameter =
+                QuantizerParameter::GetQuantizerParameterByJson(json[QUANTIZATION_PARAMS_KEY]);
+        } else {
+            this->quantizer_parameter = std::make_shared<FP32QuantizerParameter>();
+        }
     }
 
     JsonType
@@ -45,6 +62,7 @@ public:
         JsonType json;
         json[IO_PARAMS_KEY].SetJson(this->io_parameter->ToJson());
         json[CODES_TYPE_KEY].SetString(MULTI_VECTOR_CODES);
+        json[QUANTIZATION_PARAMS_KEY].SetJson(this->quantizer_parameter->ToJson());
         return json;
     }
 

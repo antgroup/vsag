@@ -19,7 +19,6 @@
 #include <memory>
 #include <vector>
 
-#include "algorithm/hnswlib/hnswalg.h"
 #include "common.h"
 #include "dense_duplicate_tracker.h"
 #include "graph_datacell_parameter.h"
@@ -27,7 +26,7 @@
 #include "graph_interface_parameter.h"
 #include "impl/reverse_edge.h"
 #include "index_common_param.h"
-#include "io/common/basic_io.h"
+#include "layout/fixed_layout.h"
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -73,13 +72,13 @@ public:
     Resize(InnerIdType new_size) override;
 
     inline void
-    SetIO(std::shared_ptr<BasicIO<IOTmpl>> io) {
-        this->io_ = io;
+    SetIO(std::shared_ptr<IOTmpl> io) {
+        this->layout_.SetIO(std::move(io));
     }
 
     virtual void
     InitIO(const IOParamPtr& io_param) override {
-        this->io_->InitIO(io_param);
+        this->layout_.InitIO(io_param);
     }
 
     /****
@@ -89,15 +88,67 @@ public:
      */
     void
     Prefetch(InnerIdType id, uint32_t neighbor_i) override {
-        io_->Prefetch(static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_) +
-                      sizeof(uint32_t) + neighbor_i * sizeof(InnerIdType));
+        const uint64_t offset_in_record =
+            NEIGHBORS_OFFSET + static_cast<uint64_t>(neighbor_i) * sizeof(InnerIdType);
+        layout_.PrefetchAt(id, offset_in_record, 64);
     }
 
     void
     Serialize(StreamWriter& writer) override;
 
+    [[nodiscard]] uint64_t
+    GetIOSize() const override {
+        // any io whose Write persists the bytes (in-memory or file-backed)
+        // can be pre-allocated by ReserveIO and filled concurrently by
+        // WriteRaw; only SkipDeserialize ios (e.g. reader_io, whose Write is
+        // a no-op counter) opt out and fall back to the whole-component path
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            return this->layout_.GetIOSize();
+        } else {
+            return 0;
+        }
+    }
+
+    uint64_t
+    ReserveIO(StreamReader& reader) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            GraphInterface::Deserialize(reader);
+            uint64_t io_size = 0;
+            StreamReader::ReadObj(reader, io_size);
+            this->layout_.ResizeForOverwrite(io_size);
+            return io_size;
+        } else {
+            return GraphInterface::ReserveIO(reader);
+        }
+    }
+
+    void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            this->layout_.WriteRaw(data, size, offset);
+        } else {
+            GraphInterface::WriteRaw(data, size, offset);
+        }
+    }
+
+    void
+    DeserializeTail(StreamReader& reader) override {
+        if constexpr (not IOTmpl::SkipDeserialize) {
+            StreamReader::ReadObj(reader, this->code_line_size_);
+            this->layout_.SetCodeSize(this->code_line_size_);
+            if (is_support_delete_) {
+                StreamReader::ReadVector(reader, node_versions_);
+            }
+        } else {
+            GraphInterface::DeserializeTail(reader);
+        }
+    }
+
     void
     Deserialize(StreamReader& reader) override;
+
+    void
+    FinishDeserialize() override;
 
     bool
     InMemory() const override {
@@ -110,9 +161,7 @@ public:
     uint64_t
     GetMemoryUsage() const override {
         uint64_t memory = sizeof(GraphDataCell) + node_versions_.size() * sizeof(uint8_t);
-        if (IOTmpl::InMemory) {
-            memory += io_->GetMemoryUsage();
-        }
+        memory += layout_.GetMemoryUsage();
         if (reverse_edges_) {
             memory += reverse_edges_->GetMemoryUsage();
         }
@@ -138,8 +187,7 @@ public:
 
     void
     ShrinkToFit(InnerIdType capacity) override {
-        uint64_t io_size = static_cast<uint64_t>(capacity) * static_cast<uint64_t>(code_line_size_);
-        this->io_->Shrink(io_size);
+        this->layout_.Shrink(capacity);
         if (is_support_delete_) {
             node_versions_.resize(capacity);
         }
@@ -147,7 +195,10 @@ public:
     }
 
 protected:
-    std::shared_ptr<BasicIO<IOTmpl>> io_{nullptr};
+    static constexpr uint64_t COUNT_OFFSET = 0;
+    static constexpr uint64_t NEIGHBORS_OFFSET = sizeof(uint32_t);
+
+    FixedLayout<IOTmpl> layout_{};
 
     Vector<uint8_t> node_versions_;
 
@@ -192,7 +243,6 @@ template <typename IOTmpl>
 GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
                                      const IndexCommonParam& common_param)
     : node_versions_(common_param.allocator_.get()) {
-    this->io_ = std::make_shared<IOTmpl>(param->io_parameter_, common_param);
     this->maximum_degree_ = param->max_degree_;
     this->max_capacity_ = param->init_max_capacity_;
     this->is_support_delete_ = param->support_remove_;
@@ -200,6 +250,8 @@ GraphDataCell<IOTmpl>::GraphDataCell(const GraphDataCellParamPtr& param,
     this->id_bit_ = sizeof(InnerIdType) * 8 - this->remove_flag_bit_;
     this->remove_flag_mask_ = (1 << this->id_bit_) - 1;
     this->code_line_size_ = this->maximum_degree_ * sizeof(InnerIdType) + sizeof(uint32_t);
+    this->layout_.SetCodeSize(this->code_line_size_);
+    this->layout_.SetIO(std::make_shared<IOTmpl>(param->io_parameter_, common_param));
     this->allocator_ = common_param.allocator_.get();
     if (this->is_support_delete_) {
         node_versions_.resize(max_capacity_);
@@ -236,71 +288,122 @@ GraphDataCell<IOTmpl>::InsertNeighborsById(InnerIdType id,
     }
     UpdateReverseEdges(id, old_neighbors, neighbor_ids);
 
+    // weak is enough here: the loop reloads current on every failure and a spurious failure only
+    // costs one retry. PublishNode uses the strong form because it exits once the mark already
+    // covers the node, so it has no reload to hide behind.
     InnerIdType current = total_count_.load();
     while (current < id + 1 && !total_count_.compare_exchange_weak(current, id + 1)) {
     }
-    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     if (is_support_delete_) {
-        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
-        start += sizeof(neighbor_count);
-        Vector<InnerIdType> neighbor_ids_ptr(neighbor_ids.size(), 0, this->allocator_);
-        for (int i = 0; i < neighbor_ids.size(); ++i) {
-            auto neighbor_id = neighbor_ids[i];
+        const auto neighbor_count =
+            std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        Vector<InnerIdType> neighbor_ids_ptr(neighbor_count, 0, this->allocator_);
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            const auto neighbor_id = neighbor_ids[i];
             neighbor_ids_ptr[i] = neighbor_id | (node_versions_[neighbor_id] << id_bit_);
         }
-        this->io_->Write((uint8_t*)(neighbor_ids_ptr.data()),
-                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                         start);
+        // Payload first, then the count with a release fence in between, so a reader that
+        // observes the new count reads the matching payload rather than the previous list.
+        // Readers hold the shared neighbour lock today; the fence pair is what a lock-free
+        // reader would need in addition to re-reading the count.
+        this->layout_.WriteAt(id,
+                              NEIGHBORS_OFFSET,
+                              reinterpret_cast<const uint8_t*>(neighbor_ids_ptr.data()),
+                              static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType));
+        std::atomic_thread_fence(std::memory_order_release);
+        this->layout_.WriteAt(id,
+                              COUNT_OFFSET,
+                              reinterpret_cast<const uint8_t*>(&neighbor_count),
+                              sizeof(neighbor_count));
     } else {
-        uint32_t neighbor_count = std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
-        this->io_->Write((uint8_t*)(&neighbor_count), sizeof(neighbor_count), start);
-        start += sizeof(neighbor_count);
-        this->io_->Write((uint8_t*)(neighbor_ids.data()),
-                         static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
-                         start);
+        const auto neighbor_count =
+            std::min((uint32_t)(neighbor_ids.size()), this->maximum_degree_);
+        // Publish the payload before the count, with a release fence in between, so a reader
+        // that observes the new count reads the matching payload rather than bytes left over
+        // from the previous list. Readers hold the shared neighbour lock today; the fence pair
+        // is what a lock-free reader would additionally need.
+        this->layout_.WriteAt(id,
+                              NEIGHBORS_OFFSET,
+                              reinterpret_cast<const uint8_t*>(neighbor_ids.data()),
+                              static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType));
+        std::atomic_thread_fence(std::memory_order_release);
+        this->layout_.WriteAt(id,
+                              COUNT_OFFSET,
+                              reinterpret_cast<const uint8_t*>(&neighbor_count),
+                              sizeof(neighbor_count));
     }
 }
 
 template <typename IOTmpl>
 uint32_t
 GraphDataCell<IOTmpl>::GetNeighborSize(InnerIdType id) const {
-    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
     uint32_t neighbor_count = 0;
-    this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
+    this->layout_.ReadAt(
+        id, COUNT_OFFSET, sizeof(neighbor_count), reinterpret_cast<uint8_t*>(&neighbor_count));
     return neighbor_count;
 }
 
 template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const {
-    auto start = static_cast<uint64_t>(id) * static_cast<uint64_t>(this->code_line_size_);
+    // The matching release fence lives in InsertNeighborsById, between the payload and the count
+    // write. The count itself is stored with a plain (non-atomic) write because the layout is a
+    // byte array, so the count is what signals that a payload is ready, and the read order here
+    // is part of the fence-to-fence pattern: the load that observes the released value has to be
+    // sequenced *before* the acquire fence, which is why the count is read above and the payload
+    // below. Readers hold the shared neighbour lock today (see BasicSearcher::visit), so this is
+    // fallback protection rather than the live mechanism; a lock-free reader would additionally
+    // have to re-read the count after the fence and bail out when it changed, because the first
+    // read is itself unordered.
     uint32_t neighbor_count = 0;
-    this->io_->Read(sizeof(neighbor_count), start, (uint8_t*)(&neighbor_count));
+    this->layout_.ReadAt(
+        id, COUNT_OFFSET, sizeof(neighbor_count), reinterpret_cast<uint8_t*>(&neighbor_count));
+    if (is_support_delete_) {
+        neighbor_count &= remove_flag_mask_;
+    }
     if (neighbor_count > this->maximum_degree_) {
         neighbor_ids.clear();
         return;
     }
     if (is_support_delete_) {
-        neighbor_count &= remove_flag_mask_;
-        start += sizeof(neighbor_count);
+        std::atomic_thread_fence(std::memory_order_acquire);
         Vector<InnerIdType> shared_neighbor_ids(neighbor_count, this->allocator_);
-        this->io_->Read(
-            neighbor_count * sizeof(InnerIdType), start, (uint8_t*)(shared_neighbor_ids.data()));
+        this->layout_.ReadAt(id,
+                             NEIGHBORS_OFFSET,
+                             static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                             reinterpret_cast<uint8_t*>(shared_neighbor_ids.data()));
         neighbor_ids.clear();
         neighbor_ids.reserve(neighbor_count);
+        const auto id_limit = static_cast<InnerIdType>(node_versions_.size());
         for (int i = 0; i < neighbor_count; ++i) {
-            uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
-            InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
-            if (node_versions_[neighbor_id] == neighbor_version) {
+            const uint8_t neighbor_version = shared_neighbor_ids[i] >> id_bit_;
+            const InnerIdType neighbor_id = shared_neighbor_ids[i] & remove_flag_mask_;
+            if (neighbor_id < id_limit and node_versions_[neighbor_id] == neighbor_version) {
                 neighbor_ids.push_back(neighbor_id);
             }
         }
     } else {
-        start += sizeof(neighbor_count);
+        // Pair with the release fence in InsertNeighborsById: the count was read above, so the
+        // payload below is safe to read.
+        std::atomic_thread_fence(std::memory_order_acquire);
+        // Read straight into the caller's vector (a traversal reuses it, so this does not
+        // allocate) and compact out ids that do not exist yet: a neighbour list that is being
+        // rewritten, or that was never written, must not leak unwritten ids into the walk.
+        const auto id_limit =
+            static_cast<InnerIdType>(total_count_.load(std::memory_order_acquire));
         neighbor_ids.resize(neighbor_count);
-        this->io_->Read(
-            neighbor_ids.size() * sizeof(InnerIdType), start, (uint8_t*)(neighbor_ids.data()));
+        this->layout_.ReadAt(id,
+                             NEIGHBORS_OFFSET,
+                             static_cast<uint64_t>(neighbor_count) * sizeof(InnerIdType),
+                             reinterpret_cast<uint8_t*>(neighbor_ids.data()));
+        uint32_t kept = 0;
+        for (uint32_t i = 0; i < neighbor_count; ++i) {
+            const InnerIdType neighbor_id = neighbor_ids[i];
+            if (neighbor_id < id_limit) {
+                neighbor_ids[kept++] = neighbor_id;
+            }
+        }
+        neighbor_ids.resize(kept);
     }
 }
 
@@ -318,8 +421,7 @@ GraphDataCell<IOTmpl>::Resize(InnerIdType new_size) {
         }
         node_versions_.resize(new_size);
     }
-    uint64_t io_size = static_cast<uint64_t>(new_size) * static_cast<uint64_t>(code_line_size_);
-    this->io_->Resize(io_size);
+    this->layout_.Resize(new_size);
     this->max_capacity_ = new_size;
     if (this->duplicate_tracker_ != nullptr) {
         this->duplicate_tracker_->Resize(new_size);
@@ -330,7 +432,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::Serialize(StreamWriter& writer) {
     GraphInterface::Serialize(writer);
-    this->io_->Serialize(writer);
+    this->layout_.Serialize(writer);
     StreamWriter::WriteObj(writer, this->code_line_size_);
     if (is_support_delete_) {
         StreamWriter::WriteVector(writer, node_versions_);
@@ -341,10 +443,30 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
-    this->io_->Deserialize(reader);
+    this->layout_.Deserialize(reader);
     StreamReader::ReadObj(reader, this->code_line_size_);
+    this->layout_.SetCodeSize(this->code_line_size_);
     if (is_support_delete_) {
         StreamReader::ReadVector(reader, node_versions_);
+    }
+    this->FinishDeserialize();
+}
+
+template <typename IOTmpl>
+void
+GraphDataCell<IOTmpl>::FinishDeserialize() {
+    if (reverse_edges_) {
+        // Reverse edges are derived state, not part of the serialized graph. Restore them
+        // after node versions, before any physical deletion can move a referenced tail ID.
+        auto restored = std::make_unique<ReverseEdge>(this->allocator_);
+        Vector<InnerIdType> neighbors(this->allocator_);
+        for (InnerIdType id = 0; id < this->total_count_; ++id) {
+            this->GetNeighbors(id, neighbors);
+            for (auto neighbor : neighbors) {
+                restored->AddReverseEdge(id, neighbor);
+            }
+        }
+        reverse_edges_.swap(restored);
     }
 }
 
@@ -352,7 +474,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::DeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] + 1 == 0) {
                 throw VsagException(
                     ErrorType::INTERNAL_ERROR,
@@ -373,7 +495,7 @@ template <typename IOTmpl>
 void
 GraphDataCell<IOTmpl>::RecoverDeleteNeighborsById(vsag::InnerIdType id) {
     if (is_support_delete_) {
-        if (id <= max_capacity_) {
+        if (id < max_capacity_) {
             if (node_versions_[id] == 0) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "recover remove point too many times in GraphDatacell");

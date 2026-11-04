@@ -322,50 +322,6 @@ generate_attributes(uint64_t count, uint32_t max_term_count, uint32_t max_value_
     return results;
 }
 
-vsag::IndexPtr
-generate_index(const std::string& name,
-               const std::string& metric_type,
-               int64_t num_vectors,
-               int64_t dim,
-               std::vector<int64_t>& ids,
-               std::vector<float>& vectors,
-               bool use_conjugate_graph) {
-    auto index = vsag::Factory::CreateIndex(name,
-                                            vsag::generate_build_parameters(
-                                                metric_type, num_vectors, dim, use_conjugate_graph)
-                                                .value())
-                     .value();
-
-    auto base = vsag::Dataset::Make();
-    base->NumElements(num_vectors)
-        ->Dim(dim)
-        ->Ids(ids.data())
-        ->Float32Vectors(vectors.data())
-        ->Owner(false);
-    if (not index->Build(base).has_value()) {
-        return nullptr;
-    }
-
-    return index;
-}
-
-std::string
-generate_hnsw_build_parameters_string(const std::string& metric_type, int64_t dim) {
-    constexpr auto parameter_temp = R"(
-    {{
-        "dtype": "float32",
-        "metric_type": "{}",
-        "dim": {},
-        "hnsw": {{
-            "max_degree": 64,
-            "ef_construction": 500
-        }}
-    }}
-    )";
-    auto build_parameters_str = fmt::format(parameter_temp, metric_type, dim);
-    return build_parameters_str;
-}
-
 vsag::DatasetPtr
 generate_one_dataset(int64_t dim, uint64_t count) {
     auto result = vsag::Dataset::Make();

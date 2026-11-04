@@ -6,7 +6,7 @@ against, grouped by responsibility. The installed headers remain the authoritati
 truth; the pages here explain intent, ownership, and how the pieces fit together.
 
 > Looking for how to *configure* an index (the JSON `index_param` / search keys)? That is covered
-> in [Index Parameters](../resources/index_parameters.md) and each [index page](../indexes/README.md).
+> in [Index Parameters](../resources/index_parameters.md) and each [index page](../indexes/).
 > This chapter covers the *code* surface (types and methods), not the JSON schema.
 
 ## Include and namespace
@@ -71,7 +71,7 @@ Defined in `vsag/errors.h`. Values start at `1` (`0` is reserved).
 | Behavior | `INDEX_EMPTY` | Index is empty; cannot search or serialize. |
 | Runtime | `NO_ENOUGH_MEMORY` | Memory allocation failed. |
 | Runtime | `READ_ERROR` | Failed to read from a binary. |
-| Runtime | `MISSING_FILE` | A required file is missing (e.g. DiskANN deserialization). |
+| Runtime | `MISSING_FILE` | A required index file is missing during deserialization. |
 | Runtime | `INVALID_BINARY` | Serialized binary content is invalid. |
 
 Because most index methods are `virtual` with a default body that returns

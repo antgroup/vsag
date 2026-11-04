@@ -26,6 +26,7 @@
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_datacell_parameter.h"
 #include "datacell/graph_interface.h"
+#include "impl/adaptive_pruning.h"
 #include "impl/odescent/odescent_graph_parameter.h"
 #include "index_common_param.h"
 #include "typing.h"
@@ -53,6 +54,7 @@ public:
     uint64_t ef_construction{400};
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
 };
 
 struct PyramidParameters : public InnerIndexParameter {
@@ -70,17 +72,23 @@ public:
     GraphInterfaceParamPtr graph_param{nullptr};
     FlattenInterfaceParamPtr base_codes_param{nullptr};
     ODescentParameterPtr odescent_param{nullptr};
+    PiPNNGraphBuilderParameter pipnn_param{};
 
     std::vector<int32_t> no_build_levels;
     std::vector<PyramidHierarchyParameters> hierarchies;
     uint64_t ef_construction{400};
     int64_t max_degree{64};
     std::string graph_type{GRAPH_TYPE_VALUE_NSW};
+    AdaptivePruningParameter adaptive_pruning;
     float alpha{1.2F};
     uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
+    GraphStorageTypes root_graph_storage_type{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
 
     bool support_duplicate{false};
     bool has_hierarchies{false};
+    bool persist_source_id{false};
+    bool store_paths{false};
 };
 
 class PyramidSearchParameters : public IndexSearchParameter {
@@ -100,10 +108,19 @@ public:
 public:
     uint64_t ef_search{100};
     uint64_t subindex_ef_search{50};
+    uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
+    bool has_rabitq_one_bit_search{false};
+    bool rabitq_one_bit_search{false};
+    float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
     std::vector<std::string> hierarchies;
     HierarchyOp hierarchy_op{HierarchyOp::SINGLE};
 
 private:
     PyramidSearchParameters() = default;
 };
+
+void
+validate_pyramid_external_root_graph_config(const JsonType& external_param,
+                                            const PyramidParameters& params);
+
 }  // namespace vsag

@@ -61,19 +61,6 @@ private:
 
 public:
     /**
-     * @brief Gets the number of threads for IO operations.
-     *
-     * This function retrieves the number of threads to use for disk index IO during the search process.
-     * It is thread-safe, using memory order acquire operations.
-     *
-     * @return uint64_t The number of threads for IO operations.
-     */
-    [[nodiscard]] inline uint64_t
-    num_threads_io() const {
-        return num_threads_io_.load(std::memory_order_acquire);
-    }
-
-    /**
      * @brief Gets the number of threads for building operations.
      *
      * This function retrieves the number of threads used for constructing indices.
@@ -87,20 +74,9 @@ public:
     }
 
     /**
-     * @brief Sets the number of threads for IO operations in diskann.
+     * @brief Sets the number of threads for index building operations.
      *
-     * This function sets the number of threads to use for disk index IO during the search process.
-     * The specified number of threads should be between 1 and 200.
-     *
-     * @param num_threads Number of threads for IO operations.
-     */
-    void
-    set_num_threads_io(uint64_t num_threads);
-
-    /**
-     * @brief Sets the number of threads for building operations in diskann.
-     *
-     * This function sets the number of threads to use for constructing diskann index
+     * This function sets the number of threads to use for constructing indexes.
      *
      * @param num_threads Number of threads for building operations.
      */
@@ -191,9 +167,6 @@ private:
     ~Options() = default;
 
 private:
-    ///< The size of the thread pool for single index I/O during searches.
-    std::atomic<uint64_t> num_threads_io_{8};
-
     ///< The number of threads used for building a single index.
     std::atomic<uint64_t> num_threads_building_{4};
 

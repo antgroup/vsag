@@ -2,14 +2,9 @@ include (FetchContent)
 
 set (cpuinfo_urls
     https://github.com/pytorch/cpuinfo/archive/ca678952a9a8eaa6de112d154e8e104b22f9ab3f.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/cpuinfo/ca678952a9a8eaa6de112d154e8e104b22f9ab3f.tar.gz
 )
-if (DEFINED ENV{VSAG_THIRDPARTY_CPUINFO})
-    message (STATUS "Using local path for cpuinfo: $ENV{VSAG_THIRDPARTY_CPUINFO}")
-    list (PREPEND cpuinfo_urls "$ENV{VSAG_THIRDPARTY_CPUINFO}")
-endif ()
+vsag_resolve_thirdparty_override (
+    CPUINFO ca678952a9a8eaa6de112d154e8e104b22f9ab3f cpuinfo_urls)
 FetchContent_Declare (
     cpuinfo
     URL ${cpuinfo_urls}

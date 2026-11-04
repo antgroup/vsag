@@ -15,6 +15,7 @@
 
 #include "fht_kac_rotate_transformer.h"
 
+#include <cstring>
 #include <random>
 
 #include "simd/rabitq_simd.h"
@@ -48,8 +49,21 @@ FhtKacRotator::FhtKacRotator(Allocator* allocator, int64_t dim)
 
 void
 FhtKacRotator::Train() {
-    std::random_device rd;   // Seed
-    std::mt19937 gen(rd());  // Mersenne Twister RNG
+    // Fixed seed: the flip signs are an arbitrary choice among equally valid rotations, so
+    // a constant seed costs nothing in quality but makes construction reproducible. Seeding
+    // from std::random_device made every process use a different rotation, which in turn
+    // made the quantized codes, the graph, and therefore search results differ run to run.
+    // Seed is overridable only so that the quality spread across seeds can be measured
+    // during validation; production uses the fixed default.
+    // Read the override once: Train() can run again when an index is deserialized or re-trained,
+    // and the rotation must not change underneath already encoded vectors.
+    static const uint32_t overridden_flip_seed = []() {
+        const char* env = std::getenv("VSAG_FHT_SEED");
+        return env == nullptr ? 0x46485431U  // "FHT1"
+                              : static_cast<uint32_t>(std::strtoul(env, nullptr, 0));
+    }();
+    const uint32_t flip_seed = overridden_flip_seed;
+    std::mt19937 gen(flip_seed);  // Mersenne Twister RNG
     std::uniform_int_distribution<int> dist(0, 255);
     for (auto& i : flip_) {
         i = static_cast<uint8_t>(dist(gen));
@@ -61,9 +75,8 @@ FhtKacRotator::Train(const float* data, uint64_t count) {
     this->Train();
 }
 
-TransformerMetaPtr
-FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
-    auto meta = std::make_shared<FHTMeta>();
+void
+FhtKacRotator::Transform(const float* data, float* rotated_vec, uint8_t* /*meta*/) const {
     auto dim = static_cast<uint64_t>(this->input_dim_);
     std::memcpy(rotated_vec, data, sizeof(float) * dim);
     if (trunc_dim_ == dim) {
@@ -72,7 +85,7 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
             FHTRotate(rotated_vec, trunc_dim_);
             VecRescale(rotated_vec, trunc_dim_, fac_);
         }
-        return meta;
+        return;
     }
 
     uint64_t start = dim - trunc_dim_;
@@ -90,8 +103,6 @@ FhtKacRotator::Transform(const float* data, float* rotated_vec) const {
     }
     VecRescale(rotated_vec, dim, 0.25F);
     //origin vec(x,y), after kacs_walk_generic() -> (x+y, x-y),should be resize by sqrt(0.5) for each KacsWalk() to make the len of vector consistent
-
-    return meta;
 }
 void
 FhtKacRotator::InverseTransform(float const* data, float* rotated_vec) const {

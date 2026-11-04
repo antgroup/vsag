@@ -13,19 +13,138 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
+#include <mutex>
 #include <sstream>
+#include <thread>
+#include <unordered_map>
+#include <unordered_set>
 
+#include "framework/test_budget_context.h"
 #include "functest.h"
 #include "storage/serialization_tags.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "test_index.h"
+#include "utils/search_threshold.h"
 #include "vsag/constants.h"
 #include "vsag/options.h"
 #include "vsag/search_request.h"
+
+namespace {
+
+class TrackingAllocator : public vsag::Allocator {
+public:
+    std::string
+    Name() override {
+        return "TrackingAllocator";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        std::scoped_lock lock(mutex_);
+        if (size > allocation_limit_ - allocated_bytes_) {
+            return nullptr;
+        }
+        auto* ptr = std::malloc(size);
+        if (ptr != nullptr) {
+            allocations_[ptr] = size;
+            allocated_bytes_ += size;
+            allocation_count_ += 1;
+        }
+        return ptr;
+    }
+
+    void
+    Deallocate(void* ptr) override {
+        if (ptr == nullptr) {
+            return;
+        }
+        {
+            std::scoped_lock lock(mutex_);
+            auto it = allocations_.find(ptr);
+            if (it == allocations_.end()) {
+                std::abort();
+            }
+            allocated_bytes_ -= it->second;
+            allocations_.erase(it);
+        }
+        std::free(ptr);
+    }
+
+    void*
+    Reallocate(void* ptr, uint64_t size) override {
+        if (ptr == nullptr) {
+            return Allocate(size);
+        }
+
+        std::scoped_lock lock(mutex_);
+        auto it = allocations_.find(ptr);
+        if (it == allocations_.end()) {
+            std::abort();
+        }
+        if (size > it->second && size - it->second > allocation_limit_ - allocated_bytes_) {
+            return nullptr;
+        }
+        auto* new_ptr = std::realloc(ptr, size);
+        if (new_ptr == nullptr) {
+            return nullptr;
+        }
+        allocated_bytes_ -= it->second;
+        allocations_.erase(it);
+        allocations_[new_ptr] = size;
+        allocated_bytes_ += size;
+        return new_ptr;
+    }
+
+    uint64_t
+    AllocatedBytes() const {
+        std::scoped_lock lock(mutex_);
+        return allocated_bytes_;
+    }
+
+    uint64_t
+    AllocationCount() const {
+        std::scoped_lock lock(mutex_);
+        return allocation_count_;
+    }
+
+    void
+    SetAllocationLimit(uint64_t limit) {
+        std::scoped_lock lock(mutex_);
+        allocation_limit_ = limit;
+    }
+
+private:
+    mutable std::mutex mutex_;
+    std::unordered_map<void*, uint64_t> allocations_;
+    uint64_t allocated_bytes_{0};
+    uint64_t allocation_count_{0};
+    uint64_t allocation_limit_{std::numeric_limits<uint64_t>::max()};
+};
+
+class BlockSizeLimitGuard {
+public:
+    explicit BlockSizeLimitGuard(uint64_t block_size)
+        : original_block_size_(vsag::Options::Instance().block_size_limit()) {
+        vsag::Options::Instance().set_block_size_limit(block_size);
+    }
+
+    ~BlockSizeLimitGuard() {
+        vsag::Options::Instance().set_block_size_limit(original_block_size_);
+    }
+
+private:
+    uint64_t original_block_size_;
+};
+
+}  // namespace
 
 namespace fixtures {
 
@@ -105,19 +224,111 @@ const std::vector<std::pair<std::string, float>> BruteForceTestIndex::all_test_c
 
 constexpr static const char* search_param_tmp = "";
 
+TEST_CASE("BruteForce empty search exposes zero statistics", "[ut][bruteforce][statistics]") {
+    constexpr const char* params = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 4,
+        "index_param": {"base_quantization_type": "fp32"}
+    })";
+    auto index = fixtures::TestIndex::TestFactory("brute_force", params, true);
+    auto query = vsag::Dataset::Make();
+    const float vector[] = {0.0F, 0.0F, 0.0F, 0.0F};
+    query->NumElements(1)->Dim(4)->Float32Vectors(vector)->Owner(false);
+    auto result = index->KnnSearch(query, 1, "");
+    REQUIRE(result.has_value());
+    auto stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(stats["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(stats["complete"].GetBool());
+
+    const float vectors[] = {
+        0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 2.0F, 0.0F, 0.0F, 0.0F};
+    const int64_t ids[] = {10, 11, 12};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(4)->Float32Vectors(vectors)->Ids(ids)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    result = index->KnnSearch(query, 1, R"({"parallelism": 2})");
+    REQUIRE(result.has_value());
+    stats = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(stats["distance_evaluations"].GetUint64() == 3);
+    REQUIRE(stats["distance_evaluations_by_phase"]["approximate"].GetUint64() == 3);
+    REQUIRE(stats["distance_evaluations_by_backend"]["fp32"].GetUint64() == 3);
+}
+
 BruteForceResourcePtr
 BruteForceTestIndex::GetResource(bool sample) {
+    const auto identity = budget::CurrentCaseIdentity(__FILE__);
+    auto policy = budget::CurrentPolicy(!sample);
+    const auto seed = budget::CaseSeed(identity.name, policy.seed);
     auto resource = std::make_shared<BruteForceTestResource>();
-    if (sample) {
-        resource->dims = fixtures::get_common_used_dims(1, RandomValue(0, 999));
-        resource->test_cases = fixtures::RandomSelect(BruteForceTestIndex::all_test_cases, 3);
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 1);
-        resource->base_count = BruteForceTestIndex::base_count;
-    } else {
-        resource->dims = fixtures::get_index_test_dims(3, RandomValue(0, 999));
-        resource->test_cases = BruteForceTestIndex::all_test_cases;
-        resource->metric_types = fixtures::RandomSelect<std::string>({"ip", "l2", "cosine"}, 2);
-        resource->base_count = BruteForceTestIndex::base_count * 3;
+    const auto selected = budget::ShuffledIndices(all_test_cases.size(), seed);
+    for (uint64_t i = 0; i < (sample ? 3 : all_test_cases.size()); ++i) {
+        resource->test_cases.push_back(all_test_cases[selected[i]]);
+    }
+    const std::vector<std::string> metrics{"ip", "l2", "cosine"};
+    const auto selected_metrics = budget::ShuffledIndices(metrics.size(), seed + 1);
+    for (uint64_t i = 0; i < (sample ? 1 : 2); ++i) {
+        resource->metric_types.push_back(metrics[selected_metrics[i]]);
+    }
+    // Every helper below passes the class's fixed 1000-row dataset size, including Daily.
+    resource->base_count = base_count;
+    auto quantizers = resource->test_cases;
+    auto actual_metrics = resource->metric_types;
+    const auto& name = identity.name;
+    if (name.find("GetDistance By ID") != std::string::npos ||
+        name.find("Remove By ID") != std::string::npos) {
+        quantizers = {{"fp32", 0.99F}};
+    }
+    if (name.find("Remove By ID") != std::string::npos) {
+        actual_metrics = {"l2"};
+    }
+    const bool estimate_memory = name.find("Estimate Memory") != std::string::npos;
+    const bool data_only = estimate_memory || name.find("Random Allocator") != std::string::npos;
+    const auto desired_dims = estimate_memory ? std::vector<int>{1536}
+                              : sample
+                                  ? fixtures::get_common_used_dims(1, static_cast<int>(seed % 1000))
+                                  : fixtures::get_index_test_dims(3, static_cast<int>(seed % 1000));
+    std::vector<std::vector<budget::RunSpec>> candidates;
+    for (const uint64_t dimension_limit : {8, 32, 64, 128, 256, 1536}) {
+        std::vector<budget::RunSpec> runs;
+        for (const auto& metric : actual_metrics) {
+            for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+                for (const auto& [quantizer, recall] : quantizers) {
+                    budget::Workload work;
+                    work.dim = estimate_memory
+                                   ? 1536
+                                   : std::min<uint64_t>(desired_dims[d], dimension_limit);
+                    work.num = base_count;
+                    work.min_num = base_count;
+                    work.query_num = 100;
+                    work.metric = metric;
+                    work.quantizer = quantizer;
+                    work.oracle_runs = 1;
+                    if (!data_only) {
+                        // Complete-helper upper bounds include both Build search-parallelism
+                        // variants, TestGeneral, copied indexes and attribute-filter searches.
+                        work.train_num = base_count;
+                        work.train_runs = 2;
+                        work.build_runs = 2;
+                        work.search_runs = 48;
+                        work.search_candidates = base_count;
+                        work.serialize_runs = 6;
+                        work.update_num = base_count;
+                    }
+                    // EstimateMemory and RandomAllocator only create the dataset and an
+                    // empty index; their helpers neither build nor search an index.
+                    runs.push_back({metric + "/" + std::to_string(d) + "/" + quantizer, work});
+                }
+            }
+        }
+        candidates.push_back(std::move(runs));
+    }
+    policy.cap_points = sample ? 2000000000ULL : 400000000000ULL;
+    const auto plan = budget::PlanCase(identity, policy, candidates);
+    plan.Log(std::cout);
+    for (uint64_t d = 0; d < desired_dims.size(); ++d) {
+        resource->dims.push_back(static_cast<int>(plan.Runs()[d * quantizers.size()].workload.dim));
     }
     return resource;
 }
@@ -292,7 +503,7 @@ static void
 TestBruteForceBuild(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
     auto origin_size = vsag::Options::Instance().block_size_limit();
-    auto size = GENERATE(1024 * 1024 * 2);
+    auto size = 1024 * 1024 * 2;
     std::vector<int32_t> search_threads_counts{1, 3};
     constexpr static const char* search_param_tmp2 = R"(
     {{
@@ -501,6 +712,14 @@ TestBruteForceSerializeStreaming() {
     auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
     TestIndex::TestBuildIndex(index, dataset, true);
 
+    auto buffer_param = vsag::JsonType::Parse(param);
+    buffer_param["index_param"]["base_io_type"].SetString("buffer_io");
+    buffer_param["index_param"]["base_file_path"].SetString(
+        BruteForceTestIndex::dir.GenerateRandomFile(false));
+    auto buffer_index =
+        TestIndex::TestFactory(BruteForceTestIndex::name, buffer_param.Dump(), true);
+    TestIndex::TestBuildIndex(buffer_index, dataset, true);
+
     std::stringstream stream;
     auto serialize_result = index->SerializeStreaming(stream);
     REQUIRE(serialize_result.has_value());
@@ -534,9 +753,16 @@ TestBruteForceSerializeStreaming() {
     auto result = index->KnnSearch(query, 10, search_param_tmp);
     auto result2 = index2->KnnSearch(query, 10, search_param_tmp);
     auto result3 = index3->KnnSearch(query, 10, search_param_tmp);
+    auto buffer_result = buffer_index->KnnSearch(query, 10, R"({"parallelism": 2})");
     REQUIRE(result.has_value());
     REQUIRE(result2.has_value());
     REQUIRE(result3.has_value());
+    REQUIRE(buffer_result.has_value());
+    auto buffer_statistics = vsag::JsonType::Parse(buffer_result.value()->GetStatistics());
+    REQUIRE(buffer_statistics["io_cnt"].GetInt() == dataset->base_->GetNumElements());
+    REQUIRE(buffer_statistics["distance_evaluations"].GetUint64() ==
+            static_cast<uint64_t>(dataset->base_->GetNumElements()));
+    REQUIRE(buffer_statistics["complete"].GetBool());
     REQUIRE(result.value()->GetDim() == result2.value()->GetDim());
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] == result2.value()->GetIds()[i]);
@@ -649,6 +875,44 @@ TEST_CASE("BruteForce streaming Load skips attribute filter state",
 
     auto remove_result = loaded.value()->Remove(dataset->base_->GetIds()[0]);
     REQUIRE(remove_result.has_value());
+}
+
+TEST_CASE("BruteForce pre-parsed attribute expression precedence",
+          "[ft][bruteforce][attribute_expression]") {
+    using namespace fixtures;
+    auto param =
+        BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32", true);
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 100, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+    REQUIRE(index->GetAttrTypeSchema() != nullptr);
+
+    vsag::SearchRequest request;
+    request.query_ = get_one_query(dataset->query_, 0);
+    request.topk_ = 10;
+    request.params_str_ = search_param_tmp;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = R"(multi_in(term_0, "0", "|"))";
+    auto expected = index->SearchWithRequest(request);
+    REQUIRE(expected.has_value());
+    request.expression_ = vsag::AstParse(request.attribute_filter_str_, index->GetAttrTypeSchema());
+    request.attribute_filter_str_ = "not a valid predicate (((";
+    auto actual = index->SearchWithRequest(request);
+    REQUIRE(actual.has_value());
+    REQUIRE(actual.value()->GetDim() == expected.value()->GetDim());
+    for (int64_t i = 0; i < actual.value()->GetDim(); ++i) {
+        REQUIRE(actual.value()->GetIds()[i] == expected.value()->GetIds()[i]);
+        REQUIRE(actual.value()->GetDistances()[i] == expected.value()->GetDistances()[i]);
+    }
+    request.expression_.reset();
+    REQUIRE_FALSE(index->SearchWithRequest(request).has_value());
+    request.enable_attribute_filter_ = false;
+    REQUIRE(index->SearchWithRequest(request).has_value());
+
+    auto plain_param =
+        BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto plain = TestIndex::TestFactory(BruteForceTestIndex::name, plain_param, true);
+    REQUIRE(plain->GetAttrTypeSchema() == nullptr);
 }
 
 TEST_CASE("BruteForce empty streaming index consumes section end",
@@ -780,6 +1044,7 @@ TestBruteForceCalcDistanceById(const fixtures::BruteForceResourcePtr& resource) 
             auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
             TestIndex::TestBuildIndex(index, dataset, true);
             TestIndex::TestCalcDistanceById(index, dataset);
+            TestIndex::TestMultiQueryBatchCalcDistanceById(index, dataset, 1e-5, true);
             vsag::Options::Instance().set_block_size_limit(origin_size);
         }
     }
@@ -962,6 +1227,112 @@ TEST_CASE("(PR) BruteForce RangeSearch After MarkRemove",
     }
 }
 
+TEST_CASE("(PR) BruteForce Force Remove Reclaims Storage",
+          "[ft][remove][memory][bruteforce][concurrent][pr]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 32 * 1024;
+    BlockSizeLimitGuard block_size_guard(256 * 1024);
+    std::vector<int64_t> ids(count);
+    std::vector<float> vectors(count * dim);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        for (int64_t j = 0; j < dim; ++j) {
+            vectors[i * dim + j] = static_cast<float>(i * dim + j);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", dim, "fp32");
+    auto allocator = std::make_shared<TrackingAllocator>();
+    auto index_result =
+        vsag::Factory::CreateIndex(fixtures::BruteForceTestIndex::name, param, allocator.get());
+    REQUIRE(index_result.has_value());
+    auto index = index_result.value();
+    REQUIRE(index->Build(base).has_value());
+    auto allocated_bytes_before_remove = allocator->AllocatedBytes();
+    auto memory_before_remove = index->GetMemoryUsage();
+
+    allocator->SetAllocationLimit(allocator->AllocatedBytes());
+    auto oom_remove = index->Remove(ids.front(), vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(not oom_remove.has_value());
+    REQUIRE(index->GetNumElements() == count);
+    REQUIRE(index->CheckIdExist(ids.front()));
+    allocator->SetAllocationLimit(std::numeric_limits<uint64_t>::max());
+
+    std::vector<int64_t> initial_removed(ids.begin(), ids.begin() + count / 2);
+    auto remove_result = index->Remove(initial_removed, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(remove_result.has_value());
+    REQUIRE(remove_result.value() == initial_removed.size());
+    REQUIRE(index->GetNumElements() == count / 2);
+    REQUIRE(index->GetNumberRemoved() == 0);
+    REQUIRE(index->GetMemoryUsage() < memory_before_remove);
+    REQUIRE(allocator->AllocatedBytes() < allocated_bytes_before_remove);
+
+    std::vector<int64_t> add_ids{count};
+    std::vector<float> add_vectors(dim, static_cast<float>(count));
+    auto readd = vsag::Dataset::Make();
+    readd->NumElements(1)
+        ->Dim(dim)
+        ->Ids(add_ids.data())
+        ->Float32Vectors(add_vectors.data())
+        ->Owner(false);
+    auto added = index->Add(readd);
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    REQUIRE(index->GetNumElements() == count / 2 + 1);
+    auto remove_readded = index->Remove(add_ids, vsag::RemoveMode::FORCE_REMOVE);
+    REQUIRE(remove_readded.has_value());
+    REQUIRE(remove_readded.value() == 1);
+
+    const int64_t retained_id = ids.back();
+    auto retained = index->GetDataByIds(&retained_id, 1);
+    REQUIRE(retained.has_value());
+    REQUIRE(retained.value()->GetNumElements() == 1);
+    REQUIRE(retained.value()->GetIds()[0] == retained_id);
+    REQUIRE(memcmp(retained.value()->GetFloat32Vectors(),
+                   vectors.data() + (count - 1) * dim,
+                   dim * sizeof(float)) == 0);
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)
+        ->Dim(dim)
+        ->Float32Vectors(vectors.data() + (count - 1) * dim)
+        ->Owner(false);
+    auto search_result = index->KnnSearch(query, 1, "");
+    REQUIRE(search_result.has_value());
+    REQUIRE(search_result.value()->GetIds()[0] == retained_id);
+
+    std::atomic<bool> start{false};
+    std::atomic<bool> search_failed{false};
+    std::thread search_thread([&] {
+        while (not start.load(std::memory_order_acquire)) {
+        }
+        for (int i = 0; i < 256; ++i) {
+            auto result = index->KnnSearch(query, 1, "");
+            if (not result.has_value() or result.value()->GetIds()[0] != retained_id) {
+                search_failed.store(true, std::memory_order_relaxed);
+                return;
+            }
+        }
+    });
+
+    start.store(true, std::memory_order_release);
+    std::vector<int64_t> concurrent_removed(ids.begin() + count / 2, ids.end() - 1);
+    auto concurrent_remove = index->Remove(concurrent_removed, vsag::RemoveMode::FORCE_REMOVE);
+    search_thread.join();
+    REQUIRE(concurrent_remove.has_value());
+    REQUIRE(concurrent_remove.value() == concurrent_removed.size());
+    REQUIRE(not search_failed.load(std::memory_order_relaxed));
+    REQUIRE(index->GetNumElements() == 1);
+    REQUIRE(index->GetNumberRemoved() == 0);
+}
+
 static void
 TestBruteForceRemoveById(const fixtures::BruteForceResourcePtr& resource) {
     using namespace fixtures;
@@ -1074,6 +1445,215 @@ TEST_CASE("(PR) BruteForce SearchWithRequest Reasoning", "[ft][bruteforce][reaso
     REQUIRE(empty_result.value()->GetReasoning().find("filter_rejected") != std::string::npos);
 }
 
+TEST_CASE("(PR) BruteForce KnnSearch threshold filtering", "[ft][bruteforce][threshold][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 1, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto base = vsag::Dataset::Make();
+    int64_t ids[] = {10, 11, 12, 13};
+    float vectors[] = {0.0F, 1.0F, 2.0F, 3.0F};
+    base->NumElements(4)->Dim(1)->Ids(ids)->Float32Vectors(vectors)->Owner(false);
+    REQUIRE(index->Build(base).has_value());
+
+    auto query = vsag::Dataset::Make();
+    float query_vector[] = {0.0F};
+    query->NumElements(1)->Dim(1)->Float32Vectors(query_vector)->Owner(false);
+
+    auto baseline = index->KnnSearch(query, 4, "{}").value();
+    auto no_threshold = index->KnnSearch(query, 4, R"({"threshold": 100.0})").value();
+    REQUIRE(no_threshold->GetDim() == baseline->GetDim());
+    for (int64_t i = 0; i < baseline->GetDim(); ++i) {
+        REQUIRE(no_threshold->GetIds()[i] == baseline->GetIds()[i]);
+        REQUIRE(no_threshold->GetDistances()[i] == baseline->GetDistances()[i]);
+    }
+
+    auto filtered = index->KnnSearch(query, 3, R"({"threshold": 4.0})").value();
+    REQUIRE(filtered->GetDim() == 3);
+    REQUIRE(filtered->GetIds()[0] == 10);
+    REQUIRE(filtered->GetIds()[1] == 11);
+    REQUIRE(filtered->GetIds()[2] == 12);
+    REQUIRE(filtered->GetDistances()[2] == 4.0F);
+
+    auto empty = index->KnnSearch(query, 3, R"({"threshold": -0.1})").value();
+    REQUIRE(empty->GetDim() == 0);
+
+    auto overflow_index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    float overflow_vector[] = {-std::numeric_limits<float>::max()};
+    auto overflow_base = vsag::Dataset::Make();
+    overflow_base->NumElements(1)->Dim(1)->Ids(ids)->Float32Vectors(overflow_vector)->Owner(false);
+    REQUIRE(overflow_index->Build(overflow_base).has_value());
+    float overflow_query_value = std::numeric_limits<float>::max();
+    auto overflow_query = vsag::Dataset::Make();
+    overflow_query->NumElements(1)->Dim(1)->Float32Vectors(&overflow_query_value)->Owner(false);
+    auto overflow_result = overflow_index->KnnSearch(overflow_query, 1, "{}").value();
+    REQUIRE(overflow_result->GetDim() == 1);
+    REQUIRE(std::isinf(overflow_result->GetDistances()[0]));
+    auto overflow_filtered =
+        overflow_index->KnnSearch(overflow_query, 1, R"({"threshold": 0.0})").value();
+    REQUIRE(overflow_filtered->GetDim() == 0);
+
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 4;
+    request.threshold_ = 1.0F;
+    TrackingAllocator request_allocator;
+    request.search_allocator_ = &request_allocator;
+    auto request_result = index->SearchWithRequest(request).value();
+    REQUIRE(request_result->GetDim() == 2);
+    REQUIRE(request_result->GetDistances()[0] <= request_result->GetDistances()[1]);
+    REQUIRE(request_result->GetDistances()[1] == 1.0F);
+    REQUIRE(request_allocator.AllocationCount() > 0);
+    REQUIRE(request_allocator.AllocatedBytes() == 0);
+
+    for (const auto threshold : {std::numeric_limits<float>::quiet_NaN(),
+                                 std::numeric_limits<float>::infinity(),
+                                 -std::numeric_limits<float>::infinity()}) {
+        request.threshold_ = threshold;
+        REQUIRE_FALSE(index->SearchWithRequest(request).has_value());
+    }
+    REQUIRE_FALSE(index->KnnSearch(query, 1, R"({"threshold":"bad"})").has_value());
+
+    auto nan_index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    float nan_vectors[] = {std::numeric_limits<float>::quiet_NaN(), 0.0F};
+    auto nan_base = vsag::Dataset::Make();
+    nan_base->NumElements(2)->Dim(1)->Ids(ids)->Float32Vectors(nan_vectors)->Owner(false);
+    REQUIRE(nan_index->Build(nan_base).has_value());
+    auto nan_filtered = nan_index->KnnSearch(query, 1, R"({"threshold": 0.0})").value();
+    REQUIRE(nan_filtered->GetDim() == 1);
+    REQUIRE(nan_filtered->GetIds()[0] == 11);
+    REQUIRE(nan_filtered->GetDistances()[0] == 0.0F);
+
+    auto ip_param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("ip", 1, "fp32");
+    auto ip_index = TestIndex::TestFactory(BruteForceTestIndex::name, ip_param, true);
+    float ip_vectors[] = {1.0F, 0.5F, 0.0F};
+    auto ip_base = vsag::Dataset::Make();
+    ip_base->NumElements(3)->Dim(1)->Ids(ids)->Float32Vectors(ip_vectors)->Owner(false);
+    REQUIRE(ip_index->Build(ip_base).has_value());
+    auto ip_query = vsag::Dataset::Make();
+    float ip_query_vector[] = {1.0F};
+    ip_query->NumElements(1)->Dim(1)->Float32Vectors(ip_query_vector)->Owner(false);
+    auto ip_filtered = ip_index->KnnSearch(ip_query, 3, R"({"threshold": 0.5})").value();
+    REQUIRE(ip_filtered->GetDim() == 2);
+    REQUIRE(ip_filtered->GetDistances()[0] == 0.0F);
+    REQUIRE(ip_filtered->GetDistances()[1] == 0.5F);
+
+    auto ip_overflow_index = TestIndex::TestFactory(BruteForceTestIndex::name, ip_param, true);
+    float ip_overflow_vector = std::numeric_limits<float>::max();
+    auto ip_overflow_base = vsag::Dataset::Make();
+    ip_overflow_base->NumElements(1)
+        ->Dim(1)
+        ->Ids(ids)
+        ->Float32Vectors(&ip_overflow_vector)
+        ->Owner(false);
+    REQUIRE(ip_overflow_index->Build(ip_overflow_base).has_value());
+    auto ip_overflow_query = vsag::Dataset::Make();
+    ip_overflow_query->NumElements(1)->Dim(1)->Float32Vectors(&ip_overflow_vector)->Owner(false);
+    vsag::SearchRequest range_request;
+    range_request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    range_request.query_ = ip_overflow_query;
+    range_request.radius_ = 0.0F;
+    range_request.threshold_ = 0.0F;
+    auto range_result = ip_overflow_index->SearchWithRequest(range_request).value();
+    REQUIRE(range_result->GetDim() == 1);
+    REQUIRE(std::isinf(range_result->GetDistances()[0]));
+    REQUIRE(range_result->GetDistances()[0] < 0.0F);
+
+    auto empty_index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto malformed_empty = empty_index->KnnSearch(query, 1, R"({"threshold":"bad"})");
+    REQUIRE_FALSE(malformed_empty.has_value());
+    auto nonfinite_empty = empty_index->KnnSearch(query, 1, R"({"threshold":1e100})");
+    REQUIRE_FALSE(nonfinite_empty.has_value());
+}
+
+TEST_CASE("(PR) SearchRequest preserves legacy aggregate initialization",
+          "[ut][search_request][compatibility][pr]") {
+    vsag::SearchRequest request{nullptr,
+                                vsag::SearchMode::RANGE_SEARCH,
+                                7,
+                                1.5F,
+                                3,
+                                "{}",
+                                nullptr,
+                                1,
+                                true,
+                                "attr",
+                                true,
+                                nullptr,
+                                true,
+                                nullptr,
+                                nullptr,
+                                true,
+                                nullptr,
+                                false,
+                                {42}};
+
+    REQUIRE(request.mode_ == vsag::SearchMode::RANGE_SEARCH);
+    REQUIRE(request.topk_ == 7);
+    REQUIRE(request.radius_ == 1.5F);
+    REQUIRE(request.limited_size_ == 3);
+    REQUIRE(request.params_str_ == "{}");
+    REQUIRE_FALSE(request.distance_batch_func_);
+    REQUIRE(request.distance_batch_size_ == 1);
+    REQUIRE(request.enable_attribute_filter_);
+    REQUIRE(request.attribute_filter_str_ == "attr");
+    REQUIRE(request.enable_filter_);
+    REQUIRE(request.enable_bitset_filter_);
+    REQUIRE(request.enable_iterator_search_);
+    REQUIRE_FALSE(request.is_last_search_);
+    REQUIRE(request.expected_labels_ == std::vector<int64_t>{42});
+    REQUIRE_FALSE(request.threshold_.has_value());
+}
+
+TEST_CASE("(PR) Threshold filtering preserves allocator ownership", "[ft][threshold][pr]") {
+    int64_t ids[] = {1, 2, 3};
+    float distances[] = {0.0F, 1.0F, 2.0F};
+    const char extra_info[] = "aabbcc";
+    auto input = vsag::Dataset::Make();
+    input->NumElements(1)
+        ->Dim(3)
+        ->Ids(ids)
+        ->Distances(distances)
+        ->ExtraInfoSize(2)
+        ->ExtraInfos(extra_info)
+        ->Owner(false);
+
+    TrackingAllocator allocator;
+    {
+        auto result = vsag::FilterDatasetByThreshold(input, 1.0F, &allocator);
+        REQUIRE(result->GetDim() == 2);
+        REQUIRE(result->GetIds()[0] == 1);
+        REQUIRE(result->GetIds()[1] == 2);
+        REQUIRE(std::memcmp(result->GetExtraInfos(), "aabb", 4) == 0);
+        REQUIRE(allocator.AllocatedBytes() > 0);
+    }
+    REQUIRE(allocator.AllocatedBytes() == 0);
+
+    auto empty = vsag::FilterDatasetByThreshold(input, -1.0F, &allocator);
+    REQUIRE(empty->GetDim() == 0);
+    REQUIRE(empty->GetExtraInfoSize() == 0);
+    REQUIRE(empty->GetExtraInfos() == nullptr);
+
+    int64_t non_finite_ids[] = {7, 8, 9};
+    float non_finite_distances[] = {-std::numeric_limits<float>::infinity(), 0.0F, 1.0F};
+    auto non_finite_input = vsag::Dataset::Make();
+    non_finite_input->NumElements(1)
+        ->Dim(3)
+        ->Ids(non_finite_ids)
+        ->Distances(non_finite_distances)
+        ->Owner(false);
+    auto finite_only = vsag::FilterDatasetByThreshold(non_finite_input, 1.0F, &allocator, 1);
+    REQUIRE(finite_only->GetDim() == 1);
+    REQUIRE(finite_only->GetIds()[0] == 8);
+    REQUIRE(finite_only->GetDistances()[0] == 0.0F);
+    finite_only.reset();
+    REQUIRE(allocator.AllocatedBytes() == 0);
+
+    allocator.SetAllocationLimit(sizeof(int64_t) * 2);
+    REQUIRE_THROWS_AS(vsag::FilterDatasetByThreshold(input, 1.0F, &allocator), std::bad_alloc);
+    REQUIRE(allocator.AllocatedBytes() == 0);
+}
+
 TEST_CASE("(PR) BruteForce Reasoning Found Verification", "[ft][bruteforce][reasoning][pr]") {
     using namespace fixtures;
 
@@ -1108,6 +1688,17 @@ TEST_CASE("(PR) BruteForce Reasoning Found Verification", "[ft][bruteforce][reas
     auto reasoning = result.value()->GetReasoning();
     REQUIRE(reasoning.find("1/1") != std::string::npos);
     REQUIRE(reasoning.find("0 missed") != std::string::npos);
+    SECTION("Range reasoning metadata matches request") {
+        req.mode_ = vsag::SearchMode::RANGE_SEARCH;
+        req.radius_ = 100.0F;
+        req.limited_size_ = 10;
+        auto range_result = index->SearchWithRequest(req);
+        REQUIRE(range_result.has_value());
+        REQUIRE(range_result.value()->GetDim() > 0);
+        auto report = vsag::JsonType::Parse(range_result.value()->GetReasoning());
+        REQUIRE(report["meta"]["search_mode"].GetString() == "range");
+        REQUIRE(report["meta"]["topk"].GetInt() == -1);
+    }
 }
 
 TEST_CASE("(PR) BruteForce Reasoning Multiple Labels Mixed", "[ft][bruteforce][reasoning][pr]") {
@@ -1321,4 +1912,242 @@ TEST_CASE("(PR) BruteForce Reasoning No Output When Disabled", "[ft][bruteforce]
     for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
         REQUIRE(result.value()->GetIds()[i] == knn_result.value()->GetIds()[i]);
     }
+}
+
+TEST_CASE("(PR) BruteForce Custom Batch Distance", "[ft][bruteforce][custom_distance][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 256, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    std::vector<int64_t> scored_ids;
+    uint64_t max_batch_size = 0;
+    vsag::SearchRequest request;
+    request.topk_ = 3;
+    request.distance_batch_size_ = 3;
+    request.enable_filter_ = true;
+    request.filter_ = std::make_shared<EvenIdFilter>();
+    request.distance_batch_func_ = [&](const int64_t* ids, uint64_t count, float* distances) {
+        max_batch_size = std::max(max_batch_size, count);
+        for (uint64_t i = 0; i < count; ++i) {
+            scored_ids.push_back(ids[i]);
+            distances[i] = static_cast<float>(ids[i]);
+        }
+    };
+
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(max_batch_size == 3);
+    REQUIRE(result.value()->GetDim() == 3);
+    auto statistics = vsag::JsonType::Parse(result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == scored_ids.size());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() ==
+            scored_ids.size());
+    REQUIRE_FALSE(statistics["complete"].GetBool());
+    for (const auto id : scored_ids) {
+        REQUIRE(id % 2 == 0);
+    }
+
+    std::vector<int64_t> expected_ids;
+    for (int64_t i = 0; i < dataset->base_->GetNumElements(); ++i) {
+        const auto id = dataset->base_->GetIds()[i];
+        if (id % 2 == 0) {
+            expected_ids.push_back(id);
+        }
+    }
+    std::sort(expected_ids.begin(), expected_ids.end());
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        REQUIRE(result.value()->GetIds()[i] == expected_ids[i]);
+        REQUIRE(result.value()->GetDistances()[i] == static_cast<float>(expected_ids[i]));
+    }
+
+    scored_ids.clear();
+    request.filter_ = std::make_shared<RejectAllFilter>();
+    auto rejected_result = index->SearchWithRequest(request);
+    REQUIRE(rejected_result.has_value());
+    REQUIRE(rejected_result.value()->GetDim() == 0);
+    REQUIRE(scored_ids.empty());
+    statistics = vsag::JsonType::Parse(rejected_result.value()->GetStatistics());
+    REQUIRE(statistics["distance_evaluations"].GetUint64() == 0);
+    REQUIRE(statistics["distance_evaluations_by_backend"]["unknown"].GetUint64() == 0);
+    REQUIRE(statistics["complete"].GetBool());
+}
+
+TEST_CASE("(PR) BruteForce Custom Batch Distance Validation",
+          "[ft][bruteforce][custom_distance][pr]") {
+    using namespace fixtures;
+
+    auto param = BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto index = TestIndex::TestFactory(BruteForceTestIndex::name, param, true);
+    auto dataset = BruteForceTestIndex::pool.GetDatasetAndCreate(16, 32, "l2");
+    TestIndex::TestBuildIndex(index, dataset, true);
+
+    vsag::SearchRequest request;
+    request.topk_ = 1;
+    request.distance_batch_func_ = [](const int64_t*, uint64_t, float* distances) {
+        distances[0] = std::numeric_limits<float>::quiet_NaN();
+    };
+
+    request.distance_batch_size_ = 0;
+    auto invalid_batch_size = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_batch_size.has_value());
+    REQUIRE(invalid_batch_size.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_size_ = 1;
+    auto non_finite_score = index->SearchWithRequest(request);
+    REQUIRE_FALSE(non_finite_score.has_value());
+    REQUIRE(non_finite_score.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.distance_batch_func_ = [](const int64_t*, uint64_t count, float* distances) {
+        std::fill(distances, distances + count, 0.0F);
+    };
+    request.topk_ = 0;
+    auto invalid_topk = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_topk.has_value());
+    REQUIRE(invalid_topk.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.mode_ = vsag::SearchMode::RANGE_SEARCH;
+    request.radius_ = -1.0F;
+    request.limited_size_ = -1;
+    auto invalid_radius = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_radius.has_value());
+    REQUIRE(invalid_radius.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    request.radius_ = 1.0F;
+    request.limited_size_ = 0;
+    auto invalid_limit = index->SearchWithRequest(request);
+    REQUIRE_FALSE(invalid_limit.has_value());
+    REQUIRE(invalid_limit.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
+TEST_CASE("BruteForce dense native distance contract", "[distance_contract]") {
+    using namespace fixtures;
+    for (const auto* quantizer : {"fp32", "sq8"}) {
+        auto param =
+            BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, quantizer);
+        auto created = vsag::Factory::CreateIndex("brute_force", param);
+        REQUIRE(created.has_value());
+        auto index = created.value();
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID));
+        REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID));
+        std::vector<float> values(64 * 16);
+        std::vector<int64_t> labels(64);
+        std::vector<std::string> paths(64, "a/b");
+        for (int64_t i = 0; i < 64; ++i) {
+            labels[i] = 100 + i;
+            for (int64_t j = 0; j < 16; ++j) {
+                values[i * 16 + j] = static_cast<float>((i + j) % 23) / 23.0F;
+            }
+        }
+        auto base = vsag::Dataset::Make()
+                        ->NumElements(64)
+                        ->Dim(16)
+                        ->Ids(labels.data())
+                        ->Float32Vectors(values.data())
+                        ->Paths(paths.data())
+                        ->Owner(false);
+        REQUIRE(index->Build(base).has_value());
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(1)
+                         ->Dim(16)
+                         ->Float32Vectors(values.data())
+                         ->Owner(false);
+        for (bool precise : {false, true}) {
+            auto raw = index->CalcDistanceById(values.data(), labels[1], precise);
+            auto native = index->CalcDistanceById(query, labels[1], precise);
+            REQUIRE(raw.has_value());
+            REQUIRE(native.has_value());
+            REQUIRE(std::abs(raw.value() - native.value()) < 1e-5F);
+            int64_t candidates[] = {labels[1], -999, labels[0], labels[1], labels[0], -999};
+            query->NumElements(2);
+            auto batch = index->CalcDistancesById(query, candidates, 3, precise);
+            REQUIRE(batch.has_value());
+            REQUIRE(batch.value()->GetNumElements() == 2);
+            REQUIRE(batch.value()->GetDim() == 3);
+            REQUIRE(std::abs(batch.value()->GetDistances()[0] - raw.value()) < 1e-5F);
+            REQUIRE(batch.value()->GetDistances()[1] == -1.0F);
+            auto top = index->CalcDistancesById(query, candidates, 3, precise, 2);
+            REQUIRE(top.has_value());
+            REQUIRE(top.value()->GetDim() == 2);
+            for (int i = 0; i < 4; ++i) {
+                REQUIRE(top.value()->GetIds()[i] != -999);
+            }
+            query->NumElements(1);
+        }
+    }
+}
+
+TEST_CASE("BruteForce valid minus-one distance sorts before missing IDs", "[distance_contract]") {
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("ip", 1, "fp32");
+    auto created = vsag::Factory::CreateIndex("brute_force", param);
+    REQUIRE(created.has_value());
+    auto index = created.value();
+    float vector = 2.0F;
+    int64_t label = 42;
+    auto data =
+        vsag::Dataset::Make()->NumElements(1)->Dim(1)->Float32Vectors(&vector)->Ids(&label)->Owner(
+            false);
+    REQUIRE(index->Build(data).has_value());
+    float query_value = 1.0F;
+    auto query =
+        vsag::Dataset::Make()->NumElements(1)->Dim(1)->Float32Vectors(&query_value)->Owner(false);
+    auto single = index->CalcDistanceById(query, label);
+    REQUIRE(single.has_value());
+    REQUIRE(single.value() == -1.0F);
+    int64_t candidates[] = {-999, label};
+    auto top = index->CalcDistancesById(query, candidates, 2, true, 1);
+    REQUIRE(top.has_value());
+    REQUIRE(top.value()->GetIds()[0] == label);
+    REQUIRE(top.value()->GetDistances()[0] == -1.0F);
+}
+
+TEST_CASE("BruteForce distance stays consistent during force removal",
+          "[distance_contract][concurrent][brute_force]") {
+    auto param =
+        fixtures::BruteForceTestIndex::GenerateBruteForceBuildParametersString("l2", 16, "fp32");
+    auto made = vsag::Factory::CreateIndex("brute_force", param);
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    constexpr int64_t count = 512;
+    std::vector<float> values(count * 16);
+    std::vector<int64_t> labels(count);
+    for (int64_t i = 0; i < count; ++i) {
+        labels[i] = i;
+        for (int64_t j = 0; j < 16; ++j) values[i * 16 + j] = static_cast<float>(i);
+    }
+    auto base = vsag::Dataset::Make()
+                    ->Owner(false)
+                    ->NumElements(count)
+                    ->Dim(16)
+                    ->Ids(labels.data())
+                    ->Float32Vectors(values.data());
+    REQUIRE(index->Build(base).has_value());
+    std::atomic<bool> start{false};
+    std::atomic<bool> failed{false};
+    std::thread reader([&] {
+        while (!start.load()) std::this_thread::yield();
+        for (int64_t pass = 0; pass < 8; ++pass) {
+            for (int64_t i = 0; i < count; ++i) {
+                auto distance = index->CalcDistanceById(values.data() + i * 16, labels[i]);
+                if (!distance.has_value() ||
+                    (distance.value() != 0.0F && distance.value() != -1.0F)) {
+                    failed.store(true);
+                }
+            }
+        }
+    });
+    start.store(true);
+    bool removed = true;
+    for (int64_t i = 0; i < count; ++i) {
+        auto result = index->Remove(labels[i], vsag::RemoveMode::FORCE_REMOVE);
+        if (!result.has_value())
+            removed = false;
+    }
+    reader.join();
+    REQUIRE(removed);
+    REQUIRE_FALSE(failed.load());
+    REQUIRE(index->GetNumElements() == 0);
 }

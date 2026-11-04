@@ -21,7 +21,7 @@
 
 using namespace vsag;
 
-TEST_CASE("Iterator context", "[ut][hnsw][filter]") {
+TEST_CASE("Iterator context", "[ut][filter]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     vsag::IteratorFilterContext filter_context = IteratorFilterContext();
     uint32_t max_size = 1000;
@@ -58,11 +58,11 @@ TEST_CASE("Iterator context", "[ut][hnsw][filter]") {
     }
 }
 
-TEST_CASE("Empty Iterator Context Destruction", "[ut][hnsw][filter]") {
+TEST_CASE("Empty Iterator Context Destruction", "[ut][filter]") {
     IteratorFilterContext filter_context = IteratorFilterContext();
 }
 
-TEST_CASE("Iterator Context CheckPoint And SetPoint", "[ut][hnsw][filter]") {
+TEST_CASE("Iterator Context CheckPoint And SetPoint", "[ut][filter]") {
     auto allocator = std::make_shared<DefaultAllocator>();
     IteratorFilterContext filter_context = IteratorFilterContext();
     uint32_t max_size = 1000;

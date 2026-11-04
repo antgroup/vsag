@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cstring>
 #include <functional>
+#include <stdexcept>
 
 #include "functest.h"
 #include "simd/fp32_simd.h"
@@ -162,11 +163,12 @@ GenerateRandomDataset(uint64_t dim,
         auto vecs_int8 = fixtures::generate_int8_codes(count, dim, seed);
         if (not has_duplicate) {
             base->Float32Vectors(CopyVector(vecs))->Int8Vectors(CopyVector(vecs_int8));
-            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim)));
+            base->SparseVectors(CopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         } else {
             base->Float32Vectors(DuplicateCopyVector(vecs))
                 ->Int8Vectors(DuplicateCopyVector(vecs_int8));
-            base->SparseVectors(DuplicateCopyVector(GenerateSparseVectors(count, dim)));
+            base->SparseVectors(
+                DuplicateCopyVector(GenerateSparseVectors(count, dim, 1000, 0.1F, 1.0F)));
         }
     } else if (vector_type == "multi") {
         auto [vector_lens, total_vector_len] = GenerateMultiVectorLens(count, seed + 2);
@@ -361,7 +363,11 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                uint64_t extra_info_size,
                                bool has_duplicate,
                                int64_t id_shift,
-                               bool use_fixed_seed) {
+                               bool use_fixed_seed,
+                               uint64_t query_count) {
+    if (query_count == 0) {
+        throw std::invalid_argument("test dataset query_count must be positive");
+    }
     constexpr int fixed_seed = 47;
     int seed = use_fixed_seed ? fixed_seed : fixtures::RandomValue(0, 564);
 
@@ -378,7 +384,6 @@ TestDataset::CreateTestDataset(uint64_t dim,
                                            has_duplicate,
                                            dataset->id_shift,
                                            seed);
-    constexpr uint64_t query_count = 100;
     dataset->query_ = GenerateRandomDataset(dim,
                                             query_count,
                                             metric_str,

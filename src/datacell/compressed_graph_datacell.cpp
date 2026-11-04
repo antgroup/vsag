@@ -120,6 +120,10 @@ CompressedGraphDataCell::Deserialize(StreamReader& reader) {
     GraphInterface::Deserialize(reader);
     uint64_t vertex_num;
     StreamReader::ReadObj(reader, vertex_num);
+    if (vertex_num < this->TotalCount()) {
+        throw VsagException(ErrorType::INVALID_BINARY,
+                            "compressed graph vertex count is smaller than total count");
+    }
     Resize(vertex_num);
     for (uint64_t id = 0; id < vertex_num; ++id) {
         uint8_t num_elements = 0;

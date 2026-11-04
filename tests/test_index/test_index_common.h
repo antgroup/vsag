@@ -18,7 +18,6 @@
 
 #include "allocator/memory_record_allocator.h"
 #include "impl/allocator/default_allocator.h"
-#include "index/hnsw.h"
 #include "test_index.h"
 #include "vsag/engine.h"
 #include "vsag/resource.h"

@@ -90,7 +90,7 @@ MultiBitsetManager::Serialize(StreamWriter& writer) {
 }
 
 void
-MultiBitsetManager::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+MultiBitsetManager::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     StreamReader::ReadObj(reader, count_);
     this->bitset_map_.resize(count_, -1);
     for (uint64_t i = 0; i < count_; i++) {

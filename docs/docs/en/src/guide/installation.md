@@ -5,8 +5,8 @@ package (`vsag`).
 
 ## Using Docker (Recommended for Development)
 
-The official development image includes the full toolchain (GCC 9.4+, CMake 3.18+,
-`clang-format`/`clang-tidy` 15, HDF5, etc.):
+The official development image includes the full toolchain (GCC 13, CMake 3.18+,
+`clang-format`/`clang-tidy` 20, HDF5, etc.):
 
 ```bash
 docker pull vsaglib/vsag:ubuntu
@@ -17,18 +17,24 @@ docker run -it --rm -v $(pwd):/work -w /work vsaglib/vsag:ubuntu bash
 
 ### Requirements
 
-- **Operating System**: Ubuntu 20.04+ or CentOS 7+
-- **Compiler**: GCC 9.4.0+ or Clang 13.0.0+
+- **Operating System**: Ubuntu 20.04+, CentOS 7+, or macOS 14+ on Apple Silicon
+- **Compiler**: GCC 9.4.0+, Clang 13.0.0+, or Apple Clang from Xcode Command Line Tools
 - **CMake**: 3.18.0+
-- **clang-format / clang-tidy**: exactly version **15** (enforced by `make fmt` / `make lint`)
+- **clang-format / clang-tidy**: exactly version **20** (enforced by `make fmt` / `make lint`)
 
 ### Build
 
 ```bash
 git clone https://github.com/antgroup/vsag.git
 cd vsag
+./scripts/deps/install_deps.sh
 make release
 ```
+
+The dependency script detects Linux versus macOS. On macOS it installs or locates the
+Homebrew dependencies and uses Apple's Accelerate framework where appropriate. The supported
+macOS path is the arm64 C++ library build; published C++ archives and `pyvsag` wheels remain
+Linux-focused.
 
 Other common Makefile targets:
 
@@ -61,10 +67,16 @@ The bindings source lives under `typescript/` and the npm package name is `vsag`
 Enable or disable at CMake configure time with these cache options:
 
 - `ENABLE_INTEL_MKL=ON` — Intel MKL acceleration.
-- `ENABLE_LIBAIO=ON` — Linux AIO for DiskANN async IO.
+- `ENABLE_LIBAIO=ON` — Linux AIO for the `async_io` data-cell backend.
+- `ENABLE_LIBURING=ON` — Linux `io_uring` backend; requires liburing.
 - `ENABLE_TOOLS=ON` — build tools under `tools/` (including `eval_performance`).
 - `ENABLE_EXAMPLES=ON` — build sample programs under `examples/cpp/`.
 
 If you build through the project Makefile, the corresponding environment variables are
 `VSAG_ENABLE_INTEL_MKL=ON`, `VSAG_ENABLE_LIBAIO=ON`, `VSAG_ENABLE_TOOLS=ON`, and
-`VSAG_ENABLE_EXAMPLES=ON`.
+`VSAG_ENABLE_EXAMPLES=ON`. `ENABLE_LIBURING` is currently a direct CMake option; configure it
+with `cmake -S . -B build-release -DENABLE_LIBURING=ON`.
+
+## C++ client compatibility
+
+Full VSAG source builds use C++20 internally; installed public headers and APIs support C++17 clients. CUDA, Node.js bindings and standalone Lite remain C++17. The Ubuntu installer requires Ubuntu 24.04+ for GCC 13 and LLVM 20. Older distributions require a manually prepared toolchain. Prebuilt packages retain their existing glibc baselines; match `_GLIBCXX_USE_CXX11_ABI` to the selected package.

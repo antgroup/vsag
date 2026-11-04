@@ -13,6 +13,7 @@ Before you make any contributions, make sure you follow this list.
 -   Read [Contributing to vsag](CONTRIBUTING.md).
 -   Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
 -   Run [tests](CONTRIBUTING.md#run-tests-with-code-coverage) and check your code coverage rate.
+-   Reduced PR CI does not waive local validation. Follow the [pre-submission checklist](docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr) for checks moved out of PR CI and report any unvalidated platforms.
 
 ## What contributions can I make?
 
@@ -84,12 +85,12 @@ And we made the following changes based on the guide:
 
 ### Format code
 
-**Important**: VSAG requires **clang-format version 15 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
+**Important**: VSAG requires **clang-format version 20 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
 
-Install clang-format-15:
+Install clang-format-20:
 ```shell
 # Ubuntu/Debian
-$ sudo apt-get install clang-format-15
+$ sudo apt-get install clang-format-20
 ```
 
 To format the code:
@@ -97,16 +98,16 @@ To format the code:
 $ make fmt
 ```
 
-The format script will automatically verify you're using clang-format-15 and will fail if a different version is detected.
+The format script will automatically verify you're using clang-format-20 and will fail if a different version is detected.
 
 ### Run clang-tidy
 
-**Important**: VSAG requires **clang-tidy version 15 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
+**Important**: VSAG requires **clang-tidy version 20 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
 
-Install clang-tidy-15:
+Install clang-tidy-20:
 ```shell
 # Ubuntu/Debian
-$ sudo apt-get install clang-tidy-15
+$ sudo apt-get install clang-tidy-20
 ```
 
 To run lint checks:
@@ -123,7 +124,7 @@ To apply clang-tidy fixes in place:
 $ make fix-lint
 ```
 
-The lint wrapper will automatically verify you're using clang-tidy-15 and will fail if a different version is detected.
+The lint wrapper will automatically verify you're using clang-tidy-20 and will fail if a different version is detected.
 
 ## Run tests with code coverage
 
@@ -136,9 +137,17 @@ $ sudo apt-get install lcov
 Compile with coverage flags, run tests, and collect the coverage report:
 ```shell
 $ make cov
-$ bash scripts/testing/test_parallel_bg.sh
+$ VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
 $ bash scripts/coverage/collect_cpp_coverage.sh
+$ bash scripts/coverage/check_cov.sh
 ```
+
+This matches the CI source population: maintained production code under `src/` and public headers under `include/`, excluding the generated `src/version.h` and vendored `include/vsag/expected.hpp`. The collector retains branch records and writes normalized repository-relative paths to `coverage/coverage.info`.
+
+SIMD pull requests targeting `main` also receive a bounded pre-merge comparison against the PR base: measured
+patch lines must reach 80%, and SIMD-scoped line coverage must not regress. This partial-suite
+result is separate from full-project coverage; other C++ areas are not yet protected by it.
+See the [testing guide](docs/docs/en/src/development/testing.md#pre-merge-simd-stage) for details.
 
 ## Pull Request Labels
 
@@ -186,3 +195,11 @@ Example:
 ```text
 [skip ci] docs: update contribution examples
 ```
+
+### Community and team CI
+
+PR CI uses a common routing entry point. GitHub-hosted community checks remain
+available to every contributor. An opt-in team Linux path reads its contributor
+allowlist exclusively from `.github/maintainers.json` on `main`; personal forks
+are supported. Compilation on the team path uses 16 jobs. See [CI routing and rollback](docs/agents/ci-routing.md)
+for activation prerequisites, required-check migration, and manual fallback.

@@ -134,3 +134,65 @@ TEST_CASE("AttributeBucketInvertedDataCell insert various types",
     }
     REQUIRE(cell2.GetTypeOfField("str") == AttrValueType::STRING);
 }
+
+TEST_CASE("Attribute update introduces a new field", "[ut][AttributeBucketInvertedDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    AttributeBucketInvertedDataCell cell(allocator.get());
+    AttributeValue<int64_t> original;
+    original.name_ = "region";
+    original.GetValue() = {10};
+    AttributeSet origin;
+    origin.attrs_ = {&original};
+    cell.Insert(origin, 3, 2);
+    cell.Insert(origin, 7, 2);
+
+    AttributeValue<int64_t> replacement;
+    replacement.name_ = "region";
+    replacement.GetValue() = {20};
+    AttributeValue<std::string> introduced;
+    introduced.name_ = "new_field";
+    introduced.GetValue() = {"value"};
+    AttributeSet updated;
+    updated.attrs_ = {&replacement, &introduced};
+    cell.UpdateBitsetsByAttr(updated, 3, 2, origin);
+
+    REQUIRE(cell.GetTypeOfField("new_field") == AttrValueType::STRING);
+    auto old = cell.GetBitsetsByAttr(original);
+    REQUIRE_FALSE(old[0]->GetOneBitset(2)->Test(3));
+    REQUIRE(old[0]->GetOneBitset(2)->Test(7));
+    auto added = cell.GetBitsetsByAttr(introduced);
+    REQUIRE(added[0]->GetOneBitset(2)->Test(3));
+    REQUIRE_FALSE(added[0]->GetOneBitset(2)->Test(7));
+    REQUIRE(added[0]->GetOneBitset(1) == nullptr);
+    auto replaced = cell.GetBitsetsByAttr(replacement);
+    REQUIRE(replaced[0]->GetOneBitset(2)->Test(3));
+
+    AttributeBucketInvertedDataCell restored(allocator.get());
+    test_serializion(cell, restored);
+    REQUIRE(restored.GetTypeOfField("new_field") == AttrValueType::STRING);
+    REQUIRE(restored.GetBitsetsByAttr(introduced)[0]->GetOneBitset(2)->Test(3));
+
+    cell.UpdateBitsetsByAttr(updated, 3, 2, updated);
+    REQUIRE(cell.GetBitsetsByAttr(introduced)[0]->GetOneBitset(2)->Test(3));
+
+    AttributeValue<int32_t> wrong_type;
+    wrong_type.name_ = "new_field";
+    wrong_type.GetValue() = {42};
+    AttributeSet invalid;
+    invalid.attrs_ = {&replacement, &wrong_type};
+    REQUIRE_THROWS_AS(cell.UpdateBitsetsByAttr(invalid, 3, 2, updated), VsagException);
+    REQUIRE(cell.GetTypeOfField("new_field") == AttrValueType::STRING);
+    REQUIRE(cell.GetBitsetsByAttr(introduced)[0]->GetOneBitset(2)->Test(3));
+    REQUIRE(cell.GetBitsetsByAttr(replacement)[0]->GetOneBitset(2)->Test(3));
+    REQUIRE_THROWS_AS(cell.UpdateBitsetsByAttr(updated, 3, 2, invalid), VsagException);
+    REQUIRE(cell.GetBitsetsByAttr(introduced)[0]->GetOneBitset(2)->Test(3));
+
+    wrong_type.name_ = "brand_new";
+    AttributeValue<std::string> conflicting;
+    conflicting.name_ = "brand_new";
+    conflicting.GetValue() = {"different type"};
+    invalid.attrs_ = {&wrong_type, &conflicting};
+    REQUIRE_THROWS_AS(cell.UpdateBitsetsByAttr(invalid, 3, 2, updated), VsagException);
+    REQUIRE_THROWS_AS(cell.GetTypeOfField("brand_new"), VsagException);
+    REQUIRE(cell.GetBitsetsByAttr(introduced)[0]->GetOneBitset(2)->Test(3));
+}

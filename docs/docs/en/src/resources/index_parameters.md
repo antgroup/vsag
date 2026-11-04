@@ -9,13 +9,21 @@ enumeration, consult the source:
 
 ## Common Fields
 
-Every index requires these top-level fields at build time:
+Every index accepts these top-level fields at build time. `dtype` and `metric_type` are required;
+`repr` is optional. `dim` is required for non-sparse data and defaults to `4096` for
+`dtype: "sparse"` when omitted:
 
 | Field | Values | Description |
 |-------|--------|-------------|
 | `dim` | positive integer | Vector dimensionality; cannot change after build |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` | Vector data type; determines internal representation |
+| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` | Scalar value type. `sparse` is retained for sparse-index compatibility. |
+| `repr` | `dense` / `sparse` / `multi_vector` | Optional data layout. When omitted, VSAG infers `sparse` from `dtype: "sparse"` and otherwise uses `dense`. |
 | `metric_type` | `l2` / `ip` / `cosine` | Distance metric |
+
+`dtype` and `repr` describe different properties: `dtype` is the scalar encoding, while `repr`
+is the record layout. `dtype: "sparse"` requires `repr: "sparse"` when `repr` is explicit.
+Use `repr: "multi_vector"` with a supported multi-vector index and a scalar `dtype` such as
+`float32`.
 
 ## HGraph
 
@@ -37,15 +45,52 @@ HGraph places its build parameters under the generic `index_param` key (see
 
 | Field | Typical | Description |
 |-------|---------|-------------|
+| `adaptive_pruning` | `false` | Experimental NSW bottom forward/reverse L2 pruning; see [HGraph](../indexes/hgraph.md#experimental-adaptive-pruning) |
 | `max_degree` | 16–48 | Maximum out-degree per node |
 | `ef_construction` | 200–500 | Candidate set size during build; larger = higher recall, slower build |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/README.md) for all supported values |
+| `alpha` | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0` |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` | Quantization of the base storage — see the [Quantization chapter](../quantization/) for all supported values |
+| `use_reverse_edges` | `false` | Track incoming neighbors for O(1) reverse-edge lookup; roughly doubles edge storage and is unsupported with compressed graph storage |
+| `label_remap_type` | `pg` | Label-map implementation: `pg` (default) or `robin` |
+| `reorder_source` | `precise` | Reorder from the `precise` store or directly from `base`; RaBitQ x+y split, including `tq_chain="mrle, rabitq"`, selects `base` automatically |
+| `persist_source_id` | `false` | Include HGraph source-ID metadata in serialization; useful when a restored index must later export a build cache |
+| `use_conjugate_graph` | `false` | Enable HGraph feedback/pretraining and persist the auxiliary conjugate graph |
+| `mrle_dim` | `0` | MRLE output dimension in `[0, dim]`; `0` means input dimension |
+| `fast_encode_rabitq` | `true` | Use fast multi-bit RaBitQ encoding; `false` restores the exact encoder |
+| `fast_encode_rabitq_rounds` | `6` | Fast-encoder refinement rounds in `[1, 32]` |
+
+For HGraph float32 L2/IP/cosine, `sq8_local` and `sq4_local` can select either `base_quantization_type` or `precise_quantization_type` (the latter requires `use_reorder: true`). See [local SQ4/SQ8](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine) for memory, persistence and limitations.
+
+### PiPNN build parameters
+
+When `graph_type` is `pipnn`, HGraph and Pyramid also accept the following build parameters under
+`index_param`. They share these defaults and validation rules:
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `pipnn_max_leaf_size` | `1024` | Maximum partition leaf size, in `[2, 2147483647]`. |
+| `pipnn_min_leaf_size` | `64` | Target for merging undersized leaves; must be positive and no larger than `pipnn_max_leaf_size`. |
+| `pipnn_leader_sample_rate` | `0.005` | Fraction sampled as leaders, in `(0, 1]`; each partition uses `2` to `1000`, bounded by its point count. |
+| `pipnn_fanout` | `[10, 2]` | Positive nearest-leader fanout at successive partition levels; deeper levels use `1`. |
+| `pipnn_leaf_neighbor_count` | `5` | Positive nearest-candidate count per point and leaf; undersized leaves use at least `4`. |
+| `pipnn_hash_plane_count` | `12` | Direction-hash bits in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | `64` | Positive per-point candidate capacity before final pruning; effective capacity is `max(value, max_degree)` and must not exceed `65535`. |
+
+The existing `alpha` field controls PiPNN's final robust pruning. `ef_construction` only tunes NSW
+and has no effect on PiPNN.
+
+HGraph additionally supports the experimental L2-only options `pipnn_adaptive_pruning` (default `false`) and `pipnn_adaptive_pruning_adjust_step` (default `0.06`). They adapt the final per-point pruning threshold during initial `Build`; see [HGraph adaptive PiPNN pruning](../indexes/hgraph.md). These options are not exposed by Pyramid.
 
 At search time:
 
 ```json
 {"hgraph": {"ef_search": 100}}
 ```
+
+`ef_search` accepts any positive signed 64-bit integer. It is no longer capped relative to
+`topk`; very large values can substantially increase latency and memory used by the frontier.
+`use_conjugate_graph_search` is a boolean (default `true`) that uses learned conjugate edges when
+the index was built with `use_conjugate_graph: true`.
 
 The `hgraph` search-param object also accepts `brute_force_threshold` (a float
 in `[0.0, 1.0]`, default `0.0`). When set above zero and the request carries a
@@ -114,28 +159,83 @@ No extra parameters.
 
 ## Pyramid
 
-Pyramid supports organising multiple subgraphs by tag:
+`adaptive_pruning` defaults to `false`. For experimental NSW bottom forward/reverse L2 pruning, see [Pyramid](../indexes/pyramid.md#experimental-adaptive-nsw-pruning).
+
+Pyramid build parameters also live under `index_param`:
 
 ```json
 {
-    "pyramid": {
-        "tag_dim": 1,
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
         "max_degree": 24,
-        "ef_construction": 300
+        "ef_construction": 300,
+        "store_paths": true
     }
 }
 ```
+
+For `graph_type: "pipnn"`, see the shared
+[PiPNN build parameters](#pipnn-build-parameters) above.
+
+`store_paths` is a top-level Pyramid build parameter and defaults to `false`. Enable it when
+`GetDataByIdsWithFlag` must return the original default or named-hierarchy paths with
+`DATA_FLAG_PATH`; see the
+[Pyramid parameter table](../indexes/pyramid.md#build-parameters) for its completeness and
+persistence semantics.
+
+MRLE with split RaBitQ uses `base_quantization_type: "tq"`,
+`tq_chain: "mrle, rabitq"`, `mrle_dim`, and the
+`rabitq_bits_per_dim_base`/`rabitq_bits_per_dim_precise` pair. It automatically reorders from the
+split base codes and retains original FP32 vectors for decode-only operations. See the
+[Pyramid page](../indexes/pyramid.md#mrle-with-split-rabitq) for a complete configuration and
+storage/recall tradeoffs.
 
 ## SINDI (sparse vectors)
 
 ```json
 {
-    "sindi": {
-        "top_k": 32,
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
         "doc_prune_ratio": 0.1
     }
 }
 ```
+
+See the [SINDI page](../indexes/sindi.md) for `use_quantization`, immutable builds, and search
+parameters such as `n_candidate`.
+
+## SINDI_V2 (sparse vectors)
+
+SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
+
+```json
+{
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "dim": 1024,
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+```
+
+See the [SINDI_V2 page](../indexes/sindi_v2.md) for build parameters and search parameters such as
+`n_candidate` and `filter_callback_limit`.
 
 ## Runtime Parameters
 

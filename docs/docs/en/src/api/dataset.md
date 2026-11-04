@@ -11,7 +11,8 @@ using DatasetPtr = std::shared_ptr<Dataset>;
 ## Builder pattern
 
 `Dataset` uses a fluent builder: `Make()` creates an instance, and every setter returns the same
-`DatasetPtr` so calls chain. Setters only store pointers/values — they do **not** copy your buffers.
+`DatasetPtr` so calls chain. Pointer setters store the supplied buffers without copying them. Value
+setters, such as the structured Pyramid paths overload, keep their own value.
 
 ```cpp
 auto base = vsag::Dataset::Make()
@@ -55,7 +56,8 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // independent copy
 
 ## Vector payloads
 
-A dataset carries exactly one vector representation, chosen to match the index's `dtype`:
+A dataset carries exactly one vector representation. Select the payload setter from both the
+index's scalar `dtype` and record-layout `repr`:
 
 | Setter | Getter | Element type | Use with |
 |--------|--------|--------------|----------|
@@ -65,6 +67,8 @@ A dataset carries exactly one vector representation, chosen to match the index's
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse` (SINDI) |
 
 Dense vectors are laid out row-major: element `i`, dimension `j` lives at `vectors[i * dim + j]`.
+Multi-vector datasets use `repr: multi_vector` with a scalar `dtype`, normally `float32`, and the
+payload described below.
 
 ### Multi-vector payloads
 
@@ -85,10 +89,21 @@ For documents that hold several dense sub-vectors each:
 | `ExtraInfoSize(int64_t)` | `GetExtraInfoSize()` | `int64_t` | Bytes per extra-info blob. |
 | `Paths(const std::string*)` | `GetPaths()` | `const std::string*` | Hierarchy paths (Pyramid). Default hierarchy. |
 | `Paths(const std::string& hierarchy, const std::string*)` | `GetPaths(const std::string& hierarchy)` | `const std::string*` | Paths for a named hierarchy. |
-| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional source identifier. |
+| `Paths(const std::string& hierarchy, std::vector<std::vector<std::string>>)` | `GetPaths(const std::string& hierarchy, std::vector<std::vector<std::string>>& paths)` | structured paths | One or multiple Pyramid paths per element. |
+| `SourceID(const std::string*)` | `GetSourceID()` | `const std::string*` | Optional stable source identifier per element; HGraph uses it to match build-cache entries across snapshots. |
 
-See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md) and
-[Extra Info](../advanced/extra_info.md).
+For the structured `Paths` overload, the outer vector must have exactly `NumElements()` entries and
+each inner vector must list at least one independent path for that element. An empty inner vector is
+invalid; an inner vector containing one empty string (`{""}`) assigns the element to the hierarchy
+root. Repeated or shared-prefix paths do not duplicate the vector in a node or in search results.
+
+The structured container is copied or moved into `Dataset`, so its lifetime is independent of
+`Owner()`. The structured `GetPaths` overload copies either representation into the output container
+and returns `false` after clearing the output when the hierarchy is absent.
+
+See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md),
+[Extra Info](../advanced/extra_info.md), and
+[HGraph Build Cache](../advanced/build_cache.md).
 
 ## Diagnostics payloads
 
@@ -112,9 +127,17 @@ if (result.has_value()) {
 }
 ```
 
-For KNN, `GetNumElements()` is `1` and the ids/distances arrays have length `k`. For range search,
-the number of matches is reported through the result's dimension. See
+For single-query KNN, `GetNumElements()` is `1` and `GetDim()` is the actual result count. HGraph
+and IVF batched KNN results are row-major `GetNumElements() x GetDim()` matrices. HGraph pads short
+rows with `id == -1` and infinite distance. For range search, the number of matches is reported
+through the result's dimension. See
 [k-Nearest Neighbor Search](../guide/knn_search.md).
+
+
+For HGraph batched KNN, an empty index (including one with all elements removed) returns
+`NumElements = query_count` and `Dim = requested k`, with every slot padded by `-1` and
+`+infinity`. For a non-empty index, `Dim = min(requested k, live element count)`; filtering
+can leave padded slots within that width. Single-query empty results retain `Dim = 0`.
 
 ## `SparseVector`
 
@@ -145,8 +168,53 @@ struct MultiVector {
 When `Owner(true)` is set, each element's `vectors_` must be independently allocated, because the
 destructor frees each `vectors_` separately.
 
+## Named metadata
+
+`UInt32Metadata(name, values)` attaches one unsigned integer per dataset element, and
+`GetUInt32Metadata` returns the named array or `nullptr`. `Int64Metadata(name, values)` and
+`GetInt64Metadata(name)` provide named signed 64-bit integer arrays; `StringMetadata(name, values)`
+and `GetStringMetadata(name)` provide named string arrays. SINDI and SINDI_V2 use string metadata
+named `host` for host filtering and int64 metadata named `publish_time_stamp` for UTC-day time
+filtering. A time range on a one-element query dataset uses `publish_time_stamp_begin` and
+`publish_time_stamp_end`. For SINDI and SINDI_V2 base datasets, `publish_time_stamp == 0` is
+reserved for a missing timestamp and never matches a time selector. These arrays have one value
+per dataset element and follow the normal Dataset ownership, deep-copy, and append rules.
+
 ## See also
 
 - [Index](index_class.md) — the methods that consume and return datasets.
 - [Search Request & Filters](search.md) — wrapping a query dataset in a `SearchRequest`.
 - [Auxiliary Types](types.md) — `AttributeSet` and attribute value types.
+
+## Per-search distance statistics
+
+Results from maintained HGraph, BruteForce, IVF, Pyramid, SINDI, and SIMQ searches include an
+additive `GetStatistics()` contract:
+
+```json
+{"distance_evaluations":1164,
+ "distance_evaluations_by_phase":{"routing":64,"approximate":1000,"rerank":100},
+ "distance_evaluations_by_backend":{"sq8":1000,"fp32":100,"unknown":0},
+ "complete":true}
+```
+
+One logical query-to-candidate distance or bound evaluation counts once. A batch of `N` counts
+`N`; duplicate evaluations count each time; pre-distance rejects, filters, graph edges, prefetches,
+heap operations, and skipped lower bounds count zero. A lower bound and later exact rerank count
+separately. Phases are `routing`, `approximate`, and `rerank`; backends are stable representation
+families such as `fp32`, `fp16`, `bf16`, `int8`, `sq8`, `sq4`, `pq`, `pq_fastscan`, `rabitq`,
+`binary`, and sparse families, never ISA or batch variants.
+
+The total equals the phase sum. Known backend values equal the total; unknown work is in `unknown`
+and sets `complete` to `false`. Values are unsigned 64-bit JSON integers with saturating addition.
+SINDI and SINDI_V2 omit approximate-phase evaluations to avoid per-posting-ID tracking in their
+search hot paths. Their measured phases remain available, but `complete` is `false` when
+approximate evaluations occur.
+Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for compatibility.
+Python preserves `(ids, distances)` tuple unpacking. Opt in with
+`knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the
+sparse CSR overload returns one string per query. `range_search_with_statistics` returns the range
+arrays plus one statistics JSON string. C preserves `SearchResult_t`; call
+`vsag_search_result_enable_statistics()` before a search and release returned statistics with
+`vsag_search_result_destroy_statistics()`. Legacy callers retain `other_result` ownership and
+incur no statistics allocation. Legacy HNSW and DiskANN are explicit non-goals.

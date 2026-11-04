@@ -25,6 +25,9 @@ class BucketDataCellParameter : public Parameter {
 public:
     explicit BucketDataCellParameter();
 
+    static std::shared_ptr<BucketDataCellParameter>
+    CreateDefault(const std::string& quantization_type, const std::string& io_type);
+
     void
     FromJson(const JsonType& json) override;
 
@@ -38,6 +41,8 @@ public:
     QuantizerParamPtr quantizer_parameter{nullptr};
 
     IOParamPtr io_parameter{nullptr};
+
+    IOParamPtr supplement_io_parameter{nullptr};
 
     bool use_residual_{false};
 

@@ -26,6 +26,7 @@
 #include "normalize.h"
 #include "pq_distance.h"
 #include "rabitq_compute.h"
+#include "rabitq_scalar_compute.h"
 #include "reduce_add.h"
 #include "scalar_op.h"
 #include "sq4_compute.h"

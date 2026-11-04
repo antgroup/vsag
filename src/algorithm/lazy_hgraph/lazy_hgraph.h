@@ -68,6 +68,20 @@ public:
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
 
+    DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
+    DatasetPtr
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
     void
     Deserialize(StreamReader& reader) override;
 
@@ -114,6 +128,12 @@ public:
 
     [[nodiscard]] uint64_t
     GetMemoryUsage() const override;
+
+    [[nodiscard]] std::string
+    GetStats() const override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;

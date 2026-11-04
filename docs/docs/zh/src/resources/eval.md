@@ -82,6 +82,23 @@ eval_case1:
 - **延迟**：平均延迟、P50/P95/P99 延迟
 - **资源**：峰值内存占用
 
+### 搜索指标计量语义
+
+- **延迟**是每次被测 `Index::KnnSearch` 调用的墙钟耗时，使用单调时钟
+  `std::chrono::steady_clock` 测量。
+- **QPS** 是成功查询数除以被测搜索阶段的墙钟时间（秒）。
+- 统计信息提取、召回率计算和内存采样在性能测试阶段之外执行，不计入延迟
+  或 QPS。
+- 所有被测查询均计入结果，包括每个工作线程的首个查询。工具不会隐式预热；
+  如有需要，应在被测阶段之前显式执行预热。
+
+JSON 结果会输出 `measurement_method`、`measurement_sample_count`、
+`measurement_successful_query_count` 和 `measurement_duration(s)`，用于核对测量方法
+及其样本范围。
+
+旧版本使用相邻监控回调间隔计算指标，其结果不能与采用上述语义的结果
+直接比较。
+
 ## 搜索模式
 
 `search_mode` 支持 `knn`、`range`、`knn_filter`、`range_filter` 四种。

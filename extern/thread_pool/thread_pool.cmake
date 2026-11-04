@@ -3,14 +3,9 @@ include (FetchContent)
 
 set (thread_pool_urls
     https://github.com/log4cplus/ThreadPool/archive/3507796e172d36555b47d6191f170823d9f6b12c.tar.gz
-    # this url is maintained by the vsag project, if it's broken, please try
-    #  the latest commit or contact the vsag project
-    https://vsagcache.oss-rg-china-mainland.aliyuncs.com/thread_pool/3507796e172d36555b47d6191f170823d9f6b12c.tar.gz
 )
-if (DEFINED ENV{VSAG_THIRDPARTY_THREAD_POOL})
-    message (STATUS "Using local path for thread_pool: $ENV{VSAG_THIRDPARTY_THREAD_POOL}")
-    list (PREPEND thread_pool_urls "$ENV{VSAG_THIRDPARTY_THREAD_POOL}")
-endif ()
+vsag_resolve_thirdparty_override (
+    THREAD_POOL 3507796e172d36555b47d6191f170823d9f6b12c thread_pool_urls)
 FetchContent_Declare (
     thread_pool
     URL ${thread_pool_urls}

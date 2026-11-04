@@ -33,6 +33,8 @@ using norm_type = uint64_t;
 template <MetricType metric>
 SQ4UniformQuantizer<metric>::SQ4UniformQuantizer(int dim, Allocator* allocator, float trunc_rate)
     : Quantizer<SQ4UniformQuantizer<metric>>(dim, allocator), trunc_rate_(trunc_rate) {
+    SQ4UniformQuantizerParameter::ValidateTruncRate(trunc_rate);
+
     lower_bound_ = std::numeric_limits<float>::max();
     diff_ = std::numeric_limits<float>::lowest();
 

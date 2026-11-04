@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <new>
+
 #include "hgraph.h"  // IWYU pragma: keep
 #include "impl/pruning_strategy.h"
 #include "utils/util_functions.h"
@@ -22,21 +24,70 @@ uint32_t
 HGraph::Remove(const std::vector<int64_t>& ids, RemoveMode mode) {
     uint32_t delete_count = 0;
     if (mode == RemoveMode::MARK_REMOVE) {
-        std::scoped_lock label_lock(this->label_lookup_mutex_);
-        delete_count = this->label_table_->MarkRemove(ids);
+        std::unique_lock<std::mutex> mci_mutation_lock(this->mci_mutation_mutex_, std::defer_lock);
+        if (this->mci_parameters_.enabled) {
+            mci_mutation_lock.lock();
+        }
+
+        Vector<InnerIdType> removed_inner_ids(this->allocator_);
+        {
+            std::scoped_lock label_lock(this->label_lookup_mutex_);
+            if (this->mci_parameters_.enabled) {
+                removed_inner_ids.reserve(ids.size());
+                for (auto label : ids) {
+                    auto [found, inner_id] = this->label_table_->TryGetIdByLabel(label);
+                    if (found) {
+                        removed_inner_ids.push_back(inner_id);
+                    }
+                }
+                std::sort(removed_inner_ids.begin(), removed_inner_ids.end());
+                removed_inner_ids.erase(
+                    std::unique(removed_inner_ids.begin(), removed_inner_ids.end()),
+                    removed_inner_ids.end());
+            }
+            if (not removed_inner_ids.empty()) {
+                this->mci_cliques_->MarkUnavailable();
+            }
+            delete_count = this->label_table_->MarkRemove(ids);
+        }
         delete_count_ += delete_count;
+        if (not removed_inner_ids.empty()) {
+            this->remove_from_mci(removed_inner_ids);
+            this->maybe_compact_mci(delete_count);
+            this->mci_cliques_->MarkAvailable(this->total_count_.load());
+            // Same as Add: invalidate instead of paying the O(total) breakdown per call.
+            this->mark_memory_usage_dirty();
+        }
         return delete_count;
     }
 
     if (mode == RemoveMode::FORCE_REMOVE) {
+        if (this->rabitq_fused_datacell_ != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "fused RaBitQ HGraph without neighbor versions does not support force remove");
+        }
         CHECK_ARGUMENT(this->support_force_remove(),
                        "force remove requires index_param.support_force_remove to be true");
+        if (this->mci_parameters_.enabled) {
+            return this->force_remove_with_mci(ids);
+        }
         std::unique_lock<std::shared_mutex> wlock(this->force_remove_mutex_);
         for (const auto& id : ids) {
             delete_count += this->force_remove_one(id);
         }
         if (delete_count != 0) {
-            this->shrink_to_fit();
+            try {
+                this->shrink_to_fit();
+            } catch (const VsagException& e) {
+                if (e.error_.type != ErrorType::NO_ENOUGH_MEMORY) {
+                    throw;
+                }
+                // Deletion has already completed; compaction is best effort when memory is exhausted.
+            } catch (const std::bad_alloc&) {  // NOLINT(bugprone-empty-catch)
+                // Cleanup must preserve the primary result or exception.
+                // SafeAllocator reports failed storage shrinking as std::bad_alloc.
+            }
         }
         return delete_count;
     }
@@ -53,7 +104,8 @@ HGraph::find_new_entry_point() {
         Vector<InnerIdType> neighbors(allocator_);
         upper_graph->GetNeighbors(this->entry_point_id_, neighbors);
         for (const auto& nb_id : neighbors) {
-            if (inner_id == nb_id) {
+            if (inner_id == nb_id or nb_id >= this->total_count_.load() or
+                this->label_table_->IsRemoved(nb_id)) {
                 continue;
             }
             this->entry_point_id_ = nb_id;
@@ -64,6 +116,25 @@ HGraph::find_new_entry_point() {
             break;
         }
         route_graphs_.pop_back();
+    }
+    if (not find_new_ep and this->bottom_graph_ != nullptr and
+        this->bottom_graph_->TotalCount() > 0) {
+        const auto total = this->total_count_.load();
+        auto fallback = LabelTable::INVALID_ID;
+        for (InnerIdType candidate = 0; candidate < total; ++candidate) {
+            if (candidate != inner_id and this->bottom_graph_->CheckIdExists(candidate)) {
+                fallback = candidate;
+                if (not this->label_table_->IsRemoved(candidate)) {
+                    this->entry_point_id_ = candidate;
+                    return;
+                }
+            }
+        }
+        // If only marked slots remain, retain a physical navigation entry for later Add.
+        // Search filters tombstones from results; INVALID is only valid for an empty graph.
+        if (fallback != LabelTable::INVALID_ID) {
+            this->entry_point_id_ = fallback;
+        }
     }
 }
 
@@ -132,9 +203,27 @@ HGraph::graph_force_remove_one(const InnerIdType& inner_id,
 
 void
 HGraph::move_id(InnerIdType from, InnerIdType to) {
-    basic_flatten_codes_->Move(from, to);
+    const auto source = pending_code_writes_.find(from);
+    const uint8_t source_pending = source == pending_code_writes_.end() ? 0 : source->second;
+    // Allocate metadata before touching storage. A throwing Move may have written part of
+    // its destination; only that storage becomes unknown, not every source-pending bit.
+    auto& destination_pending = pending_code_writes_[to];
+    auto move_codes = [&](const FlattenInterfacePtr& codes, uint8_t mask) {
+        destination_pending |= mask;
+        codes->Move(from, to);
+        destination_pending = (destination_pending & ~mask) | (source_pending & mask);
+    };
+    move_codes(basic_flatten_codes_,
+               BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (high_precise_codes_) {
-        high_precise_codes_->Move(from, to);
+        move_codes(high_precise_codes_,
+                   PRECISE_CODE | (raw_vector_ == high_precise_codes_ ? RAW_CODE : 0));
+    }
+    if (create_new_raw_vector_ and raw_vector_ != nullptr) {
+        move_codes(raw_vector_, RAW_CODE);
+    }
+    if (destination_pending == 0) {
+        pending_code_writes_.erase(to);
     }
 
     if (extra_infos_) {
@@ -178,16 +267,38 @@ HGraph::force_remove_one(int64_t label) {
     bool was_mark_removed = false;
     {
         std::unique_lock lock(this->label_lookup_mutex_);
+        // After move_id (or when swap_id == inner_id so move_id is skipped),
+        // entry_point_id_ may still equal the deleted inner_id when
+        // find_new_entry_point failed to locate an upper-level successor.
+        // Retry with the bottom graph visible now that graph state is updated.
+        if (this->entry_point_id_ == inner_id and this->total_count_.load() > 1) {
+            this->find_new_entry_point();
+        }
         was_mark_removed = this->label_table_->IsRemoved(inner_id);
+        std::unique_lock codes_lock(this->persistent_codes_mutex_);
         this->label_table_->ForceRemove(label, inner_id);
         if (swap_id != inner_id) {
             this->move_id(swap_id, inner_id);
         }
+        this->pending_code_writes_.erase(swap_id);
     }
     if (was_mark_removed) {
         this->delete_count_.fetch_sub(1);
     }
-    this->total_count_.fetch_sub(1);
+    {
+        std::scoped_lock lock(this->global_mutex_);
+        if (this->total_count_.load() == 1) {
+            this->entry_point_id_ = INVALID_ENTRY_POINT;
+            this->bottom_graph_->SetTotalCount(0);
+            this->route_graphs_.clear();
+        }
+        // acq_rel: the decrement must be visible to the acquire load in
+        // PublishThroughTotalCount below, which lowers the visibility mark in step.
+        this->total_count_.fetch_sub(1, std::memory_order_acq_rel);
+        // Removal shrinks the id range; keep the visibility mark in step so it can never
+        // exceed the reserved range.
+        this->PublishThroughTotalCount();
+    }
     return 1;
 }
 
@@ -199,11 +310,19 @@ HGraph::shrink_to_fit() {
     if (high_precise_codes_) {
         high_precise_codes_->ShrinkToFit(total_count);
     }
+    if (create_new_raw_vector_ and raw_vector_ != nullptr) {
+        raw_vector_->ShrinkToFit(total_count);
+    }
+    if (extra_infos_ != nullptr) {
+        extra_infos_->ShrinkToFit(total_count);
+    }
     bottom_graph_->ShrinkToFit(total_count);
     for (const auto& route_graph : route_graphs_) {
         route_graph->ShrinkToFit(total_count);
     }
     label_table_->ShrinkToFit(total_count);
+
+    this->max_capacity_.store(total_count);
 }
 
 void

@@ -29,6 +29,10 @@ public:
     static constexpr const char* RABITQ_VERSION_SPLIT_1BIT_7BIT = "split_1bit_7bit";
     static constexpr float DEFAULT_RABITQ_ERROR_RATE = 1.9F;
     static constexpr uint64_t DEFAULT_RABITQ_BITS_PER_DIM_FILTER = 1;
+    static constexpr bool DEFAULT_FAST_ENCODE_RABITQ = true;
+    static constexpr uint64_t DEFAULT_FAST_ENCODE_RABITQ_ROUNDS = 6;
+    static constexpr uint64_t MIN_FAST_ENCODE_RABITQ_ROUNDS = 1;
+    static constexpr uint64_t MAX_FAST_ENCODE_RABITQ_ROUNDS = 32;
 
     RaBitQuantizerParameter();
 
@@ -56,5 +60,7 @@ public:
     std::string rabitq_version_{DEFAULT_RABITQ_VERSION};
     float rabitq_error_rate_{DEFAULT_RABITQ_ERROR_RATE};
     bool use_fht_{false};
+    bool fast_encode_rabitq_{DEFAULT_FAST_ENCODE_RABITQ};
+    uint64_t fast_encode_rabitq_rounds_{DEFAULT_FAST_ENCODE_RABITQ_ROUNDS};
 };
 }  // namespace vsag

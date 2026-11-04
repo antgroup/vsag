@@ -31,6 +31,8 @@ struct RaBitQDefaultParam {
     int rabitq_bits_per_dim_filter = 1;
     float rabitq_error_rate = RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE;
     bool use_fht = false;
+    bool fast_encode_rabitq = RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ;
+    int fast_encode_rabitq_rounds = RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ_ROUNDS;
 };
 
 std::string
@@ -43,7 +45,9 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
             "rabitq_bits_per_dim_base": {},
             "rabitq_bits_per_dim_filter": {},
             "rabitq_error_rate": {},
-            "use_fht": {}
+            "use_fht": {},
+            "fast_encode_rabitq": {},
+            "fast_encode_rabitq_rounds": {}
         }}
     )";
     return fmt::format(param_str,
@@ -53,7 +57,9 @@ generate_rabitq_param(const RaBitQDefaultParam& param) {
                        param.rabitq_bits_per_dim_base,
                        param.rabitq_bits_per_dim_filter,
                        param.rabitq_error_rate,
-                       param.use_fht);
+                       param.use_fht,
+                       param.fast_encode_rabitq,
+                       param.fast_encode_rabitq_rounds);
 }
 
 #define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
@@ -114,6 +120,9 @@ SECTION("different rabitq_version") {
 }
 TEST_COMPATIBILITY_CASE("different rabitq_error_rate", rabitq_error_rate, 1.9F, 1.0F, true)
 TEST_COMPATIBILITY_CASE("different use_fht", use_fht, true, false, false)
+TEST_COMPATIBILITY_CASE("different fast_encode_rabitq", fast_encode_rabitq, true, false, true)
+TEST_COMPATIBILITY_CASE(
+    "different fast_encode_rabitq_rounds", fast_encode_rabitq_rounds, 1, 32, true)
 }
 
 TEST_CASE("RaBitQ Quantizer Parameter Defaults", "[ut][RaBitQuantizerParameter]") {
@@ -122,6 +131,10 @@ TEST_CASE("RaBitQ Quantizer Parameter Defaults", "[ut][RaBitQuantizerParameter]"
     REQUIRE(param->rabitq_version_ == RaBitQuantizerParameter::DEFAULT_RABITQ_VERSION);
     REQUIRE(std::abs(param->rabitq_error_rate_ -
                      RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE) < 1e-5F);
+    REQUIRE(param->fast_encode_rabitq_);
+    REQUIRE(param->fast_encode_rabitq_rounds_ ==
+            RaBitQuantizerParameter::DEFAULT_FAST_ENCODE_RABITQ_ROUNDS);
+    REQUIRE(param->ToJson().Contains("fast_encode_rabitq"));
 }
 
 TEST_CASE("RaBitQ Split Version Parameter", "[ut][RaBitQuantizerParameter]") {
@@ -202,4 +215,25 @@ TEST_CASE("Wrong rabitq_error_rate parameter", "[ut][RaBitQuantizerParameter]") 
     default_param.rabitq_error_rate = wrong_rabitq_error_rate;
     auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
     REQUIRE_THROWS(param->FromString(generate_rabitq_param(default_param)));
+}
+
+TEST_CASE("RaBitQ fast encode parameters", "[ut][RaBitQuantizerParameter]") {
+    SECTION("valid boundary values") {
+        auto rounds = GENERATE(1, 32);
+        RaBitQDefaultParam default_param;
+        default_param.fast_encode_rabitq = false;
+        default_param.fast_encode_rabitq_rounds = rounds;
+        auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+        param->FromString(generate_rabitq_param(default_param));
+        REQUIRE_FALSE(param->fast_encode_rabitq_);
+        REQUIRE(param->fast_encode_rabitq_rounds_ == rounds);
+    }
+
+    SECTION("invalid values") {
+        auto param = std::make_shared<vsag::RaBitQuantizerParameter>();
+        REQUIRE_THROWS(param->FromString(R"({"type":"rabitq","fast_encode_rabitq_rounds":0})"));
+        REQUIRE_THROWS(param->FromString(R"({"type":"rabitq","fast_encode_rabitq_rounds":33})"));
+        REQUIRE_THROWS(param->FromString(R"({"type":"rabitq","fast_encode_rabitq_rounds":1.5})"));
+        REQUIRE_THROWS(param->FromString(R"({"type":"rabitq","fast_encode_rabitq":"true"})"));
+    }
 }

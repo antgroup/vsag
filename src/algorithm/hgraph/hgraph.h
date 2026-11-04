@@ -15,6 +15,13 @@
 
 #pragma once
 
+#include <atomic>
+#include <cassert>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <random>
 #include <shared_mutex>
 #include <string>
@@ -22,30 +29,50 @@
 #include <unordered_map>
 
 #include "../inner_index_interface.h"
+#include "algorithm/build_cache.h"
 #include "common.h"
 #include "datacell/attribute_inverted_interface.h"
+#include "datacell/clique_datacell.h"
+#include "datacell/code_slot_flatten_adapter.h"
+#include "datacell/code_slot_map.h"
 #include "datacell/flatten_interface.h"
 #include "datacell/graph_interface.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
-#include "hgraph_cache.h"
 #include "hgraph_parameter.h"
 #include "impl/basic_optimizer.h"
+#include "impl/conjugate_graph.h"
 #include "impl/heap/distance_heap.h"
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/hybrid_mci_searcher.h"
+#include "impl/searcher/mci_searcher.h"
 #include "impl/searcher/parallel_searcher.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
 #include "vsag/index_features.h"
 
 namespace vsag {
+
+class ChunkedManifest;
+struct ComponentManifestEntry;
+class FlattenOptimizedBuildInterface;
+class HGraphFGIM;
+class HGraphRaBitQFusedDataCell;
+class HGraphRaBitQSearcher;
+class HGraphOptimizedBuildSession;
+class MciIncrementalAddExecutor;
 class IteratorFilterContext;
+class RaBitQSplitDataCellInterface;
+struct RaBitQFusedCodeView;
 
 /**
  * @brief HGraph: hierarchical navigable graph index.
@@ -60,13 +87,29 @@ public:
     CheckAndMappingExternalParam(const JsonType& external_param,
                                  const IndexCommonParam& common_param);
 
+    friend class HGraphContinueSession;
+
+    std::unique_ptr<SearchSession>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter,
+                      Allocator* allocator,
+                      std::shared_ptr<const InnerIndexInterface> owner) const override;
+
     friend class HGraphAnalyzer;
+    friend class HGraphFGIM;
+    friend class HGraphFGIMTestAccessor;
+    friend class HGraphCodeWriteTestAccess;
+    friend struct HGraphMCITestAccess;
+    friend class HGraphOptimizedBuildSession;
+    friend class MciIncrementalAddExecutor;
 
 public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
-        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
     ~HGraph() override = default;
 
@@ -88,16 +131,25 @@ public:
                      bool calculate_precise_distance = true) const override;
 
     DatasetPtr
-    CalDistanceById(const float* query,
-                    const int64_t* ids,
-                    int64_t count,
-                    bool calculate_precise_distance = true) const override;
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
 
     void
     Deserialize(StreamReader& reader) override;
 
     InnerIndexPtr
     ExportModel(const IndexCommonParam& param) const override;
+
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
 
     uint64_t
     EstimateMemory(uint64_t num_elements) const override;
@@ -111,6 +163,10 @@ public:
     std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override;
 
+    /// Cached counter, recalculated on demand once a mutation has invalidated it.
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
+
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
 
@@ -119,9 +175,89 @@ public:
         return INDEX_TYPE_HGRAPH;
     }
 
+    /// Number of searchable elements. Ids reserved by prepare_add_batch but not published yet are
+    /// excluded, so this can under-report while a batched Add is in flight; that is intended,
+    /// because those nodes are deliberately not searchable.
     int64_t
     GetNumElements() const override {
-        return static_cast<int64_t>(this->total_count_) - delete_count_;
+        return static_cast<int64_t>(this->PublishedCount()) - delete_count_;
+    }
+
+    /// Order-sensitive FNV-1a hash over every bottom-graph neighbour list.
+    ///
+    /// Only the bottom graph is covered; the route-graph layers are not hashed, so two indexes
+    /// with identical bottom connectivity but different upper layers share a checksum. FNV-1a is
+    /// not collision-resistant: this compares two builds inside a test, it is not an identity
+    /// check. Every bottom-graph node is walked, so this must run after the ids were built and
+    /// published (all callers do).
+    ///
+    /// Diagnostic only: lets a test tell "the graph differs" apart from "search amplifies a
+    /// difference", and lets two builds be compared content-wise instead of via hit lists.
+    [[nodiscard]] uint64_t
+    GraphChecksum() const override {
+        uint64_t hash = 1469598103934665603ULL;
+        auto mix = [&hash](uint64_t value) {
+            hash ^= value;
+            hash *= 1099511628211ULL;
+        };
+        // Walk the physical bottom graph, not the HGraph publication watermark. As required
+        // above, callers must finish construction/publication before taking this checksum.
+        const auto nodes = this->bottom_graph_->TotalCount();
+        Vector<InnerIdType> neighbors(allocator_);
+        for (InnerIdType node = 0; node < nodes; ++node) {
+            neighbors.clear();
+            this->bottom_graph_->GetNeighbors(node, neighbors);
+            mix(node);
+            mix(neighbors.size());
+            for (const auto neighbor : neighbors) {
+                mix(neighbor);
+            }
+        }
+        return hash;
+    }
+
+    /// The per-node lock array, for diagnostics.
+    [[nodiscard]] MutexArrayPtr
+    GetNeighborsMutexArray() const {
+        return this->neighbors_mutex_;
+    }
+
+    /// Number of leading inner ids that concurrent readers may observe.
+    [[nodiscard]] InnerIdType
+    PublishedCount() const {
+        return this->published_count_.load(std::memory_order_acquire);
+    }
+
+    /// Mark every id below total_count_ visible. Used where a whole id range is created and
+    /// completed together (ODescent build, deserialization, merge).
+    ///
+    /// The two counters are read and written separately, so the caller must be the single writer
+    /// of the id range at that moment: this runs on the thread that just grew, shrank (remove
+    /// lowers the mark) or restored the range, never concurrently with another range transition.
+    void
+    PublishThroughTotalCount() {
+        this->published_count_.store(this->total_count_.load(std::memory_order_acquire),
+                                     std::memory_order_release);
+    }
+
+    /// Mark one node visible, once its codes and links are both written.
+    ///
+    /// prepare_add_batch hands out ids in increasing order and every worker publishes its own node
+    /// after construction. This stores the maximum completed id plus one; it does not wait for
+    /// lower ids to complete. A node already covered exits immediately. This is a visibility
+    /// and counting mark, not a completion barrier: like the
+    /// bulk Build path, which publishes the reserved range up front, it assumes no search runs
+    /// concurrently with the build.
+    void
+    PublishNode(InnerIdType inner_id) {
+        // Ids come from the range reserved by prepare_add_batch, so the mark can always reach
+        // inner_id + 1; the loop below exits immediately for an id that is already covered.
+        assert(inner_id < this->total_count_.load(std::memory_order_relaxed));
+        InnerIdType current = this->published_count_.load(std::memory_order_relaxed);
+        while (current <= inner_id and
+               not this->published_count_.compare_exchange_strong(
+                   current, inner_id + 1, std::memory_order_release, std::memory_order_relaxed)) {
+        }
     }
 
     int64_t
@@ -129,8 +265,21 @@ public:
         return delete_count_;
     }
 
+    [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
+    GetCodeStorageCounts() const {
+        if (this->code_slot_map_ == nullptr) {
+            auto count = this->PublishedCount();
+            return {count, count};
+        }
+        return {this->code_slot_map_->PublishedLogicalCount(),
+                this->code_slot_map_->PhysicalCount()};
+    }
+
     std::string
     GetStats() const override;
+
+    [[nodiscard]] AnalyzerBasePtr
+    CreateAnalyzer(const AnalyzerParam& param) const override;
 
     void
     GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
@@ -186,8 +335,25 @@ public:
     uint32_t
     Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
 
+    uint32_t
+    Feedback(const DatasetPtr& query,
+             int64_t k,
+             const std::string& parameters,
+             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override;
+
+    uint32_t
+    Pretrain(const std::vector<int64_t>& base_tag_ids,
+             uint32_t k,
+             const std::string& parameters) override;
+
     void
     Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
 
     /// Set the number of threads used during Build().
     void
@@ -217,8 +383,14 @@ public:
     bool
     UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
 
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
     void
     UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
 
     void
     UpdateAttribute(int64_t id,
@@ -228,32 +400,6 @@ public:
     /// Map hgraph JSON parameters (legacy helper for external param mapping).
     static JsonType
     map_hgraph_param(const JsonType& hgraph_json);
-
-    /**
-     * @brief Extract a pointer to the data vector at the given index.
-     *
-     * Dispatches on data_type_ to the correct typed getter on the dataset
-     * and offsets by `index * dim_`. Returns nullptr if the underlying
-     * pointer is absent.
-     */
-    const void*
-    get_data(const DatasetPtr& dataset, uint32_t index = 0) const {
-        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
-            auto* ptr = dataset->GetFloat32Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
-            auto* ptr = dataset->GetInt8Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
-                   data_type_ == DataTypes::DATA_TYPE_BF16) {
-            auto* ptr = dataset->GetFloat16Vectors();
-            return ptr ? ptr + static_cast<int64_t>(index) * dim_ : nullptr;
-        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
-            auto* ptr = dataset->GetSparseVectors();
-            return ptr ? ptr + index : nullptr;
-        }
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
-    }
 
     /// Sample a random level from the exponential distribution for a new node.
     int
@@ -294,23 +440,46 @@ public:
     /// Build all graphs (bottom + route) via ODescent in batch mode.
     std::vector<int64_t>
     build_by_odescent(const DatasetPtr& data);
+    /// Build the bottom graph via PiPNN and route graphs via ODescent.
+    std::vector<int64_t>
+    build_by_pipnn(const DatasetPtr& data);
 
-    /// Insert a single point into the graph(s) at the given level.
-    void
-    add_one_point(const void* data, int level, InnerIdType id);
+    /// Shared batch-build orchestration for ODescent and PiPNN.
+    std::vector<int64_t>
+    build_by_batch_graph(const DatasetPtr& data, bool use_pipnn);
 
     /// Write codes for inner_id into the persistent flatten storage.
     void
-    insert_persistent_codes(const void* data, InnerIdType inner_id);
+    insert_persistent_codes(const void* data,
+                            InnerIdType inner_id,
+                            const RaBitQFusedCodeView* preencoded = nullptr);
 
-    /// Insert a single point, optionally also inserting codes.
+    /// Write codes when the caller already protects storage capacity.
     void
-    add_one_point(const void* data, int level, InnerIdType id, bool insert_codes);
+    insert_persistent_codes_unlocked(const void* data,
+                                     InnerIdType inner_id,
+                                     const RaBitQFusedCodeView* preencoded = nullptr);
 
-    /// Core graph insertion: connect the new node and update neighbors.
-    /// Returns true if the entry point was updated.
-    bool
-    graph_add_one(const void* data, int level, InnerIdType inner_id);
+    void
+    insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
+
+    /// Write codes to a physical code slot when deduplicated storage is enabled.
+    void
+    insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
+
+    void
+    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+
+    void
+    restore_fused_codec();
+
+    /// Ensure physical code storage can hold required_capacity physical slots.
+    void
+    ensure_physical_code_capacity(CodeSlotIdType required_capacity);
+
+    /// Ensure physical code storage while global_mutex_ unique lock is already held.
+    void
+    ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
 
     /// Grow internal storage to at least new_size capacity.
     void
@@ -319,6 +488,25 @@ public:
     /// Create a single route (upper-layer) graph from the hierarchical params.
     GraphInterfacePtr
     generate_one_route_graph();
+
+    // Keep legacy RaBitQ candidates compact while allowing fused direct search to preserve hints.
+    // Only the buffer selected by search_one_graph allocates element storage.
+    struct RaBitQSearchCandidateBuffers {
+        explicit RaBitQSearchCandidateBuffers(Allocator* allocator)
+            : generic(allocator), fused(allocator) {
+        }
+
+        void
+        Reset() {
+            generic.clear();
+            fused.clear();
+            fused_search_used = false;
+        }
+
+        DistanceRecordVector generic;
+        RaBitQCandidateVector fused;
+        bool fused_search_used{false};
+    };
 
     /// Search a single graph layer, returning a candidate distance heap.
     /// @param ctx  may be nullptr during add (non-query) scenarios.
@@ -330,7 +518,8 @@ public:
                      InnerSearchParam& inner_search_param,
                      const VisitedListPtr& vt,
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
 
     /// Overload that accepts an IteratorFilterContext for iterative search.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
@@ -342,9 +531,35 @@ public:
                      IteratorFilterContext* iter_ctx,
                      // ctx can be nullptr in adding scenario
                      QueryContext* ctx,
-                     DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
 
 private:
+    float
+    calc_native_distance_by_id(const void* native_query,
+                               int64_t id,
+                               bool calculate_precise_distance) const;
+
+    void
+    check_fused_mutation_supported(std::string_view operation) const;
+
+    void
+    check_user_defined_precise_io_supported(std::string_view operation) const;
+
+    std::vector<int64_t>
+    add_impl(const DatasetPtr& data);
+
+    [[nodiscard]] std::shared_lock<std::shared_mutex>
+    acquire_global_read_lock() const {
+        if (SearchLockScope::IsNoLock()) {
+            return {};
+        }
+        if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
+            return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        std::scoped_lock resize_lock(this->physical_code_resize_mutex_);
+        return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+    }
+
     MetadataPtr
     collect_streaming_header() const override;
 
@@ -367,6 +582,195 @@ private:
     void
     deserialize_label_info_streaming(StreamReader& reader) const;
 
+    DatasetPtr
+    sample_train_dataset(const DatasetPtr& base) const;
+
+    void
+    train_codes_with_dataset(const DatasetPtr& train_data);
+
+    // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
+    // Keep them alive until every insertion task has drained, including on failure.
+    struct FusedAddCodes {
+        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+        }
+        Vector<uint8_t> codes;
+        Vector<uint32_t> clusters;
+        uint64_t one_bit_size{0};
+        uint64_t stride{0};
+    };
+
+    struct AddContext {
+        bool first_empty_add{false};
+        bool use_dedup_storage{false};
+        bool need_temporary_sq8_build_data{false};
+        bool use_parallel_add{false};
+        std::unique_ptr<FusedAddCodes> fused_codes;
+        DatasetPtr train_data{nullptr};
+        FlattenInterfacePtr graph_read_codes{nullptr};
+    };
+
+    struct AddRow {
+        int64_t input_idx{0};
+        InnerIdType inner_id{0};
+        int level{-1};
+    };
+
+    /// Assign the level of every row up front, in input order.
+    ///
+    /// Drawing all levels before the parallel insert phase makes level assignment a pure
+    /// function of the batch contents instead of a function of worker scheduling.
+    void
+    assign_batch_levels(Vector<AddRow>& rows);
+
+    struct AddBatch {
+        explicit AddBatch(Allocator* allocator) : rows(allocator) {
+        }
+
+        Vector<AddRow> rows;
+        std::vector<int64_t> failed_ids;
+    };
+
+    std::optional<std::vector<int64_t>>
+    try_optimized_build(const DatasetPtr& data);
+
+    [[nodiscard]] bool
+    need_temporary_sq8_build_data_for_add() const;
+
+    void
+    prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
+
+    [[nodiscard]] bool
+    should_insert_codes_before_probe(bool use_dedup_storage) const;
+
+    ComputerInterfacePtr
+    make_build_computer(const void* query, InnerIdType inner_id) const;
+
+    DistHeapPtr
+    search_graph_for_build(const void* query,
+                           const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           InnerSearchParam& inner_search_param,
+                           const ComputerInterfacePtr& computer) const;
+
+    struct GraphAddProbeResult {
+        DistHeapPtr neighbors{nullptr};
+        int64_t duplicate_id{-1};
+    };
+
+    void
+    validate_add_data(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
+
+    void
+    validate_fused_encoding_data(const float* data, uint64_t count) const;
+
+    void
+    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+
+    AddContext
+    prepare_add_context(const DatasetPtr& data);
+
+    AddBatch
+    prepare_add_batch(const DatasetPtr& data);
+
+    void
+    prepare_graph_read_codes(const DatasetPtr& data, AddContext& context);
+
+    void
+    prepare_temporary_graph_read_codes(const DatasetPtr& data,
+                                       const AddContext& context,
+                                       const AddBatch& batch);
+
+    void
+    insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch);
+
+    [[nodiscard]] bool
+    graph_read_codes_is_temporary(const AddContext& context) const;
+
+    bool
+    insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context);
+
+    void
+    prepare_codes_before_probe_if_needed(const void* data,
+                                         const AddRow& row,
+                                         const AddContext& context);
+
+    void
+    publish_duplicate_storage_if_needed(InnerIdType group_id,
+                                        InnerIdType duplicate_id,
+                                        const AddContext& context);
+
+    void
+    publish_duplicate_to_tracker(InnerIdType group_id, InnerIdType duplicate_id);
+
+    void
+    publish_unique_storage_if_needed(const void* data,
+                                     InnerIdType inner_id,
+                                     const AddContext& context);
+
+    void
+    publish_unique_storage_if_needed(const void* data,
+                                     InnerIdType inner_id,
+                                     const AddContext& context,
+                                     std::shared_lock<std::shared_mutex>& read_lock);
+
+    [[nodiscard]] bool
+    unique_add_needs_structure_update(int level) const;
+
+    void
+    ensure_route_graphs_for_level(int level);
+
+    void
+    publish_unique_under_shared_global_lock(const void* data,
+                                            int level,
+                                            InnerIdType inner_id,
+                                            InnerSearchParam& param,
+                                            const GraphAddProbeResult& probe,
+                                            const AddContext& context,
+                                            std::shared_lock<std::shared_mutex>& read_lock);
+
+    void
+    publish_unique_under_unique_global_lock(const void* data,
+                                            int level,
+                                            InnerIdType inner_id,
+                                            InnerSearchParam& param,
+                                            const GraphAddProbeResult& probe,
+                                            const AddContext& context);
+
+    GraphAddProbeResult
+    probe_graph_for_add(const void* data,
+                        int level,
+                        InnerIdType inner_id,
+                        InnerSearchParam& param,
+                        const FlattenInterfacePtr& flatten_codes) const;
+
+    bool
+    publish_duplicate_if_found(const GraphAddProbeResult& probe,
+                               InnerIdType inner_id,
+                               const AddContext& context);
+
+    void
+    publish_unique_to_graphs(const void* data,
+                             int level,
+                             InnerIdType inner_id,
+                             InnerSearchParam& param,
+                             const GraphAddProbeResult& probe,
+                             const AddContext& context);
+
+    void
+    publish_unique_to_bottom_graph(InnerIdType inner_id,
+                                   const DistHeapPtr& neighbors,
+                                   const FlattenInterfacePtr& flatten_codes);
+
+    void
+    publish_unique_to_route_graphs(const void* data,
+                                   int level,
+                                   InnerIdType inner_id,
+                                   InnerSearchParam& param,
+                                   const FlattenInterfacePtr& flatten_codes);
+
     // since v0.15: serialize basic index metadata to JSON.
     JsonType
     serialize_basic_info() const;
@@ -378,6 +782,74 @@ private:
     /// Write label (external id) mappings to stream.
     void
     serialize_label_info(StreamWriter& writer) const;
+
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// validate and publish the logical state derived from the code-slot map
+    void
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    // Load clique-owned state only; restore labels after all parallel component tasks finish.
+    void
+    deserialize_mci_cliques(StreamReader& reader, const JsonType& basic_info);
+
+    void
+    restore_mci_label_state(const JsonType& basic_info);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentManifestEntry& comp,
+                                         bool compressed,
+                                         const JsonType& basic_info);
+
+    /// dispatch a whole component of the chunked manifest to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The manifest path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name,
+                                StreamReader& reader,
+                                const JsonType& basic_info);
+
+    /// parallel body load driven by the manifest recorded in the footer
+    void
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest,
+                                  const JsonType& basic_info);
+
+    /// parallel load of an uncompressed body without a recorded manifest:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader,
+                               ThreadPool& pool,
+                               uint64_t body_end,
+                               const JsonType& basic_info);
 
     /// Read label (external id) mappings from stream.
     void
@@ -413,6 +885,11 @@ private:
     void
     shrink_to_fit();
 
+    /// Physically remove external labels, remap graph/MCI IDs, repair cliques and shrink storage.
+    /// Owns mutation locking; called by Remove(FORCE_REMOVE) when MCI is enabled.
+    uint32_t
+    force_remove_with_mci(const std::vector<int64_t>& ids);
+
     /// Flat brute-force search used when the index is too small or graph is unavailable.
     template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
     DistHeapPtr
@@ -420,7 +897,14 @@ private:
                        const FilterPtr& filter,
                        int64_t topk,
                        float radius,
-                       QueryContext* ctx) const;
+                       QueryContext* ctx,
+                       const std::optional<float>& threshold = std::nullopt) const;
+
+    DatasetPtr
+    search_range_with_request(const SearchRequest& request,
+                              const HGraphSearchParameters& params,
+                              const FilterPtr& filter,
+                              QueryContext& ctx) const;
 
 private:
     /// Reorder the candidate heap using precise codes, updating in-place.
@@ -431,7 +915,8 @@ private:
             int64_t k,
             IteratorFilterContext* iter_ctx,
             QueryContext& ctx,
-            const DistanceRecordVector* rabitq_lower_bound_candidates = nullptr) const;
+            const RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) const;
 
     /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
     void
@@ -443,13 +928,20 @@ private:
                               const IndexCommonParam& common_param,
                               bool is_create_new = true);
 
-    /// Compute resize_increase_count_bit_ and initialize reorder if enabled.
+    /// Initialize reorder if enabled.
     void
     init_resize_bit_and_reorder();
 
-    /// Compute memory usage breakdown and cache the result.
+    /// Compute the memory usage breakdown and cache the result. Records the mutation version it
+    /// observed so a mutation racing with this snapshot is not silently swallowed.
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
+
+    /// Invalidate the cached counter instead of recomputing it. The per-element Add/Remove paths
+    /// call this so they do not pay the O(total) breakdown; the next GetMemoryUsage() recalculates
+    /// it. Paths that already hold the mutation locks may keep calling cal_memory_usage() eagerly.
+    void
+    mark_memory_usage_dirty() const;
 
     /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
@@ -463,10 +955,27 @@ private:
         return support_force_remove_;
     }
 
+    /// True when duplicate logical ids share physical vector storage slots.
+    [[nodiscard]] bool
+    using_dedup_storage() const {
+        return support_duplicate_ and deduplicate_storage_;
+    }
+
     /// Return the flatten used for reorder (base or high-precision).
     [[nodiscard]] FlattenInterfacePtr
     get_reorder_codes() const {
         return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
+    }
+
+    /// Return the best available flatten for precise distance in MCI and other internal
+    /// search paths.
+    /// Here, "precise" means the best available precision and does not guarantee raw FP32 data.
+    [[nodiscard]] FlattenInterfacePtr
+    get_precise_codes() const {
+        if (create_new_raw_vector_ and raw_vector_ != nullptr) {
+            return raw_vector_;
+        }
+        return has_precise_reorder() ? high_precise_codes_ : basic_flatten_codes_;
     }
 
     /// Populate the neighbor cache from the index state.
@@ -568,12 +1077,169 @@ private:
                            const FlattenInterfacePtr& flatten_codes,
                            const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
 
+    struct MCIHybridSearchResult {
+        MCIHybridSearchResult(const HGraphSearchParameters& params, const FilterPtr& filter);
+
+        [[nodiscard]] JsonType
+        MakeStatistics(const SearchStatistics& stats) const;
+
+        DistHeapPtr result{nullptr};
+        float valid_ratio{1.0F};
+        float threshold{0.0F};
+        float seed_ratio{0.0F};
+        std::string route{"disabled"};
+        uint64_t seed_count{0};
+        bool used_precise_float_csr{false};
+        bool used_bitmap_fast_path{false};
+        // Counters of the dynamic neighbor traversal (route == "hybrid").
+        HybridSearchStats hybrid_stats{};
+        // Seed budget the traversal resolved for the current filter, before sampling.
+        uint64_t hybrid_seed_budget{0};
+    };
+
+    [[nodiscard]] MCIHybridSearchResult
+    try_mci_search(const SearchRequest& request,
+                   const HGraphSearchParameters& params,
+                   const FilterPtr& inner_filter,
+                   const void* query,
+                   const InnerSearchParam& search_param,
+                   QueryContext* ctx) const;
+
+    /**
+     * Seeds for the dynamic neighbor traversal. Uses the exact seed budget of try_mci_search
+     * -- max(ceil(sqrt(N) * mci_seed_ratio), ceil(mci_seed_coverage * valid)) with the cap rule
+     * -- and the same samplers (label sampling when the filter enumerates valid ids, uniform
+     * bitmap sampling when it only exposes a validity map). Keeping the two identical means a
+     * comparison between the two routes cannot be confounded by the seed strategy.
+     * The resolved budget is written to seed_budget_out, and seeds_are_exhaustive_out is set
+     * when the returned list is exactly the whole valid set -- in that case every valid point
+     * already has a distance and the traversal cannot improve on the seeds, so the caller can
+     * skip the expansion entirely. Returns an empty vector when the filter supports neither
+     * source, in which case the traversal falls back to the coarse-search entry point.
+     * total_count is the snapshot the caller already holds, so the budget is derived from the
+     * same count that the companion availability check uses.
+     */
+    [[nodiscard]] Vector<InnerIdType>
+    collect_hybrid_seeds(const SearchRequest& request,
+                         const FilterPtr& inner_filter,
+                         const HGraphSearchParameters& params,
+                         uint64_t total_count,
+                         uint64_t* seed_budget_out,
+                         bool* seeds_are_exhaustive_out,
+                         Allocator* alloc) const;
+
+    void
+    build_mci_clique_index(const void* vectors = nullptr);
+
+    void
+    mci_read_node_cliques(const std::shared_lock<std::shared_mutex>* view,
+                          InnerIdType node_id,
+                          Vector<InnerIdType>& clique_ids) const;
+
+    void
+    mci_read_clique_members(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType clique_id,
+                            Vector<InnerIdType>& members) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_clique_member_count(const std::shared_lock<std::shared_mutex>* view,
+                                 InnerIdType clique_id) const;
+
+    [[nodiscard]] uint64_t
+    mci_read_logical_clique_count(const std::shared_lock<std::shared_mutex>* view) const;
+
+    /// Contiguous FP32 rows for lock-free L2 pair distances, or nullptr when the companion codes
+    /// or the metric require the codec pair API. Both paths return the identical L2 value.
+    [[nodiscard]] const float*
+    mci_contiguous_l2_vectors(uint64_t* row_stride) const;
+
+    /// Candidate cliques worth joining for one seed, ordered by overlapping members. Shared by the
+    /// serial update (which appends to them) and the planning pass (which only records them).
+    void
+    collect_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                             const Vector<InnerIdType>& knn_ids,
+                             Vector<std::pair<uint64_t, InnerIdType>>& targets) const;
+
+    /// Walk collected JOIN targets in gain order. With apply set they are appended to the live
+    /// structure; otherwise the walk only counts the neighbors a plan would gain.
+    void
+    apply_mci_join_targets(const std::shared_lock<std::shared_mutex>* view,
+                           InnerIdType new_inner_id,
+                           const Vector<std::pair<uint64_t, InnerIdType>>& targets,
+                           uint64_t degree_target,
+                           UnorderedSet<InnerIdType>& neighbors,
+                           bool apply);
+
+    /// Local MCE around a seed with the full-build expansion rules. `view` selects the companion
+    /// state and `emit` receives every produced clique in global inner IDs, so the caller decides
+    /// whether it is written to the cell or recorded in a plan.
+    void
+    build_local_mci_cliques(const std::shared_lock<std::shared_mutex>* view,
+                            InnerIdType new_inner_id,
+                            const Vector<InnerIdType>& knn_ids,
+                            uint64_t visible_total,
+                            const std::function<void(const Vector<InnerIdType>&)>& emit);
+
+    /// Search HGraph KNN and update MCI without inserting a vector into HGraph.
+    /// visible_total is the exclusive inner-ID bound for accepted KNN candidates, not live count.
+    /// Zero defaults to node_id + 1 for ADD; existing FP32 repair points pass total_count_.
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const void* vector,
+                                  uint64_t visible_total = 0);
+
+    void
+    incremental_update_mci_clique(InnerIdType node_id,
+                                  const Vector<InnerIdType>& knn_ids,
+                                  uint64_t visible_total);
+
+    /// Apply deletion to MCI only, retiring small cliques and repairing under-covered survivors.
+    /// Uses unchanged inner IDs; does not remove vectors, remap graph IDs or shrink storage.
+    /// Caller owns mutation locking and handles label deletion and MCI publication.
+    void
+    remove_from_mci(const Vector<InnerIdType>& removed_inner_ids);
+
+    /// Account successful vector mutations and compact at 100. Caller holds mci_mutation_mutex_.
+    /// MARK_REMOVE accounts the complete batch after repair; FORCE_REMOVE compacts separately.
+    void
+    maybe_compact_mci(uint64_t changed_count);
+
+    /// Recover an existing query vector and run the same MCI update as Add, without reinserting it.
+    /// Non-FP32 repair scans O(N) stored-code distances per seed with O(mcs) heap storage;
+    /// FP32 repair uses HGraph KNN. Neither path promises logarithmic worst-case search time.
+    void
+    repair_mci_clique(InnerIdType node_id);
+
+    /// Recheck live coverage after earlier repairs, reusing caller-owned scratch storage.
+    /// Caller holds mutation and persistent-codes locks and supplies a current inner ID.
+    bool
+    repair_mci_clique_if_undercovered(InnerIdType node_id, Vector<InnerIdType>& memberships);
+
+    [[nodiscard]] Vector<InnerIdType>
+    search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
+
+    void
+    try_join_mci_clique(InnerIdType new_inner_id,
+                        const Vector<InnerIdType>& knn_ids,
+                        uint64_t degree_target,
+                        UnorderedSet<InnerIdType>& neighbors);
+
+    void
+    build_incremental_mci_clique(InnerIdType new_inner_id,
+                                 const Vector<InnerIdType>& knn_ids,
+                                 uint64_t visible_total);
+
 private:
     FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
-    FlattenInterfacePtr high_precise_codes_{nullptr};   // precise codes for reorder (optional)
+    std::shared_ptr<FlattenOptimizedBuildInterface> optimized_build_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};  // precise codes for reorder (optional)
+    std::shared_ptr<CodeSlotMap> code_slot_map_{nullptr};
 
     Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
     GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
+    std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
+    std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
     SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
 
     bool use_elp_optimizer_{false};  // enable ELP edge-link pruning
@@ -581,8 +1247,10 @@ private:
     bool build_by_base_{false};      // build graph using base (not quantized) codes
     bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
 
-    BasicSearcherPtr searcher_;              // single-thread graph searcher
-    ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
+    BasicSearcherPtr searcher_;                 // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;               // companion MCI clique searcher
+    HybridMCISearcherPtr hybrid_mci_searcher_;  // sparse + clique dynamic neighbor traversal
+    ParallelSearcherPtr parallel_searcher_;     // multi-thread graph searcher
 
     std::default_random_engine level_generator_{
         2021};          // random number generator for level sampling
@@ -591,43 +1259,101 @@ private:
     InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
 
     ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    PiPNNGraphBuilderParameter pipnn_param_{};      // PiPNN build parameters
     std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
 
+    CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
+    HGraphMCIParameters mci_parameters_{};
+    uint64_t mci_pending_mutations_{0};  // runtime-only; guarded by mci_mutation_mutex_
+
     uint64_t ef_construct_{400};  // expansion factor during graph construction
-    float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
+    AdaptivePruningParameter adaptive_pruning_;
+
+    float alpha_{1.0};  // Relative Neighborhood Graph pruning coefficient
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;        // guards total_count_, entry_point_id_
+    mutable std::shared_mutex global_mutex_;  // guards total_count_, entry_point_id_
+    // HGraph::resize takes global_mutex_ before persistent_codes_mutex_; code writers
+    // must never acquire global_mutex_ while holding persistent_codes_mutex_.
+    mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
+    // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
+    enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
+    UnorderedMap<InnerIdType, uint8_t> pending_code_writes_;
+
+    void
+    finish_code_write(InnerIdType inner_id, uint8_t code);
+
+    mutable std::mutex mci_build_mutex_;  // serializes full MCI reconstruction
+    // MCI writers take mutation before force_remove; label scopes end before repair/search.
+    // Add insertion and Shrink/UpdateVector take force_remove before persistent_codes.
+    // FORCE_REMOVE spans the same pair: it holds force_remove exclusively, releases it, then takes
+    // persistent_codes shared for repair, and finally reacquires force_remove exclusively before
+    // pinning codes exclusively to shrink. The release is required because repair enters public
+    // search, which reacquires force_remove itself (shared_mutex is non-recursive); mutation still
+    // excludes all ID-moving operations. CSR storage/view locks are internal to CliqueDataCell.
+    mutable std::mutex mci_mutation_mutex_;         // serializes MCI Add, Remove and compaction
+    mutable std::mutex pipnn_initial_build_mutex_;  // serializes PiPNN's first Add batch
     mutable MutexArrayPtr neighbors_mutex_;         // per-node locks for neighbor lists
     mutable std::shared_mutex add_mutex_;           // serializes Add() operations
     mutable std::shared_mutex force_remove_mutex_;  // serializes force-remove operations
+    // Single-flights physical code growth before taking the global writer lock.
+    mutable std::mutex physical_code_resize_mutex_;
+    std::atomic<bool> physical_code_resize_pending_{false};
 
     std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2(resize batch size)
+    /// Memory-usage cache bookkeeping. A mutation either invalidates the counter by bumping the
+    /// version (the per-element Add/Remove paths) or recomputes it eagerly while it already holds
+    /// the mutation locks (build, resize, deserialize); the cached counter is re-derived only when
+    /// GetMemoryUsage() observes a version it has not accounted for yet. Keep the two counters on
+    /// separate cache lines: every mutation writes the first while every query reads the second.
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_version_{1};
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_accounted_version_{0};
 
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default resize batch = 1024
+    /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
+    /// links are both fully written, and which concurrent readers may therefore observe.
+    ///
+    /// total_count_ (base class) means "reserved": the id range is allocated and the
+    /// underlying storage is sized for it. A reserved id can name a node whose codes or link
+    /// lists are still being written by a construction worker, so readers gate on
+    /// published_count_ rather than total_count_.
+    ///
+    /// Monotonically non-decreasing. Kept equal to total_count_ wherever nodes are created in
+    /// bulk; insert paths advance it per node once that node is complete.
+    std::atomic<InnerIdType> published_count_{0};
+    std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
+
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_INCREASE_COUNT_BIT};  // log2(resize batch size)
 
     std::atomic<int64_t> delete_count_{0};  // number of force-removed vectors
 
     std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;  // search parameter optimizer
 
-    bool create_new_raw_vector_{false};  // whether a separate raw vector exists
-    FlattenInterfacePtr temporary_build_flatten_codes_{nullptr};  // temp flatten during build
+    bool create_new_raw_vector_{false};        // whether a separate raw vector exists
     FlattenInterfacePtr raw_vector_{nullptr};  // raw float vectors (for distance calc)
 
     ReorderInterfacePtr reorder_{nullptr};  // reorder helper
 
     bool use_old_serial_format_{false};  // true when deserialized from legacy format
 
-    bool support_duplicate_{false};             // allow duplicate external ids
-    bool support_force_remove_{false};          // enable physical deletion
+    bool support_duplicate_{false};     // allow duplicate external ids
+    bool deduplicate_storage_{false};   // share duplicate vector storage slots
+    bool support_force_remove_{false};  // enable physical deletion
+    bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
+    std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    // guards conjugate_graph_ against concurrent search paths. During a
+    // parallel restore exactly one component task acquires it (the conjugate
+    // graph handler); before adding another acquirer there, read the INVARIANT
+    // in hgraph_parallel_deserialize.cpp — two restore tasks holding component
+    // locks while waiting on this one would deadlock.
+    mutable std::shared_mutex conjugate_graph_mutex_;
     float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
 
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
-    std::unique_ptr<HGraphCache> cache_{nullptr};  // neighbor cache for warm-start build
+    std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit

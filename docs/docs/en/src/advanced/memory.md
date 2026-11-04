@@ -70,8 +70,8 @@ build is typically higher than the post-build footprint:
 uint64_t peak = index->EstimateBuildMemory(1000000);  // bytes
 ```
 
-Currently only DiskANN provides a non-trivial implementation; other index types throw
-an exception by default.
+No maintained index currently provides a non-trivial implementation; callers must handle the
+default unsupported-operation exception.
 
 ### `GetMemoryUsage()`
 

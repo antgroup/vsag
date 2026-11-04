@@ -15,18 +15,21 @@
 
 #include "latency_monitor.h"
 
-#include <mutex>
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <utility>
 
 namespace vsag::eval {
 
-LatencyMonitor::LatencyMonitor(uint64_t max_record_counts) : Monitor("latency_monitor") {
-    if (max_record_counts > 0) {
-        this->latency_records_.reserve(max_record_counts);
-    }
+LatencyMonitor::LatencyMonitor() : Monitor("latency_monitor") {
 }
 
 void
 LatencyMonitor::Start() {
+    this->latency_records_.clear();
+    this->successful_query_count_ = 0;
+    this->wall_time_seconds_ = 0.0;
 }
 void
 LatencyMonitor::Stop() {
@@ -38,22 +41,30 @@ LatencyMonitor::GetResult() {
     for (auto& metric : metrics_) {
         this->cal_and_set_result(metric, result);
     }
+    result["measurement_method"]["latency"] = "steady_clock_around_knn_search";
+    result["measurement_method"]["qps"] = "successful_queries_per_wall_time";
+    result["measurement_sample_count"] = static_cast<uint64_t>(this->latency_records_.size());
+    result["measurement_successful_query_count"] = this->successful_query_count_;
+    result["measurement_duration(s)"] = this->wall_time_seconds_;
     return result;
 }
+
 void
-LatencyMonitor::Record(void* input) {
-    std::lock_guard<std::mutex> lock(record_mutex_);
-    std::thread::id thread_id = std::this_thread::get_id();
-    if (cur_time_.find(thread_id) == cur_time_.end()) {
-        cur_time_[thread_id] = Clock::now();
-        return;
-    }
-    auto end_time = Clock::now();
-    double duration =
-        std::chrono::duration<double, std::milli>(end_time - cur_time_[thread_id]).count();
-    this->latency_records_.emplace_back(duration);
-    this->cur_time_[thread_id] = Clock::now();
+LatencyMonitor::SetTimingBatch(LatencyTimingBatch timing_batch) {
+    this->latency_records_ = std::move(timing_batch.latency_ms);
+    this->latency_records_.erase(
+        std::remove_if(
+            this->latency_records_.begin(),
+            this->latency_records_.end(),
+            [](double latency_ms) { return not std::isfinite(latency_ms) or latency_ms < 0; }),
+        this->latency_records_.end());
+    this->successful_query_count_ = timing_batch.successful_query_count;
+    this->wall_time_seconds_ =
+        std::isfinite(timing_batch.wall_time_seconds) and timing_batch.wall_time_seconds > 0.0
+            ? timing_batch.wall_time_seconds
+            : 0.0;
 }
+
 void
 LatencyMonitor::SetMetrics(std::string metric) {
     this->metrics_.emplace_back(std::move(metric));
@@ -76,23 +87,28 @@ LatencyMonitor::cal_and_set_result(const std::string& metric, Monitor::JsonType&
 }
 
 double
-LatencyMonitor::cal_qps() {
-    double total_time_cost =
-        std::accumulate(this->latency_records_.begin(), this->latency_records_.end(), double(0));
-    auto thread_num = cur_time_.size();
-    auto query_num = latency_records_.size();
-    return static_cast<double>(query_num) * thread_num * 1000.0 / total_time_cost;
+LatencyMonitor::cal_qps() const {
+    if (this->successful_query_count_ == 0 or this->wall_time_seconds_ <= 0.0) {
+        return 0.0;
+    }
+    return static_cast<double>(this->successful_query_count_) / this->wall_time_seconds_;
 }
 
 double
-LatencyMonitor::cal_avg_latency() {
+LatencyMonitor::cal_avg_latency() const {
+    if (this->latency_records_.empty()) {
+        return 0.0;
+    }
     double total_time_cost =
         std::accumulate(this->latency_records_.begin(), this->latency_records_.end(), double(0));
-    auto query_num = latency_records_.size();
-    return total_time_cost / static_cast<double>(query_num);
+    return total_time_cost / static_cast<double>(this->latency_records_.size());
 }
+
 double
 LatencyMonitor::cal_latency_rate(double rate) {
+    if (this->latency_records_.empty()) {
+        return 0.0;
+    }
     std::sort(this->latency_records_.begin(), this->latency_records_.end());
     auto pos = static_cast<uint64_t>(rate * static_cast<double>(this->latency_records_.size() - 1));
     return latency_records_[pos];

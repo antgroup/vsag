@@ -1,0 +1,25 @@
+name: asan-build-and-test-build-asan-aarch64
+description: Shared build_asan_aarch64 execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Load Cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: "2G"
+        save: ${{ github.event_name != 'pull_request' }}
+        key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+    - name: Make Asan
+      shell: sh
+      run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+    - name: Clean
+      shell: sh
+      run: find ./build -type f -name "*.o" -exec rm -f {} +
+    - name: Save Test
+      uses: actions/upload-artifact@v5
+      with:
+        path: ./build/
+        name: test_aarch64-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 3
+        overwrite: 'true'

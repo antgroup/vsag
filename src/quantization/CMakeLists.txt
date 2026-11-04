@@ -20,12 +20,14 @@ set (QUANTIZER_SRC
         int8_quantizer.cpp
         multi_vector_computer.cpp
         scalar_quantization/scalar_quantizer.cpp
+        scalar_quantization/local_scalar_quantizer.cpp
         scalar_quantization/half_precision_quantizer.cpp
         scalar_quantization/sq4_uniform_quantizer.cpp
         scalar_quantization/sq8_uniform_quantizer.cpp
         product_quantization/pq_fastscan_quantizer.cpp
         product_quantization/product_quantizer.cpp
         rabitq_quantization/rabitq_quantizer.cpp
+        sparse_quantization/sparse_dmq_quantizer.cpp
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
         int8_quantizer_parameter.cpp

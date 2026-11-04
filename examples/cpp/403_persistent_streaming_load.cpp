@@ -186,7 +186,6 @@ get_example_config() {
                         "use_reorder": true,
                         "use_quantization": false,
                         "doc_prune_ratio": 0.0,
-                        "term_prune_ratio": 0.0,
                         "window_size": 10000,
                         "term_id_limit": 30001,
                         "avg_doc_term_length": 100

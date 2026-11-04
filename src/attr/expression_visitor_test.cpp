@@ -28,6 +28,28 @@
 
 using namespace vsag;
 
+namespace {
+
+struct NumericComparisonCase {
+    const char* filter_condition_str;
+    const char* op;
+    const char* right_string;
+    const char* expression_string;
+};
+
+void
+CheckNumericComparison(const NumericComparisonCase& test_case) {
+    auto expr_ptr = AstParse(test_case.filter_condition_str);
+    auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
+    REQUIRE(comparison_expr != nullptr);
+    REQUIRE(comparison_expr->left->ToString() == "age");
+    REQUIRE(ToString(comparison_expr->op) == test_case.op);
+    REQUIRE(comparison_expr->right->ToString() == test_case.right_string);
+    REQUIRE(comparison_expr->ToString() == test_case.expression_string);
+}
+
+}  // namespace
+
 TEST_CASE("Test BaseVisitor", "[ut][expression_visitor]") {
     {
         auto filter_condition_str = "age > 18";
@@ -112,309 +134,49 @@ TEST_CASE("Test BaseVisitor", "[ut][expression_visitor]") {
 }
 
 TEST_CASE("Test NumericComparison", "[ut][expression_visitor]") {
-    {
-        auto filter_condition_str = "age > 18";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('18')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">");
-        REQUIRE(comparison_expr->right->ToString() == "18");
-        REQUIRE(comparison_expr->ToString() == "(age > 18)");
+    const NumericComparisonCase comparison_cases[] = {
+        {"age > 18", ">", "18", "(age > 18)"},
+        {"age >= 18.5", ">=", "18.5", "(age >= 18.5)"},
+        {"age < 18", "<", "18", "(age < 18)"},
+        {"age <= 18.5", "<=", "18.5", "(age <= 18.5)"},
+        {"age = 18", "=", "18", "(age = 18)"},
+        {"age != 18.5", "!=", "18.5", "(age != 18.5)"},
+        {"age > 0", ">", "0", "(age > 0)"},
+        {"age < 0", "<", "0", "(age < 0)"},
+        {"age = 0", "=", "0", "(age = 0)"},
+        {"age != 0", "!=", "0", "(age != 0)"},
+        {"age >= 0", ">=", "0", "(age >= 0)"},
+        {"age <= 0", "<=", "0", "(age <= 0)"},
+        {"age > 18.0", ">", "18.0", "(age > 18.0)"},
+        {"age < 18.0", "<", "18.0", "(age < 18.0)"},
+        {"age = 18.0", "=", "18.0", "(age = 18.0)"},
+        {"age != 18.0", "!=", "18.0", "(age != 18.0)"},
+        {"age >= 18.0", ">=", "18.0", "(age >= 18.0)"},
+        {"age <= 18.0", "<=", "18.0", "(age <= 18.0)"},
+        {"age <= .15", "<=", "0.15", "(age <= 0.15)"},
+        {"age <= 15.", "<=", "15.0", "(age <= 15.0)"},
+        {"age <= 15.23e-4", "<=", "0.001523", "(age <= 0.001523)"},
+        {"age > 2147483647", ">", "2147483647", "(age > 2147483647)"},
+        {"age < -2147483648", "<", "-2147483648", "(age < -2147483648)"},
+        {"age = 0.0", "=", "0.0", "(age = 0.0)"},
+        {"age != 0.0", "!=", "0.0", "(age != 0.0)"},
+    };
+
+    for (const auto& comparison_case : comparison_cases) {
+        CheckNumericComparison(comparison_case);
     }
-    {
-        auto filter_condition_str = "age >= 18.5";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> FLOAT('18.5')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">=");
-        REQUIRE(comparison_expr->right->ToString() == "18.5");
-        REQUIRE(comparison_expr->ToString() == "(age >= 18.5)");
-    }
-    {
-        auto filter_condition_str = "age < 18";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('18')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<");
-        REQUIRE(comparison_expr->right->ToString() == "18");
-        REQUIRE(comparison_expr->ToString() == "(age < 18)");
-    }
-    {
-        auto filter_condition_str = "age <= 18.5";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('18.5')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "18.5");
-        REQUIRE(comparison_expr->ToString() == "(age <= 18.5)");
-    }
-    {
-        auto filter_condition_str = "age = 18";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> INTEGER('18')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "=");
-        REQUIRE(comparison_expr->right->ToString() == "18");
-        REQUIRE(comparison_expr->ToString() == "(age = 18)");
-    }
-    {
-        auto filter_condition_str = "age != 18.5";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('18.5')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "!=");
-        REQUIRE(comparison_expr->right->ToString() == "18.5");
-        REQUIRE(comparison_expr->ToString() == "(age != 18.5)");
-    }
-    {
-        auto filter_condition_str = "age > 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age > 0)");
-    }
-    {
-        auto filter_condition_str = "age < 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age < 0)");
-    }
-    {
-        auto filter_condition_str = "age = 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "=");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age = 0)");
-    }
-    {
-        auto filter_condition_str = "age != 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "!=");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age != 0)");
-    }
-    {
-        auto filter_condition_str = "age >= 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GE('>='), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">=");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age >= 0)");
-    }
-    {
-        auto filter_condition_str = "age <= 0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> INTEGER('0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "0");
-        REQUIRE(comparison_expr->ToString() == "(age <= 0)");
-    }
-    {
-        auto filter_condition_str = "age > 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age > 18.0)");
-    }
-    {
-        auto filter_condition_str = "age < 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age < 18.0)");
-    }
-    {
-        auto filter_condition_str = "age = 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "=");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age = 18.0)");
-    }
-    {
-        auto filter_condition_str = "age != 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "!=");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age != 18.0)");
-    }
-    {
-        auto filter_condition_str = "age >= 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GE('>='), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">=");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age >= 18.0)");
-    }
-    {
-        auto filter_condition_str = "age <= 18.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('18.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "18.0");
-        REQUIRE(comparison_expr->ToString() == "(age <= 18.0)");
-    }
-    {
-        auto filter_condition_str = "age <= .15";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('0.15')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "0.15");
-        REQUIRE(comparison_expr->ToString() == "(age <= 0.15)");
-    }
-    {
-        auto filter_condition_str = "age <= 15.";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('15.')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "15.0");
-        REQUIRE(comparison_expr->ToString() == "(age <= 15.0)");
-    }
-    {
-        auto filter_condition_str = "age <= 15.23e-4";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LE('<='), numeric -> FLOAT('15.23e-4')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<=");
-        REQUIRE(comparison_expr->right->ToString() == "0.001523");
-        REQUIRE(comparison_expr->ToString() == "(age <= 0.001523)");
-    }
-    // 边界检查
-    {
-        auto filter_condition_str = "age > 2147483647";  // INT_MAX
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> GT('>'), numeric -> INTEGER('2147483647')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == ">");
-        REQUIRE(comparison_expr->right->ToString() == "2147483647");
-        REQUIRE(comparison_expr->ToString() == "(age > 2147483647)");
-    }
-    {
-        auto filter_condition_str = "age < -2147483648";  // INT_MIN
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> LT('<'), numeric -> INTEGER('-2147483648')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "<");
-        REQUIRE(comparison_expr->right->ToString() == "-2147483648");
-        REQUIRE(comparison_expr->ToString() == "(age < -2147483648)");
-    }
-    {
-        auto filter_condition_str = "age = 0.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> EQ('='), numeric -> FLOAT('0.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "=");
-        REQUIRE(comparison_expr->right->ToString() == "0.0");
-        REQUIRE(comparison_expr->ToString() == "(age = 0.0)");
-    }
-    {
-        auto filter_condition_str = "age != 0.0";
-        auto expr_ptr = AstParse(filter_condition_str);
-        // AST 结构: comparison -> field_expr -> field_name -> ID('age'), comparison_op -> NQ('!='), numeric -> FLOAT('0.0')
-        auto comparison_expr = std::dynamic_pointer_cast<ComparisonExpression>(expr_ptr);
-        REQUIRE(comparison_expr != nullptr);
-        REQUIRE(comparison_expr->left->ToString() == "age");
-        REQUIRE(ToString(comparison_expr->op) == "!=");
-        REQUIRE(comparison_expr->right->ToString() == "0.0");
-        REQUIRE(comparison_expr->ToString() == "(age != 0.0)");
-    }
-    // 错误语法判断
-    {
-        auto filter_condition_str = "age >";  // 缺少右侧数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age 18";  // 缺少比较操作符
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age > 18.5.5";  // 错误的浮点数格式
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age > 18 19";  // 多余的数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age > 18 AND";  // 缺少右侧表达式
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age > 18 AND age";  // 缺少右侧比较操作符和数值
-        REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
-    }
-    {
-        auto filter_condition_str = "age > 18 AND age >";  // 缺少右侧数值
+
+    const char* const invalid_filter_condition_strs[] = {
+        "age >",
+        "age 18",
+        "age > 18.5.5",
+        "age > 18 19",
+        "age > 18 AND",
+        "age > 18 AND age",
+        "age > 18 AND age >",
+    };
+
+    for (const auto* filter_condition_str : invalid_filter_condition_strs) {
         REQUIRE_THROWS_AS(AstParse(filter_condition_str), VsagException);
     }
 
@@ -1084,6 +846,24 @@ TEST_CASE("Test LongMultiInExpression", "[ut][expression_visitor]") {
                 "\"TPID_67\", \"TPID_75\", \"TPID_76\", \"TPID_8\", \"TPID_89\", \"TPID_91\", "
                 "\"TPID_92\", \"TPID_95\", \"TPID_96\"]");
     }
+}
+
+TEST_CASE("Test region and function expressions", "[ut][expression_visitor]") {
+    auto region = AstParse(R"(region_filter(kind,geo,home,"10|11","20","30"))");
+    auto region_expression = std::dynamic_pointer_cast<RegionFilterExpression>(region);
+    REQUIRE(region_expression != nullptr);
+    REQUIRE(region_expression->region_type->ToString() == "kind");
+    REQUIRE(region_expression->region_list->ToString() == "geo");
+    REQUIRE(region_expression->residence_list->ToString() == "home");
+    REQUIRE(region_expression->ToString() ==
+            "region_filter (kind, geo, home, [10, 11], [20], [30])");
+
+    auto function = AstParse(R"(FUNCTION(time_filter,"1|abc","int32|string"))");
+    auto function_expression = std::dynamic_pointer_cast<FunctionExpression>(function);
+    REQUIRE(function_expression != nullptr);
+    REQUIRE(function_expression->ToString() == R"(FUNCTION (time_filter,"1|abc","int32|string"))");
+    REQUIRE_THROWS_AS(AstParse(R"(FUNCTION(time_filter,"1|abc","int32"))"), VsagException);
+    REQUIRE_THROWS_AS(AstParse(R"(region_filter(kind,geo,home,"10","20"))"), VsagException);
 }
 
 TEST_CASE("Test ComplexExpression", "[ut][expression_visitor]") {

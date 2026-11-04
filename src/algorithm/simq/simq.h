@@ -15,12 +15,19 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
 #include <shared_mutex>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "algorithm/hgraph/hgraph.h"
 #include "algorithm/hgraph/hgraph_parameter.h"
 #include "algorithm/inner_index_interface.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/token_code_interface.h"
 #include "index_common_param.h"
 #include "simq_parameter.h"
 #include "typing.h"
@@ -28,6 +35,17 @@
 
 namespace vsag {
 
+// Pre-allocated split task for parallel execution
+struct SplitTask {
+    InnerIdType cluster_idx;                   // Cluster to split
+    InnerIdType new_cluster_idx;               // Pre-assigned new cluster index
+    std::vector<InnerIdType> tokens;           // All tokens in the cluster (sorted by distance)
+    uint64_t half;                             // Median split position
+    std::unordered_set<InnerIdType> old_docs;  // Docs staying in old cluster
+    std::unordered_set<InnerIdType> new_docs;  // Docs moving to new cluster
+};
+
+/** Single Index for Multi-vector Query (SIMQ) implementation. */
 class SIMQ : public InnerIndexInterface {
 public:
     static ParamPtr
@@ -38,7 +56,7 @@ public:
     explicit SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit SIMQ(const ParamPtr& param, const IndexCommonParam& common_param)
-        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param){};
+        : SIMQ(std::dynamic_pointer_cast<SIMQParameter>(param), common_param) {};
 
     ~SIMQ() override;
 
@@ -61,6 +79,11 @@ public:
                 const FilterPtr& filter,
                 int64_t limited_size = -1) const override;
 
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
     void
     Serialize(StreamWriter& writer) const override;
 
@@ -82,18 +105,35 @@ public:
         return static_cast<int64_t>(total_count_);
     }
 
+    [[nodiscard]] std::string
+    GetStats() const override;
+
+    void
+    SetImmutable() override;
     void
     InitFeatures() override;
 
 private:
+    DatasetPtr
+    KnnSearchImpl(const DatasetPtr& query,
+                  int64_t k,
+                  const std::string& parameters,
+                  const FilterPtr& filter) const;
+
+    DatasetPtr
+    RangeSearchImpl(const DatasetPtr& query,
+                    float radius,
+                    const std::string& parameters,
+                    const FilterPtr& filter,
+                    int64_t limited_size) const;
     void
-    run_clustering(const float* flat_vecs,
+    run_clustering(const uint8_t* token_codes,
                    const Vector<InnerIdType>& vec_to_doc,
                    int64_t num_vecs,
                    int64_t dim);
 
     void
-    build_rep_hgraph(const float* flat_vecs, int64_t dim);
+    build_rep_hgraph(const uint8_t* token_codes, int64_t dim);
 
     std::vector<std::pair<InnerIdType, float>>
     coarse_search(const float* query_tokens,
@@ -109,11 +149,29 @@ private:
     deserialize_rep_hgraph(StreamReader& reader);
 
     void
-    split_cluster_incremental(InnerIdType cluster_idx);
+    flush_pending_splits();
+
+    void
+    execute_split_parallel(const SplitTask& task);
+
+    void
+    prepare_and_execute_splits(std::vector<SplitTask>& tasks);
 
 private:
+    Vector<uint8_t> representative_codes_;
+    std::shared_ptr<TokenCodeInterface> token_codes_;
+    std::string quantization_type_{"fp32"};
+    std::string representative_quantization_type_{"fp32"};
+
     IndexCommonParam common_param_;
     int64_t num_clusters_{0};
+
+    // Progress tracking for Add() operation
+    std::atomic<uint64_t> add_completed_docs_{0};
+    std::atomic<uint64_t> add_completed_tokens_{0};
+    uint64_t add_total_docs_{0};
+    uint64_t add_total_tokens_{0};
+    std::atomic<int> last_reported_pct_{-1};
 
     // Per-cluster doc-ID lists; mutable for incremental Add.
     Vector<Vector<InnerIdType>> cluster_lists_;
@@ -132,6 +190,20 @@ private:
     // Per-cluster token count for O(1) split threshold check during Add
     Vector<uint64_t> cluster_token_counts_;
 
+    // Clusters that exceeded max_cluster_size_ but haven't been split yet.
+    // Accumulated during Add() and processed in batch by flush_pending_splits().
+    std::unordered_set<InnerIdType> pending_splits_;
+
+    // For each cluster in pending_splits_, the time point at which it first
+    // exceeded the threshold (used together with split_delay_seconds_).
+    std::unordered_map<InnerIdType, std::chrono::steady_clock::time_point>
+        pending_split_first_overflow_;
+
+    double split_delay_seconds_{0.0};
+
+    bool support_duplicate_{false};
+    bool deduplicate_storage_{false};
+
     float init_cluster_ratio_{0.2f};
     int64_t max_cluster_size_{64};
     int64_t split_start_idx_{32};
@@ -142,6 +214,7 @@ private:
     uint64_t resize_increase_count_bit_{10};
 
     mutable std::shared_mutex global_mutex_;
+    mutable std::mutex rep_hgraph_mutex_;  // Protects rep_hgraph_ mutations in parallel splits
 };
 
 }  // namespace vsag

@@ -116,7 +116,12 @@ def sindi_test():
             "dtype": "sparse",
             "dim": 128,
             "metric_type": "ip",
-            "index_param": {"doc_prune_ratio": 0.0, "window_size": 100000},
+            "index_param": {
+                "doc_prune_ratio": 0.0,
+                "window_size": 100000,
+                "use_reorder": True,
+                "rerank_type": "fp32",
+            },
         }
     )
     index = pyvsag.Index("sindi", index_params)

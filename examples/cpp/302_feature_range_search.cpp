@@ -38,23 +38,26 @@ main(int argc, char** argv) {
     // Transfer the ownership of the data (ids, vectors) to the base.
     base->NumElements(num_vectors)->Dim(dim)->Ids(ids)->Float32Vectors(vectors);
 
-    /******************* Create Hnsw Index *****************/
-    auto hnsw_build_paramesters = R"(
+    /******************* Create HGraph Index *****************/
+    auto hgraph_build_parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
-            "ef_construction": 100
+            "ef_construction": 100,
+            "alpha": 1.2
         }
     }
     )";
-    auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_paramesters).value();
+    auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
 
-    /******************* Build Hnsw Index *****************/
+    /******************* Build HGraph Index *****************/
     if (auto build_result = index->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index Hnsw contains: " << index->GetNumElements() << std::endl;
+        std::cout << "After Build(), Index HGraph contains: " << index->GetNumElements()
+                  << std::endl;
     } else {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
@@ -69,23 +72,23 @@ main(int argc, char** argv) {
     auto query = vsag::Dataset::Make();
     query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector)->Owner(true);
 
-    auto hnsw_search_parameters = R"(
+    auto hgraph_search_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 100
         }
     }
     )";
 
     /******************* Get Threshold *****************/
-    auto result = index->KnnSearch(query, topk, hnsw_search_parameters);
+    auto result = index->KnnSearch(query, topk, hgraph_search_parameters);
     if (not result.has_value()) {
         std::cerr << "Search Error: " << result.error().message << std::endl;
     }
     float threshold = result.value()->GetDistances()[5];
 
     /******************* RangeSearch *****************/
-    auto range_result = index->RangeSearch(query, threshold, hnsw_search_parameters);
+    auto range_result = index->RangeSearch(query, threshold, hgraph_search_parameters);
     if (not range_result.has_value()) {
         std::cerr << "Search Error: " << range_result.error().message << std::endl;
     }

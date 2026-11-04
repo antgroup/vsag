@@ -19,6 +19,8 @@ set (ANALYZER_SRC
         hgraph_analyzer.h
         pyramid_analyzer.cpp
         pyramid_analyzer.h
+        simq_analyzer.cpp
+        simq_analyzer.h
         sindi_analyzer.cpp
         sindi_analyzer.h
         analyzer.cpp
@@ -26,4 +28,4 @@ set (ANALYZER_SRC
 )
 
 add_library (analyzer OBJECT ${ANALYZER_SRC})
-target_link_libraries (analyzer PRIVATE vsag_src_common)
+target_link_libraries (analyzer PRIVATE coverage_config vsag_src_common)

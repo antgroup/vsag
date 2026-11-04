@@ -14,6 +14,8 @@
 
 #include "tlv_section.h"
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cstdio>
@@ -37,8 +39,15 @@ namespace vsag {
 
 namespace {
 
+struct FileCloser {
+    void
+    operator()(std::FILE* file) const {
+        std::fclose(file);
+    }
+};
+
 void
-SeekTemporaryFile(std::FILE* file, uint64_t offset) {
+seek_temporary_file(std::FILE* file, uint64_t offset) {
 #if defined(_WIN32)
     if (offset > static_cast<uint64_t>(std::numeric_limits<__int64>::max())) {
         throw VsagException(ErrorType::READ_ERROR,
@@ -206,7 +215,7 @@ SkipBlockPayload(StreamReader& reader, const StreamBlockHeader& header) {
 }
 
 void
-ValidateSeekableBlockCursor(const StreamReader& reader, const StreamBlockHeader& header) {
+validate_seekable_block_cursor(const StreamReader& reader, const StreamBlockHeader& header) {
     if (reader.GetCursor() > header.value_len) {
         throw VsagException(ErrorType::INVALID_BINARY,
                             "seekable streaming block reader cursor exceeds payload boundary");
@@ -270,11 +279,11 @@ ReadSeekableBlockPayload(StreamReader& reader,
         };
         ReadFuncStreamReader block_reader(read_func, 0, header.value_len);
         deserialize(block_reader);
-        ValidateSeekableBlockCursor(block_reader, header);
+        validate_seekable_block_cursor(block_reader, header);
         return;
     }
 
-    std::unique_ptr<std::FILE, decltype(&std::fclose)> temp_file(std::tmpfile(), std::fclose);
+    std::unique_ptr<std::FILE, FileCloser> temp_file(std::tmpfile());
     if (temp_file == nullptr) {
         throw VsagException(ErrorType::READ_ERROR,
                             "failed to create temporary file for streaming block payload");
@@ -309,7 +318,7 @@ ReadSeekableBlockPayload(StreamReader& reader,
             throw VsagException(ErrorType::READ_ERROR,
                                 "seekable streaming block reader exceeds payload boundary");
         }
-        SeekTemporaryFile(temp_file.get(), offset);
+        seek_temporary_file(temp_file.get(), offset);
         if (size > 0 && std::fread(dest, 1, static_cast<size_t>(size), temp_file.get()) != size) {
             throw VsagException(ErrorType::READ_ERROR,
                                 "failed to read streaming block temporary file");
@@ -317,7 +326,51 @@ ReadSeekableBlockPayload(StreamReader& reader,
     };
     ReadFuncStreamReader block_reader(read_func, 0, header.value_len);
     deserialize(block_reader);
-    ValidateSeekableBlockCursor(block_reader, header);
+    validate_seekable_block_cursor(block_reader, header);
+}
+
+void
+ReadExternalBlockPayload(const ReaderPtr& reader,
+                         const StreamBlockHeader& header,
+                         const std::function<void(StreamReader&)>& deserialize) {
+    if (reader == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "external block reader is null");
+    }
+    if (reader->Size() != header.value_len) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("external reader size {} does not match streaming block payload size {}",
+                        reader->Size(),
+                        header.value_len));
+    }
+
+    constexpr uint64_t checksum_buffer_size = uint64_t{1024} * 1024;
+    std::vector<char> checksum_buffer(
+        static_cast<size_t>(std::min(header.value_len, checksum_buffer_size)));
+    uint32_t crc = StreamHeader::InitialChecksum();
+    uint64_t checksum_offset = 0;
+    while (checksum_offset < header.value_len) {
+        const auto read_size = std::min(checksum_buffer_size, header.value_len - checksum_offset);
+        reader->Read(checksum_offset, read_size, checksum_buffer.data());
+        crc = StreamHeader::UpdateChecksum(
+            crc, std::string_view(checksum_buffer.data(), static_cast<size_t>(read_size)));
+        checksum_offset += read_size;
+    }
+    if (StreamHeader::FinalizeChecksum(crc) != header.payload_checksum) {
+        throw VsagException(ErrorType::INVALID_BINARY, "streaming block payload checksum mismatch");
+    }
+
+    auto read_func = [reader, payload_size = header.value_len](
+                         uint64_t offset, uint64_t size, void* dest) {
+        if (offset > payload_size or size > payload_size - offset) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "external block reader exceeds payload boundary");
+        }
+        reader->Read(offset, size, dest);
+    };
+    ReadFuncStreamReader external_reader(read_func, 0, header.value_len);
+    deserialize(external_reader);
+    validate_seekable_block_cursor(external_reader, header);
 }
 
 }  // namespace vsag

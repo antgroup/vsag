@@ -15,9 +15,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 
+#include "algorithm/index_search_parameter.h"
 #include "algorithm/inner_index_parameter.h"
+#include "impl/searcher/sindi_search_options.h"
 #include "index_common_param.h"
 #include "utils/pointer_define.h"
 
@@ -30,6 +33,14 @@ enum class SparseValueQuantizationType {
     SQ8,
     FP16,
 };
+
+static constexpr const char* SPARSE_RERANK_TYPE = "rerank_type";
+static constexpr const char* SPARSE_RERANK_TYPE_FP32 = "fp32";
+static constexpr const char* SPARSE_RERANK_TYPE_FP16 = "fp16";
+static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
+
+static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
+static constexpr uint32_t DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = 1024;
 
 std::string
 SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
@@ -55,11 +66,19 @@ public:
 
     float doc_prune_ratio{0};
 
+    float term_prune_ratio{0};
+
+    uint64_t term_retain_threshold{0};
+
     bool use_reorder{false};
 
     SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
 
     bool remap_term_ids{false};
+
+    std::string rerank_type{SPARSE_RERANK_TYPE_FP32};
+
+    uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
 
     bool immutable{false};
 
@@ -69,7 +88,7 @@ public:
     uint32_t avg_doc_term_length{100};
 };
 
-class SINDISearchParameter : public Parameter {
+class SINDISearchParameter : public Parameter, public IndexSearchParameter {
 public:
     void
     FromJson(const JsonType& json) override;
@@ -82,10 +101,15 @@ public:
 public:
     // search
     uint32_t n_candidate{0};
+    uint32_t worker_n_candidate{0};
+    uint32_t window_parallelism{1};
+    SindiSearchOptions execution_options;
+    uint64_t filter_callback_limit{0};
 
     // data cell
     float query_prune_ratio{0};
     float term_prune_ratio{0};
+    uint64_t term_retain_threshold{0};
 };
 
 }  // namespace vsag

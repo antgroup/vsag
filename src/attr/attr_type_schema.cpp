@@ -22,7 +22,7 @@ AttrTypeSchema::AttrTypeSchema(Allocator* allocator) : allocator_(allocator), sc
 }
 
 AttrValueType
-AttrTypeSchema::GetTypeOfField(const std::string& field_name) {
+AttrTypeSchema::GetTypeOfField(const std::string& field_name) const {
     auto iter = this->schema_.find(field_name);
     if (iter == this->schema_.end()) {
         throw VsagException(ErrorType::INTERNAL_ERROR,
@@ -47,7 +47,7 @@ AttrTypeSchema::Serialize(StreamWriter& writer) {
 }
 
 void
-AttrTypeSchema::Deserialize(lvalue_or_rvalue<StreamReader> reader) {
+AttrTypeSchema::Deserialize(LvalueOrRvalue<StreamReader> reader) {
     uint64_t size;
     StreamReader::ReadObj(reader, size);
     this->schema_.reserve(size);

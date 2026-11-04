@@ -1,0 +1,53 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+namespace vsag {
+
+class UringReadOperation {
+public:
+    // UringBatchRead currently completes submission before returning this typed operation.
+    // Keeping the distinct type preserves the async-capability boundary for a future deferred
+    // completion implementation without changing callers.
+    explicit UringReadOperation(bool result) : result_(result) {
+    }
+
+    UringReadOperation(const UringReadOperation&) = delete;
+    UringReadOperation&
+    operator=(const UringReadOperation&) = delete;
+
+    UringReadOperation(UringReadOperation&&) noexcept = default;
+    UringReadOperation&
+    operator=(UringReadOperation&&) noexcept = default;
+
+    [[nodiscard]] bool
+    Poll() const {
+        return true;
+    }
+
+    [[nodiscard]] bool
+    Wait() const {
+        return result_;
+    }
+
+    void
+    Cancel() {
+    }
+
+private:
+    bool result_{false};
+};
+
+}  // namespace vsag

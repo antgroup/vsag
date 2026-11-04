@@ -501,7 +501,7 @@ class TestRemoveVectors:
 
 
 class TestCalDistanceById:
-    """Tests for cal_distance_by_id method"""
+    """Tests for calc_distances_by_id and its compatibility alias."""
 
     def test_cal_distance_by_id_single(self, dataset):
         """Test calculating distance for a single ID"""
@@ -522,10 +522,12 @@ class TestCalDistanceById:
         query = dataset.query_vectors[: dataset.dim]
         ids = np.array([0, 1, 2], dtype=np.int64)
 
-        distances = index.cal_distance_by_id(query, ids)
+        distances = index.calc_distances_by_id(query, ids)
+        legacy_distances = index.cal_distance_by_id(query, ids)
 
         assert len(distances) == 3
         assert all(d >= 0 for d in distances)
+        np.testing.assert_array_equal(distances, legacy_distances)
 
     def test_cal_distance_by_id_matches_search(self, dataset):
         """Test cal_distance_by_id returns similar distance as knn_search"""
@@ -546,7 +548,7 @@ class TestCalDistanceById:
         query = dataset.query_vectors[: dataset.dim]
         ids = np.array([0, 1, 2], dtype=np.int64)
 
-        calc_dists = index.cal_distance_by_id(query, ids)
+        calc_dists = index.calc_distances_by_id(query, ids)
 
         assert len(calc_dists) == 3
         valid_count = sum(1 for d in calc_dists if d >= 0)

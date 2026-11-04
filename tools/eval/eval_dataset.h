@@ -16,6 +16,7 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "H5Cpp.h"
@@ -42,12 +43,24 @@ public:
     static EvalDatasetPtr
     Load(const std::string& filename);
 
+    static EvalDatasetPtr
+    FromDatasets(const vsag::DatasetPtr& base,
+                 const vsag::DatasetPtr& queries,
+                 const vsag::DatasetPtr& ground_truth,
+                 const std::string& metric_type);
+
+    static EvalDatasetPtr
+    FromSearchDatasets(const vsag::DatasetPtr& queries, const vsag::DatasetPtr& ground_truth);
+
     static void
     Save(const EvalDatasetPtr& dataset, const std::string& filename);
 
 public:
     [[nodiscard]] const void*
     GetTrain() const {
+        if (base_dataset_ != nullptr) {
+            return base_dataset_->GetFloat32Vectors();
+        }
         if (vector_type_ == DENSE_VECTORS) {
             return train_.get();
         }
@@ -59,6 +72,9 @@ public:
 
     [[nodiscard]] const void*
     GetTest() const {
+        if (query_dataset_ != nullptr) {
+            return query_dataset_->GetFloat32Vectors();
+        }
         if (vector_type_ == DENSE_VECTORS) {
             return test_.get();
         }
@@ -111,7 +127,7 @@ public:
     [[nodiscard]] const void*
     GetOneTrain(int64_t id) const {
         if (vector_type_ == DENSE_VECTORS) {
-            return train_.get() + id * dim_ * train_data_size_;
+            return static_cast<const char*>(GetTrain()) + id * dim_ * train_data_size_;
         }
         if (vector_type_ == SPARSE_VECTORS) {
             return sparse_train_.data() + id;
@@ -122,7 +138,7 @@ public:
     [[nodiscard]] const void*
     GetOneTest(int64_t id) const {
         if (vector_type_ == DENSE_VECTORS) {
-            return test_.get() + id * dim_ * test_data_size_;
+            return static_cast<const char*>(GetTest()) + id * dim_ * test_data_size_;
         }
         if (vector_type_ == SPARSE_VECTORS) {
             return sparse_test_.data() + id;
@@ -132,17 +148,56 @@ public:
 
     [[nodiscard]] int64_t
     GetNearestNeighbor(int64_t i) const {
-        return neighbors_[i * neighbors_shape_.second];
+        const auto* neighbors = GetNeighbors(i);
+        return neighbors == nullptr ? -1 : neighbors[0];
     }
 
-    [[nodiscard]] int64_t*
+    [[nodiscard]] const int64_t*
     GetNeighbors(int64_t i) const {
-        return neighbors_.get() + i * neighbors_shape_.second;
+        if (ground_truth_dataset_ != nullptr) {
+            return ground_truth_dataset_->GetIds() + i * neighbors_shape_.second;
+        }
+        return neighbors_ == nullptr ? nullptr : neighbors_.get() + i * neighbors_shape_.second;
     }
 
-    [[nodiscard]] float*
+    [[nodiscard]] const float*
     GetDistances(int64_t i) const {
-        return distances_.get() + i * neighbors_shape_.second;
+        if (ground_truth_dataset_ != nullptr) {
+            const auto* distances = ground_truth_dataset_->GetDistances();
+            return distances == nullptr ? nullptr : distances + i * neighbors_shape_.second;
+        }
+        return distances_ == nullptr ? nullptr : distances_.get() + i * neighbors_shape_.second;
+    }
+
+    [[nodiscard]] const int64_t*
+    GetTrainIds() const {
+        if (base_dataset_ != nullptr && base_dataset_->GetIds() != nullptr) {
+            return base_dataset_->GetIds();
+        }
+        // A null pointer represents implicit row-number IDs.
+        return nullptr;
+    }
+
+    [[nodiscard]] const std::string*
+    GetTrainPaths() const {
+        return base_dataset_ == nullptr ? nullptr : base_dataset_->GetPaths();
+    }
+
+    [[nodiscard]] const std::string*
+    GetTestPaths() const {
+        return query_dataset_ == nullptr ? nullptr : query_dataset_->GetPaths();
+    }
+
+    [[nodiscard]] const void*
+    GetOneTrainById(int64_t id) const {
+        if (train_ids_are_identity_) {
+            if (id < 0 || id >= number_of_base_) {
+                return nullptr;
+            }
+            return GetOneTrain(id);
+        }
+        const auto found = train_id_to_row_.find(id);
+        return found == train_id_to_row_.end() ? nullptr : GetOneTrain(found->second);
     }
 
     [[nodiscard]] int64_t
@@ -153,6 +208,16 @@ public:
     [[nodiscard]] int64_t
     GetNumberOfQuery() const {
         return number_of_query_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetGroundTruthK() const {
+        return neighbors_shape_.second > 0 ? static_cast<uint64_t>(neighbors_shape_.second) : 0;
+    }
+
+    [[nodiscard]] const std::string&
+    GetMetric() const {
+        return metric_;
     }
 
     [[nodiscard]] int64_t
@@ -246,6 +311,9 @@ public:
     }
 
 private:
+    void
+    InitializeTrainIds(const int64_t* ids);
+
     using shape_t = std::pair<int64_t, int64_t>;
     static std::unordered_set<std::string>
     get_datasets(const H5::H5File& file) {
@@ -267,13 +335,14 @@ private:
     get_shape(const H5::H5File& file, const std::string& dataset_name) {
         H5::DataSet dataset = file.openDataSet(dataset_name);
         H5::DataSpace dataspace = dataset.getSpace();
-        hsize_t dims_out[2];
-        int ndims = dataspace.getSimpleExtentDims(dims_out, NULL);
+        const int ndims = dataspace.getSimpleExtentNdims();
+        if (ndims != 1 && ndims != 2) {
+            throw std::runtime_error("unsupported dataset rank: " + std::to_string(ndims));
+        }
+        hsize_t dims_out[2] = {0, 0};
+        dataspace.getSimpleExtentDims(dims_out, NULL);
         if (ndims == 1) {
             return std::make_pair<int64_t, int64_t>(dims_out[0], 0);
-        }
-        if (ndims != 2) {
-            throw std::runtime_error("unsupported dataset rank: " + std::to_string(ndims));
         }
         return std::make_pair<int64_t, int64_t>(dims_out[0], dims_out[1]);
     }
@@ -291,6 +360,7 @@ protected:
     std::shared_ptr<char[]> test_;
     std::shared_ptr<int64_t[]> neighbors_;
     std::shared_ptr<float[]> distances_;
+    bool train_ids_are_identity_{false};
     std::shared_ptr<int64_t[]> train_labels_{nullptr};
     std::shared_ptr<int64_t[]> test_labels_{nullptr};
     std::shared_ptr<float[]> valid_ratio_;
@@ -307,6 +377,11 @@ protected:
     std::string test_data_type_;
     std::string file_path_;
     std::string metric_;
+
+    vsag::DatasetPtr base_dataset_;
+    vsag::DatasetPtr query_dataset_;
+    vsag::DatasetPtr ground_truth_dataset_;
+    std::unordered_map<int64_t, int64_t> train_id_to_row_;
 
     std::vector<SparseVector> sparse_train_;
     std::vector<SparseVector> sparse_test_;

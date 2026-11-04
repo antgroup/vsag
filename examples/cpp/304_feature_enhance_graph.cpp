@@ -23,7 +23,6 @@ main(int argc, char** argv) {
     int dim = 128;
     int base_elements = 2000;
     int query_elements = 1000;
-    int ef_search = 10;
     int64_t k = 10;
 
     auto base = vsag::Dataset::Make();
@@ -45,42 +44,44 @@ main(int argc, char** argv) {
         ->Float32Vectors(base_data.get())
         ->Owner(false);
 
-    /******************* Build Hnsw Index *****************/
+    /******************* Build HGraph Index *****************/
     // When you want to use EnhanceGraph, the use_conjugate_graph must be set to true
-    auto hnsw_build_paramesters = R"(
+    auto hgraph_build_parameters = R"(
     {
         "dtype": "float32",
         "metric_type": "l2",
         "dim": 128,
-        "hnsw": {
+        "index_param": {
+            "base_quantization_type": "fp32",
             "max_degree": 16,
             "ef_construction": 100,
             "use_conjugate_graph": true
         }
     }
     )";
-    std::shared_ptr<vsag::Index> hnsw;
-    if (auto index = vsag::Factory::CreateIndex("hnsw", hnsw_build_paramesters);
+    std::shared_ptr<vsag::Index> hgraph;
+    if (auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters);
         index.has_value()) {
-        hnsw = index.value();
+        hgraph = index.value();
     } else {
-        std::cout << "Create HNSW Error" << std::endl;
+        std::cerr << "Failed to create HGraph: " << index.error().message << std::endl;
+        return -1;
     }
 
-    if (const auto build_result = hnsw->Build(base); build_result.has_value()) {
-        std::cout << "After Build(), Index constains: " << hnsw->GetNumElements() << std::endl;
+    if (const auto build_result = hgraph->Build(base); build_result.has_value()) {
+        std::cout << "After Build(), Index contains: " << hgraph->GetNumElements() << std::endl;
     } else {
         std::cerr << "Failed to build index: " << build_result.error().message << std::endl;
         exit(-1);
     }
 
-    /******************* Search Hnsw Index without Conjugate Graph *****************/
+    /******************* Search HGraph Index without Conjugate Graph *****************/
     // record the failed ids
     std::set<std::pair<int, int64_t>> failed_queries;
     // use_conjugate_graph_search indicates whether to use information from the conjugate_graph to enhance the search results.
     auto before_enhance_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 10,
             "use_conjugate_graph_search": false
         }
@@ -97,7 +98,7 @@ main(int argc, char** argv) {
                 ->NumElements(1)
                 ->Owner(false);
 
-            auto result = hnsw->KnnSearch(query, k, before_enhance_parameters);
+            auto result = hgraph->KnnSearch(query, k, before_enhance_parameters);
             int64_t global_optimum = i;  // global optimum is itself
             if (result.has_value()) {
                 int64_t local_optimum = result.value()->GetIds()[0];
@@ -116,7 +117,7 @@ main(int argc, char** argv) {
     /******************* Enhance Phase *****************/
     //
     {
-        int error_fixed = 0;
+        uint32_t error_fixed = 0;
         std::cout << "====Feedback Stage====" << std::endl;
         for (auto item : failed_queries) {
             auto query = vsag::Dataset::Make();
@@ -124,15 +125,20 @@ main(int argc, char** argv) {
                 ->Float32Vectors(base_data.get() + item.first * dim)
                 ->NumElements(1)
                 ->Owner(false);
-            error_fixed += *hnsw->Feedback(query, 1, before_enhance_parameters, item.second);
+            auto feedback = hgraph->Feedback(query, 1, before_enhance_parameters, item.second);
+            if (not feedback.has_value()) {
+                std::cerr << "Feedback Error: " << feedback.error().message << std::endl;
+                return -1;
+            }
+            error_fixed += feedback.value();
         }
         std::cout << "Fixed queries num: " << error_fixed << std::endl;
     }
 
-    /******************* Search Hnsw Index with Conjugate Graph *****************/
+    /******************* Search HGraph Index with Conjugate Graph *****************/
     auto after_enhance_parameters = R"(
     {
-        "hnsw": {
+        "hgraph": {
             "ef_search": 10,
             "use_conjugate_graph_search": true
         }
@@ -149,7 +155,7 @@ main(int argc, char** argv) {
                 ->NumElements(1)
                 ->Owner(false);
 
-            auto result = hnsw->KnnSearch(query, k, after_enhance_parameters);
+            auto result = hgraph->KnnSearch(query, k, after_enhance_parameters);
             int64_t global_optimum = i;  // global optimum is itself
             if (result.has_value()) {
                 int64_t local_optimum = result.value()->GetIds()[0];

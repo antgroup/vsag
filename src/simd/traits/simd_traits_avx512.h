@@ -24,10 +24,10 @@
 
 namespace vsag::simd {
 
-struct AVX512_Tag {};
+struct Avx512Tag {};
 
 template <>
-struct SimdTraits<AVX512_Tag> {
+struct SimdTraits<Avx512Tag> {
     using FloatVec = __m512;
     static constexpr int Width = 16;
 
@@ -83,9 +83,9 @@ struct SimdTraits<AVX512_Tag> {
 };
 
 // --- Int8 traits for AVX512 ---
-struct AVX512_Int8_Tag {};
+struct Avx512Int8Tag {};
 template <>
-struct Int8Traits<AVX512_Int8_Tag> {
+struct Int8Traits<Avx512Int8Tag> {
     using Int8HalfVec = __m256i;
     using Int16Vec = __m512i;
     using Int32Vec = __m512i;
@@ -122,9 +122,9 @@ struct Int8Traits<AVX512_Int8_Tag> {
 };
 
 // --- Bit operation traits for AVX512 ---
-struct AVX512_Bit_Tag {};
+struct Avx512BitTag {};
 template <>
-struct BitTraits<AVX512_Bit_Tag> {
+struct BitTraits<Avx512BitTag> {
     using IntVec = __m512i;
     static constexpr int ByteWidth = 64;
 
@@ -155,9 +155,9 @@ struct BitTraits<AVX512_Bit_Tag> {
 };
 
 // --- SQ8 traits for AVX512 ---
-struct AVX512_SQ8_Tag {};
+struct Avx512SQ8Tag {};
 template <>
-struct SQ8Traits<AVX512_SQ8_Tag> : SimdTraits<AVX512_Tag> {
+struct SQ8Traits<Avx512SQ8Tag> : SimdTraits<Avx512Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         __m128i v = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
@@ -166,9 +166,9 @@ struct SQ8Traits<AVX512_SQ8_Tag> : SimdTraits<AVX512_Tag> {
 };
 
 // --- SQ4Traits for AVX512 (Width=16, STEP=32 nibbles = 16 bytes per call) ---
-struct AVX512_SQ4_Tag {};
+struct Avx512SQ4Tag {};
 template <>
-struct SQ4Traits<AVX512_SQ4_Tag> : SimdTraits<AVX512_Tag> {
+struct SQ4Traits<Avx512SQ4Tag> : SimdTraits<Avx512Tag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         __m128i code = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
@@ -186,9 +186,9 @@ struct SQ4Traits<AVX512_SQ4_Tag> : SimdTraits<AVX512_Tag> {
 };
 
 // --- BF16Traits for AVX512 ---
-struct AVX512_BF16_Tag {};
+struct Avx512BF16Tag {};
 template <>
-struct BF16Traits<AVX512_BF16_Tag> : SimdTraits<AVX512_Tag> {
+struct BF16Traits<Avx512BF16Tag> : SimdTraits<Avx512Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m256i bf16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
@@ -198,9 +198,9 @@ struct BF16Traits<AVX512_BF16_Tag> : SimdTraits<AVX512_Tag> {
 };
 
 // --- FP16Traits for AVX512 ---
-struct AVX512_FP16_Tag {};
+struct Avx512FP16Tag {};
 template <>
-struct FP16Traits<AVX512_FP16_Tag> : SimdTraits<AVX512_Tag> {
+struct FP16Traits<Avx512FP16Tag> : SimdTraits<Avx512Tag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         __m256i fp16 = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(p));
@@ -209,9 +209,9 @@ struct FP16Traits<AVX512_FP16_Tag> : SimdTraits<AVX512_Tag> {
 };
 
 // --- UniformCodeTraits for AVX512 (64-byte integer vectors) ---
-struct AVX512_Uniform_Tag {};
+struct Avx512UniformTag {};
 template <>
-struct UniformCodeTraits<AVX512_Uniform_Tag> {
+struct UniformCodeTraits<Avx512UniformTag> {
     using IntVec = __m512i;
     static constexpr int ByteWidth = 64;
 
@@ -268,9 +268,9 @@ struct UniformCodeTraits<AVX512_Uniform_Tag> {
 };
 
 // --- RaBitQTraits for AVX512 (16-wide, uses mask registers) ---
-struct AVX512_RaBitQ_Tag {};
+struct Avx512RaBitQTag {};
 template <>
-struct RaBitQTraits<AVX512_RaBitQ_Tag> : SimdTraits<AVX512_Tag> {
+struct RaBitQTraits<Avx512RaBitQTag> : SimdTraits<Avx512Tag> {
     static inline __attribute__((always_inline)) FloatVec
     bits_to_signed(const uint8_t* bit_ptr, FloatVec pos, FloatVec neg) {
         auto mask = static_cast<__mmask16>(static_cast<uint16_t>(bit_ptr[0]) |

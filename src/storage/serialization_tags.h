@@ -38,6 +38,14 @@ enum class StreamSerializationTag : uint32_t {
     SINDI_RERANK_INDEX = 12,
     SINDI_TERM_ID_MAPPER = 13,
     PYRAMID_HIERARCHIES = 14,
+    CODE_SLOT_MAP = 15,
+    IVF_BUCKET_GRAPH = 16,
+    IVF_PRECISE_BUCKET = 17,
+    CONJUGATE_GRAPH = 18,
+    PYRAMID_PATHS = 19,
+    SINDI_HOST_METADATA = 20,
+    SINDI_V2_TERM_LAYOUT = 21,
+    SINDI_TIME_METADATA = 22,
 };
 
 inline const char*
@@ -73,6 +81,22 @@ StreamSerializationTagName(uint32_t tag) {
             return "sindi_term_id_mapper";
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
             return "pyramid_hierarchies";
+        case StreamSerializationTag::CODE_SLOT_MAP:
+            return "code_slot_map";
+        case StreamSerializationTag::IVF_BUCKET_GRAPH:
+            return "ivf_bucket_graph";
+        case StreamSerializationTag::IVF_PRECISE_BUCKET:
+            return "ivf_precise_bucket";
+        case StreamSerializationTag::CONJUGATE_GRAPH:
+            return "conjugate_graph";
+        case StreamSerializationTag::PYRAMID_PATHS:
+            return "pyramid_paths";
+        case StreamSerializationTag::SINDI_HOST_METADATA:
+            return "sindi_host_metadata";
+        case StreamSerializationTag::SINDI_V2_TERM_LAYOUT:
+            return "sindi_v2_term_layout";
+        case StreamSerializationTag::SINDI_TIME_METADATA:
+            return "sindi_time_metadata";
     }
     return "unknown";
 }
@@ -93,10 +117,21 @@ StreamSerializationTagCritical(uint32_t tag) {
         case StreamSerializationTag::SINDI_RERANK_INDEX:
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
+        case StreamSerializationTag::CODE_SLOT_MAP:
+        case StreamSerializationTag::IVF_PRECISE_BUCKET:
+        case StreamSerializationTag::SINDI_HOST_METADATA:
+        case StreamSerializationTag::SINDI_V2_TERM_LAYOUT:
+        case StreamSerializationTag::SINDI_TIME_METADATA:
             return true;
         case StreamSerializationTag::ATTRIBUTE_FILTER:
         case StreamSerializationTag::EXTRA_INFO:
         case StreamSerializationTag::RAW_VECTOR:
+        case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::CONJUGATE_GRAPH:
+            return false;
+        case StreamSerializationTag::PYRAMID_PATHS:
+            // Unknown readers may skip this optional capability; readers configured with
+            // store_paths validate the block presence separately.
             return false;
     }
     return false;
@@ -122,6 +157,15 @@ StreamSerializationBlockCurrentVersion(uint32_t tag) {
         case StreamSerializationTag::SINDI_RERANK_INDEX:
         case StreamSerializationTag::SINDI_TERM_ID_MAPPER:
         case StreamSerializationTag::PYRAMID_HIERARCHIES:
+        case StreamSerializationTag::CODE_SLOT_MAP:
+        case StreamSerializationTag::IVF_PRECISE_BUCKET:
+        case StreamSerializationTag::PYRAMID_PATHS:
+            return kStreamSerializationBlockVersionV1;
+        case StreamSerializationTag::IVF_BUCKET_GRAPH:
+        case StreamSerializationTag::CONJUGATE_GRAPH:
+        case StreamSerializationTag::SINDI_HOST_METADATA:
+        case StreamSerializationTag::SINDI_V2_TERM_LAYOUT:
+        case StreamSerializationTag::SINDI_TIME_METADATA:
             return kStreamSerializationBlockVersionV1;
     }
     return kStreamSerializationBlockVersionV1;

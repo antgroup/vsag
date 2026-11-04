@@ -23,19 +23,21 @@ RandomAllocator::Name() {
     return "random_allocator";
 }
 
-RandomAllocator::RandomAllocator() {
-    rd_ = std::make_shared<std::random_device>();
-    gen_ = std::make_shared<std::mt19937>((*rd_)());
-    std::uniform_int_distribution<int> seed_random;
-    int seed = seed_random(*gen_);
-    gen_->seed(seed);
-    error_ratio_ = 0.025f;
+RandomAllocator::RandomAllocator() : RandomAllocator(std::random_device{}()) {
+}
+
+RandomAllocator::RandomAllocator(uint32_t seed) : gen_(seed) {
+}
+
+bool
+RandomAllocator::ShouldFail() {
+    std::lock_guard lock(mutex_);
+    return dis_(gen_) < error_ratio_;
 }
 
 void*
 RandomAllocator::Allocate(uint64_t size) {
-    auto number = dis_(*gen_);
-    if (number < error_ratio_) {
+    if (ShouldFail()) {
         return nullptr;
     }
     return malloc(size);
@@ -48,8 +50,7 @@ RandomAllocator::Deallocate(void* p) {
 
 void*
 RandomAllocator::Reallocate(void* p, uint64_t size) {
-    auto number = dis_(*gen_);
-    if (number < error_ratio_) {
+    if (ShouldFail()) {
         return nullptr;
     }
     return realloc(p, size);

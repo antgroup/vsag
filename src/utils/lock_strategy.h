@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <array>
+#include <memory>
 #include <shared_mutex>
 
 #include "typing.h"
@@ -48,6 +50,8 @@ public:
 
 class PointsMutex : public MutexArray {
 public:
+    static constexpr uint64_t kMutexesPerBlock = 1024;
+
     PointsMutex(uint32_t element_num, Allocator* allocator);
 
     void
@@ -69,8 +73,26 @@ public:
     GetMemoryUsage() override;
 
 private:
-    Vector<std::shared_ptr<std::shared_mutex>> neighbors_mutex_;
+    struct MutexBlock {
+        std::array<std::shared_mutex, kMutexesPerBlock> mutexes;
+    };
+
+    struct MutexBlockDeleter {
+        Allocator* allocator{nullptr};
+
+        void
+        operator()(MutexBlock* block) const;
+    };
+
+    using MutexBlockPtr = std::unique_ptr<MutexBlock, MutexBlockDeleter>;
+
+    std::shared_mutex&
+    GetMutex(uint32_t i) {
+        return mutex_blocks_[i / kMutexesPerBlock]->mutexes[i % kMutexesPerBlock];
+    }
+
     Allocator* const allocator_{nullptr};
+    Vector<MutexBlockPtr> mutex_blocks_;
     uint32_t element_num_{0};
 };
 

@@ -29,7 +29,7 @@
 
 namespace vsag::simd {
 
-struct Generic_Tag {};
+struct GenericTag {};
 
 // Primary template; specializations live in sibling headers.
 template <typename ISA>
@@ -39,7 +39,7 @@ template <typename ISA>
 struct Int8Traits;
 
 template <>
-struct SimdTraits<Generic_Tag> {
+struct SimdTraits<GenericTag> {
     using FloatVec = float;
     static constexpr int Width = 1;
 
@@ -95,9 +95,9 @@ struct SimdTraits<Generic_Tag> {
 };
 
 // --- Int8 traits for generic (scalar) ---
-struct Generic_Int8_Tag {};
+struct GenericInt8Tag {};
 template <>
-struct Int8Traits<Generic_Int8_Tag> {
+struct Int8Traits<GenericInt8Tag> {
     using Int8HalfVec = int8_t;
     using Int16Vec = int16_t;
     using Int32Vec = int32_t;
@@ -138,9 +138,9 @@ template <typename Tag>
 struct BitTraits;
 
 // Generic scalar bit operations (ByteWidth = 1, process byte by byte)
-struct Generic_Bit_Tag {};
+struct GenericBitTag {};
 template <>
-struct BitTraits<Generic_Bit_Tag> {
+struct BitTraits<GenericBitTag> {
     using IntVec = uint8_t;
     static constexpr int ByteWidth = 1;
 
@@ -175,9 +175,9 @@ template <typename Tag>
 struct SQ8Traits;
 
 // Generic SQ8 traits (scalar, Width=1)
-struct Generic_SQ8_Tag {};
+struct GenericSQ8Tag {};
 template <>
-struct SQ8Traits<Generic_SQ8_Tag> : SimdTraits<Generic_Tag> {
+struct SQ8Traits<GenericSQ8Tag> : SimdTraits<GenericTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_u8_as_float(const uint8_t* p) {
         return static_cast<float>(p[0]);
@@ -189,9 +189,9 @@ template <typename Tag>
 struct SQ4Traits;
 
 // Generic SQ4 (scalar, Width=1, STEP=2 nibbles per iter)
-struct Generic_SQ4_Tag {};
+struct GenericSQ4Tag {};
 template <>
-struct SQ4Traits<Generic_SQ4_Tag> : SimdTraits<Generic_Tag> {
+struct SQ4Traits<GenericSQ4Tag> : SimdTraits<GenericTag> {
     static inline __attribute__((always_inline)) void
     load_nibbles_2x_as_float(const uint8_t* p, FloatVec& out0, FloatVec& out1) {
         constexpr float inv15 = 1.0f / 15.0f;
@@ -204,9 +204,9 @@ struct SQ4Traits<Generic_SQ4_Tag> : SimdTraits<Generic_Tag> {
 template <typename Tag>
 struct BF16Traits;
 
-struct Generic_BF16_Tag {};
+struct GenericBF16Tag {};
 template <>
-struct BF16Traits<Generic_BF16_Tag> : SimdTraits<Generic_Tag> {
+struct BF16Traits<GenericBF16Tag> : SimdTraits<GenericTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         uint32_t bits = static_cast<uint32_t>(*p) << 16;
@@ -229,9 +229,9 @@ struct UniformCodeTraits;
 template <typename Tag>
 struct FP16Traits;
 
-struct Generic_FP16_Tag {};
+struct GenericFP16Tag {};
 template <>
-struct FP16Traits<Generic_FP16_Tag> : SimdTraits<Generic_Tag> {
+struct FP16Traits<GenericFP16Tag> : SimdTraits<GenericTag> {
     static inline __attribute__((always_inline)) FloatVec
     load_half(const uint16_t* p) {
         uint32_t h = *p;

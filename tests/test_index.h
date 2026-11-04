@@ -53,6 +53,12 @@ get_one_query(const vsag::DatasetPtr& queries, int i) {
         query->Float32Vectors(queries->GetFloat32Vectors() + i * queries->GetDim());
     }
 
+    if (queries->GetInt8Vectors() != nullptr) {
+        query->Int8Vectors(queries->GetInt8Vectors() + i * queries->GetDim());
+    }
+    if (queries->GetFloat16Vectors() != nullptr) {
+        query->Float16Vectors(queries->GetFloat16Vectors() + i * queries->GetDim());
+    }
     if (queries->GetPaths() != nullptr) {
         query->Paths(queries->GetPaths() + i);
     }
@@ -204,6 +210,9 @@ public:
                      bool support_filter_obj = false);
 
     static void
+    TestStoredDistanceConsistency(const IndexPtr& index, const TestDatasetPtr& dataset);
+
+    static void
     TestCalcDistanceById(const IndexPtr& index,
                          const TestDatasetPtr& dataset,
                          float error = 1e-5,
@@ -216,6 +225,14 @@ public:
                               float error = 1e-5,
                               bool expected_success = true,
                               bool is_sparse = false);
+
+    static void
+    TestMultiQueryBatchCalcDistanceById(const IndexPtr& index,
+                                        const TestDatasetPtr& dataset,
+                                        float error = 1e-5,
+                                        bool expected_success = true,
+                                        bool is_sparse = false,
+                                        bool expect_all_missing_on_failure = false);
 
     static void
     TestGetMinAndMaxId(const IndexPtr& index,
@@ -257,11 +274,6 @@ public:
                             const std::string& search_param,
                             float expected_recall = 0.99,
                             bool expected_success = true);
-    static void
-    TestConcurrentDestruct(TestIndex::IndexPtr& index,
-                           const TestDatasetPtr& dataset,
-                           const std::string& search_param);
-
     static IndexPtr
     TestMergeIndex(const std::string& name,
                    const std::string& build_param,

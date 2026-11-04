@@ -15,9 +15,15 @@
 
 #include "odescent_graph_builder.h"
 
+#include <atomic>
 #include <chrono>
+#include <exception>
 #include <ios>
 
+#include "datacell/flatten_datacell_parameter.h"
+#include "inner_string_params.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "quantization/scalar_quantization/scalar_quantizer_parameter.h"
 #include "simd/simd.h"
 #include "utils/linear_congruential_generator.h"
 
@@ -40,6 +46,7 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         graph_.emplace_back(allocator_);
         return true;
     }
+    this->prepare_build_flatten();
     Vector<std::mutex>(data_num_, allocator_).swap(points_lock_);
     Vector<UnorderedSet<uint32_t>> old_neighbors(allocator_);
     Vector<UnorderedSet<uint32_t>> new_neighbors(allocator_);
@@ -62,6 +69,37 @@ ODescent::Build(const Vector<InnerIdType>& ids_sequence, const GraphInterfacePtr
         }
     }
     return true;
+}
+
+void
+ODescent::prepare_build_flatten() {
+    if (this->build_flatten_interface_ == nullptr) {
+        this->build_flatten_interface_ = CreateBuildFlatten(
+            this->flatten_interface_, this->build_vectors_, this->build_vector_count_);
+    }
+    this->distance_flatten_interface_ = this->build_flatten_interface_ == nullptr
+                                            ? this->flatten_interface_.get()
+                                            : this->build_flatten_interface_.get();
+}
+
+FlattenInterfacePtr
+ODescent::CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                             const void* build_vectors,
+                             int64_t build_vector_count) {
+    if (build_vectors == nullptr or build_vector_count <= 0 or
+        not flatten_interface->SupportSplitCodeStorage()) {
+        return nullptr;
+    }
+
+    auto sq8_param = std::make_shared<FlattenDataCellParameter>();
+    sq8_param->quantizer_parameter = std::make_shared<ScalarQuantizerParameter<8>>();
+    sq8_param->io_parameter = std::make_shared<MemoryIOParameter>();
+
+    auto common_param = flatten_interface->ExportCommonParam();
+    auto build_flatten = FlattenInterface::MakeInstance(sq8_param, common_param);
+    build_flatten->Train(build_vectors, build_vector_count);
+    build_flatten->BatchInsertVector(build_vectors, build_vector_count);
+    return build_flatten;
 }
 
 void
@@ -178,12 +216,51 @@ void
 ODescent::add_reverse_edges() {
     Vector<Linklist> reverse_graph(allocator_);
     reverse_graph.resize(data_num_, Linklist(allocator_));
-    for (int i = 0; i < data_num_; ++i) {
-        reverse_graph[i].neighbors.reserve(odescent_param_->max_degree);
-    }
-    for (int i = 0; i < data_num_; ++i) {
-        for (const auto& node : graph_[i].neighbors) {
-            reverse_graph[node.id].neighbors.emplace_back(i, node.distance);
+    if (thread_pool_ != nullptr and data_num_ >= 4096) {
+        Vector<std::atomic<uint32_t>> reverse_counts(static_cast<uint64_t>(data_num_), allocator_);
+        auto initialize_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                reverse_counts[i].store(0, std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(initialize_counts);
+
+        auto count_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& node : graph_[i].neighbors) {
+                    reverse_counts[node.id].fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        };
+        parallelize_task(count_edges);
+
+        auto allocate_rows = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                reverse_graph[i].neighbors.resize(
+                    reverse_counts[i].exchange(0, std::memory_order_relaxed));
+            }
+        };
+        parallelize_task(allocate_rows);
+
+        auto fill_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& node : graph_[i].neighbors) {
+                    const auto offset =
+                        reverse_counts[node.id].fetch_add(1, std::memory_order_relaxed);
+                    reverse_graph[node.id].neighbors[offset] =
+                        Node(static_cast<uint32_t>(i), node.distance);
+                }
+            }
+        };
+        parallelize_task(fill_edges);
+    } else {
+        for (int64_t i = 0; i < data_num_; ++i) {
+            reverse_graph[i].neighbors.reserve(odescent_param_->max_degree);
+        }
+        for (int64_t i = 0; i < data_num_; ++i) {
+            for (const auto& node : graph_[i].neighbors) {
+                reverse_graph[node.id].neighbors.emplace_back(i, node.distance);
+            }
         }
     }
 
@@ -243,12 +320,7 @@ ODescent::sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
 
 void
 ODescent::repair_no_in_edge() {
-    Vector<int> in_edges_count(data_num_, 0, allocator_);
-    for (int i = 0; i < data_num_; ++i) {
-        for (auto& neighbor : graph_[i].neighbors) {
-            in_edges_count[neighbor.id]++;
-        }
-    }
+    auto in_edges_count = count_in_edges();
 
     Vector<int> replace_pos(
         data_num_,
@@ -259,6 +331,7 @@ ODescent::repair_no_in_edge() {
         auto& link = graph_[i].neighbors;
         int need_replace_loc = 0;
         while (in_edges_count[i] < min_in_degree &&
+               need_replace_loc < static_cast<int>(link.size()) &&
                need_replace_loc < odescent_param_->max_degree) {
             uint32_t need_replace_id = link[need_replace_loc].id;
             bool has_connect = false;
@@ -268,7 +341,15 @@ ODescent::repair_no_in_edge() {
                     break;
                 }
             }
-            if (replace_pos[need_replace_id] > 0 && not has_connect) {
+            if (replace_pos[need_replace_id] >=
+                static_cast<int>(graph_[need_replace_id].neighbors.size())) {
+                replace_pos[need_replace_id] =
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) - 1;
+            }
+            if (replace_pos[need_replace_id] > 0 &&
+                replace_pos[need_replace_id] <
+                    static_cast<int>(graph_[need_replace_id].neighbors.size()) &&
+                not has_connect) {
                 auto& replace_node =
                     graph_[need_replace_id].neighbors[replace_pos[need_replace_id]];
                 auto replace_id = replace_node.id;
@@ -285,14 +366,46 @@ ODescent::repair_no_in_edge() {
     }
 }
 
-void
-ODescent::prune_graph() {
+Vector<int>
+ODescent::count_in_edges() {
     Vector<int> in_edges_count(data_num_, 0, allocator_);
-    for (int i = 0; i < data_num_; ++i) {
-        for (auto& neighbor : graph_[i].neighbors) {
-            in_edges_count[neighbor.id]++;
+    if (thread_pool_ != nullptr and data_num_ >= 4096) {
+        Vector<std::atomic<int>> parallel_counts(static_cast<uint64_t>(data_num_), allocator_);
+        auto initialize_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                parallel_counts[i].store(0, std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(initialize_counts);
+
+        auto count_edges = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                for (const auto& neighbor : graph_[i].neighbors) {
+                    parallel_counts[neighbor.id].fetch_add(1, std::memory_order_relaxed);
+                }
+            }
+        };
+        parallelize_task(count_edges);
+
+        auto copy_counts = [&](int64_t start, int64_t end) {
+            for (int64_t i = start; i < end; ++i) {
+                in_edges_count[i] = parallel_counts[i].load(std::memory_order_relaxed);
+            }
+        };
+        parallelize_task(copy_counts);
+    } else {
+        for (int64_t i = 0; i < data_num_; ++i) {
+            for (const auto& neighbor : graph_[i].neighbors) {
+                in_edges_count[neighbor.id]++;
+            }
         }
     }
+    return in_edges_count;
+}
+
+void
+ODescent::prune_graph() {
+    auto in_edges_count = count_in_edges();
 
     auto min_in_degree = std::min(odescent_param_->min_in_degree, data_num_ - 1);
     auto task = [&, this](int64_t start, int64_t end) {
@@ -339,12 +452,30 @@ void
 ODescent::parallelize_task(const std::function<void(int64_t, int64_t)>& task) {
     if (this->thread_pool_ != nullptr) {
         Vector<std::future<void>> futures(allocator_);
-        for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
-            int64_t end = std::min(i + odescent_param_->block_size, data_num_);
-            futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
+        futures.reserve((data_num_ + odescent_param_->block_size - 1) /
+                        odescent_param_->block_size);
+        std::exception_ptr first_exception = nullptr;
+        try {
+            for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {
+                int64_t end = std::min(i + odescent_param_->block_size, data_num_);
+                futures.push_back(thread_pool_->GeneralEnqueue(task, i, end));
+            }
+        } catch (...) {
+            first_exception = std::current_exception();
         }
+        // Workers reference builder state and temporary codes owned by the build session.
+        // Drain every task before either owner can unwind and release that storage.
         for (auto& future : futures) {
-            future.get();
+            try {
+                future.get();
+            } catch (...) {
+                if (first_exception == nullptr) {
+                    first_exception = std::current_exception();
+                }
+            }
+        }
+        if (first_exception != nullptr) {
+            std::rethrow_exception(first_exception);
         }
     } else {
         for (int64_t i = 0; i < data_num_; i += odescent_param_->block_size) {

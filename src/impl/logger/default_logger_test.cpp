@@ -15,40 +15,17 @@
 
 #include "default_logger.h"
 
-#include <cstdlib>
 #include <iostream>
 #include <sstream>
 #include <string>
 
+#include "test_env.h"
 #include "unittest.h"
 #include "vsag/logger.h"
 
 namespace {
 
-class ScopedEnv {
-public:
-    ScopedEnv(const char* name, const char* value) : name_(name) {
-        const auto* old_value = std::getenv(name_);
-        if (old_value != nullptr) {
-            had_old_value_ = true;
-            old_value_ = old_value;
-        }
-        setenv(name_, value, 1);
-    }
-
-    ~ScopedEnv() {
-        if (had_old_value_) {
-            setenv(name_, old_value_.c_str(), 1);
-        } else {
-            unsetenv(name_);
-        }
-    }
-
-private:
-    const char* name_;
-    bool had_old_value_{false};
-    std::string old_value_;
-};
+using vsag::test::ScopedEnv;
 
 class ScopedStreamCapture {
 public:

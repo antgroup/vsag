@@ -23,9 +23,9 @@ Timer::Timer(double* ref) : ref_(ref) {
     this->threshold_ = std::numeric_limits<double>::max();
 }
 
-Timer::Timer(double& ref) : Timer(&ref){};
+Timer::Timer(double& ref) : Timer(&ref) {};
 
-Timer::Timer() : Timer(nullptr){};
+Timer::Timer() : Timer(nullptr) {};
 
 double
 Timer::Record() {
@@ -46,6 +46,11 @@ Timer::CheckOvertime() {
 void
 Timer::SetThreshold(double threshold) {
     threshold_ = threshold;
+}
+
+void
+Timer::Reset() {
+    start = std::chrono::steady_clock::now();
 }
 
 Timer::~Timer() {

@@ -14,9 +14,11 @@ Node.js/TypeScript bindings provided by `vsag`.
 ## Hard Constraints (must hold every change)
 
 - **Tool versions are fixed:** `clang-format` and `clang-tidy` **must be
-  version 15 exactly**. Newer versions are not acceptable; CI enforces this.
-- **Formatting:** 4-space indentation, 100-character line limit, `.cpp`
-  (not `.cc`) suffix, every committed text file ends with a trailing newline.
+  version 20 exactly**. Newer versions are not acceptable; CI enforces this.
+- **Formatting:** C++ source and header files use 4-space indentation and a
+  100-character line limit; Markdown and other non-C++ text files have no line
+  width limit. Use the `.cpp` (not `.cc`) suffix, and ensure every committed
+  text file ends with a trailing newline.
 - **Layout:** public APIs live in `include/vsag/`; implementation lives in
   `src/`; keep code in the `vsag` namespace unless the file clearly requires
   otherwise.
@@ -27,6 +29,9 @@ Node.js/TypeScript bindings provided by `vsag`.
 - **Tests:** new features need tests; bug fixes need regression coverage; the
   C++ library (`src/` + `include/`) must maintain **≥ 90 % unit-test
   coverage**.
+- **Before submitting a PR:** run the applicable checks removed from PR CI locally
+  (or in an authorized remote development environment), record results, and follow
+  the [pre-submission validation requirements](docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr).
 - **Commits:** use Conventional Commits (`feat:`, `fix:`, `docs:`,
   `chore:`, …) and DCO sign-off. **AI agents must NOT add their own
   `Signed-off-by:`** — only humans can certify the DCO. **AI agents must
@@ -39,6 +44,10 @@ Node.js/TypeScript bindings provided by `vsag`.
   `Assisted-by: <AgentName>:<ModelVersion>` (e.g.
   `Assisted-by: OpenCode:claude-opus-4.7`). For `[skip ci]`, place it at
   the **start** of the subject line.
+- **PR pushes:** when preparing a pull request, prefer pushing the working
+  branch to the contributor's fork rather than directly to the main
+  `antgroup/vsag` repository. Push to the main repository only when explicitly
+  required or authorized.
 - **Pull requests need two labels:** one `kind/*` (`kind/bug`,
   `kind/feature`, `kind/improvement`, `kind/documentation`) and one
   `version/*` (e.g. `version/1.0`). Mergify enforces both.
@@ -71,8 +80,9 @@ Full build and environment details: [`docs/agents/build-and-test.md`](docs/agent
 | --- | --- |
 | Build / test / dev environment / tool versions | [`docs/agents/build-and-test.md`](docs/agents/build-and-test.md) |
 | C++ style, layout, common patterns, testing | [`docs/agents/coding-standards.md`](docs/agents/coding-standards.md) |
-| Branching, commits, DCO, `Assisted-by`, PR labels, doc sync | [`docs/agents/contribution-workflow.md`](docs/agents/contribution-workflow.md) |
+| Branching, fork-first PR pushes, commits, DCO, `Assisted-by`, PR labels, doc sync | [`docs/agents/contribution-workflow.md`](docs/agents/contribution-workflow.md) |
 | Drafting & submitting GitHub issues (`/create-issue`) | [`docs/agents/filing-issues.md`](docs/agents/filing-issues.md) |
+| Community/team CI routing, activation, rollback | [`docs/agents/ci-routing.md`](docs/agents/ci-routing.md) |
 | Repository / docs map | [`docs/agents/docs-map.md`](docs/agents/docs-map.md) |
 
 ## How To Research The Project

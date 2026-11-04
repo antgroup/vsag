@@ -26,7 +26,6 @@ def run():
     args = [
         "-v",
         os.path.join(script_dir, "test_ivf.py"),
-        os.path.join(script_dir, "test_hnsw.py"),
         os.path.join(script_dir, "test_hgraph.py"),
         os.path.join(script_dir, "test_bruteforce.py"),
     ]

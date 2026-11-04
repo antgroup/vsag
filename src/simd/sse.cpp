@@ -26,7 +26,10 @@
 
 #include <cmath>
 
+#include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "sq4_local_simd.h"
+#include "sq8_local_simd.h"
 
 namespace vsag::sse {
 
@@ -75,7 +78,7 @@ INT8InnerProductDistance(const void* pVect1v, const void* pVect2v, const void* q
 void
 PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* result) {
 #if defined(ENABLE_SSE)
-    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::SSE_Tag>>(
+    simd::PQDistanceFloat256Impl<simd::SimdTraits<simd::SseTag>>(
         single_dim_centers, single_dim_val, result, &generic::PQDistanceFloat256);
 #else
     return generic::PQDistanceFloat256(single_dim_centers, single_dim_val, result);
@@ -83,13 +86,15 @@ PQDistanceFloat256(const void* single_dim_centers, float single_dim_val, void* r
 }
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_char(const uint8_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_char(const uint8_t* data) {
     return _mm_set_epi8(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, data[3], data[2], data[1], data[0]);
 }
 #endif
 
 #if defined(ENABLE_SSE)
-__inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t* data) {
+__inline __m128i __attribute__((__always_inline__))
+load_4_short(const uint16_t* data) {
     return _mm_set_epi16(data[3], 0, data[2], 0, data[1], 0, data[0], 0);
 }
 #endif
@@ -97,7 +102,7 @@ __inline __m128i __attribute__((__always_inline__)) load_4_short(const uint16_t*
 float
 FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::ComputeIPImpl<simd::SimdTraits<simd::SSE_Tag>>(
+    return simd::ComputeIPImpl<simd::SimdTraits<simd::SseTag>>(
         query, codes, dim, &generic::FP32ComputeIP);
 #else
     return vsag::generic::FP32ComputeIP(query, codes, dim);
@@ -107,7 +112,7 @@ FP32ComputeIP(const float* RESTRICT query, const float* RESTRICT codes, uint64_t
 float
 FP32ComputeL2Sqr(const float* RESTRICT query, const float* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::SSE_Tag>>(
+    return simd::ComputeL2SqrImpl<simd::SimdTraits<simd::SseTag>>(
         query, codes, dim, &generic::FP32ComputeL2Sqr);
 #else
     return vsag::generic::FP32ComputeL2Sqr(query, codes, dim);
@@ -154,7 +159,7 @@ FP32ComputeIPBatch4(const float* RESTRICT query,
                     float& result3,
                     float& result4) {
 #if defined(ENABLE_SSE)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::IP>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SseTag>, simd::Batch4Kind::IP>(
         query,
         dim,
         codes1,
@@ -184,7 +189,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
                        float& result3,
                        float& result4) {
 #if defined(ENABLE_SSE)
-    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SSE_Tag>, simd::Batch4Kind::L2>(
+    simd::ComputeBatch4Impl<simd::SimdTraits<simd::SseTag>, simd::Batch4Kind::L2>(
         query,
         dim,
         codes1,
@@ -205,7 +210,7 @@ FP32ComputeL2SqrBatch4(const float* RESTRICT query,
 void
 FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Sub>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SseTag>, simd::BinaryOp::Sub>(
         x, y, z, dim, &generic::FP32Sub);
 #else
     return generic::FP32Sub(x, y, z, dim);
@@ -215,7 +220,7 @@ FP32Sub(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Add>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SseTag>, simd::BinaryOp::Add>(
         x, y, z, dim, &generic::FP32Add);
 #else
     return generic::FP32Add(x, y, z, dim);
@@ -225,7 +230,7 @@ FP32Add(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Mul>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SseTag>, simd::BinaryOp::Mul>(
         x, y, z, dim, &generic::FP32Mul);
 #else
     return generic::FP32Mul(x, y, z, dim);
@@ -235,7 +240,7 @@ FP32Mul(const float* x, const float* y, float* z, uint64_t dim) {
 void
 FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    simd::BinaryOpImpl<simd::SimdTraits<simd::SSE_Tag>, simd::BinaryOp::Div>(
+    simd::BinaryOpImpl<simd::SimdTraits<simd::SseTag>, simd::BinaryOp::Div>(
         x, y, z, dim, &generic::FP32Div);
 #else
     return generic::FP32Div(x, y, z, dim);
@@ -245,7 +250,7 @@ FP32Div(const float* x, const float* y, float* z, uint64_t dim) {
 float
 FP32ReduceAdd(const float* x, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::ReduceAddImpl<simd::SimdTraits<simd::SSE_Tag>>(x, dim, &generic::FP32ReduceAdd);
+    return simd::ReduceAddImpl<simd::SimdTraits<simd::SseTag>>(x, dim, &generic::FP32ReduceAdd);
 #else
     return generic::FP32ReduceAdd(x, dim);
 #endif
@@ -254,7 +259,7 @@ FP32ReduceAdd(const float* x, uint64_t dim) {
 float
 BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::SSE_BF16_Tag>>(
+    return simd::HalfComputeIPImpl<simd::BF16Traits<simd::SseBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeIP);
 #else
     return generic::BF16ComputeIP(query, codes, dim);
@@ -264,7 +269,7 @@ BF16ComputeIP(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint
 float
 BF16ComputeL2Sqr(const uint8_t* RESTRICT query, const uint8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::SSE_BF16_Tag>>(
+    return simd::HalfComputeL2SqrImpl<simd::BF16Traits<simd::SseBF16Tag>>(
         query, codes, dim, &generic::BF16ComputeL2Sqr);
 #else
     return generic::BF16ComputeL2Sqr(query, codes, dim);
@@ -293,7 +298,7 @@ FP16SparseAccumulate(float* RESTRICT dists,
 float
 INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::SSE_Int8_Tag>>(
+    return simd::Int8ComputeL2SqrImpl<simd::Int8Traits<simd::SseInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeL2Sqr);
 #else
     return generic::INT8ComputeL2Sqr(query, codes, dim);
@@ -303,7 +308,7 @@ INT8ComputeL2Sqr(const int8_t* RESTRICT query, const int8_t* RESTRICT codes, uin
 float
 INT8ComputeIP(const int8_t* __restrict query, const int8_t* __restrict codes, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::SSE_Int8_Tag>>(
+    return simd::Int8ComputeIPImpl<simd::Int8Traits<simd::SseInt8Tag>>(
         query, codes, dim, &generic::INT8ComputeIP);
 #else
     return generic::INT8ComputeIP(query, codes, dim);
@@ -317,7 +322,7 @@ SQ8ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+    return simd::SQ8ComputeIPImpl<simd::SQ8Traits<simd::SseSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeIP);
 #else
     return generic::SQ8ComputeIP(query, codes, lower_bound, diff, dim);
@@ -331,7 +336,7 @@ SQ8ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+    return simd::SQ8ComputeL2SqrImpl<simd::SQ8Traits<simd::SseSQ8Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ8ComputeL2Sqr);
 #else
     return generic::SQ8ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -345,7 +350,7 @@ SQ8ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesIPImpl<simd::SQ8Traits<simd::SseSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesIP);
 #else
     return generic::SQ8ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -359,7 +364,7 @@ SQ8ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::SSE_SQ8_Tag>>(
+    return simd::SQ8ComputeCodesL2SqrImpl<simd::SQ8Traits<simd::SseSQ8Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ8ComputeCodesL2Sqr);
 #else
     return generic::SQ8ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -404,7 +409,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+    return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::SseSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeIP);
 #else
     return generic::SQ4ComputeIP(query, codes, lower_bound, diff, dim);
@@ -418,7 +423,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+    return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::SseSQ4Tag>>(
         query, codes, lower_bound, diff, dim, &generic::SQ4ComputeL2Sqr);
 #else
     return generic::SQ4ComputeL2Sqr(query, codes, lower_bound, diff, dim);
@@ -432,7 +437,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::SseSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesIP);
 #else
     return generic::SQ4ComputeCodesIP(codes1, codes2, lower_bound, diff, dim);
@@ -446,7 +451,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::SSE_SQ4_Tag>>(
+    return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::SseSQ4Tag>>(
         codes1, codes2, lower_bound, diff, dim, &generic::SQ4ComputeCodesL2Sqr);
 #else
     return generic::SQ4ComputeCodesL2Sqr(codes1, codes2, lower_bound, diff, dim);
@@ -458,7 +463,7 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SSE_Uniform_Tag>>(
+    return simd::SQ4UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SseUniformTag>>(
         codes1, codes2, dim, &generic::SQ4UniformComputeCodesIP);
 #else
     return generic::SQ4UniformComputeCodesIP(codes1, codes2, dim);
@@ -470,7 +475,7 @@ SQ8UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
                          const uint8_t* RESTRICT codes2,
                          uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SSE_Uniform_Tag>>(
+    return simd::SQ8UniformComputeCodesIPImpl<simd::UniformCodeTraits<simd::SseUniformTag>>(
         codes1, codes2, dim, &generic::SQ8UniformComputeCodesIP);
 #else
     return generic::SQ8UniformComputeCodesIP(codes1, codes2, dim);
@@ -545,8 +550,7 @@ RaBitQFloatSupplementCodeIP(const float* vector,
 void
 DivScalar(const float* from, float* to, uint64_t dim, float scalar) {
 #if defined(ENABLE_SSE)
-    simd::DivScalarImpl<simd::SimdTraits<simd::SSE_Tag>>(
-        from, to, dim, scalar, &generic::DivScalar);
+    simd::DivScalarImpl<simd::SimdTraits<simd::SseTag>>(from, to, dim, scalar, &generic::DivScalar);
 #else
     generic::DivScalar(from, to, dim, scalar);
 #endif
@@ -576,6 +580,21 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
     for (uint64_t i = 0; i < 4; i++) {
         sum[i] = _mm_setzero_si128();
     }
+    // Each 16-bit lane accumulates one lookup byte (<= 255) per iteration and
+    // would overflow after ~258 of them, so periodically drain the int16
+    // partials into the int32 result and reset the accumulators.
+    constexpr uint64_t kFlushInterval = 32;
+    uint64_t since_flush = 0;
+    auto flush = [&]() {
+        alignas(16) uint16_t temp[8];
+        for (int64_t k = 0; k < 4; k++) {
+            _mm_store_si128((__m128i*)(temp), sum[k]);
+            for (int64_t j = 0; j < 8; j++) {
+                result[k * 8 + j] += temp[j];
+            }
+            sum[k] = _mm_setzero_si128();
+        }
+    };
     const auto sign4 = _mm_set1_epi8(0x0F);
     const auto sign8 = _mm_set1_epi16(0xFF);
     for (uint64_t i = 0; i < pq_dim; i++) {
@@ -591,23 +610,88 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         sum[1] = _mm_add_epi32(sum[1], _mm_srli_epi16(res1, 8));
         sum[2] = _mm_add_epi32(sum[2], _mm_and_si128(res2, sign8));
         sum[3] = _mm_add_epi32(sum[3], _mm_srli_epi16(res2, 8));
-    }
-    alignas(128) uint16_t temp[8];
-    for (int64_t i = 0; i < 4; i++) {
-        _mm_store_si128((__m128i*)(temp), sum[i]);
-        for (int64_t j = 0; j < 8; j++) {
-            result[i * 8 + j] += temp[j];
+        if (++since_flush == kFlushInterval) {
+            flush();
+            since_flush = 0;
         }
     }
+    flush();
 #else
     generic::PQFastScanLookUp32(lookup_table, codes, pq_dim, result);
 #endif
 }
 
 void
+PQFastScanLookUp32HighAcc(const uint8_t* RESTRICT low_lookup_table,
+                          const uint8_t* RESTRICT high_lookup_table,
+                          const uint8_t* RESTRICT codes,
+                          uint64_t pq_dim,
+                          int32_t* RESTRICT result) {
+    generic::PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+void
+PQFastScanLookUp32HighAccOverwrite(const uint8_t* RESTRICT low_lookup_table,
+                                   const uint8_t* RESTRICT high_lookup_table,
+                                   const uint8_t* RESTRICT codes,
+                                   uint64_t pq_dim,
+                                   int32_t* RESTRICT result) {
+    for (uint64_t lane = 0; lane < 32; ++lane) {
+        result[lane] = 0;
+    }
+    PQFastScanLookUp32HighAcc(low_lookup_table, high_lookup_table, codes, pq_dim, result);
+}
+
+uint32_t
+FP32LessThan32Mask(const float* values, float limit) {
+#if defined(ENABLE_SSE)
+    const auto limit_vec = _mm_set1_ps(limit);
+    uint32_t mask = 0;
+    for (uint64_t i = 0; i < 8; ++i) {
+        const auto value = _mm_loadu_ps(values + i * 4);
+        mask |= static_cast<uint32_t>(_mm_movemask_ps(_mm_cmplt_ps(value, limit_vec))) << (i * 4);
+    }
+    return mask;
+#else
+    return generic::FP32LessThan32Mask(values, limit);
+#endif
+}
+
+uint32_t
+RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
+                                    uint32_t filter_bits,
+                                    float delta,
+                                    float sum_vl,
+                                    float query_sum,
+                                    float query_norm,
+                                    float query_bucket_norm_sqr,
+                                    float inv_sqrt_d,
+                                    const float* f_add,
+                                    const float* f_scale,
+                                    const float* filter_norm_codes,
+                                    uint32_t valid_size,
+                                    float* dists,
+                                    float* filter_inner_products) {
+    return generic::RaBitQFastScan32ResidualPostprocess(accumulators,
+                                                        filter_bits,
+                                                        delta,
+                                                        sum_vl,
+                                                        query_sum,
+                                                        query_norm,
+                                                        query_bucket_norm_sqr,
+                                                        inv_sqrt_d,
+                                                        f_add,
+                                                        f_scale,
+                                                        filter_norm_codes,
+                                                        valid_size,
+                                                        dists,
+                                                        filter_inner_products);
+}
+
+void
 BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    simd::BitAndImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitAnd);
+    simd::BitAndImpl<simd::BitTraits<simd::SseBitTag>>(x, y, num_byte, result, &generic::BitAnd);
 #else
     return generic::BitAnd(x, y, num_byte, result);
 #endif
@@ -616,7 +700,7 @@ BitAnd(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    simd::BitOrImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitOr);
+    simd::BitOrImpl<simd::BitTraits<simd::SseBitTag>>(x, y, num_byte, result, &generic::BitOr);
 #else
     return generic::BitOr(x, y, num_byte, result);
 #endif
@@ -625,7 +709,7 @@ BitOr(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* resu
 void
 BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    simd::BitXorImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, y, num_byte, result, &generic::BitXor);
+    simd::BitXorImpl<simd::BitTraits<simd::SseBitTag>>(x, y, num_byte, result, &generic::BitXor);
 #else
     return generic::BitXor(x, y, num_byte, result);
 #endif
@@ -634,7 +718,7 @@ BitXor(const uint8_t* x, const uint8_t* y, const uint64_t num_byte, uint8_t* res
 void
 BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 #if defined(ENABLE_SSE)
-    simd::BitNotImpl<simd::BitTraits<simd::SSE_Bit_Tag>>(x, num_byte, result, &generic::BitNot);
+    simd::BitNotImpl<simd::BitTraits<simd::SseBitTag>>(x, num_byte, result, &generic::BitNot);
 #else
     return generic::BitNot(x, num_byte, result);
 #endif
@@ -643,7 +727,7 @@ BitNot(const uint8_t* x, const uint64_t num_byte, uint8_t* result) {
 void
 RotateOp(float* data, int idx, int dim_, int step) {
 #if defined(ENABLE_SSE)
-    simd::RotateOpImpl<simd::SimdTraits<simd::SSE_Tag>>(data, idx, dim_, step);
+    simd::RotateOpImpl<simd::SimdTraits<simd::SseTag>>(data, idx, dim_, step);
 #else
     generic::RotateOp(data, idx, dim_, step);
 #endif
@@ -670,7 +754,7 @@ FHTRotate(float* data, uint64_t dim_) {
 void
 VecRescale(float* data, uint64_t dim, float val) {
 #if defined(ENABLE_SSE)
-    simd::VecRescaleImpl<simd::SimdTraits<simd::SSE_Tag>>(data, dim, val, &generic::VecRescale);
+    simd::VecRescaleImpl<simd::SimdTraits<simd::SseTag>>(data, dim, val, &generic::VecRescale);
 #else
     generic::VecRescale(data, dim, val);
 #endif
@@ -679,7 +763,7 @@ VecRescale(float* data, uint64_t dim, float val) {
 void
 KacsWalk(float* data, uint64_t len) {
 #if defined(ENABLE_SSE)
-    simd::KacsWalkImpl<simd::SimdTraits<simd::SSE_Tag>>(data, len, &generic::KacsWalk);
+    simd::KacsWalkImpl<simd::SimdTraits<simd::SseTag>>(data, len, &generic::KacsWalk);
 #else
     generic::KacsWalk(data, len);
 #endif
@@ -688,7 +772,7 @@ KacsWalk(float* data, uint64_t len) {
 float
 NormalizeWithCentroid(const float* from, const float* centroid, float* to, uint64_t dim) {
 #if defined(ENABLE_SSE)
-    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::SSE_Tag>>(
+    return simd::NormalizeWithCentroidImpl<simd::SimdTraits<simd::SseTag>>(
         from, centroid, to, dim, &generic::NormalizeWithCentroid);
 #else
     return generic::NormalizeWithCentroid(from, centroid, to, dim);
@@ -699,11 +783,89 @@ void
 InverseNormalizeWithCentroid(
     const float* from, const float* centroid, float* to, uint64_t dim, float norm) {
 #if defined(ENABLE_SSE)
-    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::SSE_Tag>>(
+    simd::InverseNormalizeWithCentroidImpl<simd::SimdTraits<simd::SseTag>>(
         from, centroid, to, dim, norm, &generic::InverseNormalizeWithCentroid);
 #else
     generic::InverseNormalizeWithCentroid(from, centroid, to, dim, norm);
 #endif
 }
 
+}  // namespace vsag::sse
+
+namespace vsag::sse {
+float
+SQ8LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 8, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 8, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ8LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 8, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ8LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ8LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 8, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ8LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeL2Sqr(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 4, false>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeL2Sqr(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesL2Sqr(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 4, false>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesL2Sqr(a, b, dim);
+#endif
+}
+
+float
+SQ4LocalComputeIP(const float* query, const uint8_t* codes, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, true, 4, true>(
+        query, nullptr, codes, dim);
+#else
+    return generic::SQ4LocalComputeIP(query, codes, dim);
+#endif
+}
+float
+SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    return simd::LocalSQCompute<simd::SQ8Traits<simd::SseSQ8Tag>, false, 4, true>(
+        nullptr, a, b, dim);
+#else
+    return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
 }  // namespace vsag::sse

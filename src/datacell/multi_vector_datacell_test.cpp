@@ -22,8 +22,10 @@
 
 #include "datacell/flatten_interface.h"
 #include "datacell/multi_vector_datacell_parameter.h"
+#include "datacell/token_code_interface.h"
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
+#include "quantization/quantizer_headers.h"
 #include "storage/serialization.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
@@ -137,6 +139,12 @@ TEST_CASE("MultiVectorDataCell batch insert reserves ids when idx is null",
         multi_vectors.data(), static_cast<InnerIdType>(multi_vectors.size()), nullptr);
 
     REQUIRE(data_cell->TotalCount() == token_counts.size());
+    REQUIRE_NOTHROW(data_cell->Resize(1));
+    bool need_release = false;
+    const auto* codes =
+        data_cell->GetCodesById(static_cast<InnerIdType>(multi_vectors.size() - 1), need_release);
+    REQUIRE(codes != nullptr);
+    data_cell->Release(codes);
 }
 
 TEST_CASE("MultiVectorDataCell GetCodesById reads back inserted data",
@@ -259,20 +267,25 @@ TEST_CASE("MultiVectorDataCell Serialize/Deserialize round-trip", "[ut][MultiVec
     original->Serialize(writer);
 
     FlattenInterfacePtr restored = MakeMultiVectorDataCell(io_type, dim, allocator);
+    restored->backend_ = DistanceEvaluationBackend::UNKNOWN;
     IOStreamReader reader(ss);
     restored->Deserialize(reader);
 
     REQUIRE(restored->TotalCount() == original->TotalCount());
+    REQUIRE(restored->backend_ == DistanceEvaluationBackend::FP32);
 
     std::vector<float> dists_after(3, 0.0F);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
     {
         ComputerInterfacePtr computer = restored->FactoryComputer(&query_mv);
-        restored->Query(dists_after.data(),
-                        computer,
-                        idx.data(),
-                        static_cast<InnerIdType>(idx.size()),
-                        nullptr);
+        restored->Query(
+            dists_after.data(), computer, idx.data(), static_cast<InnerIdType>(idx.size()), &ctx);
     }
+
+    JsonType statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["fp32"].GetUint64() == 3);
+    REQUIRE(statistics["complete"].GetBool());
 
     for (uint64_t i = 0; i < 3; ++i) {
         REQUIRE(dists_before[i] == dists_after[i]);
@@ -298,6 +311,11 @@ TEST_CASE("MultiVectorDataCell rejects invalid InsertVector inputs", "[ut][Multi
     SECTION("nullptr tokens") {
         MultiVector mv{2, nullptr};
         REQUIRE_THROWS(data_cell->InsertVector(&mv, 0));
+    }
+
+    SECTION("out-of-range id") {
+        bool need_release = false;
+        REQUIRE_THROWS(data_cell->GetCodesById(0, need_release));
     }
 }
 
@@ -332,6 +350,77 @@ TEST_CASE("MultiVectorDataCell rejects invalid FactoryComputer inputs",
         MultiVector mv{2, nullptr};
         REQUIRE_THROWS(data_cell->FactoryComputer(&mv));
     }
+
+    SECTION("nullptr query ids") {
+        std::vector<float> query(dim, 1.0F);
+        MultiVector mv{1, query.data()};
+        auto computer = data_cell->FactoryComputer(&mv);
+        float distance = 0.0F;
+        REQUIRE_THROWS(data_cell->Query(&distance, computer, nullptr, 1));
+    }
+
+    SECTION("out-of-range query id") {
+        std::vector<float> query(dim, 1.0F);
+        MultiVector mv{1, query.data()};
+        auto computer = data_cell->FactoryComputer(&mv);
+        const InnerIdType id = 0;
+        float distance = 0.0F;
+        REQUIRE_THROWS(data_cell->Query(&distance, computer, &id, 1));
+    }
 }
 
+TEST_CASE("MultiVector native token capability matches quantizer",
+          "[ut][MultiVectorDataCell][TokenCode]") {
+    const auto name = GENERATE("fp32", "fp16", "bf16", "sq8_uniform");
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_L2SQR);
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = 4;
+    common.metric_ = metric;
+    auto params = std::make_shared<MultiVectorDataCellParameter>();
+    params->FromJson(JsonType::Parse(fmt::format(
+        R"({{"io_params":{{"type":"memory_io"}},"quantization_params":{{"type":"{}"}}}})", name)));
+    auto cell = FlattenInterface::MakeInstance(params, common);
+    auto tokens = std::dynamic_pointer_cast<TokenCodeInterface>(cell);
+    REQUIRE(tokens != nullptr);
+    const float sample[] = {-0.5F, 0.25F, 0.75F, -0.125F, 0.125F, -0.75F, 0.5F, 0.25F};
+    cell->Train(sample, 2);
+    std::vector<uint8_t> first(cell->GetQuantizerCodeSize()), second(first.size());
+    tokens->EncodeToken(sample, first.data());
+    tokens->EncodeToken(sample + 4, second.data());
+    const auto actual = tokens->ComputeTokenCodes(first.data(), second.data());
+    auto check = [&](auto quantizer) {
+        quantizer.Train(sample, 2);
+        std::vector<uint8_t> a(quantizer.GetCodeSize()), b(a.size());
+        REQUIRE(quantizer.EncodeOne(sample, a.data()));
+        REQUIRE(quantizer.EncodeOne(sample + 4, b.data()));
+        REQUIRE(a == first);
+        REQUIRE(b == second);
+        REQUIRE(actual == quantizer.Compute(a.data(), b.data()));
+    };
+    if (metric == MetricType::METRIC_TYPE_IP) {
+        if (std::string(name) == "fp32")
+            check(FP32Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "fp16")
+            check(FP16Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "bf16")
+            check(BF16Quantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter, common));
+        if (std::string(name) == "sq8_uniform")
+            check(SQ8UniformQuantizer<MetricType::METRIC_TYPE_IP>(params->quantizer_parameter,
+                                                                  common));
+    } else {
+        if (std::string(name) == "fp32")
+            check(
+                FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "fp16")
+            check(
+                FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "bf16")
+            check(
+                BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter, common));
+        if (std::string(name) == "sq8_uniform")
+            check(SQ8UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>(params->quantizer_parameter,
+                                                                     common));
+    }
+}
 }  // namespace vsag

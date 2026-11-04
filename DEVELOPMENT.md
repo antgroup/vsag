@@ -30,8 +30,9 @@ docker pull vsaglib/vsag:ubuntu
   - or Clang version 13.0.0 or later
 - Build Tools: 
   - CMake version 3.18.0 or later
-  - clang-tidy version 15 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
-  - clang-format version 15 EXACTLY (not higher, not lower - required for consistent formatting)
+  - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
+  - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
+  - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
 - Additional Dependencies:
   - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
   - macOS: Xcode Command Line Tools, Homebrew
@@ -47,7 +48,7 @@ $ ./scripts/deps/install_deps_macos.sh
 ```
 
 ## VSAG Build Tool
-VSAG project use the Unix Makefiles to compile, package and install the library. Here is the commands below:
+VSAG uses CMake to compile, package, and install the library through the commands below. The Makefile prefers Ninja when a usable installation is available and otherwise falls back to Unix Makefiles. Set `CMAKE_GENERATOR` explicitly to use another supported generator; explicit values always take precedence.
 ```bash
 Usage: make <target>
 
@@ -58,6 +59,7 @@ help:                    ## Show the help.
 debug:                   ## Build vsag with debug options.
 dev:                     ## Build full developer configuration.
 test:                    ## Build and run unit tests.
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
 asan:                    ## Build with AddressSanitizer option.
 test_asan: asan          ## Run unit tests with AddressSanitizer option.
 tsan:                    ## Build with ThreadSanitizer option.
@@ -74,7 +76,8 @@ test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option
 test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
 ##
 ## ================ distribution ================
-release:                 ## Build vsag with release options.
+release:                 ## Build reproducible release/package output (ccache off by default).
+release-perf:            ## Build optimized output for iteration/benchmarks (ccache on by default).
 run-dist-tests:          ## Run distribution tests.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
 dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
@@ -82,15 +85,19 @@ dist-libcxx:             ## Build vsag using libc++.
 pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
 pyvsag-all:              ## Build wheels for all supported versions.
 clean-release:           ## Clear build-release/ directory.
+clean-release-perf:      ## Clear build-release-perf/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
 
 Build target behavior:
 
-- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, Python bindings, or `mockimpl` unless they are explicitly turned on.
-- `make dev` builds the full developer configuration with tests, examples, tools, Python bindings, and `mockimpl` enabled.
-- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests and `mockimpl`.
-- `make release` follows the same minimal defaults as `make debug`. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
+- `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
+- `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
+- Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
 - Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
 
 ## CMake Build Options
@@ -157,19 +164,18 @@ the new option in new scripts.
 
 ### Third-Party Source Overrides
 
-VSAG downloads its third-party libraries at configure/build time. Each
-downloaded dependency honors a `VSAG_THIRDPARTY_<LIB>` **environment variable**
-that, when set, is tried before the upstream URL and the project's Aliyun OSS
-mirror. The value may be a local filesystem path or any URL (internal HTTP
-server, OSS bucket, etc.), which makes it the primary mechanism for offline,
+VSAG downloads its third-party libraries at configure/build time. Each downloaded
+dependency honors a pin-qualified `VSAG_THIRDPARTY_<LIB>_<PIN_SUFFIX>` **environment
+variable** that, when set, is tried before the upstream URL and project mirror. The
+unversioned variable remains as a deprecated compatibility fallback. The value may
+be a local filesystem path or URL, making this the primary mechanism for offline,
 air-gapped, or internal-mirror builds.
 
-- **`VSAG_THIRDPARTY_OPENBLAS`** (representative example)
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_34`** (representative `main` example)
   - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
   - Useful for offline builds, local mirrors, or pre-downloaded archives
 
-The full list of variables (`VSAG_THIRDPARTY_ANTLR4`, `VSAG_THIRDPARTY_BOOST`,
-`VSAG_THIRDPARTY_FMT`, …), usage examples, and the exact archives to mirror are
+The full list of pinned variables, suffix rules, usage examples, and exact archives to mirror are
 documented in the [Offline / Air-gapped Builds](docs/docs/en/src/development/offline_build.md)
 guide. The note next to each `URL_HASH` in `extern/<lib>/<lib>.cmake` is the
 source of truth for the exact upstream URL and expected checksum.
@@ -188,8 +194,17 @@ source of truth for the exact upstream URL and expected checksum.
 - **`ENABLE_PYBINDS`** (default: `OFF`)
   - Build the `_pyvsag` Python extension module
 
-- **`ENABLE_MOCKIMPL`** (default: `OFF`)
-  - Build the `mockimpl` targets used by interface and compatibility-style testing
+- **`ENABLE_CUDA`** (default: `OFF`)
+  - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
+    `PATH` or `CMAKE_CUDA_COMPILER` set. With the option off a stub exporting the
+    same symbols is compiled instead, so callers link unconditionally and decide at
+    runtime.
+  - The CUDA host pass uses `CMAKE_CXX_COMPILER`. If nvcc rejects that compiler,
+    point `CMAKE_CUDA_HOST_COMPILER` at one it accepts.
+  - `VSAG_CUDA_ARCHITECTURES` is a `;`-separated CMake list, default
+    `75-real;80-real;86-real;89-real;90` (Turing through Hopper). Older devices
+    such as Volta need CUDA 12 or earlier and an explicit list, e.g.
+    `-DVSAG_CUDA_ARCHITECTURES="70-real;75-real;80"`.
 
 For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
 
@@ -200,10 +215,22 @@ For a complete list of build options, see the `option()` directives in `cmake/VS
 - `examples/`: cpp and python example codes
 - `extern/`: third-party libraries
 - `include/`: export header files
-- `mockimpl/`: the mock implementation that can be used in interface test
 - `python/`: the pyvsag package and setup tools
 - `python_bindings/`: the python bindings
 - `scripts/`: useful scripts
 - `src/`: the source codes and unit tests
 - `tests/`: the functional tests
 - `tools/`: the tools
+
+## C++ standard and compiler validation
+
+Full VSAG CPU implementation targets require C++20; installed public headers and the `vsag::vsag` target support C++17 clients. CUDA translation units, Node.js bindings, and standalone Lite stay on C++17. Linux development uses GCC 13 as the primary compiler and Clang 20 as the second compiler. Use separate build directories:
+
+```bash
+make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"
+make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"
+```
+
+The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
+
+Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.

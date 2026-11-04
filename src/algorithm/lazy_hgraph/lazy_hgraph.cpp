@@ -21,14 +21,26 @@
 #include <mutex>
 #include <vector>
 
+#include "analyzer/analyzer.h"
 #include "dataset_impl.h"
+#include "impl/graph_build_helper.h"
 #include "index_common_param.h"
 #include "index_feature_list.h"
+#include "inner_string_params.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/constants.h"
 
 namespace vsag {
+
+namespace {
+
+const char*
+phase_to_string(LazyHGraph::Phase phase) {
+    return phase == LazyHGraph::Phase::FLAT ? "flat" : "graph";
+}
+
+}  // namespace
 
 namespace {
 
@@ -81,6 +93,8 @@ checked_lazy_hgraph_param(const ParamPtr& param) {
 const LazyHGraphParameterPtr&
 checked_lazy_hgraph_param(const LazyHGraphParameterPtr& param) {
     CHECK_ARGUMENT(param != nullptr, "lazy_hgraph parameter must be LazyHGraphParameter");
+    // Constructor callers pass an owned parameter lvalue and consume this reference immediately.
+    // NOLINTNEXTLINE(bugprone-return-const-ref-from-parameter)
     return param;
 }
 
@@ -113,6 +127,37 @@ LazyHGraph::CheckAndMappingExternalParam(const JsonType& external_param,
     JsonType hgraph_json;
     if (external_param.Contains(LAZY_HGRAPH_HGRAPH)) {
         hgraph_json = external_param[LAZY_HGRAPH_HGRAPH];
+    }
+
+    // Precise FP32 user-defined IO pairs cannot be reused across temporary HGraph instances
+    // that LazyHGraph creates during EstimateMemory (lazy_hgraph.cpp line ~337). Those
+    // temporaries share the same Reader/Writer pair, resize the backing store to a small
+    // initial capacity, and permanently truncate the live index's remaining codes. Reject
+    // this backend until the pair can supply independent storage for transient instances.
+    //
+    // Check every possible placement of the io type key so an outer default like
+    // "block_memory_io" does not mask a nested "user_defined_io" in index_param.hgraph.
+    {
+        std::string pt;
+        if (external_param.Contains("precise_io_type")) {
+            pt = external_param["precise_io_type"].GetString();
+        }
+        if (!pt.empty() && pt == IO_TYPE_VALUE_USER_DEFINED_IO) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "lazy_hgraph does not support user_defined_io: its temporary instances "
+                "would share the Reader/Writer pair and truncate the backing store");
+        }
+        pt.clear();
+        if (hgraph_json.Contains("precise_io_type")) {
+            pt = hgraph_json["precise_io_type"].GetString();
+        }
+        if (!pt.empty() && pt == IO_TYPE_VALUE_USER_DEFINED_IO) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "lazy_hgraph does not support user_defined_io: its temporary instances "
+                "would share the Reader/Writer pair and truncate the backing store");
+        }
     }
 
     JsonType flat_json;
@@ -220,10 +265,10 @@ LazyHGraph::TransitionToGraph() {
         throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "failed to get lazy_hgraph vectors");
     }
 
-    auto new_graph = std::make_shared<HGraph>(graph_param_, this->common_param_);
-    new_graph->InitFeatures();
-    auto failed_ids = new_graph->Build(build_data);
-    CHECK_ARGUMENT(failed_ids.empty(), "lazy_hgraph transition failed to build all ids");
+    auto new_graph = GraphBuildHelper::BuildIndexCandidate(
+        [&] { return std::make_shared<HGraph>(graph_param_, this->common_param_); },
+        build_data,
+        "lazy_hgraph transition failed to build all ids");
     graph_index_ = new_graph;
     flat_index_.reset();
     phase_.store(Phase::GRAPH, std::memory_order_release);
@@ -254,6 +299,26 @@ LazyHGraph::CalcDistanceById(const float* query,
                              bool calculate_precise_distance) const {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->CalcDistanceById(query, id, calculate_precise_distance);
+}
+
+DatasetPtr
+LazyHGraph::CalcDistancesById(const float* query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
+}
+
+DatasetPtr
+LazyHGraph::CalcDistancesById(const DatasetPtr& query,
+                              const int64_t* ids,
+                              int64_t count,
+                              bool calculate_precise_distance,
+                              int64_t topk) const {
+    std::shared_lock lock(this->phase_mutex_);
+    return ActiveIndex()->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
 }
 
 bool
@@ -329,6 +394,29 @@ uint64_t
 LazyHGraph::GetMemoryUsage() const {
     std::shared_lock lock(this->phase_mutex_);
     return ActiveIndex()->GetMemoryUsage();
+}
+
+std::string
+LazyHGraph::GetStats() const {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->GetStats());
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(stats, GetName(), "stats", status);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
+}
+
+std::string
+LazyHGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    std::shared_lock lock(phase_mutex_);
+    auto stats = JsonType::Parse(ActiveIndex()->AnalyzeIndexBySearch(request));
+    const auto status = stats["_analysis"]["status"].GetString();
+    AddAnalysisMetadata(
+        stats, GetName(), "search", status, request.query_->GetNumElements(), request.topk_);
+    stats["_analysis"]["phase"].SetString(phase_to_string(GetPhase()));
+    stats["_analysis"]["transition_threshold"].SetUint64(transition_threshold_);
+    return stats.Dump(4);
 }
 
 DatasetPtr
@@ -407,6 +495,7 @@ LazyHGraph::InitFeatures() {
         IndexFeature::SUPPORT_RANGE_SEARCH,
         IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER,
         IndexFeature::SUPPORT_CAL_DISTANCE_BY_ID,
+        IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
         IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS,
         IndexFeature::SUPPORT_SEARCH_CONCURRENT,
         IndexFeature::SUPPORT_ADD_CONCURRENT,

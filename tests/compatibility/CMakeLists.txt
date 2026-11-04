@@ -1,0 +1,26 @@
+cmake_minimum_required (VERSION 3.18)
+project (vsag_cxx17_client LANGUAGES CXX)
+
+set (CMAKE_CXX_STANDARD 17)
+set (CMAKE_CXX_STANDARD_REQUIRED ON)
+set (CMAKE_CXX_EXTENSIONS OFF)
+set (CMAKE_EXPORT_COMPILE_COMMANDS ON)
+find_package (vsag CONFIG REQUIRED)
+# Audit the exact imported library used by this client, including custom libdirs.
+file (GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/installed-library.txt"
+      CONTENT "$<TARGET_FILE:vsag::vsag>\n")
+get_target_property (public_features vsag::vsag INTERFACE_COMPILE_FEATURES)
+if (NOT "cxx_std_17" IN_LIST public_features OR "cxx_std_20" IN_LIST public_features)
+    message (FATAL_ERROR "Installed VSAG must advertise C++17: ${public_features}")
+endif ()
+add_executable (vsag_cxx17_client main.cpp)
+target_link_libraries (vsag_cxx17_client PRIVATE vsag::vsag)
+if (DEFINED VSAG_CLIENT_CXX11_ABI)
+    if (NOT VSAG_CLIENT_CXX11_ABI MATCHES "^[01]$")
+        message (FATAL_ERROR "VSAG_CLIENT_CXX11_ABI must be 0 or 1")
+    endif ()
+    target_compile_definitions (vsag_cxx17_client PRIVATE
+        _GLIBCXX_USE_CXX11_ABI=${VSAG_CLIENT_CXX11_ABI})
+endif ()
+enable_testing ()
+add_test (NAME installed_cxx17_client COMMAND vsag_cxx17_client)

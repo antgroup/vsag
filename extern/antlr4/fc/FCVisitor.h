@@ -33,6 +33,10 @@ public:
 
     virtual std::any visitStrPipeListExpr(FCParser::StrPipeListExprContext *context) = 0;
 
+    virtual std::any visitFunctionExpr(FCParser::FunctionExprContext *context) = 0;
+
+    virtual std::any visitRegionFilterExpr(FCParser::RegionFilterExprContext *context) = 0;
+
     virtual std::any visitIntListExpr(FCParser::IntListExprContext *context) = 0;
 
     virtual std::any visitStrListExpr(FCParser::StrListExprContext *context) = 0;
@@ -61,7 +65,11 @@ public:
 
     virtual std::any visitStr_pipe_list(FCParser::Str_pipe_listContext *context) = 0;
 
+    virtual std::any visitArg_pipe_list(FCParser::Arg_pipe_listContext *context) = 0;
+
     virtual std::any visitField_name(FCParser::Field_nameContext *context) = 0;
+
+    virtual std::any visitFunction_name(FCParser::Function_nameContext *context) = 0;
 
     virtual std::any visitNumeric(FCParser::NumericContext *context) = 0;
 

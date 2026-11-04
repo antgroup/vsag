@@ -26,6 +26,7 @@
 namespace vsag {
 
 class SafeThreadPool;
+class SearchMetrics;
 
 DEFINE_POINTER2(AttrInvertedInterface, AttributeInvertedInterface);
 DEFINE_POINTER(FlattenInterface);
@@ -42,7 +43,7 @@ public:
     explicit BruteForce(const BruteForceParameterPtr& param, const IndexCommonParam& common_param);
 
     explicit BruteForce(const ParamPtr& param, const IndexCommonParam& common_param)
-        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param){};
+        : BruteForce(std::dynamic_pointer_cast<BruteForceParameter>(param), common_param) {};
 
     ~BruteForce() override = default;
 
@@ -54,6 +55,11 @@ public:
 
     float
     CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& query,
                      int64_t id,
                      bool calculate_precise_distance = true) const override;
 
@@ -117,6 +123,9 @@ public:
 
     [[nodiscard]] DatasetPtr
     SearchWithRequest(const SearchRequest& request) const override;
+
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request, SearchMetrics* metrics) const;
 
     void
     Serialize(StreamWriter& writer) const override;
@@ -243,7 +252,8 @@ private:
 
     std::atomic<uint64_t> delete_count_{0};  // number of soft-deleted vectors
 
-    uint64_t resize_increase_count_bit_{DEFAULT_RESIZE_BIT};  // log2 of capacity increment
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_INCREASE_COUNT_BIT};  // log2 of capacity increment
 
     mutable std::shared_mutex global_mutex_;  // protects reads during resize
     mutable std::shared_mutex add_mutex_;     // serialises Add / Remove
@@ -251,7 +261,5 @@ private:
     std::atomic<InnerIdType> max_capacity_{0};  // allocated slot count
 
     bool is_multi_vector_{false};  // true ⇒ WARP / multi-vector mode
-
-    static constexpr uint64_t DEFAULT_RESIZE_BIT = 10;  // default increment = 1024
 };
 }  // namespace vsag

@@ -20,6 +20,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "index_common_param.h"
 #include "quantization/quantizer_test.h"
+#include "query_context.h"
 #include "unittest.h"
 using namespace vsag;
 
@@ -48,6 +49,8 @@ TestComputeMetricTQ(std::string tq_chain, uint64_t dim, int count, float error =
     TransformQuantizer<T, metric> quantizer(param, common_param);
 
     REQUIRE(quantizer.NameImpl() == QUANTIZATION_TYPE_VALUE_TQ);
+    REQUIRE(QuantizerDistanceBackend<TransformQuantizer<T, metric>>::Get(quantizer) ==
+            DistanceEvaluationBackend::FP32);
     TestComputeCodes<TransformQuantizer<T, metric>, metric>(quantizer, dim, count, error);
     TestComputer<TransformQuantizer<T, metric>, metric>(quantizer, dim, count, error);
 }

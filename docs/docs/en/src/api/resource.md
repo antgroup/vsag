@@ -112,7 +112,6 @@ vsag::Options::Instance().set_logger(&my_logger);
 
 | Setting | Accessors | Default | Meaning |
 |---------|-----------|---------|---------|
-| IO threads | `num_threads_io()` / `set_num_threads_io(n)` | `8` | Threads for disk-index IO during search (1–200). |
 | Build threads | `num_threads_building()` / `set_num_threads_building(n)` | `4` | Threads for constructing an index. |
 | Block size limit | `block_size_limit()` / `set_block_size_limit(bytes)` | `128 MB` | Max bytes per allocation block (must be > 2 MB). |
 | Direct-IO align | `direct_IO_object_align_bit()` / `set_direct_IO_object_align_bit(bits)` | `9` | Direct-IO object alignment, in bits (< 21). |
@@ -127,6 +126,28 @@ The built-in logger defaults to `info`. Set `VSAG_LOG_LEVEL` before the built-in
 created to choose `trace`, `debug`, `info`, `warn`/`warning`, `error`, `critical`, or `off`. Invalid
 values are ignored and keep the default level. An explicit `SetLevel` call still overrides the
 environment-derived level.
+
+### Startup init banner
+
+VSAG logs a startup initialization banner when `vsag::init()` runs. To suppress that banner, set
+`VSAG_SUPPRESS_INIT_BANNER` before starting the process. This is useful for tests, CI jobs, or
+applications that need quieter startup logs.
+
+Truthy values are `1`, `on`, and `true`; matching for `on` and `true` is ASCII case-insensitive, so
+`ON`, `On`, and `TRUE` also work. Other values leave the banner enabled.
+
+Set the variable before process start. VSAG also runs `vsag::init()` during static initialization,
+so setting the variable later from inside the process cannot suppress the first banner.
+
+The banner includes an `instance spec` value such as `48C503G`, combining the cpuinfo core count
+with total physical memory. Memory is reported in whole GiB using floor division by `1024^3`; if the
+platform query fails, the memory portion is shown as `?G`. SIMD lines, including `neon` and `sve`,
+retain their existing distribution/platform/using capability semantics.
+
+```bash
+VSAG_SUPPRESS_INIT_BANNER=1 ./your_vsag_app
+VSAG_SUPPRESS_INIT_BANNER=true ./your_vsag_test
+```
 
 ```cpp
 class Logger {

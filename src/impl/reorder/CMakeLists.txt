@@ -15,10 +15,12 @@
 
 
 set (REORDER_SRC
+        bucket_reorder.cpp
+        bucket_reorder.h
         flatten_reorder.cpp
         flatten_reorder.h
         reorder.h
 )
 
 add_library (reorder OBJECT ${REORDER_SRC})
-target_link_libraries (reorder PRIVATE vsag_src_common)
+target_link_libraries (reorder PRIVATE coverage_config vsag_src_common)

@@ -79,7 +79,7 @@ main(int argc, char** argv) {
     }
 
     /******************* Calculate distance by id(batch) For HGraph Index *****************/
-    auto result = index->CalDistanceById(query_vector.data(), ids_new.data(), ids_new.size());
+    auto result = index->CalcDistancesById(query_vector.data(), ids_new.data(), ids_new.size());
     if (not result.has_value()) {
         std::cerr << "Failed to cal distance by id: internalError" << std::endl;
         exit(-1);

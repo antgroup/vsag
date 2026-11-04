@@ -15,11 +15,26 @@
 
 #pragma once
 
+#include <cstdint>
+#include <string_view>
+
 #include "parameter.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
 DEFINE_POINTER2(IOParam, IOParameter);
+
+enum class IOKind : uint8_t {
+    UNKNOWN,
+    MEMORY,
+    BLOCK_MEMORY,
+    MMAP,
+    BUFFER,
+    ASYNC,
+    URING,
+    READER,
+    USER_DEFINED,
+};
 
 /**
  * @brief Base class for IO configuration parameters.
@@ -30,6 +45,9 @@ DEFINE_POINTER2(IOParam, IOParameter);
  */
 class IOParameter : public Parameter {
 public:
+    static IOParamPtr
+    CreateDefault(const std::string& type_name);
+
     /**
      * @brief Creates an IO parameter object from JSON configuration.
      *
@@ -39,16 +57,32 @@ public:
     static IOParamPtr
     GetIOParameterByJson(const JsonType& json);
 
+    [[nodiscard]] static IOKind
+    KindFromName(std::string_view name);
+
+    void
+    LoadCommonConfig(const JsonType& json);
+
+    void
+    AppendCommonConfig(JsonType& json) const;
+
+    bool enable_read_cache_{false};
+    uint64_t read_cache_total_size_{256ULL * 1024 * 1024};
+    bool enable_prefetch_hint_{false};
+
 public:
     /**
      * @brief Returns the type name of this IO parameter.
      *
      * @return The name string identifying the IO type.
      */
-    inline std::string
-    GetTypeName() {
+    inline const std::string&
+    GetTypeName() const {
         return this->name_;
     }
+
+    [[nodiscard]] IOKind
+    Kind() const;
 
 protected:
     /**

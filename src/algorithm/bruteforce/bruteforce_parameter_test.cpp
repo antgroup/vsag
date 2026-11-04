@@ -15,12 +15,13 @@
 
 #include "bruteforce_parameter.h"
 
+#include "bruteforce.h"
 #include "parameter_test.h"
 #include "unittest.h"
 
 TEST_CASE("BruteForce Parameters CheckCompatibility",
           "[ut][BruteForceParameter][CheckCompatibility]") {
-    auto param_str = R"({
+    const auto* param_str = R"({
         "base_codes": {
             "codes_type": "flatten_codes",
             "io_params": {
@@ -41,4 +42,48 @@ TEST_CASE("BruteForce Parameters CheckCompatibility",
         REQUIRE(param->use_attribute_filter == true);
         REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
     }
+}
+
+TEST_CASE("BruteForce maps resize increase count bit", "[ut][BruteForceParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->resize_increase_count_bit == vsag::DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+
+    auto configured_param = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->resize_increase_count_bit == 1);
+    REQUIRE(configured_param->ToJson()[vsag::RESIZE_INCREASE_COUNT_BIT].GetUint64() == 1);
+
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 0})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 32})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1.5})"), common_param));
+    REQUIRE_THROWS(vsag::BruteForce::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
+}
+
+TEST_CASE("BruteForce maps store raw vector to flatten quantizers", "[ut][BruteForceParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto parameter = std::dynamic_pointer_cast<vsag::BruteForceParameter>(
+        vsag::BruteForce::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"store_raw_vector": true, "use_residual": true})"),
+            common_param));
+    REQUIRE(parameter != nullptr);
+    const auto json = parameter->ToJson();
+    REQUIRE(json[vsag::BASE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::HOLD_MOLDS].GetBool());
+    REQUIRE(
+        json[vsag::PRECISE_CODES_KEY][vsag::QUANTIZATION_PARAMS_KEY][vsag::HOLD_MOLDS].GetBool());
+    REQUIRE_FALSE(json.Contains(vsag::QUANTIZATION_PARAMS_KEY));
 }

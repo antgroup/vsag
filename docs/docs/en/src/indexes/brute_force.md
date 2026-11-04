@@ -8,7 +8,7 @@ approximation. Its main role is to be the **ground-truth baseline** that approxi
 (HGraph, IVF, …) are evaluated against, but it is also a reasonable production choice for small
 corpora or for workloads where 100% recall is mandatory.
 
-- Source: `src/algorithm/brute_force.{h,cpp}`
+- Source: `src/algorithm/bruteforce/bruteforce.{h,cpp}`
 - Example: [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp)
 
 ## How it works
@@ -22,7 +22,7 @@ corpora or for workloads where 100% recall is mandatory.
    configured `metric_type` (`l2`, `ip`, or `cosine`), then a top-k heap returns the closest
    ids. Search uses SIMD kernels and supports **intra-query parallelism** — a single query can
    be split across multiple threads via the `parallelism` search parameter (see
-   `BruteForce::SearchWithRequest` in `src/algorithm/brute_force.cpp`).
+   `BruteForce::SearchWithRequest` in `src/algorithm/bruteforce/bruteforce.cpp`).
 
 Because the index keeps every vector verbatim (modulo the chosen quantizer), the result is
 **exact** when `base_quantization_type` is `fp32` and is the standard reference used to compute
@@ -54,6 +54,12 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 A full runnable program is at
 [`examples/cpp/105_index_brute_force.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/105_index_brute_force.cpp).
 
+## Input data type
+
+The public `Build`, `Add`, `KnnSearch`, `RangeSearch`, and `UpdateVector` paths accept FP32 vectors only. At runtime, supply vectors via `Dataset::Float32Vectors`. At index creation, set `dtype` to `"float32"`; `dtype: "int8"` is not supported when creating a BruteForce index.
+
+The `base_quantization_type` parameter controls the index's internal encoding and storage, not the input type. Selecting an internal `fp16`, `bf16`, or other quantizer does not enable FP16/BF16 input.
+
 ## Build parameters
 
 The minimal config consists of the three top-level fields (`dtype`, `metric_type`, `dim`).
@@ -63,8 +69,9 @@ Advanced users can pass an `index_param` object to enable quantization or storag
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/README.md) for per-quantizer details |
+| `base_quantization_type` | string | `"fp32"` | `fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
 | `use_attribute_filter` | bool | `false` | Enable attribute-based filtering (see [Attribute Filter](../advanced/attribute_filter.md)) |
+| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
 
 > **Note on `store_raw_vector`.** The `store_raw_vector` flag is parsed by the shared
 > `InnerIndexParameter` but BruteForce does **not** consult it when deciding whether
@@ -116,10 +123,43 @@ auto r3 = index->RangeSearch(query, radius, R"({"parallelism": 8})").value();
 
 For range search semantics, see [Range Search](../advanced/range_search.md).
 
+## Removing vectors
+
+BruteForce supports both `RemoveMode::MARK_REMOVE` and `RemoveMode::FORCE_REMOVE`; neither mode
+needs an HGraph-style `support_force_remove` setting.
+
+When `use_attribute_filter: true` is enabled, neither removal mode is available. Rebuild the index instead if attribute-filtered data must be deleted.
+
+- `MARK_REMOVE` is the default. It records a tombstone, so the id is excluded from later searches
+  while its vector storage remains allocated. `GetNumElements()` excludes marked ids and
+  `GetNumberRemoved()` reports their count.
+- `FORCE_REMOVE` physically removes each requested vector. It moves the last internal slot into
+  the vacated slot when necessary and keeps the moved vector's external id intact. Successful
+  force removals do not add tombstones; pre-existing marked removals remain reflected by
+  `GetNumberRemoved()`.
+
+```cpp
+index->Remove(std::vector<int64_t>{id1, id2}, vsag::RemoveMode::MARK_REMOVE);
+index->Remove(std::vector<int64_t>{id3, id4}, vsag::RemoveMode::FORCE_REMOVE);
+```
+
+Physical removal is synchronous and more expensive than marking. It takes the index's exclusive
+global lock, so it waits for in-flight searches and prevents new searches while the swap-and-remove
+operation runs. Batch ids when possible and avoid force removal on latency-critical paths.
+
+By default, BruteForce uses `block_memory_io` for vector storage. After every successful
+force-removal batch, its logical size is reduced to the live entry count and trailing complete blocks
+are released; the final partial block remains allocated. The optional extra-information store follows
+the same block-granular behavior. To avoid repeated full-table copies, the label table reclaims its
+backing allocation when its live entry count falls to at most half of its current capacity.
+`GetMemoryUsage()` then reflects the compacted index. This is index allocation accounting,
+not a promise that the process allocator
+immediately returns memory to the operating system or that RSS drops.
+
 ## Capabilities
 
 BruteForce advertises the following capability flags (see `BruteForce::InitFeatures` in
-`src/algorithm/brute_force.cpp`):
+`src/algorithm/bruteforce/bruteforce.cpp`):
 
 | Capability                          | Notes |
 |-------------------------------------|-------|
@@ -127,16 +167,17 @@ BruteForce advertises the following capability flags (see `BruteForce::InitFeatu
 | `SUPPORT_ADD_FROM_EMPTY` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
 | `SUPPORT_KNN_SEARCH` / `SUPPORT_KNN_SEARCH_WITH_ID_FILTER` / `SUPPORT_SEARCH_CONCURRENT` | Standard top-k API and id-list filters, with concurrent search. |
 | `SUPPORT_RANGE_SEARCH` / `SUPPORT_RANGE_SEARCH_WITH_ID_FILTER` | Available with non-training quantizers (`fp32`, `fp16`, `bf16`). |
-| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported and concurrency-safe. |
+| `SUPPORT_DELETE_BY_ID` / `SUPPORT_DELETE_CONCURRENT` | `Remove` by id is supported. Searches and delete operations are synchronized; `FORCE_REMOVE` takes an exclusive lock. |
 | `SUPPORT_CAL_DISTANCE_BY_ID` | Distance lookup against stored vectors (non-training quantizers only). |
+| `SUPPORT_UPDATE_VECTOR_CONCURRENT` | `UpdateVector` replaces an existing FP32 vector with the same dimension. BruteForce has no graph connectivity check, so `force_update` does not change its update behavior. |
 | `SUPPORT_GET_RAW_VECTOR_BY_IDS` | Available only when `base_quantization_type` is `fp32` and either the metric is not `cosine` or the underlying quantizer holds molds (`hold_molds`). Quantized BruteForce indexes do **not** advertise this flag. |
 | `SUPPORT_CHECK_ID_EXIST` / `SUPPORT_CLONE` / `SUPPORT_ESTIMATE_MEMORY` / `SUPPORT_GET_MEMORY_USAGE` | Standard introspection and lifecycle. |
 | `SUPPORT_SERIALIZE_BINARY_SET` / `SUPPORT_SERIALIZE_FILE` / `SUPPORT_SERIALIZE_WRITE_FUNC` | Full save surface. |
 | `SUPPORT_DESERIALIZE_BINARY_SET` / `SUPPORT_DESERIALIZE_FILE` / `SUPPORT_DESERIALIZE_READER_SET` | Full load surface. (There is no `DESERIALIZE_WRITE_FUNC` counterpart — read paths use `READER_SET` instead.) |
 | `NEED_TRAIN` | Set when `base_quantization_type` is one of `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`. |
 
-Notably **not** supported by BruteForce: `SUPPORT_UPDATE_VECTOR_CONCURRENT`,
-`SUPPORT_UPDATE_ID_CONCURRENT`, and `SUPPORT_EXPORT_MODEL`.
+Notably **not** supported by BruteForce: `SUPPORT_UPDATE_ID_CONCURRENT` and
+`SUPPORT_EXPORT_MODEL`.
 
 ## When to use BruteForce
 

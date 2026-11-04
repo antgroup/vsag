@@ -30,6 +30,7 @@
 #include "vsag/binaryset.h"
 #include "vsag/bitset.h"
 #include "vsag/dataset.h"
+#include "vsag/deserialize_reader.h"
 #include "vsag/errors.h"
 #include "vsag/expected.hpp"
 #include "vsag/filter.h"
@@ -40,9 +41,12 @@
 #include "vsag/readerset.h"
 #include "vsag/search_param.h"
 #include "vsag/search_request.h"
+#include "vsag/search_session.h"
+#include "vsag/serialize_writer.h"
 
 namespace vsag {
 
+class AttrTypeSchema;
 class Index;
 using IndexPtr = std::shared_ptr<Index>;
 using IdMapFunction = std::function<std::tuple<bool, int64_t>(int64_t)>;
@@ -53,25 +57,26 @@ struct MergeUnit {
 };
 
 enum class IndexType {
-    HNSW,
-    DISKANN,
-    HGRAPH,
-    IVF,
-    PYRAMID,
-    BRUTEFORCE,
-    SPARSE,
-    SINDI,
-    WARP,
-    LAZY_HGRAPH,
-    SIMQ
+    // Values 0 and 1 were assigned to the removed HNSW and DiskANN types. Do not reuse them:
+    // maintained index ordinals must remain stable for API and serialization compatibility.
+    HGRAPH = 2,
+    IVF = 3,
+    PYRAMID = 4,
+    BRUTEFORCE = 5,
+    SPARSE = 6,
+    SINDI = 7,
+    WARP = 8,
+    LAZY_HGRAPH = 9,
+    SIMQ = 10,  ///< Single Index for Multi-vector Query.
+    SINDI_V2 = 11
 };
-
 #define DATA_FLAG_FLOAT32_VECTOR 0x01
 #define DATA_FLAG_INT8_VECTOR 0x02
 #define DATA_FLAG_SPARSE_VECTOR 0x04
 #define DATA_FLAG_EXTRA_INFO 0x10
 #define DATA_FLAG_ATTRIBUTE 0x20
 #define DATA_FLAG_ID 0x40
+#define DATA_FLAG_PATH 0x80
 
 using OffsetType = uint64_t;
 using SizeType = uint64_t;
@@ -271,14 +276,17 @@ public:
     // [search methods]
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       * 
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param invalid represents whether an element is filtered out by pre-filter
       * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -287,14 +295,17 @@ public:
               BitsetPtr invalid = nullptr) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -303,14 +314,17 @@ public:
               const std::function<bool(int64_t)>& filter) const = 0;
 
     /**
-      * @brief Performing single KNN search on index
+      * @brief Perform KNN search; HGraph and IVF also accept batched queries.
       *
       * @param query should contains dim, num_elements and vectors
       * @param k the result size of every query
       * @param filter represents whether an element is filtered out by pre-filter
       * @return result contains
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)
+      *                - single-query: num_elements = 1, dim is the actual result count
+      *                - batched HGraph/IVF KNN: num_elements is the query count;
+      *                  ids and distances use row-major num_elements x dim storage
+      *                - HGraph missing neighbors use id = -1, distance = +infinity;
+      *                  active external label -1 is rejected for batched HGraph KNN
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     KnnSearch(const DatasetPtr& query,
@@ -322,12 +336,38 @@ public:
     }
 
     /**
+     * @brief Open an owning, fixed-query continuation session.
+     * The index must not be mutated while the session is open. A caller-supplied
+     * allocator must outlive the session; returned datasets own independent buffers.
+     * Supply filter/search parameters to each Next. The defaults in both overloads
+     * resolve to @c {"hgraph":{"ef_search":100}}, which is the only supported
+     * backend currently. Future backends must accept or replace that JSON; callers
+     * should not rely on it remaining backend-neutral.
+     */
+    [[nodiscard]] tl::expected<std::unique_ptr<SearchSession>, Error>
+    OpenSearchSession(const DatasetPtr& query, Allocator* allocator = nullptr) const {
+        // Intentionally share the options default: these two convenience paths must agree.
+        return OpenSearchSession(
+            query, 1, SearchSessionNextOptions{}.search_parameters, nullptr, allocator);
+    }
+
+    // Nonvirtual entry point preserves the public Index vtable relative to the base revision.
+    [[nodiscard]] tl::expected<std::unique_ptr<SearchSession>, Error>
+    OpenSearchSession(const DatasetPtr& query,
+                      int64_t k_per_call,
+                      const std::string& parameters,
+                      const FilterPtr& filter = nullptr,
+                      Allocator* allocator = nullptr) const;
+
+    /**
       * @brief Performing search with request on index
       * 
       * @param request @see SearchRequest
-      * @return result contains 
-      *                - num_elements: 1
-      *                - ids, distances: length is (num_elements * k)               
+      * @return result contains
+      *                - single-query: num_elements = 1 and dim is the actual result count
+      *                - HGraph/IVF batched KNN: num_elements is the query count; ids and
+      *                  distances form a row-major num_elements x dim matrix. Missing HGraph
+      *                  neighbors are padded with id = -1 and distance = +infinity.
       */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     SearchWithRequest(const SearchRequest& request) const {
@@ -498,9 +538,9 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes such as HGraph, BruteForce, IVF, and Pyramid.
      * The query must be a contiguous float32 array with dimension matching the index.
-      * For sparse vector indexes (SINDI), this overload is not applicable;
+     * For sparse vector indexes (SINDI, SINDI_V2), this overload is not applicable;
      * use CalcDistanceById(DatasetPtr, int64_t, bool) instead.
      *
      * @param vector The embedding of the query (float32 array for dense vectors).
@@ -522,13 +562,12 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
+     * Accepts one query in the index's native representation: Float32Vectors for dense indexes,
+     * SparseVectors for SINDI/SINDI_V2, or MultiVectors and MultiVectorDim for WARP/SIMQ.
+     * Dense Dataset queries and raw float pointers have the same distance semantics.
+     * Use CalcDistancesById for multiple query rows.
      *
-     * @param vector is the embedding of query (sparse or dense format via DatasetPtr).
+     * @param vector A Dataset containing exactly one native query.
      * @param id is the unique identifier of the vector to be calculated in the index.
      * @param calculate_precise_distance If true, the function will attempt to use high-precision
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
@@ -547,9 +586,10 @@ public:
     /**
      * @brief Calculate the distance between the query and the vector of the given ID for batch.
      *
-     * Suitable for dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW).
+     * Suitable for dense vector indexes. HGraph, BruteForce, IVF, and Pyramid support top-k
+     * output when they advertise the corresponding batch distance feature.
      * The query must be a contiguous float32 array. For sparse vector indexes
-      * (SINDI), this overload is not applicable; use
+     * (SINDI, SINDI_V2), this overload is not applicable; use
      * CalDistanceById(DatasetPtr, const int64_t*, int64_t, bool) instead.
      *
      * @param query is the embedding of query (float32 array for dense vectors).
@@ -559,42 +599,68 @@ public:
      *        vectors (e.g., full-precision float32) for distance computation, even if it requires
      *        loading data from disk, which may incur I/O overhead. If false, the implementation may
      *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
+     * @param topk If -1 (default), returns all count distances without IDs and without sorting.
+     *        If positive, returns the top-k smallest distances in ascending order along with
+     *        matching IDs. The result Dim is min(topk, count). Invalid IDs (missing labels) are
+     *        ranked last and only appear if there are fewer than topk valid IDs.
+     * @return result is valid distance of input ids. If topk == -1, Dim() is count and the
+    *         distance buffer contains count entries. If topk is positive, Dim() is
+     *         min(topk, count), IDs are returned, and the distance/ID buffers contain Dim()
+     *         entries. '-1' indicates an invalid distance.
      */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const float* query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const {
-        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                    "Index does not support get distance by id"));
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const {
+        return this->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
     }
 
     /**
-     * @brief Calculate the distance between the query and the vector of the given ID for batch.
+     * @brief Calculate distances between query(queries) and vectors of given IDs for batch.
      *
-      * Suitable for sparse vector indexes (SINDI) where vectors
-     * cannot be represented as a simple float pointer. The Dataset should
-     * contain sparse vectors via GetSparseVectors().
-     * For dense vector indexes (HGraph, BruteForce, IVF, DiskANN, HNSW),
-     * this overload is also available and internally calls GetFloat32Vectors().
+     * Suitable for Dataset-backed batch query formats. Sparse vector indexes
+     * (SINDI, SINDI_V2) use GetSparseVectors(). Dense vector indexes that advertise
+     * SUPPORT_BATCH_CALC_DISTANCE_BY_ID can use Float32Vectors() through the
+     * forwarding alias to CalcDistancesById(DatasetPtr).
      *
-     * @param query is the embedding of query (sparse or dense format via DatasetPtr).
-     * @param ids is the unique identifier of the vector to be calculated in the index.
-     * @param count is the count of ids
-     * @param calculate_precise_distance If true, the function will attempt to use high-precision
-     *        vectors (e.g., full-precision float32) for distance computation, even if it requires
-     *        loading data from disk, which may incur I/O overhead. If false, the implementation may
-     *        use quantized or approximate representations for faster computation.
-     * @return result is valid distance of input ids. '-1' indicates an invalid distance.
-     */
-    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+     * When the query DatasetPtr contains multiple vectors (NumElements > 1),
+     * this method computes distances for each query against its own row of IDs.
+     * Callers should check SUPPORT_BATCH_CALC_DISTANCE_BY_ID before relying on
+     * multi-query behavior; unsupported indexes return an error. Both the input
+     * IDs and result distances use row-major layout with count IDs per query:
+     * ids[i * count + j] is the j-th ID for query i, and distances[i * count + j]
+     * is the distance from query i to that ID. '-1' indicates an invalid ID.
+     *
+     * @param query is the embedding of query(queries) (sparse or dense via DatasetPtr).
+     *        When NumElements() > 1, each element is a separate query.
+     * @param ids is the unique identifier matrix of vectors to be calculated. For
+     *        multiple queries, it must contain NumElements() * count IDs in row-major layout.
+     * @param count is the count of ids per query
+     * @param calculate_precise_distance If true, the function will attempt to use
+     *        high-precision vectors (e.g., full-precision float32) for distance
+     *        computation, even if it requires loading data from disk, which may
+     *        incur I/O overhead. If false, the implementation may use quantized
+     *        or approximate representations for faster computation.
+     * @param topk If -1 (default), returns all count distances per query without IDs
+     *        and without sorting. If positive, returns the top-k smallest distances
+     *        per query in ascending order along with matching IDs. The result Dim is
+     *        min(topk, count). Invalid IDs (missing labels) are ranked last per query
+     *        row and only appear if there are fewer than topk valid IDs in that row.
+     * @return result distances. Use result->GetDim() as the row stride. When topk == -1,
+     *         Dim() is count and the distance buffer contains NumElements() * count entries.
+     *         When topk is positive, Dim() is min(topk, count), IDs are returned, and the
+     *         distance/ID buffers contain NumElements() * Dim() entries in row-major layout.
+    *         '-1' indicates an invalid distance.
+    */
+    [[deprecated("use CalcDistancesById instead")]] [[nodiscard]] tl::expected<DatasetPtr, Error>
     CalDistanceById(const DatasetPtr& query,
                     const int64_t* ids,
                     int64_t count,
-                    bool calculate_precise_distance = true) const {
-        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
-                                    "Index does not support get distance by id"));
+                    bool calculate_precise_distance = true,
+                    int64_t topk = -1) const {
+        return this->CalcDistancesById(query, ids, count, calculate_precise_distance, topk);
     }
 
     /**
@@ -668,7 +734,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve selected data associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -677,7 +743,7 @@ public:
      * @param count Number of IDs in the 'ids' array.
      * @param selected_data_flag selected data flag, set with DATA_FLAG_*
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the selected supported fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
@@ -724,7 +790,7 @@ public:
     }
 
     /**
-     * @brief Retrieve all data associated with vectors identified by given IDs.
+     * @brief Retrieve the default data fields associated with vectors identified by given IDs.
      *
      * This method fetches data stored with the vectors in the index
      * (e.g., attributes, labels, or extra infos).
@@ -732,11 +798,11 @@ public:
      * @param ids Array of vector IDs for which extra information is requested.
      * @param count Number of IDs in the 'ids' array.
      * @return tl::expected<DatasetPtr, Error>
-     *         - On success: A DatasetPtr containing the extra data, attribute and vector
+     *         - On success: A DatasetPtr containing the implementation's default fields
      *         - On failure: An error object (e.g., invalid ID, out of memory).
      * @note The default base-class implementation returns tl::unexpected(ErrorType::UNSUPPORTED_INDEX_OPERATION) If the index implementation does not support this operation
      *            (default behavior for base class).
-     * @note The default implementation returns all data which in current index
+     * @note Optional fields may require explicit selection through GetDataByIdsWithFlag.
      */
     [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
     GetDataByIds(const int64_t* ids, int64_t count) const {
@@ -764,6 +830,11 @@ public:
      * Processes MergeUnit entries to incorporate sub-indexes into this index. For each element:
      * - id_map_func determines which IDs from the sub-index are retained
      * - Specifies the ID remapping into the destination index space
+     *
+     * Merge requires exclusive ownership of the destination index: do not call Add,
+     * Remove, or another Merge concurrently with this operation. A mapping callback
+     * can inspect destination labels before each row is published, and other index
+     * components besides the label table are also updated during the merge.
      *
      * @param merge_units Vector containing:
      *   - index: Source sub-index to merge from
@@ -826,6 +897,15 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support SetImmutable"));
     }
 
+    /**
+     * @brief Return the attribute schema used by this index.
+     * @return nullptr when attribute filtering is not configured.
+     */
+    [[nodiscard]] virtual const AttrTypeSchema*
+    GetAttrTypeSchema() const {
+        return nullptr;
+    }
+
 public:
     // [serialize/deserialize with binaryset]
 
@@ -879,6 +959,24 @@ public:
     }
 
     /**
+      * @brief Serialize index through the given writer in the chunked format.
+      *
+      * The io data of large components is split into independently
+      * decompressible frames of chunk_size logical bytes, and the physical
+      * layout of every component is recorded in the index footer. Whether
+      * the frames are compressed is decided solely by the injected writer;
+      * with a plain writer the body bytes are written verbatim.
+      *
+      * @param writer is the byte sink (optionally compressing) for the serialized index
+      * @param chunk_size is the logical granularity of one compressed frame in bytes
+      */
+    virtual tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size = DEFAULT_SERIALIZE_CHUNK_SIZE) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support chunked serialize"));
+    }
+
+    /**
       * @brief Serialize the full index to the header-first streaming format.
       *
       * The stream starts with the VSAG streaming magic/version header, followed by metadata and
@@ -902,6 +1000,30 @@ public:
     Deserialize(std::istream& in_stream) {
         return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                                     "Index does not support deserialize from a file stream"));
+    }
+
+    /**
+      * @brief Deserialize index in parallel from a positioned reader.
+      *
+      * The reader provides positioned reads (and decompression for
+      * compressed frames) over an index file written in the chunked format;
+      * the physical layout is taken from the index footer. Uncompressed
+      * files without a recorded layout are probed and loaded in parallel
+      * as well. The chunk granularity is decided at serialization time.
+      *
+      * Concurrency is driven by the thread pool bound to the Engine at
+      * creation time (see Resource); when the Engine has no thread pool
+      * bound, the implementation falls back to an internal default pool.
+      *
+      * Note: the index allocator is invoked concurrently by the worker
+      * threads, so a custom allocator must be thread-safe.
+      *
+      * @param reader is the positioned-read (optionally decompressing) data source
+      */
+    virtual tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support parallel deserialization"));
     }
 
     /**
@@ -1059,47 +1181,51 @@ public:
             Error(ErrorType::UNSUPPORTED_INDEX_OPERATION, "Index does not support ImportCache"));
     }
 
+    /**
+     * @brief Rebuild per-bucket graphs for IVF indices after Add operations.
+     *
+     * When an IVF index is configured with graph_build_threshold > 0, large buckets
+     * get internal graphs for faster search. After Add() operations, these graphs
+     * become stale. This method explicitly rebuilds them using bucket-internal
+     * distance computation (no external dataset needed).
+     *
+     * Requirements:
+     * - Index must be IVF with graph_build_threshold > 0
+     * - Not safe for concurrent use with Add/Remove/Build/Serialize
+     *
+     * @return tl::expected<void, Error>; an Error is returned if the index does not
+     * support this operation or if graph_build_threshold was not configured.
+     */
+    virtual tl::expected<void, Error>
+    RebuildIVFBucketGraphs() {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support RebuildIVFBucketGraphs"));
+    }
+
 public:
     virtual ~Index() = default;
+
+    // Canonical virtual batch distance-by-ID. Index implementations override this
+    // in InnerIndexInterface; the deprecated CalDistanceById alias forwards here.
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support CalcDistancesById"));
+    }
+
+    [[nodiscard]] virtual tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const {
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                    "Index does not support CalcDistancesById"));
+    }
 };
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_build_parameters(const std::string& json_string);
-
-/**
-  * @brief check if the build parameter is valid
-  *
-  * @return true if the parameter is valid, otherwise error with detail message.
-  */
-tl::expected<bool, Error>
-check_diskann_hnsw_search_parameters(const std::string& json_string);
-
-/**
-  * @brief estimate search time for index
-  *
-  * @return the estimated search time in milliseconds.
-  */
-tl::expected<float, Error>
-estimate_search_time(const std::string& index_name,
-                     int64_t data_num,
-                     int64_t data_dim,
-                     const std::string& parameters);
-
-/**
-  * [experimental]
-  * @brief generate build index parameters from data size and dim
-  *
-  * @return the build parameter string
-  */
-tl::expected<std::string, Error>
-generate_build_parameters(std::string metric_type,
-                          int64_t num_elements,
-                          int64_t dim,
-                          bool use_conjugate_graph = false);
 
 }  // namespace vsag
