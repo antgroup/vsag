@@ -21,6 +21,8 @@
 
 #include "simd/fp32_simd.h"
 #include "unittest.h"
+// C API contract checks use a reproducible graph. Parallel build behavior is covered by
+// dedicated HGraph/concurrency tests; do not inherit the 100-thread build default here.
 static constexpr const char* index_param = R"(
     {
         "dtype": "float32",
@@ -30,6 +32,7 @@ static constexpr const char* index_param = R"(
             "base_quantization_type": "fp32",
             "max_degree": 64,
             "ef_construction": 200,
+            "build_thread_count": 1,
             "alpha":1.2
         }
     }
@@ -72,7 +75,7 @@ public:
         int64_t topk = 10;
         std::vector<int64_t> results(topk);
         std::vector<float> scores(topk);
-        SearchResult_t result;
+        SearchResult_t result{};
         result.dists = scores.data();
         result.ids = results.data();
         result.other_result = nullptr;
@@ -87,6 +90,7 @@ public:
                     break;
                 }
             }
+            CAPTURE(i, result.count, results, scores);
             REQUIRE(in_results);
         }
     }

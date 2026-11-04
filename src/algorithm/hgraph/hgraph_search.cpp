@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 #include "attr/argparse.h"
 #include "datacell/rabitq_split_datacell.h"

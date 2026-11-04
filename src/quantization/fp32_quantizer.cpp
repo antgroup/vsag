@@ -15,6 +15,8 @@
 
 #include "fp32_quantizer.h"
 
+#include <cstring>
+
 #include "simd/fp32_simd.h"
 #include "simd/normalize.h"
 #include "simd/simd.h"
@@ -61,13 +63,13 @@ FP32Quantizer<metric>::EncodeOneImpl(const float* data, uint8_t* codes) {
             // Store the mold for cosine similarity
             const auto* data_float = reinterpret_cast<const float*>(data);
             float mold = std::sqrt(FP32ComputeIP(data_float, data_float, this->dim_));
-            memcpy(codes, data, this->dim_ * sizeof(float));
-            memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
+            std::memcpy(codes, data, this->dim_ * sizeof(float));
+            std::memcpy(codes + this->dim_ * sizeof(float), &mold, sizeof(float));
         } else {
             Normalize(data, reinterpret_cast<float*>(codes), this->dim_);
         }
     } else {
-        memcpy(codes, data, this->code_size_);
+        std::memcpy(codes, data, this->code_size_);
     }
     return true;
 }
@@ -84,7 +86,7 @@ FP32Quantizer<metric>::EncodeBatchImpl(const float* data, uint8_t* codes, uint64
 template <MetricType metric>
 bool
 FP32Quantizer<metric>::DecodeOneImpl(const uint8_t* codes, float* data) {
-    memcpy(data, codes, this->dim_ * sizeof(float));
+    std::memcpy(data, codes, this->dim_ * sizeof(float));
     return true;
 }
 
@@ -92,10 +94,11 @@ template <MetricType metric>
 bool
 FP32Quantizer<metric>::DecodeBatchImpl(const uint8_t* codes, float* data, uint64_t count) {
     if (this->code_size_ == this->dim_ * sizeof(float)) {
-        memcpy(data, codes, count * this->code_size_);
+        std::memcpy(data, codes, count * this->code_size_);
     } else {
         for (uint64_t i = 0; i < count; ++i) {
-            memcpy(data + i * this->dim_, codes + i * this->code_size_, this->dim_ * sizeof(float));
+            std::memcpy(
+                data + i * this->dim_, codes + i * this->code_size_, this->dim_ * sizeof(float));
         }
     }
     return true;
@@ -156,7 +159,7 @@ FP32Quantizer<metric>::ProcessQueryImpl(const float* query,
     if constexpr (metric == MetricType::METRIC_TYPE_COSINE) {
         Normalize(query, reinterpret_cast<float*>(computer.buf_), this->dim_);
     } else {
-        memcpy(computer.buf_, query, this->code_size_);
+        std::memcpy(computer.buf_, query, this->code_size_);
     }
 }
 

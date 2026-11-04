@@ -17,6 +17,7 @@
 #pragma once
 
 #include <cmath>
+#include <cstring>
 #include <optional>
 #include <string>
 
@@ -107,7 +108,7 @@ template <typename T>
 void
 base64_decode_obj(const std::string& in, T& obj) {
     std::string to_string = base64_decode(in);
-    memcpy(&obj, to_string.c_str(), sizeof(obj));
+    std::memcpy(&obj, to_string.c_str(), sizeof(obj));
 }
 
 void

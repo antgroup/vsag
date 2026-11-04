@@ -36,7 +36,7 @@ runs:
         else
           ./scripts/testing/test_parallel_by_name.sh ${{ inputs.matrix-test-type }}
           if [ "$FULL_EXAMPLES" = "true" ] && [ "${{ inputs.matrix-test-type }}" = "unittests" ]; then
-            python3 scripts/ci/platform_smoke.py all-examples
+            python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
           fi
         fi
     - name: Upload Log
