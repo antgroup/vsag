@@ -135,7 +135,7 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 dataset->GetFloat32Vectors(),
                 static_cast<uint64_t>(dataset->GetNumElements()),
                 options);
-        memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+        std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
