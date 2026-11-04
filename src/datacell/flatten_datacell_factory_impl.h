@@ -17,6 +17,7 @@
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "quantization/binary_quantizer.h"
 #include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_adapter.h"
 #include "quantization/quantizer_headers.h"
@@ -56,6 +57,14 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                             const IndexCommonParam& common_param) {
     const std::string quantization_string = param->quantizer_parameter->GetTypeName();
 
+    if constexpr (metric == MetricType::METRIC_TYPE_HAMMING) {
+        if (common_param.data_type_ != DataTypes::DATA_TYPE_BINARY ||
+            quantization_string != QUANTIZATION_TYPE_VALUE_BINARY) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Hamming distance requires binary dtype and binary quantization");
+        }
+        return MakeFlattenDataCellInstance<BinaryQuantizer, IOTmpl>(param, common_param);
+    } else {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
             return MakeFlattenDataCellInstance<INT8Quantizer<metric>, IOTmpl>(param, common_param);
@@ -164,6 +173,7 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
 
     throw VsagException(ErrorType::INVALID_ARGUMENT,
                         fmt::format("Unsupported quantization type: {}", actual_quantization));
+    }
 }
 
 template <MetricType metric>

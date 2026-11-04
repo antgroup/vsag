@@ -18,6 +18,7 @@ set (QUANTIZER_SRC
         quantizer_adapter.cpp
         fp32_quantizer.cpp
         int8_quantizer.cpp
+        binary_quantizer.cpp
         multi_vector_computer.cpp
         scalar_quantization/scalar_quantizer.cpp
         scalar_quantization/local_scalar_quantizer.cpp
@@ -31,6 +32,7 @@ set (QUANTIZER_SRC
         quantizer_parameter.cpp
         fp32_quantizer_parameter.cpp
         int8_quantizer_parameter.cpp
+        binary_quantizer_parameter.cpp
         scalar_quantization/sq8_uniform_quantizer_parameter.cpp
         scalar_quantization/sq4_uniform_quantizer_parameter.cpp
         scalar_quantization/scalar_quantization_trainer.cpp

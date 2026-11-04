@@ -19,6 +19,7 @@
 
 #include <unordered_set>
 
+#include "binary_quantizer_parameter.h"
 #include "fp32_quantizer_parameter.h"
 #include "inner_string_params.h"
 #include "product_quantization/pq_fastscan_quantizer_parameter.h"
@@ -90,6 +91,9 @@ QuantizerParameter::GetQuantizerParameterByJson(const JsonType& json) {
     } else if (type_name == QUANTIZATION_TYPE_VALUE_INT8) {
         quantizer_param = std::make_shared<INT8QuantizerParameter>();
         quantizer_param->FromJson(json);
+    } else if (type_name == QUANTIZATION_TYPE_VALUE_BINARY) {
+        quantizer_param = std::make_shared<BinaryQuantizerParameter>();
+        quantizer_param->FromJson(json);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("invalid quantizer name {}", type_name));
@@ -114,7 +118,8 @@ QuantizerParameter::IsValidQuantizationType(const std::string& type_name) {
                                                                 QUANTIZATION_TYPE_VALUE_SPARSE,
                                                                 QUANTIZATION_TYPE_VALUE_PQFS,
                                                                 QUANTIZATION_TYPE_VALUE_TQ,
-                                                                QUANTIZATION_TYPE_VALUE_INT8};
+                                                                QUANTIZATION_TYPE_VALUE_INT8,
+                                                                QUANTIZATION_TYPE_VALUE_BINARY};
 
     return valid_types.find(type_name) != valid_types.end();
 }
