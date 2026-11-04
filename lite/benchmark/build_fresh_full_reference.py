@@ -33,6 +33,30 @@ def strict_fp_config(original):
     raise ValueError('Unsupported Full compiler profile for the strict-FP overlay')
 
 
+def preserve_library_aliases(library, destination):
+    aliases = {}
+    for path in sorted(library.parent.glob('libvsag.so*')):
+        if not path.is_symlink():
+            continue
+        target = os.readlink(path)
+        if Path(target).name != target or target in ['', '.', '..']:
+            raise ValueError('Full library alias must stay in its library directory')
+        try:
+            resolved = path.resolve(strict=True)
+        except (OSError, RuntimeError) as error:
+            raise ValueError('Unresolvable Full library alias') from error
+        if resolved != library.resolve(strict=True):
+            raise ValueError('Full library alias points to another library')
+        installed = destination / path.name
+        if installed.exists() or installed.is_symlink():
+            raise FileExistsError(installed)
+        aliases[path.name] = target
+    # Validate the whole chain before installing any alias; preserve CMake's SONAME.
+    for name, target in aliases.items():
+        (destination / name).symlink_to(target)
+    return aliases
+
+
 def validate_source_checkout(source, expected):
     if len(expected) != 40 or any(c not in '0123456789abcdef' for c in expected):
         raise ValueError('Use an explicit full lowercase source commit SHA')
@@ -146,9 +170,7 @@ def main():
         shutil.copyfile(library,retained)
         subprocess.run(['strip','--strip-unneeded',str(retained)],check=True)
         assert sha(library)==original['sha256'], 'Original build library modified'
-        for alias in ['libvsag.so','libvsag.so.0.0']:
-            if alias != retained.name:
-                (args.install/'lib'/alias).symlink_to(retained.name)
+        installed_aliases = preserve_library_aliases(library, args.install/'lib')
         shutil.copytree(args.source/'include',args.install/'include')
         headers={str(p.relative_to(args.install/'include')):sha(p)
                  for p in sorted((args.install/'include').rglob('*')) if p.is_file()}
@@ -157,7 +179,7 @@ def main():
             full_headers_sha256=headers,library_sha256=sha(retained),library_bytes=retained.stat().st_size,
             source_sha256=source_hashes,
             compiler_profile='aligned-o3-overlay' if args.strict_fp else 'native-release-default',
-            original_library=original,install=str(args.install.resolve()),
+            original_library=original,library_aliases=installed_aliases,install=str(args.install.resolve()),
             compiler=subprocess.check_output(['c++','--version'],text=True),
             system=subprocess.check_output(['uname','-a'],text=True),
             dependency_sources=str(args.deps),antlr_archive_sha256=sha(args.antlr_archive),
