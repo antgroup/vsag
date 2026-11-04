@@ -50,4 +50,18 @@ extern BitOperatorType BitXor;
 
 using BitNotType = void (*)(const uint8_t* x, const uint64_t num_byte, uint8_t* result);
 extern BitNotType BitNot;
+
+/** Return the number of differing bits in two equally sized packed arrays. */
+inline uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t num_byte) {
+    uint64_t distance = 0;
+    for (uint64_t i = 0; i < num_byte; ++i) {
+        auto diff = static_cast<uint8_t>(x[i] ^ y[i]);
+        while (diff != 0) {
+            diff = static_cast<uint8_t>(diff & (diff - 1U));
+            ++distance;
+        }
+    }
+    return distance;
+}
 }  // namespace vsag

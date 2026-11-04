@@ -146,15 +146,15 @@ TEST_CASE("BinaryQuantizer Encode Decode Compute", "[ut][binary_quantizer]") {
             }
         }
 
-        // Decode reconstructs the original bits as 0.0/1.0 floats.
-        std::vector<float> decoded(count * bits, -1.0F);
-        REQUIRE(quantizer.DecodeBatch(codes.data(), decoded.data(), count));
-        for (uint64_t i = 0; i < count; ++i) {
-            for (uint64_t b = 0; b < bits; ++b) {
-                const auto bit = static_cast<float>((codes[i * num_bytes + b / 8] >> (b % 8)) & 1);
-                REQUIRE(decoded[i * bits + b] == bit);
-            }
-        }
+        // Decode preserves packed bytes so decoded vectors can be encoded again unchanged.
+        std::vector<uint8_t> decoded(count * num_bytes, 0xFFU);
+        REQUIRE(
+            quantizer.DecodeBatch(codes.data(), reinterpret_cast<float*>(decoded.data()), count));
+        REQUIRE(decoded == codes);
+        std::vector<uint8_t> reencoded(count * num_bytes, 0);
+        REQUIRE(quantizer.EncodeBatch(
+            reinterpret_cast<const float*>(decoded.data()), reencoded.data(), count));
+        REQUIRE(reencoded == codes);
     }
 }
 

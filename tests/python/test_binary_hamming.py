@@ -33,7 +33,7 @@ def hamming_matrix(queries: np.ndarray, base: np.ndarray, dim: int) -> np.ndarra
     used_tail_bits = dim % 8
     if used_tail_bits:
         mask = (1 << used_tail_bits) - 1
-        tail = POPCOUNT[(q[:, None, -1] ^ b[None, :, -1]) & ~mask & 0xFF].sum(axis=2)
+        tail = POPCOUNT[(q[:, None, -1] ^ b[None, :, -1]) & ~mask & 0xFF]
         dists = dists - tail
     return dists
 

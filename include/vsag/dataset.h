@@ -253,6 +253,25 @@ public:
     GetInt8Vectors() const = 0;
 
     /**
+     * @brief Sets the bit-packed binary vector array for the dataset.
+     *
+     * Each vector occupies ceil(Dim() / 8) bytes. Unused high bits in the final byte are ignored.
+     *
+     * @param vectors Pointer to the contiguous array of packed binary vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated binary vectors.
+     */
+    virtual DatasetPtr
+    BinaryVectors(const uint8_t* vectors) = 0;
+
+    /**
+     * @brief Retrieves the bit-packed binary vector array of the dataset.
+     *
+     * @return const uint8_t* Pointer to the array of packed binary vectors.
+     */
+    virtual const uint8_t*
+    GetBinaryVectors() const = 0;
+
+    /**
      * @brief Sets the float32 vector array for the dataset.
      *
      * @param vectors Pointer to the array of float32 vectors.

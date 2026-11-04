@@ -43,6 +43,10 @@ make_flatten_data_cell_cosine_half(const FlattenInterfaceParamPtr& param,
                                    const IndexCommonParam& common_param);
 
 FlattenInterfacePtr
+make_flatten_data_cell_hamming(const FlattenInterfaceParamPtr& param,
+                               const IndexCommonParam& common_param);
+
+FlattenInterfacePtr
 MakeFlattenDataCell(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
     const bool half = common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
                       common_param.data_type_ == DataTypes::DATA_TYPE_BF16;
@@ -57,6 +61,9 @@ MakeFlattenDataCell(const FlattenInterfaceParamPtr& param, const IndexCommonPara
     if (common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
         return half ? make_flatten_data_cell_cosine_half(param, common_param)
                     : make_flatten_data_cell_cosine(param, common_param);
+    }
+    if (common_param.metric_ == MetricType::METRIC_TYPE_HAMMING) {
+        return make_flatten_data_cell_hamming(param, common_param);
     }
     return nullptr;
 }

@@ -507,6 +507,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             ids, [this](const int64_t* values) { allocator_->Deallocate(void_ptr(values)); });
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetBinaryVectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
@@ -546,6 +547,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         release_int64_metadata(ids, [](const int64_t* values) { delete[] values; });
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetBinaryVectors();
         delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
@@ -620,6 +622,10 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetInt8Vectors() != nullptr) {
         copy_dataset->Int8Vectors(
             allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetBinaryVectors() != nullptr) {
+        copy_dataset->BinaryVectors(allocate_and_copy(
+            this->GetBinaryVectors(), num_elements * ((dim + 7) / 8), allocator_ref));
     }
     if (this->GetFloat32Vectors() != nullptr) {
         copy_dataset->Float32Vectors(
@@ -944,6 +950,7 @@ DatasetImpl::Append(const DatasetPtr& other) {
     APPEND_DATA(IDS, int64_t*, Ids, 1);
     APPEND_DATA(DISTS, float*, Distances, dim);
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
+    APPEND_DATA(BINARY_VECTORS, uint8_t*, BinaryVectors, (dim + 7) / 8);
     APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
     APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);
