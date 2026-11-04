@@ -78,7 +78,6 @@ def test_build_term_vocabulary_rejects_non_mapping_documents():
 def test_term_weights_to_csr_builds_expected_arrays():
     documents = [
         {"search": 0.5, "vector": 1.0},
-        {},
         {"index": 0.75},
     ]
     vocabulary = build_term_vocabulary(documents)
@@ -89,7 +88,7 @@ def test_term_weights_to_csr_builds_expected_arrays():
     assert index_pointers.dtype == np.uint32
     assert indices.dtype == np.uint32
     assert values.dtype == np.float32
-    assert index_pointers.tolist() == [0, 2, 2, 3]
+    assert index_pointers.tolist() == [0, 2, 3]
     assert indices.tolist() == [1, 2, 0]
     np.testing.assert_allclose(values, [0.5, 1.0, 0.75])
     assert index_pointers.shape == (len(documents) + 1,)
@@ -119,15 +118,16 @@ def test_term_weights_to_csr_empty_input():
     assert values.dtype == np.float32
 
 
-def test_term_weights_to_csr_keeps_repeated_empty_rows():
-    vocabulary = {"term": 0}
-    index_pointers, indices, values = term_weights_to_csr(
-        [{}, {"term": 1.0}, {}], vocabulary
-    )
+def test_term_weights_to_csr_rejects_empty_documents():
+    vocabulary = {"term": 0, "other": 1}
+    with pytest.raises(ValueError, match="empty"):
+        term_weights_to_csr([{}, {"term": 1.0}], vocabulary)
 
-    assert index_pointers.tolist() == [0, 0, 1, 1]
-    assert indices.tolist() == [0]
-    np.testing.assert_allclose(values, [1.0])
+
+def test_term_weights_to_csr_rejects_duplicate_vocab_ids():
+    vocabulary = {"a": 0, "b": 0}
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        term_weights_to_csr([{"a": 1.0, "b": 2.0}], vocabulary)
 
 
 def test_term_weights_to_csr_accepts_generator_documents():
