@@ -706,6 +706,15 @@ float
 BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
+    if (not is_multi_vector_ and data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+        const auto* vectors = query->GetBinaryVectors();
+        CHECK_ARGUMENT(vectors != nullptr, "distance query must contain binary vectors");
+        return this->CalcDistanceById(
+            reinterpret_cast<const float*>(vectors), id, calculate_precise_distance);
+    }
     if (not is_multi_vector_) {
         return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
     }
@@ -1163,8 +1172,9 @@ BruteForce::InitFeatures() {
                  IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
                  IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
         }
-        if (name == QUANTIZATION_TYPE_VALUE_FP32 and
-            (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
+        if (name == QUANTIZATION_TYPE_VALUE_BINARY or
+            (name == QUANTIZATION_TYPE_VALUE_FP32 and
+             (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds()))) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }
     }
