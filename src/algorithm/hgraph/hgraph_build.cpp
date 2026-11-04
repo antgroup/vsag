@@ -158,10 +158,10 @@ HGraph::sample_train_dataset(const DatasetPtr& base) const {
     int64_t dim = base->GetDim();
     if (rabitq_fused_datacell_ != nullptr) {
         return vsag::sample_train_data(
-            base, total_elements, dim, train_sample_count_, allocator_, 0x52425131U, data_type_);
+            base, total_elements, dim, train_sample_count_, data_type_, allocator_, 0x52425131U);
     }
     return vsag::sample_train_data(
-        base, total_elements, dim, train_sample_count_, allocator_, std::nullopt, data_type_);
+        base, total_elements, dim, train_sample_count_, data_type_, allocator_, std::nullopt);
 }
 
 void
@@ -1498,6 +1498,7 @@ HGraph::InitFeatures() {
     const bool no_train_terminal = terminal_name == QUANTIZATION_TYPE_VALUE_FP32 or
                                    terminal_name == QUANTIZATION_TYPE_VALUE_BF16 or
                                    terminal_name == QUANTIZATION_TYPE_VALUE_FP16 or
+                                   terminal_name == QUANTIZATION_TYPE_VALUE_BINARY or
                                    terminal_name == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL or
                                    terminal_name == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL;
     if (not no_train_terminal) {
