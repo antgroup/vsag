@@ -15,8 +15,27 @@ import subprocess
 import tarfile
 import tempfile
 
-from run_mixed_cpu_acceptance import sha, write_json, percentile
+from run_mixed_cpu_acceptance import sha, write_json, percentile, clean_environment
 from run_pinned_full_acceptance import validate_fresh_receipt
+
+
+def quality_environment():
+    env = clean_environment()
+    env['VSAG_FULL_PROFILE'] = 'small'
+    return env
+
+
+def validate_quality_library(binary, library, expected, env, full):
+    linkage = subprocess.check_output(['ldd', str(binary)], env=env, text=True)
+    soname = 'libvsag.so' if full else 'libvsag-lite.so'
+    matches = [line.split('=>', 1)[1].rsplit(' (', 1)[0].strip()
+               for line in linkage.splitlines() if '=>' in line and
+               (line.strip().split()[0].startswith(soname) if full else
+                line.strip().split()[0] == soname)]
+    if len(matches) != 1 or Path(matches[0]).resolve() != library.resolve() or sha(library) != expected:
+        raise ValueError('Quality consumer is not linked to the pinned ' + soname)
+    return dict(library_path=str(library.resolve()), loader_path=matches[0], library_sha256=expected,
+                binary_sha256=sha(binary)), linkage
 
 
 def audit_query(prefix, truths, begin, end, count=10000):
@@ -73,22 +92,22 @@ def main():
     paths += [root / name for name in ['query_fixed_snapshot.cpp', 'prepare_gist.cpp']]
     for path in paths:
         assert path.is_file() and path.stat().st_size > 0, 'Missing or empty input: ' + str(path)
-    for tool in ['git', 'c++', 'taskset']:
+    for tool in ['git', 'c++', 'taskset', 'ldd']:
         assert shutil.which(tool), 'Missing required tool: ' + tool
     assert Path('/dev/shm').is_dir() and os.access('/dev/shm', os.W_OK | os.X_OK), 'Writable /dev/shm is required'
     receipt_path = args.full_receipt
     receipt = json.loads(receipt_path.read_text())
     validate_fresh_receipt(receipt, expected, full)
     assert sha(full/'lib/libvsag.so') == receipt['library_sha256']
-    assert sha(lite_build/'libvsag-lite.so') == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
+    lite_library_hash = sha(lite_build/'libvsag-lite.so')
+    assert lite_library_hash == '3171d0d7e86866f02096db130f1937eb13c5115cbe993d4a6feb2e9987774330'
     assert subprocess.check_output(['git','rev-parse','HEAD'],cwd=feature,text=True).strip() == expected
     assert not subprocess.check_output(['git','status','--porcelain','-uno'],cwd=feature)
     sources = {name: subprocess.check_output(
         ['git', 'show', ref + ':lite/benchmark/' + name], cwd=source)
         for name in ['graph_crud_quality.cpp', 'full_rabitq_dataset_main.cpp']}
     output.mkdir(parents=True, exist_ok=False)
-    env = {k:v for k,v in os.environ.items() if not k.startswith('VSAG_')}
-    env.update(OMP_NUM_THREADS='1',OPENBLAS_NUM_THREADS='1',MKL_NUM_THREADS='1',VSAG_FULL_PROFILE='small')
+    env = quality_environment()
     commands = []
     def run(tag, argv):
         with (output/(tag+'.stdout')).open('w') as stdout, (output/(tag+'.stderr')).open('w') as stderr:
@@ -99,6 +118,7 @@ def main():
     grid = [128,256,512,1024,2048,4096]
     target = .990
     write_json(output/'protocol.json',dict(grid=grid,target=target,calibration=[0,100],heldout=[100,1000],
+        runtime_libraries_required=True, lite_library_sha256=lite_library_hash,
         degree=16,build_ef=128,trials=3,source_head=expected,full_receipt=receipt,
         cpp_sha256=sha(root/'query_fixed_snapshot.cpp'),runner_sha256=sha(Path(__file__)),
         warmup='one entire cohort before measured pass; no output IO inside measured phase',
@@ -131,6 +151,7 @@ def main():
             values = struct.unpack_from('<11i',truth_data,row*44)
             assert values[0] == 10 and len(set(values[1:])) == 10
             truths.append(set(values[1:]))
+        runtime_libraries = {}
         for side in ['lite','full']:
             prefix = full if side == 'full' else feature
             lib = full/'lib' if side == 'full' else lite_build
@@ -138,6 +159,16 @@ def main():
             link = '-lvsag' if side == 'full' else '-lvsag-lite'
             run('compile-'+side+'-builder',flags+[scratch/('full_rabitq_dataset_main.cpp' if side=='full' else 'graph_crud_quality.cpp'),link,'-o',scratch/(side+'-builder')])
             run('compile-'+side+'-query',flags+(['-DVSAG_BENCH_FULL'] if side=='full' else [])+[root/'query_fixed_snapshot.cpp',link,'-o',scratch/(side+'-query')])
+            library = lib / ('libvsag.so' if side == 'full' else 'libvsag-lite.so')
+            expected_library = receipt['library_sha256'] if side == 'full' else lite_library_hash
+            for role in ['builder', 'query']:
+                tag = side + '-' + role
+                record, linkage = validate_quality_library(
+                    scratch / tag, library, expected_library, env, side == 'full')
+                record['ldd_file'] = tag + '.ldd.txt'
+                (output / record['ldd_file']).write_text(linkage)
+                runtime_libraries[tag] = record
+            write_json(output / 'runtime-libraries.json', runtime_libraries)
         rows = []
         snapshots = {}
         for storage in ['fp32','fp16','rabitq8']:

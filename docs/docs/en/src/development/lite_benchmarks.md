@@ -173,6 +173,9 @@ paths, then run the package verifier on the unpacked `package` directory.
 `quality_target_fp64.cpp` / `check_quality_target_oracle.py` provide an independent
 FP64 check outside timed runs. Fixed-snapshot quality calibration requires
 explicit inputs and Full receipts; it is not a contractual acceptance threshold.
+That calibration clears inherited dynamic-loader overrides and checks both Lite
+and Full builders/query consumers against their pinned libraries before timing.
+New records include manifest-bound linkage receipts for offline verification.
 
 ## Interpreting stability and resources
 
@@ -187,6 +190,13 @@ cannot cancel it or prove zero fragmentation, independent index peak or unlimite
 stability. Input/oracle/measurement buffers and allocator-retained pages remain
 in process RSS; getrusage high water can include launcher history. Do not backfill
 new VmHWM fields into existing records. Warm Load is not strict cold start.
+
+For the synthetic `main.cpp` stability CSV, `resident_rss_kib` is sampled after
+CRUD/search and before Save/Load; `peak_rss_kib` is sampled later and is the
+process-lifetime high water. Subtracting two high waters is not a per-round peak.
+These fields are retained for compatibility and are distinct from the real-data
+resident protocol's resources. SIFT preparation uses one N-by-dimension buffer
+per query; bounded subsets are required rather than unbounded dataset preparation.
 
 ## Tool responsibilities
 

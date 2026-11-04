@@ -1,6 +1,7 @@
 # Copyright 2024-present the vsag project
 # SPDX-License-Identifier: Apache-2.0
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,6 +15,85 @@ from verify_quality_target import quantile, verify
 
 
 class QualityTargetTests(unittest.TestCase):
+    def test_quality_environment_removes_loader_overrides(self):
+        contaminated = dict(LD_LIBRARY_PATH='/foreign', LD_PRELOAD='/foreign/preload.so',
+                            LD_AUDIT='/foreign/audit.so', LD_DEBUG='all', VSAG_STALE='old',
+                            OMP_NUM_THREADS='8', OPENBLAS_NUM_THREADS='8', MKL_NUM_THREADS='8')
+        with mock.patch.dict(os.environ, contaminated):
+            env = run_quality_target.quality_environment()
+        for name in contaminated:
+            if name.endswith('NUM_THREADS'):
+                self.assertEqual(env[name], '1')
+            else:
+                self.assertNotIn(name, env)
+        self.assertEqual(env['VSAG_FULL_PROFILE'], 'small')
+
+    def test_real_loader_substitution_is_rejected_for_lite_and_full(self):
+        with tempfile.TemporaryDirectory(dir='/dev/shm') as directory:
+            root = Path(directory)
+            wanted, foreign = root / 'wanted', root / 'foreign'
+            wanted.mkdir()
+            foreign.mkdir()
+            for full, name in [(False, 'libvsag-lite.so'), (True, 'libvsag.so')]:
+                with self.subTest(full=full):
+                    for folder, marker in [(wanted, 7), (foreign, 19)]:
+                        subprocess.run(['c++', '-shared', '-fPIC', '-x', 'c++', '-', '-o',
+                                        str(folder / name)], input='extern "C" int marker(){return ' + str(marker) + ';}',
+                                       text=True, check=True, capture_output=True)
+                    binary = root / ('full-probe' if full else 'lite-probe')
+                    subprocess.run(['c++', '-x', 'c++', '-', '-L' + str(wanted),
+                                    '-Wl,-rpath,' + str(wanted), '-lvsag' if full else '-lvsag-lite',
+                                    '-o', str(binary)], input='extern "C" int marker(); int main(){return marker()==7?0:19;}',
+                                   text=True, check=True, capture_output=True)
+                    dirty = dict(os.environ, LD_LIBRARY_PATH=str(foreign))
+                    for variable in ['LD_PRELOAD', 'LD_AUDIT', 'LD_DEBUG']:
+                        dirty.pop(variable, None)
+                    self.assertEqual(subprocess.run([str(binary)], env=dirty).returncode, 19)
+                    digest = run_quality_target.sha(wanted / name)
+                    with self.assertRaises(ValueError):
+                        run_quality_target.validate_quality_library(binary, wanted / name, digest, dirty, full)
+                    with mock.patch.dict(os.environ, {'LD_LIBRARY_PATH': str(foreign)}):
+                        clean = run_quality_target.quality_environment()
+                    self.assertEqual(subprocess.run([str(binary)], env=clean).returncode, 0)
+                    record, linkage = run_quality_target.validate_quality_library(
+                        binary, wanted / name, digest, clean, full)
+                    self.assertEqual(record['library_sha256'], digest)
+                    self.assertEqual(record['library_path'], str((wanted / name).resolve()))
+                    self.assertIn(str(wanted / name), linkage)
+                    with self.assertRaises(ValueError):
+                        run_quality_target.validate_quality_library(binary, wanted / name, '0' * 64, clean, full)
+
+    def test_offline_runtime_library_receipts_are_bound(self):
+        import verify_quality_target
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            protocol = dict(runtime_libraries_required=True, lite_library_sha256='a' * 64,
+                            full_receipt=dict(library_sha256='b' * 64))
+            with self.assertRaises(AssertionError):
+                verify_quality_target.verify_runtime_libraries(root, protocol, {})
+            records, manifest = {}, {}
+            for side in ['lite', 'full']:
+                for role in ['builder', 'query']:
+                    name = side + '-' + role
+                    filename = name + '.ldd.txt'
+                    soname = 'libvsag-lite.so' if side == 'lite' else 'libvsag.so'
+                    path = '/expected/' + soname
+                    (root / filename).write_text(soname + ' => ' + path + ' (0x123)\n')
+                    manifest[filename] = run_quality_target.sha(root / filename)
+                    records[name] = dict(library_path=path, loader_path=path, library_sha256=('a' if side == 'lite' else 'b') * 64,
+                                         binary_sha256='c' * 64, ldd_file=filename)
+            receipt = root / 'runtime-libraries.json'
+            receipt.write_text(json.dumps(records))
+            manifest[receipt.name] = run_quality_target.sha(receipt)
+            verify_quality_target.verify_runtime_libraries(root, protocol, manifest)
+            with mock.patch.object(Path, 'resolve', side_effect=AssertionError('Original SDK is unavailable offline')):
+                verify_quality_target.verify_runtime_libraries(root, protocol, manifest)
+            records['lite-query']['library_sha256'] = 'd' * 64
+            receipt.write_text(json.dumps(records))
+            manifest[receipt.name] = run_quality_target.sha(receipt)
+            with self.assertRaises(AssertionError):
+                verify_quality_target.verify_runtime_libraries(root, protocol, manifest)
+
     def test_independent_oracle_preserves_existing_results(self):
         import check_quality_target_oracle
         for name in ['fp64-neighbors.csv', 'fp64-oracle.json']:

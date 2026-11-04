@@ -18,6 +18,31 @@ def quantile(values, fraction):
     return ordered[max(1, math.ceil(len(values)*fraction))-1]
 
 
+def verify_runtime_libraries(output, protocol, manifest):
+    path = output / 'runtime-libraries.json'
+    assert path.name in manifest and sha(path) == manifest[path.name]
+    records = json.loads(path.read_text())
+    assert set(records) == {side + '-' + role for side in ['lite', 'full']
+                            for role in ['builder', 'query']}
+    for name, record in records.items():
+        full = name.startswith('full-')
+        expected = protocol['full_receipt']['library_sha256'] if full else protocol['lite_library_sha256']
+        assert record['library_sha256'] == expected
+        assert len(record['binary_sha256']) == 64 and all(c in '0123456789abcdef' for c in record['binary_sha256'])
+        filename = name + '.ldd.txt'
+        assert record['ldd_file'] == filename and filename in manifest
+        assert sha(output / filename) == manifest[filename]
+        soname = 'libvsag.so' if full else 'libvsag-lite.so'
+        matches = [line.split('=>', 1)[1].rsplit(' (', 1)[0].strip()
+                   for line in (output / filename).read_text().splitlines() if '=>' in line and
+                   (line.strip().split()[0].startswith(soname) if full else
+                    line.strip().split()[0] == soname)]
+        # The original SDK may not exist on an offline verifier's machine.
+        # Runtime checked canonical resolution; offline checks its bound record.
+        assert Path(record['library_path']).is_absolute() and Path(record['loader_path']).is_absolute()
+        assert matches == [record['loader_path']]
+
+
 def verify(output, dataset=None):
     protocol = json.loads((output/'protocol.json').read_text())
     manifest = json.loads((output/'manifest.json').read_text())
@@ -27,6 +52,9 @@ def verify(output, dataset=None):
         assert sha(output/'source-query_fixed_snapshot.cpp') == protocol['cpp_sha256']
 
     for name, digest in manifest.items(): assert sha(output/name) == digest, name
+    # Original archives remain valid; new runs require all four linkage receipts.
+    if protocol.get('runtime_libraries_required'):
+        verify_runtime_libraries(output, protocol, manifest)
     dataset = dataset or output/'dataset/scale-10000'
     for name, record in json.loads((output/'dataset-receipt.json').read_text()).items():
         assert sha(dataset/name) == record['sha256'] and (dataset/name).stat().st_size == record['bytes']
