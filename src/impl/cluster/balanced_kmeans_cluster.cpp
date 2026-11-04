@@ -113,14 +113,15 @@ private:
 
 /// Runs `func(task)` for every task on the pool and waits for all of them before
 /// rethrowing the first failure, so no task outlives the state it references. A
-/// null pool runs the tasks on the calling thread.
+/// null pool runs the tasks on the calling thread, and so does a worker of the pool:
+/// joining from a worker could wait for workers that are all doing the same.
 template <typename Func>
 void
 parallel_for(const SafeThreadPoolPtr& pool, uint64_t task_count, const Func& func) {
     if (task_count == 0) {
         return;
     }
-    if (task_count == 1 or pool == nullptr) {
+    if (task_count == 1 or pool == nullptr or pool->IsCurrentThread()) {
         for (uint64_t task = 0; task < task_count; ++task) {
             func(task);
         }
