@@ -245,16 +245,7 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     // map
     auto inner_json = map_hgraph_param(hgraph_json);
     if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
-        if (not hgraph_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE)) {
-            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
-                QUANTIZATION_TYPE_VALUE_BINARY);
-        }
-        if (not hgraph_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE)) {
-            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
-                QUANTIZATION_TYPE_VALUE_BINARY);
-        }
-        inner_json[RAW_VECTOR_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
-            QUANTIZATION_TYPE_VALUE_BINARY);
+        ApplyBinaryQuantizationDefaults(hgraph_json, inner_json);
     }
     ValidateMRLEDim(hgraph_json, this->dim_);
     const bool requires_raw_vector = RequiresRawVectorForMRLERaBitQSplit(inner_json);

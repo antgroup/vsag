@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
+#include <cmath>
 #include <cstring>
 #include <numeric>
 #include <sstream>
@@ -103,8 +104,8 @@ TEST_CASE("(PR) HGraph Binary Hamming Build Search Add Remove Serialize",
     REQUIRE(brute->Build(build_dataset).has_value());
 
     const std::vector<int64_t> retrieved_ids = {0, 7, count - 1};
-    auto retrieved = brute->GetDataByIds(retrieved_ids.data(),
-                                         static_cast<int64_t>(retrieved_ids.size()));
+    auto retrieved =
+        brute->GetDataByIds(retrieved_ids.data(), static_cast<int64_t>(retrieved_ids.size()));
     REQUIRE(retrieved.has_value());
     REQUIRE(retrieved.value()->GetFloat32Vectors() == nullptr);
     REQUIRE(retrieved.value()->GetBinaryVectors() != nullptr);
@@ -372,6 +373,105 @@ TEST_CASE("(PR) HGraph Binary Raw Store Follows Forced Updates", "[ft][hgraph][p
     REQUIRE(raw.has_value());
     REQUIRE(raw.value()->GetBinaryVectors() != nullptr);
     REQUIRE(std::memcmp(replacement.data(), raw.value()->GetBinaryVectors(), num_bytes) == 0);
+
+    auto tuned = index->Tune(R"({"index_param":{"use_reorder":true}})");
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value());
+    replacement[0] ^= 0x02U;
+    updated = index->UpdateVector(update_id[0], MakeDataset(replacement, update_id, dim), true);
+    REQUIRE(updated.has_value());
+    REQUIRE(updated.value());
+    raw = index->GetRawVectorByIds(update_id.data(), 1);
+    REQUIRE(raw.has_value());
+    REQUIRE(raw.value()->GetBinaryVectors() != nullptr);
+    REQUIRE(std::memcmp(replacement.data(), raw.value()->GetBinaryVectors(), num_bytes) == 0);
+
+    // Reorder also exercises binary base/precise distances in the analyzer.
+    REQUIRE_NOTHROW(index->GetStats());
+}
+
+TEST_CASE("(PR) Float HGraph SQ8 Training Ignores Auxiliary Binary Storage", "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 1024;
+    const std::string params = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "index_param": {
+            "base_quantization_type": "sq8",
+            "train_sample_count": 512
+        }
+    })";
+    std::vector<float> vectors(count * dim);
+    for (int64_t i = 0; i < count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = static_cast<float>((i * 17 + d * 31) % 101) / 10.0F;
+        }
+    }
+    auto auxiliary_binary = GeneratePacked(count, dim, 9753);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto mixed_dataset = vsag::Dataset::Make()
+                             ->NumElements(count)
+                             ->Dim(dim)
+                             ->Ids(ids.data())
+                             ->Float32Vectors(vectors.data())
+                             ->BinaryVectors(auxiliary_binary.data())
+                             ->Owner(false);
+    auto index_made = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(mixed_dataset).has_value());
+
+    constexpr int64_t query_id = 17;
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->Float32Vectors(vectors.data() + query_id * dim)
+                     ->Owner(false);
+    auto base_distance = index->CalcDistanceById(query, query_id, false);
+    REQUIRE(base_distance.has_value());
+    // Untrained SQ8 bounds produce a non-finite distance here; trained bounds must not.
+    REQUIRE(std::isfinite(base_distance.value()));
+    REQUIRE(base_distance.value() >= 0.0F);
+}
+
+TEST_CASE("(PR) Binary HGraph Analysis Uses Packed Queries", "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 65;
+    constexpr int64_t count = 32;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65,
+        "index_param": {}
+    })";
+    auto base_data = GeneratePacked(count, dim, 8642);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto index_made = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+    REQUIRE(index->CheckFeature(vsag::IndexFeature::SUPPORT_GET_STATS));
+
+    std::string stats;
+    REQUIRE_NOTHROW(stats = index->GetStats());
+    REQUIRE_FALSE(stats.empty());
+
+    auto queries = vsag::Dataset::Make()
+                       ->NumElements(4)
+                       ->Dim(dim)
+                       ->BinaryVectors(base_data.data())
+                       ->Owner(false);
+    vsag::SearchRequest request;
+    request.query_ = queries;
+    request.topk_ = 4;
+    request.params_str_ = R"({"hgraph":{"ef_search":32}})";
+    std::string analysis;
+    REQUIRE_NOTHROW(analysis = index->AnalyzeIndexBySearch(request));
+    REQUIRE_FALSE(analysis.empty());
 }
 
 TEST_CASE("(PR) Binary HGraph Rejects MCI During Validation", "[ft][hgraph][pr]") {
