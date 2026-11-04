@@ -43,9 +43,9 @@ ones. Oversized buckets raise search latency and weaken partition pruning.
 `balanced_kmeans` keeps the same squared-L2 objective and mean centroid update
 as `kmeans`, but every assignment step is capacity-constrained: with `n`
 training vectors and `buckets_count` clusters, each final cluster holds either
-`floor(n / k)` or `ceil(n / k)` vectors. The guarantee extends to the initial
-bucket assignment of `Build`, so the stored buckets inherit the balance, and no
-cluster is ever empty as long as `1 <= k <= n`.
+`floor(n / k)` or `ceil(n / k)` vectors. With `buckets_per_data: 1`, the guarantee
+extends to the initial bucket assignment of `Build`, so the stored buckets inherit
+the balance, and no cluster is empty when balancing applies with `1 <= k <= n`.
 
 How it works, per iteration:
 
@@ -88,8 +88,48 @@ Notes:
   training or the balanced initial assignment.
 - Results are deterministic for a given input and seed, independent of the
   thread count.
+- Initial `Build` assignment is balanced only with `buckets_per_data: 1`. Other
+  values use ordinary nearest-centroid routing; balanced centroid training still
+  applies.
 - Compare balance, loss, time, and memory yourself with the reproducible
   `cluster_balance_bench` tool (`tools/cluster_balance_bench`).
+
+#### Benchmark tool
+
+`cluster_balance_bench` trains `KMeansCluster` and `BalancedKMeansCluster` on
+seeded synthetic datasets: uniform, deliberately skewed, a skewed set whose size
+is not divisible by `k`, and a duplicated-vector set. For each trainer and
+dataset it reports:
+
+- minimum, maximum, and mean cluster size, size standard deviation, and
+  coefficient of variation;
+- clustering loss (mean squared distance from each vector to its assigned
+  centroid, recomputed from the returned labels with the same yardstick for both
+  trainers);
+- training time; and
+- peak memory allocated by the trainer beyond the dataset, measured through a
+  recording allocator, with a dense `n × k` float distance matrix shown for
+  reference.
+
+On Linux, build the tool with `ENABLE_TOOLS=ON` and `ENABLE_CXX11_ABI=ON`:
+
+```bash
+make release EXTRA_DEFINED="-DENABLE_TOOLS=ON -DENABLE_CXX11_ABI=ON"
+# Or build just this target in an existing configured build directory:
+cmake --build <build-dir> --target cluster_balance_bench
+```
+
+Usage:
+
+```text
+cluster_balance_bench [--dataset all|uniform|skewed|indivisible|duplicates]
+                      [--n 50000] [--dim 64] [--k 256] [--iter 25]
+                      [--seed 42] [--threads N]
+```
+
+Every run is fully seeded, including deterministic plain-k-means reductions.
+Repeated invocations with the same arguments reproduce the cluster assignments,
+centroids, and clustering loss; elapsed time can vary.
 
 ## Quick start
 

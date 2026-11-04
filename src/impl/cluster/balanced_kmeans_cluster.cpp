@@ -278,8 +278,7 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
         Vector<uint32_t> best_id(c, 0U, allocator_);
         for (uint64_t i = begin; i < end; ++i) {
             const float* x = datas + i * static_cast<uint64_t>(dim_);
-            std::fill(
-                best_dist.begin(), best_dist.end(), std::numeric_limits<float>::infinity());
+            std::fill(best_dist.begin(), best_dist.end(), std::numeric_limits<float>::infinity());
             std::fill(best_id.begin(), best_id.end(), 0U);
             for (uint32_t j = 0; j < k; ++j) {
                 const float dist =

@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <new>
 #include <numeric>
 #include <random>
 #include <thread>
@@ -416,8 +417,7 @@ TEST_CASE("BalancedKMeans Assign balances fixed centroids", "[ut][BalancedKMeans
     REQUIRE(cluster.Stats().max_cluster_size == 1);
 }
 
-TEST_CASE("BalancedKMeans cosine assignment normalizes input rows",
-          "[ut][BalancedKMeansCluster]") {
+TEST_CASE("BalancedKMeans cosine assignment normalizes input rows", "[ut][BalancedKMeansCluster]") {
     constexpr uint32_t k = 2;
     constexpr int32_t dim = 2;
     const std::vector<float> centroids = {1.0F, 0.0F, 0.0F, 1.0F};
@@ -443,18 +443,13 @@ TEST_CASE("BalancedKMeans saturated distances still use available seats",
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::BalancedKMeansCluster cluster(dim, allocator.get());
 
-    const auto labels = cluster.Assign(k,
-                                       centroids.data(),
-                                       data.data(),
-                                       2,
-                                       vsag::MetricType::METRIC_TYPE_L2SQR,
-                                       candidates);
+    const auto labels = cluster.Assign(
+        k, centroids.data(), data.data(), 2, vsag::MetricType::METRIC_TYPE_L2SQR, candidates);
     REQUIRE(labels[0] != labels[1]);
     require_exact_balance(cluster_sizes(labels, k), 2, k);
 }
 
-TEST_CASE("BalancedKMeans propagates candidate worker exceptions",
-          "[ut][BalancedKMeansCluster]") {
+TEST_CASE("BalancedKMeans propagates candidate worker exceptions", "[ut][BalancedKMeansCluster]") {
     constexpr uint32_t k = 2;
     constexpr int32_t dim = 1;
     constexpr uint64_t count = 2048;  // More than one candidate-scan block.
