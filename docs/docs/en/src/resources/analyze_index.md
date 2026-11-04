@@ -29,7 +29,8 @@ exposed through `GetStats()` rather than through `AnalyzeIndexBySearch`.
 
 ### Common output contract
 
-Every successful static or dynamic analysis returns a JSON object with an `_analysis` member:
+Except for SIMQ's currently empty dynamic result described below, every successful static or
+dynamic analysis returns a JSON object with an `_analysis` member:
 
 ```json
 {
@@ -56,10 +57,12 @@ string `skipped_reason`; the common metadata layer mirrors that reason into
 `_analysis.skipped`. Consumers should rely on `_analysis.skipped`, while `skipped_reason` remains
 an index-specific compatibility detail.
 
-`BruteForce` and `WARP` provide exact-search baseline counts and latency. `SINDI_V2` and `SIMQ`
-provide baseline counts and query latency while index-specific quality metrics are reported as
-skipped. `LazyHGraph` delegates to its active BruteForce or HGraph backend and adds its current
-`phase` and `transition_threshold`; its reported `index_type` remains `lazy_hgraph`.
+`BruteForce` and `WARP` provide exact-search baseline counts and latency. `SINDI_V2` provides
+baseline counts and query latency while index-specific quality metrics are reported as skipped.
+`SIMQ` currently returns an empty dynamic result object without consuming the query request, so it
+provides no query metrics. `LazyHGraph` delegates to its active BruteForce or HGraph backend and
+adds its current `phase` and `transition_threshold`; its reported `index_type` remains
+`lazy_hgraph`.
 
 Analysis is synchronous and intended for offline diagnostics. It can scan substantial parts of an
 index and specialized analyzers may compute exact ground truth. Analysis never changes search or
@@ -365,7 +368,9 @@ indexes in this release provide both features:
 | `hgraph`, `lazy_hgraph` | Yes | Yes | Graph health metrics are reported through `GetStats()`. |
 | `ivf` | Yes | Yes | Quantization fields appear when reorder is enabled. |
 | `pyramid` | Yes | Yes (KNN only) | Path-scoped queries cannot be expressed through the CLI; use the C++ API to attach paths. |
-| `sindi`, `sindi_v2`, `simq` | Yes | Yes | Sparse indexes; pass `base_path`/`groundtruth_path` for recall and bias metrics. |
+| `sindi` | Yes | Yes | Sparse index; pass `base_path`/`groundtruth_path` for recall and bias metrics. |
+| `sindi_v2` | Yes | Yes | Sparse index; dynamic analysis reports baseline counts and query latency, with index-specific quality metrics skipped. The SINDI recall/bias workflow does not apply. |
+| `simq` | Yes | Yes (no metrics) | Dense float32 multi-vector index using inner product. Dynamic analysis currently returns `{}` without consuming the request; `base_path` and `groundtruth_path` do not produce recall, bias, or other query metrics. |
 | `brute_force`, `warp` | Yes | Yes | Exact-search baseline. |
 
 Serialized index input: a file produced by `Index::Serialize(std::ostream&)` /
@@ -375,9 +380,10 @@ partial data.
 
 Query dataset inputs:
 
-- Dense: `uint32 rows, uint32 cols, float32 data[rows * cols]`.
+- Dense: `uint32 rows, uint32 cols, float32 data[rows * cols]`; `rows` must be `1` for analyzer
+  query input.
 - Sparse CSR: `int64 nrow, int64 ncol, int64 nnz`, followed by `int64 indptr[nrow + 1]`,
-  `int32 indices[nnz]` and `float32 data[nnz]`.
+  `int32 indices[nnz]` and `float32 data[nnz]`; `nrow` must be `1` for analyzer query input.
 - SINDI ground truth: `.dev.gt` layout — `uint32 query_count, uint32 topk`, followed by
   flattened `int32 ids` and `float32 distances`.
 
@@ -401,7 +407,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **Yes** | Path to the serialized VSAG index file. |
 | `--build_parameter` | `-bp` | No | Build parameters (JSON) used when reloading the index. Defaults to the parameters embedded in the index file. |
-| `--query_path` | `-qp` | No | Binary query vector dataset path. This is not Pyramid hierarchy-path metadata. If omitted, only static analysis is performed. |
+| `--query_path` | `-qp` | No | Binary single-row query vector dataset path. Multi-row dense and sparse query files are rejected. This is not Pyramid hierarchy-path metadata. If omitted, only static analysis is performed. |
 | `--query_data_type` | | No | Query dataset type: `auto`, `dense`, or `sparse`. `auto` uses sparse loading for SINDI. |
 | `--base_path` | | No | Optional sparse CSR base dataset for SINDI analysis and ground-truth generation. |
 | `--groundtruth_path` | | No | Optional SINDI `.dev.gt` ground-truth file. If present, it is reused. |

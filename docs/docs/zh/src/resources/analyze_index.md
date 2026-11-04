@@ -27,7 +27,8 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 
 ### 公共输出契约
 
-每次成功的静态或动态分析都会返回 JSON 对象，并包含 `_analysis` 成员：
+除下文所述 SIMQ 当前返回空动态结果外，每次成功的静态或动态分析都会返回 JSON 对象，并包含
+`_analysis` 成员：
 
 ```json
 {
@@ -52,9 +53,10 @@ AnalyzeIndexBySearch(const SearchRequest& request);
 `_analysis.skipped`。使用方应以 `_analysis.skipped` 为准，而将 `skipped_reason` 视为索引专属的
 兼容性细节。
 
-`BruteForce` 与 `WARP` 提供精确搜索基线计数及耗时；`SINDI_V2` 与 `SIMQ` 提供基线计数和
-查询耗时，并将尚无真值的专属质量指标标记为 skipped。`LazyHGraph` 委托当前 BruteForce 或
-HGraph 后端，并追加 `phase` 与 `transition_threshold`；其 `index_type` 始终为 `lazy_hgraph`。
+`BruteForce` 与 `WARP` 提供精确搜索基线计数及耗时；`SINDI_V2` 提供基线计数和查询耗时，
+并将尚无真值的专属质量指标标记为 skipped。`SIMQ` 当前不消费 query 请求，动态分析返回空对象，
+因此不提供任何 query 指标。`LazyHGraph` 委托当前 BruteForce 或 HGraph 后端，并追加 `phase`
+与 `transition_threshold`；其 `index_type` 始终为 `lazy_hgraph`。
 
 Analysis 是同步、面向离线诊断的操作，可能扫描大量索引数据，专用 Analyzer 还可能计算精确
 真值。Analysis 不修改搜索或序列化配置，可与只读 Search 并发执行。除非索引提供更强的加锁
@@ -346,7 +348,9 @@ pyvsag-analyze-index \
 | `hgraph`、`lazy_hgraph` | 支持 | 支持 | 图健康度指标通过 `GetStats()` 输出。 |
 | `ivf` | 支持 | 支持 | 开启 reorder 时包含量化相关字段。 |
 | `pyramid` | 支持 | 支持（仅 KNN） | 命令行无法表达按路径限定的查询；请使用 C++ 接口设置路径。 |
-| `sindi`、`sindi_v2`、`simq` | 支持 | 支持 | 稀疏索引；召回与偏差指标需要 `base_path`/`groundtruth_path`。 |
+| `sindi` | 支持 | 支持 | 稀疏索引；召回与偏差指标需要 `base_path`/`groundtruth_path`。 |
+| `sindi_v2` | 支持 | 支持 | 稀疏索引；动态分析输出基线计数和查询耗时，索引专属质量指标标记为 skipped；不适用 SINDI 的召回/偏差流程。 |
+| `simq` | 支持 | 支持（无指标） | 使用内积的 dense float32 多向量索引。当前动态分析不消费请求并返回 `{}`；`base_path` 与 `groundtruth_path` 不会生成召回、偏差或其他 query 指标。 |
 | `brute_force`、`warp` | 支持 | 支持 | 精确搜索基线。 |
 
 序列化索引输入：由 `Index::Serialize(std::ostream&)` / `pyvsag.Index.save()` 生成、包含 VSAG
@@ -355,9 +359,10 @@ footer metadata 的文件。缺少 metadata 或由不兼容 VSAG 版本写入的
 
 查询数据集输入：
 
-- Dense：`uint32 rows, uint32 cols, float32 data[rows * cols]`。
+- Dense：`uint32 rows, uint32 cols, float32 data[rows * cols]`；作为 analyzer query 输入时
+  `rows` 必须为 `1`。
 - Sparse CSR：`int64 nrow, int64 ncol, int64 nnz`，随后是 `int64 indptr[nrow + 1]`、
-  `int32 indices[nnz]` 与 `float32 data[nnz]`。
+  `int32 indices[nnz]` 与 `float32 data[nnz]`；作为 analyzer query 输入时 `nrow` 必须为 `1`。
 - SINDI 真值集：`.dev.gt` 布局——`uint32 query_count, uint32 topk`，随后是展开后的
   `int32 ids` 与 `float32 distances`。
 
@@ -381,7 +386,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **是** | 待分析的 VSAG 索引文件路径。 |
 | `--build_parameter` | `-bp` | 否 | 加载索引时使用的构建参数（JSON）。默认使用索引文件内嵌的原始参数。 |
-| `--query_path` | `-qp` | 否 | 查询向量数据集的文件路径，不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
+| `--query_path` | `-qp` | 否 | 单行查询向量数据集的文件路径；多行 dense 与 sparse query 文件会被拒绝。该路径不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
 | `--query_data_type` | | 否 | 查询数据类型：`auto`、`dense` 或 `sparse`。`auto` 会对 SINDI 使用 sparse 加载。 |
 | `--base_path` | | 否 | SINDI 分析可选的 sparse CSR 原始 base 数据集路径。 |
 | `--groundtruth_path` | | 否 | SINDI 可选的 `.dev.gt` 真值集路径；提供后直接复用。 |

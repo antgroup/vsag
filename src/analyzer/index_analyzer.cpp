@@ -243,6 +243,13 @@ LoadDenseQuery(const std::string& query_path) {
         throw std::runtime_error(
             fmt::format("query file '{}' has an invalid shape ({} x {})", query_path, rows, cols));
     }
+    if (rows != 1) {
+        throw std::runtime_error(fmt::format(
+            "query file '{}' must contain exactly one query vector (rows=1), got {} rows",
+            query_path,
+            rows));
+    }
+
     const uint64_t num_elements = static_cast<uint64_t>(rows) * cols;
     if (num_elements > std::numeric_limits<uint64_t>::max() / sizeof(float)) {
         throw std::runtime_error(
@@ -285,6 +292,13 @@ LoadSparseQuery(const std::string& query_path) {
                         rows,
                         cols,
                         nnz));
+    }
+    if (rows != 1) {
+        throw std::runtime_error(
+            fmt::format("sparse query file '{}' must contain exactly one query row (nrow=1), got "
+                        "{} rows",
+                        query_path,
+                        rows));
     }
     if (static_cast<uint64_t>(rows) > std::numeric_limits<uint64_t>::max() / sizeof(SparseVector)) {
         throw std::runtime_error(

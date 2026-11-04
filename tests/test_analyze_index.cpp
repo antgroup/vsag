@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdint>
 #include <fstream>
 #include <iterator>
@@ -61,7 +62,7 @@ constexpr const char* kSindiIndexParam = R"({
     "dim": 128,
     "index_param": {
         "term_id_limit": 1000,
-        "window_size": 100,
+        "window_size": 10000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
         "use_reorder": false
@@ -74,7 +75,7 @@ constexpr const char* kSindiV2IndexParam = R"({
     "dim": 128,
     "index_param": {
         "term_id_limit": 1000,
-        "window_size": 100,
+        "window_size": 10000,
         "doc_prune_ratio": 0.0,
         "use_quantization": false,
         "use_reorder": false,
@@ -155,13 +156,18 @@ WriteDenseQueryFile(const std::string& query_path, int64_t rows, int64_t cols) {
 }
 
 void
-WriteSparseQueryFile(const std::string& query_path) {
+WriteSparseQueryFile(const std::string& query_path, int64_t rows) {
     std::ofstream stream(query_path, std::ios::binary | std::ios::out);
     REQUIRE(stream.is_open());
-    const std::vector<int64_t> header{2, 128, 2};
-    const std::vector<int64_t> indptr{0, 1, 2};
-    const std::vector<int32_t> indices{0, 1};
-    const std::vector<float> values{1.0F, 1.0F};
+    const std::vector<int64_t> header{rows, 128, rows};
+    std::vector<int64_t> indptr(static_cast<uint64_t>(rows) + 1);
+    std::vector<int32_t> indices(static_cast<uint64_t>(rows));
+    const std::vector<float> values(static_cast<uint64_t>(rows), 1.0F);
+    for (int64_t row = 0; row < rows; ++row) {
+        indptr[static_cast<uint64_t>(row)] = row;
+        indices[static_cast<uint64_t>(row)] = static_cast<int32_t>(row);
+    }
+    indptr[static_cast<uint64_t>(rows)] = rows;
     stream.write(reinterpret_cast<const char*>(header.data()),
                  static_cast<std::streamsize>(header.size() * sizeof(int64_t)));
     stream.write(reinterpret_cast<const char*>(indptr.data()),
@@ -330,7 +336,7 @@ TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[
     REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
-TEST_CASE("AnalyzeIndex accepts multi-row dense query files", "[analyze_index]") {
+TEST_CASE("AnalyzeIndex rejects multi-row dense query files", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_multi_row_query");
     const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
     const std::string query_path = temp_dir.path + "queries.bin";
@@ -341,17 +347,36 @@ TEST_CASE("AnalyzeIndex accepts multi-row dense query files", "[analyze_index]")
     options.query_path = query_path;
     options.query_data_type = "dense";
 
-    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
-
-    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+    REQUIRE_THROWS_WITH(
+        vsag::AnalyzeIndex(options),
+        Catch::Matchers::ContainsSubstring("must contain exactly one query vector (rows=1)"));
 }
 
-TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]") {
+TEST_CASE("AnalyzeIndex rejects multi-row sparse query files", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_multi_row_sparse_query");
     const std::string index_path =
         SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
     const std::string query_path = temp_dir.path + "queries.bin";
-    WriteSparseQueryFile(query_path);
+    WriteSparseQueryFile(query_path, 2);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiIndexParam;
+    options.query_path = query_path;
+    options.query_data_type = "sparse";
+    options.topk = 2;
+
+    REQUIRE_THROWS_WITH(
+        vsag::AnalyzeIndex(options),
+        Catch::Matchers::ContainsSubstring("must contain exactly one query row (nrow=1)"));
+}
+
+TEST_CASE("AnalyzeIndex explicitly skips search for an empty SINDI", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_empty_sindi_search");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteSparseQueryFile(query_path, 1);
 
     vsag::IndexAnalysisOptions options;
     options.index_path = index_path;
@@ -363,7 +388,10 @@ TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]"
     auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
 
     REQUIRE(report["dynamic_analysis"]["supported"].GetBool());
-    REQUIRE(report["dynamic_analysis"]["results"].IsObject());
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["status"].GetString() ==
+            "not_applicable");
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["skipped"]["search"].GetString() ==
+            "index is empty");
 }
 
 TEST_CASE("AnalyzeIndex rejects invalid options", "[analyze_index]") {

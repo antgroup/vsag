@@ -32,13 +32,34 @@ constexpr const char* QUERY_DATA_TYPE_AUTO = "auto";
 constexpr const char* EMPTY_OPTIONAL_PATH = "";
 
 // The library reads this variable during static initialization, before main can adjust logging.
-const bool init_banner_suppressed = [] {
+class InitBannerSuppressor {
+public:
+    InitBannerSuppressor() {
 #if defined(_WIN32)
-    return _putenv_s("VSAG_SUPPRESS_INIT_BANNER", "1") == 0;
+        suppressed_ = _putenv_s("VSAG_SUPPRESS_INIT_BANNER", "1") == 0;
 #else
-    return ::setenv("VSAG_SUPPRESS_INIT_BANNER", "1", 1) == 0;
+        suppressed_ = ::setenv("VSAG_SUPPRESS_INIT_BANNER", "1", 1) == 0;
 #endif
-}();
+    }
+
+    [[nodiscard]] bool
+    Suppressed() const {
+        return suppressed_;
+    }
+
+private:
+    bool suppressed_{false};
+};
+
+// Run before VSAG's unprioritized initializer instead of relying on link order.
+#if defined(_MSC_VER)
+#pragma init_seg(lib)
+InitBannerSuppressor init_banner_suppressor;
+#elif defined(__GNUC__) || defined(__clang__)
+InitBannerSuppressor init_banner_suppressor __attribute__((init_priority(101)));
+#else
+InitBannerSuppressor init_banner_suppressor;
+#endif
 
 void
 parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
@@ -54,7 +75,7 @@ parse_args(argparse::ArgumentParser& parser, int argc, char** argv) {
 
     parser.add_argument<std::string>("--query_path", "-qp")
         .default_value(EMPTY_QUERY_PATH)
-        .help("The query dataset path, if not set, will not do query analysis");
+        .help("The single-query dataset path, if not set, will not do query analysis");
 
     parser.add_argument<std::string>("--query_data_type")
         .default_value(std::string(QUERY_DATA_TYPE_AUTO))
@@ -97,7 +118,7 @@ main(int argc, char** argv) {
         return 1;
     }
 
-    if (not init_banner_suppressed) {
+    if (not init_banner_suppressor.Suppressed()) {
         std::cerr << "analyze_index: failed to suppress the initialization banner" << std::endl;
         return 1;
     }
