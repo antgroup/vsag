@@ -841,6 +841,48 @@ TEST_CASE("BucketDataCell residual training uses build and nearest assignments",
     REQUIRE(std::abs(bucket->QueryOneById(nearest_computer, 0, 0)) < 1e-4F);
 }
 
+TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
+          "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 65536;
+    constexpr uint64_t bucket_count = 1;
+    const std::string quantizer_type = GENERATE("pq", "pqfs");
+    CAPTURE(quantizer_type);
+    std::vector<float> vectors(count, 0.0F);
+    std::fill(vectors.begin() + count / 2, vectors.end(), 100.0F);
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    param_json["quantization_params"].SetJson(
+        JsonType::Parse(quantizer_type == "pq" ? R"({"type": "pq", "pq_dim": 1, "pq_bits": 8})"
+                                               : R"({"type": "pqfs", "pq_dim": 1})"));
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    // The sole centroid is 50, so the two halves have residuals -50 and +50.
+    // Both Build and nearest routing agree; duplicating their interleaved rows
+    // used to fill PQ's 65,536-row prefix with only the first half's -50 value.
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), count);
+    bucket->InsertVector(vectors.data() + count - 1, 0, count - 1);
+    bucket->Package();
+
+    auto computer = bucket->FactoryComputer(vectors.data() + count - 1);
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
+}
+
 TEST_CASE("BucketDataCell batch query preserves residual correction", "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 8;

@@ -327,6 +327,19 @@ TEST_CASE("BalancedKMeans splits duplicated vectors evenly", "[ut][BalancedKMean
     }
 }
 
+TEST_CASE("BalancedKMeans uses stable accumulation for cluster means",
+          "[ut][BalancedKMeansCluster]") {
+    // This compact input has the same sequential-binary32 failure mode as
+    // 2^25 rows of 1.0F: after the first value, both unit contributions are
+    // rounded away. A double accumulator retains the exact sum 16,777,218.
+    const std::vector<float> data = {16777216.0F, 1.0F, 1.0F};
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::BalancedKMeansCluster cluster(1, allocator.get());
+    cluster.Run(1, data.data(), data.size(), 1, nullptr, 1e-6F, vsag::KMeansInitMethod::RANDOM, 0U);
+
+    REQUIRE(cluster.k_centroids_[0] == 5592406.0F);
+}
+
 TEST_CASE("BalancedKMeans k equals 1 and k equals n", "[ut][BalancedKMeansCluster]") {
     constexpr int32_t dim = 6;
     constexpr uint64_t n = 100;
