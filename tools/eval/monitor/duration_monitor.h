@@ -44,7 +44,7 @@ private:
     double duration_{0};
     double user_cpu_duration_{0};
     double system_cpu_duration_{0};
-    struct rusage start_usage_ {};
+    struct rusage start_usage_{};
 
     using Clock = std::chrono::steady_clock;
     decltype(Clock::now()) cur_time_{};

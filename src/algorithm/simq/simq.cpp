@@ -130,9 +130,14 @@ read_dist_cmp(const DatasetPtr& result_ds) {
 // Both HGraphs own independent quantizer models. Only decoded vectors cross
 // graph boundaries; encoded pair distances always use the document model.
 JsonType
-simq_graph_parameters(const std::string& quantization, int64_t threads) {
+simq_graph_parameters(const std::string& quantization,
+                      int64_t threads,
+                      bool support_duplicate,
+                      bool deduplicate_storage) {
     auto param = JsonType::Parse(
         R"({"max_degree":32,"ef_construction":50,"use_reorder":false,"build_by_base":true})");
+    param["support_duplicate"].SetBool(support_duplicate);
+    param["deduplicate_storage"].SetBool(deduplicate_storage);
     param["base_quantization_type"].SetString(quantization);
     param["build_thread_count"].SetInt(threads);
     return param;
@@ -248,7 +253,11 @@ HGraphDynamicClustering::build_hgraph(const std::vector<int>& center_ids, int64_
     cp.dim_ = dim;
 
     auto param = HGraph::CheckAndMappingExternalParam(
-        simq_graph_parameters(quantization_, build_thread_count_), cp);
+        simq_graph_parameters(quantization_,
+                              build_thread_count_,
+                              false,
+                              false),  // clustering-internal HGraph: duplicates never suppressed
+        cp);
     hgraph_ = std::make_shared<HGraph>(param, cp);
     std::vector<uint64_t> center_ids_u64(center_ids.begin(), center_ids.end());
     insert_simq_representatives(hgraph_, center_ids_u64, codes_, storage_, dim);
@@ -499,6 +508,8 @@ SIMQ::SIMQ(const SIMQParameterPtr& param, const IndexCommonParam& common_param)
     default_coarse_k_ = param->coarse_k;
     default_rerank_k_ = param->rerank_k;
     split_delay_seconds_ = param->split_delay_seconds;
+    support_duplicate_ = param->support_duplicate;
+    deduplicate_storage_ = param->deduplicate_storage;
     this->has_raw_vector_ = true;
 }
 
@@ -720,9 +731,14 @@ SIMQ::build_rep_hgraph(const uint8_t* token_codes, int64_t dim) {
     IndexCommonParam cp = common_param_;
     cp.metric_ = MetricType::METRIC_TYPE_IP;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    cp.repr_ = RecordRepr::DENSE;
     cp.dim_ = dim;
     auto param = HGraph::CheckAndMappingExternalParam(
-        simq_graph_parameters(quantization_type_, static_cast<int64_t>(build_thread_count_)), cp);
+        simq_graph_parameters(quantization_type_,
+                              static_cast<int64_t>(build_thread_count_),
+                              support_duplicate_,
+                              deduplicate_storage_),
+        cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
     constexpr uint64_t batch_limit = 4096;
     for (uint64_t offset = 0; offset < representatives.size(); offset += batch_limit) {
@@ -771,6 +787,10 @@ wait_all_futures(std::vector<std::future<void>>& futures) {
 std::vector<int64_t>
 SIMQ::Add(const DatasetPtr& data) {
     std::unique_lock lock(global_mutex_);
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "simq: cannot add to an immutable index");
+    }
 
     if (rep_hgraph_ == nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -1089,7 +1109,7 @@ SIMQ::prepare_and_execute_splits(std::vector<SplitTask>& tasks) {
     representative_codes_.resize(static_cast<uint64_t>(num_clusters_ + new_cluster_count) *
                                  mv_codes_->GetQuantizerCodeSize());
     for (int64_t i = 0; i < new_cluster_count; ++i) {
-        cluster_lists_.push_back(Vector<InnerIdType>(allocator_));
+        cluster_lists_.emplace_back(allocator_);
         cluster_token_counts_.push_back(0);
     }
 
@@ -1206,6 +1226,7 @@ SIMQ::coarse_search(const float* query_tokens,
     const auto n_docs = static_cast<size_t>(total_count_);
     std::vector<float> score_buf(n_docs, 0.0F);
     std::vector<bool> seen_buf(n_docs, false);
+    std::vector<bool> collected_buf(n_docs, false);
     std::vector<InnerIdType> dirty_list;
     std::vector<InnerIdType> seen_dirty_list;
     dirty_list.reserve(n_docs);
@@ -1316,7 +1337,10 @@ SIMQ::coarse_search(const float* query_tokens,
                 }
                 seen_buf[doc_id] = true;
                 seen_dirty_list.push_back(doc_id);
-                if (score_buf[doc_id] == 0.0F) {
+                // Membership is independent of the score, which may be zero
+                // initially or after cancellation across query tokens.
+                if (not collected_buf[doc_id]) {
+                    collected_buf[doc_id] = true;
                     dirty_list.push_back(doc_id);
                 }
                 score_buf[doc_id] += cscore;
@@ -1351,6 +1375,8 @@ SIMQ::SetImmutable() {
     if (this->rep_hgraph_ != nullptr) {
         this->rep_hgraph_->SetImmutable();
     }
+    // Swap with an empty vector to release capacity, not only the logical size.
+    Vector<uint8_t>(allocator_).swap(representative_codes_);
     this->immutable_.store(true, std::memory_order_release);
 }
 
@@ -1682,10 +1708,13 @@ SIMQ::deserialize_rep_hgraph(StreamReader& reader) {
     cp.metric_ = MetricType::METRIC_TYPE_IP;
     cp.data_type_ = DataTypes::DATA_TYPE_FLOAT;
     cp.dim_ = dim_;
+    cp.repr_ = RecordRepr::DENSE;
 
     auto param = HGraph::CheckAndMappingExternalParam(
         simq_graph_parameters(representative_quantization_type_,
-                              static_cast<int64_t>(build_thread_count_)),
+                              static_cast<int64_t>(build_thread_count_),
+                              support_duplicate_,
+                              deduplicate_storage_),
         cp);
     rep_hgraph_ = std::make_shared<HGraph>(param, cp);
 
@@ -1750,7 +1779,7 @@ SIMQ::Serialize(StreamWriter& writer) const {
     StreamWriter::WriteVector(writer, representative_codes_);
 
     JsonType info;
-    info["simq_format_version"].SetInt(1);
+    info["simq_format_version"].SetInt(representative_codes_.empty() ? 2 : 1);
     info["representative_quantization_type"].SetString(representative_quantization_type_);
     info["dim"].SetInt(dim_);
     info["total_count"].SetInt(total_count_.load());
@@ -1769,7 +1798,7 @@ SIMQ::Deserialize(StreamReader& reader) {
 
     const auto format_version =
         info.Contains("simq_format_version") ? info["simq_format_version"].GetInt() : 0;
-    if (format_version != 0 and format_version != 1) {
+    if (format_version < 0 or format_version > 2) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "unsupported SIMQ format version");
     }
     BufferStreamReader buf_reader(&reader, std::numeric_limits<uint64_t>::max(), allocator_);
@@ -1789,6 +1818,16 @@ SIMQ::Deserialize(StreamReader& reader) {
         random_seed_ = tmp_param.random_seed;
         init_cluster_ratio_ = tmp_param.init_cluster_ratio;
         split_delay_seconds_ = tmp_param.split_delay_seconds;
+        // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+        CHECK_ARGUMENT(not tmp_param.deduplicate_storage or tmp_param.support_duplicate,
+                       "SIMQ deserialize deduplicate_storage requires support_duplicate");
+        support_duplicate_ = tmp_param.support_duplicate;
+        deduplicate_storage_ = tmp_param.deduplicate_storage;
+        auto simq_param = std::dynamic_pointer_cast<SIMQParameter>(this->create_param_ptr_);
+        if (simq_param) {
+            simq_param->support_duplicate = tmp_param.support_duplicate;
+            simq_param->deduplicate_storage = tmp_param.deduplicate_storage;
+        }
     }
 
     uint64_t total_count_val = 0;
@@ -1829,9 +1868,9 @@ SIMQ::Deserialize(StreamReader& reader) {
         CHECK_ARGUMENT(vec_to_cluster_[tid] < n_clusters, "SIMQ cluster ID out of bounds");
         CHECK_ARGUMENT(token_to_doc_[tid] < total_count_val, "SIMQ document ID out of bounds");
     }
-    if (format_version == 1) {
+    if (format_version >= 1) {
         CHECK_ARGUMENT(info.Contains("representative_quantization_type"),
-                       "SIMQ version 1 requires representative quantization metadata");
+                       "SIMQ version 1/2 requires representative quantization metadata");
     }
     representative_quantization_type_ = info.Contains("representative_quantization_type")
                                             ? info["representative_quantization_type"].GetString()
@@ -1846,12 +1885,23 @@ SIMQ::Deserialize(StreamReader& reader) {
         static_cast<uint64_t>(num_clusters_) <= std::numeric_limits<uint64_t>::max() / code_size,
         "SIMQ representative code size overflow");
     const auto expected_size = static_cast<uint64_t>(num_clusters_) * code_size;
-    if (format_version == 1) {
+    if (format_version >= 1) {
         uint64_t stored_size = 0;
         StreamReader::ReadObj(buf_reader, stored_size);
-        CHECK_ARGUMENT(stored_size == expected_size, "SIMQ representative code count mismatch");
-        representative_codes_.resize(expected_size);
-        buf_reader.Read(reinterpret_cast<char*>(representative_codes_.data()), expected_size);
+        if (format_version == 2) {
+            CHECK_ARGUMENT(stored_size == 0, "SIMQ v2 requires absent representative codes");
+        } else {
+            CHECK_ARGUMENT(stored_size == expected_size, "SIMQ representative code count mismatch");
+        }
+        if (stored_size == 0) {
+            // Restore both SIMQ and nested HGraph read-only state through the
+            // same transition used after Build. SetImmutable takes this mutex.
+            lock.unlock();
+            this->SetImmutable();
+        } else {
+            representative_codes_.resize(expected_size);
+            buf_reader.Read(reinterpret_cast<char*>(representative_codes_.data()), expected_size);
+        }
     } else {
         // Old graphs stored FP32 representatives; migrate each independently.
         // Encoding under the restored document model gives one consistent metric
@@ -2012,7 +2062,8 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
                    key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
                    key == "rerank_k" || key == "quantization_type" ||
-                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds") {
+                   key == BUILD_THREAD_COUNT_KEY || key == "split_delay_seconds" ||
+                   key == "support_duplicate" || key == "deduplicate_storage") {
             inner_json[key].SetJson(value);
         } else {
             throw VsagException(ErrorType::INVALID_ARGUMENT,

@@ -24,3 +24,4 @@
 #include "io/noncontinuous_io/noncontinuous_io.h"
 #include "io/reader_io/reader_io.h"
 #include "io/uring_io/uring_io.h"
+#include "io/user_defined_io/user_defined_io.h"

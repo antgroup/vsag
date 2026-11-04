@@ -63,6 +63,7 @@
 #include "io/memory_block_io/memory_block_io.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
 #include "quantization/computer.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/fp32_quantizer_parameter.h"
@@ -87,6 +88,28 @@ HGraph::check_fused_mutation_supported(std::string_view operation) const {
     if (this->rabitq_fused_datacell_ != nullptr) {
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             fmt::format("fused RaBitQ HGraph does not support {}", operation));
+    }
+}
+
+void
+HGraph::check_user_defined_precise_io_supported(std::string_view operation) const {
+    // Cloning or exporting a model re-creates datacells from the same IO parameters, which
+    // for user-defined IO re-binds this index's Reader/Writer pair into the copy: the copy
+    // would share (Clone) or resize (ExportModel + build) the source backing store. Reject
+    // until user-defined storage can supply independent bytes for lifecycle copies.
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr) {
+        const auto hgraph_param =
+            std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        if (hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+            std::dynamic_pointer_cast<UserDefinedIOParameter>(
+                hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                fmt::format(
+                    "user_defined_io precise codes do not support {}: the bound Reader/Writer "
+                    "pair would be shared with the copy",
+                    operation));
+        }
     }
 }
 
@@ -738,8 +761,8 @@ estimate_deque_request(uint64_t element_size, uint64_t occupancy) {
         estimate_checked_mul(map_slots, 2 * sizeof(void*)));
 }
 
-// Source capture storage bounds for the inspected LP64 targets: one shared_ptr or one
-// std::function member. These are not claims about arbitrary compiler closure layouts.
+// Source capture storage bounds for the inspected LP64 targets: one shared_ptr, or a pool
+// identity plus one std::function. These are not arbitrary compiler closure-layout claims.
 struct BuildEstimateTaskInvoker {
     std::shared_ptr<std::packaged_task<void()>> task;
     void
@@ -748,6 +771,15 @@ struct BuildEstimateTaskInvoker {
 };
 
 struct BuildEstimateSafeWrapper {
+    const ThreadPool* pool;
+    std::function<void()> task;
+    void
+    operator()() const {
+    }
+};
+
+struct BuildEstimateBackendWrapper {
+    DefaultThreadPool* pool;
     std::function<void()> task;
     void
     operator()() const {
@@ -769,13 +801,13 @@ template <typename Worker>
 constexpr uint64_t
 estimate_scheduler_task_request() {
 #if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP)
-    // bind(F&&) returns __bind<F>; the backend forwards its function as an lvalue.
+    // bind(F&&) returns __bind<F>; the backend forwards its pool-aware lambda as an rvalue.
     using Bound = std::__bind<Worker>;
-    using BackendBound = std::__bind<std::function<void()>&>;
+    using BackendBound = std::__bind<BuildEstimateBackendWrapper>;
 #elif defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBSTDCXX)
     // libstdc++'s _Bind_helper decays F before forming the callable signature.
     using Bound = std::_Bind<Worker()>;
-    using BackendBound = std::_Bind<std::function<void()>()>;
+    using BackendBound = std::_Bind<BuildEstimateBackendWrapper()>;
 #endif
 #if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP) || defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBSTDCXX)
     constexpr uint64_t queued = estimate_function_target_request<BuildEstimateTaskInvoker>();
@@ -1613,6 +1645,7 @@ HGraph::GetMinAndMaxId() const {
 InnerIndexPtr
 HGraph::ExportModel(const IndexCommonParam& param) const {
     this->check_fused_mutation_supported("ExportModel");
+    this->check_user_defined_precise_io_supported("ExportModel");
     auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
     this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
     if (has_precise_reorder()) {
@@ -1624,6 +1657,7 @@ HGraph::ExportModel(const IndexCommonParam& param) const {
 InnerIndexPtr
 HGraph::Clone(const IndexCommonParam& param) {
     this->check_fused_mutation_supported("Clone");
+    this->check_user_defined_precise_io_supported("Clone");
     return InnerIndexInterface::Clone(param);
 }
 
@@ -1778,7 +1812,15 @@ void
 HGraph::SetIO(const std::shared_ptr<Reader> reader) {
     auto reader_param = std::make_shared<ReaderIOParameter>();
     reader_param->reader = reader;
-    if (has_precise_reorder()) {
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool user_defined_precise_io =
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr;
+    // Deserialize has already written precise codes into the bound writable pair. Only
+    // reader_io datacells need to attach to the serialized input reader here; replacing
+    // the user-defined pair with a ReaderIOParameter would fail after loading the data.
+    if (has_precise_reorder() and not user_defined_precise_io) {
         high_precise_codes_->InitIO(reader_param);
     }
     basic_flatten_codes_->InitIO(reader_param);
@@ -2066,7 +2108,10 @@ HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const
 }
 
 void
-HGraph::cal_memory_usage() {
+HGraph::cal_memory_usage() const {
+    // Read the version before walking the components, so a mutation that lands mid-walk stays
+    // unaccounted and simply forces one more recalculation on the next query.
+    const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
     auto memory = sizeof(HGraph);
     memory += this->neighbors_mutex_->GetMemoryUsage();
     memory += this->pool_->GetMemoryUsage();
@@ -2076,7 +2121,7 @@ HGraph::cal_memory_usage() {
         memory += this->code_slot_map_->GetMemoryUsage();
     }
     memory += this->bottom_graph_->GetMemoryUsage();
-    for (auto& graph : this->route_graphs_) {
+    for (const auto& graph : this->route_graphs_) {
         memory += graph->GetMemoryUsage();
     }
     if (has_precise_reorder()) {
@@ -2093,13 +2138,62 @@ HGraph::cal_memory_usage() {
     if (this->mci_cliques_ != nullptr) {
         memory += this->mci_cliques_->GetMemoryUsage();
     }
+    // Keep the conjugate-graph lock until the publish below. Feedback() patches the cached counter
+    // with fetch_add instead of bumping the version (tests/test_hgraph.cpp pins that exact-delta
+    // contract), and it takes conjugate_graph_mutex_ and then memory_usage_mutex_ in this same
+    // order. Releasing the graph lock before the store would let its delta be overwritten by a
+    // total computed before the edge landed, with no later invalidation left to repair it.
+    std::shared_lock<std::shared_mutex> conjugate_lock(this->conjugate_graph_mutex_,
+                                                       std::defer_lock);
     if (this->conjugate_graph_ != nullptr) {
-        std::shared_lock graph_lock(this->conjugate_graph_mutex_);
+        conjugate_lock.lock();
         memory += this->conjugate_graph_->GetMemoryUsage();
     }
 
     std::unique_lock lock(this->memory_usage_mutex_);
+    // A concurrent walk that sampled a younger version may have published already; never
+    // downgrade the accounting to an older snapshot.
+    if (version < this->memory_usage_accounted_version_.load(std::memory_order_acquire)) {
+        return;
+    }
     this->current_memory_usage_.store(memory);
+    this->memory_usage_accounted_version_.store(version, std::memory_order_release);
+}
+
+void
+HGraph::mark_memory_usage_dirty() const {
+    this->memory_usage_version_.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t
+HGraph::GetMemoryUsage() const {
+    const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
+                       this->memory_usage_version_.load(std::memory_order_acquire);
+    if (not stale) {
+        return InnerIndexInterface::GetMemoryUsage();
+    }
+    // The breakdown dereferences component containers that mutating paths replace or grow, so it
+    // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
+    // busy mutation simply leaves the cached value in place, which keeps the getter free of any
+    // lock-ordering hazard (the mutating paths do not agree on one) and avoids stalling a caller
+    // that polls the counter. label_lookup_mutex_ is not needed: LabelTable::GetMemoryUsage()
+    // serialises its own storage against reallocation and remap mutations.
+    std::shared_lock<std::shared_mutex> force_remove_lock(this->force_remove_mutex_,
+                                                          std::defer_lock);
+    std::shared_lock<std::shared_mutex> global_lock(this->global_mutex_, std::defer_lock);
+    const bool force_remove_needed =
+        not this->immutable_.load(std::memory_order_acquire) and this->support_force_remove();
+    if ((not force_remove_needed or force_remove_lock.try_lock()) and global_lock.try_lock()) {
+        // Readiness is only meaningful under the structural lock: resize(), Merge() and
+        // SetImmutable() replace these pointers while holding global_mutex_ exclusively, so
+        // comparing them with nullptr outside it would itself be a data race.
+        if (this->neighbors_mutex_ != nullptr and this->pool_ != nullptr and
+            this->label_table_ != nullptr and this->basic_flatten_codes_ != nullptr and
+            this->bottom_graph_ != nullptr) {
+            this->cal_memory_usage();
+        }
+    }
+    return InnerIndexInterface::GetMemoryUsage();
 }
 
 }  // namespace vsag

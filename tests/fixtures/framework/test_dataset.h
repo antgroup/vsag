@@ -48,6 +48,7 @@ public:
      * @param has_duplicate Whether to include duplicate vectors.
      * @param id_shift Offset for generated IDs.
      * @param use_fixed_seed Whether to use a fixed seed for reproducible data generation.
+     * @param query_count Number of queries, included in the testcase cost plan.
      * @return Shared pointer to the created TestDataset.
      */
     static std::shared_ptr<TestDataset>
@@ -60,7 +61,8 @@ public:
                       uint64_t extra_info_size = 0,
                       bool has_duplicate = false,
                       int64_t id_shift = 16,
-                      bool use_fixed_seed = true);
+                      bool use_fixed_seed = true,
+                      uint64_t query_count = 100);
 
     /**
      * @brief Creates a test dataset with NaN values.

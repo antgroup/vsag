@@ -1,0 +1,17 @@
+name: asan-build-and-test-test-example-x86
+description: Shared test_example_x86 execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Clean Env
+      shell: sh
+      run: rm -rf ./build
+    - name: Download Test
+      uses: actions/download-artifact@v5
+      with:
+        name: test_x86-${{ github.run_id }}
+        path: ./build
+    - name: Do Test In example
+      shell: sh
+      run: |
+        python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples

@@ -193,6 +193,8 @@ CodeSlotMap::Deserialize(StreamReader& reader) {
         if (slot != INVALID_CODE_SLOT) {
             ++published_logical_count;
         }
+        // EnsureLogicalSize allocates this storage or throws before the loop.
+        // NOLINTNEXTLINE(clang-analyzer-core.CallAndMessage)
         inner_to_slot_[inner_id].store(slot, std::memory_order_release);
     }
     physical_count_.store(physical_count, std::memory_order_release);

@@ -57,6 +57,25 @@ auto result = index->KnnSearch(
     query, /*topk=*/10, R"({"hgraph": {"ef_search": 100}})").value();
 ```
 
+## Disk read-cache example
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+uses 1,000 64-dimensional vectors, in-memory SQ8 base codes, and disk-backed FP32
+precise codes (`async_io`) for query reranking. It sets `build_by_base: true` so
+graph construction reads the in-memory base codes, avoiding repeated disk-cache
+refills during this small usage example. This changes the graph construction
+quantization; it is not a recall benchmark or an example of precise-code graph
+construction.
+
+Read caching remains enabled with a 131,072-byte budget (one 128-KiB page).
+The 256,000-byte FP32 payload spans two pages. The example serializes to a
+`BinarySet`, restores a new index, and checks the restored count, top-10 result
+shape, ID range, and finite distances. Run it with a writable file path in a
+fresh working directory. Writes and durability behavior are unchanged.
+Focused AsyncIO tests cover one-page eviction/refill, write invalidation, and
+invalid reads; the HGraph read-cache functional test retains precise-code graph
+construction coverage.
+
 ## Build parameters
 
 Build-time parameters live under `index_param`. The table below highlights the keys
@@ -358,6 +377,12 @@ Search-time parameters live under the `hgraph` sub-object:
 | `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
+| `enable_reorder` | bool | `true` | Whether to re-rank coarse candidates against the precise codes. Set to `false` to skip reordering and return the approximate results directly. Use `use_reorder: true` in `index_param` to store the precise codes needed for reordering. |
+| `factor` | float | `0.0` | Reorder-candidate amplification factor. When `> 1.0`, the reorder-candidate pool is capped at `k * factor` (but never below `max(ef_search, k)`); the default `0.0` preserves the existing behaviour with `ef_search` candidates. |
+| `parallelism` | int | `1` | Number of parallel workers for a single HGraph search. Values `<= 0` are reset to `1` during parsing; parallel execution requires a configured executor, otherwise the search falls back to sequential execution. |
+| `timeout_ms` | int | unlimited | Per-query wall-clock timeout in milliseconds. The timer starts after routing; once exceeded, the search returns the current frontier. Best-effort only — it does not preempt a distance-computation batch. |
+| `use_extra_info_filter` | bool | `false` | Create the query filter from extra-info rather than plain label membership. Requires matching extra-info columns at build time. |
+| `use_conjugate_graph_search` | bool | `true` | Search enhancement pass. When `use_conjugate_graph: true` was set at build time, the search expands results through the conjugate graph for potentially higher recall; set to `false` to skip it. Only takes effect when a conjugate graph was built. |
 
 ```cpp
 auto result = index->KnnSearch(

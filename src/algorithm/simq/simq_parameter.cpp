@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,6 +30,8 @@ static constexpr const char* SIMQ_COARSE_K = "coarse_k";
 static constexpr const char* SIMQ_RERANK_K = "rerank_k";
 static constexpr const char* SIMQ_SPLIT_DELAY_SECONDS = "split_delay_seconds";
 static constexpr const char* SIMQ_QUANTIZATION_TYPE = "quantization_type";
+static constexpr const char* SIMQ_SUPPORT_DUPLICATE = "support_duplicate";
+static constexpr const char* SIMQ_DEDUPLICATE_STORAGE = "deduplicate_storage";
 
 void
 SIMQParameter::FromJson(const JsonType& json) {
@@ -60,6 +61,16 @@ SIMQParameter::FromJson(const JsonType& json) {
     if (json.Contains(SIMQ_QUANTIZATION_TYPE)) {
         quantization_type = json[SIMQ_QUANTIZATION_TYPE].GetString();
     }
+    if (json.Contains(SIMQ_SUPPORT_DUPLICATE)) {
+        support_duplicate = json[SIMQ_SUPPORT_DUPLICATE].GetBool();
+    }
+    if (json.Contains(SIMQ_DEDUPLICATE_STORAGE)) {
+        deduplicate_storage = json[SIMQ_DEDUPLICATE_STORAGE].GetBool();
+    }
+
+    // NOLINTNEXTLINE(readability-simplify-boolean-expr)
+    CHECK_ARGUMENT(not deduplicate_storage or support_duplicate,
+                   "simq: deduplicate_storage requires support_duplicate=true");
 
     bool valid_init_cluster_ratio = init_cluster_ratio > 0.0F and init_cluster_ratio <= 1.0F;
     CHECK_ARGUMENT(valid_init_cluster_ratio, "simq: init_cluster_ratio must be in (0, 1]");
@@ -97,6 +108,8 @@ SIMQParameter::ToJson() const {
     json[SIMQ_RERANK_K].SetInt(rerank_k);
     json[SIMQ_SPLIT_DELAY_SECONDS].SetDouble(split_delay_seconds);
     json[SIMQ_QUANTIZATION_TYPE].SetString(quantization_type);
+    json[SIMQ_SUPPORT_DUPLICATE].SetBool(support_duplicate);
+    json[SIMQ_DEDUPLICATE_STORAGE].SetBool(deduplicate_storage);
     json[BASE_CODES_KEY].SetJson(base_codes_param->ToJson());
     return json;
 }

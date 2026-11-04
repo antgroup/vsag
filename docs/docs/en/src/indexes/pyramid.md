@@ -142,6 +142,8 @@ Build-time parameters live under `index_param`.
 | `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point and leaf; the primary PiPNN quality/build-work knob. Undersized leaves use at least `4`. |
 | `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
 | `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_adaptive_pruning` | bool | `false` | Use HGraph's shared PiPNN dynamic-alpha selector during L2 batch builds. |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step for the PiPNN selector. |
 | `no_build_levels` | int[] | `[]` | Tree levels that skip graph construction (0-indexed from the root). |
 | `use_reorder` | bool | `false` | Keep a high-precision copy for rescoring. |
 | `precise_quantization_type` | string | `"fp32"` | Quantizer for reordering. Use `"rabitq"` with `rabitq_bits_per_dim_precise` to enable RaBitQ x+y split reorder from base storage. |
@@ -167,6 +169,30 @@ behavior. Levels in `no_build_levels` are still skipped.
 The `pipnn_*` values are global to the Pyramid index; hierarchy objects may continue to override
 `max_degree` and `alpha`, and those overrides are applied when PiPNN builds that hierarchy.
 `ef_construction` does not tune PiPNN.
+
+### Adaptive PiPNN pruning
+
+Set the following fields under `index_param` to enable the same final-reservoir pruning policy
+used by HGraph PiPNN:
+
+```json
+{
+    "graph_type": "pipnn",
+    "alpha": 1.2,
+    "pipnn_adaptive_pruning": true,
+    "pipnn_adaptive_pruning_adjust_step": 0.06
+}
+```
+
+This policy requires `metric_type: "l2"` and applies to every batch-built path graph and root
+routing graph. Each hierarchy supplies its own effective `alpha` and degree limit; the policy
+and step are shared. Incremental `Add` retains the existing NSW insertion policy. The separate
+`adaptive_pruning` switch controls NSW and must remain disabled for PiPNN.
+
+Enabled policies require finite `alpha >= 1`, a finite nonnegative step,
+`alpha - 2*step > 0`, and finite `alpha + 3*step`. A zero step preserves fixed-alpha PiPNN
+selection. Loading an enabled index requires matching policy, base alpha, step, and hierarchy
+configuration. Older indexes without the fields default to disabled; rebuild to change policy.
 
 ### RaBitQ split configuration
 

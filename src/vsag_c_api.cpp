@@ -81,7 +81,8 @@ cancel_statistics_request(SearchResult_t* search_result) noexcept {
         if (statistics_requests.erase(search_result) != 0) {
             search_result->other_result = nullptr;
         }
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Cleanup must preserve the primary result or exception.
     }
 }
 }  // namespace
@@ -135,7 +136,8 @@ vsag_search_result_destroy_statistics(SearchResult_t* search_result) {
                 search_result->other_result = nullptr;
             }
         }
-    } catch (...) {
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Cleanup must preserve the primary result or exception.
     }
 }
 
@@ -182,7 +184,7 @@ private:
 
 #define VSAG_CHECK_RESULT(expr)                    \
     do {                                           \
-        auto _vsag_result = (expr);                \
+        const auto& _vsag_result = (expr);         \
         if ((_vsag_result).has_value()) {          \
             return success;                        \
         }                                          \

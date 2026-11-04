@@ -299,7 +299,6 @@ InnerIndexParameter::ToJson() const {
 
     json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
 
-    auto str = json.Dump(4);
     return json;
 }
 bool

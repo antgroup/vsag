@@ -24,6 +24,7 @@
 
 #include "algorithm/inner_index_interface.h"
 #include "algorithm/pyramid/pyramid_build_cache.h"
+#include "algorithm/pyramid/pyramid_fast_build.h"
 #include "algorithm/pyramid/pyramid_path_store.h"
 #include "datacell/flatten_optimized_build_interface.h"
 #include "datacell/graph_interface.h"
@@ -104,6 +105,9 @@ public:
             throw VsagException(ErrorType::INVALID_ARGUMENT,
                                 "Pyramid PiPNN only supports dense float32 indexes");
         }
+        CHECK_ARGUMENT(not pipnn_param_.adaptive_pruning or
+                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "Pyramid PiPNN adaptive pruning only supports L2");
         base_codes_ = FlattenInterface::MakeInstance(pyramid_param->base_codes_param, common_param);
         if (pyramid_param->has_hierarchies) {
             for (const auto& h_param : pyramid_param->hierarchies) {
@@ -160,7 +164,7 @@ public:
     }
 
     explicit Pyramid(const ParamPtr& param, const IndexCommonParam& common_param)
-        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param){};
+        : Pyramid(std::dynamic_pointer_cast<PyramidParameters>(param), common_param) {};
 
     ~Pyramid() override = default;
 
@@ -283,6 +287,7 @@ public:
 
     friend class PyramidAnalyzer;
     friend class PyramidDuplicateTestPeer;
+    friend class PyramidOptimizedBuildSession;
 
 private:
     void

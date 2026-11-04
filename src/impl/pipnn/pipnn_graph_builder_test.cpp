@@ -232,7 +232,7 @@ TEST_CASE("PiPNN graph builder writes an empty row for one point", "[ut][pipnn]"
 }
 
 TEST_CASE("PiPNN adaptive zero step preserves original adjacency", "[ut][pipnn][pipnn_adaptive]") {
-    constexpr uint64_t dimensions = 8;
+    const uint64_t dimensions = GENERATE(8, 960);
     constexpr uint64_t count = 80;
     auto common = MakeCommonParam(dimensions);
     auto vectors = MakeVectors(count, dimensions);

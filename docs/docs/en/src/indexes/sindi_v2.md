@@ -117,8 +117,9 @@ contract](sindi.md#publish-time-filtering). The two indexes share one metadata f
 for time-only, host-only, and combined time-and-host KNN routing. SINDI_V2 retains its term-first
 posting layout. Publish-time filtering supports mutable and immutable indexes with either
 `use_reorder` setting and is preserved by standard and streaming serialization; range search
-remains unfiltered. A mutable time-aware SINDI_V2 is build-once and follows the same initial
-`Build()` or first-`Add()` and later-`Add()` rejection rules as SINDI. Base timestamp `0` uses the
+remains unfiltered. Mutable time-aware SINDI_V2 follows SINDI's incremental `Add()` rules:
+every batch supplies timestamps, preserves host metadata mode, and may backfill older dates.
+Base timestamp `0` uses the
 same missing-time semantics: unfiltered and host-only queries include those documents, while time
 queries exclude them. Exact day filtering disables term-level posting pruning in each selected
 window, so time queries may scan more postings than host-only queries. Host-only queries on

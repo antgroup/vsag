@@ -34,7 +34,12 @@ ParallelBatchInsertVector(const FlattenInterfacePtr& flatten,
                           uint64_t thread_count,
                           VectorAt&& vector_at) {
     constexpr InnerIdType BATCH_SIZE = 4096;
+    const bool use_parallel = thread_pool != nullptr and thread_count > 1;
     std::vector<std::future<void>> futures;
+    if (use_parallel) {
+        // Allocate before enqueueing: retaining an accepted task's future must not throw.
+        futures.reserve(count / BATCH_SIZE + (count % BATCH_SIZE != 0));
+    }
     std::exception_ptr first_exception = nullptr;
     for (InnerIdType begin = 0; begin < count; begin += BATCH_SIZE) {
         const auto batch_count = std::min<InnerIdType>(BATCH_SIZE, count - begin);
@@ -47,7 +52,7 @@ ParallelBatchInsertVector(const FlattenInterfacePtr& flatten,
             std::iota(contiguous_ids.begin(), contiguous_ids.end(), begin);
             flatten->BatchInsertVector(vector_at(begin), batch_count, contiguous_ids.data());
         };
-        if (thread_pool != nullptr and thread_count > 1) {
+        if (use_parallel) {
             try {
                 futures.emplace_back(thread_pool->GeneralEnqueue(std::move(insert_batch)));
             } catch (...) {

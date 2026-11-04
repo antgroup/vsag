@@ -159,7 +159,7 @@ DiskSindiTermDataCell<IOTmpl>::InsertHeapByWindow(float* dists,
     while (computer->HasNextTerm()) {
         auto it = computer->NextTermIter();
         auto term = computer->GetTerm(it);
-        auto* tb = this->GetTermBufferNoLock(term, query_term_buffers);
+        auto* tb = this->get_term_buffer_no_lock(term, query_term_buffers);
         if (tb == nullptr) {
             continue;
         }

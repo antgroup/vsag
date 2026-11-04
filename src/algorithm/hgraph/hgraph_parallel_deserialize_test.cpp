@@ -16,6 +16,7 @@
 
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstring>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include <random>
 #include <sstream>
@@ -161,7 +162,7 @@ public:
         auto payload = buffer_.substr(offset + sizeof(payload_size), payload_size);
         if (delta_ < 0) {
             const auto shrink = static_cast<size_t>(-delta_);
-            payload.resize(shrink <= payload.size() ? payload.size() - shrink : 0);
+            payload.erase(shrink <= payload.size() ? payload.size() - shrink : 0);
         } else {
             payload.append(static_cast<size_t>(delta_), '\0');
         }
@@ -366,6 +367,26 @@ RequireSameKnnResults(const std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>& expe
 }
 
 }  // namespace
+
+TEST_CASE("CorruptingFrameReader preserves the prefix when truncating",
+          "[ut][hgraph][parallel_deserialize]") {
+    FrameSerializeWriter writer;
+    writer.BeginCompressedFrame();
+    writer.Write("abcdef", 6);
+    const auto frame_size = writer.EndCompressedFrame();
+    const std::vector<std::pair<int64_t, std::string>> cases{
+        {-2, "abcd"}, {-6, ""}, {-9, ""}, {2, std::string("abcdef\0\0", 8)}};
+    for (const auto& [delta, expected] : cases) {
+        CAPTURE(delta);
+        CorruptingFrameReader reader(writer.buffer_, 0, delta);
+        std::string decoded;
+        reader.ReadDecompressed(0, frame_size, [&](std::istream& stream) {
+            decoded.assign(std::istreambuf_iterator<char>(stream),
+                           std::istreambuf_iterator<char>());
+        });
+        REQUIRE(decoded == expected);
+    }
+}
 
 TEST_CASE("HGraph ParallelDeserialize Compressed Chunked Round-Trip",
           "[ut][hgraph][parallel_deserialize]") {

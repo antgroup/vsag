@@ -188,3 +188,13 @@ target_link_libraries(332_feature_search_session vsag)
 
 add_executable(327_feature_search_reasoning 327_feature_search_reasoning.cpp)
 target_link_libraries(327_feature_search_reasoning vsag)
+
+add_executable(200_user_defined_io 200_user_defined_io.cpp)
+target_link_libraries(200_user_defined_io vsag)
+
+# Independent expected inventory: consumers must not infer coverage from whichever
+# binaries survived artifact transfer. Includes only configured numbered examples.
+get_property(VSAG_CI_EXAMPLE_TARGETS DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+list(FILTER VSAG_CI_EXAMPLE_TARGETS INCLUDE REGEX "^[0-9][0-9][0-9]_")
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/ci-example-targets.txt"
+     CONTENT "$<JOIN:${VSAG_CI_EXAMPLE_TARGETS},\n>\n")

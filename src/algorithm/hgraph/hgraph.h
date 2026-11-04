@@ -56,6 +56,7 @@
 #include "storage/stream_writer.h"
 #include "typing.h"
 #include "utils/lock_strategy.h"
+#include "utils/search_lock.h"
 #include "utils/util_functions.h"
 #include "utils/visited_list.h"
 #include "vsag/index.h"
@@ -66,6 +67,7 @@ namespace vsag {
 class ChunkedManifest;
 struct ComponentManifestEntry;
 class FlattenOptimizedBuildInterface;
+class HGraphFGIM;
 class HGraphRaBitQFusedDataCell;
 class HGraphRaBitQSearcher;
 class HGraphOptimizedBuildSession;
@@ -98,7 +100,10 @@ public:
                       std::shared_ptr<const InnerIndexInterface> owner) const override;
 
     friend class HGraphAnalyzer;
+    friend class HGraphFGIM;
+    friend class HGraphFGIMTestAccessor;
     friend class HGraphCodeWriteTestAccess;
+    friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
     friend struct HGraphMemoryEstimateTestAccess;
@@ -166,6 +171,10 @@ public:
 
     std::unordered_map<std::string, uint64_t>
     GetMemoryUsageDetail() const override;
+
+    /// Cached counter, recalculated on demand once a mutation has invalidated it.
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override;
 
     std::pair<int64_t, int64_t>
     GetMinAndMaxId() const override;
@@ -549,11 +558,17 @@ private:
     void
     check_fused_mutation_supported(std::string_view operation) const;
 
+    void
+    check_user_defined_precise_io_supported(std::string_view operation) const;
+
     std::vector<int64_t>
     add_impl(const DatasetPtr& data);
 
     [[nodiscard]] std::shared_lock<std::shared_mutex>
     acquire_global_read_lock() const {
+        if (SearchLockScope::IsNoLock()) {
+            return {};
+        }
         if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
             return std::shared_lock<std::shared_mutex>(this->global_mutex_);
         }
@@ -591,9 +606,13 @@ private:
 
     // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
     // Keep them alive until every insertion task has drained, including on failure.
-    struct FusedAddCodes {
-        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+    struct FusedBatchCodes {
+        explicit FusedBatchCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
         }
+
+        [[nodiscard]] RaBitQFusedCodeView
+        View(uint64_t input_idx) const;
+
         Vector<uint8_t> codes;
         Vector<uint32_t> clusters;
         uint64_t one_bit_size{0};
@@ -605,7 +624,7 @@ private:
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
-        std::unique_ptr<FusedAddCodes> fused_codes;
+        std::unique_ptr<FusedBatchCodes> fused_codes;
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -665,11 +684,8 @@ private:
     void
     validate_fused_vector_data(const float* data, uint64_t count) const;
 
-    void
-    validate_fused_encoding_data(const float* data, uint64_t count) const;
-
-    void
-    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+    std::unique_ptr<FusedBatchCodes>
+    prepare_fused_codes(const DatasetPtr& data) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
@@ -696,6 +712,8 @@ private:
         void* row_state{nullptr};
         uint64_t row_count{0};
         std::atomic<uint64_t> next_row{0};
+        // Workers access error_row/error under this mutex. The caller reads them without
+        // locking only after all submitted workers have completed via wait_all_futures.
         std::mutex error_mutex;
         uint64_t error_row{std::numeric_limits<uint64_t>::max()};
         std::exception_ptr error{nullptr};
@@ -977,9 +995,16 @@ private:
     void
     init_resize_bit_and_reorder();
 
-    /// Compute memory usage breakdown and cache the result.
+    /// Compute the memory usage breakdown and cache the result. Records the mutation version it
+    /// observed so a mutation racing with this snapshot is not silently swallowed.
     void
-    cal_memory_usage();
+    cal_memory_usage() const;
+
+    /// Invalidate the cached counter instead of recomputing it. The per-element Add/Remove paths
+    /// call this so they do not pay the O(total) breakdown; the next GetMemoryUsage() recalculates
+    /// it. Paths that already hold the mutation locks may keep calling cal_memory_usage() eagerly.
+    void
+    mark_memory_usage_dirty() const;
 
     /// True when reorder uses a separate high-precision flatten (not base codes).
     [[nodiscard]] bool
@@ -1311,7 +1336,9 @@ private:
 
     std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
 
-    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    mutable std::shared_mutex global_mutex_;  // guards total_count_, entry_point_id_
+    // HGraph::resize takes global_mutex_ before persistent_codes_mutex_; code writers
+    // must never acquire global_mutex_ while holding persistent_codes_mutex_.
     mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
     // Only unfinished ordinary-storage Add writes are retained. Protected by persistent_codes_mutex_.
     enum CodeWrite : uint8_t { BASE_CODE = 1, PRECISE_CODE = 2, RAW_CODE = 4 };
@@ -1343,6 +1370,14 @@ private:
     std::atomic<bool> physical_code_resize_pending_{false};
 
     std::atomic<InnerIdType> max_capacity_{0};  // allocated storage capacity
+
+    /// Memory-usage cache bookkeeping. A mutation either invalidates the counter by bumping the
+    /// version (the per-element Add/Remove paths) or recomputes it eagerly while it already holds
+    /// the mutation locks (build, resize, deserialize); the cached counter is re-derived only when
+    /// GetMemoryUsage() observes a version it has not accounted for yet. Keep the two counters on
+    /// separate cache lines: every mutation writes the first while every query reads the second.
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_version_{1};
+    alignas(64) mutable std::atomic<uint64_t> memory_usage_accounted_version_{0};
 
     /// Visibility high-water mark: the number of leading inner ids whose codes *and* graph
     /// links are both fully written, and which concurrent readers may therefore observe.

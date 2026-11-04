@@ -41,6 +41,8 @@
 # Developer Guide
 
 - [Code Structure](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ Design](development/lite_rabitq_design.md)
 - [C++ Coding Guide](development/coding_style.md)
 - [New Index Integration Checklist](development/new_index_checklist.md)
 - [Building](development/building.md)
@@ -66,6 +68,7 @@
 - [Per-Search Allocator](advanced/search_allocator.md)
 - [Index Introspection](advanced/introspection.md)
 - [Extensibility](advanced/extensibility.md)
+- [User-Defined IO](advanced/user_defined_io.md)
 - [Graph Enhancement](advanced/enhance_graph.md)
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)

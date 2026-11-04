@@ -60,7 +60,8 @@ public:
 
     std::future<void>
     Enqueue(std::function<void(void)> task) override {
-        auto func_wrapper = [task = std::move(task)]() {
+        auto func_wrapper = [pool = GetUnderlyingPool(), task = std::move(task)]() {
+            PoolThreadScope scope(pool);
             try {
                 task();
             } catch (std::exception& e) {
@@ -82,7 +83,69 @@ public:
         pool_->SetPoolSize(limit);
     }
 
+    // Unlike RequiresInlineExecution(), unknown external pools are not assumed to be current.
+    bool
+    IsCurrentThread() const {
+        const auto* pool = GetUnderlyingPool();
+        if (pool == nullptr) {
+            return false;
+        }
+        for (auto* scope = current_scope_; scope != nullptr; scope = scope->previous_) {
+            if (scope->pool_ == pool) {
+                return true;
+            }
+        }
+        if (const auto* identity = dynamic_cast<const DefaultThreadPool*>(pool)) {
+            return identity->IsCurrentThread();
+        }
+        return false;
+    }
+
+    // Unknown external pools may already be occupied by the calling query. Submitting
+    // and joining on such a pool can deadlock, including when a bounded queue is full.
+    bool
+    RequiresInlineExecution() const {
+        if (pool_ == nullptr) {
+            return true;
+        }
+        if (const auto* pool = dynamic_cast<const SafeThreadPool*>(pool_)) {
+            return pool->RequiresInlineExecution();
+        }
+        // Even if some workers are idle now, the pool reserves none for this query.
+        // Concurrent nested queries could occupy them all before submit/join finishes;
+        // execute same-pool queries inline rather than relying on transient spare capacity.
+        if (const auto* identity = dynamic_cast<const DefaultThreadPool*>(pool_)) {
+            return identity->IsCurrentThread();
+        }
+        return true;
+    }
+
 private:
+    const ThreadPool*
+    GetUnderlyingPool() const {
+        const ThreadPool* pool = pool_;
+        while (const auto* wrapper = dynamic_cast<const SafeThreadPool*>(pool)) {
+            pool = wrapper->pool_;
+        }
+        return pool;
+    }
+
+    class PoolThreadScope {
+    public:
+        explicit PoolThreadScope(const ThreadPool* pool) : pool_(pool), previous_(current_scope_) {
+            current_scope_ = this;
+        }
+
+        ~PoolThreadScope() {
+            current_scope_ = previous_;
+        }
+
+        const ThreadPool* pool_;
+        PoolThreadScope* previous_;
+    };
+
+    inline static thread_local PoolThreadScope* current_scope_{nullptr};
+
     ThreadPool* pool_{nullptr};
     std::shared_ptr<ThreadPool> pool_ptr_{nullptr};
     bool owner_{false};

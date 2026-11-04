@@ -10,6 +10,19 @@ HGraph 都是推荐的默认索引。
 - 源码：`src/algorithm/hgraph.{h,cpp}`
 - 示例：[`examples/cpp/103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp)
 
+## 磁盘读缓存示例
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+使用 1,000 个 64 维向量，基础 SQ8 编码存于内存，精排 FP32 编码存于磁盘（`async_io`）。
+示例设置 `build_by_base: true`，让构图读取内存中的基础编码，避免在这个小型用法示例中反复填充磁盘读缓存。
+这会改变构图所用的量化编码，因此该示例不是召回率基准，也不演示使用精排编码构图。
+
+读缓存保持启用，预算为 131,072 字节（一个 128-KiB 页）；256,000 字节的 FP32 数据跨越两页。
+示例序列化为 `BinarySet` 后恢复新索引，并检查恢复后的元素数量、top-10 结果形状、ID 范围及距离是否有限。
+请在新的工作目录中使用可写文件路径运行。写入和持久化行为保持不变。
+专门的 AsyncIO 测试覆盖单页缓存的淘汰与重新加载、写入失效及无效读取；
+HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
+
 ## 工作原理
 
 1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
@@ -274,6 +287,12 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
+| `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
+| `factor` | float | `0.0` | 精排候选数放大因子。当 `> 1.0` 时，精排候选池上限为 `k * factor`（但不会低于 `max(ef_search, k)`）；默认 `0.0` 保持原行为，使用 `ef_search` 个候选。 |
+| `parallelism` | int | `1` | 单次 HGraph 搜索的并行 worker 数。`<= 0` 的值在解析时重置为 `1`；并行执行需要已配置的执行器，否则搜索回退为顺序执行。 |
+| `timeout_ms` | int | 不限 | 每次查询的墙上时间超时（毫秒）。计时器在路由完成后启动；超时后搜索返回当前前沿。仅尽最大努力——不会中断正在执行的距离计算批次。 |
+| `use_extra_info_filter` | bool | `false` | 从 extra-info 构造查询 filter，而非基于普通 label 成员关系。需在构建时配置对应 extra-info 列。 |
+| `use_conjugate_graph_search` | bool | `true` | 搜索增强阶段。当构建时 `use_conjugate_graph: true` 时，通过共轭图扩展结果以提升召回；设为 `false` 跳过。仅在已构建共轭图时生效。 |
 
 ```cpp
 auto result = index->KnnSearch(

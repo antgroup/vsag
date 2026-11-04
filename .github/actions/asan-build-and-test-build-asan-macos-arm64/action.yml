@@ -1,0 +1,42 @@
+name: asan-build-and-test-build-asan-macos-arm64
+description: Shared build_asan_macos_arm64 execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Install Dependencies
+      env:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+        HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+      shell: bash -e {0}
+      run: bash ./scripts/deps/install_deps.sh
+    - name: Show Toolchain
+      shell: bash -e {0}
+      run: |
+        clang++ --version
+        cmake --version
+    - name: Load Cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: "2G"
+        save: true
+        key: build-macos-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+    - name: Make Asan
+      shell: bash -e {0}
+      run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON; make asan VSAG_ENABLE_EXAMPLES=ON COMPILE_JOBS=3
+    - name: Clean
+      shell: bash -e {0}
+      run: |
+        find ./build -type f -name "*.o" -exec rm -f {} +
+        find ./build -type f -name "*.cpp" -exec rm -f {} +
+        find ./build -type f -name "*.a" -exec rm -f {} +
+        find ./build -type d -name "*.dSYM" -prune -exec rm -rf {} +
+        rm -rf ./build/hdf5
+        rm -rf ./build/tools
+    - name: Save Test
+      uses: actions/upload-artifact@v5
+      with:
+        path: ./build
+        name: test_macos_arm64-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 3
+        overwrite: 'true'

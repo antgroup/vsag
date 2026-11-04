@@ -13,9 +13,17 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                      float valid_ratio,
                                      uint64_t extra_info_size,
                                      int64_t id_shift,
-                                     const std::string& vector_type) {
-    auto key = key_gen(
-        dim, count, metric_str, with_path, valid_ratio, extra_info_size, id_shift, vector_type);
+                                     const std::string& vector_type,
+                                     uint64_t query_count) {
+    auto key = key_gen(dim,
+                       count,
+                       metric_str,
+                       with_path,
+                       valid_ratio,
+                       extra_info_size,
+                       id_shift,
+                       vector_type,
+                       query_count);
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
         this->pool_[key] = TestDataset::CreateTestDataset(dim,
@@ -27,7 +35,8 @@ TestDatasetPool::GetDatasetAndCreate(uint64_t dim,
                                                           extra_info_size,
                                                           false,
                                                           id_shift,
-                                                          true);
+                                                          true,
+                                                          query_count);
     }
     return this->pool_.at(key);
 }
@@ -39,10 +48,12 @@ TestDatasetPool::key_gen(int64_t dim,
                          float filter_ratio,
                          uint64_t extra_info_size,
                          int64_t id_shift,
-                         const std::string& vector_type) {
+                         const std::string& vector_type,
+                         uint64_t query_count) {
     return std::to_string(dim) + "_" + std::to_string(count) + "_" + metric_str + "_" +
            std::to_string(with_path) + "_" + std::to_string(filter_ratio) +
-           std::to_string(extra_info_size) + "_" + std::to_string(id_shift) + "_" + vector_type;
+           std::to_string(extra_info_size) + "_" + std::to_string(id_shift) + "_" + vector_type +
+           "_" + std::to_string(query_count);
 }
 
 TestDatasetPtr
@@ -71,13 +82,31 @@ TestDatasetPool::GetDuplicateDataset(uint64_t dim,
                                      const std::string& metric_str,
                                      bool with_path,
                                      float valid_ratio,
-                                     uint64_t extra_info_size) {
-    auto key =
-        key_gen(dim, count, metric_str, with_path, valid_ratio, extra_info_size) + "_duplicate";
+                                     uint64_t extra_info_size,
+                                     uint64_t query_count) {
+    auto key = key_gen(dim,
+                       count,
+                       metric_str,
+                       with_path,
+                       valid_ratio,
+                       extra_info_size,
+                       16,
+                       "dense",
+                       query_count) +
+               "_duplicate";
     if (this->pool_.find(key) == this->pool_.end()) {
         this->dim_counts_.emplace_back(dim, count);
-        this->pool_[key] = TestDataset::CreateTestDataset(
-            dim, count, metric_str, with_path, valid_ratio, "dense", extra_info_size, true);
+        this->pool_[key] = TestDataset::CreateTestDataset(dim,
+                                                          count,
+                                                          metric_str,
+                                                          with_path,
+                                                          valid_ratio,
+                                                          "dense",
+                                                          extra_info_size,
+                                                          true,
+                                                          16,
+                                                          true,
+                                                          query_count);
     }
     return this->pool_.at(key);
 }

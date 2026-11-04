@@ -15,6 +15,7 @@
 add_library(fixtures_core OBJECT
     common.cpp
     temp_dir.cpp
+    test_budget.cpp
     types.cpp
 )
 

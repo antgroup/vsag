@@ -41,6 +41,8 @@
 # 开发者指南
 
 - [代码目录结构](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ 设计](development/lite_rabitq_design.md)
 - [C++ 编码指南](development/coding_style.md)
 - [新索引接入检查清单](development/new_index_checklist.md)
 - [编译构建](development/building.md)
@@ -66,6 +68,7 @@
 - [搜索路径 Allocator](advanced/search_allocator.md)
 - [索引自省](advanced/introspection.md)
 - [可扩展性](advanced/extensibility.md)
+- [用户自定义 IO](advanced/user_defined_io.md)
 - [图索引增强](advanced/enhance_graph.md)
 - [Extra Info（附加信息）](advanced/extra_info.md)
 - [索引生命周期管理](advanced/index_lifecycle.md)

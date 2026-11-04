@@ -177,5 +177,5 @@ private:
     vsag::IndexPtr index_ = nullptr;
 };
 
-};  // namespace ext
-};  // namespace vsag
+}  // namespace ext
+}  // namespace vsag

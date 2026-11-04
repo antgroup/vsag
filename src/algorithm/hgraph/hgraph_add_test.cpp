@@ -49,6 +49,8 @@
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/graph_datacell.h"
 #include "datacell/graph_datacell_parameter.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
+#include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
 #include "datacell/sparse_graph_datacell_parameter.h"
 #include "dataset_impl.h"
@@ -138,6 +140,22 @@ public:
     Move(HGraph& graph, InnerIdType from, InnerIdType to) {
         graph.move_id(from, to);
     }
+
+    static void
+    SetFusedCodes(HGraph& graph, const FlattenInterfacePtr& codes) {
+        graph.basic_flatten_codes_ = codes;
+        graph.rabitq_split_codes_ = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(codes);
+        graph.rabitq_split_codes_->AttachFusedCodeStorage(graph.rabitq_fused_datacell_.get());
+        graph.init_resize_bit_and_reorder();
+    }
+
+    static RaBitQFusedCodeView
+    FusedCode(const HGraph& graph, int64_t label) {
+        RaBitQFusedCodeView view;
+        REQUIRE(graph.rabitq_fused_datacell_->GetFusedCodeView(
+            graph.label_table_->GetIdByLabel(label), view));
+        return view;
+    }
 };
 
 }  // namespace vsag
@@ -225,6 +243,37 @@ struct HGraphMemoryEstimateTestAccess {
 namespace {
 
 constexpr bool EXPECT_MODELED_BUILD_MEMORY = HGRAPH_BUILD_MEMORY_TEST_MODELED_PROFILE != 0;
+
+class CountingFusedCodes final
+    : public vsag::RaBitQSplitDataCell<vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MemoryIO> {
+public:
+    using Base = vsag::RaBitQSplitDataCell<vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MemoryIO>;
+    using Base::Base;
+
+    void
+    TrainFusedCodec(const float* data, uint64_t count, uint32_t cluster_count) override {
+        Base::TrainFusedCodec(data, count, cluster_count);
+        if (after_training) {
+            after_training();
+        }
+    }
+
+    bool
+    EncodeFused(const float* data,
+                uint8_t* one_bit_code,
+                uint8_t* supplement_code,
+                uint32_t* cluster_id) const override {
+        encode_calls.fetch_add(1, std::memory_order_relaxed);
+        if (fail_encoding) {
+            return false;
+        }
+        return Base::EncodeFused(data, one_bit_code, supplement_code, cluster_id);
+    }
+
+    mutable std::atomic<uint64_t> encode_calls{0};
+    bool fail_encoding{false};
+    std::function<void()> after_training;
+};
 
 class ArmableRejectingThreadPool final : public vsag::ThreadPool {
 public:
@@ -355,6 +404,39 @@ MakeRabitQRawVectorHGraphJson() {
 std::shared_ptr<vsag::IndexImpl<vsag::HGraph>>
 MakeHGraphIndex(const vsag::JsonType& hgraph_json, const vsag::IndexCommonParam& common_param) {
     return std::make_shared<vsag::IndexImpl<vsag::HGraph>>(hgraph_json, common_param);
+}
+
+vsag::JsonType
+MakeFusedPiPNNJson(uint32_t filter_bits, uint64_t thread_count, bool raw_vectors) {
+    auto json = MakeFp32HGraphJson(false, static_cast<int64_t>(thread_count));
+    json["base_quantization_type"].SetString("rabitq");
+    json["precise_quantization_type"].SetString("rabitq");
+    json["base_io_type"].SetString("memory_io");
+    json["graph_io_type"].SetString("memory_io");
+    json["graph_storage_type"].SetString("flat");
+    json["graph_type"].SetString("pipnn");
+    json["rabitq_bits_per_dim_base"].SetUint64(filter_bits);
+    json["rabitq_bits_per_dim_precise"].SetUint64(8 - filter_bits);
+    json["rabitq_fused_datacell"].SetBool(true);
+    json["rabitq_use_fht"].SetBool(true);
+    json["fast_encode_rabitq"].SetBool(true);
+    json["use_reorder"].SetBool(true);
+    json["store_raw_vector"].SetBool(raw_vectors);
+    return json;
+}
+
+std::shared_ptr<CountingFusedCodes>
+InstallCountingFusedCodes(vsag::HGraph& graph,
+                          const vsag::JsonType& json,
+                          const vsag::IndexCommonParam& common) {
+    auto parameter = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    auto codes =
+        std::make_shared<CountingFusedCodes>(parameter->base_codes_param->quantizer_parameter,
+                                             parameter->base_codes_param->io_parameter,
+                                             common);
+    vsag::HGraphCodeWriteTestAccess::SetFusedCodes(graph, codes);
+    return codes;
 }
 
 bool
@@ -727,21 +809,32 @@ TestPackagedTaskRequest() {
 #endif
 }
 
+// Independent source-layout bound for each pool identity plus its owned function capture.
+struct TestPoolTaskWrapper {
+    vsag::ThreadPool* pool;
+    std::function<void()> task;
+
+    void
+    operator()() const {
+    }
+};
+
 uint64_t
 TestSchedulerTaskRequest() {
     using Access = vsag::HGraphMemoryEstimateTestAccess;
-    using InnerBind = decltype(std::bind(std::declval<std::function<void()>>()));
+    using InnerBind = decltype(std::bind(std::declval<TestPoolTaskWrapper>()));
     static_assert(sizeof(Access::Worker) == sizeof(void*), "Audit the real worker capture");
 #if defined(_LIBCPP_VERSION) && _LIBCPP_VERSION == 210106
     using WorkerCall =
         std::__packaged_task_func<Access::WorkerBind, std::allocator<Access::WorkerBind>, void()>;
     using InnerCall = std::__packaged_task_func<InnerBind, std::allocator<InnerBind>, void()>;
     static_assert(sizeof(WorkerCall) == 24, "Apple21 worker packaged callable fits SBO");
-    static_assert(sizeof(InnerCall) == 48, "Apple21 function bind misses packaged SBO");
+    static_assert(sizeof(InnerCall) > sizeof(WorkerCall), "Pool-aware backend carries a function");
     static_assert(sizeof(std::__function::__func<Access::WorkerBind, void()>) == 24,
                   "Apple21 __func takes two parameters");
-    static_assert(sizeof(std::__function::__func<InnerBind, void()>) == 48,
-                  "Apple21 function-bind target misses function SBO");
+    static_assert(sizeof(std::__function::__func<InnerBind, void()>) >
+                      sizeof(std::__function::__func<Access::WorkerBind, void()>),
+                  "Pool-aware backend target exceeds the worker target");
 #elif defined(_GLIBCXX_RELEASE) && _GLIBCXX_RELEASE == 11
     using WorkerState =
         std::__future_base::_Task_state<Access::WorkerBind, std::allocator<int>, void()>;
@@ -751,14 +844,15 @@ TestSchedulerTaskRequest() {
     using InnerControl =
         std::_Sp_counted_ptr_inplace<InnerState, std::allocator<int>, __gnu_cxx::_S_atomic>;
     static_assert(sizeof(WorkerControl) == 72, "GCC11 worker task-state control");
-    static_assert(sizeof(InnerControl) == 96, "GCC11 function-bind task-state control");
+    static_assert(sizeof(InnerControl) > sizeof(WorkerControl),
+                  "Pool-aware backend task state exceeds the worker state");
     static_assert(sizeof(std::__future_base::_Result<void>) == 16, "GCC11 void result request");
 #endif
-    // Invocation captures one shared_ptr. The safe wrapper captures one function.
+    // Invocation captures one shared_ptr. The safe wrapper captures a pool identity and function.
     // Unnamed enqueue lambdas stay a size bound; their closure types were not dumped.
     const auto invocation =
         TestFunctionTargetUpper(sizeof(std::shared_ptr<std::packaged_task<void()>>), true);
-    const auto wrapper = TestFunctionTargetUpper(sizeof(std::function<void()>), false) + invocation;
+    const auto wrapper = TestFunctionTargetUpper(sizeof(TestPoolTaskWrapper), false) + invocation;
     // Both packaged-task layers, both invocation targets, and both wrapper copies (D=1).
     return TestPackagedTaskRequest<Access::WorkerBind>() + TestPackagedTaskRequest<InnerBind>() +
            2 * invocation + 2 * wrapper;
@@ -2026,11 +2120,17 @@ TEST_CASE("HGraph bounded Build dispatch gates requested workers on a wider pool
             auto build = std::async(std::launch::async, [&] { return index->Build(data.dataset); });
             const auto workers = std::min(threads, count);
             const bool gated = pool->AwaitStarted(workers);
+            uint64_t pending_writes = 0;
+            if (gated) {
+                // Every worker is blocked before insertion, after the whole batch is prepared.
+                pending_writes = vsag::HGraphCodeWriteTestAccess::PendingCount(*InnerHGraph(index));
+            }
             pool->Release();
             auto result = build.get();
             pool->WaitUntilEmpty();
             REQUIRE(pool->AwaitFinished(workers));
             REQUIRE(gated);
+            REQUIRE(pending_writes == count);
             REQUIRE(result.has_value());
             REQUIRE(result.value().empty());
             REQUIRE(index->GetNumElements() == static_cast<int64_t>(count));
@@ -2045,27 +2145,29 @@ TEST_CASE("HGraph bounded Build dispatch gates requested workers on a wider pool
 TEST_CASE("HGraph bounded dispatch drains launched work after enqueue failure",
           "[ut][hgraph][build_dispatch]") {
     BlockSizeLimitGuard blocks(uint64_t{1} << 18);
-    auto pool = std::make_shared<GatedBuildPool>(1);
+    const auto accepted = GENERATE(uint64_t{0}, uint64_t{1}, uint64_t{3});
+    CAPTURE(accepted);
+    auto pool = std::make_shared<GatedBuildPool>(accepted);
     BuildPoolReleaseGuard release(pool);
     auto common = MakeCommonParam(16);
     common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
     auto index = MakeHGraphIndex(MakeBuildMemoryJson("fp32", 8, 4), common);
     BuildMemoryData data(17, 16);
     auto build = std::async(std::launch::async, [&] { return index->Build(data.dataset); });
-    const bool gated = pool->AwaitStarted(1);
+    const bool gated = pool->AwaitStarted(accepted);
     const bool failed_submission = pool->AwaitSubmissionFailure();
     const bool still_waiting =
-        build.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
+        accepted == 0 or build.wait_for(std::chrono::seconds(0)) == std::future_status::timeout;
     pool->Release();
     auto result = build.get();
     pool->WaitUntilEmpty();
-    REQUIRE(pool->AwaitFinished(1));
+    REQUIRE(pool->AwaitFinished(accepted));
     REQUIRE(gated);
     REQUIRE(failed_submission);
     REQUIRE(still_waiting);
     REQUIRE_FALSE(result.has_value());
-    REQUIRE(pool->Counts()[0] == 2);
-    REQUIRE(pool->Counts()[1] == 1);
+    REQUIRE(pool->Counts()[0] == accepted + 1);
+    REQUIRE(pool->Counts()[1] == accepted);
 }
 
 TEST_CASE("HGraph bounded dispatch reports row failures without replacing enqueue failures",
@@ -2424,7 +2526,7 @@ TEST_CASE("HGraph one bounded worker keeps parallel error semantics including T 
 TEST_CASE("HGraph new worker allocation types match the target source rules",
           "[ut][hgraph][estimate_build_memory][build_dispatch]") {
     using Access = vsag::HGraphMemoryEstimateTestAccess;
-    using BackendBind = decltype(std::bind(std::declval<std::function<void()>>()));
+    using BackendBind = decltype(std::bind(std::declval<TestPoolTaskWrapper>()));
     static_assert(sizeof(Access::Worker) == sizeof(void*));
     static_assert(alignof(Access::Worker) == alignof(void*));
     static_assert(std::is_nothrow_copy_constructible<Access::Worker>::value);
@@ -2491,6 +2593,106 @@ TEST_CASE("HGraph memory estimation checks integer arithmetic",
         require_invalid_argument(1);
     }
     REQUIRE(index->GetNumElements() == 0);
+}
+
+TEST_CASE("HGraph PiPNN encodes each fused input once and preserves compacted rows",
+          "[ut][hgraph][pipnn][fused][preencode]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 64;
+    const auto filter_bits = GENERATE(1U, 3U);
+    const auto thread_count = GENERATE(1U, 4U);
+    const bool raw_vectors = GENERATE(false, true);
+    const bool duplicate_labels = GENERATE(false, true);
+    auto common = MakeCommonParam(dim, thread_count);
+    auto json = MakeFusedPiPNNJson(filter_bits, thread_count, raw_vectors);
+    auto index = MakeHGraphIndex(json, common);
+    auto graph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    auto codes = InstallCountingFusedCodes(*graph, json, common);
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    for (int64_t row = 0; row < count; ++row) {
+        labels[row] = duplicate_labels and row % 7 == 1 ? 1000 : 1000 + row;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[row * dim + d] = std::sin(static_cast<float>(row * 13 + d)) + row * 0.01F;
+        }
+    }
+    const auto built = index->Build(MakeFloatDataset(vectors, labels, dim, count));
+    REQUIRE(built.has_value());
+    REQUIRE(codes->encode_calls.load() == count);
+    REQUIRE(index->GetNumElements() == count - built.value().size());
+    std::vector<uint8_t> expected_filter(codes->OneBitCodeSize());
+    std::vector<uint8_t> expected_supplement(codes->SupplementCodeSize());
+    for (int64_t row = 0; row < count; ++row) {
+        if (duplicate_labels and row % 7 == 1) {
+            continue;
+        }
+        uint32_t cluster = 0;
+        REQUIRE(codes->Base::EncodeFused(vectors.data() + row * dim,
+                                         expected_filter.data(),
+                                         expected_supplement.data(),
+                                         &cluster));
+        const auto actual = vsag::HGraphCodeWriteTestAccess::FusedCode(*graph, labels[row]);
+        REQUIRE(actual.cluster_id == cluster);
+        REQUIRE(std::equal(expected_filter.begin(), expected_filter.end(), actual.one_bit_code));
+        REQUIRE(std::equal(
+            expected_supplement.begin(), expected_supplement.end(), actual.supplement_code));
+    }
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = MakeHGraphIndex(json, common);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    const auto query = MakeFloatQuery(vectors, dim);
+    const auto before = index->KnnSearch(query, 8, kBruteForceSearchParams);
+    const auto after = restored->KnnSearch(query, 8, kBruteForceSearchParams);
+    REQUIRE(before.has_value());
+    REQUIRE(after.has_value());
+    REQUIRE(before.value()->GetDim() == after.value()->GetDim());
+    for (int64_t i = 0; i < before.value()->GetDim(); ++i) {
+        REQUIRE(before.value()->GetIds()[i] == after.value()->GetIds()[i]);
+        REQUIRE(before.value()->GetDistances()[i] == after.value()->GetDistances()[i]);
+    }
+}
+
+TEST_CASE("HGraph PiPNN keeps failed fused preencoding unpublished and retryable",
+          "[ut][hgraph][pipnn][fused][preencode][failure]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t count = 32;
+    const bool reject_enqueue = GENERATE(false, true);
+    auto pool = std::make_shared<ArmableRejectingThreadPool>();
+    auto common = MakeCommonParam(dim);
+    common.thread_pool_ = std::make_shared<vsag::SafeThreadPool>(pool);
+    auto json = MakeFusedPiPNNJson(3, 4, false);
+    auto index = MakeHGraphIndex(json, common);
+    auto graph = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    auto codes = InstallCountingFusedCodes(*graph, json, common);
+    codes->fail_encoding = not reject_enqueue;
+    codes->after_training = [&]() { pool->SetRejectSubmissions(reject_enqueue); };
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    for (int64_t row = 0; row < count; ++row) {
+        labels[row] = 1000 + row;
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[row * dim + d] = std::sin(static_cast<float>(row + d));
+        }
+    }
+    auto data = MakeFloatDataset(vectors, labels, dim, count);
+    const auto failed = index->Build(data);
+    REQUIRE_FALSE(failed.has_value());
+    REQUIRE(failed.error().type == (reject_enqueue ? vsag::ErrorType::NO_ENOUGH_MEMORY
+                                                   : vsag::ErrorType::INVALID_ARGUMENT));
+    REQUIRE(index->GetNumElements() == 0);
+    for (const auto label : labels) {
+        REQUIRE_FALSE(index->CheckIdExist(label));
+    }
+    codes->fail_encoding = false;
+    codes->after_training = {};
+    codes->encode_calls.store(0);
+    pool->SetRejectSubmissions(false);
+    const auto retry = index->Build(data);
+    REQUIRE(retry.has_value());
+    REQUIRE(retry.value().empty());
+    REQUIRE(index->GetNumElements() == count);
+    REQUIRE(codes->encode_calls.load() == count);
 }
 
 TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]") {
@@ -2843,6 +3045,9 @@ TEST_CASE("HGraph code compaction preserves coverage when a later move throws",
 
 TEST_CASE("HGraph Tune and brute force search finish concurrently",
           "[ut][hgraph][hgraph_tune_review]") {
+    // Keep repeated two-vector rebuilds from zero-filling 128 MiB per Tune call.
+    // The deadline should detect lock-order regressions, not allocator throughput.
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
     auto parameters = MakeFp32HGraphJson(false);
     parameters["store_raw_vector"].SetBool(true);
     auto index = MakeHGraphIndex(parameters, MakeCommonParam(4));
@@ -4695,4 +4900,35 @@ TEST_CASE("HGraph optimized fused build omits Tune pending metadata",
     REQUIRE(restored->GetNumElements() == count);
     REQUIRE(
         restored->KnnSearch(MakeFloatQuery(vectors, dim), 1, kBruteForceSearchParams).has_value());
+}
+
+TEST_CASE("HGraph multi-row Add runs inline on its pool worker", "[ut][hgraph][add][nested_pool]") {
+    const auto quantization = GENERATE(0, 1, 2);
+    CAPTURE(quantization);
+    auto common = MakeCommonParam(32, 1);
+    auto param = quantization == 0 ? MakeFp32HGraphJson(false, 2) : MakeRabitQRawVectorHGraphJson();
+    param["build_thread_count"].SetInt(2);
+    if (quantization == 2) {
+        param["deduplicate_storage"].SetBool(false);
+        param["rabitq_fused_datacell"].SetBool(true);
+        param["precise_quantization_type"].SetString("rabitq");
+        param["rabitq_bits_per_dim_base"].SetInt(2);
+        param["rabitq_bits_per_dim_precise"].SetInt(6);
+        param["use_reorder"].SetBool(true);
+        param["reorder_source"].SetString("base");
+        param["store_raw_vector"].SetBool(false);
+    }
+    auto index = MakeHGraphIndex(param, common);
+    std::vector<float> vectors(32 * 4);
+    for (uint64_t i = 0; i < vectors.size(); ++i) {
+        vectors[i] = static_cast<float>((i * 13 + 7) % 101) / 101.0F;
+    }
+    std::vector<int64_t> ids{10, 11, 12, 13};
+    auto data = MakeFloatDataset(vectors, ids, 32, 4);
+    auto task = common.thread_pool_->GeneralEnqueue([&]() { return index->Add(data); });
+    // The test runner timeout bounds regressions; no detached worker may outlive its data.
+    auto result = task.get();
+    REQUIRE(result.has_value());
+    REQUIRE(result.value().empty());
+    REQUIRE(index->GetNumElements() == 4);
 }

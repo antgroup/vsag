@@ -31,6 +31,9 @@ public:
     std::future<void>
     Enqueue(std::function<void(void)> task) override;
 
+    bool
+    IsCurrentThread() const;
+
     void
     WaitUntilEmpty() override;
 

@@ -1,0 +1,25 @@
+name: tsan-build-and-test-test-tsan
+description: Shared test_tsan execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Clean Env
+      shell: sh
+      run: rm -rf ./build
+    - name: Download Test
+      uses: actions/download-artifact@v5
+      with:
+        name: test_x86-${{ github.run_id }}-tsan
+        path: ./build/
+    - name: Run TSAN tests
+      env:
+        OPENBLAS_NUM_THREADS: "1"
+      shell: sh
+      run: |
+        echo race:libomp.so > omp.supp
+        echo race:libomp.so.5 >> omp.supp
+        echo race:fmt::v10::detail::format_decimal >> omp.supp
+        echo "race:libmkl_intel_thread.so.2" >> omp.supp
+        export TSAN_OPTIONS=suppressions=omp.supp
+        chmod +x ./build/tests/functests
+        ./build/tests/functests "[concurrent]~[daily]"

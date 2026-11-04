@@ -1,0 +1,18 @@
+name: coverage-changes
+description: Shared changes execution; callers own runners and dependencies.
+outputs:
+  non_markdown:
+    description: non_markdown
+    value: ${{ steps.changes.outputs.non_markdown }}
+runs:
+  using: composite
+  steps:
+    - uses: dorny/paths-filter@v3
+      id: changes
+      with:
+        predicate-quantifier: 'every'
+        filters: |
+          non_markdown:
+            - '**'
+            - '!docs/**'
+            - '!**/*.md'

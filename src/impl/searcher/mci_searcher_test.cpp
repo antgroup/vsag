@@ -64,6 +64,8 @@ TEST_CASE("MCISearcher traverses base extras delta and tombstones before and aft
     seeds.push_back(0);
     LabelTable labels(allocator.get());
     MCISearcherParam params;
+    params.packed_filter = GENERATE(false, true);
+    params.batch_distance = GENERATE(false, true);
     params.seed_count = 1;
     params.seed_inner_ids = &seeds;
     params.precise_vectors = use_raw ? vectors.data() : nullptr;
