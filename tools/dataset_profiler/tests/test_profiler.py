@@ -497,6 +497,20 @@ def test_large_constant_norm_histogram_has_representable_edges(tmp_path):
     assert histogram["bins"][0] < value < histogram["bins"][-1]
 
 
+def test_identical_vectors_keep_full_norm_and_duplicate_counts(tmp_path):
+    path = tmp_path / "identical_vectors.hdf5"
+    _write_dense(path, np.ones((32, 3), dtype=np.float32))
+    report = profile_dataset(str(path), sample_size=8, pairwise_sample_size=4)
+    norms = report["metrics"]["norms"]
+    exact = report["metrics"]["duplicates"]["exact"]
+    assert norms["count"] == 32
+    assert norms["stats"]["min"] == norms["stats"]["max"] == pytest.approx(math.sqrt(3))
+    assert sum(norms["histogram"]["counts"]) == 32
+    assert exact["unique_vectors"] == 1
+    assert exact["duplicate_vectors"] == 31
+    assert exact["max_group_size"] == 32
+
+
 @pytest.mark.parametrize("vector_type", ["dense", "sparse"])
 def test_dimension_variance_is_stable_at_large_offsets(tmp_path, vector_type):
     path = tmp_path / ("stable_variance_" + vector_type + ".hdf5")

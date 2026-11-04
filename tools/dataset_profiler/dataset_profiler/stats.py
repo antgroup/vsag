@@ -41,9 +41,16 @@ def as_finite_float(value: Any) -> Optional[float]:
     return number
 
 
+def _as_float64_array(values: Iterable[float]) -> np.ndarray:
+    """Convert values without boxing ndarray elements into a Python list."""
+    if isinstance(values, np.ndarray):
+        return np.asarray(values, dtype=np.float64)
+    return np.fromiter(values, dtype=np.float64)
+
+
 def summarize(values: Iterable[float]) -> Dict[str, Any]:
     """Return count/mean/std/min/max/percentiles for finite values."""
-    array = np.asarray(list(values), dtype=np.float64)
+    array = _as_float64_array(values)
     array = array[np.isfinite(array)]
     out: Dict[str, Any] = {"count": int(array.size)}
     if array.size == 0:
@@ -74,7 +81,7 @@ def summarize(values: Iterable[float]) -> Dict[str, Any]:
 
 def histogram(values: Iterable[float], bins: int = HISTOGRAM_BINS) -> Dict[str, Any]:
     """Return histogram edges/counts safe for JSON and SVG rendering."""
-    array = np.asarray(list(values), dtype=np.float64)
+    array = _as_float64_array(values)
     array = array[np.isfinite(array)]
     if array.size == 0:
         return {"bins": [], "counts": [], "bin_count": 0}

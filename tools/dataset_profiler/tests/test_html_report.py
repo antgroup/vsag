@@ -219,11 +219,14 @@ def test_downsampled_points_use_the_exact_linspace_partition():
 def test_sparse_zero_total_includes_implicit_zeros(sparse_path):
     report = profile_dataset(str(sparse_path), sample_size=8, pairwise_sample_size=4)
     sparsity = report["metrics"]["sparsity"]
-    expected = sparsity["cells"] - sparsity["non_zero_values"]
+    invalid_values = report["metrics"]["invalid_values"]["invalid_values"]
+    expected = sparsity["cells"] - sparsity["non_zero_values"] - invalid_values
     assert sparsity["zero_values"] == expected
     assert sparsity["explicit_zero_entries"] == 0
     text = render_html(report)
     assert "<th>Zero values</th><td>%d</td>" % expected in text
+    assert DEFINITIONS["sparsity"] in text
+    assert "NaN/Inf values are reported separately" in text
 
 
 def test_dense_zero_count_is_not_rendered_as_unavailable():
@@ -244,7 +247,8 @@ def test_bundled_sparse_example_has_consistent_zero_total():
         (output_dir / "toy_sparse.profile.json").read_text(encoding="utf-8")
     )
     sparsity = report["metrics"]["sparsity"]
-    expected = sparsity["cells"] - sparsity["non_zero_values"]
+    invalid_values = report["metrics"]["invalid_values"]["invalid_values"]
+    expected = sparsity["cells"] - sparsity["non_zero_values"] - invalid_values
     assert sparsity["zero_values"] == expected == 9966
     html = (output_dir / "toy_sparse.profile.html").read_text(encoding="utf-8")
     assert "<th>Zero values</th><td>9966</td>" in html

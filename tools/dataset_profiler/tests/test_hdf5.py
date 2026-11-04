@@ -55,16 +55,18 @@ def test_dense_row_selection_matches_source(tmp_path, rng):
         np.testing.assert_array_equal(rows, matrix[[0, 5, 40]])
 
 
-def test_unsigned_dense_is_rejected(tmp_path):
+def test_unsigned_dense_preserves_full_value_range(tmp_path):
     import h5py
 
+    matrix = np.array([[0, 127], [128, 255]], dtype=np.uint8)
     path = tmp_path / "unsigned_dense.hdf5"
     with h5py.File(str(path), "w") as f:
-        f.create_dataset(
-            "train", data=np.array([[128], [255]], dtype=np.uint8)
-        )
-    with pytest.raises(DatasetFormatError, match="unsigned dense"):
-        HDF5Dataset(str(path))
+        f.create_dataset("train", data=matrix)
+    with HDF5Dataset(str(path)) as dataset:
+        assert dataset.metadata.dtype == "INT8"
+        blocks = list(dataset.iter_dense_blocks())
+        np.testing.assert_array_equal(blocks[0][1], matrix)
+        np.testing.assert_array_equal(dataset.read_dense_rows([0, 1]), matrix)
 
 
 def test_dense_rejects_unsorted_row_indices(tmp_path, dense_matrix):

@@ -421,11 +421,13 @@ class MockProvider:
         self,
         response: str,
         model: str = "mock-model",
-        secrets: Sequence[str] = (),
+        secrets: str | Sequence[str] = (),
     ) -> None:
         self._response = response
         self.model = model
-        self.redaction_secrets = tuple(secrets)
+        self.redaction_secrets = (
+            (secrets,) if isinstance(secrets, str) else tuple(secrets)
+        )
         self.last_prompt: Optional[str] = None
 
     def complete(self, prompt: str) -> str:

@@ -65,6 +65,19 @@ def test_summarize_empty_input_is_all_none():
     assert stats["p50"] is None
 
 
+def test_numpy_stats_do_not_iterate_arrays_element_by_element():
+    class NoIterationArray(np.ndarray):
+        def __iter__(self):
+            raise AssertionError("ndarray elements were boxed into a Python list")
+
+    values = np.array([2.0, 2.0, 2.0], dtype=np.float64).view(NoIterationArray)
+    stats = summarize(values)
+    hist = histogram(values)
+    assert stats["count"] == 3
+    assert stats["mean"] == 2.0
+    assert sum(hist["counts"]) == 3
+
+
 def test_histogram_is_json_safe():
     hist = histogram([0.0, 0.5, 1.0, 2.0, 2.5], bins=5)
     assert hist["bin_count"] == 5
