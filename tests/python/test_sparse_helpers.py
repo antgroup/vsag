@@ -17,7 +17,8 @@
 import numpy as np
 import pytest
 
-from pyvsag.sparse import build_term_vocabulary, term_weights_to_csr
+from pyvsag import sparse
+from pyvsag.sparse import TermVocabulary, build_term_vocabulary, term_weights_to_csr
 
 
 def test_build_term_vocabulary_is_lexicographic_and_starts_at_zero():
@@ -128,6 +129,78 @@ def test_term_weights_to_csr_rejects_duplicate_vocab_ids():
     vocabulary = {"a": 0, "b": 0}
     with pytest.raises(ValueError, match="duplicate term ID"):
         term_weights_to_csr([{"a": 1.0, "b": 2.0}], vocabulary)
+
+
+def test_term_weights_to_csr_rejects_duplicate_ids_across_types():
+    # ``1.0 == 1`` hashes identically, so this is a duplicate even though
+    # ``1.0`` alone would be rejected as a non-integer ID.
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        term_weights_to_csr([{"a": 1.0}], {"a": 1, "b": 1.0})
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        term_weights_to_csr([{"a": 1.0}], {"a": 1, "b": True})
+
+
+def test_term_weights_to_csr_reports_invalid_ids_with_descriptive_error():
+    # Duplicate detection must not swallow the descriptive TypeError for
+    # unhashable / non-integer vocabulary IDs.
+    with pytest.raises(TypeError, match="must be an integer, got list"):
+        term_weights_to_csr([{"a": 1.0}], {"a": [1]})
+    with pytest.raises(TypeError, match="must be an integer, got float"):
+        term_weights_to_csr([{"a": 1.0}], {"a": 1.0})
+
+
+def test_term_vocabulary_matches_plain_mapping():
+    plain = {"a": 0, "b": 1}
+    vocabulary = TermVocabulary(plain)
+
+    assert vocabulary == plain
+    assert plain == vocabulary
+    assert vocabulary["b"] == 1
+    assert list(vocabulary) == ["a", "b"]
+    assert list(vocabulary.items()) == [("a", 0), ("b", 1)]
+    assert len(vocabulary) == 2
+
+
+def test_term_vocabulary_rejects_invalid_mappings():
+    with pytest.raises(TypeError, match="must be a mapping"):
+        TermVocabulary([("a", 0)])
+    with pytest.raises(TypeError, match="non-string term"):
+        TermVocabulary({1: 0})
+    with pytest.raises(ValueError, match="duplicate term ID"):
+        TermVocabulary({"a": 0, "b": 0})
+
+
+def test_term_weights_to_csr_accepts_term_vocabulary():
+    documents = [{"search": 0.5, "vector": 1.0}, {"index": 0.75}]
+    plain = build_term_vocabulary(documents)
+
+    first = term_weights_to_csr(documents, TermVocabulary(plain))
+    second = term_weights_to_csr(documents, plain)
+
+    for first_array, second_array in zip(first, second):
+        np.testing.assert_array_equal(first_array, second_array)
+
+
+def test_term_vocabulary_is_validated_once(monkeypatch):
+    documents = [{"a": 1.0}, {"b": 2.0}]
+    vocabulary = TermVocabulary(build_term_vocabulary(documents))
+
+    calls = []
+    original = sparse._validated_term_ids
+
+    def counting_validator(mapping):
+        calls.append(mapping)
+        return original(mapping)
+
+    monkeypatch.setattr(sparse, "_validated_term_ids", counting_validator)
+
+    term_weights_to_csr(documents, vocabulary)
+    term_weights_to_csr([{"a": 1.0}], vocabulary)
+    assert calls == []
+
+    # A raw mapping is still validated on every call.
+    term_weights_to_csr([{"a": 1.0}], dict(vocabulary))
+    assert len(calls) == 1
 
 
 def test_term_weights_to_csr_accepts_generator_documents():

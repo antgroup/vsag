@@ -154,20 +154,21 @@ are pure Python and only require NumPy, which `pyvsag` already uses.
 | Helper | Result | Notes |
 | --- | --- | --- |
 | `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32`. |
+| `TermVocabulary(vocabulary)` | reusable mapping | Wraps a vocabulary produced by `build_term_vocabulary` and validates its IDs once. Pass it instead of the raw dict when the same vocabulary converts many queries, so query-time conversion scans the query terms rather than the whole vocabulary. |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
 
 Both helpers accept any iterable of mappings, so the same vocabulary can be
 reused for documents and queries. A term that is absent from the vocabulary
 raises `KeyError`; non-string terms, non-integer IDs, IDs outside the `uint32`
 range, and non-finite weights are rejected instead of being silently
-truncated. Weights that do not fit in `float32` are also remembered.
+truncated. Weights that do not fit in `float32` are also rejected.
 
 ```python
 import json
 import numpy as np
 import pyvsag
 
-from pyvsag.sparse import build_term_vocabulary, term_weights_to_csr
+from pyvsag.sparse import TermVocabulary, build_term_vocabulary, term_weights_to_csr
 
 documents = [
     {"vector": 1.0, "search": 0.8, "guide": 0.6},
@@ -193,9 +194,13 @@ index.build(
     ids=ids,
 )
 
+# Validate the reuse vocabulary once; every query conversion then costs
+# only the query's terms, not the whole vocabulary.
+query_vocabulary = TermVocabulary(vocabulary)
+
 query = {"vector": 1.0, "search": 0.8}
 query_pointers, query_indices, query_values = term_weights_to_csr(
-    [query], vocabulary
+    [query], query_vocabulary
 )
 result_ids, result_distances = index.knn_search(
     query_pointers,

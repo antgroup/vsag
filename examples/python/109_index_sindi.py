@@ -74,22 +74,10 @@ DOCUMENTS = [
 ]
 
 
-def print_results(index, vocabulary, query_terms, topk, search_params, titles):
-    """Convert query terms to CSR, run KNN, and print readable results."""
-    missing = sorted(set(query_terms) - set(vocabulary))
-    if missing:
-        raise ValueError(f"query terms missing from the vocabulary: {missing}")
-
-    query_pointers, query_indices, query_values = term_weights_to_csr(
-        [query_terms], vocabulary
-    )
-    result_ids, result_distances = index.knn_search(
-        query_pointers, query_indices, query_values, topk, search_params
-    )
-
-    print(f"\nQuery terms: {query_terms}")
+def print_results(result_ids, result_distances, titles):
+    """Print the neighbours of one query in a readable form."""
     for rank, (doc_id, distance) in enumerate(
-        zip(result_ids[0], result_distances[0]), start=1
+        zip(result_ids, result_distances), start=1
     ):
         doc_id = int(doc_id)
         if doc_id < 0:
@@ -116,14 +104,8 @@ def sindi_term_weight_example():
     print("\nCSR preview:")
     print("  index_pointers:", index_pointers.tolist())
     print("  indices:       ", indices.tolist())
-    # The vocabulary from the 6 documents includes: approximate, database, full,
-    # guide, indexing, keyword, nearest, neighbor, retrieval, sparse, text, tuning,
-    # vector.  With terms sorted lexicographically the mapping is:
-    #   approximate:0, database:1, full:2, guide:3, indexing:4, keyword:5,
-    #   nearest:6, neighbor:7, retrieval:8, sparse:9, text:10, tuning:11,
-    #   vector:12
-    # Document 1 (vector=1.0, search=1.0, guide=0.6) -> terms vector(12), search(13),
-    # but wait - let's just print the actual values:
+    # `values` holds one weight per non-zero term, ordered by term ID within
+    # each row; the vocabulary printed above maps each term to its ID.
     print("  values:        ", [float(v) for v in values.tolist()])
 
     # `dim` is the maximum number of non-zero terms per vector, not the
@@ -151,42 +133,50 @@ def sindi_term_weight_example():
 
     # Step 4: search with readable query terms. The same helper converts the
     # query to CSR; unknown terms must be filtered or mapped beforehand.
+    topk = 3
     search_params = json.dumps({"sindi": {"query_prune_ratio": 0.0, "n_candidate": 6}})
     query_terms = {"vector": 1.0, "search": 0.8}
-    print_results(index, vocabulary, query_terms, 3, search_params, titles)
+    missing = sorted(set(query_terms) - set(vocabulary))
+    if missing:
+        raise ValueError(f"query terms missing from the vocabulary: {missing}")
+
+    # Convert the query once and reuse the same CSR arrays before and after
+    # the save/load round-trip, so both searches really use one query.
+    query_pointers, query_indices, query_values = term_weights_to_csr(
+        [query_terms], vocabulary
+    )
+    result_ids, result_distances = index.knn_search(
+        query_pointers, query_indices, query_values, topk, search_params
+    )
+    print(f"\nQuery terms: {query_terms}")
+    print_results(result_ids[0], result_distances[0], titles)
 
     # Step 5: persist the index and confirm the loaded copy returns the same
-    # neighbours.
+    # neighbours for the same query.
     filename = "./python_example_sindi.index"
     index.save(filename)
     restored = pyvsag.Index("sindi", index_params)
     restored.load(filename)
     print(f"\nReloaded index from {filename}")
 
-    # Compare results before and after round-trip
-    search_params = json.dumps({"sindi": {"query_prune_ratio": 0.0, "n_candidate": 6}})
-    query_terms = {"vector": 1.0, "search": 0.8}
-    _, result_ids_before, result_distances_before = index.knn_search(
-        index_pointers, indices, values, 3, search_params
+    restored_ids, restored_distances = restored.knn_search(
+        query_pointers, query_indices, query_values, topk, search_params
     )
-    _, result_ids_after, result_distances_after = restored.knn_search(
-        index_pointers, indices, values, 3, search_params
-    )
-    ids_match = (result_ids_before == result_ids_after).all()
-    dists_match = np.allclose(result_distances_before, result_distances_after)
-    print(f"\nSave/Load round-trip test:")
-    print(f"  result_ids match:    {ids_match}")
+    ids_match = bool(np.array_equal(result_ids, restored_ids))
+    dists_match = bool(np.allclose(result_distances, restored_distances))
+    print("\nSave/Load round-trip test:")
+    print(f"  result_ids match:       {ids_match}")
     print(f"  result_distances match: {dists_match}")
-    if ids_match and dists_match:
-        print("  PASS: save/load round-trip preserves results")
-    else:
+    if not (ids_match and dists_match):
         print("  FAIL: save/load round-trip changed results")
         if not ids_match:
-            print(f"    before IDs:   {result_ids_before.tolist()}")
-            print(f"    after IDs:    {result_ids_after.tolist()}")
+            print(f"    before IDs:   {result_ids.tolist()}")
+            print(f"    after IDs:    {restored_ids.tolist()}")
         if not dists_match:
-            print(f"    before dists: {result_distances_before.tolist()}")
-            print(f"    after dists:  {result_distances_after.tolist()}")
+            print(f"    before dists: {result_distances.tolist()}")
+            print(f"    after dists:  {restored_distances.tolist()}")
+        raise SystemExit(1)
+    print("  PASS: save/load round-trip preserves results")
 
 
 if __name__ == "__main__":
