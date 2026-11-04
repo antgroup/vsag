@@ -123,6 +123,7 @@ Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(
 | 辅助函数 | 返回值 | 说明 |
 | --- | --- | --- |
 | `build_term_vocabulary(documents)` | `dict[str, int]` | 对所有唯一词条按字典序排序并从 `0` 开始编号，因此词表不受字典插入顺序或文档顺序影响，ID 始终落在 `uint32` 范围内。 |
+| `TermVocabulary(vocabulary)` | 可复用的映射 | 包装 `build_term_vocabulary` 的结果并只校验一次 ID。同一份词表需要转换大量查询时传入它而不是原始字典，查询转换的耗时便只与查询词条数相关，而不再随词表大小增长。 |
 | `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序。**空映射被拒绝**（引发 `ValueError`），因为 SINDI::add 在添加时会静默丢弃空文档，而 SINDI::KnnSearch 排斥空查询。**词表中的 ID 必须唯一**——重复 ID 会引发 `ValueError`。 |
 
 两个函数都接受任意可迭代的映射序列，因此文档和查询可以复用同一份词表。查询中出现词表之外的词条会抛出 `KeyError`；非字符串词条、非整数 ID、超出 `uint32` 范围的 ID、非有限权重以及无法用 `float32` 表示的权重都会被显式拒绝，不会被静默截断。
@@ -132,7 +133,7 @@ import json
 import numpy as np
 import pyvsag
 
-from pyvsag.sparse import build_term_vocabulary, term_weights_to_csr
+from pyvsag.sparse import TermVocabulary, build_term_vocabulary, term_weights_to_csr
 
 documents = [
     {"vector": 1.0, "search": 0.8, "guide": 0.6},
@@ -158,9 +159,13 @@ index.build(
     ids=ids,
 )
 
+# 复用词表只校验一次；之后每次查询转换只处理查询本身的词条，
+# 不再扫描整个词表。
+query_vocabulary = TermVocabulary(vocabulary)
+
 query = {"vector": 1.0, "search": 0.8}
 query_pointers, query_indices, query_values = term_weights_to_csr(
-    [query], vocabulary
+    [query], query_vocabulary
 )
 result_ids, result_distances = index.knn_search(
     query_pointers,
