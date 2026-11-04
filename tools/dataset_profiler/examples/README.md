@@ -22,8 +22,8 @@ python examples/make_toy_datasets.py            # writes into examples/output/
 ```
 
 The generation seed and the profiling seed are fixed in the script, so re-running it on the
-same NumPy build reproduces the committed reports byte-for-byte (verified with NumPy 2.2 /
-Python 3.13; SVD sign conventions may differ across BLAS builds).
+same NumPy build reproduces the committed reports byte-for-byte (verified with NumPy 2.4 /
+Python 3.11; SVD sign conventions may differ across BLAS builds).
 
 ## Profile your own dataset
 

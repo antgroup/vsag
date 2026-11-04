@@ -119,3 +119,66 @@ def test_warnings_are_rendered(sparse_no_offsets_path):
     report = profile_dataset(str(sparse_no_offsets_path), sample_size=8, pairwise_sample_size=8)
     text = render_html(report)
     assert "Warnings" in text
+
+
+def test_page_title_and_header_use_input_file_name(dense_path):
+    text = render_html(_dense_report(dense_path))
+    assert "<title>VSAG dataset profile: dense_toy.hdf5</title>" in text
+    assert "dense_toy.hdf5 ·" in text
+
+
+def test_overview_shows_effective_metric(dense_path):
+    # the file attribute is 'l2' (euclidean) but the run used angular
+    report = profile_dataset(
+        str(dense_path), metric="angular", sample_size=8, pairwise_sample_size=8
+    )
+    text = render_html(report)
+    assert '<div class="card-value">angular</div>' in text
+
+
+def test_large_constant_range_renders_with_representable_padding(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "huge_range.hdf5"
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["distance"] = "euclidean"
+        handle.create_dataset(
+            "train",
+            data=np.array([[1e20, 0.0], [0.0, 2e20], [2e20, 1e20]], dtype=np.float32),
+        )
+    report = profile_dataset(
+        str(path), sample_size=3, pairwise_sample_size=3, clusters=2
+    )
+    # per-dimension means are constant at ~1e20, so the chart range must be
+    # padded by a representable amount instead of +/-1.0
+    assert report["metrics"]["dimensions"]["per_dimension"]["mean"]["values"][0] == (
+        report["metrics"]["dimensions"]["per_dimension"]["mean"]["values"][1]
+    )
+    text = render_html(report)
+    assert "Per-dimension distributions" in text
+    assert re.search(r'(cx|cy)="[^"]*(nan|inf)', text) is None
+
+
+def test_downsampled_points_labelled_with_source_dimension_ranges(tmp_path):
+    import h5py
+    import numpy as np
+
+    path = tmp_path / "bucket.hdf5"
+    with h5py.File(str(path), "w") as handle:
+        handle.attrs["distance"] = "euclidean"
+        handle.create_dataset(
+            "train",
+            data=np.arange(16, dtype=np.float32).reshape(4, 4),
+        )
+    report = profile_dataset(
+        str(path),
+        sample_size=4,
+        pairwise_sample_size=4,
+        max_dimension_points=2,
+    )
+    assert report["metrics"]["dimensions"]["per_dimension"]["mean"]["downsampled"] is True
+    text = render_html(report)
+    assert "dimensions 0-1" in text
+    assert "dimensions 2-3" in text
+

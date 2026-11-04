@@ -49,6 +49,17 @@ _DEFAULT_SPARSE_METRIC = "ip"
 _MAX_ANISOTROPY_DIM = 50000
 _MAX_ANISOTROPY_BYTES = 256 * 1024 * 1024
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
+# Dense streaming blocks are sized by their working bytes, not by a fixed row
+# count: every row keeps the raw block, a float64 copy, a finite mask, and
+# several float64 temporaries alive at the same time.
+_DENSE_BLOCK_BYTES = 128 * 1024 * 1024
+_DENSE_BLOCK_BYTES_PER_VALUE = 40
+_DENSE_BLOCK_MAX_ROWS = 65536
+# Relative tolerance under which the expanded Euclidean formula (||a||²+||b||²-2a·b)
+# has lost every significant digit; such pairs are recomputed from differences.
+_EUCLIDEAN_GRAM_REL_TOL = 1e-8
+# Row budget for the streaming mean-cosine reduction (normalized blocks only).
+_MEAN_COSINE_BLOCK_ROWS = 8192
 
 
 @dataclass
@@ -217,6 +228,20 @@ def _normalize_metric(
 # ---------------------------------------------------------------------------
 # Dense profiling
 # ---------------------------------------------------------------------------
+def _dense_block_rows(dim: int) -> int:
+    """Return a dense block row count whose working buffers fit the byte budget.
+
+    The streaming dense pass converts each block to float64 and keeps several
+    float64/bool temporaries alive simultaneously, so a fixed row count would
+    retain gigabytes for wide vectors.  Row counts are derived from
+    ``_DENSE_BLOCK_BYTES`` instead.
+    """
+    if dim <= 0:
+        return _DENSE_BLOCK_MAX_ROWS
+    rows = _DENSE_BLOCK_BYTES // (int(dim) * _DENSE_BLOCK_BYTES_PER_VALUE)
+    return int(max(1, min(_DENSE_BLOCK_MAX_ROWS, rows)))
+
+
 def _profile_dense(
     dataset: HDF5Dataset,
     config: ProfilerConfig,
@@ -248,7 +273,7 @@ def _profile_dense(
     vectors_with_invalid = 0
     all_zero_vectors = 0
 
-    for _, block in dataset.iter_dense_blocks(block_rows=65536):
+    for _, block in dataset.iter_dense_blocks(block_rows=_dense_block_rows(dim)):
         raw = np.asarray(block)
         if raw.dtype.kind == "f":
             finite = np.isfinite(raw)
@@ -1101,12 +1126,7 @@ def _pairwise_dense(matrix: np.ndarray, metric: str) -> np.ndarray:
     if matrix.shape[0] == 0:
         return np.zeros((0, 0), dtype=np.float64)
     if metric == "euclidean":
-        squared_norms = np.einsum("ij,ij->i", matrix, matrix)
-        squared = (
-            squared_norms[:, None] + squared_norms[None, :] - 2.0 * (matrix @ matrix.T)
-        )
-        np.maximum(squared, 0.0, out=squared)
-        return np.sqrt(squared)
+        return _dense_euclidean(matrix)
     if metric == "ip":
         return 1.0 - matrix @ matrix.T
     if metric == "angular":
@@ -1150,8 +1170,13 @@ def _pairwise_sparse(
             if metric == "ip":
                 distance = 1.0 - dot
             elif metric == "euclidean":
-                squared = norms[i] * norms[i] + norms[j] * norms[j] - 2.0 * dot
-                distance = math.sqrt(max(0.0, squared))
+                # Direct coordinate differences avoid the cancellation that the
+                # expanded norm/dot form suffers for large-magnitude vectors.
+                squared = 0.0
+                for key in left.keys() | right.keys():
+                    delta = left.get(key, 0.0) - right.get(key, 0.0)
+                    squared += delta * delta
+                distance = math.sqrt(squared)
             elif metric == "angular":
                 if norms[i] == 0.0 and norms[j] == 0.0:
                     distance = 0.0
@@ -1165,6 +1190,30 @@ def _pairwise_sparse(
             matrix[i, j] = distance
             matrix[j, i] = distance
     return matrix
+
+
+def _dense_euclidean(matrix: np.ndarray) -> np.ndarray:
+    """Return the Euclidean distance matrix without catastrophic cancellation.
+
+    The fast expanded form is used first.  When the norms of two rows dwarf
+    their distance (for example rows near 1e10 whose differences are 1), that
+    expansion rounds to zero, so every pair touching an unstable row is
+    recomputed from direct coordinate differences.
+    """
+    squared_norms = np.einsum("ij,ij->i", matrix, matrix)
+    squared = squared_norms[:, None] + squared_norms[None, :] - 2.0 * (
+        matrix @ matrix.T
+    )
+    scale = squared_norms[:, None] + squared_norms[None, :]
+    unstable = (scale > 0) & (squared <= _EUCLIDEAN_GRAM_REL_TOL * scale)
+    if np.any(unstable):
+        for row in np.unique(np.nonzero(unstable)[0]):
+            difference = matrix[row] - matrix
+            direct = np.einsum("ij,ij->i", difference, difference)
+            squared[row, :] = direct
+            squared[:, row] = direct
+    np.maximum(squared, 0.0, out=squared)
+    return np.sqrt(squared)
 
 
 def _upper_triangle(matrix: np.ndarray) -> np.ndarray:
@@ -1226,17 +1275,26 @@ def _pca_statistics(
 
 def _mean_pairwise_cosine(matrix: np.ndarray) -> Optional[float]:
     matrix = np.asarray(matrix, dtype=np.float64)
-    if matrix.shape[0] < 2:
+    rows = int(matrix.shape[0])
+    if rows < 2:
         return None
-    norms = np.linalg.norm(matrix, axis=1)
-    safe = np.where(norms > 0, norms, 1.0)
-    normalized = matrix / safe[:, None]
-    gram = normalized @ normalized.T
-    upper = gram[np.triu_indices(gram.shape[0], k=1)]
-    upper = upper[np.isfinite(upper)]
-    if upper.size == 0:
+    # Sum identity: sum_{i != j} u_i . u_j = ||sum_i u_i||^2 - sum_i ||u_i||^2.
+    # This matches the pairwise definition (zero-norm rows contribute nothing)
+    # without materializing the O(M^2) Gram matrix of the reduction sample;
+    # normalized rows are also accumulated in bounded blocks.
+    total = np.zeros(int(matrix.shape[1]), dtype=np.float64)
+    squared = 0.0
+    for start in range(0, rows, _MEAN_COSINE_BLOCK_ROWS):
+        chunk = matrix[start : start + _MEAN_COSINE_BLOCK_ROWS]
+        norms = np.linalg.norm(chunk, axis=1)
+        safe = np.where(norms > 0, norms, 1.0)
+        normalized = chunk / safe[:, None]
+        total += normalized.sum(axis=0)
+        squared += float(np.einsum("ij,ij->", normalized, normalized))
+    mean = (float(total @ total) - squared) / float(rows * (rows - 1))
+    if not math.isfinite(mean):
         return None
-    return float(np.mean(np.clip(upper, -1.0, 1.0)))
+    return float(np.clip(mean, -1.0, 1.0))
 
 
 def _kmeans(

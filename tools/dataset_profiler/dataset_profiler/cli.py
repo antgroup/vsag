@@ -101,7 +101,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--out-html",
         metavar="PATH",
         default=None,
-        help="write the self-contained HTML report here (default: <input>.profile.html)",
+        help=(
+            "write the self-contained HTML report here (default: <input>.profile.html; "
+            "omitted when --out-json is given without --out-html)"
+        ),
     )
     parser.add_argument(
         "--ai",

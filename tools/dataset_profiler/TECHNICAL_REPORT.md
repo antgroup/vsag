@@ -44,12 +44,21 @@ dataset, and bounded memory for streaming sparse files.
   matrix. Sorting the selected positions afterward restores deterministic row
   order without biasing the subset toward low dataset indices. The report
   records requested vs. effective sizes and the exact method string.
-* **Streaming**: dense files are read in row blocks (65536 rows); sparse files
-  are decoded record-by-record from bounded byte chunks (default 64 MiB).
+* **Streaming**: dense files are read in row blocks sized from a 128 MiB
+  working-byte budget (at most 65536 rows), so a wide FLOAT32 matrix cannot
+  retain gigabytes per block; sparse files are decoded record-by-record from
+  bounded byte chunks (default 64 MiB).
   Full-dataset statistics (norms, per-dimension aggregates, duplicates,
   invalid counts, sparsity) come from a single streaming pass; nothing beyond
   the block buffer, the bounded accumulators, and the bounded sample is ever
   materialized.
+* **Distance computations**: Euclidean pairwise distances use the expanded
+  norm/dot form when it is numerically stable and fall back to direct
+  coordinate differences for pairs whose norms dwarf their distance (for
+  example rows near `1e10` differing by `1`, where the expansion rounds to
+  zero). The sparse Euclidean branch always subtracts coordinates directly.
+  The mean pairwise cosine is derived from normalized-vector sums
+  (`||sum(u)||² - sum(||u||²)`) instead of an `O(M²)` Gram matrix.
 * **Per-dimension arrays**: sparse absent coordinates contribute implicit zeros
   to per-dimension statistics. Sparse accumulation stops at dimensionality
   10,000,000 (other metrics continue) to bound memory. Series longer than
@@ -76,9 +85,12 @@ dataset, and bounded memory for streaming sparse files.
 * **Default offline**: JSON/HTML generation never opens a network connection.
 * **Aggregate-only AI payload**: the request is built from the report —
   aggregate metrics, sampling config, warnings, and non-sensitive metadata
-  (split name, vector type, dtype, count/dim, distance). Raw vectors are not
-  in the report and therefore structurally cannot be sent; tests assert that
-  source rows never appear in the request body.
+  (split name, vector type, dtype, count/dim, distance). A field allowlist
+  drops per-vector entries (`clustering.projection_points`, which holds one
+  PCA coordinate pair per sampled vector, and `clustering.labels`, which holds
+  one cluster assignment per sampled vector). Raw vectors are not in the
+  report and therefore structurally cannot be sent; tests assert that source
+  rows never appear in the request body and that those keys are absent.
 * **Credentials**: the API key is read from the environment (`VSAG_AI_API_KEY`,
   fallback `OPENAI_API_KEY`, or a custom variable via `VSAG_AI_KEY_ENV`),
   sent only in the `Authorization` header over https (plaintext URLs are

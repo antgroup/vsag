@@ -64,6 +64,10 @@ The tool reads the layouts defined in [HDF5 Dataset Format](dataset_format.md):
 `multi_vector` files are rejected with an explanatory error. Data is streamed in bounded
 chunks: the profiler never materializes a complete dataset, and pairwise work is capped by
 the configured sample size, so no `O(N²)` matrix is ever allocated over the full dataset.
+Dense block sizes are derived from a working-memory budget rather than a fixed row count,
+sparse per-dimension accumulators stop at 10,000,000 inferred dimensions (the other metrics
+are still reported), and Euclidean distances switch to direct coordinate differences when
+the fast expanded form would cancel catastrophically.
 
 To profile arrays you only have in memory — for example the same arrays you pass to
 `pyvsag` — first export them with h5py to the layout above; see
@@ -107,7 +111,8 @@ section.
   assets and contacts no external service when opened.
 - Raw vectors are never written into the report and never sent to an AI provider: the AI
   request contains only aggregate metrics, sampling configuration, warnings, and bounded
-  non-sensitive metadata.
+  non-sensitive metadata. Per-vector entries such as the PCA projection points and cluster
+  labels are filtered out of that payload.
 - AI credentials come only from environment variables, are transmitted exclusively over https
   in the `Authorization` header, and are never included in reports, command output, or error
   messages (errors are redacted). HTTP redirects are rejected so credentials cannot be forwarded.

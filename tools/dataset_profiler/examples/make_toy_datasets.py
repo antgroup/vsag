@@ -28,7 +28,7 @@ Run from anywhere::
     python tools/dataset_profiler/examples/make_toy_datasets.py --outdir out
 
 Everything is deterministic for a given NumPy build; committed example reports
-under ``examples/output/`` were produced with NumPy 2.2 / Python 3.13.
+under ``examples/output/`` were produced with NumPy 2.4 / Python 3.11.
 """
 
 from __future__ import annotations

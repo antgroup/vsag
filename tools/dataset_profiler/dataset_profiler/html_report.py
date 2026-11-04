@@ -44,6 +44,7 @@ def render_html(report: Dict[str, Any]) -> str:
     metrics = report.get("metrics", {})
     dataset = report.get("dataset", {})
     config = report.get("config", {})
+    file_name = _report_file_name(report)
     body: List[str] = []
     body.append(_header(report, dataset, config))
     body.append(_overview_cards(report, metrics, dataset))
@@ -72,11 +73,16 @@ def render_html(report: Dict[str, Any]) -> str:
         "<script>%s</script>\n"
         "</body>\n</html>\n"
     ) % (
-        _e(dataset.get("file_name") or "dataset"),
+        _e(file_name),
         _CSS,
         "\n".join(part for part in body if part),
         _JS,
     )
+
+
+def _report_file_name(report: Dict[str, Any]) -> str:
+    """Return the input file name stored under ``report.input``."""
+    return str(report.get("input", {}).get("file_name") or "dataset")
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +91,7 @@ def render_html(report: Dict[str, Any]) -> str:
 def _header(report: Dict[str, Any], dataset: Dict[str, Any], config: Dict[str, Any]) -> str:
     title = "Dataset Feature Profile"
     subtitle = "%s · %s vectors · %s dimensions · %s" % (
-        _e(dataset.get("file_name") or "dataset"),
+        _e(_report_file_name(report)),
         _fmt(dataset.get("count")),
         _fmt(dataset.get("dim")),
         _e(str(dataset.get("vector_type", "dense")).upper()),
@@ -116,6 +122,7 @@ def _header(report: Dict[str, Any], dataset: Dict[str, Any], config: Dict[str, A
 def _overview_cards(
     report: Dict[str, Any], metrics: Dict[str, Any], dataset: Dict[str, Any]
 ) -> str:
+    config = report.get("config", {})
     norms = metrics.get("norms", {}).get("stats", {})
     sparsity = metrics.get("sparsity", {})
     duplicates = metrics.get("duplicates", {}).get("exact", {})
@@ -130,7 +137,11 @@ def _overview_cards(
             "full dataset",
         ),
         ("Element type", _e(str(dataset.get("dtype"))), "full dataset"),
-        ("Distance metric", _e(str(dataset.get("distance_metric") or "n/a")), "profiling metric"),
+        (
+            "Distance metric",
+            _e(str(config.get("metric") or dataset.get("distance_metric") or "n/a")),
+            "profiling metric",
+        ),
         ("Norm median", _fmt(norms.get("p50")), "full dataset"),
         ("Zero ratio", _pct(sparsity.get("zero_ratio")), "full dataset"),
         (
@@ -563,16 +574,35 @@ def _chart_line(
     if len(pairs) < 2:
         return '<p class="muted">Not enough per-dimension points for %s.</p>' % _e(title)
     pairs = _thin(pairs, _MAX_SVG_POINTS)
+    downsampled = bool(data.get("downsampled"))
+    bucket_size = max(1, int(data.get("bucket_size") or 1))
+    source_length = int(data.get("source_length") or len(values))
+
+    def source_range(index: int):
+        if not downsampled:
+            return index, index
+        start = index * bucket_size
+        end = min(start + bucket_size, source_length) - 1
+        return start, max(start, end)
+
+    def x_position(index: int) -> float:
+        start, end = source_range(index)
+        return (start + end) / 2.0
+
     width, height = 720, 230
     left, right, top, bottom = 56, 16, 18, 44
     plot_width = width - left - right
     plot_height = height - top - bottom
     y_values = [value for _, value in pairs]
     y_min, y_max = min(y_values), max(y_values)
-    if math.isclose(y_min, y_max):
-        y_min -= 1.0
-        y_max += 1.0
-    x_max = max(index for index, _ in pairs) or 1
+    if not y_max > y_min:
+        # Pad by a representable fraction of the magnitude: adding 1.0 to a
+        # value near 1e20 leaves the float64 bound unchanged.
+        magnitude = max(abs(y_max), abs(y_min))
+        pad = max(magnitude * 1e-3, math.ulp(magnitude) * 4.0, 1e-12)
+        y_min -= pad
+        y_max += pad
+    x_max = max(source_range(index)[1] for index, _ in pairs) or 1
 
     def sx(index: float) -> float:
         return left + (index / float(x_max)) * plot_width
@@ -580,7 +610,9 @@ def _chart_line(
     def sy(value: float) -> float:
         return top + plot_height - ((value - y_min) / (y_max - y_min)) * plot_height
 
-    points = " ".join("%.2f,%.2f" % (sx(index), sy(value)) for index, value in pairs)
+    points = " ".join(
+        "%.2f,%.2f" % (sx(x_position(index)), sy(value)) for index, value in pairs
+    )
     parts = [_svg_open(width, height)]
     parts.append(_axes(left, top, plot_width, plot_height, ylabel))
     parts.append(
@@ -588,11 +620,15 @@ def _chart_line(
         % (color, points)
     )
     for index, value in pairs:
-        tip = "dimension %d: %.6g" % (index, value)
+        start, end = source_range(index)
+        if start == end:
+            tip = "dimension %d: %.6g" % (start, value)
+        else:
+            tip = "dimensions %d-%d: %.6g" % (start, end, value)
         parts.append(
             '<circle class="point" cx="%.2f" cy="%.2f" r="2.2" fill="%s" '
             'data-tip="%s"><title>%s</title></circle>'
-            % (sx(index), sy(value), color, _e(tip), _e(tip))
+            % (sx(x_position(index)), sy(value), color, _e(tip), _e(tip))
         )
     parts.append(_x_axis(left, top + plot_height, plot_width, 0, x_max, xlabel))
     parts.append(_axis_labels(left, top, plot_width, plot_height, y_max, y_min))

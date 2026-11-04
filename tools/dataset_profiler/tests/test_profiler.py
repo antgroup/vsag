@@ -22,7 +22,15 @@ import math
 import numpy as np
 import pytest
 
-from dataset_profiler.profiler import _outliers_metric, profile_dataset
+from dataset_profiler.profiler import (
+    _DENSE_BLOCK_BYTES,
+    _DENSE_BLOCK_BYTES_PER_VALUE,
+    _DENSE_BLOCK_MAX_ROWS,
+    _dense_block_rows,
+    _mean_pairwise_cosine,
+    _outliers_metric,
+    profile_dataset,
+)
 from dataset_profiler.report import DEFINITIONS
 from dataset_profiler.sampling import make_rng, sample_indices
 from dataset_profiler.stats import dump_json
@@ -337,3 +345,56 @@ def test_ip_near_duplicates_use_nonnegative_duplicate_distance(tmp_path):
     assert near["metric"] == "euclidean"
     assert near["pair_count"] == 3
     assert near["near_duplicate_pairs"] == 1
+
+
+def test_dense_euclidean_avoids_catastrophic_cancellation(tmp_path):
+    path = tmp_path / "large_offset.hdf5"
+    _write_dense(path, [[1e10, 0], [1e10, 1], [1e10, 2]])
+    report = profile_dataset(
+        str(path), metric="euclidean", sample_size=3, pairwise_sample_size=3
+    )
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    assert pairwise["min"] == 1.0
+    assert pairwise["max"] == 2.0
+    assert pairwise["mean"] == pytest.approx(4.0 / 3.0)
+    nearest = report["metrics"]["nearest_neighbor_distances"]["stats"]
+    assert nearest["min"] == 1.0
+    assert nearest["max"] == 1.0
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert near["near_duplicate_pairs"] == 0
+
+
+def test_sparse_euclidean_avoids_catastrophic_cancellation(tmp_path):
+    path = tmp_path / "sparse_large_offset.hdf5"
+    base = 2 ** 33
+    records = [
+        (np.array([0], dtype=np.uint32), np.array([base], dtype=np.float32)),
+        (np.array([0], dtype=np.uint32), np.array([base + 2048], dtype=np.float32)),
+        (np.array([0], dtype=np.uint32), np.array([base + 4096], dtype=np.float32)),
+    ]
+    _write_sparse(path, records, metric="euclidean")
+    report = profile_dataset(
+        str(path), metric="euclidean", sample_size=3, pairwise_sample_size=3
+    )
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    assert pairwise["min"] == 2048.0
+    assert pairwise["max"] == 4096.0
+    assert pairwise["mean"] == pytest.approx((2048.0 + 2048.0 + 4096.0) / 3.0)
+
+
+def test_dense_block_rows_are_bounded_by_working_bytes():
+    assert _dense_block_rows(0) == _DENSE_BLOCK_MAX_ROWS
+    assert _dense_block_rows(8) == _DENSE_BLOCK_MAX_ROWS
+    wide = _dense_block_rows(4096)
+    assert wide < _DENSE_BLOCK_MAX_ROWS
+    # raw + float64 copy + boolean flags + float64 temporaries stay in budget
+    assert wide * 4096 * _DENSE_BLOCK_BYTES_PER_VALUE <= _DENSE_BLOCK_BYTES
+    assert _dense_block_rows(10 ** 9) == 1
+
+
+def test_mean_pairwise_cosine_matches_explicit_pairs():
+    matrix = np.array([[1.0, 0.0], [1.0, 0.0], [-1.0, 0.0], [0.0, 0.0]])
+    expected = (1.0 + -1.0 + 0.0 + -1.0 + 0.0 + 0.0) / 6.0
+    assert _mean_pairwise_cosine(matrix) == pytest.approx(expected)
+    assert _mean_pairwise_cosine(np.ones((1, 2))) is None
+

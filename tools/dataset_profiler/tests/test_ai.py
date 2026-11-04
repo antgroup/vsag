@@ -95,6 +95,24 @@ def test_prompt_is_jsonable(dense_path):
     json.dumps(payload, allow_nan=False, sort_keys=True)
 
 
+def test_aggregate_payload_excludes_per_vector_projections(dense_path):
+    report = profile_dataset(
+        str(dense_path), sample_size=24, pairwise_sample_size=12, clusters=3
+    )
+    assert report["metrics"]["clustering"]["projection_points"]
+    assert report["metrics"]["clustering"]["labels"]
+    payload = aggregate_payload(report)
+    clustering = payload["metrics"]["clustering"]
+    assert "projection_points" not in clustering
+    assert "labels" not in clustering
+    # aggregate summary fields are still forwarded
+    assert "cluster_sizes" in clustering
+    assert clustering["n_clusters"] == 3
+    prompt = build_prompt(report)
+    assert "projection_points" not in prompt
+
+
+
 # ---------------------------------------------------------------------------
 # Response validation
 # ---------------------------------------------------------------------------

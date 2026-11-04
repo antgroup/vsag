@@ -58,6 +58,135 @@ _ERROR_REDACTIONS = (
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]{8,}"),
 )
 
+# Field allowlist for the aggregate AI payload.  Anything not listed here is
+# never forwarded to the provider; per-vector fields such as
+# ``clustering.projection_points`` and ``clustering.labels`` are excluded.
+_AGGREGATE_METRIC_FIELDS: Dict[str, tuple] = {
+    "invalid_values": (
+        "definition",
+        "scope",
+        "sample_size",
+        "count",
+        "total_values",
+        "invalid_values",
+        "vectors_with_invalid",
+        "invalid_ratio",
+        "vectors_with_invalid_ratio",
+    ),
+    "norms": (
+        "definition",
+        "scope",
+        "sample_size",
+        "count",
+        "stats",
+        "histogram",
+        "non_finite_norms",
+    ),
+    "outliers": (
+        "definition",
+        "scope",
+        "sample_size",
+        "count",
+        "outlier_count",
+        "outlier_ratio",
+        "median_norm",
+        "mad_norm",
+        "threshold",
+        "max_over_median_norm",
+        "method",
+    ),
+    "dimensions": (
+        "definition",
+        "scope",
+        "sample_size",
+        "dim",
+        "summary",
+        "top_variance_dimensions",
+        "top_zero_dimensions",
+        "available",
+        "reason",
+    ),
+    "sparsity": (
+        "definition",
+        "scope",
+        "sample_size",
+        "representation",
+        "count",
+        "dim",
+        "cells",
+        "total_values",
+        "zero_values",
+        "non_zero_values",
+        "stored_entries",
+        "explicit_zero_entries",
+        "zero_ratio",
+        "density",
+        "nnz_per_vector",
+        "nnz_histogram",
+        "all_zero_vectors",
+        "all_zero_vector_ratio",
+    ),
+    "duplicates": (
+        "definition",
+        "scope",
+        "sample_size",
+        "exact",
+        "near_duplicate",
+        "scope_note",
+    ),
+    "pairwise_distances": (
+        "definition",
+        "scope",
+        "sample_size",
+        "metric",
+        "pair_count",
+        "requested_pairwise_sample_size",
+        "stats",
+        "histogram",
+        "matrix_is_bounded",
+        "dense_sample_materialized",
+        "sparse_sparse_distance_loops",
+    ),
+    "nearest_neighbor_distances": (
+        "definition",
+        "scope",
+        "sample_size",
+        "available",
+        "reason",
+        "stats",
+        "histogram",
+    ),
+    "anisotropy": (
+        "definition",
+        "scope",
+        "sample_size",
+        "available",
+        "reason",
+        "method",
+        "top1_eigenvalue_share",
+        "top10_eigenvalue_share",
+        "effective_rank",
+        "mean_pairwise_cosine",
+        "explained_variance_ratio",
+        "interpretation",
+    ),
+    "clustering": (
+        "definition",
+        "scope",
+        "sample_size",
+        "available",
+        "reason",
+        "method",
+        "explained_variance_ratio_pc1",
+        "explained_variance_ratio_pc2",
+        "clustering_available",
+        "n_clusters",
+        "cluster_sizes",
+        "inertia",
+        "iterations",
+    ),
+}
+
 
 class AIAnalysisError(RuntimeError):
     """Raised for configuration, transport, or response-validation failures."""
@@ -135,9 +264,26 @@ def aggregate_payload(report: Dict[str, Any]) -> Dict[str, Any]:
         "split": report.get("input", {}).get("split"),
         "dataset": report.get("dataset"),
         "config": report.get("config"),
-        "metrics": report.get("metrics"),
+        "metrics": _aggregate_metrics(report.get("metrics") or {}),
         "warnings": report.get("warnings"),
     }
+
+
+def _aggregate_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """Filter a metrics tree down to the aggregate allowlist.
+
+    Per-vector payloads are excluded on purpose: ``clustering.projection_points``
+    holds one PCA coordinate pair per sampled vector and ``clustering.labels``
+    holds one cluster assignment per sampled vector, which together with the
+    accompanying summaries can expose individual rows.
+    """
+    payload: Dict[str, Any] = {}
+    for name, metric in metrics.items():
+        allowed = _AGGREGATE_METRIC_FIELDS.get(name)
+        if allowed is None or not isinstance(metric, dict):
+            continue
+        payload[name] = {key: metric[key] for key in allowed if key in metric}
+    return payload
 
 
 def build_prompt(report: Dict[str, Any]) -> str:
