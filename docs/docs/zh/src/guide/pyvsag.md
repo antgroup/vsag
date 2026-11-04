@@ -123,7 +123,7 @@ Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(
 | 辅助函数 | 返回值 | 说明 |
 | --- | --- | --- |
 | `build_term_vocabulary(documents)` | `dict[str, int]` | 对所有唯一词条按字典序排序并从 `0` 开始编号，因此词表不受字典插入顺序或文档顺序影响，ID 始终落在 `uint32` 范围内。 |
-| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序，空映射会生成空行。 |
+| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序。**空映射被拒绝**（引发 `ValueError`），因为 SINDI::add 在添加时会静默丢弃空文档，而 SINDI::KnnSearch 排斥空查询。**词表中的 ID 必须唯一**——重复 ID 会引发 `ValueError`。 |
 
 两个函数都接受任意可迭代的映射序列，因此文档和查询可以复用同一份词表。查询中出现词表之外的词条会抛出 `KeyError`；非字符串词条、非整数 ID、超出 `uint32` 范围的 ID、非有限权重以及无法用 `float32` 表示的权重都会被显式拒绝，不会被静默截断。
 

@@ -57,7 +57,7 @@ import math
 import operator
 import struct
 from collections.abc import Mapping as MappingABC
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 
@@ -110,7 +110,7 @@ def build_term_vocabulary(
         >>> build_term_vocabulary([{"b": 1.0, "a": 0.5}])
         {'a': 0, 'b': 1}
     """
-    terms = set()
+    terms: set[str] = set()
     for position, document in enumerate(documents):
         if not isinstance(document, MappingABC):
             raise TypeError(
@@ -135,7 +135,7 @@ def build_term_vocabulary(
 
 
 def term_weights_to_csr(
-    documents: Sequence[Mapping[str, float]],
+    documents: Iterable[Mapping[str, float]],
     vocabulary: Mapping[str, int],
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Convert term-weight mappings into pyvsag sparse CSR arrays.
@@ -145,11 +145,13 @@ def term_weights_to_csr(
     when the input mappings have different insertion orders.
 
     Args:
-        documents: Sequence (or iterable) of ``{term: weight}`` mappings.
+        documents: Iterable (or sequence) of ``{term: weight}`` mappings.
             An empty mapping produces an empty CSR row.
         vocabulary: Mapping returned by :func:`build_term_vocabulary` (or
             an equivalent ``str -> int`` mapping). Every term used by a
-            document must be present; IDs must fit in ``uint32``.
+            document must be present; IDs must fit in ``uint32``. IDs must
+            be unique — duplicate IDs in the vocabulary will cause a
+            ``ValueError``.
 
     Returns:
         A tuple ``(index_pointers, indices, values)``:
@@ -171,8 +173,10 @@ def term_weights_to_csr(
             weight is not numeric.
         KeyError: If a document uses a term absent from ``vocabulary``.
         ValueError: If a vocabulary ID is outside the ``uint32`` range, a
-            weight is non-finite or does not fit in ``float32``, or the
-            total number of stored terms exceeds the ``uint32`` range.
+            weight is non-finite or does not fit in ``float32``, the
+            total number of stored terms exceeds the ``uint32`` range,
+            the vocabulary contains duplicate term IDs, or a document is
+            empty (empty documents are not supported by SINDI).
 
     Example:
         >>> from pyvsag.sparse import (
@@ -193,6 +197,18 @@ def term_weights_to_csr(
             f"got {type(vocabulary).__name__}"
         )
 
+    # Validate that vocabulary IDs are unique
+    seen_ids: set[int] = set()
+    id_to_term: Dict[int, str] = {}
+    for term, vid in vocabulary.items():
+        if vid in seen_ids:
+            raise ValueError(
+                f"vocabulary has duplicate term ID {vid} for terms "
+                f"{term!r} and {id_to_term[vid]!r}"
+            )
+        seen_ids.add(vid)
+        id_to_term[vid] = term
+
     index_pointers = [0]
     indices: List[int] = []
     values: List[float] = []
@@ -203,6 +219,15 @@ def term_weights_to_csr(
             raise TypeError(
                 f"documents[{position}] must be a mapping of str to numeric "
                 f"weight, got {type(document).__name__}"
+            )
+
+        # Reject empty documents - SINDI::add skips empty documents
+        # and SINDI::KnnSearch rejects empty queries
+        if len(document) == 0:
+            raise ValueError(
+                f"documents[{position}] is empty; empty documents are not "
+                f"supported by SINDI (they are silently dropped during "
+                f"add and rejected by knn_search)"
             )
 
         row = []

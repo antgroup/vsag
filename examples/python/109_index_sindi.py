@@ -116,7 +116,15 @@ def sindi_term_weight_example():
     print("\nCSR preview:")
     print("  index_pointers:", index_pointers.tolist())
     print("  indices:       ", indices.tolist())
-    print("  values:        ", values.tolist())
+    # The vocabulary from the 6 documents includes: approximate, database, full,
+    # guide, indexing, keyword, nearest, neighbor, retrieval, sparse, text, tuning,
+    # vector.  With terms sorted lexicographically the mapping is:
+    #   approximate:0, database:1, full:2, guide:3, indexing:4, keyword:5,
+    #   nearest:6, neighbor:7, retrieval:8, sparse:9, text:10, tuning:11,
+    #   vector:12
+    # Document 1 (vector=1.0, search=1.0, guide=0.6) -> terms vector(12), search(13),
+    # but wait - let's just print the actual values:
+    print("  values:        ", [float(v) for v in values.tolist()])
 
     # `dim` is the maximum number of non-zero terms per vector, not the
     # vocabulary size. `term_id_limit` must cover the largest term ID + 1.
@@ -154,7 +162,31 @@ def sindi_term_weight_example():
     restored = pyvsag.Index("sindi", index_params)
     restored.load(filename)
     print(f"\nReloaded index from {filename}")
-    print_results(restored, vocabulary, query_terms, 3, search_params, titles)
+
+    # Compare results before and after round-trip
+    search_params = json.dumps({"sindi": {"query_prune_ratio": 0.0, "n_candidate": 6}})
+    query_terms = {"vector": 1.0, "search": 0.8}
+    _, result_ids_before, result_distances_before = index.knn_search(
+        index_pointers, indices, values, 3, search_params
+    )
+    _, result_ids_after, result_distances_after = restored.knn_search(
+        index_pointers, indices, values, 3, search_params
+    )
+    ids_match = (result_ids_before == result_ids_after).all()
+    dists_match = np.allclose(result_distances_before, result_distances_after)
+    print(f"\nSave/Load round-trip test:")
+    print(f"  result_ids match:    {ids_match}")
+    print(f"  result_distances match: {dists_match}")
+    if ids_match and dists_match:
+        print("  PASS: save/load round-trip preserves results")
+    else:
+        print("  FAIL: save/load round-trip changed results")
+        if not ids_match:
+            print(f"    before IDs:   {result_ids_before.tolist()}")
+            print(f"    after IDs:    {result_ids_after.tolist()}")
+        if not dists_match:
+            print(f"    before dists: {result_distances_before.tolist()}")
+            print(f"    after dists:  {result_distances_after.tolist()}")
 
 
 if __name__ == "__main__":

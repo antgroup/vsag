@@ -64,13 +64,13 @@ are pure Python and only require NumPy, which `pyvsag` already uses.
 | Helper | Result | Notes |
 | --- | --- | --- |
 | `build_term_vocabulary(documents)` | `dict[str, int]` | Sorts the unique terms lexicographically and assigns IDs from `0`, so the vocabulary is deterministic regardless of dict insertion order or document order. IDs fit in `uint32`. |
-| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID and empty mappings produce empty rows. |
+| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | Returns `uint32` / `uint32` / `float32` arrays for `index.build(...)` and `index.knn_search(...)`. Rows are ordered by term ID. **Empty mappings are rejected** (raise `ValueError`) because SINDI::add silently drops empty documents and SINDI::KnnSearch rejects empty queries. **Vocabulary IDs must be unique** — duplicate IDs raise `ValueError`. |
 
 Both helpers accept any iterable of mappings, so the same vocabulary can be
 reused for documents and queries. A term that is absent from the vocabulary
 raises `KeyError`; non-string terms, non-integer IDs, IDs outside the `uint32`
 range, and non-finite weights are rejected instead of being silently
-truncated. Weights that do not fit in `float32` are also rejected.
+truncated. Weights that do not fit in `float32` are also remembered.
 
 ```python
 import json
