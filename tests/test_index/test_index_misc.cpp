@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "test_index_common.h"
-
 #include "json_types.h"
+#include "test_index_common.h"
 
 namespace fixtures {
 
@@ -103,12 +102,59 @@ TestIndex::TestEstimateBuildMemory(const std::string& index_name,
 
                 const auto quantizer =
                     serial_param["index_param"]["base_quantization_type"].GetString();
+                const uint64_t estimate_count =
+                    std::min<uint64_t>(static_cast<uint64_t>(data_size), 512);
+                if (quantizer == "fp32" and estimate_count > 2) {
+                    // With two-row growth, the last MemoryIO resize can briefly retain the old
+                    // store alongside the final store. BlockMemoryIO only adds another block.
+                    // Compare the estimates directly because MemoryRecordAllocator::Reallocate()
+                    // cannot observe the old/new overlap hidden inside realloc().
+                    auto contiguous_param = serial_param;
+                    contiguous_param["index_param"]["base_io_type"].SetString("memory_io");
+                    contiguous_param["index_param"]["resize_increase_count_bit"].SetUint64(1);
+                    auto contiguous_index =
+                        engine.CreateIndex(index_name, contiguous_param.Dump()).value();
+                    REQUIRE(contiguous_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+                    auto block_param = contiguous_param;
+                    block_param["index_param"]["base_io_type"].SetString("block_memory_io");
+                    auto block_index = engine.CreateIndex(index_name, block_param.Dump()).value();
+                    REQUIRE(block_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+                    const uint64_t rounded_count = (estimate_count + 1) & ~uint64_t{1};
+                    const uint64_t previous_count = rounded_count - 2;
+                    const uint64_t previous_store_bytes =
+                        previous_count * static_cast<uint64_t>(dataset->base_->GetDim()) *
+                        sizeof(float);
+                    REQUIRE(contiguous_index->EstimateBuildMemory(estimate_count) >=
+                            block_index->EstimateBuildMemory(estimate_count) +
+                                previous_store_bytes);
+                }
                 if (quantizer == "sq8" or quantizer == "sq8_uniform") {
+                    // Ignoring reorder during search must not change the build peak: Build still
+                    // allocates and fills the precise store. Both configurations must therefore
+                    // produce the same build estimate even though EstimateMemory() intentionally
+                    // omits the ignored precise store from the retained search footprint.
+                    auto reorder_param = serial_param;
+                    reorder_param["index_param"]["use_reorder"].SetBool(true);
+                    reorder_param["index_param"]["precise_quantization_type"].SetString("fp32");
+                    reorder_param["index_param"]["precise_io_type"].SetString("memory_io");
+                    auto reorder_index =
+                        engine.CreateIndex(index_name, reorder_param.Dump()).value();
+                    REQUIRE(reorder_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+                    auto ignored_reorder_param = reorder_param;
+                    ignored_reorder_param["index_param"]["ignore_reorder"].SetBool(true);
+                    auto ignored_reorder_index =
+                        engine.CreateIndex(index_name, ignored_reorder_param.Dump()).value();
+                    REQUIRE(
+                        ignored_reorder_index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+                    REQUIRE(ignored_reorder_index->EstimateMemory(estimate_count) <
+                            reorder_index->EstimateMemory(estimate_count));
+                    REQUIRE(ignored_reorder_index->EstimateBuildMemory(estimate_count) ==
+                            reorder_index->EstimateBuildMemory(estimate_count));
+
                     // At this count HGraph's outer sampler returns the caller dataset. Increasing
                     // the dimension must nevertheless grow the build-only estimate by at least
                     // one float per row: the quantizer's own training copy is always made.
-                    const uint64_t estimate_count =
-                        std::min<uint64_t>(static_cast<uint64_t>(data_size), 512);
                     auto wider_param = serial_param;
                     wider_param["dim"].SetInt(dataset->base_->GetDim() + 1);
                     auto wider_index = engine.CreateIndex(index_name, wider_param.Dump()).value();

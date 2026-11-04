@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <fstream>
 #include <future>
@@ -1584,9 +1585,23 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     }
 
     // Peak build memory = the retained footprint Build() leaves behind + the build-only
-    // temporaries. The retained part is already modelled by EstimateMemory(), which rounds each
-    // component up to the configured block size.
-    const uint64_t final_memory = this->EstimateMemory(num_elements);
+    // temporaries. EstimateMemory() models most retained components and rounds each one up to
+    // the configured block size.
+    uint64_t final_memory = this->EstimateMemory(num_elements);
+    const uint64_t element_count =
+        next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
+    const auto block_size = Options::Instance().block_size_limit();
+    auto block_memory_ceil = [](uint64_t memory, uint64_t size) -> uint64_t {
+        return static_cast<uint64_t>(
+            std::ceil(static_cast<double>(memory) / static_cast<double>(size)) *
+            static_cast<double>(size));
+    };
+    if (has_precise_reorder() and this->high_precise_codes_->InMemory() and this->ignore_reorder_) {
+        // EstimateMemory() omits precise codes that search is told to ignore, but Build still
+        // resizes and populates them. Restore their retained footprint for the build estimate.
+        const uint64_t precise_memory = this->high_precise_codes_->code_size_ * element_count;
+        final_memory += block_memory_ceil(precise_memory, block_size);
+    }
     uint64_t build_memory = 0;
 
     // (1) HGraph's outer training sample. sample_train_data() only copies when the input is
@@ -1658,6 +1673,41 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         const uint64_t future_bytes = static_cast<uint64_t>(sizeof(std::future<void>));
         build_memory += num_elements * (kParallelTaskStateBytes + future_bytes);
     }
+
+    // (7) MemoryIO grows through Allocator::Reallocate(), whose copy-based growth can keep the
+    //     old and new contiguous stores alive together. HGraph::resize() grows the code stores
+    //     sequentially, so only the largest previous store is needed beyond the final footprint.
+    //     BlockMemoryIO grows by adding independent blocks and has no whole-store transient.
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    const uint64_t resize_batch_size = uint64_t{1} << this->resize_increase_count_bit_;
+    const uint64_t current_capacity = this->max_capacity_.load();
+    const bool grows_code_stores = current_capacity < element_count;
+    const uint64_t previous_element_count =
+        grows_code_stores
+            ? std::max<uint64_t>(
+                  current_capacity,
+                  element_count > resize_batch_size ? element_count - resize_batch_size : 0)
+            : 0;
+    uint64_t resize_transient = 0;
+    auto account_contiguous_store = [&](const FlattenInterfacePtr& codes,
+                                        const FlattenInterfaceParamPtr& codes_param) {
+        if (not grows_code_stores or codes == nullptr or codes_param == nullptr or
+            codes_param->io_parameter == nullptr or
+            codes_param->io_parameter->Kind() != IOKind::MEMORY) {
+            return;
+        }
+        const uint64_t previous_store_bytes =
+            std::max<uint64_t>(previous_element_count * codes->code_size_, 1);
+        resize_transient = std::max(resize_transient, previous_store_bytes);
+    };
+    account_contiguous_store(this->basic_flatten_codes_, hgraph_param->base_codes_param);
+    if (has_precise_reorder()) {
+        account_contiguous_store(this->high_precise_codes_, hgraph_param->precise_codes_param);
+    }
+    if (this->create_new_raw_vector_) {
+        account_contiguous_store(this->raw_vector_, hgraph_param->raw_vector_param);
+    }
+    build_memory += resize_transient;
 
     return final_memory + build_memory;
 }
