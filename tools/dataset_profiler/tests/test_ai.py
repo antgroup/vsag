@@ -247,6 +247,17 @@ def test_provider_from_env_resolution():
     assert fallback.base_url == "https://other.example/v1"
 
 
+def test_explicit_empty_vsag_key_does_not_use_openai_fallback():
+    with pytest.raises(AIAnalysisError, match="no API key"):
+        provider_from_env(
+            env={
+                "VSAG_AI_API_KEY": "",
+                "OPENAI_API_KEY": "must-not-be-used",
+                "VSAG_AI_MODEL": "m",
+            }
+        )
+
+
 def test_provider_rejects_redirects_before_forwarding_credentials():
     provider = OpenAICompatibleProvider(
         api_key="sk-supersecretvalue123", model="m", base_url="https://api.example.com/v1"

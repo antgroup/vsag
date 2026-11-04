@@ -63,6 +63,11 @@ _EUCLIDEAN_GRAM_REL_TOL = 1e-8
 _ANGULAR_ZERO_TOL = 32 * np.finfo(np.float64).eps
 # Row budget for the streaming mean-cosine reduction (normalized blocks only).
 _MEAN_COSINE_BLOCK_ROWS = 8192
+_INVALID_SAMPLE_WARNING = (
+    "sampled vectors contain NaN/Inf entries; sampled metrics replace them with "
+    "0.0, which can distort pairwise, nearest-neighbor, anisotropy, and clustering "
+    "results"
+)
 
 
 @dataclass
@@ -163,6 +168,11 @@ def profile_dataset(
         requested_pairwise = int(config.pairwise_sample_size)
         effective_sample = min(requested_sample, int(metadata.count or 0))
         effective_pairwise = min(requested_pairwise, effective_sample)
+        if effective_sample < requested_sample:
+            warnings.append(
+                "sample_size reduced from %d to %d to stay within the dataset size"
+                % (requested_sample, effective_sample)
+            )
         if effective_pairwise < requested_pairwise:
             warnings.append(
                 "pairwise_sample_size reduced from %d to %d to stay within the "
@@ -334,6 +344,8 @@ def _profile_dense(
         else np.empty(0, dtype=np.float64)
     )
     sample_matrix = dataset.read_dense_rows(sample_idx).astype(np.float64, copy=True)
+    if not bool(np.isfinite(sample_matrix).all()):
+        warnings.append(_INVALID_SAMPLE_WARNING)
     # Invalid (NaN/Inf) entries are excluded from numeric summaries and treated
     # as zero, matching the semantics of the norms metric.
     sample_matrix = np.where(np.isfinite(sample_matrix), sample_matrix, 0.0)
@@ -517,6 +529,10 @@ def _profile_sparse(
             reason=dimension_stats_reason,
             dim=int(dim),
         )
+    if any(
+        not bool(np.isfinite(values).all()) for _, _, values in sample_records
+    ):
+        warnings.append(_INVALID_SAMPLE_WARNING)
     pair_matrix = _pairwise_sparse(pair_records, metric)
     pair_values = _upper_triangle(pair_matrix)
     duplicate_pair_values = pair_values

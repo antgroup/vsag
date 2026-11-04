@@ -106,6 +106,38 @@ def test_dense_full_metrics_match_source_fixture(dense_path, dense_matrix):
     assert exact["unique_vectors"] == dense_matrix.shape[0] - 2
 
 
+def test_small_dataset_sample_size_truncation_warns(tmp_path):
+    path = tmp_path / "small_sample_warning.hdf5"
+    _write_dense(path, [[1, 0], [0, 1]])
+    report = profile_dataset(str(path), sample_size=8, pairwise_sample_size=2)
+    assert report["config"]["effective_sample_size"] == 2
+    assert (
+        "sample_size reduced from 8 to 2 to stay within the dataset size"
+        in report["warnings"]
+    )
+    assert not any(
+        "pairwise_sample_size reduced" in warning for warning in report["warnings"]
+    )
+
+
+def test_sampled_metrics_expose_invalid_zero_replacement_semantics(tmp_path):
+    path = tmp_path / "invalid_sample_warning.hdf5"
+    _write_dense(path, [[np.nan, np.inf], [0, 0], [3, 4]])
+    report = profile_dataset(str(path), sample_size=3, pairwise_sample_size=3)
+    assert any(
+        "sampled vectors contain NaN/Inf entries" in warning
+        and "replace them with 0.0" in warning
+        for warning in report["warnings"]
+    )
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    assert pairwise["min"] == 0.0
+    assert pairwise["max"] == 5.0
+    nearest = report["metrics"]["nearest_neighbor_distances"]["stats"]
+    assert nearest["min"] == 0.0
+    assert nearest["max"] == 5.0
+    assert report["metrics"]["invalid_values"]["invalid_values"] == 2
+
+
 def test_pairwise_matrix_is_bounded_by_sample_size(dense_path):
     report = profile_dataset(str(dense_path), sample_size=20, pairwise_sample_size=8)
     pairwise = report["metrics"]["pairwise_distances"]

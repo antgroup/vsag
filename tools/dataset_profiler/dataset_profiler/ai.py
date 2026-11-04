@@ -492,7 +492,7 @@ def provider_from_env(
     """Build a provider from the environment; credentials are never persisted."""
     env = os.environ if env is None else env
     key_name = key_env or env.get("VSAG_AI_KEY_ENV") or "VSAG_AI_API_KEY"
-    api_key = env.get(key_name) or env.get("OPENAI_API_KEY") or ""
+    api_key = env[key_name] if key_name in env else env.get("OPENAI_API_KEY") or ""
     resolved_model = model or env.get("VSAG_AI_MODEL") or ""
     resolved_base = base_url or env.get("VSAG_AI_BASE_URL") or env.get("OPENAI_BASE_URL") or DEFAULT_BASE_URL
     return OpenAICompatibleProvider(
