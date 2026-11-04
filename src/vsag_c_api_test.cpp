@@ -955,3 +955,136 @@ TEST_CASE("vsag_c_api logger callback", "[vsag_c_api][ut]") {
     REQUIRE_OK(vsag_index_serialize_file(index.get(), paths[0].c_str()));
     REQUIRE(records.count.load() == before);
 }
+
+namespace {
+
+// Bit-packed rows: dim counts bits and a row takes ceil(dim / 8) bytes.
+DatasetPtr
+make_binary(const uint8_t* vectors, int64_t count, int64_t bits, const int64_t* ids = nullptr) {
+    vsag_dataset_t* raw = nullptr;
+    REQUIRE_OK(vsag_dataset_create(&raw));
+    DatasetPtr dataset(raw);
+    REQUIRE_OK(vsag_dataset_set_num_elements(raw, count));
+    REQUIRE_OK(vsag_dataset_set_dim(raw, bits));
+    REQUIRE_OK(vsag_dataset_set_binary_vectors(raw, vectors));
+    if (ids != nullptr) {
+        REQUIRE_OK(vsag_dataset_set_ids(raw, ids));
+    }
+    return dataset;
+}
+
+// Logical bit i is (row[i / 8] >> (7 - i % 8)) & 1, the layout of numpy.packbits.
+float
+reference_hamming(const uint8_t* a, const uint8_t* b, int64_t bits) {
+    int64_t distance = 0;
+    for (int64_t i = 0; i < bits; ++i) {
+        const auto shift = 7 - i % 8;
+        distance += ((a[i / 8] >> shift) & 1U) != ((b[i / 8] >> shift) & 1U) ? 1 : 0;
+    }
+    return static_cast<float>(distance);
+}
+
+// 100 bits: the last byte carries four padding bits.
+constexpr const char* binary_brute_force_param = R"(
+    {"dtype": "binary", "metric_type": "hamming", "dim": 100, "index_param": {}}
+)";
+constexpr const char* binary_hgraph_param = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 100,
+        "index_param": {"max_degree": 16, "ef_construction": 100, "build_thread_count": 1}
+    }
+)";
+constexpr const char* binary_search_parameters = R"({"hgraph": {"ef_search": 100}})";
+
+}  // namespace
+
+TEST_CASE("vsag_c_api binary vectors with the Hamming metric", "[vsag_c_api][ut]") {
+    constexpr int64_t bits = 100;
+    constexpr int64_t row_bytes = (bits + 7) / 8;
+    constexpr int64_t count = 300;
+    std::mt19937 rng(2872);
+    std::vector<uint8_t> rows(count * row_bytes);
+    for (auto& value : rows) {
+        value = static_cast<uint8_t>(rng());
+    }
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+    }
+    const std::string name = GENERATE("brute_force", "hgraph");
+    INFO("index=" << name);
+    auto index = make_index(name.c_str(),
+                            name == "brute_force" ? binary_brute_force_param : binary_hgraph_param);
+    auto base = make_binary(rows.data(), count, bits, ids.data());
+    REQUIRE_OK(vsag_index_build(index.get(), base.get()));
+
+    // Row 7 with its padding bits flipped: padding never changes a distance.
+    std::vector<uint8_t> query(rows.begin() + 7 * row_bytes, rows.begin() + 8 * row_bytes);
+    query[row_bytes - 1] ^= 0x0F;
+    auto query_set = make_binary(query.data(), 1, bits);
+
+    vsag_search_result_t* raw = nullptr;
+    REQUIRE_OK(vsag_index_knn_search(
+        index.get(), query_set.get(), 5, binary_search_parameters, nullptr, &raw));
+    ResultPtr result(raw);
+    REQUIRE(vsag_search_result_count(raw) == 5);
+    REQUIRE(vsag_search_result_ids(raw)[0] == 7);
+    REQUIRE(vsag_search_result_distances(raw)[0] == 0.0F);
+    for (int64_t i = 0; i < 5; ++i) {
+        const auto id = vsag_search_result_ids(raw)[i];
+        REQUIRE(vsag_search_result_distances(raw)[i] ==
+                reference_hamming(query.data(), rows.data() + id * row_bytes, bits));
+    }
+
+    std::vector<int64_t> probe = {0, 7, 42, count - 1};
+    std::vector<float> distances(probe.size(), -1.0F);
+    REQUIRE_OK(vsag_index_calc_distances_by_ids(
+        index.get(), query_set.get(), probe.data(), probe.size(), distances.data()));
+    for (size_t i = 0; i < probe.size(); ++i) {
+        REQUIRE(distances[i] ==
+                reference_hamming(query.data(), rows.data() + probe[i] * row_bytes, bits));
+    }
+
+    // Range search keeps every returned vector within the radius; brute force returns all of them.
+    constexpr float radius = 40.0F;
+    vsag_search_result_t* range_raw = nullptr;
+    REQUIRE_OK(vsag_index_range_search(
+        index.get(), query_set.get(), radius, -1, binary_search_parameters, nullptr, &range_raw));
+    ResultPtr range(range_raw);
+    const auto found = static_cast<int64_t>(vsag_search_result_count(range_raw));
+    REQUIRE(found >= 1);
+    for (int64_t i = 0; i < found; ++i) {
+        const auto id = vsag_search_result_ids(range_raw)[i];
+        REQUIRE(vsag_search_result_distances(range_raw)[i] <= radius);
+        REQUIRE(vsag_search_result_distances(range_raw)[i] ==
+                reference_hamming(query.data(), rows.data() + id * row_bytes, bits));
+    }
+    if (name == "brute_force") {
+        int64_t expected = 0;
+        for (int64_t i = 0; i < count; ++i) {
+            expected += reference_hamming(query.data(), rows.data() + i * row_bytes, bits) <= radius
+                            ? 1
+                            : 0;
+        }
+        REQUIRE(found == expected);
+    }
+
+    // A float32 query of the right dimension carries no packed bits and is rejected.
+    std::vector<float> floats(bits, 0.0F);
+    vsag_dataset_t* float_raw = nullptr;
+    REQUIRE_OK(vsag_dataset_create(&float_raw));
+    DatasetPtr float_query(float_raw);
+    REQUIRE_OK(vsag_dataset_set_num_elements(float_raw, 1));
+    REQUIRE_OK(vsag_dataset_set_dim(float_raw, bits));
+    REQUIRE_OK(vsag_dataset_set_float32_vectors(float_raw, floats.data()));
+    vsag_search_result_t* rejected = nullptr;
+    REQUIRE(code_of(vsag_index_knn_search(
+                index.get(), float_query.get(), 5, binary_search_parameters, nullptr, &rejected)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(rejected == nullptr);
+
+    REQUIRE(code_of(vsag_dataset_set_binary_vectors(nullptr, query.data())) ==
+            VSAG_INVALID_ARGUMENT);
+}

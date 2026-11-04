@@ -287,6 +287,40 @@ public:
     GetFloat16Vectors() const = 0;
 
     /**
+     * @brief Sets the bit-packed binary vector array for the dataset.
+     *
+     * @details
+     * Binary vectors are used by indexes created with `"dtype": "binary"` and
+     * `"metric_type": "hamming"`. Dim() counts bits, not bytes. Each vector occupies
+     * ceil(Dim() / 8) contiguous bytes and rows are stored back to back, so the buffer holds
+     * NumElements() * ceil(Dim() / 8) bytes.
+     *
+     * Bits are packed MSB-first: logical bit i is `(vectors[i / 8] >> (7 - i % 8)) & 1`. This is
+     * the layout produced by `numpy.packbits` with its default `bitorder="big"`. When Dim() is
+     * not a multiple of eight, the low `8 - Dim() % 8` bits of the last byte of every row are
+     * padding: they are ignored by every Hamming distance computation.
+     *
+     * The buffer follows the same ownership rules as the other pointer-backed vector fields:
+     * with Owner(true) it is released by the dataset allocator, or with delete[] when no
+     * allocator is set.
+     *
+     * @param vectors Pointer to the bit-packed binary vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated binary vectors.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    DatasetPtr
+    BinaryVectors(const uint8_t* vectors);
+
+    /**
+     * @brief Retrieves the bit-packed binary vector array of the dataset.
+     *
+     * @return const uint8_t* Pointer to the binary vectors, or nullptr when absent.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    const uint8_t*
+    GetBinaryVectors() const;
+
+    /**
      * @brief Sets the sparse vector array for the dataset.
      *
      * @param vectors Pointer to the struct of sparse vectors.

@@ -22,6 +22,7 @@
 #include <initializer_list>
 #include <new>
 #include <numeric>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -438,6 +439,49 @@ TEST_CASE("HGraph PiPNN keeps failed fused preencoding unpublished and retryable
     REQUIRE(retry.value().empty());
     REQUIRE(index->GetNumElements() == count);
     REQUIRE(codes->encode_calls.load() == count);
+}
+
+TEST_CASE("HGraph UpdateVector refreshes a separate raw vector datacell", "[ut][hgraph][update]") {
+    // store_raw_vector with SQ8 codes keeps the float32 vectors in a datacell of their own, which
+    // GetRawVectorByIds and the default precise distances read; an update must reach it.
+    constexpr int64_t dim = 8;
+    constexpr int64_t count = 64;
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["base_quantization_type"].SetString("sq8");
+    parameters["store_raw_vector"].SetBool(true);
+    auto index = MakeHGraphIndex(parameters, MakeCommonParam(dim));
+    std::mt19937 rng(14);
+    std::uniform_real_distribution<float> uniform(0.0F, 1.0F);
+    std::vector<float> vectors(count * dim);
+    for (auto& value : vectors) {
+        value = uniform(rng);
+    }
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 100);
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, count)).has_value());
+
+    int64_t target = 105;
+    std::vector<int64_t> target_ids{target};
+    std::vector<float> replacement(dim);
+    for (auto& value : replacement) {
+        value = uniform(rng) + 2.0F;  // away from every stored vector
+    }
+    auto updated =
+        index->UpdateVector(target, MakeFloatDataset(replacement, target_ids, dim, 1), true);
+    REQUIRE(updated.has_value());
+    REQUIRE(updated.value());
+
+    auto raw = index->GetRawVectorByIds(&target, 1, nullptr);
+    REQUIRE(raw.has_value());
+    const auto* stored = raw.value()->GetFloat32Vectors();
+    REQUIRE(stored != nullptr);
+    for (int64_t d = 0; d < dim; ++d) {
+        REQUIRE(stored[d] == replacement[d]);
+    }
+    auto distance =
+        index->CalcDistanceById(MakeFloatDataset(replacement, target_ids, dim, 1), target);
+    REQUIRE(distance.has_value());
+    REQUIRE(std::abs(distance.value()) < 1e-4F);
 }
 
 TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]") {
@@ -1630,6 +1674,9 @@ TEST_CASE("HGraph fused RaBitQ remains mutable after fast build and deserialize"
     std::vector<float> updated_vector(dim, 3.0F);
     std::vector<int64_t> updated_id{ids.front()};
     auto update = MakeFloatDataset(updated_vector, updated_id, dim, 1);
+    // Without force, the fused index first compares the new vector with the neighborhood of the
+    // old one; the comparison must decide (accept or reject) rather than fail.
+    REQUIRE(index->UpdateVector(updated_id.front(), update, false).has_value());
     auto update_result = index->UpdateVector(updated_id.front(), update, true);
     REQUIRE(update_result.has_value());
     REQUIRE(update_result.value());

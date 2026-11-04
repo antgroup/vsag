@@ -144,11 +144,13 @@ for rid, rdist in zip(result_ids, result_dists):
 | `float32` | `numpy.float32` |
 | `float16` | `numpy.float16` |
 | `bfloat16` | 包含 bfloat16 原始位模式的 `numpy.uint16` 数组 |
+| `binary` | 按位压缩的 `numpy.uint8` 数组：`dim` 表示 bit 数，每个向量占 `ceil(dim / 8)` 字节，与 `numpy.packbits` 一样按 MSB-first 打包（见[二进制向量](binary_vectors.md)） |
 | `sparse` | CSR 数组：`index_pointers`（`uint32`）、`indices`（`uint32`）、`values`（`float32`） |
 
 `pyvsag` 不会转换或复制稠密向量，以保持零拷贝；不匹配的输入会以 `ValueError` 拒绝：
 
-- 稠密数组的 dtype 必须与上表完全一致，使用本机字节序，并且是 C 连续的（二维矩阵必须是行优先，且每行长度等于 `dim`）；
+- 稠密数组的 dtype 必须与上表完全一致，使用本机字节序，并且是 C 连续的（二维矩阵必须是行优先，且每行长度等于 `dim`，`binary` 为 `ceil(dim / 8)` 字节）；
+- 单个 `binary` 查询是恰好 `ceil(dim / 8)` 字节的一维数组；
 - ID 数组以及稀疏的 `index_pointers`、`indices` 必须是整数数组，数值要落在目标类型（`int64`、`uint32`）范围内；
   浮点 ID 和越界数值会被拒绝，而不是被截断；
 - `build` 和 `add` 的 `ids` 必须是一维数组，每个向量对应一个元素。
@@ -231,7 +233,8 @@ removed = index.remove(candidate_ids)
 
 `calc_distances_by_id` 接受一个一维 float32 query（长度等于索引维度）和一个一维 ID 数组。长度不对的 query
 和空 query 会以 `RuntimeError` 拒绝，不会被当作缺失 ID。其他 NumPy 输入会按需转为连续的 float32 / int64
-数组，正负步长的视图都保持逻辑顺序。它不支持稀疏、多向量或多 query 输入。
+数组，正负步长的视图都保持逻辑顺序。`binary` 索引则要求 query 是恰好 `ceil(dim / 8)` 字节的连续
+`numpy.uint8` 数组，不做任何转换，其他输入以 `ValueError` 拒绝。它不支持稀疏、多向量或多 query 输入。
 
 ## 错误处理
 

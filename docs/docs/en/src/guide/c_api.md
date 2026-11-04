@@ -62,6 +62,9 @@ element count, then the vectors in one of these forms:
 
 - `vsag_dataset_set_float32_vectors`, `vsag_dataset_set_float16_vectors` (also used for bfloat16
   as raw `uint16` bits) and `vsag_dataset_set_int8_vectors`, with `vsag_dataset_set_dim`.
+- `vsag_dataset_set_binary_vectors`: bit-packed vectors for `dtype: "binary"` indexes, where
+  `vsag_dataset_set_dim` gives the number of bits and each vector takes `ceil(dim / 8)` bytes
+  (see [Binary Vectors](binary_vectors.md)).
 - `vsag_dataset_set_sparse_vectors`: CSR rows, where row `i` owns
   `indices[index_pointers[i] .. index_pointers[i + 1])` and the matching values.
 
