@@ -33,6 +33,12 @@
 #include "vsag/vsag.h"
 
 namespace vsag {
+
+// Internal constructor implemented in bruteforce.cpp. Unlike Factory::CreateIndex, this entry
+// point accepts serialized internal parameters only from the analyzer, not from user JSON.
+IndexPtr
+CreateBruteForceIndexForAnalyzer(JsonType build_param);
+
 namespace {
 
 constexpr const char* DEFAULT_BUILD_PARAM = "default";
@@ -41,7 +47,6 @@ constexpr const char* EMPTY_QUERY_PATH = "empty";
 constexpr const char* QUERY_DATA_TYPE_AUTO = "auto";
 constexpr const char* QUERY_DATA_TYPE_DENSE = "dense";
 constexpr const char* QUERY_DATA_TYPE_SPARSE = "sparse";
-constexpr const char* ANALYZER_DESERIALIZATION_MARKER = "_analyzer_deserialize";
 
 std::streamsize
 ToStreamSize(uint64_t bytes) {
@@ -179,7 +184,6 @@ PrepareInternalBruteForceParam(const JsonType& serialized_param) {
             IsolateDataCellStorage(isolated_param, key);
         }
     }
-    isolated_param[ANALYZER_DESERIALIZATION_MARKER].SetBool(true);
     return isolated_param;
 }
 
@@ -646,14 +650,21 @@ private:
         }
         if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) and
             index_param_.Contains(BASE_CODES_KEY)) {
-            build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
-        } else {
-            build_param[INDEX_PARAM].SetJson(index_param_);
-            if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
-                IsolateExternalBruteForceParam(build_param, index_name_ == INDEX_WARP);
+            if (not basic_info_.Contains("metric")) {
+                throw std::invalid_argument(
+                    "serialized BruteForce/WARP metadata is missing 'metric'; pass "
+                    "build_parameter with an explicit metric_type to reload it safely");
             }
+            build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
+            auto analyzer_index = CreateBruteForceIndexForAnalyzer(build_param);
+            this->Deserialize(analyzer_index, stream);
+            return;
         }
 
+        build_param[INDEX_PARAM].SetJson(index_param_);
+        if (index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) {
+            IsolateExternalBruteForceParam(build_param, index_name_ == INDEX_WARP);
+        }
         auto create_result = Factory::CreateIndex(index_name_, build_param.Dump());
         if (not create_result.has_value()) {
             throw std::runtime_error(

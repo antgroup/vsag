@@ -51,11 +51,13 @@ private:
     bool suppressed_{false};
 };
 
-// Run before VSAG's unprioritized initializer instead of relying on link order.
+// Ordering is guaranteed only by MSVC init_seg, or by GCC/Clang init_priority on ELF targets
+// linked with GNU ld/lld. Other toolchains (including Mach-O/Darwin) and the fallback below have
+// no such guarantee, so the library banner may still precede the JSON report on those targets.
 #if defined(_MSC_VER)
 #pragma init_seg(lib)
 InitBannerSuppressor init_banner_suppressor;
-#elif defined(__GNUC__) || defined(__clang__)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(__ELF__)
 InitBannerSuppressor init_banner_suppressor __attribute__((init_priority(101)));
 #else
 InitBannerSuppressor init_banner_suppressor;
