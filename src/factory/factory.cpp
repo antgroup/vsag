@@ -26,6 +26,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -40,6 +41,8 @@
 #include "algorithm/ivf/ivf_parameter.h"
 #include "algorithm/pyramid/pyramid.h"
 #include "algorithm/pyramid/pyramid_zparameters.h"
+#include "algorithm/simq/simq.h"
+#include "algorithm/simq/simq_parameter.h"
 #include "algorithm/sindi/sindi.h"
 #include "algorithm/sindi/sindi_parameter.h"
 #include "algorithm/sindi_v2/sindi_v2.h"
@@ -52,6 +55,7 @@
 #include "inner_string_params.h"
 #include "json_wrapper.h"
 #include "metric_type.h"
+#include "serialized_index_factory.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/stream_reader.h"
@@ -247,11 +251,38 @@ struct StreamingIndexLoadTarget {
 
 template <typename IndexT, typename ParamT>
 StreamingIndexLoadTarget
-create_streaming_index(const JsonType& index_param, const IndexCommonParam& common_param) {
+make_index_target(const JsonType& index_param, const IndexCommonParam& common_param) {
     auto param = std::make_shared<ParamT>();
     param->FromJson(index_param);
     auto inner_index = std::make_shared<IndexT>(param, common_param);
     return {std::make_shared<IndexImpl<IndexT>>(inner_index, common_param), inner_index};
+}
+
+// Serialized metadata records basic_info.index_param as the output of the parameter ToJson()
+// (the internal layout), which Factory::CreateIndex does not accept.
+std::optional<StreamingIndexLoadTarget>
+create_index_from_recorded_param(const std::string& index_name,
+                                 const JsonType& index_param,
+                                 const IndexCommonParam& common_param) {
+    if (index_name == INDEX_BRUTE_FORCE || index_name == INDEX_WARP) {
+        return make_index_target<BruteForce, BruteForceParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_HGRAPH) {
+        return make_index_target<HGraph, HGraphParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_IVF) {
+        return make_index_target<IVF, IVFParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_PYRAMID) {
+        return make_index_target<Pyramid, PyramidParameters>(index_param, common_param);
+    }
+    if (index_name == INDEX_SINDI) {
+        return make_index_target<SINDI, SINDIParameter>(index_param, common_param);
+    }
+    if (index_name == INDEX_SINDI_V2) {
+        return make_index_target<SINDIV2, SINDIV2Parameter>(index_param, common_param);
+    }
+    return std::nullopt;
 }
 
 tl::expected<StreamingIndexLoadTarget, Error>
@@ -293,25 +324,13 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
     }
     auto common_param = make_streaming_common_param(metadata, allocator);
 
-    if (index_name == INDEX_BRUTE_FORCE || index_name == INDEX_WARP) {
-        return create_streaming_index<BruteForce, BruteForceParameter>(index_param, common_param);
-    }
     if (index_name == INDEX_HGRAPH) {
         apply_hgraph_streaming_load_parameters(index_param, parameters.Dump());
-        return create_streaming_index<HGraph, HGraphParameter>(index_param, common_param);
-    }
-    if (index_name == INDEX_IVF) {
+    } else if (index_name == INDEX_IVF) {
         apply_ivf_streaming_load_parameters(index_param, parameters);
-        return create_streaming_index<IVF, IVFParameter>(index_param, common_param);
     }
-    if (index_name == INDEX_PYRAMID) {
-        return create_streaming_index<Pyramid, PyramidParameters>(index_param, common_param);
-    }
-    if (index_name == INDEX_SINDI) {
-        return create_streaming_index<SINDI, SINDIParameter>(index_param, common_param);
-    }
-    if (index_name == INDEX_SINDI_V2) {
-        return create_streaming_index<SINDIV2, SINDIV2Parameter>(index_param, common_param);
+    if (auto target = create_index_from_recorded_param(index_name, index_param, common_param)) {
+        return std::move(target.value());
     }
 
     LOG_ERROR_AND_RETURNS(ErrorType::UNSUPPORTED_INDEX_OPERATION,
@@ -320,6 +339,23 @@ create_streaming_index_from_metadata(const MetadataPtr& metadata,
 }
 
 }  // namespace
+
+IndexPtr
+create_index_from_serialized_param(const std::string& index_name,
+                                   JsonType& common_param_json,
+                                   const JsonType& index_param) {
+    auto resource = std::make_shared<Resource>(Engine::CreateDefaultAllocator(), nullptr);
+    auto common_param = IndexCommonParam::CheckAndCreate(common_param_json, resource);
+    if (auto target = create_index_from_recorded_param(index_name, index_param, common_param)) {
+        return target->index;
+    }
+    if (index_name == INDEX_SIMQ) {
+        return make_index_target<SIMQ, SIMQParameter>(index_param, common_param).index;
+    }
+    throw VsagException(
+        ErrorType::UNSUPPORTED_INDEX,
+        fmt::format("index type {} cannot be recreated from serialized parameters", index_name));
+}
 
 tl::expected<std::shared_ptr<Index>, Error>
 Factory::CreateIndex(const std::string& origin_name,
