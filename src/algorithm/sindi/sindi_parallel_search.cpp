@@ -116,7 +116,7 @@ SindiExecutionStatistics(std::string summary,
     if (parallel) {
         json["sindi_strategy"] = "accel_v1";
         json["sindi_requested_slots"] = parallel->requested;
-        json["sindi_resources_ready"] = parallel->resources_ready;
+        json["sindi_resources_ready"] = parallel->resources != nullptr;
         json["sindi_granted_slots"] = parallel->granted;
         json["sindi_filter_slots"] = parallel->filter_slots;
         json["sindi_cpu_slots"] = parallel->cpu_slots;
@@ -227,10 +227,9 @@ SearchSindiPartitions(const SindiPartitionSearchRequest& request,
     if (groups == 0) {
         return;
     }
-    auto* ready = state.resources.get();
-    CHECK_ARGUMENT(ready != nullptr, "SINDI partition executor requires prepared resources");
-    auto& shared = *ready;
-    state.resources_ready = true;
+    CHECK_ARGUMENT(state.resources != nullptr,
+                   "SINDI partition executor requires prepared resources");
+    auto& shared = *state.resources;
     state.cpu_slots = shared.slots;
     state.worker_limit = shared.limit;
     Reservation reservation(shared);

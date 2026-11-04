@@ -250,6 +250,30 @@ TEST_CASE("SINDI parallel search preserves filtering and deterministic ties",
         query, 1, R"({"sindi":{"window_parallelism":2,"parallel_n_candidate_ratio":1}})", nullptr));
 }
 
+TEST_CASE("SINDI empty search retains injected resource readiness",
+          "[ut][SINDIParallel][SINDIEmptyResources]") {
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.search_resources_ = std::make_shared<SearchExecutionContext>(0);
+    auto params = std::make_shared<SINDIParameter>();
+    params->immutable = true;
+    params->term_id_limit = 4;
+    params->window_size = 10000;
+    SINDI index(params, common);
+    uint32_t term = 1;
+    float value = 1;
+    SparseVector sparse{1, &term, &value};
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&sparse)->Owner(false);
+    auto result = index.KnnSearch(
+        query, 8, R"({"sindi":{"window_parallelism":4,"n_candidate":16}})", nullptr);
+    REQUIRE(result->GetDim() == 0);
+    auto stats = nlohmann::json::parse(result->GetStatistics());
+    REQUIRE(stats["sindi_resources_ready"] == true);
+    REQUIRE(stats["sindi_requested_slots"] == 4);
+    REQUIRE(stats["sindi_windows_processed"] == 0);
+}
+
 TEST_CASE("SINDI callback permits never exceed the invocation budget", "[ut][SINDIParallel]") {
     SindiParallelState state;
     state.callback_limit = 7;
