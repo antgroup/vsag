@@ -590,9 +590,13 @@ private:
 
     // Batch-local encoded rows, indexed by input position rather than reserved inner ID.
     // Keep them alive until every insertion task has drained, including on failure.
-    struct FusedAddCodes {
-        explicit FusedAddCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
+    struct FusedBatchCodes {
+        explicit FusedBatchCodes(Allocator* allocator) : codes(allocator), clusters(allocator) {
         }
+
+        [[nodiscard]] RaBitQFusedCodeView
+        View(uint64_t input_idx) const;
+
         Vector<uint8_t> codes;
         Vector<uint32_t> clusters;
         uint64_t one_bit_size{0};
@@ -604,7 +608,7 @@ private:
         bool use_dedup_storage{false};
         bool need_temporary_sq8_build_data{false};
         bool use_parallel_add{false};
-        std::unique_ptr<FusedAddCodes> fused_codes;
+        std::unique_ptr<FusedBatchCodes> fused_codes;
         DatasetPtr train_data{nullptr};
         FlattenInterfacePtr graph_read_codes{nullptr};
     };
@@ -663,11 +667,8 @@ private:
     void
     validate_fused_vector_data(const float* data, uint64_t count) const;
 
-    void
-    validate_fused_encoding_data(const float* data, uint64_t count) const;
-
-    void
-    prepare_fused_add_codes(const DatasetPtr& data, AddContext& context) const;
+    std::unique_ptr<FusedBatchCodes>
+    prepare_fused_codes(const DatasetPtr& data) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);
