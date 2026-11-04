@@ -3,7 +3,11 @@
 `cluster_benchmark` compares the two IVF trainers, `kmeans` and `balanced_kmeans`, on the same
 vectors. It reports how even the clusters are, the clustering loss, the training time and the
 peak memory the trainer allocates, and with `--ivf` it builds IVF indexes with both trainers and
-searches them. Every run is seeded, so its numbers can be reproduced.
+searches them.
+
+The clustering comparison is seeded, and `balanced_kmeans` repeats its result exactly. `kmeans`
+runs as an index build runs it, merging its per-block sums in completion order, so its numbers
+vary slightly between runs. The `--ivf` builds go through the public API, which takes no seed.
 
 See [IVF: Balanced k-means training](../indexes/ivf.md#balanced-k-means-training) for what the
 balanced trainer does and for results measured with this tool.
