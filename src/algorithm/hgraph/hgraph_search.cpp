@@ -42,27 +42,28 @@ public:
     FusedLabelFilter(FilterPtr filter,
                      FilterPtr deleted,
                      const HGraphRaBitQFusedDataCell& graph,
-                     bool identity)
+                     uint64_t identity_limit)
         : filter_(std::move(filter)),
           deleted_(std::move(deleted)),
           graph_(graph),
-          identity_(identity) {
+          identity_limit_(identity_limit) {
     }
 
-    bool
+    [[nodiscard]] bool
     CheckValid(int64_t id) const override {
-        return (deleted_ == nullptr or deleted_->CheckValid(id)) and
+        return id >= 0 and (deleted_ == nullptr or deleted_->CheckValid(id)) and
                filter_->CheckValid(
-                   identity_ ? id
-                             : graph_.GetLabel(graph_.GetNodeRecord(static_cast<InnerIdType>(id))));
+                   static_cast<uint64_t>(id) < identity_limit_
+                       ? id
+                       : graph_.GetLabel(graph_.GetNodeRecord(static_cast<InnerIdType>(id))));
     }
 
-    float
+    [[nodiscard]] float
     ValidRatio() const override {
         return filter_->ValidRatio();
     }
 
-    Distribution
+    [[nodiscard]] Distribution
     FilterDistribution() const override {
         return filter_->FilterDistribution();
     }
@@ -74,10 +75,17 @@ public:
 
     const uint8_t*
     GetValidBitmap(uint64_t* size) const override {
-        if (identity_ and deleted_ == nullptr)
-            return filter_->GetValidBitmap(size);
-        if (size != nullptr)
+        if (identity_limit_ > 0 and deleted_ == nullptr) {
+            uint64_t source_size = 0;
+            const auto* bitmap = filter_->GetValidBitmap(&source_size);
+            if (size != nullptr) {
+                *size = std::min(source_size, identity_limit_);
+            }
+            return bitmap;
+        }
+        if (size != nullptr) {
             *size = 0;
+        }
         return nullptr;
     }
 
@@ -85,7 +93,7 @@ private:
     FilterPtr filter_;
     FilterPtr deleted_;
     const HGraphRaBitQFusedDataCell& graph_;
-    bool identity_;
+    uint64_t identity_limit_;
 };
 
 // A sample selects whether to enumerate the predicate. Scan routing uses the exact enumeration.
@@ -108,7 +116,8 @@ public:
                 }
             }
             complete_ = true;
-            ratio_ = count == 0 ? 0.0F : static_cast<float>(ids_.size()) / count;
+            ratio_ =
+                count == 0 ? 0.0F : static_cast<float>(ids_.size()) / static_cast<float>(count);
             return;
         }
         // Read the caller's hint once, including for small sets that are fully enumerated.
@@ -121,10 +130,10 @@ public:
             const uint64_t begin = i * count / samples;
             const uint64_t end = (i + 1) * count / samples;
             random = random * 6364136223846793005ULL + 1442695040888963407ULL;
-            accepted +=
-                source_->CheckValid(static_cast<InnerIdType>(begin + random % (end - begin)));
+            accepted += static_cast<uint64_t>(
+                source_->CheckValid(static_cast<InnerIdType>(begin + random % (end - begin))));
         }
-        ratio_ = samples == 0 ? 0.0F : static_cast<float>(accepted) / samples;
+        ratio_ = samples == 0 ? 0.0F : static_cast<float>(accepted) / static_cast<float>(samples);
         const bool enumerate =
             count <= sample_limit or
             (scan_threshold > 0.0F and
@@ -138,11 +147,12 @@ public:
                 }
             }
             complete_ = true;
-            ratio_ = count == 0 ? 0.0F : static_cast<float>(ids_.size()) / count;
+            ratio_ =
+                count == 0 ? 0.0F : static_cast<float>(ids_.size()) / static_cast<float>(count);
         }
     }
 
-    bool
+    [[nodiscard]] bool
     CheckValid(int64_t id) const override {
         if (complete_) {
             return id >= 0 and static_cast<uint64_t>(id) < bitmap_.size() and bitmap_[id] != 0;
@@ -150,12 +160,12 @@ public:
         return source_->CheckValid(id);
     }
 
-    float
+    [[nodiscard]] float
     ValidRatio() const override {
         return ratio_;
     }
 
-    Distribution
+    [[nodiscard]] Distribution
     FilterDistribution() const override {
         return source_->FilterDistribution();
     }
@@ -168,19 +178,20 @@ public:
     const uint8_t*
     GetValidBitmap(uint64_t* size) const override {
         if (complete_) {
-            if (size != nullptr)
+            if (size != nullptr) {
                 *size = bitmap_.size();
+            }
             return bitmap_.data();
         }
         return source_->GetValidBitmap(size);
     }
 
-    bool
+    [[nodiscard]] bool
     ShouldScan(float threshold) const {
         return complete_ and threshold > 0.0F and ratio_ <= threshold;
     }
 
-    const Vector<InnerIdType>&
+    [[nodiscard]] const Vector<InnerIdType>&
     ValidIds() const {
         return ids_;
     }
@@ -911,8 +922,10 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     }
 
     auto params = HGraphSearchParameters::FromJson(request.params_str_);
-    CHECK_ARGUMENT(not request.enable_attribute_filter_ or this->attr_filter_index_ != nullptr,
-                   "attribute filtering requires use_attribute_filter at build time");
+    if (request.enable_attribute_filter_) {
+        CHECK_ARGUMENT(this->attr_filter_index_ != nullptr,
+                       "attribute filtering requires use_attribute_filter at build time");
+    }
     const SearchLockScope search_lock_scope(params.search_no_lock);
     ctx.rabitq_error_rate = params.rabitq_error_rate;
     ctx.enable_rabitq_reorder = params.enable_reorder;
@@ -1053,10 +1066,14 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     FilterPtr ft = this->create_search_filter(request.filter_, params.use_extra_info_filter);
     if (rabitq_fused_datacell_ != nullptr and not support_duplicate_ and
         request.filter_ != nullptr and not params.use_extra_info_filter) {
-        ft = std::make_shared<FusedLabelFilter>(request.filter_,
-                                                this->label_table_->GetDeletedIdsFilter(),
-                                                *rabitq_fused_datacell_,
-                                                this->label_table_->IsIdentityMapping());
+        // Add can publish new labels under the same global read lock as this query.
+        // Snapshot the domain before checking identity; new IDs must read their fused label.
+        const auto identity_count = this->PublishedCount();
+        ft = std::make_shared<FusedLabelFilter>(
+            request.filter_,
+            this->label_table_->GetDeletedIdsFilter(),
+            *rabitq_fused_datacell_,
+            this->label_table_->IsIdentityMapping() ? identity_count : 0);
     }
     if (request.enable_bitset_filter_ and request.bitset_filter_ != nullptr) {
         auto combined = std::make_shared<CombinedFilter>();
@@ -1296,11 +1313,11 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         // Try it first with either lock policy; an unavailable route still uses HGraph navigation.
         MCIHybridSearchResult mci_result(params, ft);
         bool mci_tried = false;
-        if (not params.use_hybrid_traversal and not use_custom_distance and
-            // NOLINTNEXTLINE(readability-simplify-boolean-expr)
-            not prepared_scan and
-            not(prepared_filter == nullptr and params.brute_force_threshold > 0.0F and
-                mci_result.valid_ratio <= params.brute_force_threshold)) {
+        const bool hint_scan = prepared_filter == nullptr and
+                               params.brute_force_threshold > 0.0F and
+                               mci_result.valid_ratio <= params.brute_force_threshold;
+        if (not params.use_hybrid_traversal and not use_custom_distance and not prepared_scan and
+            not hint_scan) {
             mci_tried = true;
             mci_result = this->try_mci_search(request, params, ft, raw_query, search_param, &ctx);
         }

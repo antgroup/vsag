@@ -822,7 +822,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         entry_filter_ip,
         entry_allowed,
         entry_full_distance_available ? entry_distance : std::numeric_limits<float>::quiet_NaN());
-    candidate_set.Insert(search_param.ep, entry_distance, entry_allowed);
+    candidate_set.Insert(search_param.ep,
+                         should_rerank and not entry_allowed ? entry_lower_bound : entry_distance,
+                         entry_allowed);
     visited_list->Set(search_param.ep);
     if (entry_allowed and result_eligible(entry_distance)) {
         results.Insert(
@@ -868,8 +870,11 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 filter_inner_product,
                 allowed,
                 full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
-            if (not candidate_set.IsFull(distance)) {
-                candidate_set.Insert(neighbor, distance, allowed);
+            // Rejected bridges are not refined. Compare their lower bound with the
+            // accepted boundary so a poor coarse estimate cannot hide a useful path.
+            const float traversal_distance = should_rerank and not allowed ? lower_bound : distance;
+            if (not candidate_set.IsFull(traversal_distance)) {
+                candidate_set.Insert(neighbor, traversal_distance, allowed);
             }
             if (allowed) {
                 if (result_eligible(distance)) {
@@ -910,8 +915,9 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                 allowed,
                 full_distance_available ? distance : std::numeric_limits<float>::quiet_NaN());
         }
-        if (not candidate_set.IsFull(distance)) {
-            candidate_set.Insert(neighbor, distance, allowed);
+        const float traversal_distance = should_rerank and not allowed ? lower_bound : distance;
+        if (not candidate_set.IsFull(traversal_distance)) {
+            candidate_set.Insert(neighbor, traversal_distance, allowed);
         }
         if (promising and allowed and result_eligible(distance)) {
             results.Insert(neighbor, distance, filter_inner_product, full_distance_available);
@@ -1608,7 +1614,9 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             return result;
         }
     }
-    candidate_set.Insert(search_param.ep, entry_distance, entry_allowed);
+    candidate_set.Insert(search_param.ep,
+                         should_rerank and not entry_allowed ? entry_lower_bound : entry_distance,
+                         entry_allowed);
     visited_list->Set(search_param.ep);
     if (entry_allowed and result_eligible(entry_distance)) {
         result->Push(entry_distance, search_param.ep);
@@ -1708,8 +1716,10 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             }
 
             if (deferred_rerank) {
-                if (not candidate_set.IsFull(distance)) {
-                    candidate_set.Insert(neighbor, distance, allowed);
+                const float traversal_distance =
+                    should_rerank and not allowed ? lower_bound : distance;
+                if (not candidate_set.IsFull(traversal_distance)) {
+                    candidate_set.Insert(neighbor, traversal_distance, allowed);
                 }
                 if (allowed) {
                     result->Push(distance, neighbor);
@@ -1740,8 +1750,11 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                 }
             }
 
-            if (not candidate_set.IsFull(distance)) {
-                candidate_set.Insert(neighbor, distance, allowed);
+            // Rejected bridges are not refined. Compare their lower bound with the
+            // accepted boundary so a poor coarse estimate cannot hide a useful path.
+            const float traversal_distance = should_rerank and not allowed ? lower_bound : distance;
+            if (not candidate_set.IsFull(traversal_distance)) {
+                candidate_set.Insert(neighbor, traversal_distance, allowed);
             }
             if (promising and allowed and result_eligible(distance)) {
                 result->Push(distance, neighbor);

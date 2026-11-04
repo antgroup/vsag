@@ -332,6 +332,77 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
         }
     }
 
+    SECTION("rejected bridge lower bound survives a full accepted frontier") {
+        constexpr InnerIdType bridge_id = 42;
+        constexpr InnerIdType target_id = 43;
+        auto params = std::make_shared<GraphDataCellParameter>();
+        params->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        params->max_degree_ = 64;
+        params->init_max_capacity_ = 44;
+        auto bridge_graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+            params, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        auto bridge = *best;
+        REQUIRE(traversal_query.cluster_g_error[bridge.cluster_id] > 0.0F);
+        set_coarse_score(bridge, worst->full_distance + 1000.0F);
+        const float error =
+            (worst->full_distance + 2000.0F) / traversal_query.cluster_g_error[bridge.cluster_id];
+        std::memcpy(
+            bridge.filter.data() + traversal_query.one_bit_metadata_offset + 2U * sizeof(float),
+            &error,
+            sizeof(error));
+        for (InnerIdType id = 0; id <= target_id; ++id) {
+            auto node = id == bridge_id ? bridge : id == target_id ? *best : *worst;
+            if (id != bridge_id) {
+                set_coarse_score(node, node.full_distance);
+            }
+            bridge_graph->SetNodeCodes(
+                id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+            Vector<InnerIdType> neighbors(allocator.get());
+            if (id == 0) {
+                for (InnerIdType neighbor = 1; neighbor <= bridge_id; ++neighbor) {
+                    neighbors.push_back(neighbor);
+                }
+            } else if (id == bridge_id) {
+                neighbors.push_back(target_id);
+            }
+            bridge_graph->InsertNeighborsById(id, neighbors);
+        }
+        class RejectBridge final : public Filter {
+        public:
+            bool
+            CheckValid(int64_t id) const override {
+                return id != bridge_id;
+            }
+            float
+            ValidRatio() const override {
+                return 0.0F;
+            }
+        };
+        for (const auto ef : {40U, 41U, 42U}) {
+            for (const float skip : {0.0F, 1.0F}) {
+                CAPTURE(filter_bits, ef, skip);
+                InnerSearchParam params;
+                params.ep = 0;
+                params.ef = ef;
+                params.topk = 1;
+                params.rerank_topk = 1;
+                params.enable_rabitq_one_bit_search = true;
+                params.enable_reorder = true;
+                params.skip_ratio = skip;
+                params.is_inner_id_allowed = std::make_shared<RejectBridge>();
+                auto visited = std::make_shared<VisitedList>(44, allocator.get());
+                QueryContext context;
+                context.rabitq_error_rate = 1.0F;
+                context.alloc = allocator.get();
+                auto found = searcher.Search(
+                    bridge_graph, flatten, visited, vectors.data(), params, &context, nullptr);
+                REQUIRE(found != nullptr);
+                REQUIRE(found->Size() == 1);
+                CHECK(found->Top().second == target_id);
+            }
+        }
+    }
+
     auto full_hint_graph = make_search_graph(false);
     InnerSearchParam full_hint_param;
     full_hint_param.ep = 0;

@@ -46,8 +46,9 @@ SparseBitset::GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const {
     std::lock_guard<std::mutex> lock(mutex_);
     ids.clear();
     for (const auto id : r_) {
-        if (id >= limit)
+        if (id >= limit) {
             break;
+        }
         ids.push_back(id);
     }
 }

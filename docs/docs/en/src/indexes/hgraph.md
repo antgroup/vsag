@@ -417,7 +417,7 @@ hints cannot change predicate correctness. Attribute expressions run once per re
 batch queries reuse the matching set. Attribute results available as complete bitsets enumerate set IDs directly,
 then apply the ID, bitset and deletion predicates. Graph search can use the resulting validity
 bitmap directly. Scans visit matching IDs without graph routing
-or a subsequent reorder pass. Distances use the final codes or raw vectors and retain the
+or a subsequent reorder pass. Attribute expressions and SearchRequest bitset predicates use the HGraph/scan path; MCI fast paths remain limited to the original ID predicate. Distances use the final codes or raw vectors and retain the
 quantization error of the selected codes.
 
 How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
@@ -455,7 +455,7 @@ for a runnable brute-force fallback example.
 ### Filter Skip Strategy (skip_ratio and skip_strategy)
 
 Fused KNN supports these parameters by deferring rejected bridge nodes. When the primary
-frontier is exhausted, deferred nodes are checked against the accepted-candidate boundary.
+frontier is exhausted, deferred nodes are checked against the accepted-candidate boundary. With reorder enabled, rejected bridges use their distance lower bound for traversal so a poor coarse estimate cannot hide an eligible bridge.
 Rejected nodes do not consume the accepted-candidate budget, and filling topk does not
 permanently discard unchecked bridges.
 
