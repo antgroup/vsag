@@ -63,14 +63,20 @@ TestIndex::TestEstimateBuildMemory(const std::string& index_name,
             auto final_estimate_memory = index1->EstimateMemory(data_size);
             REQUIRE(estimate_build_memory >= final_estimate_memory);
             auto build_index = index1->Build(dataset->base_);
-            auto real_memory = allocator->GetCurrentMemory();
-            if (estimate_build_memory <= static_cast<uint64_t>(real_memory * 0.8) or
-                estimate_build_memory >= static_cast<uint64_t>(real_memory * 1.2)) {
-                WARN(fmt::format("estimate_build_memory({}) is not in range [{}, {}]",
-                                 estimate_build_memory,
-                                 static_cast<uint64_t>(real_memory * 0.8),
-                                 static_cast<uint64_t>(real_memory * 1.2)));
-            }
+            REQUIRE(build_index.has_value());
+            // Build() has already released its build-only temporaries, so the retained
+            // footprint (GetCurrentMemory) cannot validate the peak. Assert against the
+            // peak the recording allocator observed while building instead.
+            auto real_peak_memory = allocator->GetMemoryPeak();
+            // The estimate must cover the recorded build peak: every structural term
+            // (retained stores, sample copies, per-element build bookkeeping, per-worker
+            // scratch) is modelled, so falling 20% or more below the peak means a real
+            // allocation path is missing from the model.
+            REQUIRE(estimate_build_memory * 5 >= real_peak_memory * 4);
+            // ... and it must not inflate the peak without bound: the model only adds
+            // bounded per-element and per-worker terms over the block-rounded retained
+            // footprint, so a twofold overshoot means a term is double-counted.
+            REQUIRE(estimate_build_memory <= real_peak_memory * 2);
         }
     }
 }

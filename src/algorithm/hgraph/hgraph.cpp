@@ -475,6 +475,17 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         estimate_memory += block_memory_ceil(precise_memory, block_size);
     }
 
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
+        this->raw_vector_->InMemory()) {
+        // A separate raw-vector store (e.g. sq8 base codes with store_raw_vector) retains a
+        // full fp32 row per element next to the base codes; resize() grows it and
+        // insert_persistent_codes_unlocked() populates it during the build. When the base or
+        // precise codes already hold the raw vectors, raw_vector_ aliases them and
+        // create_new_raw_vector_ stays false, so nothing is counted twice.
+        auto raw_vector_memory = this->raw_vector_->code_size_ * element_count;
+        estimate_memory += block_memory_ceil(raw_vector_memory, block_size);
+    }
+
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && this->extra_infos_->InMemory()) {
         auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * element_count;
         estimate_memory += block_memory_ceil(extra_info_memory, block_size);

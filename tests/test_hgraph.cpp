@@ -4564,6 +4564,69 @@ TEST_CASE("HGraph EstimateBuildMemory unsupported configuration", "[ft][memory][
     }
 }
 
+TEST_CASE("HGraph EstimateBuildMemory disabled after cache import", "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    // The feature bit is computed at construction, but a nonempty imported cache switches
+    // Build() onto the warm-start/refine path, which the cold-NSW estimate does not
+    // describe. ImportCache() must refresh the advertisement and EstimateBuildMemory()
+    // must reject the call.
+    constexpr int64_t dim = 16;
+    constexpr uint64_t count = 512;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8");
+    build_param.graph_type = "nsw";
+    build_param.thread_count = 1;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto dataset = HGraphTestIndex::pool.GetDatasetAndCreate(dim, count, "l2");
+
+    auto source = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(source->Build(dataset->base_).has_value());
+    std::stringstream cache;
+    REQUIRE(source->ExportCache(cache).has_value());
+    cache.seekg(0);
+
+    auto target = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(target->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE(target->ImportCache(cache).has_value());
+    REQUIRE_FALSE(target->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    try {
+        target->EstimateBuildMemory(100);
+        FAIL("EstimateBuildMemory must throw after a nonempty cache import");
+    } catch (const vsag::VsagException& e) {
+        REQUIRE(e.error_.type == vsag::ErrorType::UNSUPPORTED_INDEX_OPERATION);
+    }
+}
+
+TEST_CASE("HGraph EstimateMemory counts a separate raw-vector store",
+          "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    // SQ8 base codes with store_raw_vector create a separate fp32 raw store next to the
+    // base codes; the retained estimate must cover both of them.
+    constexpr int64_t dim = 16;
+    HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8");
+    build_param.graph_type = "nsw";
+    build_param.store_raw_vector = true;
+    auto param = HGraphTestIndex::GenerateHGraphBuildParametersString(build_param);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+
+    // The separate raw store is in memory, so the configuration stays estimable.
+    REQUIRE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    constexpr uint64_t count = 1024;
+    const auto estimate = index->EstimateMemory(count);
+    // base sq8 codes (1 byte per dim) + separate fp32 raw store (4 bytes per dim) for
+    // every element, before any graph, label or extra-info storage.
+    REQUIRE(estimate >= count * dim * (1 + sizeof(float)));
+
+    // The same configuration without store_raw_vector has no separate raw store, so its
+    // estimate must be smaller by at least the raw store bytes.
+    HGraphTestIndex::HGraphBuildParam plain_param("l2", dim, "sq8");
+    plain_param.graph_type = "nsw";
+    auto plain =
+        TestIndex::TestFactory(HGraphTestIndex::name,
+                               HGraphTestIndex::GenerateHGraphBuildParametersString(plain_param),
+                               true);
+    REQUIRE(estimate >= plain->EstimateMemory(count) + count * dim * sizeof(float));
+}
+
 TEST_CASE_PERSISTENT_FIXTURE(fixtures::HGraphTestIndex,
                              "HGraph ELP Optimizer",
                              "[ft][build][hgraph]") {

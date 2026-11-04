@@ -1421,6 +1421,13 @@ HGraph::can_estimate_build_memory() const {
         // Precise reorder only carries a meaningful estimate for fp32 precise codes.
         return false;
     }
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
+        not this->raw_vector_->InMemory()) {
+        // A separate raw-vector store backed by file IO has write buffers the in-memory
+        // model cannot account for. In-memory separate raw stores are counted by
+        // EstimateMemory() and stay eligible.
+        return false;
+    }
     return true;
 }
 
@@ -1473,7 +1480,8 @@ HGraph::InitFeatures() {
 
     // Build-time memory estimation: only declared for configurations that can produce a
     // meaningful EstimateBuildMemory() result (in-memory NSW build, estimable quantization,
-    // no imported cache and no in-build MCI maintenance).
+    // no imported cache, no in-build MCI maintenance, and any separate raw-vector store
+    // in memory, where EstimateMemory() counts it).
     this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
                                           this->can_estimate_build_memory());
 
@@ -1559,7 +1567,13 @@ HGraph::InitFeatures() {
 uint64_t
 HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     if (this->index_feature_list_ == nullptr or
-        not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY)) {
+        not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY) or
+        not this->can_estimate_build_memory()) {
+        // The feature bit is computed once by InitFeatures() at construction time.
+        // Recheck the live eligibility as well: ImportCache() can switch Build() onto
+        // the warm-start/refine path after construction (the bit is also refreshed
+        // there), and the feature bit must never make this method describe a build
+        // path Build() would not take.
         throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
                             "HGraph doesn't support EstimateBuildMemory for the current build "
                             "configuration");
@@ -1575,16 +1589,21 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     const uint64_t final_memory = this->EstimateMemory(num_elements);
     uint64_t build_memory = 0;
 
-    // (1) Quantizer training sample: Build() trains on sample_train_data(), which copies
-    //     min(N, max(512, train_sample_count)) rows into allocator-owned buffers. While the
-    //     sample is copied the staging buffer and the returned dataset coexist, so the peak is
-    //     two float32 copies of the sample plus its ids and index arrays.
+    // (1) Quantizer training sample. sample_train_data() only copies when the input is
+    //     larger than the sample budget: for num_elements <= max(512, train_sample_count)
+    //     it returns the caller's dataset as-is and allocates none of these buffers, so
+    //     caller-owned input memory stays excluded (FP32Quantizer::TrainImpl allocates
+    //     nothing either). When sampling does happen, the staging buffer and the returned
+    //     dataset coexist, so the peak is two float32 copies of the sample plus its id
+    //     and index arrays.
     constexpr uint64_t kMinTrainSampleCount = 512;
-    const uint64_t train_sample_count = std::min<uint64_t>(
-        num_elements,
-        std::max<uint64_t>(kMinTrainSampleCount, static_cast<uint64_t>(this->train_sample_count_)));
-    build_memory += train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float) * 2;
-    build_memory += train_sample_count * (sizeof(int64_t) + sizeof(int64_t));
+    const uint64_t max_train_sample_count =
+        std::max<uint64_t>(kMinTrainSampleCount, static_cast<uint64_t>(this->train_sample_count_));
+    const uint64_t train_sample_count = std::min<uint64_t>(num_elements, max_train_sample_count);
+    if (train_sample_count < num_elements) {
+        build_memory += train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float) * 2;
+        build_memory += train_sample_count * (sizeof(int64_t) + sizeof(int64_t));
+    }
 
     // Workers that may hold construction scratch at the same time. A single-threaded build has
     // no thread pool and inserts on the calling thread.
@@ -1606,6 +1625,15 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     // (3) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
     //     before writing it into the persistent flatten storage.
     build_memory += build_threads * static_cast<uint64_t>(this->basic_flatten_codes_->code_size_);
+
+    // (4) Per-element build bookkeeping, retained by the allocator for the whole insertion
+    //     phase and independent of the worker count: prepare_add_batch() keeps one AddRow per
+    //     accepted input in the batch's row vector and one entry per element in
+    //     pending_code_writes_ until insertion completes. Both containers grow by
+    //     reallocation, where the old and the new storage coexist, so each term is charged
+    //     at twice its final per-element size to cover the growth transient.
+    build_memory += 2 * num_elements * sizeof(AddRow);
+    build_memory += 2 * num_elements * sizeof(std::pair<const InnerIdType, uint8_t>);
 
     return final_memory + build_memory;
 }
@@ -1696,6 +1724,12 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    // A nonempty imported cache switches Build() onto the warm-start/refine path, which the
+    // cold in-memory NSW estimate does not describe. Refresh the advertised feature so
+    // CheckFeature(SUPPORT_ESTIMATE_BUILD_MEMORY) stays in sync with what Build() will do;
+    // EstimateBuildMemory() independently rechecks the live eligibility.
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
 }
 
 void
