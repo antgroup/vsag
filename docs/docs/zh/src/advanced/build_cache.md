@@ -114,3 +114,37 @@ warm-start 构建完成后调用 `GetStats()`，检查：
 
 API 签名见 [Index 缓存接口](../api/index_class.md#缓存构建加速)，Source ID 字段见
 [Dataset](../api/dataset.md)。
+
+### PiPNN reservoir 缓存
+
+HGraph 和 Pyramid 的 `graph_type: "pipnn"` 现在也支持 `ExportCache` / `ImportCache`。
+调用顺序与 NSW 相同：构建时提供非空且唯一的 `Dataset::SourceID`，导出缓存，
+在新的空索引中导入，再构建下一批快照。Pyramid 按层级名称及节点路径分别匹配缓存，路由层正常重建。
+
+PiPNN 导出带版本的 reservoir 快照，包含稳定 Source ID、原始 FP32 输入的 64 位指纹、
+候选 ID 和 BF16 距离键，以及最终邻接表和相应的源点距离键。输入顺序和数值标签可以变化。已删除或向量已变化的候选会被丢弃；
+新增、内容变化或剩余候选不足的行重新计算叶内邻居。可复用行跳过叶内 Top-K，
+缺失行通过矩形 GEMM 计算距离并更新两端候选。未受影响且仍有效的邻接表直接复用；变化行在固定 alpha 的剪枝证明成立时也可复用，其余行重新剪枝。
+旧 reservoir 只在收到新候选时按需装入，当前数据重新分区。
+这是近似增量构建，不保证图结构或 Recall 与冷构建相同，需要用业务数据实测 Recall 和 QPS。
+
+维度、距离类型、最大度数、随机投影签名和全部 PiPNN 策略参数必须一致。Source ID 缺失或不唯一、
+策略不兼容，以及不含 reservoir 的旧缓存，都会回退为 PiPNN 冷构建。每个图中实际可复用行不足 80% 时，该图也回退为冷构建。
+`support_duplicate: true` 的重复组图也走冷构建，本版本不导出其分组 reservoir。
+已有 fused 存储缓存接口限制继续适用。PiPNN 自适应剪枝在策略一致时可以复用 reservoir，
+变化行仍重新剪枝。指纹用于检测意外内容变化，不提供对抗哈希碰撞的保证，缓存文件应与索引文件处于相同可信边界。
+
+快照在 `Build` 后保留于内存，额外空间与点数乘 `reservoir_size` 成正比。
+导出的是最近一次 PiPNN 批量构建的快照，后续增删改不会重新生成 reservoir。
+普通索引序列化不会保留 reservoir，即使设置 `persist_source_id: true` 也应在构建后单独导出缓存。
+恢复后的索引如果没有 reservoir，只能导出旧图种子，PiPNN 会冷构建。
+仅包含 NSW 信息的缓存保留现有二进制编码；旧读取器不能读取新版 PiPNN payload。
+不支持的版本、非法偏移/候选以及截断文件会被拒绝，且不会覆盖此前已导入的有效缓存。
+
+`GetStats()` 的 `build_cache_hit_nodes` 表示实际复用的行数，`build_cache_hit_rate` 为其比例。
+Pyramid 的 `build_cache_hit_memberships` 按子图分别计数，同一向量在多个图中复用时，
+节点总数只计一次；重新计算的图计入成员未命中。`build_cache_restored_edges` 统计直接恢复的图边，
+不包含 reservoir 候选；PiPNN 图行复用单独记录为 `pipnn_build.reused_graph_rows`，其中包含
+`pipnn_build.certificate_rows`。Pyramid 的这两个字段按子图计数。
+临时诊断对象 `pipnn_build.phase_seconds` 记录准备、缓存匹配、分区、叶内计算及合并、
+图写入和缓存生成的耗时，不包含索引训练、路由层和流 I/O。

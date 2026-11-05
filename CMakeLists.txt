@@ -98,9 +98,3 @@ endif ()
 include (cmake/VSAGPythonBindings.cmake)  # Optional Python bindings.
 include (cmake/VSAGNodeBindings.cmake)    # Optional Node.js bindings.
 include (cmake/VSAGInstall.cmake)         # Install rules and CMake package config.
-
-# Research-only targets; never enabled by the normal library build.
-option (VSAG_ENABLE_PIPNN_CACHE_EXPERIMENT "Build the standalone PiPNN cache research prototype" OFF)
-if (VSAG_ENABLE_PIPNN_CACHE_EXPERIMENT)
-    add_subdirectory (experiments/pipnn_build_cache)
-endif ()

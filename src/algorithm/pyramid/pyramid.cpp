@@ -750,6 +750,8 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
 
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool cache_attempt = has_loaded_cache();
+        std::vector<uint8_t> global_hits(static_cast<uint64_t>(data_num), 0);
         // PiPNN is restricted to float32 dense input by the constructor, so the
         // representation-free rows can be handed back as float pointers unchanged.
         Vector<const float*> rows(allocator_);
@@ -767,22 +769,59 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                             allocator_,
                                             this->thread_pool_.get(),
                                             this->build_thread_count_);
-            GraphBuildFunc build_graph =
-                [&](GraphInterfacePtr& graph, const Vector<InnerIdType>& ids, uint32_t level) {
-                    // `rows` is indexed by compacted inner id while `ids` is this node's own id
-                    // list, which is a strict subset as soon as an element is missing from the
-                    // node. Remap positionally for every level rather than assuming level 0 spans
-                    // the whole [0, data_num) range: the public path API currently requires at
-                    // least one path per element, but that caller-side invariant is not something
-                    // this builder should depend on.
-                    Vector<const float*> node_rows(allocator_);
-                    node_rows.reserve(ids.size());
+            GraphBuildFunc build_graph = [&](GraphInterfacePtr& graph,
+                                             const Vector<InnerIdType>& ids,
+                                             uint32_t level,
+                                             const std::string& node_path) {
+                // `rows` is indexed by compacted inner id while `ids` is this node's own id
+                // list, which is a strict subset as soon as an element is missing from the
+                // node. Remap positionally for every level rather than assuming level 0 spans
+                // the whole [0, data_num) range: the public path API currently requires at
+                // least one path per element, but that caller-side invariant is not something
+                // this builder should depend on.
+                Vector<const float*> node_rows(allocator_);
+                node_rows.reserve(ids.size());
+                for (const auto id : ids) {
+                    node_rows.emplace_back(rows[id]);
+                }
+                graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
+                std::vector<std::string> node_sources;
+                if (source_ids != nullptr) {
+                    node_sources.reserve(ids.size());
                     for (const auto id : ids) {
-                        node_rows.emplace_back(rows[id]);
+                        node_sources.emplace_back(source_ids[input_indices[id]]);
                     }
-                    graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(graph, ids, node_rows);
-                };
+                }
+                auto& graph_cache = cache_->CreateGraphCache(hname, node_path);
+                const auto imported_snapshot = graph_cache.pipnn;
+                pipnn_builder.Build(graph,
+                                    ids,
+                                    node_rows,
+                                    source_ids == nullptr ? nullptr : &node_sources,
+                                    imported_snapshot.get(),
+                                    &graph_cache.pipnn);
+                if (cache_attempt) {
+                    const auto hits =
+                        graph_cache.pipnn == nullptr ? 0 : graph_cache.pipnn->reused_rows;
+                    build_cache_hit_memberships_ += hits;
+                    build_cache_missed_memberships_ += ids.size() - hits;
+                    if (graph_cache.pipnn != nullptr) {
+                        const auto& mask = graph_cache.pipnn->reuse_mask;
+                        for (uint64_t row = 0; row < mask.size(); ++row) {
+                            if (mask[row] != 0 and global_hits[ids[row]] == 0) {
+                                global_hits[ids[row]] = 1;
+                                ++build_cache_hit_nodes_;
+                            }
+                        }
+                    }
+                    build_cache_missed_nodes_ =
+                        static_cast<uint64_t>(data_num) - build_cache_hit_nodes_;
+                    build_cache_hit_rate_ = data_num == 0
+                                                ? 0.0F
+                                                : static_cast<float>(build_cache_hit_nodes_) /
+                                                      static_cast<float>(data_num);
+                }
+            };
             hierarchy->root->Build(build_graph);
 
             auto& root = *hierarchy->root;
@@ -2379,7 +2418,8 @@ Pyramid::Build(const DatasetPtr& base) {
         return {};
     }
     CHECK_ARGUMENT(GetNumElements() == 0, "index is not empty");
-    CHECK_ARGUMENT(not(adaptive_pruning_.enabled && has_loaded_cache()),
+    CHECK_ARGUMENT(not(adaptive_pruning_.enabled && has_loaded_cache() &&
+                       graph_type_ != GRAPH_TYPE_VALUE_PIPNN),
                    "adaptive_pruning does not yet support building from imported cache; disable "
                    "adaptive_pruning or build without importing a cache");
     const auto data_num = base->GetNumElements();
@@ -3167,10 +3207,11 @@ Pyramid::populate_hierarchy_trees(const DatasetPtr& base, const Vector<int64_t>*
     if (thread_pool_ != nullptr && hierarchies_.size() > 1) {
         Vector<std::future<void>> futures(allocator_);
         for (const auto& [hname, hierarchy_ptr] : hierarchies_) {
-            const std::string hierarchy_name = hname;
+            // Hierarchy keys stay alive until every future below has completed.
+            const auto* hierarchy_name = &hname;
             futures.push_back(thread_pool_->GeneralEnqueue(
                 [&hierarchy = *hierarchy_ptr, base, hierarchy_name, data_num, input_indices]() {
-                    populate_path_tree(hierarchy, base, hierarchy_name, data_num, input_indices);
+                    populate_path_tree(hierarchy, base, *hierarchy_name, data_num, input_indices);
                 }));
         }
         for (auto& future : futures) {
@@ -3564,6 +3605,9 @@ Pyramid::GetStats() const {
     analyzer_param.search_params = R"({"pyramid": {"ef_search": 500}})";
     auto analyzer = CreateAnalyzer(analyzer_param);
     JsonType stats = analyzer->GetStats();
+    if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        stats["pipnn_build"].SetJson(cache_->GetPiPNNBuildStats());
+    }
     if (build_cache_hit_rate_ >= 0.0F) {
         stats["build_cache_hit_rate"].SetFloat(build_cache_hit_rate_);
         stats["build_cache_hit_nodes"].SetUint64(build_cache_hit_nodes_);
@@ -3724,6 +3768,10 @@ Pyramid::fulfill_cache(PyramidBuildCache& cache_snapshot) const {
             }
             if (not graph_cache.neighbors_.empty()) {
                 auto& target_cache = cache_snapshot.CreateGraphCache(hname, node_path);
+                const auto* retained_cache = cache_->GetGraphCache(hname, node_path);
+                if (retained_cache != nullptr) {
+                    target_cache.pipnn = retained_cache->pipnn;
+                }
                 target_cache.source_ids_ = std::move(graph_cache.source_ids_);
                 if (support_duplicate_) {
                     PyramidBuildCache::GroupOwners owners(target_cache.source_ids_.size());

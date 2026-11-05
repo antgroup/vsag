@@ -864,6 +864,9 @@ HGraph::GetStats() const {
         stats["live_count"].SetInt64(0);
         stats["deleted_count"].SetInt64(GetNumberRemoved());
         stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        if (cache_ != nullptr and cache_->pipnn != nullptr) {
+            stats["pipnn_build"].SetJson(cache_->pipnn->GetBuildStats());
+        }
         populate_mci_stats(stats);
         AddAnalysisMetadata(stats, GetName(), "stats", "partial");
         return stats.Dump(4);
@@ -886,6 +889,9 @@ HGraph::GetStats() const {
     } else {
         stats["build_cache_hit_rate"]["skipped_reason"].SetString(
             "index was not built from an imported cache");
+    }
+    if (cache_ != nullptr and cache_->pipnn != nullptr) {
+        stats["pipnn_build"].SetJson(cache_->pipnn->GetBuildStats());
     }
     populate_mci_stats(stats);
     AddAnalysisMetadata(stats, GetName(), "stats", "complete");

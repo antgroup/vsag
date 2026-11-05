@@ -32,6 +32,7 @@
 #include "impl/allocator/safe_allocator.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
+#include "pipnn_build_cache.h"
 #include "simd/bf16_simd.h"
 #include "unittest.h"
 
@@ -724,6 +725,80 @@ TEST_CASE("PiPNN partition TopK preserves serial and parallel graphs", "[ut][pip
         vsag::Vector<vsag::InnerIdType> expected(allocator), actual(allocator);
         serial->GetNeighbors(id, expected);
         parallel->GetNeighbors(id, actual);
+        REQUIRE(actual == expected);
+    }
+}
+
+TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
+          "[ut][pipnn_cache]") {
+    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
+                                 vsag::MetricType::METRIC_TYPE_IP,
+                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    auto common = MakeCommonParam(8, metric);
+    auto* allocator = common.allocator_.get();
+    auto vectors = MakeVectors(160, 8);
+    std::mt19937 generator(42);
+    std::normal_distribution<float> distribution;
+    for (auto& value : vectors) {
+        value = distribution(generator);
+    }
+    vsag::Vector<vsag::InnerIdType> original_ids(allocator);
+    std::vector<std::string> original_sources;
+    for (uint32_t id = 0; id < 128; ++id) {
+        original_ids.push_back(id);
+        original_sources.push_back("source-" + std::to_string(id));
+    }
+    auto original_rows = MakeRows(vectors, original_ids, 8, allocator);
+    vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.reservoir_size = 32;
+    parameter.leaf_neighbor_count = 16;
+    parameter.min_leaf_size = 1;
+    vsag::PiPNNGraphBuilder builder(parameter, 8, metric, allocator);
+    auto original = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> snapshot;
+    builder.Build(original, original_ids, original_rows, &original_sources, nullptr, &snapshot);
+    REQUIRE(snapshot != nullptr);
+    vsag::Vector<vsag::InnerIdType> ids(allocator);
+    std::vector<std::string> sources;
+    for (uint32_t id = 0; id < 128; ++id) {
+        if (id % 20 != 0) {
+            ids.push_back(id);
+        }
+    }
+    for (uint32_t id = 128; ids.size() < 128; ++id) {
+        ids.push_back(id);
+    }
+    for (const auto id : ids) {
+        sources.push_back("source-" + std::to_string(id));
+    }
+    auto rows = MakeRows(vectors, ids, 8, allocator);
+    auto reused = MakeGraph(common, 160, 8);
+    auto reference = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> result;
+    builder.Build(reused, ids, rows, &sources, snapshot.get(), &result);
+    REQUIRE(result->reused_graph_rows > 0);
+    snapshot->reuse_final_graph = false;
+    builder.Build(reference, ids, rows, &sources, snapshot.get());
+    for (const auto id : ids) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        reused->GetNeighbors(id, actual);
+        reference->GetNeighbors(id, expected);
+        REQUIRE(actual == expected);
+    }
+    vsag::Vector<vsag::InnerIdType> remapped(allocator);
+    for (uint32_t i = 0; i < ids.size(); ++i) {
+        remapped.push_back(static_cast<uint32_t>(ids.size()) - i - 1);
+    }
+    auto remapped_graph = MakeGraph(common, 160, 8);
+    auto remapped_reference = MakeGraph(common, 160, 8);
+    std::shared_ptr<vsag::PiPNNBuildCache> third;
+    builder.Build(remapped_graph, remapped, rows, &sources, result.get(), &third);
+    result->reuse_final_graph = false;
+    builder.Build(remapped_reference, remapped, rows, &sources, result.get());
+    for (const auto id : remapped) {
+        vsag::Vector<vsag::InnerIdType> actual(allocator), expected(allocator);
+        remapped_graph->GetNeighbors(id, actual);
+        remapped_reference->GetNeighbors(id, expected);
         REQUIRE(actual == expected);
     }
 }
