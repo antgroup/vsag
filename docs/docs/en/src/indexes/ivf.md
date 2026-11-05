@@ -129,7 +129,10 @@ cluster_balance_bench [--dataset all|uniform|skewed|indivisible|duplicates]
 
 Every run is fully seeded, including deterministic plain-k-means reductions.
 Repeated invocations with the same arguments reproduce the cluster assignments,
-centroids, and clustering loss; elapsed time can vary.
+centroids, and clustering loss; elapsed time can vary. To preserve this guarantee,
+the tool rejects `k >= 10000`: plain k-means would otherwise use approximate HGraph
+assignment, whose parallel graph construction is not deterministic. Use a smaller
+`k` for reproducible comparisons.
 
 ## Quick start
 

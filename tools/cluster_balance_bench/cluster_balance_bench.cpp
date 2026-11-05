@@ -368,6 +368,11 @@ parse(const int argc,
             return false;
         }
     }
+    if (k >= 10000) {
+        // KMeansCluster switches to non-deterministic parallel HGraph assignment here.
+        std::printf("--k must be less than 10000 for reproducible HGraph-free assignment\n");
+        return false;
+    }
     return k > 0 and n > 0 and dim > 0 and iter > 0 and (k <= n);
 }
 
