@@ -300,9 +300,13 @@ transportation problem, solved by an auction (Bertsekas) with one price per
 cluster: a vector bids for the cluster with the lowest `distance + price`, a full
 cluster gives the seat to the higher bid and its lowest bidder bids again, and
 prices only rise. With epsilon-scaling every assignment is optimal for its
-centroids within `n * epsilon` (for the distances as computed in float), epsilon
-being 1e-4 of the typical distance gap between a vector's closest clusters; as the
-mean is optimal for a fixed cluster, the loss does not grow between iterations.
+centroids and its cluster sizes within `n * epsilon` (for the distances as computed
+in float), epsilon being 1e-4 of the typical distance gap between a vector's closest
+clusters; as the mean is optimal for a fixed cluster, the loss does not grow between
+iterations. When `n` is not divisible by `buckets_count`, the buckets with one vector
+more start as the ones most vectors prefer, and a vector that saves cost by moving to
+a bucket without that extra seat takes the seat along. This choice of buckets is a
+good one, not a jointly optimal one.
 Every iteration starts from the previous assignment and prices, raised by how far
 each centroid moved, so most vectors keep their seats and only the others bid.
 
