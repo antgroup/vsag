@@ -41,7 +41,7 @@ public:
                 ids_are_contiguous = idx_vec[i] == idx_vec[0] + i;
             }
             if (not ids_are_contiguous) {
-                const auto packed_dim = static_cast<uint64_t>((this->common_param_.dim_ + 7) / 8);
+                const auto packed_dim = this->quantizer_->GetCodeSize();
                 const auto* data = static_cast<const uint8_t*>(vectors);
                 for (InnerIdType i = 0; i < count; ++i) {
                     this->InsertVector(data + static_cast<uint64_t>(i) * packed_dim, idx_vec[i]);

@@ -646,14 +646,55 @@ TEST_CASE("(PR) BruteForce Binary Hamming Update And Force Remove", "[ft][brutef
     REQUIRE(moved_distance.value() == 0.0F);
 }
 
-TEST_CASE("(PR) Binary WARP Is Rejected", "[ft][warp][pr]") {
+TEST_CASE("(PR) BruteForce Binary Rejects Malformed Queries Before Encoding",
+          "[ft][bruteforce][pr]") {
+    constexpr int64_t dim = 65;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65
+    })";
+    const std::vector<int64_t> ids = {7};
+    auto base_data = GeneratePacked(ids.size(), dim, 9012);
+    auto index_made = vsag::Factory::CreateIndex("brute_force", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    std::vector<uint8_t> short_data(1, 0);
+    auto wrong_dim_query = vsag::Dataset::Make()
+                               ->NumElements(1)
+                               ->Dim(8)
+                               ->BinaryVectors(short_data.data())
+                               ->Owner(false);
+    auto wrong_dim_result = index->KnnSearch(wrong_dim_query, 1, "{}");
+    REQUIRE_FALSE(wrong_dim_result.has_value());
+    REQUIRE(wrong_dim_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    std::vector<float> float_data(dim, 0.0F);
+    auto missing_binary_query = vsag::Dataset::Make()
+                                    ->NumElements(1)
+                                    ->Dim(dim)
+                                    ->Float32Vectors(float_data.data())
+                                    ->Owner(false);
+    auto missing_binary_result = index->KnnSearch(missing_binary_query, 1, "{}");
+    REQUIRE_FALSE(missing_binary_result.has_value());
+    REQUIRE(missing_binary_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
+
+TEST_CASE("(PR) Binary Unsupported Index Backends Are Rejected", "[ft][factory][pr]") {
     const std::string params = R"(
     {
         "dtype": "binary",
         "metric_type": "hamming",
         "dim": 64
     })";
-    auto index = vsag::Factory::CreateIndex("warp", params);
-    REQUIRE_FALSE(index.has_value());
-    REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    for (const auto* name :
+         {"ivf", "lazy_hgraph", "pyramid", "sindi", "sindi_v2", "simq", "warp"}) {
+        INFO(name);
+        auto index = vsag::Factory::CreateIndex(name, params);
+        REQUIRE_FALSE(index.has_value());
+        REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    }
 }
