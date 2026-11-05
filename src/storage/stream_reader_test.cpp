@@ -20,6 +20,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <stdexcept>
 
 #include "impl/allocator/safe_allocator.h"
 #include "unittest.h"
@@ -230,6 +231,52 @@ TEST_CASE("StreamReader Skip respects bounds without reading random-access data"
     REQUIRE_THROWS_AS(reader.Skip(1), vsag::VsagException);
     REQUIRE_THROWS_AS(reader.Skip(std::numeric_limits<uint64_t>::max()), vsag::VsagException);
     REQUIRE(reader.GetCursor() == 100);
+}
+
+TEST_CASE("ReadFuncStreamReader rejects reads beyond a shorter block source",
+          "[ut][stream_reader][callback_read_bounds]") {
+    const std::string bytes = "abc";
+    uint64_t calls = 0;
+    bool fail_callback = false;
+    vsag::ReadFuncStreamReader source(
+        [&](uint64_t offset, uint64_t size, void* dest) {
+            ++calls;
+            REQUIRE(offset <= bytes.size());
+            REQUIRE(size <= bytes.size() - offset);
+            if (fail_callback) {
+                throw std::runtime_error("callback failure");
+            }
+            std::memcpy(dest, bytes.data() + offset, size);
+        },
+        0,
+        bytes.size());
+    vsag::BoundedForwardReader block(&source, bytes.size() + 1);
+    char dest[4]{};
+    REQUIRE_THROWS_AS(block.Read(dest, sizeof(dest)), vsag::VsagException);
+    REQUIRE(calls == 0);
+    REQUIRE(source.GetCursor() == 0);
+    REQUIRE(block.GetCursor() == 0);
+    fail_callback = true;
+    REQUIRE_THROWS_AS(block.Read(dest, 1), std::runtime_error);
+    REQUIRE(calls == 1);
+    REQUIRE(source.GetCursor() == 0);
+    REQUIRE(block.GetCursor() == 0);
+    fail_callback = false;
+    block.Read(dest, bytes.size());
+    REQUIRE(std::string(dest, bytes.size()) == bytes);
+    REQUIRE(calls == 2);
+    REQUIRE(source.GetCursor() == bytes.size());
+    REQUIRE(block.GetCursor() == bytes.size());
+    source.Read(dest, 0);
+    REQUIRE(calls == 3);
+    REQUIRE_THROWS_AS(block.Read(dest, 1), vsag::VsagException);
+    REQUIRE_THROWS_AS(source.Read(dest, std::numeric_limits<uint64_t>::max()), vsag::VsagException);
+    REQUIRE(calls == 3);
+    REQUIRE(source.GetCursor() == bytes.size());
+    source.Seek(std::numeric_limits<uint64_t>::max());
+    REQUIRE_THROWS_AS(source.Read(dest, 0), vsag::VsagException);
+    REQUIRE(calls == 3);
+    REQUIRE(source.GetCursor() == std::numeric_limits<uint64_t>::max());
 }
 
 TEST_CASE("BufferStreamReader Skip preserves buffered cursor and delegates unread bytes",

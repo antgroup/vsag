@@ -21,6 +21,7 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -61,6 +62,10 @@ StreamReader::Slice(uint64_t length) {
 
 void
 ReadFuncStreamReader::Read(char* data, uint64_t size) {
+    if (cursor_ > length_ || size > length_ - cursor_) {
+        throw VsagException(ErrorType::READ_ERROR,
+                            "ReadFuncStreamReader: read exceeds stream boundary");
+    }
     readFunc_(cursor_, size, data);
     cursor_ += size;
     io_count_++;
@@ -161,6 +166,7 @@ IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
     } catch (...) {
         // Best effort: a stream buffer that rejects restoring its cursor cannot be repaired here.
         // Preserve the original failure even when restoration itself throws.
+        const auto construction_failure = std::current_exception();
         const auto exceptions = istream.exceptions();
         try {
             istream.exceptions(std::ios::goodbit);
@@ -171,6 +177,7 @@ IOStreamReader::IOStreamReader(std::istream& istream) : istream_(istream) {
             istream.clear(original_state);
             istream.exceptions(exceptions);
         } catch (...) {
+            std::rethrow_exception(construction_failure);
         }
         throw;
     }

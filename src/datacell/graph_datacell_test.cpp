@@ -15,6 +15,10 @@
 
 #include <fmt/format.h>
 
+#include <catch2/matchers/catch_matchers_predicate.hpp>
+#include <cstring>
+#include <sstream>
+
 #include "graph_datacell_parameter.h"
 #include "graph_interface_parameter.h"
 #include "graph_interface_test.h"
@@ -26,6 +30,57 @@
 #include "unittest.h"
 
 using namespace vsag;
+
+TEST_CASE("Dense graph count is checked before loading derived state",
+          "[ut][GraphDataCell][graph_count_bounds]") {
+    const bool split_io = GENERATE(false, true);
+    const InnerIdType count = GENERATE(0, 3, 8, 9);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = 4;
+    auto param = std::make_shared<GraphDataCellParameter>();
+    param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    param->init_max_capacity_ = 8;
+    param->use_reverse_edges_ = true;
+    param->max_degree_ = 4;
+    auto graph = GraphInterface::MakeInstance(param, common);
+    graph->Resize(8);
+    Vector<InnerIdType> empty(allocator.get());
+    const InnerIdType rows = count > 8 ? 3 : count;
+    for (InnerIdType id = 0; id < rows; ++id) {
+        graph->InsertNeighborsById(id, empty);
+    }
+    std::stringstream output;
+    IOStreamWriter writer(output);
+    graph->Serialize(writer);
+    auto bytes = output.str();
+    // For the invalid case, change only the count, retaining the valid capacity and payload.
+    std::memcpy(bytes.data(), &count, sizeof(count));
+    std::istringstream input(bytes);
+    IOStreamReader reader(input);
+    auto restored = GraphInterface::MakeInstance(param, common);
+    auto load = [&]() {
+        if (split_io) {
+            return restored->ReserveIO(reader);
+        }
+        restored->DeserializeBounded(reader, 8);
+        return uint64_t{0};
+    };
+    if (count > 8) {
+        REQUIRE_THROWS_MATCHES(
+            load(),
+            VsagException,
+            Catch::Matchers::Predicate<VsagException>([](const VsagException& error) {
+                return error.error_.type == ErrorType::INVALID_BINARY;
+            }));
+        REQUIRE(reader.GetCursor() == 3 * sizeof(InnerIdType));
+    } else {
+        REQUIRE_NOTHROW(load());
+        REQUIRE(restored->TotalCount() == count);
+        REQUIRE(restored->MaxCapacity() == 8);
+    }
+}
 
 TEST_CASE("Graph deserialization restores incoming edges before tail moves",
           "[ut][GraphDataCell][mci][reload_remove]") {

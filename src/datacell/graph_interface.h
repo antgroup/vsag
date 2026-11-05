@@ -214,6 +214,10 @@ public:
         StreamReader::ReadObj(reader, this->max_capacity_);
         StreamReader::ReadObj(reader, this->maximum_degree_);
 
+        if (this->uses_dense_capacity() && this->total_count_ > this->max_capacity_) {
+            throw VsagException(ErrorType::INVALID_BINARY,
+                                "serialized graph count exceeds graph capacity");
+        }
         if (this->uses_dense_capacity() && this->max_capacity_ > deserialize_capacity_limit_) {
             throw VsagException(ErrorType::INVALID_BINARY,
                                 "serialized graph capacity exceeds index capacity");
