@@ -77,9 +77,10 @@ _DENSE_BLOCK_MAX_ROWS = 65536
 # Relative tolerance under which the expanded Euclidean formula (||a||²+||b||²-2a·b)
 # has lost every significant digit; such pairs are recomputed from differences.
 _EUCLIDEAN_GRAM_REL_TOL = 1e-8
-# Normalization and dot products can leave identical angular vectors a few ulps
-# from zero.  Canonicalize that numerical residue before duplicate thresholds.
-_ANGULAR_ZERO_TOL = 32 * np.finfo(np.float64).eps
+# Normalization and dot products lose significant digits for nearly coincident
+# angular vectors.  Recompute pairs in this band from normalized differences
+# instead of canonicalizing genuine small distances to zero.
+_ANGULAR_DIRECT_TOL = 32 * np.finfo(np.float64).eps
 # Row budget for the streaming mean-cosine reduction (normalized blocks only).
 _MEAN_COSINE_BLOCK_ROWS = 8192
 _INVALID_SAMPLE_WARNING = (
@@ -1465,9 +1466,15 @@ def _pairwise_dense(matrix: np.ndarray, metric: str) -> np.ndarray:
     if metric == "ip":
         return 1.0 - matrix @ matrix.T
     if metric == "angular":
-        norms = np.linalg.norm(matrix, axis=1)
+        # Canonicalize by the largest coordinate first.  Positive scalar
+        # multiples then have identical scaled coordinates, so independent
+        # norm rounding cannot give them a spurious non-zero distance.
+        scales = np.max(np.abs(matrix), axis=1)
+        safe_scales = np.where(scales > 0, scales, 1.0)
+        scaled = matrix / safe_scales[:, None]
+        norms = np.linalg.norm(scaled, axis=1)
         safe = np.where(norms > 0, norms, 1.0)
-        normalized = matrix / safe[:, None]
+        normalized = scaled / safe[:, None]
         similarity = normalized @ normalized.T
         np.clip(similarity, -1.0, 1.0, out=similarity)
         distances = 1.0 - similarity
@@ -1476,7 +1483,14 @@ def _pairwise_dense(matrix: np.ndarray, metric: str) -> np.ndarray:
             distances[zero_norms, :] = 1.0
             distances[:, zero_norms] = 1.0
             distances[np.ix_(zero_norms, zero_norms)] = 0.0
-        distances[np.abs(distances) <= _ANGULAR_ZERO_TOL] = 0.0
+        unstable = np.triu(np.abs(distances) <= _ANGULAR_DIRECT_TOL, k=1)
+        for row in np.unique(np.nonzero(unstable)[0]):
+            columns = np.nonzero(unstable[row])[0]
+            differences = normalized[row] - normalized[columns]
+            direct = 0.5 * np.einsum("ij,ij->i", differences, differences)
+            distances[row, columns] = direct
+            distances[columns, row] = direct
+        np.fill_diagonal(distances, 0.0)
         return distances
     raise ValueError("unsupported metric %r" % metric)
 
@@ -1490,6 +1504,12 @@ def _pairwise_sparse(
     norms = np.zeros(size, dtype=np.float64)
     for position, (_, ids, values) in enumerate(records):
         mapping = {int(key): float(value) for key, value in zip(ids, values) if np.isfinite(value)}
+        if metric == "angular":
+            # Match the dense canonicalization: proportional sparse vectors
+            # must have identical coordinates before their norms are rounded.
+            scale = max((abs(value) for value in mapping.values()), default=0.0)
+            if scale > 0:
+                mapping = {key: value / scale for key, value in mapping.items()}
         maps.append(mapping)
         norms[position] = math.sqrt(sum(value * value for value in mapping.values()))
     for i in range(size):
@@ -1521,10 +1541,16 @@ def _pairwise_sparse(
                 else:
                     cosine = max(-1.0, min(1.0, dot / (norms[i] * norms[j])))
                     distance = 1.0 - cosine
+                    if abs(distance) <= _ANGULAR_DIRECT_TOL:
+                        squared = 0.0
+                        for key in maps[i].keys() | maps[j].keys():
+                            delta = maps[i].get(key, 0.0) / norms[i] - maps[j].get(
+                                key, 0.0
+                            ) / norms[j]
+                            squared += delta * delta
+                        distance = 0.5 * squared
             else:
                 raise ValueError("unsupported metric %r" % metric)
-            if metric == "angular" and abs(distance) <= _ANGULAR_ZERO_TOL:
-                distance = 0.0
             matrix[i, j] = distance
             matrix[j, i] = distance
     return matrix

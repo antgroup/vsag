@@ -610,6 +610,68 @@ def test_angular_identical_vectors_are_near_duplicates(tmp_path, vector_type):
     assert near["near_duplicate_pairs"] == 3
 
 
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_angular_positive_scalar_multiples_are_near_duplicates(tmp_path, vector_type):
+    path = tmp_path / ("angular_scalar_multiples_" + vector_type + ".hdf5")
+    rows = np.array([[1, 1], [3, 3], [3, 3]], dtype=np.float32)
+    if vector_type == "dense":
+        _write_dense(path, rows, metric="angular")
+    else:
+        records = [
+            (np.array([0, 1], dtype=np.uint32), row) for row in rows
+        ]
+        _write_sparse(path, records, metric="angular")
+
+    report = profile_dataset(
+        str(path), metric="angular", sample_size=3, pairwise_sample_size=3
+    )
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert pairwise["min"] == 0.0
+    assert pairwise["max"] == 0.0
+    assert near["median_pairwise_distance"] == 0.0
+    assert near["threshold"] == 0.0
+    assert near["near_duplicate_pairs"] == 3
+
+
+@pytest.mark.parametrize("vector_type", ["dense", "sparse"])
+def test_angular_preserves_small_positive_distances(tmp_path, vector_type):
+    path = tmp_path / ("angular_small_distance_" + vector_type + ".hdf5")
+    rows = np.array([[1.0, 0.0], [1.0, 2**-24]], dtype=np.float32)
+    if vector_type == "dense":
+        _write_dense(path, rows, metric="angular")
+    else:
+        records = [
+            (np.array([0, 1], dtype=np.uint32), row) for row in rows
+        ]
+        _write_sparse(path, records, metric="angular")
+
+    report = profile_dataset(
+        str(path),
+        metric="angular",
+        sample_size=2,
+        pairwise_sample_size=2,
+        near_duplicate_relative_epsilon=0,
+    )
+    expected = 2**-49
+    pairwise = report["metrics"]["pairwise_distances"]["stats"]
+    near = report["metrics"]["duplicates"]["near_duplicate"]
+    assert pairwise["min"] == pytest.approx(expected)
+    assert pairwise["max"] == pytest.approx(expected)
+    assert near["median_pairwise_distance"] == pytest.approx(expected)
+    assert near["threshold"] == 0.0
+    assert near["near_duplicate_pairs"] == 0
+    assert near["near_duplicate_ratio"] == 0.0
+
+    default = profile_dataset(
+        str(path), metric="angular", sample_size=2, pairwise_sample_size=2
+    )
+    default_near = default["metrics"]["duplicates"]["near_duplicate"]
+    assert default_near["threshold"] == pytest.approx(expected * 1e-3)
+    assert default_near["near_duplicate_pairs"] == 0
+    assert default_near["near_duplicate_ratio"] == 0.0
+
+
 def test_dense_sample_size_is_capped_by_materialized_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 64)
     path = tmp_path / "bounded_dense_sample.hdf5"
