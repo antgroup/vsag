@@ -793,6 +793,14 @@ def test_full_split_norm_and_duplicate_state_honors_budget(
         ]
         _write_sparse(path, records)
 
+    real_empty = np.empty
+
+    def reject_full_split_allocations(shape, *args, **kwargs):
+        if shape in (5, (5,), (5, 16)):
+            raise AssertionError("over-budget full-split state must not be allocated")
+        return real_empty(shape, *args, **kwargs)
+
+    monkeypatch.setattr(profiler_module.np, "empty", reject_full_split_allocations)
     report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
     metrics = report["metrics"]
     for name in ("norms", "outliers"):
@@ -801,12 +809,22 @@ def test_full_split_norm_and_duplicate_state_honors_budget(
         assert "32-byte full-split state budget" in metrics[name]["reason"]
     exact = metrics["duplicates"]["exact"]
     assert exact["available"] is False
-    assert "480 bytes for 5 vectors" in exact["reason"]
+    assert "80 bytes for 5 vectors" in exact["reason"]
     assert exact["unique_vectors"] is None
     assert exact["duplicate_ratio"] is None
     assert metrics["duplicates"]["near_duplicate"]["available"] is True
     assert metrics["sparsity"]["count"] == 5
-    assert sum("full-split state budget" in warning for warning in report["warnings"]) == 2
+    if vector_type == "sparse":
+        assert metrics["sparsity"]["non_zero_values"] == 5
+        assert metrics["sparsity"]["nnz_available"] is False
+        assert metrics["sparsity"]["nnz_per_vector"] is None
+        assert metrics["sparsity"]["nnz_histogram"] is None
+        assert "40 bytes for 5 vectors" in metrics["sparsity"]["nnz_reason"]
+    expected_warnings = 3 if vector_type == "sparse" else 2
+    assert (
+        sum("full-split state budget" in warning for warning in report["warnings"])
+        == expected_warnings
+    )
 
 
 def test_unsigned_dense_statistics_match_evaluator_int8_values(tmp_path):
@@ -819,18 +837,32 @@ def test_unsigned_dense_statistics_match_evaluator_int8_values(tmp_path):
         handle.create_dataset("train", data=matrix)
 
     report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
-    expected = matrix.view(np.int8).astype(np.float64)
+    with h5py.File(str(path), "r") as handle:
+        expected = handle["train"].astype(np.int8)[:].astype(np.float64)
     assert report["dataset"]["dtype"] == "INT8"
     np.testing.assert_allclose(
         report["metrics"]["norms"]["stats"]["mean"],
         np.linalg.norm(expected, axis=1).mean(),
     )
     per_dimension = report["metrics"]["dimensions"]["per_dimension"]
-    assert per_dimension["min"]["values"] == [-128.0, -1.0]
-    assert per_dimension["max"]["values"] == [0.0, 127.0]
-    assert per_dimension["mean"]["values"] == [-64.0, 63.0]
+    assert per_dimension["min"]["values"] == [0.0, 127.0]
+    assert per_dimension["max"]["values"] == [127.0, 127.0]
+    assert per_dimension["mean"]["values"] == [63.5, 127.0]
     expected_distance = np.linalg.norm(expected[0] - expected[1])
     assert report["metrics"]["pairwise_distances"]["stats"]["min"] == pytest.approx(
         expected_distance
     )
+
+
+def test_unsigned_dense_saturated_values_are_evaluator_duplicates(tmp_path):
+    import h5py
+
+    path = tmp_path / "unsigned_dense_duplicates.hdf5"
+    with h5py.File(str(path), "w") as handle:
+        handle.create_dataset("train", data=np.array([[127], [255]], dtype=np.uint8))
+    report = profile_dataset(str(path), sample_size=2, pairwise_sample_size=2)
+    assert report["metrics"]["pairwise_distances"]["stats"]["min"] == 0.0
+    exact = report["metrics"]["duplicates"]["exact"]
+    assert exact["unique_vectors"] == 1
+    assert exact["duplicate_vectors"] == 1
 

@@ -18,7 +18,8 @@ Two layouts are supported, matching ``docs/docs/en/src/resources/dataset_format.
 
 * **dense** (``type`` missing or ``"dense"``): ``/<split>`` is an ``(N, D)``
   matrix of ``INT8`` or ``FLOAT32`` values.  One-byte unsigned integers are
-  reinterpreted as ``INT8`` to match the evaluator's ``ALPHA_I8`` reads.
+  numerically converted to ``INT8`` by HDF5 to match the evaluator's
+  ``ALPHA_I8`` reads (out-of-range values saturate at 127).
 * **sparse** (``type="sparse"``): ``/<split>`` is a flat ``INT8`` byte stream.
   Each record is ``uint32 len | uint32 ids[len] | float32 vals[len]`` in
   little-endian order.  ``/<split>_offsets`` is an optional ``UINT64`` array of
@@ -38,6 +39,8 @@ from typing import Dict, Iterator, List, Optional, Sequence, Tuple
 import numpy as np
 
 DEFAULT_CHUNK_BYTES = 64 * 1024 * 1024
+_OFFSET_INDEX_BUDGET_BYTES = DEFAULT_CHUNK_BYTES
+_OFFSET_VALIDATION_ROWS = 1024 * 1024
 _LEN_STRUCT = struct.Struct("<I")
 _LEN_SIZE = _LEN_STRUCT.size
 
@@ -175,27 +178,21 @@ class HDF5Dataset:
                 )
             offsets_name = self.split + "_offsets"
             if offsets_name in f:
-                offsets = np.asarray(f[offsets_name][()], dtype=np.uint64)
-                if len(offsets) < 1:
-                    raise DatasetFormatError(
-                        "'/%s' must contain at least the trailing sentinel" % offsets_name
-                    )
-                if int(offsets[0]) != 0:
-                    raise DatasetFormatError(
-                        "'/%s' must start at byte offset 0" % offsets_name
-                    )
-                if np.any(offsets[1:] < offsets[:-1]):
-                    raise DatasetFormatError(
-                        "'/%s' must be non-decreasing" % offsets_name
-                    )
-                if int(offsets[-1]) != int(dset.shape[0]):
-                    raise DatasetFormatError(
-                        "'/%s' sentinel (%d) does not match '/%s' size (%d)"
-                        % (offsets_name, int(offsets[-1]), self.split, int(dset.shape[0]))
-                    )
-                count = len(offsets) - 1
+                offsets_dset = f[offsets_name]
+                offset_count = _validate_offsets(
+                    offsets_dset, int(dset.shape[0]), offsets_name
+                )
+                count = offset_count - 1
                 has_offsets = True
-                self._offsets = offsets
+                offset_bytes = offset_count * np.dtype(np.uint64).itemsize
+                if offset_bytes <= _OFFSET_INDEX_BUDGET_BYTES:
+                    self._offsets = np.asarray(offsets_dset[()], dtype=np.uint64)
+                else:
+                    warnings.append(
+                        "sparse '/%s' exceeds the %d-byte retained-index budget; "
+                        "using the bounded sequential decoder"
+                        % (offsets_name, _OFFSET_INDEX_BUDGET_BYTES)
+                    )
             else:
                 warnings.append(
                     "sparse dataset has no '/%s_offsets'; records are counted by scanning"
@@ -238,7 +235,7 @@ class HDF5Dataset:
         total = int(dset.shape[0])
         for start in range(0, total, block_rows):
             end = min(start + block_rows, total)
-            yield start, _evaluator_dense_view(dset[start:end])
+            yield start, _read_evaluator_dense(dset, slice(start, end))
 
     def read_dense_rows(self, indices: Sequence[int]) -> np.ndarray:
         """Read selected rows from a dense matrix (indices must be sorted)."""
@@ -250,7 +247,7 @@ class HDF5Dataset:
         if np.any(idx[1:] <= idx[:-1]):
             raise ValueError("dense row indices must be strictly increasing")
         dset = self._file[self.split]
-        return _evaluator_dense_view(dset[idx.tolist()])
+        return _read_evaluator_dense(dset, idx.tolist())
 
     # -- sparse --------------------------------------------------------
     def iter_sparse_records(
@@ -264,7 +261,13 @@ class HDF5Dataset:
         if self._offsets is not None:
             yield from self._iter_sparse_with_offsets(max_chunk_bytes)
         else:
-            yield from self._iter_sparse_without_offsets(max_chunk_bytes)
+            # With no index, or with an index too large to retain, decode the
+            # byte stream directly.  An oversized index still supplies the
+            # record count, which is cross-checked by the decoder.
+            yield from self._iter_sparse_without_offsets(
+                max_chunk_bytes,
+                expected_count=self.metadata.count if self.metadata.has_offsets else None,
+            )
 
     def _iter_sparse_with_offsets(
         self, max_chunk_bytes: int
@@ -297,7 +300,7 @@ class HDF5Dataset:
             start = end
 
     def _iter_sparse_without_offsets(
-        self, max_chunk_bytes: int
+        self, max_chunk_bytes: int, expected_count: Optional[int] = None
     ) -> Iterator[Tuple[int, np.ndarray, np.ndarray]]:
         dset = self._file[self.split]
         total_bytes = int(dset.shape[0])
@@ -334,6 +337,11 @@ class HDF5Dataset:
                 "sparse byte stream has %d trailing byte(s) that do not form a "
                 "complete record" % len(buffer)
             )
+        if expected_count is not None and index != expected_count:
+            raise DatasetFormatError(
+                "sparse decoded record count (%d) does not match '/%s_offsets' (%d)"
+                % (index, self.split, expected_count)
+            )
 
     def read_sparse_rows(
         self, indices: Sequence[int], max_chunk_bytes: int = DEFAULT_CHUNK_BYTES
@@ -357,12 +365,43 @@ class HDF5Dataset:
         return out
 
 
-def _evaluator_dense_view(values) -> np.ndarray:
-    """Match the evaluator's signed interpretation of one-byte dense values."""
-    array = np.asarray(values)
-    if array.dtype.kind == "u" and array.dtype.itemsize == 1:
-        return array.view(np.int8)
-    return array
+def _read_evaluator_dense(dset, selection) -> np.ndarray:
+    """Read dense values with the evaluator's HDF5 destination datatype."""
+    dtype = np.dtype(dset.dtype)
+    if dtype.kind == "u" and dtype.itemsize == 1:
+        # ALPHA_I8 is a signed destination type.  HDF5 performs a numeric
+        # conversion and saturates uint8 values above 127; viewing the bytes
+        # would instead wrap them to negative values.
+        return np.asarray(dset.astype(np.int8)[selection])
+    return np.asarray(dset[selection])
+
+
+def _validate_offsets(dset, total_bytes: int, name: str) -> int:
+    """Validate an on-disk offset index using bounded read windows."""
+    if len(dset.shape) != 1:
+        raise DatasetFormatError("'/%s' must be a 1-D offset array" % name)
+    count = int(dset.shape[0])
+    if count < 1:
+        raise DatasetFormatError(
+            "'/%s' must contain at least the trailing sentinel" % name
+        )
+    first = int(np.asarray(dset[0], dtype=np.uint64))
+    last = int(np.asarray(dset[count - 1], dtype=np.uint64))
+    if first != 0:
+        raise DatasetFormatError("'/%s' must start at byte offset 0" % name)
+    if last != int(total_bytes):
+        raise DatasetFormatError(
+            "'/%s' sentinel (%d) does not match the sparse byte stream size (%d)"
+            % (name, last, int(total_bytes))
+        )
+    previous = first
+    for start in range(1, count, _OFFSET_VALIDATION_ROWS):
+        end = min(start + _OFFSET_VALIDATION_ROWS, count)
+        window = np.asarray(dset[start:end], dtype=np.uint64)
+        if int(window[0]) < previous or np.any(window[1:] < window[:-1]):
+            raise DatasetFormatError("'/%s' must be non-decreasing" % name)
+        previous = int(window[-1])
+    return count
 
 
 def _describe_dtype(dtype: np.dtype) -> str:

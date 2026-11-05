@@ -51,12 +51,14 @@ dataset, and bounded memory for streaming sparse files.
   Full-dataset statistics (norms, per-dimension aggregates, duplicates,
   invalid counts, sparsity) come from a single streaming pass. Norm state is
   preallocated once (8 bytes per vector), never accumulated as block lists and
-  concatenated. Norm state and exact-duplicate hash state (estimated at 96
-  bytes per vector for the digest object and `Counter` entry) each have an
+  concatenated. Norm state, sparse nnz state (8 bytes per vector each), and
+  exact-duplicate digests (a preallocated 16-byte row per vector) each have an
   explicit 256 MiB retained-state budget. The row-count estimate is checked
   before allocation; when it exceeds the budget, the affected full-split
-  norms/outliers or exact-duplicate fields are marked `available: false` with
-  a reason and warning, while streaming and sampled metrics still appear.
+  norms/outliers, nnz distribution, or exact-duplicate fields are marked
+  unavailable with a reason and warning, while streaming totals and sampled
+  metrics still appear. Duplicate groups are counted with NumPy over the
+  fixed-width digest rows rather than a Python `Counter`.
 * **Distance computations**: Euclidean pairwise distances use the expanded
   norm/dot form when it is numerically stable and fall back to direct
   coordinate differences for pairs whose norms dwarf their distance (for
@@ -77,8 +79,11 @@ dataset, and bounded memory for streaming sparse files.
   convention (BLAS-dependent), which only affects projection scatter
   orientation, not the scalar anisotropy statistics.
 * **Sparse offsets**: results must not change between the `*_offsets`-indexed
-  and scan-only encodings of the same byte stream. Tests assert full-dataset
-  metric equality between the two paths.
+  and scan-only encodings of the same byte stream. Offset validation reads
+  bounded windows. An index larger than 64 MiB is not retained; the reader
+  uses the bounded sequential decoder and cross-checks its decoded record
+  count. Tests assert full-dataset metric equality between the paths and
+  exercise the oversized-index fallback.
 * **Invalid values**: NaN/Inf entries are excluded from numeric summaries and
   treated as zero in norms, pairwise math, and PCA input (documented per
   metric). An all-zero vector is a *valid* vector: it contributes to counts,
@@ -153,12 +158,13 @@ message: deterministic reports are still produced and a warning is printed
 * Near-duplicate detection is a bounded *indicator* over the sample, not a
   full-dataset guarantee.
 * The duplicate hash includes invalid bytes as-is (byte equality, not numeric
-  equality). Dense one-byte unsigned input is viewed as signed `INT8` before
-  hashing and numeric statistics, matching the evaluator's `ALPHA_I8` reads;
-  this preserves the bytes but maps 128..255 to -128..-1.
-* Full norm quantiles/outliers and exact duplicate counts are unavailable when
-  their estimated per-row state exceeds the 256 MiB per-structure budget; the
-  report marks these fields unavailable rather than returning partial results.
+  equality). Dense one-byte unsigned input is numerically converted by HDF5 to
+  signed `INT8` before hashing and numeric statistics, matching the evaluator's
+  `ALPHA_I8` reads; values above 127 saturate at 127 rather than wrapping.
+* Full norm quantiles/outliers, sparse nnz distributions, and exact duplicate
+  counts are unavailable when their estimated per-row state exceeds the 256 MiB
+  per-structure budget; the report marks these fields unavailable rather than
+  returning partial results.
 * k-means is an O(n·k) Lloyd loop over the 2-D projection; it is intended for
   structure hints, not production clustering.
 * Sparse dimensionality is inferred as `max(id) + 1`; a file with id gaps at

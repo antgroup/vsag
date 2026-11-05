@@ -61,9 +61,9 @@ The tool reads the layouts defined in [HDF5 Dataset Format](dataset_format.md):
   `uint32 len | uint32 ids[len] | float32 vals[len]` records, optionally indexed by
   `/<split>_offsets`. Sparse dimensionality is inferred as `max(feature id) + 1`.
 
-For dense one-byte unsigned HDF5 integers, the profiler reinterprets each byte as signed `INT8`
-(128..255 becomes -128..-1), matching `eval_performance`'s `H5::PredType::ALPHA_I8` reads. The
-report dtype and all numeric statistics therefore use the same values as the evaluator.
+For dense one-byte unsigned HDF5 integers, the profiler uses HDF5's numeric conversion to signed
+`INT8` (values above 127 saturate at 127), matching `eval_performance`'s `H5::PredType::ALPHA_I8`
+reads. The report dtype and all numeric statistics therefore use the same values as the evaluator.
 
 `multi_vector` files are rejected with an explanatory error. Data is streamed in bounded
 chunks: the profiler never materializes a complete dataset, and pairwise work is capped by
@@ -71,11 +71,13 @@ the configured sample size, so no `O(N²)` matrix is ever allocated over the ful
 Dense block sizes are derived from a working-memory budget rather than a fixed row count,
 sparse per-dimension accumulators stop at 10,000,000 inferred dimensions (the other metrics
 are still reported), and Euclidean distances switch to direct coordinate differences when
-the fast expanded form would cancel catastrophically. Full norm storage (8 bytes per vector)
-and exact-duplicate hash storage (estimated at 96 bytes per vector) each have a 256 MiB budget.
-If the row-count estimate exceeds either budget, the corresponding full-split norms/outliers or
-exact-duplicate fields are explicitly marked unavailable with a reason; no partial result is
-presented as full-dataset coverage, and streaming/sampled metrics are still reported.
+the fast expanded form would cancel catastrophically. Full norm and sparse nnz storage (8 bytes
+per vector each) and fixed-width exact-duplicate digests (16 bytes per vector) each have a 256 MiB
+retained-state budget. If the row-count estimate exceeds a budget, the corresponding full-split
+norms/outliers, nnz distribution, or exact-duplicate fields are explicitly marked unavailable with
+a reason; no partial result is presented as full-dataset coverage, and streaming/sampled metrics
+are still reported. Sparse offsets are validated in bounded windows; an index over 64 MiB is not
+retained and the reader falls back to bounded sequential decoding.
 
 To profile arrays you only have in memory — for example the same arrays you pass to
 `pyvsag` — first export them with h5py to the layout above; see

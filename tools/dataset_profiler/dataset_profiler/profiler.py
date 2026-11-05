@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections import Counter
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -55,8 +54,9 @@ _PCA_SVD_MAX_DIM = 4096
 # instead of allowing dataset-sized Python/NumPy state to grow without a limit.
 _FULL_SPLIT_STATE_BUDGET_BYTES = 256 * 1024 * 1024
 _NORM_BYTES_PER_VECTOR = 8
-# A 16-byte digest object plus its Counter entry and interpreter overhead.
-_DUPLICATE_BYTES_PER_VECTOR = 96
+# Store fixed-width digests in a preallocated array instead of Python objects.
+_DUPLICATE_DIGEST_BYTES = 16
+_DUPLICATE_BYTES_PER_VECTOR = _DUPLICATE_DIGEST_BYTES
 # Dense streaming blocks are sized by their working bytes, not by a fixed row
 # count: every row keeps the raw block, a float64 copy, a finite mask, and
 # several float64 temporaries alive at the same time.
@@ -299,6 +299,15 @@ def _full_split_state_reason(
     )
 
 
+def _duplicate_digest_buffer(
+    count: int, unavailable_reason: Optional[str]
+) -> Optional[np.ndarray]:
+    """Allocate fixed-width duplicate digests only when they fit the budget."""
+    if unavailable_reason is not None:
+        return None
+    return np.empty((int(count), _DUPLICATE_DIGEST_BYTES), dtype=np.uint8)
+
+
 def _profile_dense(
     dataset: HDF5Dataset,
     config: ProfilerConfig,
@@ -332,7 +341,7 @@ def _profile_dense(
     for reason in (norms_reason, duplicates_reason):
         if reason is not None:
             warnings.append(reason)
-    hashes: Optional[Counter] = None if duplicates_reason is not None else Counter()
+    hashes: Optional[np.ndarray] = _duplicate_digest_buffer(count, duplicates_reason)
     norms: Optional[np.ndarray] = (
         None if norms_reason is not None else np.empty(count, dtype=np.float64)
     )
@@ -395,9 +404,11 @@ def _profile_dense(
         dim_max = np.maximum(dim_max, masked_max)
 
         if hashes is not None:
-            for row in raw:
+            for row_index, row in enumerate(raw):
                 contiguous = np.ascontiguousarray(row)
-                hashes[_digest(contiguous.tobytes())] += 1
+                hashes[start + row_index] = np.frombuffer(
+                    _digest(contiguous.tobytes()), dtype=np.uint8
+                )
 
     sample_matrix = dataset.read_dense_rows(sample_idx).astype(np.float64, copy=True)
     finite_sample = np.isfinite(sample_matrix)
@@ -498,16 +509,21 @@ def _profile_sparse(
     duplicates_reason = _full_split_state_reason(
         "exact duplicate detection", count, _DUPLICATE_BYTES_PER_VECTOR
     )
-    for reason in (norms_reason, duplicates_reason):
+    nnz_reason = _full_split_state_reason(
+        "sparse nnz-per-vector distribution", count, _NORM_BYTES_PER_VECTOR
+    )
+    for reason in (norms_reason, duplicates_reason, nnz_reason):
         if reason is not None:
             warnings.append(reason)
-    hashes: Optional[Counter] = None if duplicates_reason is not None else Counter()
+    hashes: Optional[np.ndarray] = _duplicate_digest_buffer(count, duplicates_reason)
     # The record count is known before this pass (a no-offsets stream is counted
     # above), so avoid retaining one tiny NumPy array per sparse vector.
     norms: Optional[np.ndarray] = (
         None if norms_reason is not None else np.empty(count, dtype=np.float64)
     )
-    nnz = np.empty(count, dtype=np.int64)
+    nnz: Optional[np.ndarray] = (
+        None if nnz_reason is not None else np.empty(count, dtype=np.int64)
+    )
     stored_entries = 0
     nonzero_entries = 0
     explicit_zero_entries = 0
@@ -544,7 +560,8 @@ def _profile_sparse(
         norm = float(math.sqrt(float(np.dot(valid, valid))))
         if norms is not None:
             norms[index] = norm
-        nnz[index] = nonzero
+        if nnz is not None:
+            nnz[index] = nonzero
         if norm == 0.0:
             all_zero_vectors += 1
         if ids.size:
@@ -564,7 +581,7 @@ def _profile_sparse(
             payload = ids.astype("<u4", copy=False).tobytes() + values.astype(
                 "<f4", copy=False
             ).tobytes()
-            hashes[_digest(payload)] += 1
+            hashes[index] = np.frombuffer(_digest(payload), dtype=np.uint8)
         if index in sample_set:
             sample_records.append((index, ids.copy(), values.copy()))
 
@@ -635,6 +652,7 @@ def _profile_sparse(
             explicit_zero_entries,
             nnz,
             all_zero_vectors,
+            nnz_reason,
         ),
         "duplicates": _duplicates_metric(
             hashes,
@@ -986,8 +1004,9 @@ def _sparse_sparsity_metric(
     nonzero_entries: int,
     invalid_values: int,
     explicit_zero_entries: int,
-    nnz_per_vector: np.ndarray,
+    nnz_per_vector: Optional[np.ndarray],
     all_zero_vectors: int,
+    nnz_unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     cells = count * dim if dim else None
     zero_values = (
@@ -1010,8 +1029,20 @@ def _sparse_sparsity_metric(
             zero_values / float(cells) if zero_values is not None and cells else None
         ),
         density=as_finite_float(density),
-        nnz_per_vector=summarize(nnz_per_vector),
-        nnz_histogram=histogram(nnz_per_vector, bins=min(HISTOGRAM_BINS, 20)),
+        nnz_per_vector=(
+            summarize(nnz_per_vector) if nnz_per_vector is not None else None
+        ),
+        nnz_histogram=(
+            histogram(nnz_per_vector, bins=min(HISTOGRAM_BINS, 20))
+            if nnz_per_vector is not None
+            else None
+        ),
+        nnz_available=nnz_per_vector is not None,
+        nnz_reason=(
+            None
+            if nnz_per_vector is not None
+            else nnz_unavailable_reason or "full-split nnz state is unavailable"
+        ),
         all_zero_vectors=int(all_zero_vectors),
         all_zero_vector_ratio=as_finite_float(
             all_zero_vectors / float(count) if count else None
@@ -1020,7 +1051,7 @@ def _sparse_sparsity_metric(
 
 
 def _duplicates_metric(
-    hashes: Optional[Counter],
+    hashes: Optional[np.ndarray],
     count: int,
     pair_values: np.ndarray,
     epsilon: float,
@@ -1048,15 +1079,22 @@ def _duplicates_metric(
             "bounded pairwise sample"
         )
     else:
-        duplicate_vectors = sum(value - 1 for value in hashes.values() if value > 1)
-        duplicate_groups = sum(1 for value in hashes.values() if value > 1)
-        max_group = max(hashes.values()) if hashes else 0
+        # A one-dimensional void view lets NumPy compare complete 16-byte
+        # digests without a Python dict entry and integer object per vector.
+        digest_rows = np.ascontiguousarray(hashes).view(
+            np.dtype((np.void, _DUPLICATE_DIGEST_BYTES))
+        ).reshape(-1)
+        _, group_sizes = np.unique(digest_rows, return_counts=True)
+        repeated = group_sizes[group_sizes > 1]
+        duplicate_vectors = int(np.sum(repeated - 1, dtype=np.int64))
+        duplicate_groups = int(repeated.size)
+        max_group = int(group_sizes.max()) if group_sizes.size else 0
         exact = {
             "definition": "Vectors whose complete byte representation is identical.",
             "scope": "full",
             "sample_size": None,
             "count": int(count),
-            "unique_vectors": int(len(hashes)),
+            "unique_vectors": int(group_sizes.size),
             "duplicate_vectors": int(duplicate_vectors),
             "duplicate_ratio": as_finite_float(
                 duplicate_vectors / float(count) if count else None
@@ -1561,4 +1599,4 @@ def _kmeans(
 # Misc
 # ---------------------------------------------------------------------------
 def _digest(payload: bytes) -> bytes:
-    return hashlib.blake2b(payload, digest_size=16).digest()
+    return hashlib.blake2b(payload, digest_size=_DUPLICATE_DIGEST_BYTES).digest()

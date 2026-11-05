@@ -113,6 +113,25 @@ def test_aggregate_payload_excludes_per_vector_projections(dense_path):
 
 
 
+def test_aggregate_payload_forwards_budget_unavailability():
+    report = {
+        "metrics": {
+            "norms": {"available": False, "reason": "norm budget exceeded"},
+            "outliers": {"available": False, "reason": "norm budget exceeded"},
+            "sparsity": {
+                "nnz_available": False,
+                "nnz_reason": "nnz budget exceeded",
+            },
+        }
+    }
+    metrics = aggregate_payload(report)["metrics"]
+    for name in ("norms", "outliers"):
+        assert metrics[name]["available"] is False
+        assert metrics[name]["reason"] == "norm budget exceeded"
+    assert metrics["sparsity"]["nnz_available"] is False
+    assert metrics["sparsity"]["nnz_reason"] == "nnz budget exceeded"
+
+
 # ---------------------------------------------------------------------------
 # Response validation
 # ---------------------------------------------------------------------------

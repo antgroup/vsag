@@ -19,6 +19,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import dataset_profiler.hdf5 as hdf5_module
 from dataset_profiler.hdf5 import DatasetFormatError, HDF5Dataset
 
 
@@ -55,20 +56,38 @@ def test_dense_row_selection_matches_source(tmp_path, rng):
         np.testing.assert_array_equal(rows, matrix[[0, 5, 40]])
 
 
-def test_unsigned_dense_uses_evaluator_int8_view(tmp_path):
+def test_unsigned_dense_uses_evaluator_int8_conversion(tmp_path):
     import h5py
 
     matrix = np.array([[0, 127], [128, 255]], dtype=np.uint8)
-    expected = matrix.view(np.int8)
     path = tmp_path / "unsigned_dense.hdf5"
     with h5py.File(str(path), "w") as f:
         f.create_dataset("train", data=matrix)
+    with h5py.File(str(path), "r") as f:
+        # Use HDF5's numeric conversion as the oracle, not a byte reinterpretation.
+        expected = f["train"].astype(np.int8)[:]
+    np.testing.assert_array_equal(expected, [[0, 127], [127, 127]])
     with HDF5Dataset(str(path)) as dataset:
         assert dataset.metadata.dtype == "INT8"
         blocks = list(dataset.iter_dense_blocks())
         assert blocks[0][1].dtype == np.dtype(np.int8)
         np.testing.assert_array_equal(blocks[0][1], expected)
         np.testing.assert_array_equal(dataset.read_dense_rows([0, 1]), expected)
+
+
+def test_signed_dense_preserves_int8_boundaries(tmp_path):
+    import h5py
+
+    matrix = np.array([[-128, -1, 0, 127]], dtype=np.int8)
+    path = tmp_path / "signed_dense.hdf5"
+    with h5py.File(str(path), "w") as f:
+        f.create_dataset("train", data=matrix)
+    with HDF5Dataset(str(path)) as dataset:
+        assert dataset.metadata.dtype == "INT8"
+        np.testing.assert_array_equal(
+            list(dataset.iter_dense_blocks())[0][1], matrix
+        )
+        np.testing.assert_array_equal(dataset.read_dense_rows([0]), matrix)
 
 
 def test_dense_rejects_unsorted_row_indices(tmp_path, dense_matrix):
@@ -152,6 +171,23 @@ def test_sparse_with_offsets_round_trip(sparse_path, sparse_records):
             np.testing.assert_allclose(values, ref_values)
 
 
+def test_oversized_sparse_offsets_use_bounded_sequential_decoder(
+    sparse_path, sparse_records, monkeypatch
+):
+    monkeypatch.setattr(hdf5_module, "_OFFSET_INDEX_BUDGET_BYTES", 1)
+    monkeypatch.setattr(hdf5_module, "_OFFSET_VALIDATION_ROWS", 2)
+    with HDF5Dataset(str(sparse_path)) as dataset:
+        assert dataset.metadata.has_offsets is True
+        assert dataset.metadata.count == len(sparse_records)
+        assert dataset._offsets is None
+        assert any("bounded sequential decoder" in w for w in dataset.metadata.warnings)
+        records = list(dataset.iter_sparse_records(max_chunk_bytes=16))
+    assert len(records) == len(sparse_records)
+    for (_, ids, values), (ref_ids, ref_values) in zip(records, sparse_records):
+        np.testing.assert_array_equal(ids, ref_ids)
+        np.testing.assert_allclose(values, ref_values)
+
+
 def test_sparse_without_offsets_matches_offsets_version(
     sparse_path, sparse_no_offsets_path, sparse_records
 ):
@@ -182,10 +218,12 @@ def test_sparse_trailing_bytes_rejected(tmp_path, sparse_records):
             list(dataset.iter_sparse_records())
 
 
-def test_sparse_offset_validation_errors(tmp_path, sparse_records):
+def test_sparse_offset_validation_errors(tmp_path, sparse_records, monkeypatch):
     import h5py
 
     from conftest import encode_sparse_record
+
+    monkeypatch.setattr(hdf5_module, "_OFFSET_VALIDATION_ROWS", 2)
 
     stream = b"".join(encode_sparse_record(ids, values) for ids, values in sparse_records)
     good_offsets = [0]
