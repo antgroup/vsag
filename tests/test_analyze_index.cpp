@@ -15,6 +15,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <sstream>
 #include <stdexcept>
@@ -168,7 +169,8 @@ ReadBinaryFile(const std::string& path) {
 }
 
 void
-RemoveMetricFromFooter(const std::string& path) {
+UpdateBasicInfoInFooter(const std::string& path,
+                        const std::function<void(vsag::JsonType&)>& update) {
     const auto bytes = ReadBinaryFile(path);
     std::stringstream input(bytes);
     vsag::IOStreamReader reader(input);
@@ -179,8 +181,7 @@ RemoveMetricFromFooter(const std::string& path) {
     auto metadata = footer->GetMetadata();
     auto basic_info = metadata->Get("basic_info");
     REQUIRE(basic_info.IsObject());
-    REQUIRE(basic_info.Contains("metric"));
-    basic_info.Erase("metric");
+    update(basic_info);
     metadata->Set("basic_info", basic_info);
 
     std::ofstream output(path, std::ios::binary | std::ios::out | std::ios::trunc);
@@ -190,6 +191,32 @@ RemoveMetricFromFooter(const std::string& path) {
     footer->Write(writer);
     output.close();
     REQUIRE(output.good());
+}
+
+void
+RemoveMetricFromFooter(const std::string& path) {
+    UpdateBasicInfoInFooter(path, [](vsag::JsonType& basic_info) {
+        REQUIRE(basic_info.Contains("metric"));
+        basic_info.Erase("metric");
+    });
+}
+
+void
+AddUnknownKeyToFooter(const std::string& path) {
+    UpdateBasicInfoInFooter(path, [](vsag::JsonType& basic_info) {
+        REQUIRE(basic_info.Contains("index_param"));
+        auto index_param = vsag::JsonType::Parse(basic_info["index_param"].GetString());
+        index_param["unknown_future_key"].SetBool(true);
+        basic_info["index_param"].SetString(index_param.Dump());
+    });
+}
+
+void
+SetInvalidMetricInFooter(const std::string& path) {
+    UpdateBasicInfoInFooter(path, [](vsag::JsonType& basic_info) {
+        REQUIRE(basic_info.Contains("metric"));
+        basic_info["metric"].SetInt(999);
+    });
 }
 
 void
@@ -269,6 +296,38 @@ TEST_CASE("AnalyzeIndex loads legacy brute-force metadata without metric", "[ana
     REQUIRE(report["warnings"].Dump().find(
                 "serialized index metadata is missing 'metric'; using analyzer default 'l2'") !=
             std::string::npos);
+}
+
+TEST_CASE("AnalyzeIndex tolerates unknown serialized brute-force parameters", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_unknown_serialized_param");
+    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    AddUnknownKeyToFooter(index_path);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "brute_force");
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["static_analysis"]["statistics"].IsObject());
+    REQUIRE(report["warnings"].Dump().find(
+                "ignored serialized BruteForce parameter 'unknown_future_key'") !=
+            std::string::npos);
+}
+
+TEST_CASE("AnalyzeIndex wraps invalid serialized metric errors", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_invalid_serialized_metric");
+    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    SetInvalidMetricInFooter(index_path);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+
+    const std::string expected_context =
+        "failed to load index '" + index_path + "' from serialized metadata";
+    REQUIRE_THROWS_WITH(vsag::AnalyzeIndex(options),
+                        Catch::Matchers::ContainsSubstring(expected_context));
 }
 
 TEST_CASE("AnalyzeIndex does not modify brute-force backing files", "[analyze_index]") {

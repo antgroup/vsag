@@ -14,6 +14,9 @@
 
 #pragma once
 
+#include <string>
+#include <vector>
+
 #include "json_types.h"
 #include "vsag/index.h"
 
@@ -25,6 +28,7 @@ namespace vsag {
 __attribute__((visibility("hidden")))
 #endif
 IndexPtr
-CreateBruteForceIndexForAnalyzer(JsonType build_param);
+CreateBruteForceIndexForAnalyzer(JsonType build_param,
+                                 std::vector<std::string>* ignored_param_keys = nullptr);
 
 }  // namespace vsag
