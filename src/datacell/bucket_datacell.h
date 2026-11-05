@@ -629,11 +629,22 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
         auto data_ptr = original_data_ptr;
         const uint64_t dim = static_cast<uint64_t>(this->quantizer_->GetDim());
         const bool train_nearest = strategy_->HasDistinctBuildAssignment();
+        bool prefix_limited = false;
+        if (train_nearest) {
+            const auto quantizer_name = this->GetQuantizerName();
+            prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
+        }
         const uint64_t buffer_factor = train_nearest ? 2 : 1;
         if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
             throw VsagException(ErrorType::INVALID_ARGUMENT, "residual training size overflow");
         }
-        train_data_buffer.resize(buffer_factor * count * dim);
+        if (not prefix_limited) {
+            train_data_buffer.resize(buffer_factor * count * dim);
+        } else if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            // Classification needs normalized inputs, but this is not the output allocation.
+            train_data_buffer.resize(count * dim);
+        }
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             for (uint64_t i = 0; i < count; ++i) {
                 Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
@@ -648,9 +659,6 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             // calls use nearest-centroid routing. Only this path needs both residual
             // populations and the corresponding second classification pass.
             auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-            const auto quantizer_name = this->GetQuantizerName();
-            const bool prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
-                                        quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
             Vector<uint64_t> nearest_rows(allocator_);
             if (prefix_limited) {
                 for (uint64_t i = 0; i < count; ++i) {
@@ -658,17 +666,25 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                         nearest_rows.emplace_back(i);
                     }
                 }
-            }
-            constexpr uint64_t max_pq_train_count = 65536;
-            if (prefix_limited and count + nearest_rows.size() > max_pq_train_count) {
-                // PQ and PQFS retain only their first 65,536 rows. Reserve space
-                // for both populations and sample each evenly across the complete
-                // Build corpus instead of truncating an interleaved prefix.
-                uint64_t build_samples = std::min(count, max_pq_train_count / 2);
-                const uint64_t nearest_samples = std::min(
-                    static_cast<uint64_t>(nearest_rows.size()), max_pq_train_count - build_samples);
-                build_samples = std::min(count, max_pq_train_count - nearest_samples);
+                constexpr uint64_t max_pq_train_count = 65536;
+                const bool sample_prefix = count + nearest_rows.size() > max_pq_train_count;
+                uint64_t build_samples = count;
+                uint64_t nearest_samples = static_cast<uint64_t>(nearest_rows.size());
+                if (sample_prefix) {
+                    // PQ and PQFS retain only their first 65,536 rows. Sample both
+                    // populations evenly across the complete Build corpus instead
+                    // of truncating an interleaved prefix.
+                    build_samples = std::min(count, max_pq_train_count / 2);
+                    nearest_samples = std::min(static_cast<uint64_t>(nearest_rows.size()),
+                                               max_pq_train_count - build_samples);
+                    build_samples = std::min(count, max_pq_train_count - nearest_samples);
+                }
                 train_count = build_samples + nearest_samples;
+                // The sampled rows are re-derived from the original input. Release
+                // any normalized classification copy before allocating only the rows
+                // that the prefix-limited quantizer will actually consume.
+                Vector<float>(allocator_).swap(train_data_buffer);
+                train_data_buffer.resize(train_count * dim);
                 Vector<float> normalized_row(dim, allocator_);
                 auto write_residual =
                     [&](uint64_t destination, uint64_t source, BucketIdType bucket) {
@@ -689,11 +705,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                         return sample * step + sample * remainder / sample_count;
                     };
                 for (uint64_t i = 0; i < build_samples; ++i) {
-                    const uint64_t source = sample_index(i, build_samples, count);
+                    const uint64_t source =
+                        sample_prefix ? sample_index(i, build_samples, count) : i;
                     write_residual(i, source, build_buckets[source]);
                 }
                 for (uint64_t i = 0; i < nearest_samples; ++i) {
-                    const uint64_t nearest = sample_index(i, nearest_samples, nearest_rows.size());
+                    const uint64_t nearest =
+                        sample_prefix ? sample_index(i, nearest_samples, nearest_rows.size()) : i;
                     const uint64_t source = nearest_rows[nearest];
                     write_residual(build_samples + i, source, nearest_buckets[source]);
                 }

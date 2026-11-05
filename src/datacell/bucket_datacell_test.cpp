@@ -56,12 +56,13 @@ public:
     }
 
     uint64_t limit{std::numeric_limits<uint64_t>::max()};
+    uint64_t rejected_size{0};
     uint64_t rejected{0};
 
 private:
     void
     check_size(uint64_t size) {
-        if (size > limit) {
+        if (size > limit or (rejected_size != 0 and size == rejected_size)) {
             ++rejected;
             throw std::bad_alloc();
         }
@@ -970,7 +971,7 @@ TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
 }
 
 TEST_CASE("BucketDataCell samples nearest residuals within the PQ prefix", "[ut][BucketDataCell]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
     constexpr int64_t dim = 1;
     constexpr uint64_t count = 65536;
     constexpr uint64_t bucket_count = 2;
@@ -1001,7 +1002,11 @@ TEST_CASE("BucketDataCell samples nearest residuals within the PQ prefix", "[ut]
     auto bucket = BucketInterface::MakeInstance(param, common_param);
     bucket->SetStrategy(
         std::make_shared<MixedResidualPartitionStrategy>(common_param, bucket_count));
+    // The old temporary held 2 * count rows although PQ/PQFS consume at most
+    // count rows here. Reject that exact allocation without bounding trainer workspaces.
+    allocator->rejected_size = 2 * count * dim * sizeof(float);
     bucket->Train(vectors.data(), count);
+    REQUIRE(allocator->rejected == 0);
 
     // Build assigns 10 to centroid 28 (residual -18), but Add routes it to
     // centroid 0 (residual +10). The latter used to start after the PQ prefix.
@@ -1597,6 +1602,43 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
     REQUIRE(optimized->BeginOptimizedBuild(context, count));
     optimized->AbortOptimizedBuild();
     REQUIRE_FALSE(optimized->IsOptimizedBuildActive());
+}
+
+TEST_CASE("RaBitQ split residual training uses build and nearest assignments",
+          "[ut][BucketDataCell][rabitq_split][residual]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t training_count = 64;
+    constexpr uint64_t bucket_count = 2;
+    auto vectors = fixtures::generate_vectors(training_count, dim);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": {
+            "type": "rabitq",
+            "rabitq_version": "split",
+            "rabitq_bits_per_dim_query": 32,
+            "rabitq_bits_per_dim_base": 8,
+            "rabitq_bits_per_dim_filter": 1
+        },
+        "buckets_count": 2,
+        "use_residual": true
+    })"));
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
+        common_param, bucket_count, /*centroid_scale=*/5000.0F);
+    bucket->SetStrategy(strategy);
+    bucket->Train(vectors.data(), training_count);
+
+    // Every row has a different Build and nearest route, so training must fetch
+    // both centroids per row. Rebuilding residual query transforms may add more.
+    REQUIRE(strategy->GetClassifyRequestCount() == 1);
+    REQUIRE(strategy->GetCentroidRequestCount() >= 2 * training_count);
 }
 
 TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",
