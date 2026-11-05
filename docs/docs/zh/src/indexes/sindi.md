@@ -229,7 +229,7 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `n_candidate` | int | `0` | 候选堆大小。为 `0` 时自动取 `SPARSE_AMPLIFICATION_FACTOR · topk`（500 倍）；若显式设置，须满足 `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk` |
+| `n_candidate` | int | `500` | 近似候选池大小，有效值为 `N = max(n_candidate, topk)`。增大 N 可为精排保留更多候选，同时增加计算量；不保证精确召回或串并行结果完全一致。 |
 | `window_parallelism` | int | `1` | 含调用线程的执行槽位数上限，取值 `1` 至 `16`。省略或为 1 使用原串行候选堆；大于 1 启用固定分区近似执行器，首版只支持 immutable 内存 KNN。资源准入可降低实际槽位数，候选计划保持不变。 |
 | `parallel_n_candidate_ratio` | number | `2` | 有限且 ≥1。所有局部堆的总容量为 `ceil(倍率 × max(n_candidate, topk))`，独立于执行槽位数分配到固定逻辑分区。增大容量允许保留更多候选并增加成本，不保证保留串行候选集或特定召回率；串行模式只校验该值，不应用它。 |
 | `profile_cpu` | bool | `false` | 串行和并行 KNN 的诊断选项。采集调用线程参数解析后至统计序列化前的 CPU 时间，并累加后台 window worker 的 CPU 时间；关闭时不读取线程 CPU 时钟。 |
@@ -237,6 +237,19 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 | `query_prune_ratio` | float | `0.0` | 查询时丢弃权重最低查询项的比例，取值范围为 `[0.0, 1.0)` |
 | `term_prune_ratio` | float | `0.0` | 每条倒排链中按 value 丢弃低权 posting 的比例，取值范围为 `[0.0, 1.0)` |
 | `term_retain_threshold` | uint64 | `0` | 单个 term 在所有 window 中最多扫描的 posting 总数；`0` 表示关闭此限制，正数使每个 window 的非空 posting list 最多扫描 `max(1, floor(threshold / window_count))` 个 |
+
+### 并行候选质量与调参
+
+并行检索同时改变候选选择策略和执行方式。串行使用一个全局候选堆；并行将 `ceil(parallel_n_candidate_ratio * N)` 容量分配给固定分区，再合并截取 N 个候选后复用相同精排。高分候选集中在某一分区时，可能超过局部配额；近似距离同分的文档也可能具有不同的精排距离。`query_prune_ratio=0` 只关闭查询词剪枝，不消除分区配额、构建剪枝或量化影响，不能保证串并行结果完全一致。
+
+固定查询、Filter、输出 TopK 和 deadline，每次只调整一个维度：
+
+- `window_parallelism` 改变执行槽位，不扩大候选计划。
+- `parallel_n_candidate_ratio` 扩大局部候选堆，可缓解分区配额不足；不扩大最终 N 个候选的截断边界，因此不一定消除该处的近似同分取舍。
+- `n_candidate` 同时扩大局部预算及进入精排的最终候选池，可能改善返回得分，也会增加计算和耗时，并可能改变串行结果。
+- 降低 `query_prune_ratio` 可在额外计算成本下保留更多查询词，同时改变质量基线；串并行对照应使用相同剪枝参数和 N。
+
+质量比较需区分结果完全一致、等分文档替换及排名得分变化。修改默认值前先验证代表负载；返回得分提高不等同于已测得真实召回率或业务相关性提升。调参用例只能证明该用例的规避效果，不能据此承诺通用参数保证。
 
 新并行路径保持串行精排，包括 DMQ8。候选分区数为 `min(16, 有效window数, max(n_candidate, topk))`，采用固定连续分区，在最多 4 个 window 的 chunk 边界交接执行权；堆归属于逻辑分区，不归属于物理线程。并行模式明确拒绝 Range、reasoning 和 mutable/disk datacell。
 
