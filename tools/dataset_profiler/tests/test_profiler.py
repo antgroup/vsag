@@ -635,8 +635,8 @@ def test_dense_sample_size_is_capped_by_materialized_bytes(tmp_path, monkeypatch
 def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
     tmp_path, monkeypatch
 ):
-    # 6 sampled rows x 10 entries retain 128 + 10 * 32 = 448 bytes each; a
-    # 1000-byte budget stops after the second row instead of eagerly holding
+    # 6 sampled rows x 10 entries retain 128 + 10 * 128 = 1408 bytes each; a
+    # 3000-byte budget stops after the second row instead of eagerly holding
     # all rows and then expanding every one of them into Python dicts.
     base_ids = np.arange(10, dtype=np.uint32)
     records = [
@@ -657,7 +657,7 @@ def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
         return real_pairwise(pair_records, metric)
 
     monkeypatch.setattr(profiler_module, "_pairwise_sparse", tracking_pairwise)
-    monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 1000)
+    monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 3000)
     report = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
     metrics = report["metrics"]
 
@@ -667,7 +667,7 @@ def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
         "sample memory budget" in warning for warning in report["warnings"]
     ) == 1
     row_bytes = profiler_module._sparse_sample_row_bytes(base_ids)
-    assert row_bytes == 448
+    assert row_bytes == 1408
     expected_reason = profiler_module._sparse_sample_budget_reason(
         row_bytes, 2 * row_bytes, 2
     )

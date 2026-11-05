@@ -262,11 +262,12 @@ class HDF5Dataset:
             yield from self._iter_sparse_with_offsets(max_chunk_bytes)
         else:
             # With no index, or with an index too large to retain, decode the
-            # byte stream directly.  An oversized index still supplies the
-            # record count, which is cross-checked by the decoder.
+            # byte stream directly.  An oversized index still supplies record
+            # boundaries and the count, which the decoder cross-checks in windows.
             yield from self._iter_sparse_without_offsets(
                 max_chunk_bytes,
                 expected_count=self.metadata.count if self.metadata.has_offsets else None,
+                validate_offsets=self.metadata.has_offsets,
             )
 
     def _iter_sparse_with_offsets(
@@ -300,9 +301,15 @@ class HDF5Dataset:
             start = end
 
     def _iter_sparse_without_offsets(
-        self, max_chunk_bytes: int, expected_count: Optional[int] = None
+        self,
+        max_chunk_bytes: int,
+        expected_count: Optional[int] = None,
+        validate_offsets: bool = False,
     ) -> Iterator[Tuple[int, np.ndarray, np.ndarray]]:
         dset = self._file[self.split]
+        offset_dset = self._file[self.split + "_offsets"] if validate_offsets else None
+        offset_window = np.empty(0, dtype=np.uint64)
+        offset_window_start = 0
         total_bytes = int(dset.shape[0])
         buffer = bytearray()
         index = 0
@@ -328,6 +335,38 @@ class HDF5Dataset:
                 if offset + record_size > len(buffer):
                     break
                 ids, values, consumed = _decode_one_record(buffer, offset, record_size)
+                if offset_dset is not None:
+                    # Keep only one bounded offset window, but check both boundaries
+                    # of every decoded record before exposing it to the caller.
+                    if index + 1 >= offset_window_start + offset_window.size:
+                        offset_window_start = (
+                            index // _OFFSET_VALIDATION_ROWS
+                        ) * _OFFSET_VALIDATION_ROWS
+                        offset_window_end = min(
+                            offset_window_start + _OFFSET_VALIDATION_ROWS + 1,
+                            int(offset_dset.shape[0]),
+                        )
+                        offset_window = np.asarray(
+                            offset_dset[offset_window_start:offset_window_end],
+                            dtype=np.uint64,
+                        )
+                    window_index = index - offset_window_start
+                    stored_start = int(offset_window[window_index])
+                    stored_end = int(offset_window[window_index + 1])
+                    decoded_end = record_start + consumed
+                    if record_start != stored_start or decoded_end != stored_end:
+                        raise DatasetFormatError(
+                            "sparse decoded record %d has byte range [%d, %d), but "
+                            "'/%s_offsets' contains [%d, %d)"
+                            % (
+                                index,
+                                record_start,
+                                decoded_end,
+                                self.split,
+                                stored_start,
+                                stored_end,
+                            )
+                        )
                 yield index, ids, values
                 index += 1
                 offset += consumed

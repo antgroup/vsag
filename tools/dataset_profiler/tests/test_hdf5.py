@@ -188,6 +188,25 @@ def test_oversized_sparse_offsets_use_bounded_sequential_decoder(
         np.testing.assert_allclose(values, ref_values)
 
 
+def test_oversized_sparse_offsets_reject_mismatched_record_boundary(
+    sparse_path, monkeypatch
+):
+    import h5py
+
+    # Moving only an internal boundary preserves the count, monotonicity, and
+    # sentinel, so validation must compare it with the decoded record position.
+    with h5py.File(str(sparse_path), "r+") as handle:
+        offsets = handle["train_offsets"]
+        offsets[1] = int(offsets[1]) + 1
+
+    monkeypatch.setattr(hdf5_module, "_OFFSET_INDEX_BUDGET_BYTES", 1)
+    monkeypatch.setattr(hdf5_module, "_OFFSET_VALIDATION_ROWS", 2)
+    with HDF5Dataset(str(sparse_path)) as dataset:
+        assert dataset._offsets is None
+        with pytest.raises(DatasetFormatError, match="decoded record 0.*train_offsets"):
+            next(dataset.iter_sparse_records(max_chunk_bytes=16))
+
+
 def test_sparse_without_offsets_matches_offsets_version(
     sparse_path, sparse_no_offsets_path, sparse_records
 ):

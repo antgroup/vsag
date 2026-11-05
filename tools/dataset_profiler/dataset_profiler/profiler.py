@@ -51,11 +51,12 @@ _MAX_ANISOTROPY_DIM = 50000
 # sample rows below.  Sparse samples must obey the same budget as dense ones
 # even though their rows carry a variable number of entries.
 _SAMPLE_MEMORY_BUDGET_BYTES = 256 * 1024 * 1024
-# A retained sparse sample keeps one (uint32, float32) copy per row and later
-# expands into one Python dict entry per finite value; estimate both together
-# from nnz with interpreter object overhead so nnz-heavy rows trip the budget
-# before any copy or dict expansion happens instead of exhausting memory.
-_SPARSE_SAMPLE_ENTRY_BYTES = 32
+# A retained sparse sample keeps one (uint32, float32) copy per entry and later
+# expands into one Python dict entry per finite value.  Besides those 8 array
+# bytes, the expansion creates Python int/float objects and allocates hash-table
+# storage.  Use a conservative per-entry estimate for all of them so nnz-heavy
+# rows trip the budget before either representation can exhaust memory.
+_SPARSE_SAMPLE_ENTRY_BYTES = 128
 _SPARSE_SAMPLE_ROW_OVERHEAD_BYTES = 128
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
 _PCA_SVD_MAX_DIM = 4096
