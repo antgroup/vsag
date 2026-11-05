@@ -674,9 +674,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                 uint64_t build_samples = count;
                 uint64_t nearest_samples = static_cast<uint64_t>(nearest_rows.size());
                 if (sample_prefix) {
-                    // PQ and PQFS retain only their first 65,536 rows. Sample both
-                    // populations evenly across the complete Build corpus instead
-                    // of truncating an interleaved prefix.
+                    // PQ and PQFS retain only their first 65,536 rows. Budget both
+                    // populations within that prefix instead of truncating nearest
+                    // residuals after an interleaved Build corpus.
                     build_samples = std::min(count, max_pq_train_count / 2);
                     nearest_samples = std::min(static_cast<uint64_t>(nearest_rows.size()),
                                                max_pq_train_count - build_samples);
@@ -707,9 +707,12 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                         const uint64_t remainder = population_count % sample_count;
                         return sample * step + sample * remainder / sample_count;
                     };
+                // Without nearest-only rows there is no second population to represent.
+                // Keep the original prefix instead of aliasing periodic input to one residue.
+                const bool sample_build = sample_prefix && nearest_samples != 0;
                 for (uint64_t i = 0; i < build_samples; ++i) {
                     const uint64_t source =
-                        sample_prefix ? sample_index(i, build_samples, count) : i;
+                        sample_build ? sample_index(i, build_samples, count) : i;
                     write_residual(i, source, build_buckets[source]);
                 }
                 for (uint64_t i = 0; i < nearest_samples; ++i) {
