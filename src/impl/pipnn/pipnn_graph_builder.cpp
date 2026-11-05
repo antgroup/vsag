@@ -200,6 +200,11 @@ struct WorkItem {
         : points(std::move(input_points)), level(input_level), seed(input_seed) {
     }
 
+    WorkItem(WorkItem&&) = default;
+
+    WorkItem&
+    operator=(WorkItem&& other) noexcept(false) = default;
+
     Vector<uint32_t> points;
     uint64_t level{0};
     uint64_t seed{0};
