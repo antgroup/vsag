@@ -20,11 +20,14 @@
 #include <functional>
 #include <future>
 #include <initializer_list>
+#include <limits>
 #include <new>
+#include <numeric>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "datacell/flatten_datacell.h"
@@ -74,6 +77,30 @@ public:
     static InnerIdType
     InnerId(const HGraph& graph, int64_t label) {
         return graph.label_table_->GetIdByLabel(label);
+    }
+
+    static std::pair<InnerIdType, Vector<InnerIdType>>
+    SaturateDirtyEntry(HGraph& graph) {
+        const auto entry = graph.entry_point_id_;
+        const auto degree = graph.bottom_graph_->MaximumDegree();
+        Vector<InnerIdType> neighbors(graph.allocator_);
+        for (InnerIdType id = 0;
+             id < graph.bottom_graph_->TotalCount() and neighbors.size() < degree;
+             ++id) {
+            if (id != entry) {
+                neighbors.push_back(id);
+            }
+        }
+        REQUIRE(neighbors.size() == degree);
+        graph.bottom_graph_->InsertNeighborsById(entry, neighbors);
+        return {entry, std::move(neighbors)};
+    }
+
+    static Vector<InnerIdType>
+    BottomNeighbors(const HGraph& graph, InnerIdType id) {
+        Vector<InnerIdType> neighbors(graph.allocator_);
+        graph.bottom_graph_->GetNeighbors(id, neighbors);
+        return neighbors;
     }
 
     static void
@@ -437,6 +464,49 @@ TEST_CASE("HGraph PiPNN keeps failed fused preencoding unpublished and retryable
     REQUIRE(retry.value().empty());
     REQUIRE(index->GetNumElements() == count);
     REQUIRE(codes->encode_calls.load() == count);
+}
+
+TEST_CASE("HGraph saturated dirty entry reserves a finite connectivity bridge",
+          "[ut][hgraph][build][nonfinite]") {
+    const auto quantizer = GENERATE("fp32", "fp16");
+    auto parameters = MakeFp32HGraphJson(false);
+    parameters["base_quantization_type"].SetString(quantizer);
+    parameters["support_duplicate"].SetBool(false);
+    auto index = MakeHGraphIndex(parameters, MakeCommonParam(1));
+    auto inner = std::dynamic_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    REQUIRE(inner != nullptr);
+    constexpr int64_t dirty_count = 33;
+    std::vector<int64_t> ids(dirty_count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> dirty(dirty_count, std::numeric_limits<float>::quiet_NaN());
+    auto data = vsag::Dataset::Make()
+                    ->NumElements(dirty_count)
+                    ->Dim(1)
+                    ->Ids(ids.data())
+                    ->Float32Vectors(dirty.data())
+                    ->Owner(false);
+    REQUIRE(index->Build(data).has_value());
+    // NaN insertion only creates outgoing bridges. Seed a full reverse list explicitly so this
+    // test reaches eviction deterministically instead of relying on a small degree to fill it.
+    auto [entry, before] = vsag::HGraphCodeWriteTestAccess::SaturateDirtyEntry(*inner);
+    REQUIRE_FALSE(before.empty());
+    std::vector<int64_t> finite_ids{dirty_count};
+    std::vector<float> finite{1.0F};
+    auto added = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(1)
+                     ->Ids(finite_ids.data())
+                     ->Float32Vectors(finite.data())
+                     ->Owner(false);
+    REQUIRE(index->Add(added).has_value());
+    const auto after = vsag::HGraphCodeWriteTestAccess::BottomNeighbors(*inner, entry);
+    REQUIRE(after.size() == before.size());
+    REQUIRE(std::equal(before.begin(), before.end() - 1, after.begin()));
+    REQUIRE(after.back() == vsag::HGraphCodeWriteTestAccess::InnerId(*inner, dirty_count));
+    auto result = index->KnnSearch(added, 1, R"({"hgraph":{"ef_search":64}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 1);
+    REQUIRE(result.value()->GetIds()[0] == dirty_count);
 }
 
 TEST_CASE("HGraph UpdateId preserves equal-label no-op", "[ut][hgraph][update]") {

@@ -1267,6 +1267,8 @@ HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
                 if (reverse.size() < bottom_graph_->MaximumDegree()) {
                     reverse.push_back(inner_id);
                 } else {
+                    // All existing candidates are unrankable for this insertion. Intentionally
+                    // reuse the last slot for a rankable bridge without NaN-based eviction order.
                     reverse.back() = inner_id;
                 }
                 bottom_graph_->InsertNeighborsById(entry, reverse);

@@ -14,9 +14,11 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
 #include <limits>
 #include <numeric>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "unittest.h"
@@ -104,6 +106,51 @@ TEST_CASE("HGraph mixed NaN batch preserves finite vector connectivity",
         REQUIRE(id != 7);
         REQUIRE(id != 31);
         REQUIRE(id != 63);
+    }
+}
+
+TEST_CASE("HGraph unbounded KNN preserves infinite FP16 distances like FP32",
+          "[ut][hgraph][build][nonfinite]") {
+    const auto metric = GENERATE("ip", "l2");
+    const auto quantizer = GENERATE("fp32", "fp16");
+    INFO("metric=" << metric << ", quantizer=" << quantizer);
+    const auto params = fmt::format(R"({{
+        "dtype":"float32", "metric_type":"{}", "dim":1,
+        "index_param":{{"base_quantization_type":"{}","max_degree":8,
+        "ef_construction":32,"build_thread_count":1}}
+    }})",
+                                    metric,
+                                    quantizer);
+    auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+    const auto infinity = std::numeric_limits<float>::infinity();
+    std::vector<int64_t> ids{0, 1, 2};
+    std::vector<float> vectors{infinity, 1.0F, -infinity};
+    REQUIRE(index->Build(MakeBuildDataset(ids, vectors, 3, 1)).has_value());
+    std::vector<float> query{1.0F};
+    auto result =
+        index->KnnSearch(MakeBuildDataset(ids, query, 1, 1), 3, R"({"hgraph":{"ef_search":32}})");
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 3);
+    const auto* result_ids = result.value()->GetIds();
+    const auto* distances = result.value()->GetDistances();
+    if (std::string(metric) == "ip") {
+        REQUIRE(result_ids[0] == 0);
+        REQUIRE(std::isinf(distances[0]));
+        REQUIRE(std::signbit(distances[0]));
+        REQUIRE(result_ids[1] == 1);
+        REQUIRE(distances[1] == 0.0F);
+        REQUIRE(result_ids[2] == 2);
+        REQUIRE(std::isinf(distances[2]));
+        REQUIRE_FALSE(std::signbit(distances[2]));
+    } else {
+        REQUIRE(result_ids[0] == 1);
+        REQUIRE(distances[0] == 0.0F);
+        REQUIRE(result_ids[1] != result_ids[2]);
+        for (int64_t i = 1; i < 3; ++i) {
+            REQUIRE((result_ids[i] == 0 or result_ids[i] == 2));
+            REQUIRE(std::isinf(distances[i]));
+            REQUIRE_FALSE(std::signbit(distances[i]));
+        }
     }
 }
 
