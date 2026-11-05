@@ -530,6 +530,13 @@ InnerIndexInterface::CalcDistancesById(const DatasetPtr& query,
         query->GetFloat32Vectors() != nullptr && !is_sparse &&
         query->GetMultiVectors() == nullptr && query->GetInt8Vectors() == nullptr &&
         query->GetBinaryVectors() == nullptr && query->GetFloat16Vectors() == nullptr;
+    // A float32-only Dataset selects the native float path below. For an index configured
+    // for packed binary vectors that would misread the floats as packed bits, so reject
+    // it the same way the single-ID Dataset path does.
+    const bool float_query_mismatches_binary =
+        is_float_query && data_type_ == DataTypes::DATA_TYPE_BINARY;
+    CHECK_ARGUMENT(not float_query_mismatches_binary,
+                   "CalcDistancesById query vector storage must match index data type");
     if (is_float_query) {
         CHECK_ARGUMENT(query->GetDim() == dim_, "CalcDistancesById query dimension mismatch");
     }

@@ -721,6 +721,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         // Range search remains single-query only (validate_range_args enforces NumElements==1).
         if (not use_custom_distance) {
             this->validate_range_args(query, request.radius_, request.limited_size_);
+            CHECK_ARGUMENT(get_data(query) != nullptr,
+                           "query vector storage must match index data type");
         } else {
             CHECK_ARGUMENT(query != nullptr, "query dataset cannot be null");
             CHECK_ARGUMENT(query->GetNumElements() == 1,
