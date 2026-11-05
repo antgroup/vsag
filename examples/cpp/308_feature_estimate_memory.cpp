@@ -37,12 +37,26 @@ main(int argc, char** argv) {
     vsag::Engine engine(&resource);
     auto index = engine.CreateIndex("hgraph", hgraph_build_parameters).value();
 
-    /******************* Estimate Memory *****************/
+    const uint64_t element_count = 100000;
+
+    /******************* Estimate Final Index Memory *****************/
     if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_MEMORY)) {
-        auto estimate_memory = index->EstimateMemory(100'000);
-        std::cout << "Index Support EstimateMemory, when given 100000 vectors to build, the "
-                     "estimate memory is "
-                  << estimate_memory << " byte" << std::endl;
+        uint64_t final_index_bytes = index->EstimateMemory(element_count);
+        std::cout << "Index supports EstimateMemory. For " << element_count
+                  << " elements, the final index memory estimate is " << final_index_bytes
+                  << " bytes" << std::endl;
+    }
+
+    /******************* Estimate Peak Build Memory *****************/
+    if (index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY)) {
+        uint64_t peak_bytes = index->EstimateBuildMemory(element_count);
+        std::cout << "Index supports EstimateBuildMemory. For " << element_count
+                  << " elements, the peak build memory estimate is " << peak_bytes << " bytes"
+                  << std::endl;
+    } else {
+        std::cout << "EstimateBuildMemory is unsupported. This index does not provide a peak "
+                     "build-memory estimate."
+                  << std::endl;
     }
 
     engine.Shutdown();
