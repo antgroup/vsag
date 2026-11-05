@@ -360,8 +360,8 @@ Python exception, and the command exits non-zero.
 ### Supported index types and serialized formats
 
 Static analysis requires the index to implement `IndexFeature::SUPPORT_GET_STATS`; dynamic
-analysis requires `IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH`. All factory-registered
-indexes in this release provide both features:
+analysis requires `IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH`. The table below also records
+limitations of the file-based query interfaces:
 
 | Index type | Static analysis | Dynamic analysis | Notes |
 | --- | --- | --- | --- |
@@ -371,7 +371,8 @@ indexes in this release provide both features:
 | `sindi` | Yes | Yes | Sparse index; pass `base_path`/`groundtruth_path` for recall and bias metrics. |
 | `sindi_v2` | Yes | Yes | Sparse index; dynamic analysis reports baseline counts and query latency, with index-specific quality metrics skipped. The SINDI recall/bias workflow does not apply. |
 | `simq` | Yes | Yes (no metrics) | Dense float32 multi-vector index using inner product. Dynamic analysis currently returns `{}` without consuming the request; `base_path` and `groundtruth_path` do not produce recall, bias, or other query metrics. |
-| `brute_force`, `warp` | Yes | Yes | Exact-search baseline. |
+| `brute_force` | Yes | Yes | Exact-search baseline. |
+| `warp` | Yes | No | The file interfaces load only dense float32 or sparse queries, not the multi-vector queries required by WARP. Use the C++ API with a multi-vector query dataset for dynamic analysis. |
 
 Serialized index input: a file produced by `Index::Serialize(std::ostream&)` /
 `pyvsag.Index.save()`, including the VSAG footer metadata. Files without footer metadata, or

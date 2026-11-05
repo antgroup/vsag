@@ -341,7 +341,7 @@ pyvsag-analyze-index \
 ### 支持的索引类型与序列化格式
 
 静态分析要求索引实现 `IndexFeature::SUPPORT_GET_STATS`；动态分析要求实现
-`IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH`。当前版本中工厂注册的全部索引均支持这两项：
+`IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH`。下表同时列出了文件式 query 接口的限制：
 
 | 索引类型 | 静态分析 | 动态分析 | 说明 |
 | --- | --- | --- | --- |
@@ -351,7 +351,8 @@ pyvsag-analyze-index \
 | `sindi` | 支持 | 支持 | 稀疏索引；召回与偏差指标需要 `base_path`/`groundtruth_path`。 |
 | `sindi_v2` | 支持 | 支持 | 稀疏索引；动态分析输出基线计数和查询耗时，索引专属质量指标标记为 skipped；不适用 SINDI 的召回/偏差流程。 |
 | `simq` | 支持 | 支持（无指标） | 使用内积的 dense float32 多向量索引。当前动态分析不消费请求并返回 `{}`；`base_path` 与 `groundtruth_path` 不会生成召回、偏差或其他 query 指标。 |
-| `brute_force`、`warp` | 支持 | 支持 | 精确搜索基线。 |
+| `brute_force` | 支持 | 支持 | 精确搜索基线。 |
+| `warp` | 支持 | 不支持 | 文件式接口只能加载 dense float32 或 sparse query，无法提供 WARP 所需的 multi-vector query。动态分析请通过 C++ 接口传入 multi-vector query 数据集。 |
 
 序列化索引输入：由 `Index::Serialize(std::ostream&)` / `pyvsag.Index.save()` 生成、包含 VSAG
 footer metadata 的文件。缺少 metadata 或由不兼容 VSAG 版本写入的文件会直接报错，而不是返回

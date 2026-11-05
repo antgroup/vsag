@@ -1257,7 +1257,8 @@ namespace {
 
 BruteForceParameterPtr
 MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
-                                const IndexCommonParam& common_param) {
+                                const IndexCommonParam& common_param,
+                                std::vector<std::string>* ignored_param_keys) {
     const bool is_warp = serialized_param.Contains(WARP_MODE_MARKER);
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         const auto* index_name = is_warp ? "WARP" : "BruteForce";
@@ -1290,6 +1291,9 @@ MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
         }
         if (internal_param_keys.count(key) == 0) {
             logger::warn("ignoring unrecognized serialized BruteForce parameter '{}'", key);
+            if (ignored_param_keys != nullptr) {
+                ignored_param_keys->emplace_back(key);
+            }
         }
     }
 
@@ -1305,11 +1309,13 @@ MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
 // Keeping this trusted entry point separate from CheckAndMappingExternalParam prevents public
 // Factory/pyvsag JSON from enabling the internal parameter mapping bypass.
 IndexPtr
-CreateBruteForceIndexForAnalyzer(JsonType build_param) {
+CreateBruteForceIndexForAnalyzer(JsonType build_param,
+                                 std::vector<std::string>* ignored_param_keys) {
     auto resource = std::make_shared<Resource>();
     auto common_param = IndexCommonParam::CheckAndCreate(build_param, resource);
     common_param.user_defined_ios_ = std::make_shared<UserDefinedIOSet>();
-    auto param = MakeAnalyzerBruteForceParameter(build_param[INDEX_PARAM], common_param);
+    auto param =
+        MakeAnalyzerBruteForceParameter(build_param[INDEX_PARAM], common_param, ignored_param_keys);
     auto inner_index = std::make_shared<BruteForce>(param, common_param);
     return std::make_shared<IndexImpl<BruteForce>>(inner_index, common_param);
 }

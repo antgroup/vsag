@@ -472,7 +472,7 @@ private:
         } else {
             try {
                 this->CreateIndexFromMetadata(reopen);
-            } catch (const std::invalid_argument& error) {
+            } catch (const std::exception& error) {
                 throw std::runtime_error(
                     fmt::format("failed to load index '{}' from serialized metadata: {}",
                                 options_.index_path,
@@ -659,7 +659,13 @@ private:
         if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) and
             index_param_.Contains(BASE_CODES_KEY)) {
             build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
-            auto analyzer_index = CreateBruteForceIndexForAnalyzer(build_param);
+            std::vector<std::string> ignored_param_keys;
+            auto analyzer_index =
+                CreateBruteForceIndexForAnalyzer(build_param, &ignored_param_keys);
+            for (const auto& key : ignored_param_keys) {
+                warnings_.emplace_back(
+                    fmt::format("ignored serialized BruteForce parameter '{}'", key));
+            }
             this->Deserialize(analyzer_index, stream);
             return;
         }
