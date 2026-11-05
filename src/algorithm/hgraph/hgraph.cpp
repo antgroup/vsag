@@ -1034,10 +1034,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    // reject malformed replacements before constructing queries or re-encoding;
+    // a wrong declared dimension would make binary updates read past the buffer.
+    CHECK_ARGUMENT(
+        new_base->GetDim() == dim_,
+        fmt::format("new_base.dim({}) must be equal to index.dim({})", new_base->GetDim(), dim_));
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(new_base->GetDim() == dim_,
-                       "updated vector dimension must match the index dimension");
-        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
         this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
     }
     if (not force_update) {

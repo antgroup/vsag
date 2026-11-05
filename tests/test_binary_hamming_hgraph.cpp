@@ -814,3 +814,65 @@ TEST_CASE("(PR) Binary HGraph Range And Batch Distances Reject Dense-Only Query"
     REQUIRE_FALSE(graph_topk_result.has_value());
     REQUIRE(graph_topk_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
+
+TEST_CASE("(PR) HGraph Binary Update Rejects Malformed Replacement Before Encoding",
+          "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 65;
+    constexpr int64_t count = 16;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65,
+        "index_param": {}
+    })";
+    auto base_data = GeneratePacked(count, dim, 4262);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto index_made = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    // A one-row, Dim(8) replacement is backed by a single packed byte, while the
+    // 65-bit index derives a nine-byte data size from its own dimension. Without
+    // validation, the ordinary path rebuilds the query at the index dimension and
+    // copies nine bytes out of the one-byte buffer, and the forced path re-encodes
+    // the same out-of-range data. Both must fail as INVALID_ARGUMENT before any
+    // of that can happen.
+    std::vector<uint8_t> one_byte(1, 0x01U);
+    const std::vector<int64_t> update_id = {5};
+    auto wrong_dim_dataset = MakeDataset(one_byte, update_id, 8);
+
+    auto forced_result = index->UpdateVector(update_id[0], wrong_dim_dataset, true);
+    REQUIRE_FALSE(forced_result.has_value());
+    REQUIRE(forced_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto ordinary_result = index->UpdateVector(update_id[0], wrong_dim_dataset);
+    REQUIRE_FALSE(ordinary_result.has_value());
+    REQUIRE(ordinary_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // A missing binary payload with the right dimension must be rejected too.
+    auto null_binary_dataset = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false);
+    auto null_forced_result = index->UpdateVector(update_id[0], null_binary_dataset, true);
+    REQUIRE_FALSE(null_forced_result.has_value());
+    REQUIRE(null_forced_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto null_ordinary_result = index->UpdateVector(update_id[0], null_binary_dataset);
+    REQUIRE_FALSE(null_ordinary_result.has_value());
+    REQUIRE(null_ordinary_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // Well-formed replacements must keep working after the rejections.
+    auto replacement = GeneratePacked(1, dim, 555);
+    auto valid_result = index->UpdateVector(update_id[0], MakeDataset(replacement, update_id, dim));
+    REQUIRE(valid_result.has_value());
+    REQUIRE(valid_result.value());
+    auto replacement_query = vsag::Dataset::Make()
+                                 ->NumElements(1)
+                                 ->Dim(dim)
+                                 ->BinaryVectors(replacement.data())
+                                 ->Owner(false);
+    auto distance = index->CalcDistanceById(replacement_query, update_id[0]);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == 0.0F);
+}
