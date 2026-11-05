@@ -793,6 +793,11 @@ TEST_CASE("(PR) Binary HGraph Range And Batch Distances Reject Dense-Only Query"
     REQUIRE_FALSE(range_result.has_value());
     REQUIRE(range_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 
+    vsag::DatasetPtr null_query;
+    auto null_range_result = graph->RangeSearch(null_query, 40.0F, "{}");
+    REQUIRE_FALSE(null_range_result.has_value());
+    REQUIRE(null_range_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
     auto batch_result = brute->CalcDistancesById(dense_query, ids.data(), count, true, -1);
     REQUIRE_FALSE(batch_result.has_value());
     REQUIRE(batch_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
@@ -800,4 +805,12 @@ TEST_CASE("(PR) Binary HGraph Range And Batch Distances Reject Dense-Only Query"
     auto topk_result = brute->CalcDistancesById(dense_query, ids.data(), count, true, 2);
     REQUIRE_FALSE(topk_result.has_value());
     REQUIRE(topk_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto graph_batch_result = graph->CalcDistancesById(dense_query, ids.data(), count, true, -1);
+    REQUIRE_FALSE(graph_batch_result.has_value());
+    REQUIRE(graph_batch_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto graph_topk_result = graph->CalcDistancesById(dense_query, ids.data(), count, true, 2);
+    REQUIRE_FALSE(graph_topk_result.has_value());
+    REQUIRE(graph_topk_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
