@@ -345,20 +345,20 @@ Every row is the run with the median time of three:
 
 | Data (`n x d`, `k`) | Trainer | Sizes | CV | Loss | Time | Peak memory |
 |---|---|---|---|---|---|---|
-| Uniform (100,000 x 64, 256) | `kmeans` | 334–452 | 0.052 | 4.5991 | 1.06 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.6004 | 0.82 s | 19.0 MiB |
-| Not divisible (99,968 x 64, 256) | `kmeans` | 342–448 | 0.050 | 4.5963 | 1.03 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 4.5969 | 0.82 s | 19.0 MiB |
-| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 1.05 s | 64.4 MiB |
-| | `balanced_kmeans` | 390–391 | 0.001 | 3.7469 | 4.01 s | 19.0 MiB |
-| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–809 | 0.526 | 3.5802 | 1.09 s | 64.4 MiB |
-| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2411 | 4.24 s | 41.8 MiB |
-| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 54.2 s | 1027 MiB |
-| | `balanced_kmeans` | 64–64 | 0 | 43818 | 13.6 s | 60.4 MiB |
-| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–734 | 1.297 | 21.371 | 39.7 s | 1027 MiB |
+| Uniform (100,000 x 64, 256) | `kmeans` | 342–448 | 0.049 | 4.5991 | 0.97 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.6000 | 0.85 s | 19.0 MiB |
+| Not divisible (99,968 x 64, 256) | `kmeans` | 340–455 | 0.050 | 4.5964 | 1.06 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.5966 | 0.85 s | 19.0 MiB |
+| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 0.97 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 3.7463 | 4.00 s | 19.0 MiB |
+| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–801 | 0.526 | 3.5803 | 1.03 s | 64.4 MiB |
+| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2430 | 4.23 s | 41.8 MiB |
+| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 53.6 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 43818 | 13.9 s | 60.4 MiB |
+| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–733 | 1.297 | 21.370 | 40.0 s | 1027 MiB |
 | | `balanced_kmeans` | 64–64 | 0 | 21.142 | 21.9 s | 59.9 MiB |
-| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9020 | 53.6 s | 1027 MiB |
-| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9823 | 37.2 s | 95.8 MiB |
+| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9019 | 53.7 s | 1027 MiB |
+| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9823 | 38.7 s | 95.9 MiB |
 
 The skewed sets are Zipf-weighted Gaussian mixtures; "separated" places 64
 components far apart, so many small ones have to share clusters, and repeats eight
@@ -375,7 +375,7 @@ vectors in 5% of the rows.
   (whose seeding is single-threaded and whose distance block grows with
   `65536 x k`) and needs 11 to 17 times less memory. Its own seeding does not
   decide that: with k-means++ (`--init kmeans++`) instead of a random sample it
-  takes 12.8 s on SIFT, at a 0.05% higher loss.
+  takes 12.5 s on SIFT, at a 0.05% higher loss.
 
 The same holds for whole indexes. Built from the full SIFT1M (`l2`) and GloVe-100
 (`cosine`) files with 4096 buckets and `fp32` codes, then searched by 32 threads on
@@ -385,19 +385,19 @@ three, with the median QPS of the three at each setting):
 
 | Data | Trainer | Build | Bucket sizes | Recall@10 | Distances per query | QPS |
 |---|---|---|---|---|---|---|
-| SIFT1M | `kmeans` | 66.0 s | 1–1897 | 0.834 / 0.971 / 0.992 | 5212 / 19415 / 37259 | 126k / 37.8k / 18.6k |
-| | `balanced_kmeans` | 28.1 s | 244–245 | 0.826 / 0.971 / 0.992 | 4148 / 16173 / 32059 | 132k / 43.0k / 21.7k |
-| GloVe-100 | `kmeans` | 55.7 s | 0–2792 | 0.776 / 0.902 / 0.942 | 12359 / 44815 / 84130 | 78.3k / 23.6k / 12.8k |
-| | `balanced_kmeans` | 38.7 s | 288–289 | 0.697 / 0.852 / 0.907 | 4980 / 19431 / 38489 | 148k / 45.0k / 23.2k |
+| SIFT1M | `kmeans` | 65.2 s | 1–1613 | 0.835 / 0.972 / 0.992 | 5238 / 19504 / 37445 | 127k / 38.8k / 20.5k |
+| | `balanced_kmeans` | 30.0 s | 244–245 | 0.827 / 0.971 / 0.993 | 4160 / 16190 / 32078 | 149k / 46.2k / 23.4k |
+| GloVe-100 | `kmeans` | 55.5 s | 1–2638 | 0.775 / 0.901 / 0.941 | 11829 / 43286 / 81713 | 77.5k / 24.8k / 13.2k |
+| | `balanced_kmeans` | 48.1 s | 288–289 | 0.699 / 0.853 / 0.908 | 5000 / 19461 / 38521 | 150k / 45.8k / 24.6k |
 
 Queries follow the data, so large buckets are probed more often than small ones,
 and with plain k-means the probed buckets are larger than the mean (a bucket probed
-in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.7
-on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 16% to
-26% more distances on SIFT and 2.2 to 2.5 times as many on GloVe, which buys it
+in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.6
+on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 17% to
+26% more distances on SIFT and 2.1 to 2.4 times as many on GloVe, which buys it
 recall on GloVe. At about the same throughput the balanced index has the same or
-higher recall (GloVe: 0.907 at 23.2k QPS against 0.902 at 23.6k; SIFT: 0.992 at
-21.7k against 0.992 at 18.6k), and no query scans more than
+higher recall (GloVe: 0.908 at 24.6k QPS against 0.901 at 24.8k; SIFT: 0.993 at
+23.4k against 0.992 at 20.5k), and no query scans more than
 `scan_buckets_count x ceil(n / buckets_count)` vectors until `Add` grows the
 buckets.
 
