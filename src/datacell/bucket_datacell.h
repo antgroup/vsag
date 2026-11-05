@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <random>
 #include <shared_mutex>
 #include <type_traits>
 
@@ -697,26 +698,44 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                             train_data_buffer[destination * dim + j] = src[j] - centroid[j];
                         }
                     };
-                auto sample_index =
-                    [](uint64_t sample, uint64_t sample_count, uint64_t population_count) {
-                        const uint64_t step = population_count / sample_count;
-                        const uint64_t remainder = population_count % sample_count;
-                        return sample * step + sample * remainder / sample_count;
-                    };
+                std::mt19937_64 random(0x524553494455414cULL);
+                auto for_each_sample = [&](bool should_sample,
+                                           uint64_t sample_count,
+                                           uint64_t population_count,
+                                           auto write_sample) {
+                    for (uint64_t i = 0; i < sample_count; ++i) {
+                        write_sample(i, i);
+                    }
+                    if (not should_sample) {
+                        return;
+                    }
+                    // Use the residual buffer itself as a reservoir. Every subset has the
+                    // same probability, without fixed-stride phase aliases, duplicate rows,
+                    // or any sampling allocation beyond the existing training budget.
+                    for (uint64_t i = sample_count; i < population_count; ++i) {
+                        std::uniform_int_distribution<uint64_t> select(0, i);
+                        const uint64_t selected = select(random);
+                        if (selected < sample_count) {
+                            write_sample(selected, i);
+                        }
+                    }
+                };
                 // Without nearest-only rows there is no second population to represent.
                 // Keep the original prefix instead of aliasing periodic input to one residue.
                 const bool sample_build = sample_prefix && nearest_samples != 0;
-                for (uint64_t i = 0; i < build_samples; ++i) {
-                    const uint64_t source =
-                        sample_build ? sample_index(i, build_samples, count) : i;
-                    write_residual(i, source, build_buckets[source]);
-                }
-                for (uint64_t i = 0; i < nearest_samples; ++i) {
-                    const uint64_t nearest =
-                        sample_prefix ? sample_index(i, nearest_samples, nearest_rows.size()) : i;
-                    const uint64_t source = nearest_rows[nearest];
-                    write_residual(build_samples + i, source, nearest_buckets[source]);
-                }
+                for_each_sample(
+                    sample_build, build_samples, count, [&](uint64_t destination, uint64_t source) {
+                        write_residual(destination, source, build_buckets[source]);
+                    });
+                for_each_sample(sample_prefix,
+                                nearest_samples,
+                                nearest_rows.size(),
+                                [&](uint64_t destination, uint64_t nearest) {
+                                    const uint64_t source = nearest_rows[nearest];
+                                    write_residual(build_samples + destination,
+                                                   source,
+                                                   nearest_buckets[source]);
+                                });
             } else {
                 // Keep complete populations when they fit. Allocate only rows whose routes
                 // disagree in addition to the Build corpus; cosine retains its normalized prefix.
