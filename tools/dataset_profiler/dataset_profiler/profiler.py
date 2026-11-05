@@ -61,13 +61,15 @@ _SPARSE_SAMPLE_ROW_OVERHEAD_BYTES = 128
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
 _PCA_SVD_MAX_DIM = 4096
 # Exact norm quantiles/outliers and exact duplicate groups need per-row state.
-# Budget each retained structure independently and disable its full-split metric
-# instead of allowing dataset-sized Python/NumPy state to grow without a limit.
+# Budget each full-split structure independently and disable its metric instead
+# of allowing dataset-sized Python/NumPy state to grow without a limit.
 _FULL_SPLIT_STATE_BUDGET_BYTES = 256 * 1024 * 1024
 _NORM_BYTES_PER_VECTOR = 8
 # Store fixed-width digests in a preallocated array instead of Python objects.
+# np.unique additionally holds a sorted copy, sort index, unique output, and
+# counts, bringing peak duplicate-detection state to about 64 bytes per vector.
 _DUPLICATE_DIGEST_BYTES = 16
-_DUPLICATE_BYTES_PER_VECTOR = _DUPLICATE_DIGEST_BYTES
+_DUPLICATE_BYTES_PER_VECTOR = 4 * _DUPLICATE_DIGEST_BYTES
 # Dense streaming blocks are sized by their working bytes, not by a fixed row
 # count: every row keeps the raw block, a float64 copy, a finite mask, and
 # several float64 temporaries alive at the same time.

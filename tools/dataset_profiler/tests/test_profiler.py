@@ -956,7 +956,7 @@ def test_full_split_norm_and_duplicate_state_honors_budget(
         assert "32-byte full-split state budget" in metrics[name]["reason"]
     exact = metrics["duplicates"]["exact"]
     assert exact["available"] is False
-    assert "80 bytes for 5 vectors" in exact["reason"]
+    assert "320 bytes for 5 vectors (64 bytes per vector)" in exact["reason"]
     assert exact["unique_vectors"] is None
     assert exact["duplicate_ratio"] is None
     assert metrics["duplicates"]["near_duplicate"]["available"] is True

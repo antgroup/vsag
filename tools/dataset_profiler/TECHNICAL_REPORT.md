@@ -51,14 +51,16 @@ dataset, and bounded memory for streaming sparse files.
   Full-dataset statistics (norms, per-dimension aggregates, duplicates,
   invalid counts, sparsity) come from a single streaming pass. Norm state is
   preallocated once (8 bytes per vector), never accumulated as block lists and
-  concatenated. Norm state, sparse nnz state (8 bytes per vector each), and
-  exact-duplicate digests (a preallocated 16-byte row per vector) each have an
-  explicit 256 MiB retained-state budget. The row-count estimate is checked
-  before allocation; when it exceeds the budget, the affected full-split
-  norms/outliers, nnz distribution, or exact-duplicate fields are marked
-  unavailable with a reason and warning, while streaming totals and sampled
-  metrics still appear. Duplicate groups are counted with NumPy over the
-  fixed-width digest rows rather than a Python `Counter`.
+  concatenated. Norm state and sparse nnz state (8 bytes per vector each) have
+  an explicit 256 MiB state budget. Exact-duplicate detection preallocates a
+  16-byte digest row per vector and uses a peak-aware 64-byte-per-vector budget
+  that also covers `np.unique`'s sorted copy, sort index, unique output, and
+  counts. Each row-count estimate is checked before allocation; when it exceeds
+  the budget, the affected full-split norms/outliers, nnz distribution, or
+  exact-duplicate fields are marked unavailable with a reason and warning,
+  while streaming totals and sampled metrics still appear. Duplicate groups
+  are counted with NumPy over the fixed-width digest rows rather than a Python
+  `Counter`.
 * **Distance computations**: Euclidean pairwise distances use the expanded
   norm/dot form when it is numerically stable and fall back to direct
   coordinate differences for pairs whose norms dwarf their distance (for
