@@ -689,13 +689,33 @@ private:
 
     JsonType
     BuildIndexMetadata() const {
+        // Some footers (e.g. Pyramid's) omit data_type / extra_info_size entirely, so those
+        // members still hold the analyzer sentinels (float32 / 0) even though
+        // CreateIndexWithParam() built the index from the explicit build_parameter. Backfill
+        // the report from those effective build parameters only when the footer value is
+        // absent; a footer value that is genuinely present always wins.
+        std::string report_data_type = DataTypesToString(data_type_);
+        int64_t report_extra_info_size = extra_info_size_;
+        if (options_.build_parameter != DEFAULT_BUILD_PARAM) {
+            auto parsed = ParseJsonArgument(options_.build_parameter, "build_parameter");
+            if (parsed.IsObject()) {
+                if (parsed.Contains("dtype") and not basic_info_.Contains("data_type")) {
+                    report_data_type = parsed["dtype"].GetString();
+                }
+                if (parsed.Contains("extra_info_size") and
+                    not basic_info_.Contains("extra_info_size")) {
+                    report_extra_info_size = parsed["extra_info_size"].GetInt();
+                }
+            }
+        }
+
         JsonType metadata;
         metadata["path"].SetString(options_.index_path);
         metadata["name"].SetString(index_name_);
         metadata["dim"].SetInt64(dim_);
-        metadata["data_type"].SetString(DataTypesToString(data_type_));
+        metadata["data_type"].SetString(report_data_type);
         metadata["metric"].SetString(MetricTypeToString(metric_type_));
-        metadata["extra_info_size"].SetInt64(extra_info_size_);
+        metadata["extra_info_size"].SetInt64(report_extra_info_size);
         metadata["metadata_source"].SetString(metadata_source_);
         metadata["metadata_complete"].SetBool(metadata_complete_);
         metadata["index_parameter"].SetJson(index_param_);
