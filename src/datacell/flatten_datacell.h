@@ -397,6 +397,9 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
             case DataTypes::DATA_TYPE_SPARSE:
                 source_stride = sizeof(SparseVector);
                 break;
+            case DataTypes::DATA_TYPE_BINARY:
+                source_stride = quantizer_->GetCodeSize();
+                break;
             case DataTypes::DATA_TYPE_FLOAT:
                 break;
         }
