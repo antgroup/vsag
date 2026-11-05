@@ -15,7 +15,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <iostream>
+#include <random>
 #include <vector>
 
 #include "algorithm/inner_index_interface.h"
@@ -89,31 +91,62 @@ public:
 
     /// Writes the residuals of `datas` to their buckets of ClassifyDatasForTrain, with one
     /// row of `dim_` floats per different bucket of a vector, and returns the row count.
+    /// `datas` may be the storage of `residuals`, sized for it, so one bucket per vector
+    /// needs no further buffer and keeps the rows in order. Further rows are shuffled in,
+    /// with a fixed seed, because product quantizers train on a prefix of the rows and
+    /// have to see both kinds, from every part of the batch. A slot the routing left
+    /// without a bucket adds no row.
     uint64_t
     ResidualsForTrain(const float* datas, int64_t count, Vector<float>& residuals) {
-        residuals.clear();
         if (count <= 0) {
+            residuals.clear();
             return 0;
         }
         const auto buckets = this->ClassifyDatasForTrain(datas, count);
         const auto vectors = static_cast<uint64_t>(count);
         const auto buckets_per_data = buckets.size() / vectors;
         const auto dim = static_cast<uint64_t>(dim_);
-        residuals.resize(buckets.size() * dim);
         Vector<float> centroid(dim, allocator_);
-        uint64_t rows = 0;
+        // The further rows first, while the first ones cannot have overwritten `datas`.
+        Vector<float> further(allocator_);
         for (uint64_t i = 0; i < vectors; ++i) {
             const auto* own = buckets.data() + i * buckets_per_data;
-            for (uint64_t j = 0; j < buckets_per_data; ++j) {
-                if (j > 0 and own[j] == own[0]) {
-                    continue;
+            for (uint64_t j = 1; j < buckets_per_data; ++j) {
+                if (own[j] >= 0 and own[j] != own[0]) {
+                    this->GetCentroid(own[j], centroid);
+                    further.resize(further.size() + dim);
+                    FP32Sub(datas + i * dim,
+                            centroid.data(),
+                            further.data() + further.size() - dim,
+                            dim);
                 }
-                this->GetCentroid(own[j], centroid);
+            }
+        }
+        residuals.resize(vectors * dim);
+        uint64_t rows = 0;
+        for (uint64_t i = 0; i < vectors; ++i) {
+            const auto bucket = buckets[i * buckets_per_data];
+            if (bucket >= 0) {
+                this->GetCentroid(bucket, centroid);
                 FP32Sub(datas + i * dim, centroid.data(), residuals.data() + rows * dim, dim);
                 ++rows;
             }
         }
         residuals.resize(rows * dim);
+        if (further.empty()) {
+            return rows;
+        }
+        residuals.insert(residuals.end(), further.begin(), further.end());
+        rows += further.size() / dim;
+        std::mt19937 generator(47);
+        for (uint64_t row = rows - 1; row > 0; --row) {
+            const uint64_t other = generator() % (row + 1);
+            if (other != row) {
+                std::swap_ranges(residuals.data() + row * dim,
+                                 residuals.data() + (row + 1) * dim,
+                                 residuals.data() + other * dim);
+            }
+        }
         return rows;
     }
 
