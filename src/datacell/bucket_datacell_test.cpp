@@ -160,6 +160,48 @@ public:
     }
 };
 
+class OrderedBalancedResidualPartitionStrategy : public IVFPartitionStrategy {
+public:
+    OrderedBalancedResidualPartitionStrategy(const IndexCommonParam& common_param,
+                                             BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+        is_trained_ = true;
+    }
+
+    void
+    Train(const DatasetPtr) override {
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType, QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] > 1.0F ? 1 : 0;
+        }
+        return result;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = i < count / 2 ? 0 : 1;
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid[0] = bucket_id == 0 ? 0.0F : 185530.0F / 65536.0F;
+    }
+};
+
 class MixedResidualPartitionStrategy : public IVFPartitionStrategy {
 public:
     MixedResidualPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
@@ -1003,6 +1045,64 @@ TEST_CASE("BucketDataCell residual training uses build and nearest assignments",
     REQUIRE(std::abs(bucket->QueryOneById(build_computer, 1, 0)) < 1e-4F);
     auto nearest_computer = bucket->FactoryComputer(vectors.data() + dim);
     REQUIRE(std::abs(bucket->QueryOneById(nearest_computer, 0, 0)) < 1e-4F);
+}
+
+TEST_CASE("BucketDataCell samples scalar build and nearest residual populations",
+          "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 131072;
+    constexpr uint64_t zero_count = 65536;
+    constexpr uint64_t outlier_count = 6;
+    constexpr uint64_t nearest_population = count - zero_count - outlier_count;
+    constexpr uint64_t train_count = count + nearest_population;
+    constexpr uint64_t max_scalar_samples = 100000;
+    constexpr uint64_t bucket_count = 2;
+    static_assert(nearest_population == 65530);
+    static_assert(2147483647UL % train_count == 1);
+    const std::string quantizer_type = GENERATE("sq8", "sq4");
+    CAPTURE(quantizer_type);
+
+    std::vector<float> vectors(count, 1.0F);
+    std::fill_n(vectors.begin(), zero_count, 0.0F);
+    std::fill(vectors.end() - outlier_count, vectors.end(), 20000.0F);
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    JsonType quantizer_json;
+    quantizer_json["type"].SetString(quantizer_type);
+    param_json["quantization_params"].SetJson(quantizer_json);
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(
+        std::make_shared<OrderedBalancedResidualPartitionStrategy>(common_param, bucket_count));
+    allocator->capture_size = max_scalar_samples * dim * sizeof(float);
+    allocator->rejected_size = train_count * dim * sizeof(float);
+    bucket->Train(vectors.data(), count);
+    REQUIRE(allocator->rejected == 0);
+    REQUIRE(allocator->captured_values.size() == max_scalar_samples);
+
+    // Half the scalar budget represents the 65,530 nearest-only residuals. The old
+    // stride of one sampled only the Build prefix, making the upper bound zero.
+    for (uint64_t i = max_scalar_samples / 2; i < max_scalar_samples; ++i) {
+        REQUIRE(allocator->captured_values[i] == 1.0F);
+    }
+
+    const float added = 1.0F;
+    bucket->InsertVector(&added, 0, 0);
+    auto computer = bucket->FactoryComputer(&added);
+    // Clipping this +1 residual to the old zero upper bound returned distance one.
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
 }
 
 TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
