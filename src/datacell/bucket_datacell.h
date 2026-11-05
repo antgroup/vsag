@@ -639,10 +639,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
         if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
             throw VsagException(ErrorType::INVALID_ARGUMENT, "residual training size overflow");
         }
-        if (not prefix_limited) {
-            train_data_buffer.resize(buffer_factor * count * dim);
-        } else if (metric_ == MetricType::METRIC_TYPE_COSINE) {
-            // Classification needs normalized inputs, but this is not the output allocation.
+        if (metric_ == MetricType::METRIC_TYPE_COSINE or not train_nearest) {
+            // Cosine classification needs a normalized corpus. Other single-route training can
+            // write its residuals immediately; dual-route L2/IP allocates after classification.
             train_data_buffer.resize(count * dim);
         }
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -716,17 +715,41 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                     write_residual(build_samples + i, source, nearest_buckets[source]);
                 }
             } else {
-                // Keep complete populations when they fit. Rows whose routes agree
-                // are not duplicated, and each nearest extra is written before its
-                // normalized source row is overwritten by the Build residual.
+                // Keep complete populations when they fit. Allocate only rows whose routes
+                // disagree in addition to the Build corpus; cosine retains its normalized prefix.
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        ++train_count;
+                    }
+                }
+                const bool regrow_normalized =
+                    metric_ == MetricType::METRIC_TYPE_COSINE and train_count > count;
+                if (regrow_normalized) {
+                    // Do not let vector growth hold the old and new corpus allocations at once.
+                    Vector<float>(allocator_).swap(train_data_buffer);
+                }
+                train_data_buffer.resize(train_count * dim);
+                if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                    if (regrow_normalized) {
+                        for (uint64_t i = 0; i < count; ++i) {
+                            Normalize(original_data_ptr + i * dim,
+                                      train_data_buffer.data() + i * dim,
+                                      dim);
+                        }
+                    }
+                    data_ptr = train_data_buffer.data();
+                }
+                // Each nearest extra is written before its normalized source row is overwritten
+                // by the Build residual.
+                uint64_t nearest_offset = count;
                 for (uint64_t i = 0; i < count; ++i) {
                     if (build_buckets[i] != nearest_buckets[i]) {
                         strategy_->GetCentroid(nearest_buckets[i], centroid);
                         for (uint64_t j = 0; j < dim; ++j) {
-                            train_data_buffer[train_count * dim + j] =
+                            train_data_buffer[nearest_offset * dim + j] =
                                 data_ptr[i * dim + j] - centroid[j];
                         }
-                        ++train_count;
+                        ++nearest_offset;
                     }
                     strategy_->GetCentroid(build_buckets[i], centroid);
                     for (uint64_t j = 0; j < dim; ++j) {

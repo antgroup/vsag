@@ -46,7 +46,21 @@ public:
     void*
     Allocate(uint64_t size) override {
         check_size(size);
-        return DefaultAllocator::Allocate(size);
+        auto* pointer = DefaultAllocator::Allocate(size);
+        if (size == capture_size and captured_pointer == nullptr) {
+            captured_pointer = pointer;
+        }
+        return pointer;
+    }
+
+    void
+    Deallocate(void* pointer) override {
+        if (pointer != nullptr and pointer == captured_pointer) {
+            const auto* values = static_cast<const float*>(pointer);
+            captured_values.assign(values, values + capture_size / sizeof(float));
+            captured_pointer = nullptr;
+        }
+        DefaultAllocator::Deallocate(pointer);
     }
 
     void*
@@ -58,8 +72,12 @@ public:
     uint64_t limit{std::numeric_limits<uint64_t>::max()};
     uint64_t rejected_size{0};
     uint64_t rejected{0};
+    uint64_t capture_size{0};
+    std::vector<float> captured_values;
 
 private:
+    void* captured_pointer{nullptr};
+
     void
     check_size(uint64_t size) {
         if (size > limit or (rejected_size != 0 and size == rejected_size)) {
@@ -1606,7 +1624,7 @@ TEST_CASE("RaBitQ split bucket supports optimized build",
 
 TEST_CASE("RaBitQ split residual training uses build and nearest assignments",
           "[ut][BucketDataCell][rabitq_split][residual]") {
-    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
     constexpr uint64_t dim = 16;
     constexpr uint64_t training_count = 64;
     constexpr uint64_t bucket_count = 2;
@@ -1633,12 +1651,28 @@ TEST_CASE("RaBitQ split residual training uses build and nearest assignments",
     auto strategy = std::make_shared<BuildAssignedPartitionStrategy>(
         common_param, bucket_count, /*centroid_scale=*/5000.0F);
     bucket->SetStrategy(strategy);
+    allocator->capture_size = 2 * training_count * dim * sizeof(float);
     bucket->Train(vectors.data(), training_count);
 
     // Every row has a different Build and nearest route, so training must fetch
     // both centroids per row. Rebuilding residual query transforms may add more.
     REQUIRE(strategy->GetClassifyRequestCount() == 1);
     REQUIRE(strategy->GetCentroidRequestCount() >= 2 * training_count);
+
+    // Check the actual quantizer input, not just the classification counters: Build residuals
+    // occupy the prefix and each nearest residual is appended at count + i against centroid 0.
+    Vector<float> nearest_centroid(dim, allocator.get());
+    Vector<float> build_centroid(dim, allocator.get());
+    strategy->GetCentroid(0, nearest_centroid);
+    strategy->GetCentroid(1, build_centroid);
+    std::vector<float> expected(2 * training_count * dim);
+    for (uint64_t i = 0; i < training_count; ++i) {
+        for (uint64_t d = 0; d < dim; ++d) {
+            expected[i * dim + d] = vectors[i * dim + d] - build_centroid[d];
+            expected[(training_count + i) * dim + d] = vectors[i * dim + d] - nearest_centroid[d];
+        }
+    }
+    REQUIRE(allocator->captured_values == expected);
 }
 
 TEST_CASE("RaBitQ split bucket scan spills computed masks above 256 blocks",

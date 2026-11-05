@@ -1358,13 +1358,14 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
                    "RaBitQ split residual training size overflow");
     Vector<float> centroid(this->dim_, this->allocator_);
     const float* classify_data = input;
-    Vector<float> normalized_data(this->allocator_);
+    Vector<float> train_data(this->allocator_);
     if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
-        normalized_data.resize(count * this->dim_);
+        // Normalize into the residual buffer so the corpus is not duplicated for classification.
+        train_data.resize(count * this->dim_);
         for (uint64_t i = 0; i < count; ++i) {
-            Normalize(input + i * this->dim_, normalized_data.data() + i * this->dim_, this->dim_);
+            Normalize(input + i * this->dim_, train_data.data() + i * this->dim_, this->dim_);
         }
-        classify_data = normalized_data.data();
+        classify_data = train_data.data();
     }
     // Balanced Build uses capacity-constrained assignments, while later Add calls
     // use nearest-centroid routing. Train on both residual populations so either
@@ -1382,7 +1383,22 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
             }
         }
     }
-    Vector<float> train_data(train_count * this->dim_, this->allocator_);
+    const bool regrow_normalized =
+        this->metric_ == MetricType::METRIC_TYPE_COSINE and train_count > count;
+    if (regrow_normalized) {
+        // Release the classification corpus before growing so vector reallocation cannot briefly
+        // retain both the old buffer and the complete dual-population buffer.
+        Vector<float>(this->allocator_).swap(train_data);
+    }
+    train_data.resize(train_count * this->dim_);
+    if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
+        if (regrow_normalized) {
+            for (uint64_t i = 0; i < count; ++i) {
+                Normalize(input + i * this->dim_, train_data.data() + i * this->dim_, this->dim_);
+            }
+        }
+        classify_data = train_data.data();
+    }
     uint64_t nearest_offset = count;
     for (uint64_t i = 0; i < count; ++i) {
         if (train_nearest and build_buckets[i] != nearest_buckets[i]) {
