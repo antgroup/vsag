@@ -635,10 +635,13 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
         const uint64_t dim = static_cast<uint64_t>(this->quantizer_->GetDim());
         const bool train_nearest = strategy_->HasDistinctBuildAssignment();
         bool prefix_limited = false;
+        bool scalar_limited = false;
         if (train_nearest) {
             const auto quantizer_name = this->GetQuantizerName();
             prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
                              quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
+            scalar_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4;
         }
         const uint64_t buffer_factor = train_nearest ? 2 : 1;
         if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
@@ -664,29 +667,29 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             // populations and the corresponding second classification pass.
             auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
             Vector<uint64_t> nearest_rows(allocator_);
-            if (prefix_limited) {
+            if (prefix_limited or scalar_limited) {
                 for (uint64_t i = 0; i < count; ++i) {
                     if (build_buckets[i] != nearest_buckets[i]) {
                         nearest_rows.emplace_back(i);
                     }
                 }
-                constexpr uint64_t max_pq_train_count = 65536;
-                const bool sample_prefix = count + nearest_rows.size() > max_pq_train_count;
+                const uint64_t max_train_count = prefix_limited ? 65536 : 100000;
+                const bool sample_populations = count + nearest_rows.size() > max_train_count;
                 uint64_t build_samples = count;
                 uint64_t nearest_samples = static_cast<uint64_t>(nearest_rows.size());
-                if (sample_prefix) {
-                    // PQ and PQFS retain only their first 65,536 rows. Budget both
-                    // populations within that prefix instead of truncating nearest
-                    // residuals after an interleaved Build corpus.
-                    build_samples = std::min(count, max_pq_train_count / 2);
+                if (sample_populations) {
+                    // PQ/PQFS retain only their first 65,536 rows, while SQ8/SQ4 sample
+                    // 100,000 rows. Budget both populations before either limit can discard
+                    // appended nearest residuals.
+                    build_samples = std::min(count, max_train_count / 2);
                     nearest_samples = std::min(static_cast<uint64_t>(nearest_rows.size()),
-                                               max_pq_train_count - build_samples);
-                    build_samples = std::min(count, max_pq_train_count - nearest_samples);
+                                               max_train_count - build_samples);
+                    build_samples = std::min(count, max_train_count - nearest_samples);
                 }
                 train_count = build_samples + nearest_samples;
                 // The sampled rows are re-derived from the original input. Release
                 // any normalized classification copy before allocating only the rows
-                // that the prefix-limited quantizer will actually consume.
+                // that the sample-limited quantizer will actually consume.
                 Vector<float>(allocator_).swap(train_data_buffer);
                 train_data_buffer.resize(train_count * dim);
                 Vector<float> normalized_row(dim, allocator_);
@@ -724,14 +727,16 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                         }
                     }
                 };
-                // Without nearest-only rows there is no second population to represent.
-                // Keep the original prefix instead of aliasing periodic input to one residue.
-                const bool sample_build = sample_prefix && nearest_samples != 0;
+                // Without nearest-only rows, retain the original PQ prefix. Scalar training
+                // already sampled a lone population, so reservoir-sample it here instead of
+                // silently reducing it to a prefix.
+                const bool sample_build =
+                    sample_populations && (nearest_samples != 0 or scalar_limited);
                 for_each_sample(
                     sample_build, build_samples, count, [&](uint64_t destination, uint64_t source) {
                         write_residual(destination, source, build_buckets[source]);
                     });
-                for_each_sample(sample_prefix,
+                for_each_sample(sample_populations,
                                 nearest_samples,
                                 nearest_rows.size(),
                                 [&](uint64_t destination, uint64_t nearest) {
