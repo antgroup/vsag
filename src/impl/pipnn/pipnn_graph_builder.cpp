@@ -2051,7 +2051,10 @@ PiPNNPipeline::certify_cached_graph(uint32_t source) const {
 
 void
 PiPNNPipeline::write_graph_row(uint32_t source, PruneScratch& scratch) {
-    bool reuse = reuse_graph_ and clean_graph_rows_[source] != 0;
+    // Adaptive thresholds depend on rejected-candidate counts as well as selected edges.
+    // Recompute them even when all previously selected neighbors survive.
+    bool reuse =
+        reuse_graph_ and not parameter_.adaptive_pruning and clean_graph_rows_[source] != 0;
     if (not reuse) {
         seed_cached_row(source);
         reuse = reuse_graph_ and certify_cached_graph(source);

@@ -731,9 +731,10 @@ TEST_CASE("PiPNN partition TopK preserves serial and parallel graphs", "[ut][pip
 
 TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
           "[ut][pipnn_cache]") {
-    const auto metric = GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR,
-                                 vsag::MetricType::METRIC_TYPE_IP,
-                                 vsag::MetricType::METRIC_TYPE_COSINE);
+    const auto mode = GENERATE(0, 1, 2, 3);
+    const auto metric = mode == 1   ? vsag::MetricType::METRIC_TYPE_IP
+                        : mode == 2 ? vsag::MetricType::METRIC_TYPE_COSINE
+                                    : vsag::MetricType::METRIC_TYPE_L2SQR;
     auto common = MakeCommonParam(8, metric);
     auto* allocator = common.allocator_.get();
     auto vectors = MakeVectors(160, 8);
@@ -750,6 +751,7 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
     }
     auto original_rows = MakeRows(vectors, original_ids, 8, allocator);
     vsag::PiPNNGraphBuilderParameter parameter;
+    parameter.adaptive_pruning = mode == 3;
     parameter.reservoir_size = 32;
     parameter.leaf_neighbor_count = 16;
     parameter.min_leaf_size = 1;
@@ -776,7 +778,11 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
     auto reference = MakeGraph(common, 160, 8);
     std::shared_ptr<vsag::PiPNNBuildCache> result;
     builder.Build(reused, ids, rows, &sources, snapshot.get(), &result);
-    REQUIRE(result->reused_graph_rows > 0);
+    if (parameter.adaptive_pruning) {
+        REQUIRE(result->reused_graph_rows == 0);
+    } else {
+        REQUIRE(result->reused_graph_rows > 0);
+    }
     snapshot->reuse_final_graph = false;
     builder.Build(reference, ids, rows, &sources, snapshot.get());
     for (const auto id : ids) {

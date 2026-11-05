@@ -144,7 +144,7 @@ PiPNN construction. Fewer than 80% eligible rows in a graph also triggers graph-
 Duplicate-group graphs (`support_duplicate: true`) also use cold construction;
 their grouped reservoirs are not exported in this version. Existing fused-storage cache API
 restrictions still apply. Adaptive PiPNN pruning can reuse reservoirs when its policy matches;
-changed adaptive rows are pruned again. Fingerprints detect accidental content changes, not adversarial
+all adaptive rows are pruned again because their thresholds depend on candidate counts. Fingerprints detect accidental content changes, not adversarial
 collisions. Keep cache files within the same trusted boundary as index files.
 
 The snapshot remains in memory after `Build` and consumes additional space proportional to the
