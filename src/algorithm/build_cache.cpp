@@ -134,7 +134,7 @@ BuildCache::Deserialize(StreamReader& reader) {
         }
     }
     if (versioned) {
-        auto snapshot = std::make_shared<PiPNNBuildCache>();
+        auto snapshot = std::make_shared<PiPNNBuildCache>(allocator_);
         snapshot->policy = read_string(reader);
         uint64_t count = 0;
         StreamReader::ReadObj(reader, count);
@@ -197,6 +197,7 @@ BuildCache::Deserialize(StreamReader& reader) {
                                         "invalid PiPNN graph cache target");
                 }
             }
+            Vector<uint64_t> graph_seen(count, std::numeric_limits<uint64_t>::max(), allocator_);
             for (uint64_t row = 0; row < count; ++row) {
                 const auto begin =
                     snapshot->targets.begin() + static_cast<int64_t>(snapshot->offsets[row]);
@@ -204,6 +205,27 @@ BuildCache::Deserialize(StreamReader& reader) {
                     snapshot->targets.begin() + static_cast<int64_t>(snapshot->offsets[row + 1]);
                 if (std::adjacent_find(begin, end, std::greater_equal<InnerIdType>{}) != end) {
                     throw VsagException(ErrorType::INVALID_BINARY, "unsorted PiPNN candidate row");
+                }
+                if (std::find(begin, end, row) != end) {
+                    throw VsagException(ErrorType::INVALID_BINARY, "PiPNN candidate self-edge");
+                }
+                for (uint64_t edge = snapshot->graph_offsets[row];
+                     edge < snapshot->graph_offsets[row + 1];
+                     ++edge) {
+                    const auto target = snapshot->graph_targets[edge];
+                    if (target == row or graph_seen[target] == row) {
+                        throw VsagException(ErrorType::INVALID_BINARY,
+                                            "PiPNN graph self-edge or duplicate target");
+                    }
+                    graph_seen[target] = row;
+                    const auto candidate = std::lower_bound(begin, end, target);
+                    if (candidate == end or *candidate != target or
+                        snapshot->graph_distances[edge] !=
+                            snapshot->distances[static_cast<uint64_t>(candidate -
+                                                                      snapshot->targets.begin())]) {
+                        throw VsagException(ErrorType::INVALID_BINARY,
+                                            "PiPNN graph edge does not match its candidate row");
+                    }
                 }
             }
         }

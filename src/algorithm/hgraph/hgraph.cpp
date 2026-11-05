@@ -1150,10 +1150,13 @@ HGraph::mark_memory_usage_dirty() const {
 
 uint64_t
 HGraph::GetMemoryUsage() const {
+    // Snapshot charge is separate from the cached structural total: imports and
+    // replacements are visible without traversing cache containers in this getter.
     const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
                        this->memory_usage_version_.load(std::memory_order_acquire);
     if (not stale) {
-        return InnerIndexInterface::GetMemoryUsage();
+        return InnerIndexInterface::GetMemoryUsage() +
+               pipnn_cache_memory_.load(std::memory_order_acquire);
     }
     // The breakdown dereferences component containers that mutating paths replace or grow, so it
     // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
@@ -1176,7 +1179,8 @@ HGraph::GetMemoryUsage() const {
             this->cal_memory_usage();
         }
     }
-    return InnerIndexInterface::GetMemoryUsage();
+    return InnerIndexInterface::GetMemoryUsage() +
+           pipnn_cache_memory_.load(std::memory_order_acquire);
 }
 
 }  // namespace vsag

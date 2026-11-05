@@ -760,6 +760,10 @@ TEST_CASE("PiPNN final graph reuse matches full pruning with stable graph IDs",
     std::shared_ptr<vsag::PiPNNBuildCache> snapshot;
     builder.Build(original, original_ids, original_rows, &original_sources, nullptr, &snapshot);
     REQUIRE(snapshot != nullptr);
+    REQUIRE(snapshot->targets.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->distances.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->fingerprints.get_allocator().allocator_ == allocator);
+    REQUIRE(snapshot->source_ids.get_allocator().allocator_ == allocator);
     vsag::Vector<vsag::InnerIdType> ids(allocator);
     std::vector<std::string> sources;
     for (uint32_t id = 0; id < 128; ++id) {

@@ -148,13 +148,18 @@ all adaptive rows are pruned again because their thresholds depend on candidate 
 collisions. Keep cache files within the same trusted boundary as index files.
 
 The snapshot remains in memory after `Build` and consumes additional space proportional to the
-number of points times `reservoir_size`. Export captures the last PiPNN batch-build snapshot;
+number of points times `reservoir_size`. Large snapshot buffers use the index's supplied allocator.
+`GetMemoryUsage()` includes retained snapshot capacity, and `GetMemoryUsageDetail()` exposes it as
+`pipnn_build_cache`, including snapshots loaded by `ImportCache`. The component counts snapshot
+objects, buffer capacities and string heap capacity; allocator metadata and process RSS are different
+measurement scopes. Export captures the last PiPNN batch-build snapshot;
 later mutations do not regenerate reservoirs. Normal index serialization does not retain these
 reservoirs, even with `persist_source_id: true`: export the cache separately after construction.
 A restored index without a retained reservoir exports legacy graph seeds and cold-builds PiPNN.
 NSW-only caches retain their existing binary encoding. Readers predating this feature cannot read
 the versioned PiPNN payload. Unsupported versions, invalid offsets/targets and truncated payloads
-are rejected without replacing a previously imported cache.
+are rejected without replacing a previously imported cache. Adjacency must reference its own candidate
+row with matching distance keys; self-edges and duplicate graph targets are rejected on import.
 
 `GetStats()` reports actual reused rows as `build_cache_hit_nodes` and their fraction as
 `build_cache_hit_rate`. Pyramid additionally counts reuse per graph in `build_cache_hit_memberships`;

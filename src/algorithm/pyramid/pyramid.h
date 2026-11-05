@@ -692,6 +692,7 @@ private:
     bool store_paths_{false};        // whether to retain paths for ID-based retrieval
 
     std::unique_ptr<PyramidBuildCache> cache_{nullptr};  // per-graph caches for warm-start build
+    std::atomic<uint64_t> pipnn_cache_memory_{0};
 
     float build_cache_hit_rate_{-1.0F};           // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};           // number of nodes with cache hit

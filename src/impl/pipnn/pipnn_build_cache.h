@@ -17,7 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <string>
-#include <vector>
+#include <type_traits>
 
 #include "json_wrapper.h"
 #include "typing.h"
@@ -28,24 +28,62 @@ namespace vsag {
 // Original graph IDs are retained only for validating pruning tie ordering.
 // Source fingerprints refer to the original FP32 input, independent of index quantization.
 struct PiPNNBuildCache {
+    explicit PiPNNBuildCache(Allocator* allocator)
+        : source_ids(allocator),
+          fingerprints(allocator),
+          offsets(allocator),
+          targets(allocator),
+          distances(allocator),
+          hashes(allocator),
+          inner_ids(allocator),
+          graph_offsets(allocator),
+          graph_targets(allocator),
+          graph_distances(allocator),
+          reuse_mask(allocator) {
+    }
+
     std::string policy;
-    std::vector<std::string> source_ids;
-    std::vector<uint64_t> fingerprints;
-    std::vector<uint64_t> offsets;
-    std::vector<InnerIdType> targets;
-    std::vector<uint16_t> distances;
-    std::vector<uint16_t> hashes;
-    std::vector<InnerIdType> inner_ids;
-    std::vector<uint64_t> graph_offsets;
-    std::vector<InnerIdType> graph_targets;
-    std::vector<uint16_t> graph_distances;
+    Vector<std::string> source_ids;
+    Vector<uint64_t> fingerprints;
+    Vector<uint64_t> offsets;
+    Vector<InnerIdType> targets;
+    Vector<uint16_t> distances;
+    Vector<uint16_t> hashes;
+    Vector<InnerIdType> inner_ids;
+    Vector<uint64_t> graph_offsets;
+    Vector<InnerIdType> graph_targets;
+    Vector<uint16_t> graph_distances;
     // Internal comparison switch; never serialized or exposed as an index parameter.
     bool reuse_final_graph{true};
     uint64_t reused_graph_rows{0};
     uint64_t certificate_rows{0};
     uint64_t reused_rows{0};  // Diagnostics for the last build, not serialized.
-    std::vector<uint8_t> reuse_mask;
+    Vector<uint8_t> reuse_mask;
     std::array<double, 6> phase_seconds{};
+
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const {
+        auto buffer_bytes = [](const auto& values) {
+            using Value = typename std::decay_t<decltype(values)>::value_type;
+            return static_cast<uint64_t>(values.capacity()) * sizeof(Value);
+        };
+        auto string_bytes = [](const std::string& value) -> uint64_t {
+            const auto data = reinterpret_cast<std::uintptr_t>(value.data());
+            const auto object = reinterpret_cast<std::uintptr_t>(&value);
+            // Small strings already occupy space inside the string object/vector slot.
+            return data >= object and data - object < sizeof(value) ? 0 : value.capacity() + 1;
+        };
+        uint64_t bytes = sizeof(*this) + string_bytes(policy);
+        bytes += buffer_bytes(source_ids) + buffer_bytes(fingerprints) + buffer_bytes(offsets);
+        bytes += buffer_bytes(targets) + buffer_bytes(distances) + buffer_bytes(hashes);
+        bytes += buffer_bytes(inner_ids) + buffer_bytes(graph_offsets);
+        bytes += buffer_bytes(graph_targets) + buffer_bytes(graph_distances);
+        bytes += buffer_bytes(reuse_mask);
+        for (const auto& source : source_ids) {
+            bytes += string_bytes(source);
+        }
+        return bytes;
+    }
 
     [[nodiscard]] JsonType
     GetBuildStats() const {

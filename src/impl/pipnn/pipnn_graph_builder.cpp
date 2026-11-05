@@ -270,6 +270,8 @@ public:
           dimensions_(dimensions),
           metric_(metric),
           rows_(rows),
+          fingerprints_(allocator),
+          cached_rows_(allocator),
           ids_(allocator),
           reservoirs_(allocator),
           reservoir_states_(allocator) {
@@ -413,8 +415,8 @@ private:
     const std::vector<std::string>* source_ids_{nullptr};
     const PiPNNBuildCache* imported_cache_{nullptr};
     std::shared_ptr<PiPNNBuildCache>* exported_cache_{nullptr};
-    std::vector<uint64_t> fingerprints_;
-    std::vector<uint8_t> cached_rows_;
+    Vector<uint64_t> fingerprints_;
+    Vector<uint8_t> cached_rows_;
     bool warm_build_{false};
     bool reuse_graph_{false};
     std::vector<uint32_t> old_to_new_;
@@ -649,9 +651,9 @@ PiPNNPipeline::capture_cache() {
     if (source_ids_ == nullptr or exported_cache_ == nullptr) {
         return;
     }
-    auto snapshot = std::make_shared<PiPNNBuildCache>();
+    auto snapshot = std::make_shared<PiPNNBuildCache>(allocator_);
     snapshot->policy = cache_policy();
-    snapshot->source_ids = *source_ids_;
+    snapshot->source_ids.assign(source_ids_->begin(), source_ids_->end());
     snapshot->fingerprints = std::move(fingerprints_);
     snapshot->inner_ids.assign(ids_.begin(), ids_.end());
     snapshot->offsets.reserve(ids_.size() + 1);

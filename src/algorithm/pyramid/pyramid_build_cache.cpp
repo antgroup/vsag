@@ -175,7 +175,7 @@ PyramidBuildCache::GetGraphCache(const std::string& hierarchy_name,
 
 JsonType
 PyramidBuildCache::GetPiPNNBuildStats() const {
-    PiPNNBuildCache aggregate;
+    PiPNNBuildCache aggregate(allocator_);
     for (const auto& [key, graph] : graph_caches_) {
         if (graph->pipnn == nullptr) {
             continue;
@@ -189,6 +189,17 @@ PyramidBuildCache::GetPiPNNBuildStats() const {
         }
     }
     return aggregate.GetBuildStats();
+}
+
+uint64_t
+PyramidBuildCache::GetPiPNNMemoryUsage() const {
+    uint64_t memory = 0;
+    for (const auto& [key, graph] : graph_caches_) {
+        if (graph != nullptr and graph->pipnn != nullptr) {
+            memory += graph->pipnn->GetMemoryUsage();
+        }
+    }
+    return memory;
 }
 
 uint64_t

@@ -460,12 +460,24 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
             }
         }
         const auto imported_snapshot = cache_->pipnn;
-        pipnn_builder.Build(bottom_graph_,
-                            inner_ids,
-                            pipnn_vectors,
-                            source_id == nullptr ? nullptr : &pipnn_sources,
-                            imported_snapshot.get(),
-                            &cache_->pipnn);
+        auto refresh_cache_memory = [&]() {
+            pipnn_cache_memory_.store(
+                cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                std::memory_order_release);
+            mark_memory_usage_dirty();
+        };
+        try {
+            pipnn_builder.Build(bottom_graph_,
+                                inner_ids,
+                                pipnn_vectors,
+                                source_id == nullptr ? nullptr : &pipnn_sources,
+                                imported_snapshot.get(),
+                                &cache_->pipnn);
+        } catch (...) {
+            refresh_cache_memory();
+            throw;
+        }
+        refresh_cache_memory();
         if (imported_snapshot != nullptr) {
             build_cache_hit_nodes_ = cache_->pipnn == nullptr ? 0 : cache_->pipnn->reused_rows;
             build_cache_missed_nodes_ = inner_ids.size() - build_cache_hit_nodes_;
@@ -1605,6 +1617,9 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    pipnn_cache_memory_.store(cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                              std::memory_order_release);
+    mark_memory_usage_dirty();
 }
 
 void

@@ -134,7 +134,11 @@ PiPNN 导出带版本的 reservoir 快照，包含稳定 Source ID、原始 FP32
 已有 fused 存储缓存接口限制继续适用。PiPNN 自适应剪枝在策略一致时可以复用 reservoir，
 由于阈值依赖候选数量，所有自适应行都重新剪枝。指纹用于检测意外内容变化，不提供对抗哈希碰撞的保证，缓存文件应与索引文件处于相同可信边界。
 
-快照在 `Build` 后保留于内存，额外空间与点数乘 `reservoir_size` 成正比。
+快照在 `Build` 后保留于内存，额外空间与点数乘 `reservoir_size` 成正比。大型快照缓冲区使用索引传入的 allocator。
+`GetMemoryUsage()` 计入保留快照的容量，`GetMemoryUsageDetail()` 通过 `pipnn_build_cache`
+字段给出该分项，也包括 `ImportCache` 导入的快照。该分项统计快照对象、缓冲区容量及字符串堆容量，
+与 allocator 元数据和进程 RSS 的统计口径不同。
+
 导出的是最近一次 PiPNN 批量构建的快照，后续增删改不会重新生成 reservoir。
 普通索引序列化不会保留 reservoir，即使设置 `persist_source_id: true` 也应在构建后单独导出缓存。
 恢复后的索引如果没有 reservoir，只能导出旧图种子，PiPNN 会冷构建。
@@ -148,3 +152,5 @@ Pyramid 的 `build_cache_hit_memberships` 按子图分别计数，同一向量�
 `pipnn_build.certificate_rows`。Pyramid 的这两个字段按子图计数。
 临时诊断对象 `pipnn_build.phase_seconds` 记录准备、缓存匹配、分区、叶内计算及合并、
 图写入和缓存生成的耗时，不包含索引训练、路由层和流 I/O。
+
+导入时，最终邻接中的每条边必须存在于对应的候选行，且距离键一致；自环和重复的最终邻接目标也会被拒绝，原缓存不会被无效导入替换。

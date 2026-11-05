@@ -794,12 +794,27 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 }
                 auto& graph_cache = cache_->CreateGraphCache(hname, node_path);
                 const auto imported_snapshot = graph_cache.pipnn;
-                pipnn_builder.Build(graph,
-                                    ids,
-                                    node_rows,
-                                    source_ids == nullptr ? nullptr : &node_sources,
-                                    imported_snapshot.get(),
-                                    &graph_cache.pipnn);
+                const uint64_t old_memory =
+                    imported_snapshot == nullptr ? 0 : imported_snapshot->GetMemoryUsage();
+                auto charge_snapshot = [&]() {
+                    if (graph_cache.pipnn != nullptr) {
+                        pipnn_cache_memory_.fetch_add(graph_cache.pipnn->GetMemoryUsage(),
+                                                      std::memory_order_release);
+                    }
+                };
+                pipnn_cache_memory_.fetch_sub(old_memory, std::memory_order_acq_rel);
+                try {
+                    pipnn_builder.Build(graph,
+                                        ids,
+                                        node_rows,
+                                        source_ids == nullptr ? nullptr : &node_sources,
+                                        imported_snapshot.get(),
+                                        &graph_cache.pipnn);
+                } catch (...) {
+                    charge_snapshot();
+                    throw;
+                }
+                charge_snapshot();
                 if (cache_attempt) {
                     const auto hits =
                         graph_cache.pipnn == nullptr ? 0 : graph_cache.pipnn->reused_rows;
@@ -1341,6 +1356,7 @@ std::unordered_map<std::string, uint64_t>
 Pyramid::GetMemoryUsageDetail() const {
     std::shared_lock resize_lock(resize_mutex_);
     std::unordered_map<std::string, uint64_t> memory_usage;
+    memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
     memory_usage["points_mutex"] = points_mutex_ == nullptr ? 0 : points_mutex_->GetMemoryUsage();
     memory_usage["pool"] = pool_ == nullptr ? 0 : pool_->GetMemoryUsage();
     memory_usage["label_table"] = label_table_ == nullptr ? 0 : label_table_->GetMemoryUsage();
@@ -3806,6 +3822,7 @@ void
 Pyramid::ImportCache(std::istream& in_stream) {
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    pipnn_cache_memory_.store(cache_->GetPiPNNMemoryUsage(), std::memory_order_release);
 }
 
 std::vector<int64_t>

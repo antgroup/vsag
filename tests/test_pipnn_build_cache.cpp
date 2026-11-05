@@ -24,6 +24,7 @@
 
 #include "algorithm/build_cache.h"
 #include "algorithm/pyramid/pyramid_build_cache.h"
+#include "allocator/memory_record_allocator.h"
 #include "impl/allocator/safe_allocator.h"
 #include "json_wrapper.h"
 #include "vsag/vsag.h"
@@ -85,6 +86,9 @@ TEST_CASE("PiPNN public cache round trip", "[ft][pipnn_cache]") {
     };
     auto original = create();
     REQUIRE(original->Build(dataset()).has_value());
+    const auto retained_memory = original->GetMemoryUsageDetail().at("pipnn_build_cache");
+    REQUIRE(retained_memory > count * sizeof(vsag::InnerIdType));
+    REQUIRE(original->GetMemoryUsage() >= retained_memory);
     std::stringstream buffer;
     REQUIRE(original->ExportCache(buffer).has_value());
     const auto bytes = buffer.str();
@@ -107,8 +111,12 @@ TEST_CASE("PiPNN public cache round trip", "[ft][pipnn_cache]") {
     }
     SECTION("unchanged data reuses all rows") {
         auto warmed = create();
+        const auto empty_memory = warmed->GetMemoryUsage();
         std::stringstream input(bytes);
         REQUIRE(warmed->ImportCache(input).has_value());
+        const auto imported_memory = warmed->GetMemoryUsageDetail().at("pipnn_build_cache");
+        REQUIRE(imported_memory > 0);
+        REQUIRE(warmed->GetMemoryUsage() >= empty_memory + imported_memory);
         REQUIRE(warmed->Build(dataset()).has_value());
         const auto stats = vsag::JsonType::Parse(warmed->GetStats());
         INFO(warmed->GetStats());
@@ -258,12 +266,36 @@ TEST_CASE("PiPNN public cache round trip", "[ft][pipnn_cache]") {
                     1.0F);
         }
     }
+    SECTION("replacing a snapshot updates the memory charge") {
+        auto warmed = create();
+        std::stringstream input(bytes);
+        REQUIRE(warmed->ImportCache(input).has_value());
+        const auto first_memory = warmed->GetMemoryUsage();
+        std::stringstream repeated(bytes);
+        REQUIRE(warmed->ImportCache(repeated).has_value());
+        REQUIRE(warmed->GetMemoryUsage() == first_memory);
+        std::stringstream legacy;
+        vsag::IOStreamWriter writer(legacy);
+        auto alloc = vsag::SafeAllocator::FactoryDefaultAllocator();
+        if (index_type == "hgraph") {
+            vsag::BuildCache empty(alloc.get());
+            empty.Serialize(writer);
+        } else {
+            vsag::PyramidBuildCache empty(alloc.get());
+            empty.Serialize(writer);
+        }
+        REQUIRE(warmed->ImportCache(legacy).has_value());
+        REQUIRE(warmed->GetMemoryUsageDetail().at("pipnn_build_cache") == 0);
+        REQUIRE(warmed->GetMemoryUsage() < first_memory);
+    }
     SECTION("truncated import preserves an already imported cache") {
         auto warmed = create();
         std::stringstream input(bytes);
         REQUIRE(warmed->ImportCache(input).has_value());
+        const auto memory = warmed->GetMemoryUsage();
         std::stringstream corrupt(bytes.substr(0, bytes.size() - 1));
         REQUIRE_FALSE(warmed->ImportCache(corrupt).has_value());
+        REQUIRE(warmed->GetMemoryUsage() == memory);
         REQUIRE(warmed->Build(dataset()).has_value());
         REQUIRE(vsag::JsonType::Parse(warmed->GetStats())["build_cache_hit_rate"].GetFloat() ==
                 1.0F);
@@ -274,16 +306,16 @@ TEST_CASE("PiPNN cache version and structural validation", "[ft][pipnn_cache]") 
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
     vsag::BuildCache original(allocator.get());
     original.source_ids_.emplace_back("a");
-    original.pipnn = std::make_shared<vsag::PiPNNBuildCache>();
+    original.pipnn = std::make_shared<vsag::PiPNNBuildCache>(allocator.get());
     original.pipnn->policy = "policy";
-    original.pipnn->source_ids = {"a", "b"};
-    original.pipnn->fingerprints = {123, 456};
-    original.pipnn->offsets = {0, 1, 2};
+    original.pipnn->source_ids = {"a", "b", "c"};
+    original.pipnn->fingerprints = {123, 456, 789};
+    original.pipnn->offsets = {0, 1, 2, 2};
     original.pipnn->targets = {1, 0};
     original.pipnn->distances = {42, 42};
     original.pipnn->hashes = {0, 0};
-    original.pipnn->inner_ids = {0, 1};
-    original.pipnn->graph_offsets = {0, 1, 2};
+    original.pipnn->inner_ids = {0, 1, 2};
+    original.pipnn->graph_offsets = {0, 1, 2, 2};
     original.pipnn->graph_targets = {1, 0};
     original.pipnn->graph_distances = {42, 42};
     std::stringstream encoded;
@@ -293,6 +325,9 @@ TEST_CASE("PiPNN cache version and structural validation", "[ft][pipnn_cache]") 
     vsag::IOStreamReader reader(encoded);
     restored.Deserialize(reader);
     REQUIRE(restored.pipnn->targets == original.pipnn->targets);
+    REQUIRE(restored.pipnn->targets.get_allocator().allocator_ == allocator.get());
+    REQUIRE(restored.pipnn->distances.get_allocator().allocator_ == allocator.get());
+    REQUIRE(restored.pipnn->source_ids.get_allocator().allocator_ == allocator.get());
     REQUIRE(restored.pipnn->fingerprints == original.pipnn->fingerprints);
     SECTION("unknown version is rejected without changing state") {
         auto bytes = encoded.str();
@@ -304,7 +339,7 @@ TEST_CASE("PiPNN cache version and structural validation", "[ft][pipnn_cache]") 
         REQUIRE(restored.pipnn->policy == "policy");
     }
     SECTION("nonmonotonic offsets are rejected") {
-        original.pipnn->offsets = {0, 3, 2};
+        original.pipnn->offsets = {0, 3, 2, 2};
         std::stringstream input;
         vsag::IOStreamWriter output(input);
         original.Serialize(output);
@@ -312,12 +347,36 @@ TEST_CASE("PiPNN cache version and structural validation", "[ft][pipnn_cache]") 
         REQUIRE_THROWS(restored.Deserialize(bad));
     }
     SECTION("out of range target is rejected") {
-        original.pipnn->targets[0] = 2;
+        original.pipnn->targets[0] = 3;
         std::stringstream input;
         vsag::IOStreamWriter output(input);
         original.Serialize(output);
         vsag::IOStreamReader bad(input);
         REQUIRE_THROWS(restored.Deserialize(bad));
+    }
+    SECTION("in-range graph targets must match their candidate row") {
+        const auto invalid = GENERATE(0, 1, 2, 3, 4);
+        if (invalid == 0) {
+            original.pipnn->graph_targets[0] = 2;  // In range, absent from this reservoir.
+        } else if (invalid == 1) {
+            original.pipnn->graph_targets[0] = 0;
+        } else if (invalid == 2) {
+            original.pipnn->graph_distances[0] = 43;
+        } else if (invalid == 3) {
+            original.pipnn->targets[0] = 0;
+        } else {
+            original.pipnn->graph_offsets = {0, 2, 3, 3};
+            original.pipnn->graph_targets = {1, 1, 0};
+            original.pipnn->graph_distances = {42, 42, 42};
+        }
+        const auto previous = restored.pipnn;
+        std::stringstream input;
+        vsag::IOStreamWriter output(input);
+        original.Serialize(output);
+        vsag::IOStreamReader bad(input);
+        REQUIRE_THROWS(restored.Deserialize(bad));
+        REQUIRE(restored.pipnn == previous);
+        REQUIRE(restored.pipnn->graph_targets[0] == 1);
     }
     SECTION("legacy payload retains its format") {
         original.pipnn.reset();
@@ -332,5 +391,111 @@ TEST_CASE("PiPNN cache version and structural validation", "[ft][pipnn_cache]") 
         restored.Deserialize(legacy);
         REQUIRE(restored.pipnn == nullptr);
         REQUIRE(restored.source_ids_[0] == "a");
+    }
+}
+
+TEST_CASE("PiPNN snapshot buffers use the supplied allocator and charge capacity",
+          "[ft][pipnn_cache]") {
+    fixtures::MemoryRecordAllocator allocator;
+    {
+        vsag::PiPNNBuildCache snapshot(&allocator);
+        snapshot.source_ids = {"a", "b"};
+        snapshot.targets.reserve(4096);
+        snapshot.distances.reserve(4096);
+        snapshot.hashes.reserve(4096);
+        snapshot.graph_targets.reserve(2048);
+        snapshot.graph_distances.reserve(2048);
+        snapshot.offsets.reserve(128);
+        snapshot.graph_offsets.reserve(128);
+        snapshot.fingerprints.reserve(128);
+        snapshot.inner_ids.reserve(128);
+        snapshot.reuse_mask.reserve(128);
+        REQUIRE(allocator.GetCurrentMemory() >= 4096 * 8 + 2048 * 6);
+        REQUIRE(snapshot.GetMemoryUsage() == sizeof(snapshot) + allocator.GetCurrentMemory());
+        snapshot.source_ids[0] = std::string(256, 'x');
+        REQUIRE(snapshot.GetMemoryUsage() >= sizeof(snapshot) + allocator.GetCurrentMemory() + 257);
+    }
+    REQUIRE(allocator.GetCurrentMemory() == 0);
+}
+
+TEST_CASE("PiPNN rejects invalid public imports before publishing index state",
+          "[ft][pipnn_cache]") {
+    const std::string index_type = GENERATE("hgraph", "pyramid");
+    const auto threads = GENERATE(1, 4);
+    constexpr uint64_t count = 32;
+    constexpr uint64_t dim = 8;
+    auto config = vsag::JsonType::Parse(R"({"dtype":"float32","metric_type":"l2","dim":8,
+        "index_param":{"graph_type":"pipnn","max_degree":8,
+            "base_quantization_type":"fp32"}})");
+    config["index_param"]["build_thread_count"].SetInt(threads);
+    if (index_type == "pyramid") {
+        config["index_param"]["root_graph_type"].SetString("single_layer");
+        config["index_param"]["no_build_levels"].SetJson(vsag::JsonType::Parse("[1]"));
+    }
+    std::vector<float> vectors(count * dim);
+    std::vector<int64_t> labels(count);
+    std::vector<std::string> sources(count);
+    std::vector<std::string> paths(count, "shared");
+    std::mt19937 random(42);
+    std::normal_distribution<float> normal;
+    for (auto& value : vectors) {
+        value = normal(random);
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        sources[i] = "source-" + std::to_string(i);
+    }
+    auto dataset = [&]() {
+        auto data = vsag::Dataset::Make()
+                        ->NumElements(count)
+                        ->Dim(dim)
+                        ->Ids(labels.data())
+                        ->Float32Vectors(vectors.data())
+                        ->SourceID(sources.data())
+                        ->Owner(false);
+        if (index_type == "pyramid") {
+            data->Paths(paths.data());
+        }
+        return data;
+    };
+    auto create = [&]() {
+        auto result = vsag::Factory::CreateIndex(index_type, config.Dump());
+        REQUIRE(result.has_value());
+        return result.value();
+    };
+    auto original = create();
+    REQUIRE(original->Build(dataset()).has_value());
+    std::stringstream buffer;
+    REQUIRE(original->ExportCache(buffer).has_value());
+    const auto bytes = buffer.str();
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    SECTION("invalid adjacency import leaves the previous cache usable") {
+        auto warmed = create();
+        std::stringstream valid(bytes);
+        REQUIRE(warmed->ImportCache(valid).has_value());
+        const auto memory = warmed->GetMemoryUsage();
+        std::stringstream input(bytes);
+        vsag::IOStreamReader reader(input);
+        std::stringstream corrupt;
+        vsag::IOStreamWriter writer(corrupt);
+        if (index_type == "hgraph") {
+            vsag::BuildCache cache(allocator.get());
+            cache.Deserialize(reader);
+            REQUIRE(cache.pipnn->graph_offsets[1] > 0);
+            cache.pipnn->graph_targets[0] = 0;
+            cache.Serialize(writer);
+        } else {
+            vsag::PyramidBuildCache cache(allocator.get());
+            cache.Deserialize(reader);
+            auto* root = cache.GetGraphCache("", "");
+            REQUIRE(root->pipnn->graph_offsets[1] > 0);
+            root->pipnn->graph_targets[0] = 0;
+            cache.Serialize(writer);
+        }
+        REQUIRE_FALSE(warmed->ImportCache(corrupt).has_value());
+        REQUIRE(warmed->GetMemoryUsage() == memory);
+        REQUIRE(warmed->Build(dataset()).has_value());
+        REQUIRE(vsag::JsonType::Parse(warmed->GetStats())["build_cache_hit_rate"].GetFloat() ==
+                1.0F);
     }
 }
