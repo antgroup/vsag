@@ -4624,6 +4624,66 @@ TEST_CASE("HGraph EstimateBuildMemory unsupported configuration", "[ft][memory][
     }
 }
 
+TEST_CASE("HGraph EstimateBuildMemory includes reserved capacity and SQ trainer buffers",
+          "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+
+    SECTION("initial capacity sets the retained-store floor") {
+        constexpr int64_t dim = 16;
+        constexpr uint64_t count = 512;
+        constexpr uint64_t large_capacity = 16384;
+        auto make_index = [&](uint64_t init_capacity) {
+            HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+            build_param.graph_type = "nsw";
+            build_param.graph_io_type = "memory_io";
+            build_param.thread_count = 1;
+            auto param = vsag::JsonType::Parse(
+                HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+            param["index_param"]["base_io_type"].SetString("memory_io");
+            param["index_param"]["hgraph_init_capacity"].SetUint64(init_capacity);
+            param["index_param"]["max_degree"].SetUint64(4);
+            param["index_param"]["ef_construction"].SetUint64(4);
+            return TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        };
+        auto small = make_index(count);
+        auto large = make_index(large_capacity);
+        REQUIRE(small->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE(large->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+        const auto small_estimate = small->EstimateBuildMemory(count);
+        const auto large_estimate = large->EstimateBuildMemory(count);
+        REQUIRE(large_estimate > small_estimate);
+        constexpr uint64_t capacity_floor =
+            large_capacity * dim * sizeof(float) + large_capacity * (4 + 1) * sizeof(uint32_t);
+        REQUIRE(large_estimate >= capacity_floor);
+    }
+
+    SECTION("uniform SQ training includes upper and lower bound buffers") {
+        constexpr int64_t dim = 4096;
+        constexpr uint64_t count = 2;
+        HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8_uniform");
+        build_param.graph_type = "nsw";
+        build_param.graph_io_type = "memory_io";
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["base_io_type"].SetString("memory_io");
+        param["index_param"]["hgraph_init_capacity"].SetUint64(count);
+        param["index_param"]["resize_increase_count_bit"].SetUint64(1);
+        param["index_param"]["max_degree"].SetUint64(4);
+        param["index_param"]["ef_construction"].SetUint64(4);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+        const auto estimate = index->EstimateBuildMemory(count);
+        const auto estimated_bytes_per_dim = estimate / dim;
+        // Two sampled float rows plus upper(dim) and lower(dim) dominate this small build.
+        // Keep a broad bound around the expected ~18 bytes/dim instead of an exact total.
+        REQUIRE(estimated_bytes_per_dim >= 16);
+        REQUIRE(estimated_bytes_per_dim < 24);
+    }
+}
+
 TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory][hgraph][build]") {
     using namespace fixtures;
 
@@ -4636,6 +4696,21 @@ TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory]
         param["index_param"]["build_by_base"].SetBool(false);
         param["index_param"]["precise_enable_read_cache"].SetBool(true);
         param["index_param"]["precise_cache_total_size"].SetUint64(1024 * 1024);
+        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    }
+
+    SECTION("cached file-backed graph") {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.graph_io_type = "buffer_io";
+        build_param.graph_file_path = HGraphTestIndex::dir.GenerateRandomFile();
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["graph_enable_read_cache"].SetBool(true);
+        param["index_param"]["graph_cache_total_size"].SetUint64(1024 * 1024);
         auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
         REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
         REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);

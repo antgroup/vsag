@@ -1423,6 +1423,14 @@ HGraph::can_estimate_build_memory() const {
         // File / mmap backed base code stores cannot be accounted as an in-memory peak.
         return false;
     }
+    const auto graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    if (not this->bottom_graph_->InMemory() and graph_param != nullptr and
+        graph_param->io_parameter_ != nullptr and graph_param->io_parameter_->enable_read_cache_) {
+        // Construction probes can retain up to the configured OptionalPageCache budget while
+        // reading a file-backed graph. That cache is not part of the in-memory model.
+        return false;
+    }
     const auto quantizer_name = this->basic_flatten_codes_->GetQuantizerName();
     const bool estimable_quantizer = quantizer_name == QUANTIZATION_TYPE_VALUE_FP32 or
                                      quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
@@ -1611,9 +1619,16 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     // temporaries. EstimateMemory() models retained components using their backend allocation
     // granularity: contiguous stores use their exact sizes and blocked stores use block rounding.
     const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
-    uint64_t final_memory = this->EstimateMemory(num_elements);
+    const auto bottom_graph_param =
+        std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    const uint64_t init_capacity =
+        bottom_graph_param == nullptr ? 0 : bottom_graph_param->init_max_capacity_;
+    // Construction reserves the initial capacity and resize() never shrinks it, so a smaller
+    // build still retains stores and capacity-sized scratch for all of those rows.
+    const uint64_t retained_rows = std::max<uint64_t>(num_elements, init_capacity);
+    uint64_t final_memory = this->EstimateMemory(retained_rows);
     const uint64_t element_count =
-        next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
+        next_multiple_of_power_of_two(retained_rows, this->resize_increase_count_bit_);
     const auto block_size = Options::Instance().block_size_limit();
     auto block_memory_ceil = [](uint64_t memory, uint64_t size) -> uint64_t {
         return static_cast<uint64_t>(
@@ -1661,6 +1676,11 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         build_memory +=
             quantizer_train_sample_count * static_cast<uint64_t>(this->dim_) * sizeof(float);
     }
+    if (quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM) {
+        // TrainUniform() keeps its upper(dim) and lower(dim) float vectors alive alongside the
+        // sampled rows. Both use the default heap and are invisible to the recording allocator.
+        build_memory += 2 * static_cast<uint64_t>(this->dim_) * sizeof(float);
+    }
 
     // Workers that may hold construction scratch at the same time. insert_add_batch() keeps at
     // most build_thread_count_ unfinished tasks even when the supplied pool has more workers.
@@ -1676,7 +1696,7 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     //     visited list is one tag word plus one bit word per 64 nodes held by the graph, and the
     //     search keeps a result heap and a candidate heap of up to ef_construct entries each.
     const uint64_t visited_list_bytes =
-        (num_elements + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
+        (element_count + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
     const uint64_t probe_heap_bytes =
         2 * this->ef_construct_ * sizeof(std::pair<float, InnerIdType>);
     build_memory += build_threads * (visited_list_bytes + probe_heap_bytes);
