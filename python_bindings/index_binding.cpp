@@ -94,8 +94,15 @@ expected_numpy_dtype_name(DenseVectorKind kind) {
 }
 
 void
-validate_dense_index_kind(DenseVectorKind kind, const char* operation_name) {
+validate_dense_index_kind(DenseVectorKind kind,
+                          const char* operation_name,
+                          bool allow_unsupported = false) {
     if (kind == DenseVectorKind::UNSUPPORTED) {
+        if (allow_unsupported) {
+            // Unsupported (sparse) indexes reject dense queries inside C++, which the
+            // binding surfaces as RuntimeError; do not short-circuit with ValueError.
+            return;
+        }
         throw std::invalid_argument(
             fmt::format("{} only supports indexes with dtype in [{}, {}, {}, {}]",
                         operation_name,
@@ -621,7 +628,10 @@ public:
     py::array_t<float>
     CalcDistancesById(const py::array& query,
                       const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& ids) {
-        validate_dense_index_kind(dense_vector_kind_, "calc_distances_by_id");
+        // Unsupported (sparse) indexes keep the legacy RuntimeError contract here.
+        validate_dense_index_kind(dense_vector_kind_,
+                                  "calc_distances_by_id",
+                                  /*allow_unsupported=*/true);
         const bool is_binary = dense_vector_kind_ == DenseVectorKind::BINARY;
         py::array validated_query = query;
         if (not is_binary) {
@@ -633,9 +643,11 @@ public:
             validated_query = converted;
         }
         const uint64_t query_size = is_binary ? (dim_ + 7U) / 8U : 0;
-        auto buf_query = validate_dense_array(
-            validated_query, is_binary ? DenseVectorKind::BINARY : DenseVectorKind::FLOAT32,
-            "query", query_size);
+        auto buf_query =
+            validate_dense_array(validated_query,
+                                 is_binary ? DenseVectorKind::BINARY : DenseVectorKind::FLOAT32,
+                                 "query",
+                                 query_size);
         auto buf_ids = ids.request();
 
         if (buf_query.ndim != 1 || buf_ids.ndim != 1) {

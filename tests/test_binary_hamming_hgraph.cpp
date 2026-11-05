@@ -745,3 +745,59 @@ TEST_CASE("(PR) Binary Unsupported Index Backends Are Rejected", "[ft][factory][
         REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
     }
 }
+
+TEST_CASE("(PR) Binary HGraph Range And Batch Distances Reject Dense-Only Query",
+          "[ft][hgraph][bruteforce][pr]") {
+    constexpr int64_t dim = 65;
+    constexpr int64_t count = 16;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65,
+        "index_param": {
+            "base_quantization_type": "binary"
+        }
+    })";
+    const std::string brute_params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65
+    })";
+
+    auto base_data = GeneratePacked(count, dim, 3262);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+
+    auto graph_made = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(graph_made.has_value());
+    auto graph = graph_made.value();
+    REQUIRE(graph->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    auto brute_made = vsag::Factory::CreateIndex("brute_force", brute_params);
+    REQUIRE(brute_made.has_value());
+    auto brute = brute_made.value();
+    REQUIRE(brute->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    // A float32-only Dataset must be rejected like KNN does, instead of decoding the
+    // floats as packed bits or crashing on a nullptr vector storage.
+    std::vector<float> float_data(dim, 0.0F);
+    auto dense_query = vsag::Dataset::Make()
+                           ->NumElements(1)
+                           ->Dim(dim)
+                           ->Float32Vectors(float_data.data())
+                           ->Owner(false);
+
+    auto range_result = graph->RangeSearch(dense_query, 40.0F, "{}");
+    REQUIRE_FALSE(range_result.has_value());
+    REQUIRE(range_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto batch_result = brute->CalcDistancesById(dense_query, ids.data(), count, true, -1);
+    REQUIRE_FALSE(batch_result.has_value());
+    REQUIRE(batch_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    auto topk_result = brute->CalcDistancesById(dense_query, ids.data(), count, true, 2);
+    REQUIRE_FALSE(topk_result.has_value());
+    REQUIRE(topk_result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+}
