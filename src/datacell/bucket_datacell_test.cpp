@@ -950,12 +950,14 @@ TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
           "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     constexpr int64_t dim = 1;
-    constexpr uint64_t count = 65536;
+    constexpr uint64_t count = 131072;
     constexpr uint64_t bucket_count = 1;
     const std::string quantizer_type = GENERATE("pq", "pqfs");
     CAPTURE(quantizer_type);
-    std::vector<float> vectors(count, 0.0F);
-    std::fill(vectors.begin() + count / 2, vectors.end(), 100.0F);
+    std::vector<float> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        vectors[i] = i % 2 == 0 ? 0.0F : 100.0F;
+    }
 
     JsonType param_json;
     JsonType io_json;
@@ -974,9 +976,9 @@ TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
     common_param.dim_ = dim;
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
     auto bucket = BucketInterface::MakeInstance(param, common_param);
-    // The sole centroid is 50, so the two halves have residuals -50 and +50.
-    // Both Build and nearest routing agree; duplicating their interleaved rows
-    // used to fill PQ's 65,536-row prefix with only the first half's -50 value.
+    // The sole centroid is 50, so alternating rows have residuals -50 and +50.
+    // Both Build and nearest routing agree. Fixed-stride sampling used to select
+    // only even rows, filling PQ's 65,536-row prefix with just the -50 residual.
     auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(
         common_param, bucket_count, /*centroid_scale=*/5000.0F);
     bucket->SetStrategy(strategy);
