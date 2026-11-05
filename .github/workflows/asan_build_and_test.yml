@@ -2,7 +2,7 @@ name: Asan Build & Test Parallel
 
 on:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "main", "0.*", "1.1" ]
     paths-ignore:
       - 'docs/**'
   workflow_dispatch:
@@ -11,7 +11,7 @@ jobs:
     name: Asan Build X86
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-v1.1-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -49,7 +49,7 @@ jobs:
     name: Asan Build Aarch64
     runs-on: ubuntu-22.04-arm
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -133,7 +133,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-v1.1-mkl
       volumes:
         - /opt:/useless
     steps:
@@ -171,7 +171,7 @@ jobs:
       matrix:
         test_type: [ unittests, functests ]
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -248,7 +248,7 @@ jobs:
     needs: build_asan_x86
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-v1.1-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -282,7 +282,7 @@ jobs:
     needs: build_asan_aarch64
     runs-on: ubuntu-22.04-arm
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     concurrency:

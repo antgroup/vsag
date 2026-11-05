@@ -2,7 +2,7 @@ name: PR SIMD Coverage
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "1.1"]
     paths:
       - 'src/simd/**'
       # make cov configures the aggregate library/test build.
@@ -34,7 +34,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
     steps:
       - uses: actions/checkout@v4
         with:

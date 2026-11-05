@@ -3,7 +3,7 @@ name: PR CI
 on:
   workflow_dispatch:
   pull_request:
-    branches: ["main", "0.*"]
+    branches: ["main", "0.*", "1.1"]
 
 concurrency:
   group: pr-ci-${{ github.event.pull_request.number || github.sha }}
@@ -268,7 +268,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -310,7 +310,7 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -348,7 +348,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -384,7 +384,7 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     steps:

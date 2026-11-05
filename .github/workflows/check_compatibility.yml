@@ -2,7 +2,7 @@ name: Check Compatibility
 
 on:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "main", "0.*", "1.1" ]
     paths-ignore:
       - 'docs/**'
   workflow_dispatch:
@@ -15,7 +15,7 @@ jobs:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
     steps:
       - name: Install GitHub CLI
         env:

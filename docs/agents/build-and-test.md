@@ -35,7 +35,8 @@ Prefer these targets over invoking `cmake` directly so behavior matches CI.
 
 - Recommended: use the published Docker development image
   (`vsaglib/vsag:ubuntu`).
-- Maintained CI images use the `ci-x86-*` and `ci-aarch64-*` tags and are
+- Hosted CI on 1.1 uses `ci-v1.1-openblas` (amd64 and arm64) and
+  `ci-v1.1-mkl` (amd64). The images are
   published to both `vsaglib/vsag` on Docker Hub and
   `ghcr.io/antgroup/vsag` on GitHub Container Registry.
 - Supported local environments include Ubuntu 20.04+ and CentOS 7+.
