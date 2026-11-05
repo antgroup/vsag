@@ -199,6 +199,54 @@ def test_binary_rejects_non_contiguous_arrays():
         )
 
 
+def test_binary_hgraph_load_refreshes_dimension(tmp_path):
+    source_dim = 10
+    num_elements = 32
+    base = make_binary_data(num_elements, source_dim, 51)
+    ids = np.arange(num_elements, dtype=np.int64)
+    source = pyvsag.Index("hgraph", index_params("hgraph", source_dim))
+    source.build(vectors=base, ids=ids, num_elements=num_elements, dim=source_dim)
+
+    filename = str(tmp_path / "binary_hgraph.bin")
+    source.save(filename)
+    restored = pyvsag.Index("hgraph", index_params("hgraph", source_dim - 1))
+    restored.load(filename)
+
+    query = base[0]
+    search_params = json.dumps({"hgraph": {"ef_search": 64}})
+    result_ids, result_dists = restored.knn_search(
+        vector=query, k=1, parameters=search_params
+    )
+    assert result_ids[0] == 0
+    assert result_dists[0] == 0.0
+
+    range_ids, range_dists = restored.range_search(
+        point=query, threshold=0.0, parameters=search_params
+    )
+    assert 0 in range_ids
+    assert range_dists[np.flatnonzero(range_ids == 0)[0]] == 0.0
+    np.testing.assert_array_equal(
+        restored.calc_distances_by_id(query=query, ids=np.array([0], dtype=np.int64)),
+        np.array([0.0], dtype=np.float32),
+    )
+
+    extra = make_binary_data(1, source_dim, 52)
+    restored.add(
+        vectors=extra,
+        ids=np.array([num_elements], dtype=np.int64),
+        num_elements=1,
+        dim=source_dim,
+    )
+    assert restored.get_num_elements() == num_elements + 1
+    with pytest.raises(ValueError, match="dim"):
+        restored.add(
+            vectors=extra,
+            ids=np.array([num_elements + 1], dtype=np.int64),
+            num_elements=1,
+            dim=source_dim - 1,
+        )
+
+
 def test_binary_hgraph_recall_against_bruteforce():
     dim = 128
     num_elements = 600
