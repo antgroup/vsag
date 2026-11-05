@@ -48,6 +48,9 @@ public:
         check_size(size);
         auto* pointer = DefaultAllocator::Allocate(size);
         if (size == capture_size) {
+            // Classification arrays can have the same size as the training buffer, which is
+            // allocated last. Ignore earlier matches instead of depending on destruction order.
+            captured_pointers.clear();
             captured_pointers.emplace_back(pointer);
         }
         return pointer;
@@ -57,6 +60,7 @@ public:
     Deallocate(void* pointer) override {
         auto captured = std::find(captured_pointers.begin(), captured_pointers.end(), pointer);
         if (captured != captured_pointers.end()) {
+            REQUIRE(captured_pointers.size() == 1);
             const auto* values = static_cast<const float*>(pointer);
             captured_values.assign(values, values + capture_size / sizeof(float));
             captured_pointers.erase(captured);
@@ -214,11 +218,11 @@ public:
     }
 
     Vector<BucketIdType>
-    ClassifyDatas(const void* datas, int64_t count, BucketIdType, QueryContext*) const override {
-        const auto* values = static_cast<const float*>(datas);
+    ClassifyDatas(const void*, int64_t count, BucketIdType, QueryContext*) const override {
         Vector<BucketIdType> result(count, 0, allocator_);
         for (int64_t i = 0; i < count; ++i) {
-            result[i] = values[i * dim_] == 0.0F ? 0 : 1;
+            // Half the rows mismatch Build, exceeding the nearest-only sampling budget.
+            result[i] = (i % 4 == 0 or i % 4 == 3) ? 1 : 0;
         }
         return result;
     }
@@ -1054,6 +1058,8 @@ TEST_CASE("BucketDataCell residual sampling avoids periodic population aliases",
     constexpr uint64_t count = 131072;
     constexpr uint64_t build_samples = 32768;
     constexpr uint64_t nearest_samples = 32768;
+    constexpr uint64_t nearest_population = count / 2;
+    static_assert(nearest_samples < nearest_population);
     constexpr uint64_t bucket_count = 2;
     const std::string quantizer_type = GENERATE("pq", "pqfs");
     CAPTURE(quantizer_type);
@@ -1093,6 +1099,8 @@ TEST_CASE("BucketDataCell residual sampling avoids periodic population aliases",
     std::vector<bool> nearest_seen(count, false);
     uint64_t negative_build_residuals = 0;
     uint64_t positive_build_residuals = 0;
+    uint64_t negative_nearest_residuals = 0;
+    uint64_t positive_nearest_residuals = 0;
     for (uint64_t i = 0; i < build_samples; ++i) {
         const float residual = allocator->captured_values[i * dim];
         const float source_value = allocator->captured_values[i * dim + 1];
@@ -1123,10 +1131,17 @@ TEST_CASE("BucketDataCell residual sampling avoids periodic population aliases",
         const auto source = static_cast<uint64_t>(source_value);
         REQUIRE_FALSE(nearest_seen[source]);
         nearest_seen[source] = true;
-        // Only the forced 100 rows differ between Build and nearest routing.
-        REQUIRE(source % 4 == 1);
-        REQUIRE(residual == 0.0F);
+        REQUIRE(source % 2 == 0);
+
+        const float value = source % 4 == 0 ? 0.0F : 100.0F;
+        const float centroid = source % 4 < 2 ? 100.0F : 50.0F;
+        REQUIRE(residual == value - centroid);
+        negative_nearest_residuals += residual < 0.0F ? 1 : 0;
+        positive_nearest_residuals += residual > 0.0F ? 1 : 0;
     }
+    // Fixed stride over the 65,536 mismatches selected only -100 nearest residuals.
+    REQUIRE(negative_nearest_residuals > 0);
+    REQUIRE(positive_nearest_residuals > 0);
 }
 
 TEST_CASE("BucketDataCell samples nearest residuals within the PQ prefix", "[ut][BucketDataCell]") {
