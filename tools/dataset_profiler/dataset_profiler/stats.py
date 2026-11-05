@@ -110,7 +110,20 @@ def histogram(values: Iterable[float], bins: int = HISTOGRAM_BINS) -> Dict[str, 
                 edges = edges[::-1]
             counts, edges = np.histogram(array, bins=edges)
     else:
-        counts, edges = np.histogram(array, bins=bin_count)
+        # Automatic edges can repeat when a nonconstant range spans only a few
+        # float64 ULPs.  Depending on the NumPy version this either raises or
+        # returns duplicate edges.  Reduce the bin count until every interval
+        # is visible and renderable instead of exposing zero-width buckets.
+        while True:
+            try:
+                counts, edges = np.histogram(array, bins=bin_count)
+            except ValueError:
+                if bin_count <= 1:
+                    raise
+            else:
+                if bin_count <= 1 or not np.any(edges[1:] <= edges[:-1]):
+                    break
+            bin_count -= 1
     return {
         "bins": [as_finite_float(edge) for edge in edges],
         "counts": [int(count) for count in counts],

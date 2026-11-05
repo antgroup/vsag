@@ -107,6 +107,15 @@ def test_constant_histogram_near_float_limit_has_finite_splittable_edges(value):
     assert sum(result["counts"]) == 2
 
 
+def test_narrow_nonconstant_histogram_has_representable_edges():
+    # FLOAT32 rows [1, 0] and [1, 2**-25] have these distinct float64 norms.
+    result = histogram([1.0, 1.0 + 2**-51])
+    edges = np.asarray(result["bins"], dtype=np.float64)
+    assert result["bin_count"] < 20
+    assert np.all(np.diff(edges) > 0)
+    assert sum(result["counts"]) == 2
+
+
 def test_downsample_keeps_small_arrays_and_buckets_large_ones():
     small = downsample(np.arange(10, dtype=float), max_points=16)
     assert small["downsampled"] is False

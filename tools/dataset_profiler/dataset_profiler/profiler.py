@@ -181,24 +181,28 @@ def profile_dataset(
         if metadata.vector_type == "dense":
             metrics = _profile_dense(dataset, config, metric_name, rng, warnings)
         else:
-            metrics = _profile_sparse(dataset, config, metric_name, rng, warnings)
+            metrics, effective_sample, effective_pairwise = _profile_sparse(
+                dataset, config, metric_name, rng, warnings
+            )
 
         requested_sample = int(config.sample_size)
         requested_pairwise = int(config.pairwise_sample_size)
         dataset_count = int(metadata.count or 0)
         dataset_limited_sample = min(requested_sample, dataset_count)
-        effective_sample = dataset_limited_sample
         if metadata.vector_type == "dense":
             effective_sample = _dense_sample_size(
                 dataset_count, int(metadata.dim or 0), requested_sample
             )
-        effective_pairwise = min(requested_pairwise, effective_sample)
+            effective_pairwise = min(requested_pairwise, effective_sample)
         if dataset_limited_sample < requested_sample:
             warnings.append(
                 "sample_size reduced from %d to %d to stay within the dataset size"
                 % (requested_sample, dataset_limited_sample)
             )
-        if effective_sample < dataset_limited_sample:
+        if (
+            metadata.vector_type == "dense"
+            and effective_sample < dataset_limited_sample
+        ):
             warnings.append(
                 "sample_size reduced from %d to %d to stay within the dense "
                 "sample memory budget" % (dataset_limited_sample, effective_sample)
@@ -516,7 +520,7 @@ def _profile_sparse(
     metric: str,
     rng: np.random.Generator,
     warnings: List[str],
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], int, int]:
     metadata = dataset.metadata
     if metadata.count is None:
         counted = 0
@@ -737,7 +741,8 @@ def _profile_sparse(
             unavailable_reason=sample_budget_reason,
         )
     )
-    return metrics
+    effective_sample = 0 if sample_budget_reason is not None else len(sample_records)
+    return metrics, effective_sample, int(pair_matrix.shape[0])
 
 
 class _DimAccumulator:

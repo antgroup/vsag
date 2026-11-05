@@ -660,6 +660,11 @@ def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
     monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 3000)
     report = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
     metrics = report["metrics"]
+    assert report["config"]["effective_sample_size"] == 0
+    assert report["config"]["effective_pairwise_sample_size"] == 0
+    assert not any(
+        "dense sample memory budget" in warning for warning in report["warnings"]
+    )
 
     # (a) the over-budget sample is neither fully retained nor expanded.
     assert expanded_rows == []
@@ -704,6 +709,8 @@ def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
     )
     unbounded = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
     unbounded_metrics = unbounded["metrics"]
+    assert unbounded["config"]["effective_sample_size"] == 6
+    assert unbounded["config"]["effective_pairwise_sample_size"] == 6
     assert unbounded_metrics["pairwise_distances"]["pair_count"] == 15
     assert unbounded_metrics["anisotropy"]["available"] is True
     assert len(expanded_rows) == 2

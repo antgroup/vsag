@@ -95,6 +95,29 @@ def test_prompt_is_jsonable(dense_path):
     json.dumps(payload, allow_nan=False, sort_keys=True)
 
 
+def test_aggregate_payload_omits_arbitrary_dataset_object_names(dense_path):
+    report = _report(dense_path)
+    report["dataset"]["datasets"].append("customer-private-label")
+    report["dataset"]["attributes"]["private_label"] = "customer-secret"
+
+    payload = aggregate_payload(report)
+    dataset = payload["dataset"]
+    assert set(dataset) == {
+        "vector_type",
+        "dtype",
+        "count",
+        "dim",
+        "dim_inferred",
+        "distance_metric",
+        "has_offsets",
+    }
+    assert "datasets" not in dataset
+    assert "attributes" not in dataset
+    prompt = build_prompt(report)
+    assert "customer-private-label" not in prompt
+    assert "customer-secret" not in prompt
+
+
 def test_aggregate_payload_excludes_per_vector_projections(dense_path):
     report = profile_dataset(
         str(dense_path), sample_size=24, pairwise_sample_size=12, clusters=3

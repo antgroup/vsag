@@ -58,9 +58,19 @@ _ERROR_REDACTIONS = (
     re.compile(r"Bearer\s+[A-Za-z0-9._\-]{8,}"),
 )
 
-# Field allowlist for the aggregate AI payload.  Anything not listed here is
-# never forwarded to the provider; per-vector fields such as
-# ``clustering.projection_points`` and ``clustering.labels`` are excluded.
+# Field allowlists for the aggregate AI payload.  Anything not listed here is
+# never forwarded to the provider; arbitrary HDF5 object names and per-vector
+# fields such as ``clustering.projection_points`` and ``clustering.labels`` are
+# excluded.
+_DATASET_METADATA_FIELDS = (
+    "vector_type",
+    "dtype",
+    "count",
+    "dim",
+    "dim_inferred",
+    "distance_metric",
+    "has_offsets",
+)
 _AGGREGATE_METRIC_FIELDS: Dict[str, tuple] = {
     "invalid_values": (
         "definition",
@@ -264,11 +274,14 @@ def aggregate_payload(report: Dict[str, Any]) -> Dict[str, Any]:
     metadata are included.  The full file path and any per-vector raw content
     are never sent.
     """
+    dataset = report.get("dataset") or {}
     return {
         "schema_version": report.get("schema_version"),
         "tool": report.get("tool"),
         "split": report.get("input", {}).get("split"),
-        "dataset": report.get("dataset"),
+        "dataset": {
+            key: dataset[key] for key in _DATASET_METADATA_FIELDS if key in dataset
+        },
         "config": report.get("config"),
         "metrics": _aggregate_metrics(report.get("metrics") or {}),
         "warnings": report.get("warnings"),
