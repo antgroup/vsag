@@ -56,6 +56,9 @@ public:
                           BucketIdType buckets_per_data,
                           QueryContext* ctx) const override;
 
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override;
+
     Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,

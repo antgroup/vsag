@@ -501,6 +501,31 @@ TEST_CASE("BalancedKMeans cosine assignment normalizes input rows", "[ut][Balanc
     REQUIRE(labels[1] == 0);
 }
 
+TEST_CASE("BalancedKMeans cosine assignment avoids a full normalized corpus",
+          "[ut][BalancedKMeansCluster]") {
+    constexpr uint32_t k = 2;
+    constexpr int32_t dim = 64;
+    constexpr uint64_t n = 4096;
+    std::vector<float> centroids(static_cast<uint64_t>(k) * dim, 0.0F);
+    centroids[0] = 1.0F;
+    centroids[dim] = 1.0F;
+    std::vector<float> data(n * static_cast<uint64_t>(dim), 0.0F);
+    for (uint64_t i = 0; i < n; ++i) {
+        data[i * static_cast<uint64_t>(dim)] = static_cast<float>(i + 1);
+    }
+    auto allocator = std::make_shared<fixtures::MemoryRecordAllocator>();
+    vsag::BalancedKMeansCluster cluster(dim, allocator.get());
+
+    // One candidate forces a fallback pass for half the rows. The loss pass also
+    // visits every row; all three passes must use row-local normalization.
+    const auto labels = cluster.Assign(
+        k, centroids.data(), data.data(), n, vsag::MetricType::METRIC_TYPE_COSINE, 1U);
+    require_exact_balance(cluster_sizes(labels, k), n, k);
+    REQUIRE(std::isfinite(cluster.Stats().loss));
+    const uint64_t normalized_corpus_bytes = n * static_cast<uint64_t>(dim) * sizeof(float);
+    REQUIRE(allocator->GetMemoryPeak() < normalized_corpus_bytes / 2);
+}
+
 TEST_CASE("BalancedKMeans saturated distances still use available seats",
           "[ut][BalancedKMeansCluster]") {
     constexpr uint32_t k = 2;

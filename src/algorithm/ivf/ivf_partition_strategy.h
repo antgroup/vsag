@@ -73,6 +73,13 @@ public:
         return this->ClassifyDatas(datas, count, buckets_per_data, ctx);
     }
 
+    /// Whether Build routing can differ from nearest-centroid routing. Residual
+    /// training uses this to keep ordinary strategies on the single-route path.
+    [[nodiscard]] virtual bool
+    HasDistinctBuildAssignment() const {
+        return false;
+    }
+
     virtual Vector<BucketIdType>
     ClassifyDatasForSearch(const void* datas,
                            int64_t count,

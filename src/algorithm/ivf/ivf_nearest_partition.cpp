@@ -192,6 +192,12 @@ IVFNearestPartition::ClassifyDatas(const void* datas,
     return classify_datas_on_host(datas, count, buckets_per_data, ctx);
 }
 
+bool
+IVFNearestPartition::HasDistinctBuildAssignment() const {
+    return this->ivf_partition_strategy_param_->partition_train_type ==
+           IVFNearestPartitionTrainerType::BalancedKMeansTrainer;
+}
+
 Vector<BucketIdType>
 IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
                                            int64_t count,

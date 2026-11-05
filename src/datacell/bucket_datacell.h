@@ -629,12 +629,15 @@ void
 BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
-        auto data_ptr = static_cast<const float*>(data);
+        const auto* original_data_ptr = static_cast<const float*>(data);
+        auto data_ptr = original_data_ptr;
         const uint64_t dim = static_cast<uint64_t>(this->quantizer_->GetDim());
-        if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / 2) {
+        const bool train_nearest = strategy_->HasDistinctBuildAssignment();
+        const uint64_t buffer_factor = train_nearest ? 2 : 1;
+        if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
             throw VsagException(ErrorType::INVALID_ARGUMENT, "residual training size overflow");
         }
-        train_data_buffer.resize(2 * count * dim);
+        train_data_buffer.resize(buffer_factor * count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             for (uint64_t i = 0; i < count; ++i) {
                 Normalize(data_ptr + i * dim, train_data_buffer.data() + i * dim, dim);
@@ -642,27 +645,89 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             data_ptr = train_data_buffer.data();
         }
         Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        // Build uses capacity-constrained assignments, while later Add calls still
-        // use nearest-centroid routing. Train on both residual sets so either path
-        // stays inside the quantizer's learned range.
         auto build_buckets = strategy_->ClassifyDatasForBuild(data_ptr, count, 1, nullptr);
-        auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-        // Emit one Build residual for every original row before adding nearest-route
-        // extras. Prefix-limited trainers therefore retain the original sample
-        // coverage, and rows for which both routes agree are not duplicated. Write
-        // each extra before overwriting its source row during cosine normalization.
         uint64_t train_count = count;
-        for (uint64_t i = 0; i < count; ++i) {
-            if (build_buckets[i] != nearest_buckets[i]) {
-                strategy_->GetCentroid(nearest_buckets[i], centroid);
-                for (uint64_t j = 0; j < dim; ++j) {
-                    train_data_buffer[train_count * dim + j] = data_ptr[i * dim + j] - centroid[j];
+        if (train_nearest) {
+            // Balanced Build uses capacity-constrained assignments, while later Add
+            // calls use nearest-centroid routing. Only this path needs both residual
+            // populations and the corresponding second classification pass.
+            auto nearest_buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
+            const auto quantizer_name = this->GetQuantizerName();
+            const bool prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
+                                        quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
+            Vector<uint64_t> nearest_rows(allocator_);
+            if (prefix_limited) {
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        nearest_rows.emplace_back(i);
+                    }
                 }
-                ++train_count;
             }
-            strategy_->GetCentroid(build_buckets[i], centroid);
-            for (uint64_t j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+            constexpr uint64_t max_pq_train_count = 65536;
+            if (prefix_limited and count + nearest_rows.size() > max_pq_train_count) {
+                // PQ and PQFS retain only their first 65,536 rows. Reserve space
+                // for both populations and sample each evenly across the complete
+                // Build corpus instead of truncating an interleaved prefix.
+                uint64_t build_samples = std::min(count, max_pq_train_count / 2);
+                const uint64_t nearest_samples = std::min(
+                    static_cast<uint64_t>(nearest_rows.size()), max_pq_train_count - build_samples);
+                build_samples = std::min(count, max_pq_train_count - nearest_samples);
+                train_count = build_samples + nearest_samples;
+                Vector<float> normalized_row(dim, allocator_);
+                auto write_residual =
+                    [&](uint64_t destination, uint64_t source, BucketIdType bucket) {
+                        const float* src = original_data_ptr + source * dim;
+                        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                            Normalize(src, normalized_row.data(), dim);
+                            src = normalized_row.data();
+                        }
+                        strategy_->GetCentroid(bucket, centroid);
+                        for (uint64_t j = 0; j < dim; ++j) {
+                            train_data_buffer[destination * dim + j] = src[j] - centroid[j];
+                        }
+                    };
+                auto sample_index =
+                    [](uint64_t sample, uint64_t sample_count, uint64_t population_count) {
+                        const uint64_t step = population_count / sample_count;
+                        const uint64_t remainder = population_count % sample_count;
+                        return sample * step + sample * remainder / sample_count;
+                    };
+                for (uint64_t i = 0; i < build_samples; ++i) {
+                    const uint64_t source = sample_index(i, build_samples, count);
+                    write_residual(i, source, build_buckets[source]);
+                }
+                for (uint64_t i = 0; i < nearest_samples; ++i) {
+                    const uint64_t nearest = sample_index(i, nearest_samples, nearest_rows.size());
+                    const uint64_t source = nearest_rows[nearest];
+                    write_residual(build_samples + i, source, nearest_buckets[source]);
+                }
+            } else {
+                // Keep complete populations when they fit. Rows whose routes agree
+                // are not duplicated, and each nearest extra is written before its
+                // normalized source row is overwritten by the Build residual.
+                for (uint64_t i = 0; i < count; ++i) {
+                    if (build_buckets[i] != nearest_buckets[i]) {
+                        strategy_->GetCentroid(nearest_buckets[i], centroid);
+                        for (uint64_t j = 0; j < dim; ++j) {
+                            train_data_buffer[train_count * dim + j] =
+                                data_ptr[i * dim + j] - centroid[j];
+                        }
+                        ++train_count;
+                    }
+                    strategy_->GetCentroid(build_buckets[i], centroid);
+                    for (uint64_t j = 0; j < dim; ++j) {
+                        train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                    }
+                }
+            }
+        } else {
+            // Ordinary kmeans/random strategies have identical Build and Add routes:
+            // retain the previous single-classification, single-buffer behavior.
+            for (uint64_t i = 0; i < count; ++i) {
+                strategy_->GetCentroid(build_buckets[i], centroid);
+                for (uint64_t j = 0; j < dim; ++j) {
+                    train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
+                }
             }
         }
         data = train_data_buffer.data();
