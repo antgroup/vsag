@@ -172,7 +172,8 @@ public:
       *      min(train_count, 100000) float32 rows, including when the outer sampler does
       *      not copy;
       *   3. the per-worker construction probe scratch: one pool visited list over the graph's
-      *      nodes and the result/candidate heaps bounded by ef_construction;
+      *      nodes, a result heap bounded by ef_construction, and an unbounded candidate heap
+      *      conservatively bounded by N visited nodes, including vector-growth capacity;
       *   4. one temporary encode row per worker, used by InsertVector() before the code is
       *      written into the persistent flatten storage;
       *   5. the per-element build bookkeeping prepare_add_batch() retains until insertion
@@ -1042,7 +1043,8 @@ private:
     //   (3) build route graphs via ODescent over the sampled level ids.
     bool
     has_loaded_cache() const {
-        return this->cache_ != nullptr && not this->cache_->neighbors_.empty();
+        return this->cache_is_imported_ && this->cache_ != nullptr &&
+               not this->cache_->neighbors_.empty();
     }
 
     /// Build from imported cache: warm-start, refine, and rebuild route graphs.
@@ -1402,6 +1404,8 @@ private:
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
     std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
+    // ExportCache() also fills cache_, but only an imported cache selects build_with_cache().
+    mutable bool cache_is_imported_{false};
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit

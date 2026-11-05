@@ -492,6 +492,12 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
         }
     }
 
+    if (this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SQ8) {
+        // ScalarQuantizer owns lower_bound_ and diff_ as default-heap std::vector<float>s.
+        // They live for the quantizer's lifetime but are invisible to the index allocator.
+        estimate_memory += 2 * static_cast<uint64_t>(this->dim_) * sizeof(float);
+    }
+
     if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
         not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;

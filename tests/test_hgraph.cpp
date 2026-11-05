@@ -4658,6 +4658,39 @@ TEST_CASE("HGraph EstimateBuildMemory includes reserved capacity and SQ trainer 
         REQUIRE(large_estimate >= capacity_floor);
     }
 
+    SECTION("SQ8 retained footprint includes both quantizer bound arrays") {
+        constexpr uint64_t dim = 4096;
+        constexpr uint64_t count = 2;
+        auto make_index = [&](const std::string& quantization) {
+            HGraphTestIndex::HGraphBuildParam build_param("l2", dim, quantization);
+            build_param.graph_type = "nsw";
+            build_param.graph_io_type = "memory_io";
+            build_param.thread_count = 1;
+            auto param = vsag::JsonType::Parse(
+                HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+            param["index_param"]["base_io_type"].SetString("memory_io");
+            param["index_param"]["hgraph_init_capacity"].SetUint64(count);
+            param["index_param"]["resize_increase_count_bit"].SetUint64(1);
+            param["index_param"]["max_degree"].SetUint64(4);
+            param["index_param"]["ef_construction"].SetUint64(4);
+            return TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        };
+        auto sq8 = make_index("sq8");
+        auto fp32 = make_index("fp32");
+        REQUIRE(sq8->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE(fp32->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+        // Relative to fp32, SQ8 saves three bytes per code coordinate but retains two
+        // additional float arrays of dim entries. All other retained terms are identical.
+        constexpr uint64_t code_bytes_saved = count * dim * (sizeof(float) - 1);
+        constexpr uint64_t bound_array_bytes = 2 * dim * sizeof(float);
+        REQUIRE(sq8->EstimateMemory(count) + code_bytes_saved ==
+                fp32->EstimateMemory(count) + bound_array_bytes);
+        // The retained arrays flow into the build peak alongside the independent training copy.
+        REQUIRE(sq8->EstimateBuildMemory(count) >=
+                sq8->EstimateMemory(count) + count * dim * sizeof(float));
+    }
+
     SECTION("uniform SQ training includes upper and lower bound buffers") {
         constexpr int64_t dim = 4096;
         constexpr uint64_t count = 2;
@@ -4729,12 +4762,12 @@ TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory]
     }
 }
 
-TEST_CASE("HGraph EstimateBuildMemory disabled after cache import", "[ft][memory][hgraph][build]") {
+TEST_CASE("HGraph EstimateBuildMemory refreshes support after cache export and import",
+          "[ft][memory][hgraph][build]") {
     using namespace fixtures;
-    // The feature bit is computed at construction, but a nonempty imported cache switches
-    // Build() onto the warm-start/refine path, which the cold-NSW estimate does not
-    // describe. ImportCache() must refresh the advertisement and EstimateBuildMemory()
-    // must reject the call.
+    // Only an imported cache switches Build() onto the warm-start/refine path, which the cold-NSW
+    // estimate does not describe. Export creates snapshot storage without changing the build path.
+    // Both operations refresh the advertisement: export stays estimable and import is rejected.
     constexpr int64_t dim = 16;
     constexpr uint64_t count = 512;
     HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "sq8");
@@ -4749,9 +4782,14 @@ TEST_CASE("HGraph EstimateBuildMemory disabled after cache import", "[ft][memory
     dataset->base_->SourceID(source_ids.data());
 
     auto source = TestIndex::TestFactory(HGraphTestIndex::name, param, true);
+    REQUIRE(source->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
     REQUIRE(source->Build(dataset->base_).has_value());
     std::stringstream cache;
     REQUIRE(source->ExportCache(cache).has_value());
+    // ExportCache() fills cache_->neighbors_ but does not import warm-start build state.
+    // CheckFeature and the live estimator check must agree, and the call must not throw.
+    REQUIRE(source->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE_NOTHROW(source->EstimateBuildMemory(100));
     dataset->base_->SourceID(nullptr);
     cache.seekg(0);
 
@@ -4856,6 +4894,51 @@ TEST_CASE("HGraph EstimateMemory uses exact sizes for contiguous stores",
         REQUIRE(retained < contiguous_store_bytes + 1024 * 1024);
         REQUIRE(index->EstimateBuildMemory(count) < 16 * 1024 * 1024);
     });
+}
+
+TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
+          "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    constexpr uint64_t count = 1024;
+    constexpr uint64_t dim = 16;
+    constexpr uint64_t ef_construction = 4;
+    auto pool = vsag::Engine::CreateThreadPool(2);
+    REQUIRE(pool.has_value());
+    vsag::Resource resource(vsag::Engine::CreateDefaultAllocator(), pool.value());
+    vsag::Engine engine(&resource);
+    auto make_index = [&](int thread_count) {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", dim, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.graph_io_type = "memory_io";
+        build_param.thread_count = 1;
+        auto param = vsag::JsonType::Parse(
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+        param["index_param"]["base_io_type"].SetString("memory_io");
+        param["index_param"]["hgraph_init_capacity"].SetUint64(count);
+        param["index_param"]["resize_increase_count_bit"].SetUint64(10);
+        param["index_param"]["max_degree"].SetUint64(4);
+        param["index_param"]["ef_construction"].SetUint64(ef_construction);
+        param["index_param"]["build_thread_count"].SetInt(thread_count);
+        auto index = engine.CreateIndex(HGraphTestIndex::name, param.Dump());
+        REQUIRE(index.has_value());
+        return index.value();
+    };
+    auto serial = make_index(1);
+    auto parallel = make_index(2);
+    REQUIRE(serial->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+    REQUIRE(parallel->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+
+    // Both indexes use the same supplied pool, so the O(N) task-state charge is identical.
+    // Their difference is exactly one additional worker's visited list, two heaps and encode row.
+    const auto extra_worker =
+        parallel->EstimateBuildMemory(count) - serial->EstimateBuildMemory(count);
+    constexpr uint64_t visited_list_bytes =
+        (count + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
+    constexpr uint64_t result_heap_entries =
+        count < ef_construction + 1 ? count : ef_construction + 1;
+    constexpr uint64_t heap_bytes =
+        3 * (count + result_heap_entries) * sizeof(std::pair<float, vsag::InnerIdType>);
+    REQUIRE(extra_worker == visited_list_bytes + heap_bytes + dim * sizeof(float));
 }
 
 TEST_CASE("HGraph Build limits tasks on a supplied thread pool", "[ft][memory][hgraph][build]") {

@@ -1692,13 +1692,19 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
                                  static_cast<uint64_t>(num_elements));
 
     // (3) Per-worker construction scratch. Each NSW insertion probe takes one visited list from
-    //     the pool and runs one KNN search with ef_construct as the candidate budget: the
-    //     visited list is one tag word plus one bit word per 64 nodes held by the graph, and the
-    //     search keeps a result heap and a candidate heap of up to ef_construct entries each.
+    //     the pool: one tag word plus one bit word per 64 nodes held by the graph. The search's
+    //     result heap is trimmed after exceeding ef_construct, but its unbounded candidate heap
+    //     is not. A visited node is discovered at most once per probe, so candidate_set has a hard
+    //     logical upper bound of N entries even for non-finite distances. StandardHeap::Pop()
+    //     does not shrink its vector. Charge three logical capacities per heap: up to two for the
+    //     geometrically grown allocation and one for the previous buffer during reallocation.
     const uint64_t visited_list_bytes =
         (element_count + 63) / 64 * (sizeof(uint64_t) + sizeof(uint16_t));
-    const uint64_t probe_heap_bytes =
-        2 * this->ef_construct_ * sizeof(std::pair<float, InnerIdType>);
+    const uint64_t result_heap_entries = std::min<uint64_t>(num_elements, this->ef_construct_ + 1);
+    constexpr uint64_t kHeapGrowthCapacityFactor = 3;
+    const uint64_t probe_heap_bytes = kHeapGrowthCapacityFactor *
+                                      (num_elements + result_heap_entries) *
+                                      sizeof(std::pair<float, InnerIdType>);
     build_memory += build_threads * (visited_list_bytes + probe_heap_bytes);
 
     // (4) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
@@ -1850,6 +1856,11 @@ HGraph::ExportCache(std::ostream& out_stream) const {
     this->check_fused_mutation_supported("ExportCache");
     IOStreamWriter writer(out_stream);
     this->fullfill_cache();
+    // fullfill_cache() replaces any imported state with an exported snapshot. Exported storage
+    // does not select build_with_cache(), so a cold-build index remains eligible for estimation.
+    this->cache_is_imported_ = false;
+    this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                          this->can_estimate_build_memory());
     this->cache_->Serialize(writer);
 }
 
@@ -1858,6 +1869,7 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    this->cache_is_imported_ = true;
     // A nonempty imported cache switches Build() onto the warm-start/refine path, which the
     // cold in-memory NSW estimate does not describe. Refresh the advertised feature so
     // CheckFeature(SUPPORT_ESTIMATE_BUILD_MEMORY) stays in sync with what Build() will do;
