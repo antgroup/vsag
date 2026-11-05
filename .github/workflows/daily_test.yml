@@ -113,7 +113,7 @@ jobs:
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -166,7 +166,7 @@ jobs:
     needs: daily-plan
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -223,8 +223,8 @@ jobs:
     container:
       # Matches daily_build_asan_x86: the test binaries were built against the
       # from-source OpenBLAS (statically linked), so any image with the rest
-      # of the runtime would do. We pick ci-x86-openblas for consistency.
-      image: vsaglib/vsag:ci-x86-openblas
+      # of the runtime would do. We pick ci-main-openblas for consistency.
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     env:
@@ -289,7 +289,7 @@ jobs:
       matrix:
         test_type: [unittests, functests]
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -352,7 +352,7 @@ jobs:
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     strategy:
@@ -412,7 +412,7 @@ jobs:
       group: daily_test_simd-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     env:
@@ -489,7 +489,7 @@ jobs:
       group: daily_build_tsan_x86-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
     steps:
       - uses: actions/checkout@v4
         with:
@@ -535,7 +535,7 @@ jobs:
       group: daily_test_tsan_x86-${{ github.run_id }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: daily_test_tsan
@@ -586,7 +586,7 @@ jobs:
     needs: daily-plan
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -649,7 +649,7 @@ jobs:
           - unittests
           - functests
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     env:
@@ -737,7 +737,7 @@ jobs:
       - full-platform-build-asan-x86
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-mkl
+      image: vsaglib/vsag:ci-main-mkl
       volumes:
         - /opt:/useless
     concurrency:
@@ -782,7 +782,7 @@ jobs:
       SMOKE: ${{ false }}
     runs-on: ubuntu-24.04-arm
     container:
-      image: vsaglib/vsag:ci-aarch64-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     concurrency:
@@ -965,7 +965,7 @@ jobs:
     needs: daily-plan
     runs-on: ubuntu-latest
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     env:
       VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
       VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
@@ -1016,7 +1016,7 @@ jobs:
       group: coverage-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: full-coverage-coverage
@@ -1059,7 +1059,7 @@ jobs:
       group: compatibility-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     env:
       VSAG_DAILY_CONTEXT: ${{ github.workspace }}/daily-context/context.json
       VSAG_DAILY_LANE: full-compatibility-compatibility
@@ -1109,7 +1109,7 @@ jobs:
       group: runtime-performance-${{ github.run_id }}-${{ github.run_attempt }}
       cancel-in-progress: false
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     steps:
       - name: Checkout approved main history
         uses: actions/checkout@v4

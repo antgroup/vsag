@@ -60,6 +60,14 @@ class EntryTests(unittest.TestCase):
             for name in re.findall(r'uses: \./(\.github/actions/[^\s]+)', p.read_text()):
                 self.assertTrue((ROOT / name / 'action.yml').is_file(), name)
 
+    def test_consumers_do_not_pull_shared_architecture_tags(self):
+        legacy_tag = r'(?:vsaglib/vsag|ghcr\.io/antgroup/vsag):ci-(?:x86|aarch64)-'
+        for workflow in (ROOT / '.github/workflows').glob('*.y*ml'):
+            if workflow.name == 'update-ci-image.yml':
+                continue  # Local aliases in the publisher connect consecutive Dockerfile builds.
+            with self.subTest(workflow=workflow.name):
+                self.assertNotRegex(workflow.read_text(), legacy_tag)
+
     def test_branch_scope_original_version_docs_and_simd(self):
         event = {'ref': 'refs/heads/0.18'}
         self.assertEqual(select('push', event, 'full-branch', ['docs/a.md']),
