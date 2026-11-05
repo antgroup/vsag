@@ -228,17 +228,6 @@ BalancedKMeansCluster::Assign(uint32_t k,
         }
     }
 
-    Vector<float> normalized_datas(allocator_);
-    if (metric == MetricType::METRIC_TYPE_COSINE) {
-        normalized_datas.resize(count * static_cast<uint64_t>(dim_));
-        for (uint64_t i = 0; i < count; ++i) {
-            Normalize(datas + i * static_cast<uint64_t>(dim_),
-                      normalized_datas.data() + i * static_cast<uint64_t>(dim_),
-                      dim_);
-        }
-        datas = normalized_datas.data();
-    }
-
     Vector<int32_t> labels(count, -1, allocator_);
     const double loss =
         this->balanced_assign(centroids, datas, count, k, metric, num_candidates, labels.data());
@@ -276,8 +265,16 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
         // legitimately clamp to K_MAX_DISTANCE and must still be selectable.
         Vector<float> best_dist(c, std::numeric_limits<float>::infinity(), allocator_);
         Vector<uint32_t> best_id(c, 0U, allocator_);
+        Vector<float> normalized_row(allocator_);
+        if (metric == MetricType::METRIC_TYPE_COSINE) {
+            normalized_row.resize(dim_);
+        }
         for (uint64_t i = begin; i < end; ++i) {
             const float* x = datas + i * static_cast<uint64_t>(dim_);
+            if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(x, normalized_row.data(), dim_);
+                x = normalized_row.data();
+            }
             std::fill(best_dist.begin(), best_dist.end(), std::numeric_limits<float>::infinity());
             std::fill(best_id.begin(), best_id.end(), 0U);
             for (uint32_t j = 0; j < k; ++j) {
@@ -405,7 +402,12 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
 
     // Total remaining capacity equals the number of unplaced vectors at every
     // point of this loop, so the on-demand rescan always finds a cluster with
-    // a free seat.
+    // a free seat. The same sequential scratch row is reused by rescans and by
+    // the loss pass below; neither needs a normalized copy of the whole corpus.
+    Vector<float> normalized_row(allocator_);
+    if (metric == MetricType::METRIC_TYPE_COSINE) {
+        normalized_row.resize(dim_);
+    }
     for (uint64_t i : point_order) {
         const uint64_t row = i * static_cast<uint64_t>(c);
         uint32_t chosen = k;
@@ -421,6 +423,10 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
             // the clusters that still have seats instead of keeping the full
             // row. Rare for c > 1, and bounded work even when it repeats.
             const float* x = datas + i * static_cast<uint64_t>(dim_);
+            if (metric == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(x, normalized_row.data(), dim_);
+                x = normalized_row.data();
+            }
             float best = std::numeric_limits<float>::infinity();
             for (uint32_t j = 0; j < k; ++j) {
                 if (remaining[j] == 0) {
@@ -449,6 +455,10 @@ BalancedKMeansCluster::balanced_assign(const float* centroids,
     double total_loss = 0.0;
     for (uint64_t i = 0; i < count; ++i) {
         const float* x = datas + i * static_cast<uint64_t>(dim_);
+        if (metric == MetricType::METRIC_TYPE_COSINE) {
+            Normalize(x, normalized_row.data(), dim_);
+            x = normalized_row.data();
+        }
         const float* centroid =
             centroids + static_cast<uint64_t>(labels[i]) * static_cast<uint64_t>(dim_);
         total_loss += static_cast<double>(metric_distance(metric, x, centroid, dim_));

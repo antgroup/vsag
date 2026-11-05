@@ -83,6 +83,7 @@ public:
 
     Vector<BucketIdType>
     ClassifyDatas(const void*, int64_t count, BucketIdType, QueryContext*) const override {
+        classify_requests_.fetch_add(1, std::memory_order_relaxed);
         return Vector<BucketIdType>(count, 0, allocator_);
     }
 
@@ -99,8 +100,14 @@ public:
         return centroid_requests_.load(std::memory_order_relaxed);
     }
 
+    [[nodiscard]] uint64_t
+    GetClassifyRequestCount() const {
+        return classify_requests_.load(std::memory_order_relaxed);
+    }
+
 private:
     std::atomic<uint64_t> centroid_requests_{0};
+    mutable std::atomic<uint64_t> classify_requests_{0};
     float centroid_scale_{1.0F};
 };
 
@@ -111,6 +118,56 @@ public:
     Vector<BucketIdType>
     ClassifyDatasForBuild(const void*, int64_t count, BucketIdType, QueryContext*) const override {
         return Vector<BucketIdType>(count, 1, allocator_);
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+};
+
+class MixedResidualPartitionStrategy : public IVFPartitionStrategy {
+public:
+    MixedResidualPartitionStrategy(const IndexCommonParam& common_param, BucketIdType bucket_count)
+        : IVFPartitionStrategy(common_param, bucket_count) {
+        is_trained_ = true;
+    }
+
+    void
+    Train(const DatasetPtr) override {
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatas(const void* datas, int64_t count, BucketIdType, QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] == 100.0F ? 1 : 0;
+        }
+        return result;
+    }
+
+    Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas,
+                          int64_t count,
+                          BucketIdType,
+                          QueryContext*) const override {
+        const auto* values = static_cast<const float*>(datas);
+        Vector<BucketIdType> result(count, 0, allocator_);
+        for (int64_t i = 0; i < count; ++i) {
+            result[i] = values[i] == 0.0F ? 0 : 1;
+        }
+        return result;
+    }
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+
+    void
+    GetCentroid(BucketIdType bucket_id, Vector<float>& centroid) override {
+        centroid[0] = bucket_id == 0 ? 0.0F : 28.0F;
     }
 };
 
@@ -805,6 +862,35 @@ TEST_CASE("BucketDataCell batch query", "[ut][BucketDataCell]") {
     }
 }
 
+TEST_CASE("BucketDataCell ordinary residual training keeps one route and buffer",
+          "[ut][BucketDataCell]") {
+    auto allocator = std::make_shared<BoundedBucketAllocator>();
+    constexpr int64_t dim = 64;
+    constexpr uint64_t count = 1024;
+    constexpr uint64_t bucket_count = 1;
+    const std::vector<float> vectors(count * dim, 1.0F);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "io_params": { "type": "memory_io" },
+        "quantization_params": { "type": "fp32" },
+        "buckets_count": 1,
+        "use_residual": true
+    })"));
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(common_param, bucket_count);
+    bucket->SetStrategy(strategy);
+    // One FP32 corpus is 256 KiB and the old dual residual buffer is 512 KiB.
+    allocator->limit = 300 * 1024;
+    REQUIRE_NOTHROW(bucket->Train(vectors.data(), count));
+    REQUIRE(allocator->rejected == 0);
+    REQUIRE(strategy->GetClassifyRequestCount() == 1);
+}
+
 TEST_CASE("BucketDataCell residual training uses build and nearest assignments",
           "[ut][BucketDataCell]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
@@ -880,6 +966,49 @@ TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
     bucket->Package();
 
     auto computer = bucket->FactoryComputer(vectors.data() + count - 1);
+    REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
+}
+
+TEST_CASE("BucketDataCell samples nearest residuals within the PQ prefix", "[ut][BucketDataCell]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    constexpr int64_t dim = 1;
+    constexpr uint64_t count = 65536;
+    constexpr uint64_t bucket_count = 2;
+    const std::string quantizer_type = GENERATE("pq", "pqfs");
+    CAPTURE(quantizer_type);
+    std::vector<float> vectors(count, 0.0F);
+    for (uint64_t i = 0; i < count; ++i) {
+        const uint64_t kind = i % 10;
+        vectors[i] = kind < 5 ? 0.0F : (kind < 9 ? 10.0F : 100.0F);
+    }
+
+    JsonType param_json;
+    JsonType io_json;
+    io_json["type"].SetString("memory_io");
+    param_json["io_params"].SetJson(io_json);
+    param_json["quantization_params"].SetJson(
+        JsonType::Parse(quantizer_type == "pq" ? R"({"type": "pq", "pq_dim": 1, "pq_bits": 8})"
+                                               : R"({"type": "pqfs", "pq_dim": 1})"));
+    param_json["buckets_count"].SetInt(bucket_count);
+    param_json["use_residual"].SetBool(true);
+    auto param = std::make_shared<BucketDataCellParameter>();
+    param->FromJson(param_json);
+
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.dim_ = dim;
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto bucket = BucketInterface::MakeInstance(param, common_param);
+    bucket->SetStrategy(
+        std::make_shared<MixedResidualPartitionStrategy>(common_param, bucket_count));
+    bucket->Train(vectors.data(), count);
+
+    // Build assigns 10 to centroid 28 (residual -18), but Add routes it to
+    // centroid 0 (residual +10). The latter used to start after the PQ prefix.
+    const float added = 10.0F;
+    bucket->InsertVector(&added, 0, 0);
+    bucket->Package();
+    auto computer = bucket->FactoryComputer(&added);
     REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
 }
 
