@@ -627,7 +627,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
     Vector<float> train_data_buffer(allocator_);
     if (use_residual_) {
         auto data_ptr = static_cast<const float*>(data);
-        auto dim = this->quantizer_->GetDim();
+        auto dim = this->strategy_->dim_;
         train_data_buffer.resize(count * dim);
         if (metric_ == MetricType::METRIC_TYPE_COSINE) {
             for (int i = 0; i < count; ++i) {
@@ -635,14 +635,10 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             }
             data_ptr = train_data_buffer.data();
         }
-        Vector<float> centroid(this->quantizer_->GetDim(), allocator_);
-        auto buckets = strategy_->ClassifyDatas(data_ptr, count, 1, nullptr);
-        for (int i = 0; i < count; ++i) {
-            strategy_->GetCentroid(buckets[i], centroid);
-            for (int j = 0; j < dim; ++j) {
-                train_data_buffer[i * dim + j] = data_ptr[i * dim + j] - centroid[j];
-            }
-        }
+        // Residuals to the buckets a Build and Add give this batch. For a sample that is
+        // the same procedure, not the same placement of each vector.
+        count =
+            strategy_->ResidualsForTrain(data_ptr, static_cast<int64_t>(count), train_data_buffer);
         data = train_data_buffer.data();
     }
     this->quantizer_->Train(reinterpret_cast<const float*>(data), count);

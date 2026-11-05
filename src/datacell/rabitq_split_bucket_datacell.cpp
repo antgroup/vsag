@@ -1349,9 +1349,8 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
     }
 
     const auto* input = static_cast<const float*>(data);
-    Vector<float> train_data(count * this->dim_, this->allocator_);
+    Vector<float> train_data(this->allocator_);
     Vector<float> normalized(this->dim_, this->allocator_);
-    Vector<float> centroid(this->dim_, this->allocator_);
     const float* classify_data = input;
     Vector<float> normalized_data(this->allocator_);
     if (this->metric_ == MetricType::METRIC_TYPE_COSINE) {
@@ -1363,16 +1362,11 @@ RaBitQSplitBucketDataCell::Train(const void* data, uint64_t count) {
     }
     CHECK_ARGUMENT(count <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
                    "RaBitQ split training count is too large");
-    auto buckets =
-        this->strategy_->ClassifyDatas(classify_data, static_cast<int64_t>(count), 1, nullptr);
-    for (uint64_t i = 0; i < count; ++i) {
-        this->strategy_->GetCentroid(buckets[i], centroid);
-        FP32Sub(classify_data + i * this->dim_,
-                centroid.data(),
-                train_data.data() + i * this->dim_,
-                this->dim_);
-    }
-    this->codes_->Train(train_data.data(), count);
+    // The residuals the codes will encode: each vector against the buckets a Build and
+    // Add can place it in.
+    const auto rows =
+        this->strategy_->ResidualsForTrain(classify_data, static_cast<int64_t>(count), train_data);
+    this->codes_->Train(train_data.data(), rows);
     this->rebuild_residual_centroid_transforms();
 }
 

@@ -18,9 +18,12 @@ tight, or when queries are naturally parallelizable.
 ## How it works
 
 1. **Clustering.** A sample of the dataset is clustered with k-means (or sampled
-   randomly, `ivf_train_type: "random"`) to produce `buckets_count` centroids.
+   randomly, `ivf_train_type: "random"`, or clustered into equal-size clusters,
+   `ivf_train_type: "balanced_kmeans"`) to produce `buckets_count` centroids.
 2. **Assignment.** Every vector is written to the inverted list of its nearest
-   centroid, stored in the configured coarse quantization (`base_quantization_type`).
+   centroid (with `balanced_kmeans`, the first `Build` fills every bucket equally;
+   see [Balanced k-means training](#balanced-k-means-training)), stored in the
+   configured coarse quantization (`base_quantization_type`).
    Optionally, a second high-precision copy is kept (`use_reorder: true`) for
    post-filter reordering.
 3. **Search.** For each query, the `scan_buckets_count` nearest centroids are
@@ -79,8 +82,8 @@ Build-time parameters live under `index_param`. See
 | `buckets_count` | int | `10` | Number of inverted lists (effective for `ivf`) |
 | `first_order_buckets_count` | int | `10` | First-level count (effective for `gno_imi`) |
 | `second_order_buckets_count` | int | `10` | Second-level count (effective for `gno_imi`) |
-| `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans` or `random` |
-| `kmeans_iter_count` | int | `25` (`ivf`), `30` (`gno_imi`) | KMeans training iterations for centroid training (effective with `ivf_train_type: "kmeans"`). Higher → better bucket quality, longer build. |
+| `ivf_train_type` | string | `"kmeans"` | Centroid training: `kmeans`, `random` or `balanced_kmeans` (equal-size buckets, effective for `ivf`; see [Balanced k-means training](#balanced-k-means-training)). Other names are rejected with `INVALID_ARGUMENT`. |
+| `kmeans_iter_count` | int | `25` (`ivf`), `30` (`gno_imi`) | Training iterations (effective with `ivf_train_type: "kmeans"` or `"balanced_kmeans"`). Higher → better bucket quality, longer build. |
 | `route_max_degree` | int | `64` | Routing HGraph maximum degree (effective for `ivf`) |
 | `route_ef_construction` | int | `300` | Routing HGraph construction search breadth (effective for `ivf`) |
 | `enable_gpu_build` | bool | `false` | Use the CUDA backend while building (effective for `ivf`); see [GPU-accelerated build](#gpu-accelerated-build) |
@@ -161,7 +164,10 @@ When VSAG is built with `ENABLE_CUDA=ON`, both move to a CUDA device. Set
 Four passes run on the device: k-means++ seeding, nearest-centroid assignment
 and centroid accumulation inside clustering, and the bucket assignment of the
 base vectors afterwards. `ivf_train_type: "random"` does not cluster, so only
-the last one applies to it.
+the last one applies to it. `ivf_train_type: "balanced_kmeans"` clusters and
+fills the buckets of a `Build` on the host, so of these passes only the
+nearest-bucket assignment applies to it: for vectors added later and, with codes
+relative to a bucket, for the training vectors.
 
 The four settings reach the `ivf` partition strategy only. With
 `partition_strategy_type: "gno_imi"` they are accepted and ignored, as the other
@@ -240,6 +246,162 @@ recall, against the hundredths of a point in the table. Read that column as
 showing no regression, not as measuring the gain. Below those sizes the two agree
 except where two centroids are equidistant from a point to within floating-point
 rounding.
+
+## Balanced k-means training
+
+Plain k-means lets the data decide how large every bucket is. On skewed or
+duplicated data a few buckets end up holding a large share of the corpus, every
+query routed to them scans all of it, and the work per query becomes uneven.
+`ivf_train_type: "balanced_kmeans"` trains the centroids with balanced k-means
+and fills the buckets of the first `Build` the same way: every bucket receives
+`floor(n / buckets_count)` or `ceil(n / buckets_count)` vectors, so no bucket is
+empty and no two differ by more than one vector.
+
+```json
+{
+    "buckets_count": 4096,
+    "base_quantization_type": "fp32",
+    "partition_strategy_type": "ivf",
+    "ivf_train_type": "balanced_kmeans"
+}
+```
+
+**What is balanced.** The clusters of the training sample, and the buckets that a
+`Build` into an empty index writes. The build assigns the base vectors to the
+trained centroids under the same exact sizes, scored with the routing key of the
+metric (`1 - <x, c>` for `ip`, one minus the cosine for `cosine`), so a vector goes
+to the bucket a query near it is routed to whenever the sizes allow. Codes kept
+relative to a bucket centroid (`use_residual`, RaBitQ split storage) are trained on
+residuals from the same balanced assignment of the training vectors and, where it
+differs, from their nearest buckets, so they cover both the vectors a `Build` places
+away from their nearest bucket and the vectors `Add` routes to it. A `Build` on a
+model trained or exported beforehand can bring fewer vectors than buckets; every
+vector then gets a bucket of its own. Vectors added later with `Add` go to their
+nearest bucket, as with the other trainers, so the sizes drift as the index grows.
+With `buckets_per_data` above 1 the first copy of every vector is balanced and the
+other copies go to the nearest other buckets.
+
+**What stays the same.** Training uses the same sample, objective and iterations
+as `kmeans` (squared L2, centroids are means, `kmeans_iter_count` iterations), and
+the same post-processing: for `cosine` the centroids are normalized afterwards.
+`kmeans` stays the default and its results do not change. The trainer is not part
+of the compatibility check, so an index built with one trainer loads with a reader
+configured with another. `partition_strategy_type: "gno_imi"` always trains with
+plain k-means and rejects `balanced_kmeans`.
+
+### How it works
+
+Every iteration assigns the vectors under the size constraint and then moves each
+centroid to the mean of its cluster, as k-means does. The assignment is a
+transportation problem, solved by an auction (Bertsekas) with one price per
+cluster: a vector bids for the cluster with the lowest `distance + price`, a full
+cluster gives the seat to the higher bid and its lowest bidder bids again, and
+prices only rise. With epsilon-scaling every assignment is optimal for its
+centroids and its cluster sizes within `n * epsilon` (for the distances as computed
+in float), epsilon being 1e-4 of the typical distance gap between a vector's closest
+clusters; as the mean is optimal for a fixed cluster, the loss does not grow between
+iterations. When `n` is not divisible by `buckets_count`, the buckets with one vector
+more start as the ones most vectors prefer, and a vector that saves cost by moving to
+a bucket without that extra seat takes the seat along. This choice of buckets is a
+good one, not a jointly optimal one.
+Every iteration starts from the previous assignment and prices, raised by how far
+each centroid moved, so most vectors keep their seats and only the others bid.
+
+The working set never holds an `n x buckets_count` matrix. Each vector keeps its
+16 cheapest clusters and a lower bound for all the others, and distances are
+computed in GEMM tiles of at most 64 vectors by 1024 centroids per task. When the
+centroids lie far from the origin compared with their spread, the tiles are
+computed around the centroids' mean, so that small distances keep their precision.
+A vector whose remembered clusters all become dearer than its bound is scored again
+against every centroid, so the bound is never trusted beyond what it proves.
+
+| | `kmeans` | `balanced_kmeans` |
+|---|---|---|
+| Distances per iteration | `O(n · k · d)` | `O(n · k · d)`, plus `O(r · k · d)` for `r` re-scored vectors |
+| Assignment | nearest centroid | auction, `O(b · 16)` for `b` bids |
+| Working memory | a `min(n, 65536) x k` distance block (`k` < 10000) | `O(n · 16 + k · d)`, plus one tile per thread |
+| Cluster sizes | unconstrained | `floor(n / k)` or `ceil(n / k)` |
+
+On real data `b` and `r` stay at a few per vector per iteration. Dense blobs that
+each need many clusters (high-dimensional Gaussian mixtures, for example) make the
+auction fight over nearly equivalent clusters, so the work of every assignment is
+counted and bounded. Bids and re-scored vectors are counted rather than timed, so
+the outcome does not depend on threads. When the first assignment exceeds its
+bound, training switches to a two-level decomposition: about `sqrt(k)`
+super-clusters whose sizes are whole numbers of leaves, each split into its leaves
+in parallel, with the same exact sizes. When a later assignment exceeds it, the
+result is whichever of the iterations so far and the two-level run has the lower
+loss.
+
+### Trade-offs
+
+Measured with [`cluster_benchmark`](../resources/cluster_benchmark.md) on 32
+threads of one NUMA node, 25 iterations, loss as the mean squared distance to the
+assigned centroid and peak memory as what the trainer allocates beyond its input.
+Every row is the run with the median time of three:
+
+| Data (`n x d`, `k`) | Trainer | Sizes | CV | Loss | Time | Peak memory |
+|---|---|---|---|---|---|---|
+| Uniform (100,000 x 64, 256) | `kmeans` | 342–448 | 0.049 | 4.5991 | 0.97 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.6000 | 0.85 s | 19.0 MiB |
+| Not divisible (99,968 x 64, 256) | `kmeans` | 340–455 | 0.050 | 4.5964 | 1.06 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 4.5966 | 0.85 s | 19.0 MiB |
+| Skewed, overlapping (100,000 x 64, 256) | `kmeans` | 5–1327 | 0.393 | 3.5829 | 0.97 s | 64.4 MiB |
+| | `balanced_kmeans` | 390–391 | 0.001 | 3.7463 | 4.00 s | 19.0 MiB |
+| Skewed, separated + duplicates (100,000 x 64, 256) | `kmeans` | 2–801 | 0.526 | 3.5803 | 1.03 s | 64.4 MiB |
+| | `balanced_kmeans` (two-level) | 390–391 | 0.001 | 19.2430 | 4.23 s | 41.8 MiB |
+| SIFT1M, first 262,144 (128, 4096) | `kmeans` | 1–355 | 0.525 | 43694 | 53.6 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 43818 | 13.9 s | 60.4 MiB |
+| GloVe-100, first 262,144 (100, 4096) | `kmeans` | 1–733 | 1.297 | 21.370 | 40.0 s | 1027 MiB |
+| | `balanced_kmeans` | 64–64 | 0 | 21.142 | 21.9 s | 59.9 MiB |
+| Skewed, overlapping (262,144 x 128, 4096) | `kmeans` | 1–1698 | 1.305 | 6.9019 | 53.7 s | 1027 MiB |
+| | `balanced_kmeans` (two-level) | 64–64 | 0 | 6.9823 | 38.7 s | 95.9 MiB |
+
+The skewed sets are Zipf-weighted Gaussian mixtures; "separated" places 64
+components far apart, so many small ones have to share clusters, and repeats eight
+vectors in 5% of the rows.
+
+- **Balance is exact** on every set. Plain k-means leaves its largest cluster at 1.1
+  to 26.5 times the mean size, and at 4096 clusters some clusters hold one vector.
+- **Loss** is within 0.3% of plain k-means on uniform, non-divisible and SIFT data,
+  and lower on GloVe, where plain k-means keeps many nearly empty clusters. Where
+  the data is clustered unevenly, equal sizes cost loss by construction: 4.6% and
+  1.2% on the two overlapping mixtures, and on the separated one small far-apart
+  components have to share clusters.
+- **Time and memory:** at IVF scale the trainer is faster than plain k-means
+  (whose seeding is single-threaded and whose distance block grows with
+  `65536 x k`) and needs 11 to 17 times less memory. Its own seeding does not
+  decide that: with k-means++ (`--init kmeans++`) instead of a random sample it
+  takes 12.5 s on SIFT, at a 0.05% higher loss.
+
+The same holds for whole indexes. Built from the full SIFT1M (`l2`) and GloVe-100
+(`cosine`) files with 4096 buckets and `fp32` codes, then searched by 32 threads on
+one NUMA node at `scan_buckets_count` 16 / 64 / 128 (`cluster_benchmark --ivf`,
+recall@10 against the files' ground truth; the run with the median build time of
+three, with the median QPS of the three at each setting):
+
+| Data | Trainer | Build | Bucket sizes | Recall@10 | Distances per query | QPS |
+|---|---|---|---|---|---|---|
+| SIFT1M | `kmeans` | 65.2 s | 1–1613 | 0.835 / 0.972 / 0.992 | 5238 / 19504 / 37445 | 127k / 38.8k / 20.5k |
+| | `balanced_kmeans` | 30.0 s | 244–245 | 0.827 / 0.971 / 0.993 | 4160 / 16190 / 32078 | 149k / 46.2k / 23.4k |
+| GloVe-100 | `kmeans` | 55.5 s | 1–2638 | 0.775 / 0.901 / 0.941 | 11829 / 43286 / 81713 | 77.5k / 24.8k / 13.2k |
+| | `balanced_kmeans` | 48.1 s | 288–289 | 0.699 / 0.853 / 0.908 | 5000 / 19461 / 38521 | 150k / 45.8k / 24.6k |
+
+Queries follow the data, so large buckets are probed more often than small ones,
+and with plain k-means the probed buckets are larger than the mean (a bucket probed
+in proportion to its size is on average `1 + CV²` times the mean: 1.3 on SIFT, 2.6
+on GloVe). At the same `scan_buckets_count` plain k-means therefore evaluates 17% to
+26% more distances on SIFT and 2.1 to 2.4 times as many on GloVe, which buys it
+recall on GloVe. At about the same throughput the balanced index has the same or
+higher recall (GloVe: 0.908 at 24.6k QPS against 0.901 at 24.8k; SIFT: 0.993 at
+23.4k against 0.992 at 20.5k), and no query scans more than
+`scan_buckets_count x ceil(n / buckets_count)` vectors until `Add` grows the
+buckets.
+
+Use `balanced_kmeans` when the cost of the largest bucket matters: skewed or
+duplicated data, buckets that live on disk or are moved between shards, or
+latency that has to stay predictable per query. On uniformly spread data it gives
+about the same index as `kmeans`.
 
 ## RaBitQ split storage
 

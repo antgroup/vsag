@@ -15,12 +15,15 @@
 
 #pragma once
 
+#include <algorithm>
 #include <iostream>
+#include <random>
 #include <vector>
 
 #include "algorithm/inner_index_interface.h"
 #include "impl/searcher/basic_searcher.h"
 #include "ivf_partition_strategy_parameter.h"
+#include "simd/fp32_simd.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "typing.h"
@@ -67,6 +70,84 @@ public:
                            const InnerSearchParam& param,
                            QueryContext* ctx) {
         return std::move(ClassifyDatas(datas, count, param.scan_bucket_size, ctx));
+    }
+
+    /// Buckets of the vectors written by a Build into an empty index. A strategy that
+    /// balances its buckets overrides this; by default every vector goes to its
+    /// nearest buckets, exactly as Add does.
+    virtual Vector<BucketIdType>
+    ClassifyDatasForBuild(const void* datas, int64_t count, BucketIdType buckets_per_data) {
+        return ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    }
+
+    /// Buckets of training vectors for codes that depend on their bucket (residuals):
+    /// the same number per vector, `size() / count`, naming every bucket a Build or Add
+    /// can encode it against, so the codes are trained on residuals like the ones they
+    /// will encode. By default that is the nearest bucket, where both put a vector.
+    virtual Vector<BucketIdType>
+    ClassifyDatasForTrain(const void* datas, int64_t count) {
+        return ClassifyDatas(datas, count, 1, nullptr);
+    }
+
+    /// Writes the residuals of `datas` to their buckets of ClassifyDatasForTrain, with one
+    /// row of `dim_` floats per different bucket of a vector, and returns the row count.
+    /// `datas` may be the storage of `residuals`, sized for it, so one bucket per vector
+    /// needs no further buffer and keeps the rows in order. Further rows are shuffled in,
+    /// with a fixed seed, because product quantizers train on a prefix of the rows and
+    /// have to see both kinds, from every part of the batch. A slot the routing left
+    /// without a bucket adds no row.
+    uint64_t
+    ResidualsForTrain(const float* datas, int64_t count, Vector<float>& residuals) {
+        if (count <= 0) {
+            residuals.clear();
+            return 0;
+        }
+        const auto buckets = this->ClassifyDatasForTrain(datas, count);
+        const auto vectors = static_cast<uint64_t>(count);
+        const auto buckets_per_data = buckets.size() / vectors;
+        const auto dim = static_cast<uint64_t>(dim_);
+        Vector<float> centroid(dim, allocator_);
+        // The further rows first, while the first ones cannot have overwritten `datas`.
+        Vector<float> further(allocator_);
+        for (uint64_t i = 0; i < vectors; ++i) {
+            const auto* own = buckets.data() + i * buckets_per_data;
+            for (uint64_t j = 1; j < buckets_per_data; ++j) {
+                if (own[j] >= 0 and own[j] != own[0]) {
+                    this->GetCentroid(own[j], centroid);
+                    further.resize(further.size() + dim);
+                    FP32Sub(datas + i * dim,
+                            centroid.data(),
+                            further.data() + further.size() - dim,
+                            dim);
+                }
+            }
+        }
+        residuals.resize(vectors * dim);
+        uint64_t rows = 0;
+        for (uint64_t i = 0; i < vectors; ++i) {
+            const auto bucket = buckets[i * buckets_per_data];
+            if (bucket >= 0) {
+                this->GetCentroid(bucket, centroid);
+                FP32Sub(datas + i * dim, centroid.data(), residuals.data() + rows * dim, dim);
+                ++rows;
+            }
+        }
+        residuals.resize(rows * dim);
+        if (further.empty()) {
+            return rows;
+        }
+        residuals.insert(residuals.end(), further.begin(), further.end());
+        rows += further.size() / dim;
+        std::mt19937 generator(47);
+        for (uint64_t row = rows - 1; row > 0; --row) {
+            const uint64_t other = generator() % (row + 1);
+            if (other != row) {
+                std::swap_ranges(residuals.data() + row * dim,
+                                 residuals.data() + (row + 1) * dim,
+                                 residuals.data() + other * dim);
+            }
+        }
+        return rows;
     }
 
     virtual void

@@ -31,6 +31,7 @@
 #include "gpu/gpu_plan.h"
 #include "impl/allocator/safe_allocator.h"
 #include "impl/blas/blas_function.h"
+#include "impl/cluster/balanced_kmeans_cluster.h"
 #include "impl/cluster/kmeans_cluster.h"
 #include "inner_string_params.h"
 #include "query_context.h"
@@ -122,6 +123,20 @@ IVFNearestPartition::Train(const DatasetPtr dataset) {
                 ivf_partition_strategy_param_->GetKMeansIterCount());
         std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
     } else if (ivf_partition_strategy_param_->partition_train_type ==
+               IVFNearestPartitionTrainerType::BalancedKMeansTrainer) {
+        // The same squared-L2 objective, sample, iteration count and (below) cosine
+        // normalization as the kmeans trainer; only the cluster sizes are constrained.
+        BalancedKMeansCluster cls(static_cast<int32_t>(dim), this->allocator_, this->thread_pool_);
+        BalancedKMeansOptions options;
+        options.iterations = ivf_partition_strategy_param_->GetKMeansIterCount();
+        // Only the centroids are kept. The trainer's last assignment produced them but
+        // is not one to them: a Build assigns afresh, as the residual codes do.
+        cls.Run(static_cast<uint32_t>(this->bucket_count_),
+                dataset->GetFloat32Vectors(),
+                static_cast<uint64_t>(dataset->GetNumElements()),
+                options);
+        std::memcpy(data.data(), cls.k_centroids_, dim * this->bucket_count_ * sizeof(float));
+    } else if (ivf_partition_strategy_param_->partition_train_type ==
                IVFNearestPartitionTrainerType::RandomTrainer) {
         auto selected = select_k_numbers(dataset->GetNumElements(), this->bucket_count_);
         for (int i = 0; i < bucket_count_; ++i) {
@@ -187,6 +202,87 @@ IVFNearestPartition::ClassifyDatasForSearch(const void* datas,
     // shape, and the device would prepare the whole centroid set per query. The
     // routing statistics also come only from here.
     return classify_datas_on_host(datas, count, param.scan_bucket_size, ctx);
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForBuild(const void* datas,
+                                           int64_t count,
+                                           BucketIdType buckets_per_data) {
+    if (ivf_partition_strategy_param_->partition_train_type !=
+            IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
+        not this->is_trained_ or count <= 0 or buckets_per_data <= 0) {
+        return this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    }
+    // The same assignment ClassifyDatasForTrain gives the residual codes: one auction,
+    // deterministic, against the final centroids.
+    auto labels = this->assign_balanced(datas, count);
+    if (buckets_per_data == 1) {
+        return labels;
+    }
+    // Further copies of a vector go to its nearest other buckets, as in Add; only the
+    // first copy of every vector is balanced. A copy the routing leaves without a bucket
+    // stays INVALID_BUCKET_ID, as ClassifyDatas leaves it, rather than naming bucket 0.
+    const auto routed = this->ClassifyDatas(datas, count, buckets_per_data, nullptr);
+    Vector<BucketIdType> result(
+        static_cast<uint64_t>(count) * buckets_per_data, INVALID_BUCKET_ID, allocator_);
+    for (int64_t i = 0; i < count; ++i) {
+        auto* out = result.data() + i * buckets_per_data;
+        const auto* nearest = routed.data() + i * buckets_per_data;
+        out[0] = labels[i];
+        BucketIdType filled = 1;
+        for (BucketIdType j = 0; j < buckets_per_data and filled < buckets_per_data; ++j) {
+            if (nearest[j] != labels[i]) {
+                out[filled++] = nearest[j];
+            }
+        }
+    }
+    return result;
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::ClassifyDatasForTrain(const void* datas, int64_t count) {
+    auto nearest = this->ClassifyDatas(datas, count, 1, nullptr);
+    if (ivf_partition_strategy_param_->partition_train_type !=
+            IVFNearestPartitionTrainerType::BalancedKMeansTrainer or
+        not this->is_trained_ or count <= 0) {
+        return nearest;
+    }
+    // A Build places its vectors under the size constraint, often away from their
+    // nearest bucket, while Add routes every vector to the nearest one. Residual codes
+    // trained on either assignment alone would not cover the other.
+    const auto balanced = this->assign_balanced(datas, count);
+    Vector<BucketIdType> buckets(static_cast<uint64_t>(count) * 2, allocator_);
+    for (int64_t i = 0; i < count; ++i) {
+        buckets[2 * i] = balanced[i];
+        buckets[2 * i + 1] = nearest[i];
+    }
+    return buckets;
+}
+
+Vector<BucketIdType>
+IVFNearestPartition::assign_balanced(const void* datas, int64_t count) {
+    // Scored with the routing key of the metric against the final centroids, which
+    // are unit length for cosine, so that a vector lands in the bucket a query near
+    // it is routed to whenever the capacities allow.
+    auto metric = BalancedAssignMetric::L2SQR;
+    if (metric_type_ == MetricType::METRIC_TYPE_IP) {
+        metric = BalancedAssignMetric::INNER_PRODUCT;
+    } else if (metric_type_ == MetricType::METRIC_TYPE_COSINE) {
+        metric = BalancedAssignMetric::COSINE;
+    }
+    const auto dim = static_cast<uint64_t>(this->dim_);
+    Vector<float> centroids(static_cast<uint64_t>(bucket_count_) * dim, allocator_);
+    Vector<float> centroid(dim, allocator_);
+    for (BucketIdType b = 0; b < bucket_count_; ++b) {
+        this->GetCentroid(b, centroid);
+        std::copy(centroid.begin(), centroid.end(), centroids.data() + b * dim);
+    }
+    BalancedKMeansCluster cluster(static_cast<int32_t>(dim), allocator_, thread_pool_);
+    return cluster.Assign(centroids.data(),
+                          static_cast<uint32_t>(bucket_count_),
+                          static_cast<const float*>(datas),
+                          static_cast<uint64_t>(count),
+                          metric);
 }
 
 /// The build-time assignment, offloaded. Nothing means use the host path: the
