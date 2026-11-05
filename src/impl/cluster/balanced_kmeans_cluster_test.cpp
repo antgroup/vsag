@@ -434,6 +434,37 @@ TEST_CASE("BalancedKMeans assignment is optimal for its centroids", "[ut][Balanc
     REQUIRE(cluster.stats_.fallback_assignments == 0);
 }
 
+TEST_CASE("BalancedKMeans Assign moves extra seats to where they save cost",
+          "[ut][BalancedKMeansCluster]") {
+    // Five vectors in three clusters give two of them an extra seat. Demand alone ties the
+    // clusters at -1000 and 1 and picks the lower id, where a zero would pay 1000000
+    // instead of the 1 it pays in the cluster at 1.
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const std::vector<float> centroids{0.0F, -1000.0F, 1.0F};
+    const std::vector<float> datas{0.0F, 0.0F, 0.0F, -1000.0F, 1.0F};
+    vsag::BalancedKMeansCluster cluster(1, allocator.get());
+    double mean_cost = 0.0;
+    const auto labels = cluster.Assign(
+        centroids.data(), 3, datas.data(), 5, vsag::BalancedAssignMetric::L2SQR, 16, &mean_cost);
+    const auto sizes = require_balanced(labels, 5, 3);
+    REQUIRE(sizes[0] == 2);
+    REQUIRE(sizes[1] == 1);
+    REQUIRE(sizes[2] == 2);
+    REQUIRE(std::abs(mean_cost - 0.2) < 1e-9);
+
+    // A budget that stops the auction also leaves the seats where they are.
+    const auto greedy = cluster.Assign(centroids.data(),
+                                       3,
+                                       datas.data(),
+                                       5,
+                                       vsag::BalancedAssignMetric::L2SQR,
+                                       16,
+                                       &mean_cost,
+                                       0.0);
+    require_balanced(greedy, 5, 3);
+    REQUIRE(cluster.stats_.fallback_assignments == 5);
+}
+
 TEST_CASE("BalancedKMeans Assign gives each vector its own cluster when k > count",
           "[ut][BalancedKMeansCluster]") {
     const auto [count, k, candidates, seed] =
@@ -950,6 +981,14 @@ TEST_CASE("BalancedKMeans rejects invalid arguments", "[ut][BalancedKMeansCluste
     // More vectors than 32-bit ids can name, refused before any of them is read.
     require_invalid_argument([&] {
         cluster.Run(4, datas.data(), uint64_t{std::numeric_limits<uint32_t>::max()} + 1, options);
+    });
+    // More clusters than int32_t labels can name, refused before any centroid is read.
+    require_invalid_argument([&] {
+        cluster.Assign(datas.data(),
+                       uint32_t{1} << 31U,
+                       datas.data(),
+                       count,
+                       vsag::BalancedAssignMetric::L2SQR);
     });
 
     auto bad = options;
