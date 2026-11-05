@@ -699,6 +699,11 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        CHECK_ARGUMENT(query != nullptr, "query must not be null");
+        this->validate_search_query(query);
+        CHECK_ARGUMENT(query->GetBinaryVectors() != nullptr, "query must contain binary vectors");
+    }
     return this->inner_codes_->FactoryComputer(this->get_data(query, 0));
 }
 
