@@ -13,8 +13,10 @@
 // limitations under the License.
 
 #include <algorithm>
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <numeric>
 #include <sstream>
@@ -55,6 +57,62 @@ GeneratePacked(uint64_t count, uint64_t bits, uint64_t seed) {
     }
     return data;
 }
+
+class LargeAllocationRecorder : public vsag::Allocator {
+public:
+    explicit LargeAllocationRecorder(uint64_t threshold) : threshold_(threshold) {
+    }
+
+    std::string
+    Name() override {
+        return "LargeAllocationRecorder";
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        Record(size);
+        return std::malloc(size);
+    }
+
+    void
+    Deallocate(void* ptr) override {
+        std::free(ptr);
+    }
+
+    void*
+    Reallocate(void* ptr, uint64_t size) override {
+        Record(size);
+        return std::realloc(ptr, size);
+    }
+
+    void
+    StartRecording() {
+        oversized_allocations_.store(0, std::memory_order_relaxed);
+        recording_.store(true, std::memory_order_release);
+    }
+
+    void
+    StopRecording() {
+        recording_.store(false, std::memory_order_release);
+    }
+
+    [[nodiscard]] uint64_t
+    OversizedAllocations() const {
+        return oversized_allocations_.load(std::memory_order_acquire);
+    }
+
+private:
+    void
+    Record(uint64_t size) {
+        if (recording_.load(std::memory_order_acquire) and size >= threshold_) {
+            oversized_allocations_.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    uint64_t threshold_;
+    std::atomic<bool> recording_{false};
+    std::atomic<uint64_t> oversized_allocations_{0};
+};
 
 vsag::DatasetPtr
 MakeDataset(const std::vector<uint8_t>& data, const std::vector<int64_t>& ids, int64_t dim) {
@@ -325,6 +383,44 @@ TEST_CASE("(PR) HGraph Binary Hamming Ordinary Update And Tune", "[ft][hgraph][p
                      ->BinaryVectors(base_data.data())
                      ->Owner(false);
     auto distance = index->CalcDistanceById(query, first_id[0]);
+    REQUIRE(distance.has_value());
+    REQUIRE(distance.value() == 0.0F);
+}
+
+TEST_CASE("(PR) HGraph Binary Tune Skips Float Training Scratch", "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 8192;
+    constexpr int64_t count = 64;
+    constexpr uint64_t float_train_scratch_bytes =
+        static_cast<uint64_t>(count) * dim * sizeof(float);
+    LargeAllocationRecorder allocator(float_train_scratch_bytes);
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 8192,
+        "index_param": {}
+    })";
+    auto base_data = GeneratePacked(count, dim, 531);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto index_made = vsag::Factory::CreateIndex("hgraph", params, &allocator);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+
+    allocator.StartRecording();
+    auto tuned = index->Tune(R"({"index_param":{"use_reorder":true}})");
+    allocator.StopRecording();
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value());
+    REQUIRE(allocator.OversizedAllocations() == 0);
+
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->BinaryVectors(base_data.data())
+                     ->Owner(false);
+    auto distance = index->CalcDistanceById(query, ids.front());
     REQUIRE(distance.has_value());
     REQUIRE(distance.value() == 0.0F);
 }
