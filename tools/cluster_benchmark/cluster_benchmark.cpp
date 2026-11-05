@@ -174,13 +174,16 @@ read_fvecs(const std::string& path, uint64_t limit) {
     Vectors vectors{path, 0, 0, {}};
     int32_t dim = 0;
     while (vectors.count < limit and in.read(reinterpret_cast<char*>(&dim), sizeof(dim))) {
-        if (vectors.dim == 0) {
-            vectors.dim = static_cast<uint64_t>(dim);
+        if (dim <= 0 or (vectors.dim != 0 and static_cast<uint64_t>(dim) != vectors.dim)) {
+            throw std::runtime_error(path + ": a record has a different or invalid dimension");
         }
+        vectors.dim = static_cast<uint64_t>(dim);
         const uint64_t offset = vectors.data.size();
         vectors.data.resize(offset + vectors.dim);
-        in.read(reinterpret_cast<char*>(vectors.data.data() + offset),
-                static_cast<std::streamsize>(vectors.dim * sizeof(float)));
+        if (not in.read(reinterpret_cast<char*>(vectors.data.data() + offset),
+                        static_cast<std::streamsize>(vectors.dim * sizeof(float)))) {
+            throw std::runtime_error(path + ": the last record is truncated");
+        }
         ++vectors.count;
     }
     return vectors;
