@@ -72,12 +72,16 @@ Dense block sizes are derived from a working-memory budget rather than a fixed r
 sparse per-dimension accumulators stop at 10,000,000 inferred dimensions (the other metrics
 are still reported), and Euclidean distances switch to direct coordinate differences when
 the fast expanded form would cancel catastrophically. Full norm and sparse nnz storage (8 bytes
-per vector each) and fixed-width exact-duplicate digests (16 bytes per vector) each have a 256 MiB
-retained-state budget. If the row-count estimate exceeds a budget, the corresponding full-split
-norms/outliers, nnz distribution, or exact-duplicate fields are explicitly marked unavailable with
-a reason; no partial result is presented as full-dataset coverage, and streaming/sampled metrics
-are still reported. Sparse offsets are validated in bounded windows; an index over 64 MiB is not
-retained and the reader falls back to bounded sequential decoding.
+per vector each) each have a 256 MiB retained-state budget. Exact-duplicate detection retains a
+16-byte digest per vector but uses a peak-aware budget of 64 bytes per vector, also covering
+`np.unique`'s sorted copy, sort index, unique output, and counts, against the same 256 MiB
+full-split state budget. It is available through 4,194,304 vectors
+(`256 × 1024 × 1024 / 64`, approximately 4.19 million) and becomes unavailable above that
+threshold. If the row-count estimate exceeds a budget, the corresponding full-split norms/outliers,
+nnz distribution, or exact-duplicate fields are explicitly marked unavailable with a reason; no
+partial result is presented as full-dataset coverage, and streaming/sampled metrics are still
+reported. Sparse offsets are validated in bounded windows; an index over 64 MiB is not retained and
+the reader falls back to bounded sequential decoding.
 
 To profile arrays you only have in memory — for example the same arrays you pass to
 `pyvsag` — first export them with h5py to the layout above; see
