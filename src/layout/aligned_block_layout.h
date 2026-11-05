@@ -109,6 +109,14 @@ public:
     }
 
     [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t count) const {
+        if (count == 0) {
+            return 0;
+        }
+        return ((count - 1) / records_per_block_ + 1) * block_size_;
+    }
+
+    [[nodiscard]] uint64_t
     GetMemoryUsage() const {
         return sizeof(*this) + io_.GetMemoryUsage() + blocks_.capacity() * sizeof(uint8_t*);
     }

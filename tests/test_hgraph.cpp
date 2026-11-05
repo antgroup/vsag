@@ -4720,18 +4720,20 @@ TEST_CASE("HGraph EstimateBuildMemory includes reserved capacity and SQ trainer 
 TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory][hgraph][build]") {
     using namespace fixtures;
 
-    SECTION("cached file-backed precise codes") {
-        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "sq8,fp32,buffer_io");
-        build_param.graph_type = "nsw";
-        build_param.thread_count = 1;
-        auto param = vsag::JsonType::Parse(
-            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
-        param["index_param"]["build_by_base"].SetBool(false);
-        param["index_param"]["precise_enable_read_cache"].SetBool(true);
-        param["index_param"]["precise_cache_total_size"].SetUint64(1024 * 1024);
-        auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
-        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
-        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    SECTION("file-backed precise codes used for construction") {
+        for (const bool enable_read_cache : {false, true}) {
+            HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "sq8,fp32,buffer_io");
+            build_param.graph_type = "nsw";
+            build_param.thread_count = 1;
+            auto param = vsag::JsonType::Parse(
+                HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+            param["index_param"]["build_by_base"].SetBool(false);
+            param["index_param"]["precise_enable_read_cache"].SetBool(enable_read_cache);
+            param["index_param"]["precise_cache_total_size"].SetUint64(1024 * 1024);
+            auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+            REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+            REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+        }
     }
 
     SECTION("cached file-backed graph") {
@@ -4757,6 +4759,19 @@ TEST_CASE("HGraph EstimateBuildMemory rejects unmodelled storage", "[ft][memory]
             HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
         param["index_param"]["use_reverse_edges"].SetBool(true);
         auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+        REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
+        REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
+    }
+
+    SECTION("attribute posting lists") {
+        HGraphTestIndex::HGraphBuildParam build_param("l2", 16, "fp32");
+        build_param.graph_type = "nsw";
+        build_param.thread_count = 1;
+        build_param.use_attr_filter = true;
+        auto index = TestIndex::TestFactory(
+            HGraphTestIndex::name,
+            HGraphTestIndex::GenerateHGraphBuildParametersString(build_param),
+            true);
         REQUIRE_FALSE(index->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
         REQUIRE_THROWS_AS(index->EstimateBuildMemory(512), vsag::VsagException);
     }
@@ -4896,6 +4911,31 @@ TEST_CASE("HGraph EstimateMemory uses exact sizes for contiguous stores",
     });
 }
 
+TEST_CASE("HGraph EstimateMemory uses captured block IO granularity",
+          "[ft][memory][hgraph][build]") {
+    using namespace fixtures;
+    const auto origin_size = vsag::Options::Instance().block_size_limit();
+    constexpr uint64_t mib = 1024 * 1024;
+    vsag::Options::Instance().set_block_size_limit(3 * mib);
+    HGraphTestIndex::HGraphBuildParam build_param("l2", 1, "fp32");
+    build_param.graph_type = "nsw";
+    build_param.thread_count = 1;
+    auto param =
+        vsag::JsonType::Parse(HGraphTestIndex::GenerateHGraphBuildParametersString(build_param));
+    param["index_param"]["resize_increase_count_bit"].SetUint64(1);
+    param["index_param"]["max_degree"].SetUint64(4);
+    auto index = TestIndex::TestFactory(HGraphTestIndex::name, param.Dump(), true);
+
+    // MemoryBlockIOParameter rounded 3 MiB down to 2 MiB at construction. Both the base and
+    // graph stores occupy one block, and later option changes cannot resize them.
+    const auto retained = index->EstimateMemory(1);
+    vsag::Options::Instance().set_block_size_limit(8 * mib);
+    REQUIRE(index->EstimateMemory(1) == retained);
+    vsag::Options::Instance().set_block_size_limit(origin_size);
+    REQUIRE(retained >= 4 * mib);
+    REQUIRE(retained < 5 * mib);
+}
+
 TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
           "[ft][memory][hgraph][build]") {
     using namespace fixtures;
@@ -4929,7 +4969,8 @@ TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
     REQUIRE(parallel->CheckFeature(vsag::SUPPORT_ESTIMATE_BUILD_MEMORY));
 
     // Both indexes use the same supplied pool, so the O(N) task-state charge is identical.
-    // Their difference is exactly one additional worker's visited list, two heaps and encode row.
+    // Their difference is exactly one additional worker's visited list, two heaps, four
+    // degree-sized probe vectors and encode row.
     const auto extra_worker =
         parallel->EstimateBuildMemory(count) - serial->EstimateBuildMemory(count);
     constexpr uint64_t visited_list_bytes =
@@ -4938,7 +4979,11 @@ TEST_CASE("HGraph EstimateBuildMemory bounds candidate heap growth",
         count < ef_construction + 1 ? count : ef_construction + 1;
     constexpr uint64_t heap_bytes =
         3 * (count + result_heap_entries) * sizeof(std::pair<float, vsag::InnerIdType>);
-    REQUIRE(extra_worker == visited_list_bytes + heap_bytes + dim * sizeof(float));
+    constexpr uint64_t max_degree = 4;
+    constexpr uint64_t probe_vector_bytes =
+        2 * max_degree * (sizeof(vsag::InnerIdType) + sizeof(float));
+    REQUIRE(extra_worker ==
+            visited_list_bytes + heap_bytes + probe_vector_bytes + dim * sizeof(float));
 }
 
 TEST_CASE("HGraph Build limits tasks on a supplied thread pool", "[ft][memory][hgraph][build]") {

@@ -42,6 +42,7 @@
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
 #include "io/common/io_parameter.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
@@ -1402,6 +1403,11 @@ HGraph::can_estimate_build_memory() const {
         // build, which the in-memory NSW model below does not account for.
         return false;
     }
+    if (this->use_attribute_filter_) {
+        // Attribute posting lists grow with the number and distribution of indexed values and
+        // are not represented by the vector/graph terms in EstimateMemory().
+        return false;
+    }
     const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
     if (hgraph_param == nullptr) {
         return false;
@@ -1446,12 +1452,10 @@ HGraph::can_estimate_build_memory() const {
         return false;
     }
     if (this->has_precise_reorder() and not this->build_by_base_ and
-        not this->high_precise_codes_->InMemory() and
-        hgraph_param->precise_codes_param != nullptr and
-        hgraph_param->precise_codes_param->io_parameter != nullptr and
-        hgraph_param->precise_codes_param->io_parameter->enable_read_cache_) {
-        // Construction probes can retain up to the configured OptionalPageCache budget while
-        // reading file-backed precise codes. That cache is not part of the in-memory model.
+        not this->high_precise_codes_->InMemory()) {
+        // Construction probes read precise codes in degree-sized batches. File-backed stores
+        // allocate an id_count * code_size buffer per worker even when their read cache is off;
+        // neither that scratch nor an enabled cache belongs to this in-memory model.
         return false;
     }
     if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
@@ -1629,7 +1633,6 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     uint64_t final_memory = this->EstimateMemory(retained_rows);
     const uint64_t element_count =
         next_multiple_of_power_of_two(retained_rows, this->resize_increase_count_bit_);
-    const auto block_size = Options::Instance().block_size_limit();
     auto block_memory_ceil = [](uint64_t memory, uint64_t size) -> uint64_t {
         return static_cast<uint64_t>(
             std::ceil(static_cast<double>(memory) / static_cast<double>(size)) *
@@ -1639,10 +1642,16 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
         // EstimateMemory() omits precise codes that search is told to ignore, but Build still
         // resizes and populates them. Restore their retained footprint for the build estimate.
         const uint64_t precise_memory = this->high_precise_codes_->code_size_ * element_count;
+        const auto precise_io = hgraph_param->precise_codes_param == nullptr
+                                    ? IOParamPtr{}
+                                    : hgraph_param->precise_codes_param->io_parameter;
         const bool precise_is_contiguous =
-            hgraph_param->precise_codes_param != nullptr and
-            hgraph_param->precise_codes_param->io_parameter != nullptr and
-            hgraph_param->precise_codes_param->io_parameter->Kind() == IOKind::MEMORY;
+            precise_io != nullptr and precise_io->Kind() == IOKind::MEMORY;
+        const auto block_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(precise_io);
+        const auto block_size =
+            block_io == nullptr
+                ? MemoryBlockIOParameter::NearestPowerOfTwo(Options::Instance().block_size_limit())
+                : block_io->block_size_;
         final_memory +=
             precise_is_contiguous ? precise_memory : block_memory_ceil(precise_memory, block_size);
     }
@@ -1705,7 +1714,12 @@ HGraph::EstimateBuildMemory(uint64_t num_elements) const {
     const uint64_t probe_heap_bytes = kHeapGrowthCapacityFactor *
                                       (num_elements + result_heap_entries) *
                                       sizeof(std::pair<float, InnerIdType>);
-    build_memory += build_threads * (visited_list_bytes + probe_heap_bytes);
+    // BasicSearcher::search_impl also keeps two InnerIdType vectors and two float vectors at
+    // MaximumDegree() entries each for neighbor collection and batch distance evaluation.
+    const uint64_t probe_vector_bytes =
+        2 * static_cast<uint64_t>(this->bottom_graph_->MaximumDegree()) *
+        (sizeof(InnerIdType) + sizeof(float));
+    build_memory += build_threads * (visited_list_bytes + probe_heap_bytes + probe_vector_bytes);
 
     // (4) Per-worker encode scratch: InsertVector() encodes one code row in a temporary buffer
     //     before writing it into the persistent flatten storage.

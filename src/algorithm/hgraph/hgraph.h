@@ -172,8 +172,9 @@ public:
       *      min(train_count, 100000) float32 rows, including when the outer sampler does
       *      not copy;
       *   3. the per-worker construction probe scratch: one pool visited list over the graph's
-      *      nodes, a result heap bounded by ef_construction, and an unbounded candidate heap
-      *      conservatively bounded by N visited nodes, including vector-growth capacity;
+      *      nodes, a result heap bounded by ef_construction, an unbounded candidate heap
+      *      conservatively bounded by N visited nodes, including vector-growth capacity, and
+      *      two degree-sized inner-ID vectors plus two degree-sized distance vectors;
       *   4. one temporary encode row per worker, used by InsertVector() before the code is
       *      written into the persistent flatten storage;
       *   5. the per-element build bookkeeping prepare_add_batch() retains until insertion

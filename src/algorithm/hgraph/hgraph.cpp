@@ -43,6 +43,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "typing.h"
@@ -448,7 +449,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 uint64_t
 HGraph::EstimateMemory(uint64_t num_elements) const {
     uint64_t estimate_memory = 0;
-    auto block_size = Options::Instance().block_size_limit();
+    const auto block_size =
+        MemoryBlockIOParameter::NearestPowerOfTwo(Options::Instance().block_size_limit());
     auto element_count =
         next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
 
@@ -463,7 +465,9 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
             // backends retain a final partially used block beyond the logical store size.
             return memory;
         }
-        return block_memory_ceil(memory, block_size);
+        const auto block_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(io_parameter);
+        const auto allocation_block_size = block_io == nullptr ? block_size : block_io->block_size_;
+        return block_memory_ceil(memory, allocation_block_size);
     };
     auto flatten_io = [](const FlattenInterfaceParamPtr& param) -> IOParamPtr {
         return param == nullptr ? nullptr : param->io_parameter;
@@ -476,8 +480,10 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
     const auto graph_io = graph_param == nullptr ? IOParamPtr{} : graph_param->io_parameter_;
 
     if (this->rabitq_fused_datacell_ != nullptr) {
-        const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
-        estimate_memory += block_memory_ceil(fused_memory, block_size);
+        // AlignedBlockLayout captures its block size at construction and keeps every record
+        // within a block, so use its actual block count rather than rounding packed records
+        // with the current global option.
+        estimate_memory += this->rabitq_fused_datacell_->EstimateMemory(element_count);
     } else {
         if (this->basic_flatten_codes_->InMemory()) {
             auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
