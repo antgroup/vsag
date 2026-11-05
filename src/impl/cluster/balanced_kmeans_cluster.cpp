@@ -210,6 +210,12 @@ check_problem(uint32_t k, uint64_t count, int32_t dim, uint32_t candidate_count)
             ErrorType::INVALID_ARGUMENT,
             fmt::format("count must not exceed {}", std::numeric_limits<uint32_t>::max()));
     }
+    // Clusters are named by int32_t labels.
+    if (k > static_cast<uint32_t>(std::numeric_limits<int32_t>::max())) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("k must not exceed {}", std::numeric_limits<int32_t>::max()));
+    }
     if (candidate_count == 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "candidate_count must be positive");
     }
@@ -527,6 +533,48 @@ choose_capacities(const CandidateTable& table, uint64_t count, uint64_t k, Alloc
         ++capacity[order[i]];
     }
     return capacity;
+}
+
+/// choose_capacities places the extra seats before any vector is, and the auction keeps
+/// the sizes it is given. This pass moves them: a vector in a cluster with an extra seat
+/// takes a remembered cluster without one when that lowers its cost, and the seat goes
+/// with it. Sizes stay exact and the result does not depend on the threads. Returns
+/// whether a seat moved, which leaves the assignment to be settled for the new sizes.
+bool
+move_extra_seats(const CostModel& model,
+                 const CandidateTable& table,
+                 Vector<uint32_t>& capacity,
+                 Vector<int32_t>& labels) {
+    const uint64_t count = labels.size();
+    const uint64_t k = capacity.size();
+    if (count < k or count % k == 0) {
+        return false;
+    }
+    const auto base = static_cast<uint32_t>(count / k);
+    bool moved = false;
+    for (uint64_t row = 0; row < count; ++row) {
+        const auto from = static_cast<uint64_t>(labels[row]);
+        if (capacity[from] == base) {
+            continue;
+        }
+        double best = model.Cost(row, from);
+        uint64_t to = from;
+        for (uint64_t t = 0; t < table.width; ++t) {
+            const uint64_t cluster = table.ids[row * table.width + t];
+            const auto cost = static_cast<double>(table.costs[row * table.width + t]);
+            if (capacity[cluster] == base and cost < best) {
+                best = cost;
+                to = cluster;
+            }
+        }
+        if (to != from) {
+            labels[row] = static_cast<int32_t>(to);
+            --capacity[from];
+            ++capacity[to];
+            moved = true;
+        }
+    }
+    return moved;
 }
 
 /// Typical difference between the cheapest and the dearest remembered cluster of a
@@ -1346,6 +1394,11 @@ BalancedKMeansCluster::run_flat(uint32_t k,
             outcome = FlatOutcome::LATER_OVER_BUDGET;
             break;
         }
+        // Capacities from the caller are part of the problem, and the warm iterations
+        // that follow settle the assignment for the sizes this leaves.
+        if (iteration == 0 and capacity == nullptr) {
+            move_extra_seats(model, table, sizes, labels);
+        }
         // Dual warm start: moving centroid j by d lowers the mean cost of its members by
         // ||d||^2, so raising its price by as much keeps the previous prices close to
         // what clears the next assignment.
@@ -1518,7 +1571,7 @@ BalancedKMeansCluster::Assign(const float* centroids,
         CandidateTable table(count, width, allocator_);
         Vector<double> prices(k, 0.0, allocator_);
         score_rows(model, prices.data(), nullptr, count, table, allocator_, thread_pool_);
-        const auto capacity = choose_capacities(table, count, k, allocator_);
+        auto capacity = choose_capacities(table, count, k, allocator_);
         const BalancedKMeansOptions defaults;
         solve_assignment(model,
                          capacity,
@@ -1533,6 +1586,22 @@ BalancedKMeansCluster::Assign(const float* centroids,
                          auction_bytes,
                          allocator_,
                          thread_pool_);
+        // A budget that stopped the auction also stops this refinement.
+        if (stats_.fallback_assignments == 0 and move_extra_seats(model, table, capacity, labels)) {
+            solve_assignment(model,
+                             capacity,
+                             prices,
+                             table,
+                             true,
+                             defaults.epsilon_ratio,
+                             WorkBudget::For(count, work_budget, false),
+                             true,
+                             labels,
+                             stats_,
+                             auction_bytes,
+                             allocator_,
+                             thread_pool_);
+        }
         stats_.working_set_bytes =
             table.MemoryUsage() + auction_bytes + scored_centroids.size() * sizeof(float);
     }
