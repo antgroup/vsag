@@ -387,6 +387,53 @@ TEST_CASE("(PR) HGraph Binary Hamming Ordinary Update And Tune", "[ft][hgraph][p
     REQUIRE(distance.value() == 0.0F);
 }
 
+TEST_CASE("(PR) HGraph Binary Tune Uses Restored Dimension", "[ft][hgraph][pr]") {
+    constexpr int64_t dim = 65;
+    constexpr int64_t count = 32;
+    constexpr uint64_t num_bytes = (dim + 7) / 8;
+    const std::string params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 65,
+        "index_param": {}
+    })";
+    const std::string different_dim_params = R"(
+    {
+        "dtype": "binary",
+        "metric_type": "hamming",
+        "dim": 128,
+        "index_param": {}
+    })";
+    auto base_data = GeneratePacked(count, dim, 97531);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    auto index_made = vsag::Factory::CreateIndex("hgraph", params);
+    REQUIRE(index_made.has_value());
+    auto index = index_made.value();
+    REQUIRE(index->Build(MakeDataset(base_data, ids, dim)).has_value());
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+
+    auto restored_made = vsag::Factory::CreateIndex("hgraph", different_dim_params);
+    REQUIRE(restored_made.has_value());
+    auto restored = restored_made.value();
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    auto tuned = restored->Tune(R"({"index_param":{"use_reorder":true}})");
+    REQUIRE(tuned.has_value());
+    REQUIRE(tuned.value());
+
+    constexpr int64_t query_id = 7;
+    auto query = vsag::Dataset::Make()
+                     ->NumElements(1)
+                     ->Dim(dim)
+                     ->BinaryVectors(base_data.data() + query_id * num_bytes)
+                     ->Owner(false);
+    auto precise_distance = restored->CalcDistanceById(query, ids[query_id], true);
+    REQUIRE(precise_distance.has_value());
+    REQUIRE(precise_distance.value() == 0.0F);
+}
+
 TEST_CASE("(PR) HGraph Binary Tune Skips Float Training Scratch", "[ft][hgraph][pr]") {
     constexpr int64_t dim = 8192;
     constexpr int64_t count = 64;

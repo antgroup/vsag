@@ -264,6 +264,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
     // init new_basic_code obj
     auto common_param = this->basic_flatten_codes_->ExportCommonParam();
+    // Deserialize restores dim_ but leaves the datacell's constructor-time common parameter stale.
+    common_param.dim_ = this->dim_;
     auto new_basic_code =
         FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
     FlattenInterfacePtr new_precise_code;
@@ -402,8 +404,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 
             const bool packed_binary_rebuild = data_type_ == DataTypes::DATA_TYPE_BINARY and
                                                binary_tune_source and is_binary_code(new_code);
+            if (packed_binary_rebuild) {
+                const auto expected_size = (static_cast<uint64_t>(dim_) + 7U) / 8U;
+                CHECK_ARGUMENT(tune_source->GetQuantizerCodeSize() == expected_size and
+                                   new_code->GetQuantizerCodeSize() == expected_size,
+                               "binary Tune source and destination packed widths must match dim");
+            }
             const uint64_t insert_buffer_bytes = packed_binary_rebuild
-                                                     ? tune_source->GetQuantizerCodeSize()
+                                                     ? new_code->GetQuantizerCodeSize()
                                                      : static_cast<uint64_t>(dim_) * sizeof(float);
             // Binary decode/encode type-erases packed bytes through float*, so only the byte
             // capacity changes; other dtypes retain their original float scratch layout.
