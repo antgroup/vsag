@@ -18,6 +18,7 @@
 extern char** environ;
 #endif
 #include <limits>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <numeric>
 #include <set>
@@ -111,7 +112,184 @@ public:
     }
     std::shared_ptr<ConcurrencyProbe> probe = std::make_shared<ConcurrencyProbe>();
 };
+
+// Keep both stages exact here: any observed difference must come from candidate
+// selection, rather than build pruning, quantization, filtering or a deadline.
+struct CandidateDiagnosisData {
+    explicit CandidateDiagnosisData(uint32_t dimensions)
+        : query_vector{dimensions, terms.data(), query_values.data()} {
+        for (uint64_t i = 0; i < vectors.size(); ++i) {
+            labels[i] = static_cast<int64_t>(100 + i);
+            vectors[i] = SparseVector{dimensions, terms.data(), values[i].data()};
+        }
+    }
+
+    std::unique_ptr<SINDI>
+    Build(uint32_t workers) {
+        IndexCommonParam common;
+        common.allocator_ = allocator;
+        common.metric_ = MetricType::METRIC_TYPE_IP;
+        common.search_resources_ = std::make_shared<SearchExecutionContext>(workers);
+        auto params = std::make_shared<SINDIParameter>();
+        params->immutable = true;
+        params->term_id_limit = 4;
+        params->window_size = 4;
+        params->doc_prune_ratio = 0;
+        params->term_prune_ratio = 0;
+        params->sparse_value_quant_type = SparseValueQuantizationType::FP32;
+        params->use_reorder = true;
+        params->rerank_type = SPARSE_RERANK_TYPE_FP32;
+        auto index = std::make_unique<SINDI>(params, common);
+        auto data = Dataset::Make()
+                        ->NumElements(vectors.size())
+                        ->SparseVectors(vectors.data())
+                        ->Ids(labels.data())
+                        ->Owner(false);
+        REQUIRE(index->Build(data).empty());
+        return index;
+    }
+
+    DatasetPtr
+    Search(const SINDI& index,
+           uint32_t parallelism,
+           uint32_t candidates,
+           double ratio,
+           float prune,
+           uint32_t topk) {
+        const auto parameters = nlohmann::json{{"sindi",
+                                                {{"window_parallelism", parallelism},
+                                                 {"n_candidate", candidates},
+                                                 {"parallel_n_candidate_ratio", ratio},
+                                                 {"query_prune_ratio", prune},
+                                                 {"timeout_ms", 10000}}}};
+        auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+        return index.KnnSearch(query, topk, parameters.dump(), nullptr);
+    }
+
+    // SINDI borrows its allocator; keep it alive through every index/result.
+    std::shared_ptr<Allocator> allocator = SafeAllocator::FactoryDefaultAllocator();
+    std::array<uint32_t, 2> terms{1, 2};
+    std::array<float, 2> query_values{2, 1};
+    std::array<std::array<float, 2>, 16> values{};
+    std::array<int64_t, 16> labels{};
+    std::array<SparseVector, 16> vectors{};
+    SparseVector query_vector;
+};
+
+std::vector<std::pair<int64_t, float>>
+candidate_results(const DatasetPtr& result) {
+    std::vector<std::pair<int64_t, float>> rows;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        rows.emplace_back(result->GetIds()[i], result->GetDistances()[i]);
+    }
+    return rows;
+}
+
+void
+require_partition_diagnosis(const DatasetPtr& result, uint64_t capacity, uint32_t workers) {
+    const auto stats = nlohmann::json::parse(result->GetStatistics());
+    REQUIRE(stats["sindi_candidate_capacity"] == capacity);
+    REQUIRE(stats["sindi_partitions"] == 4);
+    REQUIRE(stats["sindi_windows_processed"] == 4);
+    REQUIRE(stats["sindi_execution_complete"] == true);
+    const auto granted = stats["sindi_granted_slots"].get<uint32_t>();
+    REQUIRE(granted >= 1);
+    REQUIRE(granted <= workers + 1);
+    if (workers == 0) {
+        // Prepared resources with no background workers still exercise partitions.
+        // Explicit P1 would instead exercise the original serial algorithm.
+        REQUIRE(granted == 1);
+    } else if (stats["sindi_cpu_slots"].get<uint32_t>() > 1) {
+        REQUIRE(granted > 1);
+    }
+}
 }  // namespace
+
+TEST_CASE("SINDI unpruned candidate concentration explains quota differences",
+          "[ut][SINDIParallel][SindiCandidateDiagnosis]") {
+    CandidateDiagnosisData data(1);
+    data.query_values[0] = 1;
+    for (uint64_t i = 0; i < data.values.size(); ++i) {
+        data.values[i][0] = static_cast<float>(16 - i);
+    }
+    // Four windows and N=4 produce four partitions. All four exact winners are
+    // in the first partition. These expectations follow directly from 1-dot.
+    const std::vector<std::pair<int64_t, float>> exact{
+        {100, -15}, {101, -14}, {102, -13}, {103, -12}};
+    const std::vector<std::pair<int64_t, float>> ratio_one{
+        {100, -15}, {104, -11}, {108, -7}, {112, -3}};
+    const std::vector<std::pair<int64_t, float>> ratio_two{
+        {100, -15}, {101, -14}, {104, -11}, {105, -10}};
+    for (uint32_t workers : {0U, 3U}) {
+        CAPTURE(workers);
+        auto index = data.Build(workers);
+        auto serial = data.Search(*index, 1, 4, 1, 0, 4);
+        REQUIRE(candidate_results(serial) == exact);
+        REQUIRE(candidate_results(data.Search(*index, 1, 4, 4, 0, 4)) == exact);
+
+        // Characterize the current allocation policy, not acceptance of a
+        // serial-compatibility deviation: R=1/2 admits only 1/2 winners locally.
+        auto limited_one = data.Search(*index, 4, 4, 1, 0, 4);
+        auto limited_two = data.Search(*index, 4, 4, 2, 0, 4);
+        REQUIRE(candidate_results(limited_one) == ratio_one);
+        REQUIRE(candidate_results(limited_two) == ratio_two);
+        require_partition_diagnosis(limited_one, 4, workers);
+        require_partition_diagnosis(limited_two, 8, workers);
+        REQUIRE(candidate_results(data.Search(*index, 8, 4, 2, 0, 4)) == ratio_two);
+
+        // Either knob can remove this particular quota loss. Neither outcome
+        // establishes a universal default or a latency recommendation.
+        auto larger_ratio = data.Search(*index, 4, 4, 4, 0, 4);
+        auto more_candidates = data.Search(*index, 4, 8, 2, 0, 4);
+        REQUIRE(candidate_results(larger_ratio) == exact);
+        REQUIRE(candidate_results(more_candidates) == exact);
+        require_partition_diagnosis(larger_ratio, 16, workers);
+        require_partition_diagnosis(more_candidates, 16, workers);
+    }
+}
+
+TEST_CASE("SINDI pruned proxy ties remain stable and expose candidate tuning limits",
+          "[ut][SINDIParallel][SindiCandidateDiagnosis]") {
+    CandidateDiagnosisData data(2);
+    for (uint64_t i = 0; i < data.values.size(); ++i) {
+        data.values[i] = {1, static_cast<float>(i + 1)};
+    }
+    // q=(2,1). Dropping its second term makes every proxy score 2, although
+    // exact dot products range from 3 to 18. Global tie ordering retains IDs
+    // 100..103 at N=4, whose best reranked document is 103, rather than 115.
+    const std::vector<std::pair<int64_t, float>> exact{{115, -17}};
+    const std::vector<std::pair<int64_t, float>> pruned{{103, -5}};
+    for (uint32_t workers : {0U, 3U}) {
+        CAPTURE(workers);
+        auto index = data.Build(workers);
+        REQUIRE(candidate_results(data.Search(*index, 1, 4, 4, 0, 1)) == exact);
+        REQUIRE(candidate_results(data.Search(*index, 4, 4, 4, 0, 1)) == exact);
+
+        // Serial distance-only ties have no ID-order contract. Check the exact
+        // rerank value of whichever candidate survives, not an incidental heap order.
+        auto serial_pruned = data.Search(*index, 1, 4, 4, 0.5F, 1);
+        REQUIRE(serial_pruned->GetDim() == 1);
+        const auto label = serial_pruned->GetIds()[0];
+        REQUIRE(label >= 100);
+        REQUIRE(label <= 115);
+        REQUIRE(serial_pruned->GetDistances()[0] == 98.0F - static_cast<float>(label));
+
+        for (uint32_t repeat = 0; repeat < 3; ++repeat) {
+            for (uint32_t parallelism : {4U, 8U}) {
+                auto result = data.Search(*index, parallelism, 4, 4, 0.5F, 1);
+                REQUIRE(candidate_results(result) == pruned);
+                require_partition_diagnosis(result, 16, workers);
+            }
+        }
+        // More local capacity does not change the global N=4 proxy tie cutoff.
+        REQUIRE(candidate_results(data.Search(*index, 4, 4, 16, 0.5F, 1)) == pruned);
+        // Raising N includes all documents before reranking and recovers the
+        // exact winner while retaining query pruning in this controlled case.
+        auto more_candidates = data.Search(*index, 4, 16, 2, 0.5F, 1);
+        REQUIRE(candidate_results(more_candidates) == exact);
+        require_partition_diagnosis(more_candidates, 32, workers);
+    }
+}
 
 TEST_CASE("SINDI parallel search preserves filtering and deterministic ties",
           "[ut][SINDIParallel]") {

@@ -255,7 +255,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_candidate` | int | `0` | Candidate heap size. When `0`, defaults to `SPARSE_AMPLIFICATION_FACTOR · topk` (500×). If set, must satisfy `1 ≤ n_candidate ≤ SPARSE_AMPLIFICATION_FACTOR · topk`. |
+| `n_candidate` | int | `500` | Approximate candidate pool size. The effective size is `N = max(n_candidate, topk)`. Increasing N can retain more candidates for reranking at additional cost; it does not guarantee exact recall or serial/parallel equivalence. |
 | `window_parallelism` | int | `1` | Maximum execution slots, including the caller (`1` to `16`). Omitted or `1` uses the original serial candidate heap. Greater values select the fixed-partition approximate executor, supported for immutable in-memory KNN only. Actual slots may be reduced by resource admission without changing the candidate plan. |
 | `parallel_n_candidate_ratio` | number | `2` | Finite value ≥1. Total local heap capacity is `ceil(ratio × max(n_candidate, topk))`; capacity is distributed over fixed logical partitions independently of the execution slot count. Larger capacity retains more candidates at additional cost; it does not guarantee the serial candidate set or a particular recall. Validated but unapplied in serial mode. |
 | `profile_cpu` | bool | `false` | Diagnostic only, for serial and parallel KNN. Measures calling-thread CPU after parameter parsing and before statistics serialization, plus background window-worker CPU. Disabled requests do not read thread CPU clocks. |
@@ -263,6 +263,19 @@ Search-time parameters live under the `sindi` sub-object:
 | `query_prune_ratio` | float | `0.0` | Fraction of lowest-weight query terms skipped (`[0.0, 1.0)`). |
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
+
+### Parallel candidate quality and tuning
+
+Parallel search changes candidate selection as well as execution. A serial query uses one global candidate heap; parallel queries distribute `ceil(parallel_n_candidate_ratio * N)` capacity over fixed partitions, then merge to N candidates before the same reranking stage. A concentrated group of good candidates can exceed one partition quota. Approximate-distance ties can also select different documents whose reranked distances differ. Setting `query_prune_ratio=0` removes query-term pruning but does not remove partition quotas, build-time pruning or quantization; it is not a guarantee of identical serial and parallel results.
+
+Tune one dimension at a time while keeping the query, filter, output top-k and deadlines fixed:
+
+- `window_parallelism` changes execution slots; it does not enlarge the candidate plan.
+- `parallel_n_candidate_ratio` enlarges local heaps and can alleviate partition quota loss. It does not enlarge the final N-candidate cutoff, so increasing it may not resolve approximate-score ties there.
+- `n_candidate` enlarges both the local budget and the final pool reaching reranking. It can improve the returned scores while increasing work and latency, and may change serial results too.
+- Lower `query_prune_ratio` retains more query terms at extra cost. It changes the quality baseline, so compare serial and parallel with the same pruning setting and N.
+
+For accuracy comparisons, distinguish identical results, equal-score document substitutions, and changes in ranked scores. Verify a representative workload before changing defaults; higher returned scores are not by themselves a measurement of ground-truth recall or business relevance. A tuning example can establish a mitigation for that example without establishing a universal setting.
 
 The parallel executor keeps reranking serial, including DMQ8. It uses up to `min(16, selected_windows, max(n_candidate, topk))` stable contiguous candidate partitions; tasks exchange ownership at four-window chunk boundaries. Candidate heaps belong to partitions rather than operating-system threads. Range, reasoning and mutable/disk datacells are rejected in parallel mode.
 
