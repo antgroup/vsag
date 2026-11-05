@@ -16,12 +16,16 @@
 #include <cstdint>
 #include <fstream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
 #include "analyzer/index_analyzer.h"
 #include "functest.h"
+#include "storage/serialization.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 
 namespace {
 
@@ -164,6 +168,31 @@ ReadBinaryFile(const std::string& path) {
 }
 
 void
+RemoveMetricFromFooter(const std::string& path) {
+    const auto bytes = ReadBinaryFile(path);
+    std::stringstream input(bytes);
+    vsag::IOStreamReader reader(input);
+    auto footer = vsag::Footer::Parse(reader);
+    REQUIRE(footer != nullptr);
+    REQUIRE(bytes.size() >= footer->Length());
+
+    auto metadata = footer->GetMetadata();
+    auto basic_info = metadata->Get("basic_info");
+    REQUIRE(basic_info.IsObject());
+    REQUIRE(basic_info.Contains("metric"));
+    basic_info.Erase("metric");
+    metadata->Set("basic_info", basic_info);
+
+    std::ofstream output(path, std::ios::binary | std::ios::out | std::ios::trunc);
+    REQUIRE(output.is_open());
+    output.write(bytes.data(), static_cast<std::streamsize>(bytes.size() - footer->Length()));
+    vsag::IOStreamWriter writer(output);
+    footer->Write(writer);
+    output.close();
+    REQUIRE(output.good());
+}
+
+void
 WriteDenseQueryFile(const std::string& query_path, int64_t rows, int64_t cols) {
     std::ofstream stream(query_path, std::ios::binary | std::ios::out);
     REQUIRE(stream.is_open());
@@ -223,6 +252,23 @@ TEST_CASE("AnalyzeIndex returns a structured static report", "[analyze_index]") 
     REQUIRE(report["warnings"].IsArray());
     REQUIRE(report["compatibility"]["schema_version"].GetString() ==
             vsag::INDEX_ANALYSIS_SCHEMA_VERSION);
+}
+
+TEST_CASE("AnalyzeIndex loads legacy brute-force metadata without metric", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_legacy_metric");
+    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    RemoveMetricFromFooter(index_path);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["metric"].GetString() == "l2");
+    REQUIRE_FALSE(report["index"]["metadata_complete"].GetBool());
+    REQUIRE(report["warnings"].Dump().find(
+                "serialized index metadata is missing 'metric'; using analyzer default 'l2'") !=
+            std::string::npos);
 }
 
 TEST_CASE("AnalyzeIndex does not modify brute-force backing files", "[analyze_index]") {

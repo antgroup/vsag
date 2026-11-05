@@ -460,6 +460,8 @@ errors on stderr.
 
 When a serialized index only embeds `index_param`, `analyze_index` can still reload it without
 `--build_parameter`; missing metadata fields are filled with analyzer defaults where possible.
+For legacy BruteForce/WARP files without `basic_info.metric`, the analyzer falls back to `l2` and
+records the fallback in the report's `warnings` array.
 
 ## Typical Use Cases
 

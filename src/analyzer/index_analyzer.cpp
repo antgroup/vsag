@@ -25,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include "algorithm/bruteforce/bruteforce_analyzer.h"
 #include "data_type.h"
 #include "inner_string_params.h"
 #include "metric_type.h"
@@ -33,11 +34,6 @@
 #include "vsag/vsag.h"
 
 namespace vsag {
-
-// Internal constructor implemented in bruteforce.cpp. Unlike Factory::CreateIndex, this entry
-// point accepts serialized internal parameters only from the analyzer, not from user JSON.
-IndexPtr
-CreateBruteForceIndexForAnalyzer(JsonType build_param);
 
 namespace {
 
@@ -474,7 +470,14 @@ private:
         if (options_.build_parameter != DEFAULT_BUILD_PARAM) {
             this->CreateIndexWithParam(reopen);
         } else {
-            this->CreateIndexFromMetadata(reopen);
+            try {
+                this->CreateIndexFromMetadata(reopen);
+            } catch (const std::invalid_argument& error) {
+                throw std::runtime_error(
+                    fmt::format("failed to load index '{}' from serialized metadata: {}",
+                                options_.index_path,
+                                error.what()));
+            }
         }
 
         if (not options_.base_path.empty()) {
@@ -620,6 +623,11 @@ private:
             metric_type_ = (index_name_ == INDEX_SINDI or index_name_ == INDEX_SINDI_V2)
                                ? MetricType::METRIC_TYPE_IP
                                : MetricType::METRIC_TYPE_L2SQR;
+            warnings_.emplace_back(fmt::format(
+                "serialized index metadata is missing 'metric'; using analyzer default '{}' for "
+                "index type '{}'",
+                MetricTypeToString(metric_type_),
+                index_name_));
         }
     }
 
@@ -650,11 +658,6 @@ private:
         }
         if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_WARP) and
             index_param_.Contains(BASE_CODES_KEY)) {
-            if (not basic_info_.Contains("metric")) {
-                throw std::invalid_argument(
-                    "serialized BruteForce/WARP metadata is missing 'metric'; pass "
-                    "build_parameter with an explicit metric_type to reload it safely");
-            }
             build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
             auto analyzer_index = CreateBruteForceIndexForAnalyzer(build_param);
             this->Deserialize(analyzer_index, stream);
