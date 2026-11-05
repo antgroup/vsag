@@ -330,6 +330,16 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
         }
     }
 
+    const auto is_binary_code = [](const FlattenInterfacePtr& code) {
+        return code != nullptr and code->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_BINARY;
+    };
+    const bool binary_tune_source = is_binary_code(tune_source);
+    const bool skip_float_train_data =
+        data_type_ == DataTypes::DATA_TYPE_BINARY and
+        (not is_tune_base_code or is_binary_code(new_basic_code)) and
+        (not is_tune_precise_code or is_binary_code(new_precise_code)) and
+        (not is_tune_raw_code or is_binary_code(new_raw_code));
+
     auto decode_tune_source = [&](InnerIdType inner_id, float* data) {
         auto buffer = tune_source->AcquireCodesById(inner_id);
         if (not buffer) {
@@ -351,12 +361,14 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
                        (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
                    "Tune training buffer size overflows");
-    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    const auto train_bytes =
+        skip_float_train_data ? 0 : static_cast<size_t>(train_count) * row_bytes;
     // Train consumes tightly packed native input, including FP16/BF16. Keep the
     // allocation float-aligned, and decode through aligned scratch: odd half
     // dimensions need not leave each packed row aligned for Decode's float* API.
     Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
-    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+    if (not skip_float_train_data and
+        (is_tune_base_code or is_tune_precise_code or is_tune_raw_code)) {
         Vector<float> decoded_row(dim_, 0, allocator_);
         auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
@@ -388,7 +400,15 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
             new_code = wrap_new_code(new_code);
             new_code->Train(train_data.data(), train_count);
 
-            Vector<float> insert_buffer(dim_, 0, allocator_);
+            const bool packed_binary_rebuild = data_type_ == DataTypes::DATA_TYPE_BINARY and
+                                               binary_tune_source and is_binary_code(new_code);
+            const uint64_t insert_buffer_bytes = packed_binary_rebuild
+                                                     ? tune_source->GetQuantizerCodeSize()
+                                                     : static_cast<uint64_t>(dim_) * sizeof(float);
+            // Binary decode/encode type-erases packed bytes through float*, so only the byte
+            // capacity changes; other dtypes retain their original float scratch layout.
+            Vector<float> insert_buffer(
+                (insert_buffer_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
             for (int64_t i = 0; i < current_count; ++i) {
                 decode_tune_source(i, insert_buffer.data());
                 new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
