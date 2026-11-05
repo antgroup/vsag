@@ -1060,7 +1060,7 @@ TEST_CASE("BucketDataCell samples scalar build and nearest residual populations"
     constexpr uint64_t bucket_count = 2;
     static_assert(nearest_population == 65530);
     static_assert(2147483647UL % train_count == 1);
-    const std::string quantizer_type = GENERATE("sq8", "sq4");
+    const std::string quantizer_type = GENERATE("sq8", "sq4", "sq8_uniform", "sq4_uniform");
     CAPTURE(quantizer_type);
 
     std::vector<float> vectors(count, 1.0F);
@@ -1101,7 +1101,7 @@ TEST_CASE("BucketDataCell samples scalar build and nearest residual populations"
     const float added = 1.0F;
     bucket->InsertVector(&added, 0, 0);
     auto computer = bucket->FactoryComputer(&added);
-    // Clipping this +1 residual to the old zero upper bound returned distance one.
+    // Training only the Build prefix clips this +1 residual against a zero upper bound.
     REQUIRE(std::abs(bucket->QueryOneById(computer, 0, 0)) < 1e-3F);
 }
 

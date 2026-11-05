@@ -637,7 +637,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
             prefix_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_PQ or
                              quantizer_name == QUANTIZATION_TYPE_VALUE_PQFS;
             scalar_limited = quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8 or
-                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4;
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4 or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM or
+                             quantizer_name == QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM;
         }
         const uint64_t buffer_factor = train_nearest ? 2 : 1;
         if (dim == 0 or count > std::numeric_limits<uint64_t>::max() / dim / buffer_factor) {
@@ -674,9 +676,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::Train(const void* data, uint64_t count) {
                 uint64_t build_samples = count;
                 uint64_t nearest_samples = static_cast<uint64_t>(nearest_rows.size());
                 if (sample_populations) {
-                    // PQ/PQFS retain only their first 65,536 rows, while SQ8/SQ4 sample
-                    // 100,000 rows. Budget both populations before either limit can discard
-                    // appended nearest residuals.
+                    // PQ/PQFS retain only their first 65,536 rows, while scalar quantizers
+                    // sample 100,000 rows. Budget both populations before either limit can
+                    // discard appended nearest residuals.
                     build_samples = std::min(count, max_train_count / 2);
                     nearest_samples = std::min(static_cast<uint64_t>(nearest_rows.size()),
                                                max_train_count - build_samples);
