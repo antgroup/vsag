@@ -21,6 +21,7 @@
 #include <string>
 
 #include "common.h"
+#include "vsag/constants.h"
 
 namespace vsag {
 namespace {
@@ -76,6 +77,10 @@ create_registered_index(const std::string& index_name,
                               "failed to create index(internal): null creator for ",
                               normalized_name);
     }
+    const bool supports_binary =
+        normalized_name == INDEX_BRUTE_FORCE || normalized_name == INDEX_HGRAPH;
+    CHECK_ARGUMENT(index_common_params.data_type_ != DataTypes::DATA_TYPE_BINARY || supports_binary,
+                   "binary dtype is only supported by brute_force and hgraph indexes");
     return creator(parsed_params, index_common_params);
 }
 
