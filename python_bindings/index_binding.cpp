@@ -21,6 +21,7 @@
 
 #include "binding.h"
 #include "fmt/format.h"
+#include "storage/serialization.h"
 #include "vsag/constants.h"
 #include "vsag/dataset.h"
 #include "vsag/vsag.h"
@@ -687,7 +688,27 @@ public:
     void
     Load(const std::string& filename) {
         std::ifstream file(filename, std::ios::binary);
-        index_->Deserialize(file);
+        auto result = index_->Deserialize(file);
+        if (not result.has_value()) {
+            file.close();
+            throw std::runtime_error(fmt::format("load failed: {}", result.error().message));
+        }
+        if (dense_vector_kind_ == DenseVectorKind::BINARY) {
+            file.clear();
+            file.seekg(0);
+            vsag::IOStreamReader reader(file);
+            auto footer = vsag::Footer::Parse(reader);
+            if (footer == nullptr) {
+                file.close();
+                throw std::runtime_error("load failed: serialized binary index has no footer");
+            }
+            const auto basic_info = footer->GetMetadata()->Get("basic_info");
+            if (not basic_info.Contains(vsag::PARAMETER_DIM)) {
+                file.close();
+                throw std::runtime_error("load failed: serialized binary index has no dimension");
+            }
+            dim_ = static_cast<uint64_t>(basic_info[vsag::PARAMETER_DIM].GetInt());
+        }
         file.close();
     }
 

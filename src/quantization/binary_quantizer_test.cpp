@@ -244,7 +244,7 @@ TEST_CASE("BinaryQuantizer Serialize and Deserialize", "[ut][binary_quantizer]")
     auto data = GeneratePackedBinary(count, bits, 2026);
 
     BinaryQuantizer quantizer1(static_cast<int>(bits), allocator.get());
-    BinaryQuantizer quantizer2(static_cast<int>(bits), allocator.get());
+    BinaryQuantizer quantizer2(64, allocator.get());
     REQUIRE(quantizer1.Train(nullptr, count));
     std::vector<uint8_t> codes(num_bytes * count, 0);
     REQUIRE(
@@ -252,8 +252,15 @@ TEST_CASE("BinaryQuantizer Serialize and Deserialize", "[ut][binary_quantizer]")
     test_serializion(quantizer1, quantizer2);
 
     REQUIRE(quantizer2.GetCodeSize() == quantizer1.GetCodeSize());
+    REQUIRE(quantizer2.GetQueryCodeSize() == quantizer1.GetQueryCodeSize());
     REQUIRE(quantizer2.GetDim() == quantizer1.GetDim());
     REQUIRE(quantizer2.Metric() == MetricType::METRIC_TYPE_HAMMING);
+
+    auto computer = quantizer2.FactoryComputer();
+    computer->SetQuery(reinterpret_cast<const float*>(data.data()));
+    float query_distance = -1.0F;
+    computer->ComputeDist(codes.data(), &query_distance);
+    REQUIRE(query_distance == 0.0F);
 
     std::vector<uint8_t> restored_codes(num_bytes * count, 0);
     REQUIRE(quantizer2.EncodeBatch(
@@ -268,4 +275,9 @@ TEST_CASE("BinaryQuantizer Serialize and Deserialize", "[ut][binary_quantizer]")
                                                         num_bytes)));
         }
     }
+
+    BinaryQuantizer smaller_quantizer(64, allocator.get());
+    test_serializion(smaller_quantizer, quantizer2);
+    REQUIRE(quantizer2.GetDim() == smaller_quantizer.GetDim());
+    REQUIRE(quantizer2.GetQueryCodeSize() == smaller_quantizer.GetCodeSize());
 }
