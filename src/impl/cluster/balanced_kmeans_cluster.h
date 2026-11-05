@@ -113,9 +113,12 @@ struct BalancedKMeansStats {
 /// one price per cluster: a vector bids for the cluster with the lowest
 /// `cost + price`, a full cluster gives its seat to the higher bid and evicts its
 /// lowest bidder, and prices only rise. With epsilon-scaling, the result is optimal
-/// for the current centroids within `n * epsilon`; since the update step takes the
-/// mean of every cluster, the loss does not increase between iterations by more
-/// than that tolerance.
+/// for the current centroids and its cluster sizes within `n * epsilon`; since the
+/// update step takes the mean of every cluster, the loss does not increase between
+/// iterations by more than that tolerance. The `count % k` clusters with one vector
+/// more start as the ones most vectors prefer, and a vector that saves cost by moving
+/// to a cluster without an extra seat takes the seat along. That choice of clusters
+/// is a good one, not a jointly optimal one.
 ///
 /// Memory stays O(n * m + k * dim): each vector keeps its `m` cheapest clusters and
 /// a lower bound for all the others, and distances are computed tile by tile. A
