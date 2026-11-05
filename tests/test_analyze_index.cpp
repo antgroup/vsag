@@ -83,6 +83,28 @@ constexpr const char* kSindiV2IndexParam = R"({
     }
 })";
 
+constexpr const char* kPyramidHalfIndexParam = R"({
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 4,
+    "extra_info_size": 8,
+    "index_param": {
+        "max_degree": 16,
+        "ef_construction": 16,
+        "build_thread_count": 1,
+        "alpha": 1.2,
+        "graph_type": "nsw",
+        "root_graph_type": "multi_layer",
+        "no_build_levels": [1, 2],
+        "base_quantization_type": "fp16",
+        "precise_quantization_type": "fp32",
+        "use_reorder": false,
+        "index_min_size": 8,
+        "persist_source_id": true,
+        "store_paths": true
+    }
+})";
+
 constexpr int64_t kDim = 4;
 constexpr int64_t kNumElements = 8;
 
@@ -268,6 +290,28 @@ TEST_CASE("AnalyzeIndex reports the metric from explicit build parameters", "[an
     REQUIRE(report["index"]["name"].GetString() == "brute_force");
     REQUIRE(report["index"]["metric"].GetString() == "cosine");
     REQUIRE(report["index"]["metadata_source"].GetString() == "build_parameter");
+}
+
+TEST_CASE("AnalyzeIndex backfills Pyramid report metadata from explicit build parameters",
+          "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_pyramid_explicit_params");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "pyramid", kPyramidHalfIndexParam);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kPyramidHalfIndexParam;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "pyramid");
+    REQUIRE(report["index"]["metadata_source"].GetString() == "build_parameter");
+    // The Pyramid footer carries neither data_type nor extra_info_size, so the report must
+    // reflect the explicit build parameters instead of the float32 / 0 analyzer defaults.
+    REQUIRE(report["index"]["data_type"].GetString() == "float16");
+    REQUIRE(report["index"]["extra_info_size"].GetInt() == 8);
+    REQUIRE(report["index"]["dim"].GetInt() == kDim);
+    REQUIRE(report["index"]["metric"].GetString() == "l2");
 }
 
 TEST_CASE("AnalyzeIndex restores cosine for raw-vector brute-force reload", "[analyze_index]") {
