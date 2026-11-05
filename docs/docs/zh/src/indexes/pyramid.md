@@ -1,0 +1,542 @@
+# Pyramid
+
+![Pyramid：以路径字符串为键的“每节点一个邻近子图”树形结构；向量可以属于多条路径，搜索沿指定路径前缀执行](../figures/indexes/pyramid-overview.svg)
+
+Pyramid 是 VSAG 的 **层级路径分区** 图索引。每条向量可以附带零个、一个或多个路径字符串
+（例如 `"a/d/f"`），Pyramid 会按这些路径树为每个节点构建一个子图；查询时提供一个或
+多个路径前缀，检索即被限定在相应的子树内。
+
+这种设计非常适合多租户部署、标签分区的物料库，或者任何“一个逻辑索引服务多个群体、
+群体之间不允许结果交叉”的场景。
+
+- 源码：`src/algorithm/pyramid.{h,cpp}`、`src/algorithm/pyramid_zparameters.{h,cpp}`
+- 示例（单层级）：[`examples/cpp/107_index_pyramid.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/107_index_pyramid.cpp)
+- 示例（多层级）：[`examples/cpp/112_index_pyramid_multi_hierarchy.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/112_index_pyramid_multi_hierarchy.cpp)
+
+## 只读索引
+
+`SetImmutable()` 拒绝后续写入并释放逐向量锁，同时保留反向 ID 映射，以支持高效的
+指定 ID 算分和数据读取。相比丢弃映射，这会多占用一些内存，但避免了线性扫描 ID。
+在反序列化之前或之后冻结索引均适用，序列化格式不变。
+
+## 工作原理
+
+1. **路径树。** 每条向量在 ID 之外还可以携带多条独立路径，分隔符为 `/`
+   （例如 `"tenant_a/lang_en/topic_news"`）。Pyramid 会为构建期间出现过的每个路径前缀
+   维护一个子索引。即使向量属于多条路径，向量数据和 ID 也只保存一次。
+2. **按层构建子图。** 默认情况下每一层都会独立构建一张近邻图。可以用 `no_build_levels`
+   跳过那些太小或太粗、不适合构图的层级——这些层级仍作为透传容器存在，但检索会退化为
+   线性扫描。
+3. **图的构建。** 每个子图与 HGraph 采用同一套机制：`nsw` 插入或 `odescent`，并通过
+   `graph_iter_turn`、`neighbor_sample_rate`、`alpha` 控制构图剪枝。底层向量按
+   `base_quantization_type` 存储；启用精排时另外保留一份高精度副本。
+4. **检索。** 查询向量同样要附带路径。搜索会顺路径树向下走到最具体匹配查询路径的子图，
+   然后在该子图内执行图检索（`ef_search`；中间层由 `subindex_ef_search` 控制）。
+
+## 快速开始
+
+```cpp
+#include <vsag/vsag.h>
+
+std::string params = R"({
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "graph_type": "odescent",
+        "graph_iter_turn": 15,
+        "neighbor_sample_rate": 0.2,
+        "no_build_levels": [0, 1],
+        "use_reorder": true,
+        "build_thread_count": 16
+    }
+})";
+auto index = vsag::Factory::CreateIndex("pyramid", params).value();
+
+// 构建时为每条向量提供路径。
+auto base = vsag::Dataset::Make();
+base->NumElements(n)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Paths(paths)          // std::string* 长度为 n，例如 "a/d/f"
+    ->Float32Vectors(data)
+    ->Owner(false);
+index->Build(base);
+
+// 按路径前缀执行检索。
+std::string query_path = "a/d";
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths(&query_path)
+    ->Owner(false);
+auto result = index->KnnSearch(
+    query, /*topk=*/10,
+    R"({"pyramid": {"ef_search": 100}})").value();
+```
+
+## 支持的输入数据类型
+
+Pyramid 的 `Build`、`Add` 和检索支持 `dtype: "float16"`、`dtype: "bfloat16"` 输入，也保留原有的 `"float32"` 输入支持。输入 `dtype` 与存储量化器是两个独立选项：`dtype` 使用 `"float16"` / `"bfloat16"`，量化参数则使用 `"fp16"` / `"bf16"`。
+
+两种半精度输入都通过 `Dataset::Float16Vectors` 提供连续的 `uint16_t` 缓冲区。缓冲区应包含**已经编码的 FP16 或 BF16 位模式**，而不是将浮点数直接数值转换为整数的结果；`dtype` 决定这些位模式的解释方式。Build/Add 缓冲区包含 `NumElements() * Dim()` 个元素，查询缓冲区也必须使用与索引一致的输入格式。ID 和路径的设置与上面的示例相同，将 `Float32Vectors(data)` 和 `Float32Vectors(q)` 分别替换为 `Float16Vectors(half_data)` 和 `Float16Vectors(half_query)` 即可。使用 `Owner(false)` 时，调用期间须保持借用的缓冲区（包括 ID 和路径）有效。
+
+对于半精度输入，`base_quantization_type` 以及启用 `use_reorder: true` 时的 `precise_quantization_type` 支持 `fp16`、`bf16`、`pq`、`sq8` 和 `fp32`。各量化器自身的要求仍然适用，例如 PQ 的训练和维度设置。以下是输入与存储格式匹配的最小配置：
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 32,
+    "index_param": {
+        "graph_type": "nsw",
+        "base_quantization_type": "fp16",
+        "use_reorder": false
+    }
+}
+```
+
+若使用 BF16 输入和 BF16 存储，将 `dtype` 改为 `"bfloat16"`，`base_quantization_type` 改为 `"bf16"`。也支持跨格式存储转换，例如 FP16 输入配 BF16 存储、BF16 输入配 FP32 存储；这不会改变后续查询所需的输入格式。`metric_type: "cosine"` 会在编码前归一化向量，因此即使输入和存储格式匹配，cosine 也不保证逐字节保留输入。
+
+对于 L2/IP，FP16 输入配 FP16 存储、BF16 输入配 BF16 存储会逐位保留输入编码。跨格式存储以及 `pq`/`sq8`/`fp32` 存储会先将输入转换为 float32，不提供相同的半精度位模式保留保证。
+
+在半精度输入索引上调用 `CalcDistanceById` 和 `CalcDistancesById` 时，请使用 `DatasetPtr` 重载，并提供与索引 dtype 一致的原生半精度查询缓冲区。原始 `const float*` 重载仅接受 float32 索引，对半精度输入索引会明确报错。
+
+FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 字节。这指的是**向量编码大小，而非整个索引内存**：图、ID、路径、分配开销以及可选的精排/原始向量副本还会占用空间。仅使用半精度输入并不会自动选择半精度存储，也不代表总内存减半。
+
+半精度输入可使用 `graph_type: "nsw"` 或 `"odescent"`；**PiPNN 仍仅支持 float32 输入**。以上说明仅针对 Pyramid，不代表 VSAG 的所有索引都支持这些输入类型。
+
+## 构建参数
+
+构建参数放在 `index_param` 下。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
+| `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
+| `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
+| `max_degree` | int | `64` | 子图内节点的最大出度 |
+| `graph_type` | string | `"nsw"` | `nsw`、`odescent` 或 `pipnn`。PiPNN 批量构建每棵 hierarchy 中所有实际构建的图，包括 `multi_layer` 根节点的 routing 层。 |
+| `graph_storage_type` | string | `"flat"` | `multi_layer` 根节点的底图存储：`flat` 偏向构建和检索速度，`compressed` 减少图内存。压缩存储要求 `max_degree <= 255`。单层根图、路由图和子图仍使用 Sparse。 |
+| `ef_construction` | int | `400` | `nsw` 构图时的候选集大小 |
+| `alpha` | float | `1.2` | 构图剪枝系数；PiPNN 要求有限且不小于 `1.0` |
+| `adaptive_pruning` | boolean | `false` | 可选的 NSW 底图正向/反向 L2 选择器；见[配置与范围](#实验性-nsw-自适应剪枝)。 |
+| `graph_iter_turn` | int | — | ODescent 迭代轮数（`graph_type: "odescent"` 时生效） |
+| `neighbor_sample_rate` | float | — | ODescent 的邻居采样比率 |
+| `pipnn_max_leaf_size` | int | `1024` | PiPNN 分区叶子的最大点数 |
+| `pipnn_min_leaf_size` | int | `64` | PiPNN 合并过小叶子时的目标规模 |
+| `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区使用 `2` 到 `1000` 个 leader，且不超过分区点数 |
+| `pipnn_fanout` | int[] | `[10, 2]` | PiPNN 连续分区层级中一个点加入的最近 leader 分区数 |
+| `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；过小叶子至少使用 `4` |
+| `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
+| `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 在 L2 批量构图时使用与 HGraph 共享的 PiPNN 动态 alpha 选择器 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | PiPNN 选择器的 alpha 调整步长 |
+| `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
+| `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
+| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
+| `rabitq_bits_per_dim_base` | int | `1` | RaBitQ 底库存储码的每维位数。在 x+y split 模式下表示 `x`，即图遍历使用的 filter bits；范围为 `[1, 8]`。 |
+| `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
+| `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
+| `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
+| `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
+| `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |
+| `store_paths` | bool | `false` | 顶层开关；保留传给 `Build` 和 `Add` 的原始路径，使 `GetDataByIdsWithFlag` 在选择 `DATA_FLAG_PATH` 时可以返回它们。该开关对所有已配置的 hierarchy 生效，不支持按 hierarchy 覆盖 |
+| `index_min_size` | int | `0` | 子索引的最小规模；小于该值的分区会退化为线性扫描 |
+| `root_graph_type` | string | `"single_layer"` | 根图结构：`single_layer` 保留原有稀疏底图；`multi_layer` 使用预分配的 Flat 或 Compressed 底图、类似 HGraph 的稀疏路由层以及联合构图流程。`multi_layer` 支持 `graph_type: "nsw"` 和 `"pipnn"`。`no_build_levels` 禁用第 0 层时不要显式指定此选项。 |
+| `support_duplicate` | bool | `false` | 根据构建编码的 `CompareVectors` 语义对编码等价、外部标签不同的向量分组；外部标签仍须唯一。 |
+| `build_thread_count` | int | `1` | 构建阶段并发线程数 |
+| `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
+
+PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的 Pyramid
+构建。它批量构建每棵 hierarchy 中所有实际构建的图；设置
+`root_graph_type: "multi_layer"` 时，也包括所有 root routing 层。搜索、增量 `Add`、删除、
+重复处理、精排和序列化保持标准 Pyramid 行为；`no_build_levels` 中列出的层级仍会跳过构图。
+`pipnn_*` 参数在整个 Pyramid 索引中共享；hierarchy 对象仍可分别覆盖
+`max_degree` 和 `alpha`，PiPNN 构建该 hierarchy 时会使用这些覆盖值。
+`ef_construction` 不调节 PiPNN。
+
+### PiPNN 动态 alpha 剪枝
+
+在 `index_param` 下设置以下字段，即可启用 HGraph PiPNN 使用的最终候选池剪枝策略：
+
+```json
+{
+    "graph_type": "pipnn",
+    "alpha": 1.2,
+    "pipnn_adaptive_pruning": true,
+    "pipnn_adaptive_pruning_adjust_step": 0.06
+}
+```
+
+该策略要求 `metric_type: "l2"`，作用于所有批量构建的路径图及根节点路由图。
+各 hierarchy 使用自己的有效 `alpha` 和度数上限，动态策略和步长全局共享。
+增量 `Add` 沿用现有 NSW 插入策略。另一个开关 `adaptive_pruning` 控制 NSW，使用 PiPNN 时应保持关闭。
+
+启用时要求 `alpha` 有限且不小于 1，步长有限且非负，`alpha - 2*step > 0`，且
+`alpha + 3*step` 有限。零步长保持固定 alpha 的 PiPNN 选边结果。
+加载已启用策略的索引时，策略、基础 alpha、步长和 hierarchy 配置必须匹配；
+旧索引缺少这些字段时默认关闭。改变已有索引的策略需要重建。
+
+### RaBitQ split 配置
+
+需要同时设置以下五个参数，才能启用 RaBitQ x+y split 存储和精排：
+
+```json
+{
+    "use_reorder": true,
+    "base_quantization_type": "rabitq",
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5
+}
+```
+
+Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升，因此默认不保留
+内部 FP32 副本。需要访问原始向量或完整 Analyzer 指标时，可在构建时将
+`store_raw_vector` 设置为 `true`。
+
+### MRLE 与 split RaBitQ
+
+对于使用 Matryoshka Representation Learning 训练的向量，Pyramid 可以先截断维度，再编码
+为 split RaBitQ：
+
+```json
+{
+    "base_quantization_type": "tq",
+    "tq_chain": "mrle, rabitq",
+    "mrle_dim": 1280,
+    "precise_quantization_type": "rabitq",
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "use_reorder": true
+}
+```
+
+该配置使用 3-bit filter planes 构图和搜索、5-bit supplement planes 精排；两部分编码的是
+同一个截断后向量。Pyramid 使用 split code-code 距离完成构图提升，不保留原始 FP32
+向量；除非构建时启用 `store_raw_vector`，否则依赖可解码向量的 Analyzer 指标会被标记为
+不可用。如果 embedding 模型没有针对前缀维度训练，截断可能显著降低召回率。
+
+## 构建缓存
+
+`ExportCache` 保存每个层级、每个节点的 NSW 图种子，`ImportCache` 可在后续 `Build` 中复用。缓存使用索引缓存 payload 格式，而非 streaming 索引序列化格式。需要复用缓存的索引通过 footer 序列化前应设置 `persist_source_id: true`，两次构建中的每个向量都须提供唯一的 `Dataset::SourceID` 和外部标签。缓存预热仅适用于 `graph_type: "nsw"`；ODescent、缺少 source ID、source ID 或标签重复时回退到普通冷构建（保留普通构建拒绝重复标签的行为）。`ef_construction` 不作为准入条件。输入 source ID 至少 80% 须与缓存重合。未命中成员按正常流程构建；single-layer root 命中成员执行出边修复，multi-layer 节点重建未缓存的 routing overlay。
+
+启用 `support_duplicate: true` 时，Pyramid 显式保存每个图的组成员及实际邻接行代表，而不是最小标签或内部 ID。预热构建重映射 SourceID，并验证当前图成员关系和构建编码等价性。代表缺失或迁移、组等价性变化、组缓存行不可用时，仅将受影响的组转为 miss，其他合法组仍可复用。仅删除别名不会使其组失效。编码新合并的组保守重建。按哈希组织的有序索引通过比较完整构建编码字节处理冲突，不将哈希相同视为向量相等。每图至少 80% 的成员关系须保持可复用；缺少组元数据（含旧缓存）或复用比例不足时，整个图回退冷构建。缺少有效缓存邻接的全相同向量图仍冷构建。先恢复代表邻接再关联别名，过滤指向失效组的边；别名只计入成员关系，不增加恢复边或路由条目。
+
+并发插入使用临时的图级精确编码代表登记表，仅在相应的准入分片锁内完成代表发布。登记表引用已有构建编码，不复制完整向量；加载索引后在需要时重建。启用 duplicate 的 NSW `Build` 在冷构建和预热修整结束后，既检查从每个底层图入口出发的正向可达性，也检查各代表返回该入口的可达性。必要时补充有界、按几何距离选择的连接，同时保护正向遍历树边并保持最大度数。这两项检查共同确保图内物理代表之间的强连通性，也适用于路由下降为不同查询选择的底层入口。返回路径检查采用 CSR 反向邻接结构，对于 R 个代表和 E 条边需要 O(R + E) 临时内存，逐图处理并释放。这是 Build 阶段的不变量，不保证任意后续 `Add` 操作后的连通性。有限搜索预算的近似查询仍可能漏召回整个向量组，不承诺通用的召回率或构建加速。 反序列化后，稀疏图的显式空邻接行仍保留物理代表身份。旧版稠密或压缩存储可能丢失孤立空重复组的历史代表身份；准入初始化优先保留可由邻接行、入边或路由观察到的代表，然后为仍不可观察的已持久化重复组规范化一个成员作为代表，而不改变组内标签。这不等于恢复历史代表身份，也不保证任意增量图的连通性。此一次性旧索引准入扫描需要 O(H + A + E) 遍历工作和 O(H) 访问标记内存，其中 H 为已存储 ID 的高水位，A 为访问的重复成员数，E 为遍历的边数；精确编码有序索引操作另计通常的比较开销。
+
+带重复组的缓存使用 Pyramid 专用版本化格式；新读取器兼容旧普通缓存，旧读取器不能读取新重复组 payload。不含组元数据的普通缓存保留旧格式。HGraph 缓存及索引序列化格式不变。`GetStats()` 区分向量、图成员关系的命中/未命中计数和恢复边数；图回退计为未命中，不计为已恢复组。
+
+## 检索参数
+
+检索参数放在 `pyramid` 子对象下：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `ef_search` | int | `100` | 叶子层子图检索的候选集大小 |
+| `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
+| `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
+| `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
+| `parallelism` | int | `1` | 单次请求同时检索子图的数量上限。大于 `1` 时使用索引线程池，各子图结果合并并按 inner id 去重后再重排；线程池前提见下方说明。 |
+| `hierarchies` | string[] | `[]` | 指定检索哪个层级。空数组表示使用默认（匿名）层级。 |
+| `hierarchy_op` | string | `"single"` | 多层级结果合并方式：`single`（检索单个层级）、`union`、`intersection`。**注意：** `union` 和 `intersection` 尚未实现——设置后 `KnnSearch`/`RangeSearch` 会返回错误。 |
+| `rabitq_error_rate` | float | `1.9` | 本次搜索使用的正数 lower-bound 误差倍率。默认值 `1.9` 较大；值越大，精度越高，但搜索速度越慢。 |
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk,
+    R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
+```
+
+### `parallelism` 的线程池前提
+
+`parallelism` 只有在索引持有线程池时才生效。通过 `Engine` 创建索引、并由 `Resource` 提供 `ThreadPool`（例如 `Engine::CreateThreadPool(n)`），或者建库时设置 `build_thread_count > 1`，索引才会持有线程池。`Factory::CreateIndex` 与 `Index::Load` 都不会挂载线程池，因此这两条路径上 `parallelism` 会被忽略，各子图按顺序串行检索。参数无法生效时，Pyramid 会为每个索引打印一次告警。
+
+`<= 0` 的取值会被钳到 `1`。当 `parallelism >= 2` 时，Pyramid 最多同时检索 `parallelism` 个解析出的子图。实际并发上限为 `min(parallelism, 线程池大小, 解析出的子图数)`；与其他请求竞争资源时可能更低。因此，线程池为 32、`parallelism: 2` 时最多同时检索两个子图。
+
+结果按 inner id 合并，保留最小距离。结束于中间节点的路径可能展开为多个后代索引节点，这些节点仍共用本次请求的并行预算。
+
+## 多层级支持 (Multi-Hierarchy)
+
+一个 Pyramid 索引可以同时维护**多棵独立的路径树**，每棵树由名称标识（如
+`"site"`、`"category"`）。所有层级共享向量 ID 和数据——只有路径不同。每个层级可以
+选择性地覆盖图构建参数。
+
+当同一组向量需要沿多个维度同时分区时，这个特性非常有用。例如，一个电商平台可能
+需要按**站点**（`site-a/lang-en`）和按**品类**（`electronics/phones`）同时分区，
+检索时可以独立选择任一层级。
+
+### 构建配置
+
+在 `index_param` 中添加 `hierarchies` 数组。每个元素可以是：
+- **字符串**（继承全部顶层参数）：`"site"`
+- **对象**（含 `name` 和可选的参数覆盖）：
+  `{"name": "category", "max_degree": 64, "no_build_levels": [0]}`
+
+可按层级覆盖的参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、
+`index_min_size`、`root_graph_type`。
+
+`root_graph_type: "multi_layer"` 只改变所选层级的根节点。底图使用顶层
+`graph_storage_type`：默认使用 Flat，也可使用 Compressed，以构建和检索速度换取更低的图
+内存；路由图和子图仍使用 Sparse。稀疏路由图先选择更好的入口点，再进入底图检索。NSW Build
+与增量 Add 使用类似 HGraph 的 route 与 bottom 联合插入流程；PiPNN Build 则批量构建这两类图。
+参数校验会拒绝 `multi_layer` 与 `odescent` 的组合。存在独立 precise
+storage 时，底图和路由图的边统一使用 precise codes 构建，否则使用 base codes；查询遍历
+继续使用 base codes，最终精排使用配置的 reorder source。
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "graph_type": "odescent",
+        "graph_iter_turn": 15,
+        "neighbor_sample_rate": 0.2,
+        "no_build_levels": [0, 1],
+        "use_reorder": true,
+        "build_thread_count": 16,
+        "hierarchies": [
+            "site",
+            {"name": "category", "max_degree": 64, "no_build_levels": [0]}
+        ]
+    }
+}
+```
+
+### 命名层级的 Dataset API
+
+使用重载方法 `Paths(hierarchy_name, paths)` 为每个层级设置路径。所有层级共享同一份
+`Ids()` 和 `Float32Vectors()`。指针重载保留原有的“每条向量一条路径”形式：
+
+```cpp
+auto base = vsag::Dataset::Make();
+base->NumElements(n)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("site", site_paths)         // std::string* 长度为 n
+    ->Paths("category", category_paths) // 第二个层级的独立路径
+    ->Owner(false);
+index->Build(base);
+```
+
+### 按 ID 取回路径
+
+将顶层构建参数 `store_paths` 设为 `true` 后，Pyramid 会保留原始路径，供按 ID
+取回。在 `GetDataByIdsWithFlag` 中选择 `DATA_FLAG_PATH` 后，返回路径的顺序与请求 ID
+的顺序一致。默认匿名 hierarchy 使用 `GetPaths()`，命名 hierarchy 使用
+`GetPaths(hierarchy_name)`：
+
+```cpp
+int64_t requested_ids[] = {product_id_b, product_id_a};
+auto data = index->GetDataByIdsWithFlag(
+    requested_ids, 2, DATA_FLAG_ID | DATA_FLAG_PATH).value();
+
+const std::string* site_paths = data->GetPaths("site");
+const std::string* category_paths = data->GetPaths("category");
+```
+
+`GetDataByIds` 以及未选择 `DATA_FLAG_PATH` 的 `GetDataByIdsWithFlag` 都不会附带路径
+数组。`store_paths` 为 `false` 时选择 `DATA_FLAG_PATH` 会返回参数错误。开启路径存储
+后，只有当所有请求 ID 在某个 hierarchy 中都恰好有一条已记录路径时，这些旧 getter
+才会返回该 hierarchy。只要其中一个 ID 没有已记录路径或有多条路径，对应 getter 就返回
+`nullptr`；其他路径完整的 hierarchy 仍会正常返回。单 hierarchy 模式下，
+`GetPaths()` 遵循相同规则。
+
+使用结构化重载可以统一取回旧表示或新表示中的全部路径：
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths;
+if (data->GetPaths("tag", tag_paths)) {
+    // tag_paths[i] 包含 requested_ids[i] 的全部路径。
+}
+```
+
+若要让同一条向量在同一个层级中属于多条独立路径，请传入嵌套 vector。外层 vector
+与 dataset 元素一一对应，每个内层 vector 可以包含一条或多条路径：
+
+```cpp
+std::vector<std::vector<std::string>> tag_paths = {
+    {"technology", "military"}, // 向量 0 同时属于两条路径
+    {"sports"},                  // 向量 1 属于一条路径
+    {""},                        // 向量 2 属于层级根节点
+};
+
+auto base = vsag::Dataset::Make();
+base->NumElements(3)
+    ->Dim(128)
+    ->Ids(ids)
+    ->Float32Vectors(data)
+    ->Paths("tag", std::move(tag_paths))
+    ->Paths("site", site_paths) // 可与旧指针形式共存
+    ->Owner(false);
+index->Build(base);
+```
+
+空的内层 vector 非法；只包含 `""` 的内层 vector 表示挂到根节点。
+重复路径和共享前缀在同一个树节点内只插入一次。`Add()` 支持相同形式，序列化会保留
+最终形成的全部路径归属。
+
+### 检索指定层级
+
+通过检索参数中的 `"hierarchies"` 指定要检索的层级。查询 Dataset 也需要在对应的
+层级名称上设置路径：
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("site", &query_path)   // 指向 "site" 层级
+    ->Owner(false);
+
+auto result = index->KnnSearch(
+    query, /*topk=*/10,
+    R"({"pyramid": {"ef_search": 100, "hierarchies": ["site"]}})").value();
+```
+
+旧查询形式用 `|` 表示多条候选路径的并集，例如 `"technology|military"`；同一向量即使
+同时可由两条路径到达，在结果中也只出现一次。旧字符串形式中的 `|` 是保留分隔符，
+目前没有转义语法。结构化查询不依赖这个分隔约定，也允许路径段中包含字面量 `|`：
+
+```cpp
+auto query = vsag::Dataset::Make();
+query->NumElements(1)
+    ->Dim(128)
+    ->Float32Vectors(q)
+    ->Paths("tag", std::vector<std::vector<std::string>>{{"technology", "military"}})
+    ->Owner(false);
+```
+
+### 增量插入 (Add)
+
+`Add()` 的用法与 `Build()` 一致——可以提供单路径或结构化命名路径，每条通过校验的向量
+都会插入到所有匹配路径：
+
+```cpp
+auto new_data = vsag::Dataset::Make();
+new_data->NumElements(count)
+    ->Dim(128)
+    ->Ids(new_ids)
+    ->Float32Vectors(new_vectors)
+    ->Paths("site", new_site_paths)
+    ->Paths("category", new_cat_paths);
+index->Add(new_data);
+```
+
+### 范围检索 (RangeSearch)
+
+RangeSearch 同样支持通过检索参数选择层级：
+
+```cpp
+auto result = index->RangeSearch(
+    query, /*radius=*/20.0f,
+    R"({"pyramid": {"ef_search": 100, "hierarchies": ["category"]}})").value();
+```
+
+### 序列化与反序列化
+
+多 hierarchy 索引的序列化和反序列化完全透明。序列化格式包含所有 hierarchy
+名称及其图结构。当 `store_paths: true` 时，常规序列化和 streaming 序列化还会持久化
+已保留的原始路径，因此反序列化后仍可通过 `GetDataByIdsWithFlag` 获取。使用默认值
+`false` 时，图 hierarchy 会被持久化，但不会保留按 ID 索引的原始路径：
+
+```cpp
+// 序列化
+auto binary_set = index->Serialize().value();
+
+// 反序列化到新索引（必须使用相同的构建参数）
+auto new_index = vsag::Factory::CreateIndex("pyramid", build_params).value();
+new_index->Deserialize(binary_set);
+```
+
+## 何时选择 Pyramid
+
+- 多租户服务：每个租户只能看到自己分区的结果，且希望避免为每个租户单独维护一份索引。
+- 带有层级标签的物料库（语言 / 地域 / 品类），查询永远限定在某个已知的前缀下。
+- 小分区非常多的负载：可以用 `no_build_levels` 与 `index_min_size` 跳过那些小到不值得
+  构图的分区。
+
+如果不需要按路径限定查询范围，[HGraph](hgraph.md) 更简洁，性能通常也更高。
+
+可以通过[索引分析](../resources/analyze_index.md)检查 Pyramid 的树结构、子索引质量、
+`GetStats()` 输出的 base 采样召回率和重复比例。每个 hierarchy 的 `root_graphs` 会报告
+`root_graph_type`、`bottom_graph_storage_type`、`bottom_graph_node_count`、
+`bottom_graph_size`、`route_graph_count`、`route_node_counts` 和 `route_graph_size`。
+`AnalyzeIndexBySearch` 还会输出按路径限定的
+query 召回率、距离、耗时，以及开启 reorder 时的量化指标。query 数据集必须包含与
+`KnnSearch` 相同的默认或命名 hierarchy 路径。对于批量数据集，外层路径集合的每一行对应
+一条 query：旧重载每行提供一个路径字符串（并用 `|` 表示并集），结构化重载则可为每行提供
+一条或多条原子路径，并允许路径中包含字面量 `|`。`analyze_index` 工具当前无法从
+dense query 文件加载 hierarchy 路径，因此按路径执行动态分析时请使用 C++ 接口。
+
+## 标记删除
+
+Pyramid 支持 `RemoveMode::MARK_REMOVE`。调用 `Remove(ids)`（默认模式）会为给定的 id
+打上删除标记：它们会从后续检索结果中排除，`GetNumElements()` 相应减少，
+`GetNumberRemoved()` 返回累计删除数量。删除不存在或已删除的 id 不会有任何效果。
+`RemoveMode::FORCE_REMOVE` 不支持，调用会返回错误。
+
+被标记删除的向量在索引重建前仍占用内存，空间不会被物理回收。
+
+## 标签查询与持久化
+
+标签 `0` 是合法标签。预留容量不会创建标签：没有向量使用该标签时，`CheckIdExist(0)`
+返回 false，单 ID 的 `CalcDistanceById` 对不存在或已标记删除的标签返回错误。
+
+Pyramid 仅写入已填充的标签槽位，继续使用现有的带长度前缀的向量格式。
+读取包含未使用槽位的旧数据时，根据已存储的向量数量移除未使用的尾部并重建标签映射。
+可寻址格式和流式格式均支持此恢复过程。旧版读取器仍能解析新写入的数据，
+但不会因此获得修复后的查询行为，因此读取端也需要升级。
+
+## 相关文档
+
+- [创建索引](../guide/create_index.md)
+- [索引参数](../resources/index_parameters.md)
+- [图索引增强](../advanced/enhance_graph.md)
+- [HGraph](hgraph.md)
+
+## 实验性 NSW 自适应剪枝
+
+Pyramid 直接复用 HGraph 的[自适应邻居选择器](adaptive_pruning.md)。参数平铺在 `index_param` 下，`adaptive_pruning` 是布尔开关；旧实验版嵌套配置和已删除的 `fill_rejected` 参数会报错，使用旧实验格式的索引需重新构建。配置一次，作用于每个已构建路径节点的底图，包括 `single_layer` 根图和 `multi_layer` 根图的底层。路由层保留原有固定 alpha 策略。平面节点升级为 NSW 图时开始使用该策略。
+
+```json
+{
+    "graph_type": "nsw",
+    "alpha": 1.06,
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": true,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+以上字段放在 `index_param` 内。这是实验配置，不是适用于所有数据集的推荐默认值。
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | NSW 插入时使用共享的多轮选择器 |
+| `adaptive_pruning_adjust_step` | `0.06` | 相对所属 hierarchy 基准 alpha 放宽或收紧的步长 |
+| `adaptive_pruning_apply_to_reverse` | `false` | 同时对已满的反向邻居表重新剪枝，以已有邻居为中心 |
+| `adaptive_pruning_apply_to_upper` | `false` | 保留字段，暂不支持启用上层自适应 |
+
+策略全局共享，各 hierarchy 保留自己的有效 `alpha` 和最大度数；不支持 hierarchy 内单独覆盖 `adaptive_pruning`。每个有效 alpha 都必须有限，且满足 `adjust_step >= 0`、`alpha - 2*adjust_step > 0`、`alpha + 3*adjust_step` 有限。alpha=1.06、step=0.06 时，可能使用的调整值介于 0.94–1.24；这些常数不会根据向量维度自动推导。
+
+启用时要求 `graph_type: "nsw"` 和 `metric_type: "l2"`。导入非空构图缓存后的 Build 会被拒绝，空缓存可以正常使用。ODescent、路由层自适应和更新/精炼路径不在本策略范围内。尚有容量的反向邻居表仍直接追加；距离提供器和量化器不变。
+
+序列化会记录策略。加载要求启用状态一致；启用时还要求 alpha、步长和作用范围一致。旧参数中没有此字段时按关闭处理，从而保证后续 Add 继续使用一致策略；这不保证旧版本 VSAG 能读取新写出的索引。
+
+应在相近 recall 下比较 QPS，同时报告构图时间和内存。更多剪枝轮次可能增加构图耗时，即使得到的图能加速查询。当 `k=10` 时，Pyramid 当前仅接受 `[1, 1000]` 范围内的 `ef_search`。GIST 测试若构图路径全部为空、查询不传 `Paths`，只衡量根图无过滤搜索，不能据此推断路径过滤场景的收益。RaBitQ + SQ8 重排使用现有 SQ8 距离提供器构图，与 RaBitQ 3+5 split 存储配置不同。
+
+
+GIST 1M 的四组合消融中，补边的单因素 QPS 变化为 −3.4%～+4.7%，没有一致收益，因此移除了无条件补边及其参数。反向自适应仍可选：alpha=1.06 时本轮各匹配 recall 档位均减速，alpha=1.2 时均加速。每组只有一份并行构建索引，小幅差异尚不足以证明稳定收益；应按数据集和目标 recall 选择反向开关。

@@ -1,0 +1,24 @@
+
+# OpenBLAS variant of the VSAG CI image for aarch64.
+#
+# Built on top of vsaglib/vsag:ci-aarch64-base (see docker/Dockerfile.aarch64.base).
+# Ships a pre-installed system OpenBLAS (plus LAPACKE headers) so the aarch64 CI
+# jobs (asan_build_and_test.yml / daily_test.yml) can run straight from the image
+# instead of installing dependencies per job via scripts/deps/install_deps_ubuntu.sh.
+#
+# Jobs that want to skip the per-job OpenBLAS source build can opt in to
+# `-DUSE_SYSTEM_OPENBLAS=ON`; jobs that leave the flag unset still exercise the
+# from-source OpenBLAS build and simply ignore the pre-installed packages.
+#
+# This is the aarch64 counterpart of docker/Dockerfile.x86.openblas. There is no
+# MKL counterpart on aarch64 because Intel oneAPI MKL is x86-only.
+
+FROM vsaglib/vsag:ci-aarch64-base
+
+# Install system OpenBLAS + LAPACKE in a single layer and drop the apt cache to
+# keep the image small. liblapacke-dev pulls in the C headers needed for VSAG's
+# CMake `find_path(LAPACKE_INCLUDE NAMES lapacke.h)` probe.
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+        libopenblas-dev liblapacke-dev \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*

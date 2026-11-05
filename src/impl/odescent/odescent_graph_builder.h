@@ -1,0 +1,197 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <iostream>
+#include <queue>
+#include <random>
+#include <unordered_set>
+#include <vector>
+
+#include "datacell/flatten_datacell.h"
+#include "datacell/graph_datacell.h"
+#include "datacell/sparse_graph_datacell.h"
+#include "impl/allocator/safe_allocator.h"
+#include "impl/logger/logger.h"
+#include "odescent_graph_parameter.h"
+#include "simd/simd.h"
+#include "vsag/dataset.h"
+
+namespace vsag {
+
+struct Node {
+    bool old = false;
+    uint32_t id;
+    float distance;
+
+    Node(uint32_t id, float distance) {
+        this->id = id;
+        this->distance = distance;
+    }
+
+    Node(uint32_t id, float distance, bool old) {
+        this->id = id;
+        this->distance = distance;
+        this->old = old;
+    }
+    Node() {
+    }
+
+    bool
+    operator<(const Node& other) const {
+        if (distance != other.distance) {
+            return distance < other.distance;
+        }
+        if (id != other.id) {
+            return id < other.id;
+        }
+        return old && not other.old;
+    }
+
+    bool
+    operator==(const Node& other) const {
+        return id == other.id;
+    }
+};
+
+struct Linklist {
+    Vector<Node> neighbors;
+    float greast_neighbor_distance;
+    Linklist(Allocator* allocator)
+        : neighbors(allocator), greast_neighbor_distance(std::numeric_limits<float>::max()) {
+    }
+};
+
+class ODescent {
+public:
+    ODescent(ODescentParameterPtr odescent_parameter,
+             const FlattenInterfacePtr& flatten_interface,
+             Allocator* allocator,
+             SafeThreadPool* thread_pool,
+             bool pruning = true,
+             const void* build_vectors = nullptr,
+             int64_t build_vector_count = 0,
+             FlattenInterfacePtr build_flatten_interface = nullptr)
+        : odescent_param_(std::move(odescent_parameter)),
+          flatten_interface_(flatten_interface),
+          pruning_(pruning),
+          allocator_(allocator),
+          graph_(allocator),
+          points_lock_(allocator),
+          thread_pool_(thread_pool),
+          build_flatten_interface_(std::move(build_flatten_interface)),
+          build_vectors_(build_vectors),
+          build_vector_count_(build_vector_count) {
+    }
+
+    static FlattenInterfacePtr
+    CreateBuildFlatten(const FlattenInterfacePtr& flatten_interface,
+                       const void* build_vectors,
+                       int64_t build_vector_count);
+
+    bool
+    Build(const GraphInterfacePtr& graph_storage = nullptr) {
+        return Build(Vector<InnerIdType>(allocator_), graph_storage);
+    }
+
+    bool
+    Build(const Vector<InnerIdType>& ids_sequence,
+          const GraphInterfacePtr& graph_storage = nullptr);
+
+    void
+    SaveGraph(std::stringstream& out);
+
+    void
+    SaveGraph(GraphInterfacePtr& graph_storage);
+
+    void
+    SetMaxDegree(int32_t max_degree) {
+        odescent_param_->max_degree = max_degree;
+    }
+
+private:
+    inline float
+    get_distance(uint32_t loc1, uint32_t loc2) {
+        if (valid_ids_ != nullptr) {
+            return distance_flatten_interface_->ComputePairVectors(valid_ids_[loc1],
+                                                                   valid_ids_[loc2]);
+        }
+        return distance_flatten_interface_->ComputePairVectors(loc1, loc2);
+    }
+
+    void
+    init_one_edge(int64_t i,
+                  const GraphInterfacePtr& graph_storage,
+                  const std::function<uint32_t(uint32_t)>& id_map_func,
+                  std::uniform_int_distribution<int64_t>& k_generate,
+                  std::mt19937& rng);
+
+    void
+    init_graph(const GraphInterfacePtr& graph_storage);
+
+    void
+    prepare_build_flatten();
+
+    void
+    update_neighbors(Vector<UnorderedSet<uint32_t>>& old_neighbors,
+                     Vector<UnorderedSet<uint32_t>>& new_neighbors);
+
+    void
+    add_reverse_edges();
+
+    void
+    sample_candidates(Vector<UnorderedSet<uint32_t>>& old_neighbors,
+                      Vector<UnorderedSet<uint32_t>>& new_neighbors,
+                      float sample_rate);
+
+    void
+    repair_no_in_edge();
+
+    Vector<int>
+    count_in_edges();
+
+    void
+    prune_graph();
+
+private:
+    void
+    parallelize_task(const std::function<void(int64_t i, int64_t end)>& task);
+
+    uint64_t dim_{0};
+    int64_t data_num_{0};
+    Vector<Linklist> graph_;
+    Vector<std::mutex> points_lock_;
+    SafeThreadPool* thread_pool_{nullptr};
+
+    const InnerIdType* valid_ids_{nullptr};
+
+    bool pruning_{true};
+    Allocator* const allocator_;
+
+    const ODescentParameterPtr odescent_param_;
+
+    const FlattenInterfacePtr& flatten_interface_;
+
+    // Build() initializes this before the first parallelize_task() call and never mutates it
+    // afterward. Task enqueue publishes the initialized pointer to workers, and each parallel phase
+    // waits on all futures before continuing, so get_distance() only performs concurrent reads.
+    FlattenInterfacePtr build_flatten_interface_{nullptr};
+    FlattenInterface* distance_flatten_interface_{nullptr};
+    const void* build_vectors_{nullptr};
+    int64_t build_vector_count_{0};
+};
+
+}  // namespace vsag

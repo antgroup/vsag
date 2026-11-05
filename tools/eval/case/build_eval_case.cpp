@@ -1,0 +1,139 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "./build_eval_case.h"
+
+#include <filesystem>
+#include <numeric>
+#include <utility>
+#include <vector>
+
+#include "../monitor/duration_monitor.h"
+#include "../monitor/memory_peak_monitor.h"
+#include "vsag_exception.h"
+
+namespace vsag::eval {
+
+BuildEvalCase::BuildEvalCase(const std::string& dataset_path,
+                             const std::string& index_path,
+                             vsag::IndexPtr index,
+                             EvalConfig config,
+                             EvalDatasetPtr dataset)
+    : EvalCase(dataset_path, index_path, std::move(index), std::move(dataset)),
+      config_(std::move(config)) {
+    this->init_monitors();
+}
+
+void
+BuildEvalCase::init_monitors() {
+    if (config_.enable_memory) {
+        auto memory_peak_monitor = std::make_shared<MemoryPeakMonitor>("build");
+        this->monitors_.emplace_back(std::move(memory_peak_monitor));
+    }
+    auto duration_monitor = std::make_shared<DurationMonitor>();
+    this->monitors_.emplace_back(std::move(duration_monitor));
+}
+
+JsonType
+BuildEvalCase::Run() {
+    this->do_build();
+    this->serialize();
+    return this->process_result();
+}
+
+JsonType
+BuildEvalCase::RunInMemory() {
+    this->do_build();
+    return this->process_result();
+}
+
+void
+BuildEvalCase::do_build() {
+    auto base = vsag::Dataset::Make();
+    int64_t total_base = this->dataset_ptr_->GetNumberOfBase();
+    const auto* train_ids = this->dataset_ptr_->GetTrainIds();
+    std::vector<int64_t> identity_ids;
+    if (train_ids == nullptr) {
+        identity_ids.resize(static_cast<uint64_t>(total_base));
+        std::iota(identity_ids.begin(), identity_ids.end(), int64_t{0});
+        train_ids = identity_ids.data();
+    }
+    base->NumElements(total_base)->Dim(this->dataset_ptr_->GetDim())->Ids(train_ids)->Owner(false);
+    if (this->dataset_ptr_->GetVectorType() == DENSE_VECTORS) {
+        if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_FLOAT32) {
+            base->Float32Vectors((const float*)this->dataset_ptr_->GetTrain());
+        } else if (this->dataset_ptr_->GetTrainDataType() == vsag::DATATYPE_INT8) {
+            base->Int8Vectors((const int8_t*)this->dataset_ptr_->GetTrain());
+        }
+    } else {
+        base->SparseVectors((const SparseVector*)this->dataset_ptr_->GetTrain());
+    }
+    if (this->dataset_ptr_->GetTrainPaths() != nullptr) {
+        base->Paths(this->dataset_ptr_->GetTrainPaths());
+    }
+    for (auto& monitor : monitors_) {
+        monitor->Start();
+    }
+    auto build_index = index_->Build(base);
+    if (not build_index.has_value()) {
+        throw std::runtime_error(build_index.error().message);
+    }
+    for (auto& monitor : monitors_) {
+        monitor->Record();
+        monitor->Stop();
+    }
+}
+void
+BuildEvalCase::serialize() {
+    std::filesystem::path dir_path(index_path_);
+    dir_path = dir_path.parent_path();
+    if (!std::filesystem::exists(dir_path)) {
+        std::filesystem::create_directories(dir_path);
+    }
+    std::ofstream outfile(this->index_path_, std::ios::binary);
+    this->index_->Serialize(outfile);
+}
+
+JsonType
+BuildEvalCase::process_result() {
+    JsonType result;
+    JsonType eval_result;
+    for (auto& monitor : this->monitors_) {
+        const auto& one_result = monitor->GetResult();
+        EvalCase::MergeJsonType(one_result, eval_result);
+    }
+    result = eval_result;
+    if (config_.enable_tps) {
+        result["tps"] =
+            double(this->dataset_ptr_->GetNumberOfBase()) / double(result["duration(s)"]);
+    }
+    EvalCase::MergeJsonType(this->basic_info_, result);
+    result["index_info"] =
+        config_.build_param.empty() ? JsonType::object() : JsonType::parse(config_.build_param);
+    result["action"] = "build";
+    result["index"] = config_.index_name;
+    result["index_memory(B)"] = this->index_->GetMemoryUsage();
+    try {
+        auto detail = this->index_->GetMemoryUsageDetail();
+        for (const auto& [name, size] : detail) {
+            result["memory_detail(B)"][name] = size;
+        }
+    } catch (const std::exception& e) {
+        logger_->Error(e.what());
+    }
+    return result;
+}
+
+}  // namespace vsag::eval

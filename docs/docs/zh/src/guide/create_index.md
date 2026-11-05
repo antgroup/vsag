@@ -1,0 +1,95 @@
+# 创建索引
+
+VSAG 中所有检索能力都围绕 `Index` 接口展开。要使用某种索引，首先需要通过工厂方法 `vsag::Factory::CreateIndex(name, parameters)` 创建实例，其中：
+
+- `name` 是索引类型名称，对应 `include/vsag/constants.h` 中定义的常量；
+- `parameters` 是一段 JSON 字符串，声明数据类型、距离度量、维度等构建参数。
+
+## 当前支持的索引类型
+
+| 名称           | `name` 字符串   | 文档                                  | 适用场景                                            |
+| -------------- | --------------- | ------------------------------------- | --------------------------------------------------- |
+| HGraph         | `hgraph`        | [HGraph](../indexes/hgraph.md)        | VSAG 自研图索引，支持多级量化和调优（详见 `examples/cpp/103_index_hgraph.cpp`） |
+| IVF            | `ivf`           | [IVF](../indexes/ivf.md)              | 倒排索引，适合大 `k` 和批量查询                     |
+| SINDI          | `sindi`         | [SINDI](../indexes/sindi.md)          | 稀疏向量上的倒排索引                                |
+| SINDI_V2       | `sindi_v2`      | [SINDI_V2](../indexes/sindi_v2.md) | 支持内存与磁盘 I/O 的稀疏向量索引 |
+| Pyramid        | `pyramid`       | [Pyramid](../indexes/pyramid.md)      | 多层级 / 按路径分区的索引结构                       |
+| BruteForce     | `brute_force`   | —                                     | 暴力搜索，用作基准或小数据集                        |
+| GNO-IMI        | `gno_imi`       | —                                     | 基于 GNO-IMI 的倒排索引变体（作为 `ivf` 的 `partition_strategy_type`）|
+
+> 完整示例可在 [`examples/cpp/`](https://github.com/antgroup/vsag/tree/main/examples/cpp) 目录中按照前缀编号依次查看（`101_` ~ `109_` 为索引类型，`2xx_` 为自定义资源，`3xx_` 为功能特性）。
+
+### 使用磁盘 I/O 的 SINDI_V2
+
+```cpp
+std::string params = R"(
+{
+    "dim": 1024,
+    "dtype": "sparse",
+    "metric_type": "ip",
+    "index_param": {
+        "term_id_limit": 30000,
+        "use_reorder": true,
+        "term_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.terms"
+        },
+        "rerank_io": {
+            "type": "async_io",
+            "file_path": "/path/to/sindi_v2.rerank"
+        }
+    }
+}
+)";
+auto index = vsag::Factory::CreateIndex("sindi_v2", params).value();
+```
+
+## 通用的构建参数
+
+所有索引在创建时都需要声明以下字段：
+
+- `dtype`：向量数据类型，当前常用为 `"float32"`；部分索引也支持 `"fp16"`、`"bf16"`、`"int8"`；
+- `metric_type`：距离度量方式，支持 `"l2"`、`"ip"`、`"cosine"`；
+- `dim`：向量维度，必须与后续写入的数据一致。
+
+索引特有参数以嵌套对象形式提供，例如 HGraph 在构建期使用 `index_param` 子对象（`hgraph` 保留给 `ef_search` 等查询期参数）。
+
+## 示例：创建 HGraph 索引
+
+```cpp
+#include <vsag/vsag.h>
+
+auto hgraph_build_parameters = R"(
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 16,
+        "ef_construction": 100
+    }
+}
+)";
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
+```
+
+## 示例：创建 HGraph 索引（SQ8 量化）
+
+```cpp
+auto hgraph_build_parameters = R"(
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "max_degree": 32,
+        "ef_construction": 100,
+        "base_quantization_type": "sq8"
+    }
+}
+)";
+auto index = vsag::Factory::CreateIndex("hgraph", hgraph_build_parameters).value();
+```
+
+不同索引支持的参数及其语义，请参考 [索引参数](../resources/index_parameters.md)。

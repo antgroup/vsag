@@ -1,0 +1,255 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "vsag/allocator.h"
+#include "vsag/bitset.h"
+#include "vsag/dataset.h"
+#include "vsag/filter.h"
+#include "vsag/iterator_context.h"
+
+namespace vsag {
+
+using SearchDistanceBatchFunc =
+    std::function<void(const int64_t* ids, uint64_t count, float* distances)>;
+
+enum class SearchMode {
+    KNN_SEARCH = 1,
+    RANGE_SEARCH = 2,
+};
+
+class AttrTypeSchema;
+class Expression;
+using ExprPtr = std::shared_ptr<Expression>;
+
+/**
+ * @brief Parse an attribute filter expression.
+ */
+ExprPtr
+AstParse(const std::string& filter_condition_str, const AttrTypeSchema* schema = nullptr);
+
+class SearchRequest {
+public:
+    // basic params
+    /** 
+     * @brief Query dataset containing the vector or vectors to search for
+     * @details This DatasetPtr holds the query vector used for similarity search. 
+     *          HGraph and IVF KNN requests, plus supported AnalyzeIndexBySearch implementations, accept
+     *          multiple query vectors; other requests allow one.
+     */
+    DatasetPtr query_{nullptr};
+
+    /**
+     * @brief Search mode determining the type of similarity search to perform
+     * @details Specifies whether to perform K-Nearest Neighbors (KNN) search or range-based search.
+     *          - KNN_SEARCH: Returns the top-k most similar vectors
+     *          - RANGE_SEARCH: Returns all vectors within a specified distance/radius
+     */
+    SearchMode mode_{SearchMode::KNN_SEARCH};
+
+    /**
+     * @brief Number of nearest neighbors to return in KNN search mode
+     * @details Only applicable when mode_ is set to KNN_SEARCH. 
+     *          Defines how many of the most similar vectors should be returned.
+     *          Default value is 10, must be a positive integer.
+     */
+    int64_t topk_{10};
+
+    /**
+     * @brief Search radius for range-based search mode
+     * @details Only used when mode_ is set to RANGE_SEARCH.
+     *          Defines the maximum distance threshold from the query vector.
+     *          All vectors within this radius will be allowed.
+     *          The result size must be smaller than the limited_size_(when limited_size_ is positive).
+     *          Default value is 0.5, must be a non-negative float.
+     */
+    float radius_{0.5F};
+
+    /**
+     * @brief Limited size for search results
+     * @details Only used when mode_ is set to RANGE_SEARCH.
+     *          Defines the maximum number of results to return.
+     *          Default value is -1, which means no limit.
+     */
+    int64_t limited_size_{-1};
+
+    /**
+     * @brief Additional search parameters as a JSON string
+     * @details Contains algorithm-specific parameters in JSON format.
+     *          Used to pass fine-tuned configuration options to the underlying search algorithm.
+     *          Examples: ef_search, etc.
+     */
+    std::string params_str_{};
+
+    /**
+     * @brief Optional request-scoped callback for custom query scoring.
+     *
+     * Receives stable external IDs and writes one lower-is-better score per ID.
+     * When non-null, supported indexes use this callback for search traversal and
+     * result ordering instead of their built-in vector metric. Graph traversal can
+     * score filtered IDs to keep the graph connected, but filtered IDs are never
+     * returned as results.
+     * IVF parallel search may invoke this callback and the request filter concurrently.
+     * Both must support concurrent calls, including any captured/shared state. Filter
+     * decisions must be stable within a request and independent of call order. Scores
+     * must be stable within a request and independent of batch composition or call order.
+     * IVF applies attribute filtering before scoring, then checks the local top-k score
+     * threshold before invoking the request filter. Rejected candidates never enter
+     * the result heap; candidates that cannot improve a full heap skip the filter.
+     */
+    SearchDistanceBatchFunc distance_batch_func_{nullptr};
+
+    /**
+     * @brief Maximum number of IDs submitted to distance_batch_func_ per invocation.
+     *
+     * Defaults to 1 for scalar scorers. Set this to the scorer's efficient batch
+     * width when it benefits from batched inference or data access.
+     */
+    uint64_t distance_batch_size_{1};
+
+    // for attribute filter
+    /**
+     * @brief Flag to enable attribute-based filtering during search
+     * @details When set to true, enables filtering of search results based on vector attributes.
+     *          Requires attribute_filter_str_ to contain valid filter criteria.
+     *          Default is false (no attribute filtering applied).
+     */
+    bool enable_attribute_filter_{false};
+
+    /**
+     * @brief Attribute filter criteria as a SQL string
+     * @details Contains the filtering conditions for vector attributes in SQL format.
+     *          Only used when enable_attribute_filter_ is set to true.
+     *          Format depends on the attribute schema defined in the dataset.
+     *          Examples: 
+     *              1. "category = 'electronics' AND price != 1000",
+     *              2. "multi_in(category, ['electronics', 'clothing']) AND multi_notin(color, ['red', 'blue'])",
+     */
+    std::string attribute_filter_str_{};
+
+    // for callback filter
+    /**
+     * @brief Flag to enable custom callback-based filtering
+     * @details When set to true, enables the use of a custom Filter object for result filtering.
+     *          Requires filter_ to be properly initialized with a valid FilterPtr.
+     *          Default is false (no callback filtering applied).
+     */
+    bool enable_filter_{false};
+
+    /**
+     * @brief Custom filter object for advanced result filtering
+     * @details A smart pointer to a Filter implementation that provides custom filtering logic.
+     *          The filter is applied after the initial similarity search to further refine results.
+     *          Only used when enable_filter_ is set to true.
+     *          Allows for complex filtering scenarios not covered by attribute-based filtering.
+     *          All Filter Use *AND* to connect
+     */
+    FilterPtr filter_{nullptr};
+
+    /**
+     * @brief Flag to enable bitset filter
+     * @details When set to true, enables the use of a bitset filter for result filtering.
+     *          Requires bitset_filter_ to be properly initialized with a valid BitsetPtr.
+     *          Default is false (no bitset filter applied).
+     */
+    bool enable_bitset_filter_{false};
+
+    /**
+     * @brief Bitset filter for result filtering
+     * @details A smart pointer to a Bitset implementation that provides result filtering based on a bitset.
+     *          Only used when enable_bitset_filter_ is set to true.
+     *          If the bitset filter's Test(id) return True, the id will be filtered out.
+     *          Default is nullptr (no bitset filter applied).
+     */
+    BitsetPtr bitset_filter_{nullptr};
+
+    // search resource alloc
+    /**
+     * @brief Custom memory allocator for search operations
+     * @details Pointer to a custom Allocator object used for memory management during search.
+     *          If nullptr, the default index allocator is used.
+     *          Useful for memory-constrained environments or when using specialized memory pools.
+     *          Can help optimize memory usage patterns for large-scale searches.
+     */
+    Allocator* search_allocator_{nullptr};
+
+    // for iterator search
+    /**
+     * @brief Flag to enable iterator-based search mode
+     * @details When set to true, enables incremental search using an iterator pattern.
+     *          Allows for processing search with steps.
+     *          Hold the current search context in the iterator context.
+     *          Requires p_iter_ctx_ to be properly initialized.
+     *          Default is false (standard search mode).
+     */
+    bool enable_iterator_search_{false};
+
+    /**
+     * @brief Pointer to iterator context for incremental search
+     * @details Double pointer to an IteratorContext object used for maintaining search state
+     *          across multiple incremental search calls. Only used when enable_iterator_search_ is true.
+     *          The context stores the current position in the search space and allows resuming
+     *          searches from where they left off. Must be initialized before starting iterator search.
+     */
+    IteratorContext** p_iter_ctx_{nullptr};
+
+    /**
+     * @brief Flag indicating this is the final search in an iterator sequence
+     * @details When set to true, signals that no more results are expected from this iterator.
+     */
+    bool is_last_search_{false};
+
+    /**
+     * @brief Expected labels for reasoning analysis
+     * @details List of expected vector IDs that should be returned in the search result.
+     *          When non-empty, enables reasoning mechanism to analyze why these target
+     *          vectors were not recalled. Used for debugging and optimization purposes.
+     *          Default is empty (no reasoning enabled).
+     */
+    std::vector<int64_t> expected_labels_{};
+
+    /**
+     * @brief Optional inclusive distance threshold for KNN search mode
+     * @details When set, at most topk_ results are returned and every returned
+     *          distance is less than or equal to this threshold. An unset value
+     *          preserves the default KNN behavior.
+     */
+    std::optional<float> threshold_{std::nullopt};
+
+    /**
+     * @brief Pre-selected bucket IDs for bypassing IVF bucket routing (ClassifyDatasForSearch)
+     * @details The outer vector contains one entry per query vector.
+     *          Inner vector contains ordered bucket IDs (caller is responsible for ordering).
+     *          When non-empty with at least one ID, skips ClassifyDatasForSearch and searches only
+     *          the specified buckets. Empty means "use default bucket routing".
+     */
+    std::vector<std::vector<int64_t>> bucket_ids_{};
+
+    /**
+     * @brief Pre-built attribute expression used instead of attribute_filter_str_
+     * @details When non-null and enable_attribute_filter_ is true, this expression has priority
+     *          over parsing attribute_filter_str_. Appended to preserve aggregate initialization.
+     */
+    ExprPtr expression_{nullptr};
+};
+
+}  // namespace vsag

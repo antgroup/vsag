@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="570" viewBox="0 0 980 570">
+  <defs>
+    <style>
+      .subtitle { font: 600 17px Arial, sans-serif; fill: #243040; }
+      .text { font: 15px Arial, sans-serif; fill: #344256; }
+      .small { font: 13px Arial, sans-serif; fill: #536173; }
+      .word { font: 15px Arial, sans-serif; fill: #536173; }
+      .label { font: 600 13px Arial, sans-serif; fill: #334155; }
+      .mono { font: 14px "SFMono-Regular", Consolas, monospace; fill: #1f2937; }
+      .card { fill: #ffffff; stroke: #d6dde7; stroke-width: 1.4; rx: 8; }
+      .soft { fill: #f8fafc; stroke: #d6dde7; stroke-width: 1.2; rx: 8; }
+      .vocab { fill: #f1f5f9; stroke: #cbd5e1; stroke-width: 1; rx: 7; }
+      .hit { fill: #dcfce7; stroke: #86efac; stroke-width: 1; rx: 7; }
+      .semantic { fill: #fef3c7; stroke: #fbbf24; stroke-width: 1; rx: 7; }
+      .dense { fill: #dff4ff; stroke: #7dd3fc; stroke-width: 1; }
+      .brace { stroke: #64748b; stroke-width: 1.7; fill: none; stroke-linecap: round; }
+      .arrow { stroke: #64748b; stroke-width: 2; fill: none; marker-end: url(#arrow); }
+    </style>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="980" height="570" fill="#ffffff"/>
+
+  <g transform="translate(0,-14)">
+  <rect x="350" y="28" width="280" height="44" class="soft"/>
+  <text x="490" y="56" text-anchor="middle" class="subtitle">I love black cat</text>
+  <path d="M 490 74 L 490 100" class="arrow"/>
+
+  <rect x="26" y="102" width="928" height="260" class="card"/>
+  <text x="50" y="134" class="subtitle">稀疏向量：词表很大，只保存少数非零词项</text>
+
+  <g transform="translate(50,166)">
+    <rect width="76" height="36" class="vocab"/><text x="38" y="24" text-anchor="middle" class="word">apple</text>
+    <rect x="76" width="76" height="36" class="hit"/><text x="114" y="24" text-anchor="middle" class="word">love</text>
+    <rect x="152" width="76" height="36" class="vocab"/><text x="190" y="24" text-anchor="middle" class="word">dog</text>
+    <rect x="228" width="76" height="36" class="hit"/><text x="266" y="24" text-anchor="middle" class="word">black</text>
+    <rect x="304" width="76" height="36" class="hit"/><text x="342" y="24" text-anchor="middle" class="word">cat</text>
+    <rect x="380" width="76" height="36" class="vocab"/><text x="418" y="24" text-anchor="middle" class="word">car</text>
+    <rect x="456" width="76" height="36" class="semantic"/><text x="494" y="24" text-anchor="middle" class="word">feline</text>
+    <rect x="532" width="76" height="36" class="semantic"/><text x="570" y="24" text-anchor="middle" class="word">kitty</text>
+    <rect x="608" width="76" height="36" class="vocab"/><text x="646" y="24" text-anchor="middle" class="word">cloud</text>
+    <rect x="684" width="76" height="36" class="vocab"/><text x="722" y="24" text-anchor="middle" class="word">...</text>
+
+    <path d="M 0 50
+             C 0 56 16 56 16 62
+             L 356 62
+             C 372 62 370 78 380 78
+             C 390 78 388 62 404 62
+             L 744 62
+             C 744 56 760 56 760 50" class="brace"/>
+    <text x="380" y="102" text-anchor="middle" class="label">总维度约 30,000 维</text>
+  </g>
+
+  <text x="50" y="308" class="small">存储时可以像 dict 一样，只记录有权重的位置：</text>
+  <rect x="50" y="322" width="646" height="28" class="soft"/>
+  <text x="66" y="342" class="mono">{"love": 0.71, "black": 0.82, "cat": 0.93, "feline": 0.51, "kitty": 0.28}</text>
+
+  <rect x="752" y="286" width="154" height="64" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.2" rx="8"/>
+  <text x="829" y="310" text-anchor="middle" class="small">feline / kitty</text>
+  <text x="829" y="331" text-anchor="middle" class="small">是 cat 的语义扩展</text>
+
+  <rect x="26" y="392" width="928" height="172" class="card"/>
+  <text x="50" y="424" class="subtitle">稠密向量：长度固定，每一维通常不直接对应某个词</text>
+  <g transform="translate(50,446)">
+    <rect width="60" height="34" class="dense"/><text x="30" y="22" text-anchor="middle" class="mono">0.18</text>
+    <rect x="60" width="60" height="34" class="dense"/><text x="90" y="22" text-anchor="middle" class="mono">-0.42</text>
+    <rect x="120" width="60" height="34" class="dense"/><text x="150" y="22" text-anchor="middle" class="mono">0.07</text>
+    <rect x="180" width="60" height="34" class="dense"/><text x="210" y="22" text-anchor="middle" class="mono">0.33</text>
+    <rect x="240" width="60" height="34" class="dense"/><text x="270" y="22" text-anchor="middle" class="mono">...</text>
+    <rect x="300" width="60" height="34" class="dense"/><text x="330" y="22" text-anchor="middle" class="mono">-0.11</text>
+    <rect x="360" width="60" height="34" class="dense"/><text x="390" y="22" text-anchor="middle" class="mono">0.56</text>
+    <rect x="420" width="60" height="34" class="dense"/><text x="450" y="22" text-anchor="middle" class="mono">0.29</text>
+
+    <path d="M 0 48
+             C 0 54 14 54 14 60
+             L 224 60
+             C 238 60 236 76 240 76
+             C 244 76 242 60 256 60
+             L 466 60
+             C 466 54 480 54 480 48" class="brace"/>
+    <text x="240" y="100" text-anchor="middle" class="label">所有维度：1024 维</text>
+  </g>
+  <text x="620" y="468" class="text">整体语义压缩表示</text>
+  </g>
+</svg>

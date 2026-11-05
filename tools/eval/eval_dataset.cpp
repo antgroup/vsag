@@ -1,0 +1,1251 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "eval_dataset.h"
+
+#include <cmath>
+#include <cstring>
+#include <limits>
+#include <stdexcept>
+
+#include "impl/logger/logger.h"
+
+using namespace H5;
+namespace vsag::eval {
+
+void
+parse_sparse_vectors(const char* src_data,
+                     size_t data_size,
+                     std::vector<SparseVector>& parsed_vectors,
+                     int64_t& max_len,
+                     std::vector<uint64_t>* offsets_out) {
+    // parse the sparse vectors with ordered keys
+    const char* ptr = src_data;
+    const char* end = src_data + data_size;
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(64);
+    }
+    while (ptr < end) {
+        SparseVector vec;
+
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - src_data));
+        }
+
+        if (ptr + sizeof(uint32_t) > end)
+            break;
+        std::memcpy(&vec.len_, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        if (vec.len_ == 0) {
+            parsed_vectors.push_back(vec);
+            continue;
+        }
+        max_len = std::max(max_len, static_cast<int64_t>(vec.len_));
+
+        const size_t keys_size = vec.len_ * sizeof(uint32_t);
+        const size_t vals_size = vec.len_ * sizeof(float);
+
+        if (ptr + keys_size + vals_size > end)
+            break;
+
+        vec.ids_ = new uint32_t[vec.len_];
+        vec.vals_ = new float[vec.len_];
+
+        std::memcpy(vec.ids_, ptr, keys_size);
+        ptr += keys_size;
+
+        std::memcpy(vec.vals_, ptr, vals_size);
+        ptr += vals_size;
+
+        std::vector<uint32_t> indices(vec.len_);
+        for (uint32_t i = 0; i < vec.len_; ++i) indices[i] = i;
+
+        std::sort(indices.begin(), indices.end(), [&](uint32_t a, uint32_t b) {
+            return vec.ids_[a] < vec.ids_[b];
+        });
+
+        auto* sorted_ids = new uint32_t[vec.len_];
+        auto* sorted_vals = new float[vec.len_];
+
+        for (uint32_t i = 0; i < vec.len_; ++i) {
+            sorted_ids[i] = vec.ids_[indices[i]];
+            sorted_vals[i] = vec.vals_[indices[i]];
+        }
+
+        delete[] vec.ids_;
+        delete[] vec.vals_;
+        vec.ids_ = sorted_ids;
+        vec.vals_ = sorted_vals;
+
+        parsed_vectors.push_back(vec);
+    }
+    if (ptr != end) {
+        throw std::runtime_error("parse_sparse_vectors: fail to parse sparse vectors");
+    }
+    if (offsets_out != nullptr) {
+        // append the sentinel offset (== total data_size) so that the
+        // length of record i is offsets_out[i+1] - offsets_out[i].
+        offsets_out->push_back(static_cast<uint64_t>(data_size));
+    }
+}
+
+void
+parse_token_sequences(const char* src_data,
+                      size_t data_size,
+                      std::vector<SparseVector>& target_vectors,
+                      std::vector<uint64_t>* offsets_out) {
+    // Parse token sequences and attach them to the matching sparse vectors
+    // by ordinal position. Each record layout in the byte stream is:
+    //   [seq_len(uint32), term_id_0(uint32), term_id_1(uint32), ...]
+    // Records are concatenated back-to-back with no padding. A seq_len of 0
+    // is allowed and occupies only the 4-byte length field.
+    const char* ptr = src_data;
+    const char* end = src_data + data_size;
+    uint64_t idx = 0;
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(target_vectors.size() + 1);
+    }
+    while (ptr < end) {
+        if (idx >= target_vectors.size()) {
+            throw std::runtime_error(
+                "parse_token_sequences: more token sequence records than sparse vectors");
+        }
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - src_data));
+        }
+        if (ptr + sizeof(uint32_t) > end) {
+            throw std::runtime_error("parse_token_sequences: truncated stream at length header");
+        }
+        uint32_t seq_len = 0;
+        std::memcpy(&seq_len, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        target_vectors[idx].token_seq_len_ = seq_len;
+        target_vectors[idx].token_sequence_ = nullptr;
+
+        if (seq_len > 0) {
+            const size_t payload_size = static_cast<size_t>(seq_len) * sizeof(uint32_t);
+            if (ptr + payload_size > end) {
+                throw std::runtime_error("parse_token_sequences: truncated stream at payload");
+            }
+            target_vectors[idx].token_sequence_ = new uint32_t[seq_len];
+            std::memcpy(target_vectors[idx].token_sequence_, ptr, payload_size);
+            ptr += payload_size;
+        }
+        ++idx;
+    }
+    if (ptr != end) {
+        throw std::runtime_error("parse_token_sequences: trailing bytes in stream");
+    }
+    if (idx != target_vectors.size()) {
+        throw std::runtime_error(
+            "parse_token_sequences: fewer token sequence records than sparse vectors");
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(data_size));
+    }
+}
+
+namespace {
+
+// Validate that a record-offsets array follows the [0, ..., total] contract:
+// length N+1, strictly non-decreasing, first entry 0, last entry == total
+// byte stream length. Throws on violation so we never silently use a broken
+// index for random access.
+void
+validate_offsets(const std::vector<uint64_t>& offsets,
+                 uint64_t expected_count,
+                 uint64_t expected_total,
+                 const std::string& tag) {
+    if (offsets.size() != expected_count + 1) {
+        throw std::runtime_error(tag + ": offsets length mismatch (expected " +
+                                 std::to_string(expected_count + 1) + ", got " +
+                                 std::to_string(offsets.size()) + ")");
+    }
+    if (offsets.front() != 0) {
+        throw std::runtime_error(tag + ": offsets[0] must be 0");
+    }
+    if (offsets.back() != expected_total) {
+        throw std::runtime_error(tag + ": offsets sentinel must equal byte stream size");
+    }
+    for (uint64_t i = 1; i < offsets.size(); ++i) {
+        if (offsets[i] < offsets[i - 1]) {
+            throw std::runtime_error(tag + ": offsets must be non-decreasing");
+        }
+    }
+}
+
+}  // namespace
+
+float
+get_distance(const SparseVector* vector1, const SparseVector* vector2, const void* qty_ptr) {
+    float sum = 0.0f;
+    uint32_t i = 0, j = 0;
+    while (i < vector1->len_ && j < vector2->len_) {
+        const uint32_t id1 = vector1->ids_[i];
+        const uint32_t id2 = vector2->ids_[j];
+        if (id1 == id2) {
+            sum += vector1->vals_[i] * vector2->vals_[j];
+            i++;
+            j++;
+        } else if (id1 < id2) {
+            i++;
+        } else {
+            j++;
+        }
+    }
+    return sum;
+}
+
+void
+EvalDataset::InitializeTrainIds(const int64_t* ids) {
+    train_ids_are_identity_ = true;
+    train_id_to_row_.clear();
+    if (ids == nullptr) {
+        return;
+    }
+
+    for (int64_t i = 0; i < number_of_base_; ++i) {
+        if (ids[i] != i) {
+            train_ids_are_identity_ = false;
+            break;
+        }
+    }
+    if (train_ids_are_identity_) {
+        return;
+    }
+
+    train_id_to_row_.reserve(static_cast<uint64_t>(number_of_base_));
+    for (int64_t i = 0; i < number_of_base_; ++i) {
+        if (!train_id_to_row_.emplace(ids[i], i).second) {
+            throw std::invalid_argument("base dataset contains duplicate ids");
+        }
+    }
+}
+
+EvalDatasetPtr
+EvalDataset::FromDatasets(const vsag::DatasetPtr& base,
+                          const vsag::DatasetPtr& queries,
+                          const vsag::DatasetPtr& ground_truth,
+                          const std::string& metric_type) {
+    if (base == nullptr || queries == nullptr) {
+        throw std::invalid_argument("base and queries datasets are required");
+    }
+    if (base->GetNumElements() <= 0 || queries->GetNumElements() <= 0) {
+        throw std::invalid_argument("base and queries datasets must not be empty");
+    }
+    if (base->GetDim() <= 0 || base->GetDim() != queries->GetDim()) {
+        throw std::invalid_argument("base and queries datasets must have the same positive dim");
+    }
+    if (base->GetFloat32Vectors() == nullptr || queries->GetFloat32Vectors() == nullptr) {
+        throw std::invalid_argument("in-memory eval supports only float32 dense vectors");
+    }
+    if (ground_truth != nullptr &&
+        (ground_truth->GetNumElements() != queries->GetNumElements() ||
+         ground_truth->GetDim() <= 0 || ground_truth->GetIds() == nullptr)) {
+        throw std::invalid_argument(
+            "ground_truth must contain one non-empty id row for every query");
+    }
+
+    auto dataset = std::make_shared<EvalDataset>();
+    dataset->base_dataset_ = base;
+    dataset->query_dataset_ = queries;
+    dataset->ground_truth_dataset_ = ground_truth;
+    dataset->vector_type_ = DENSE_VECTORS;
+    dataset->train_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->test_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->train_data_size_ = sizeof(float);
+    dataset->test_data_size_ = sizeof(float);
+    dataset->number_of_base_ = base->GetNumElements();
+    dataset->number_of_query_ = queries->GetNumElements();
+    dataset->dim_ = base->GetDim();
+    dataset->train_shape_ = {dataset->number_of_base_, dataset->dim_};
+    dataset->test_shape_ = {dataset->number_of_query_, dataset->dim_};
+    dataset->neighbors_shape_ =
+        ground_truth == nullptr ? shape_t{0, 0}
+                                : shape_t{ground_truth->GetNumElements(), ground_truth->GetDim()};
+    dataset->file_path_ = "<memory>";
+
+    if (metric_type == "l2") {
+        dataset->metric_ = "euclidean";
+        dataset->distance_func_ =
+            [](const void* left, const void* right, const void* dim) -> float {
+            return std::sqrt(vsag::L2Sqr(left, right, dim));
+        };
+    } else if (metric_type == "ip") {
+        dataset->metric_ = "ip";
+        dataset->distance_func_ = vsag::InnerProductDistance;
+    } else if (metric_type == "cosine") {
+        dataset->metric_ = "angular";
+        dataset->distance_func_ =
+            [](const void* left, const void* right, const void* dim) -> float {
+            return 1 - vsag::InnerProduct(left, right, dim) /
+                           std::sqrt(vsag::InnerProduct(left, left, dim) *
+                                     vsag::InnerProduct(right, right, dim));
+        };
+    } else {
+        throw std::invalid_argument("unsupported in-memory eval metric_type: " + metric_type);
+    }
+
+    dataset->InitializeTrainIds(base->GetIds());
+    if (ground_truth != nullptr) {
+        if (ground_truth->GetNumElements() >
+            std::numeric_limits<int64_t>::max() / ground_truth->GetDim()) {
+            throw std::invalid_argument("ground_truth contains too many ids");
+        }
+        const auto ground_truth_count = ground_truth->GetNumElements() * ground_truth->GetDim();
+        for (int64_t i = 0; i < ground_truth_count; ++i) {
+            if (dataset->GetOneTrainById(ground_truth->GetIds()[i]) == nullptr) {
+                throw std::invalid_argument("ground_truth contains an id not present in base");
+            }
+        }
+    }
+    return dataset;
+}
+
+EvalDatasetPtr
+EvalDataset::FromSearchDatasets(const vsag::DatasetPtr& queries,
+                                const vsag::DatasetPtr& ground_truth) {
+    if (queries == nullptr || queries->GetNumElements() <= 0) {
+        throw std::invalid_argument("queries dataset is required and must not be empty");
+    }
+    if (queries->GetDim() <= 0 || queries->GetFloat32Vectors() == nullptr) {
+        throw std::invalid_argument(
+            "in-memory search evaluation requires positive-dimensional float32 queries");
+    }
+    if (ground_truth != nullptr &&
+        (ground_truth->GetNumElements() != queries->GetNumElements() ||
+         ground_truth->GetDim() <= 0 || ground_truth->GetIds() == nullptr)) {
+        throw std::invalid_argument(
+            "ground_truth must contain one non-empty id row for every query");
+    }
+
+    auto dataset = std::make_shared<EvalDataset>();
+    dataset->query_dataset_ = queries;
+    dataset->ground_truth_dataset_ = ground_truth;
+    dataset->vector_type_ = DENSE_VECTORS;
+    dataset->train_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->test_data_type_ = vsag::DATATYPE_FLOAT32;
+    dataset->train_data_size_ = sizeof(float);
+    dataset->test_data_size_ = sizeof(float);
+    dataset->number_of_query_ = queries->GetNumElements();
+    dataset->dim_ = queries->GetDim();
+    dataset->train_shape_ = {0, dataset->dim_};
+    dataset->test_shape_ = {dataset->number_of_query_, dataset->dim_};
+    dataset->neighbors_shape_ =
+        ground_truth == nullptr ? shape_t{0, 0}
+                                : shape_t{ground_truth->GetNumElements(), ground_truth->GetDim()};
+    dataset->file_path_ = "<memory>";
+    return dataset;
+}
+
+EvalDatasetPtr
+EvalDataset::Load(const std::string& filename) {
+    H5::H5File file(filename, H5F_ACC_RDONLY);
+
+    std::unordered_set<std::string> datasets;
+    bool has_labels = false;
+    bool has_valid_ratio = false;
+    bool has_multi_vectors = false;
+
+    // check datasets exist
+    {
+        datasets = get_datasets(file);
+        has_multi_vectors =
+            datasets.count("train_multi_vectors") && datasets.count("test_multi_vectors") &&
+            datasets.count("train_vector_counts") && datasets.count("test_vector_counts");
+        auto require_dataset = [&datasets](const std::string& name) {
+            if (datasets.count(name) == 0) {
+                throw std::invalid_argument("missing required HDF5 dataset '" + name + "'");
+            }
+        };
+        if (not has_multi_vectors) {
+            require_dataset("train");
+            require_dataset("test");
+        }
+        require_dataset("neighbors");
+        require_dataset("distances");
+        const bool has_train_labels = datasets.count("train_labels") > 0;
+        const bool has_test_labels = datasets.count("test_labels") > 0;
+        if (has_train_labels != has_test_labels) {
+            throw std::invalid_argument("train_labels and test_labels must be provided together");
+        }
+        has_labels = has_train_labels;
+        has_valid_ratio = datasets.count("valid_ratios") > 0;
+        if (has_valid_ratio && not has_labels) {
+            throw std::invalid_argument("valid_ratios requires train_labels and test_labels");
+        }
+    }
+
+    auto obj = std::make_shared<EvalDataset>();
+    obj->file_path_ = filename;
+
+    // compatible with the hdf5 files from internet
+    if (not file.attrExists("type")) {
+        obj->vector_type_ = DENSE_VECTORS;
+    } else {
+        try {
+            H5::Attribute attr = file.openAttribute("type");
+            H5::StrType str_type = attr.getStrType();
+            std::string type;
+            attr.read(str_type, type);
+            if (type == "dense") {
+                obj->vector_type_ = DENSE_VECTORS;
+            } else if (type == "sparse") {
+                obj->vector_type_ = SPARSE_VECTORS;
+            } else if (type == "multi_vector") {
+                obj->vector_type_ = MULTI_VECTORS;
+            } else {
+                throw std::invalid_argument("unsupported HDF5 dataset type '" + type + "'");
+            }
+        } catch (H5::Exception& err) {
+            throw std::runtime_error("failed to read HDF5 dataset type attribute");
+        }
+    }
+
+    if (obj->vector_type_ == MULTI_VECTORS and not has_multi_vectors) {
+        throw std::runtime_error(
+            "multi_vector dataset requires train/test multi-vector datasets and vector counts");
+    }
+
+    if (obj->vector_type_ != MULTI_VECTORS and has_multi_vectors) {
+        throw std::runtime_error(
+            "multi_vector datasets are only allowed when type is set to 'multi_vector'");
+    }
+
+    // get and check shapes
+    shape_t train_shape(0, 0);
+    shape_t test_shape(0, 0);
+    auto neighbors_shape = get_shape(file, "neighbors");
+    auto distances_shape = get_shape(file, "distances");
+    logger::debug("neighbors.shape: {}", to_string(neighbors_shape));
+    if (neighbors_shape.first <= 0 || neighbors_shape.second <= 0) {
+        throw std::invalid_argument("neighbors must have shape (query_count, K) with K > 0");
+    }
+    if (distances_shape != neighbors_shape) {
+        throw std::invalid_argument(
+            "distances shape must match neighbors shape: neighbors=" + to_string(neighbors_shape) +
+            ", distances=" + to_string(distances_shape));
+    }
+
+    if (obj->vector_type_ == MULTI_VECTORS) {
+        // For multi-vector datasets, N and Q come from vector_counts
+        auto train_counts_shape = get_shape(file, "train_vector_counts");
+        auto test_counts_shape = get_shape(file, "test_vector_counts");
+        train_shape = std::make_pair(train_counts_shape.first, 0);
+        test_shape = std::make_pair(test_counts_shape.first, 0);
+    } else {
+        train_shape = get_shape(file, "train");
+        logger::debug("train.shape: {}", to_string(train_shape));
+        test_shape = get_shape(file, "test");
+        logger::debug("test.shape: {}", to_string(test_shape));
+        if (train_shape.second != test_shape.second) {
+            throw std::invalid_argument("train and test vector dimensions must match: train=" +
+                                        to_string(train_shape) + ", test=" + to_string(test_shape));
+        }
+    }
+
+    if (train_shape.first <= 0 || test_shape.first <= 0) {
+        throw std::invalid_argument("train and test datasets must not be empty");
+    }
+    if (obj->vector_type_ == DENSE_VECTORS && (train_shape.second <= 0 || test_shape.second <= 0)) {
+        throw std::invalid_argument("dense train and test vector dimensions must be positive");
+    }
+
+    obj->train_shape_ = train_shape;
+    obj->test_shape_ = test_shape;
+    obj->neighbors_shape_ = neighbors_shape;
+    obj->dim_ = train_shape.second;
+    obj->number_of_base_ = train_shape.first;
+    obj->number_of_query_ = test_shape.first;
+
+    if (obj->vector_type_ == DENSE_VECTORS || obj->vector_type_ == MULTI_VECTORS) {
+        // read from file
+        if (obj->vector_type_ == DENSE_VECTORS) {
+            {
+                H5::DataSet dataset = file.openDataSet("/train");
+                H5::DataSpace dataspace = dataset.getSpace();
+                auto data_type = dataset.getDataType();
+                H5::PredType type = H5::PredType::ALPHA_I8;
+                if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                    obj->train_data_type_ = vsag::DATATYPE_INT8;
+                    type = H5::PredType::ALPHA_I8;
+                    obj->train_data_size_ = 1;
+                } else if (data_type.getClass() == H5T_FLOAT) {
+                    obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
+                    type = H5::PredType::NATIVE_FLOAT;
+                    obj->train_data_size_ = 4;
+                } else {
+                    throw std::runtime_error(
+                        fmt::format("wrong data type, data type ({}), data size ({})",
+                                    (int)data_type.getClass(),
+                                    data_type.getSize()));
+                }
+                obj->train_ = std::shared_ptr<char[]>(
+                    new char[train_shape.first * train_shape.second * obj->train_data_size_]);
+                dataset.read(obj->train_.get(), type, dataspace);
+            }
+
+            {
+                H5::DataSet dataset = file.openDataSet("/test");
+                H5::DataSpace dataspace = dataset.getSpace();
+                auto data_type = dataset.getDataType();
+                H5::PredType type = H5::PredType::ALPHA_I8;
+                if (data_type.getClass() == H5T_INTEGER && data_type.getSize() == 1) {
+                    obj->test_data_type_ = vsag::DATATYPE_INT8;
+                    type = H5::PredType::ALPHA_I8;
+                    obj->test_data_size_ = 1;
+                } else if (data_type.getClass() == H5T_FLOAT) {
+                    obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
+                    type = H5::PredType::NATIVE_FLOAT;
+                    obj->test_data_size_ = 4;
+                } else {
+                    throw std::runtime_error("wrong data type");
+                }
+                obj->test_ = std::shared_ptr<char[]>(
+                    new char[test_shape.first * test_shape.second * obj->test_data_size_]);
+                dataset.read(obj->test_.get(), type, dataspace);
+            }
+        }
+
+        // Load multi-vector data if present
+        if (obj->vector_type_ == MULTI_VECTORS) {
+            // Read multi_vector_dim attribute
+            if (file.attrExists("multi_vector_dim")) {
+                H5::Attribute attr = file.openAttribute("multi_vector_dim");
+                attr.read(H5::PredType::NATIVE_INT64, &obj->multi_vector_dim_);
+            } else {
+                // Infer from train_multi_vectors shape
+                auto mv_shape = get_shape(file, "train_multi_vectors");
+                obj->multi_vector_dim_ = mv_shape.second;
+            }
+            obj->dim_ = obj->multi_vector_dim_;
+
+            {
+                // Read train_vector_counts
+                H5::DataSet counts_ds = file.openDataSet("/train_vector_counts");
+                H5::DataSpace counts_space = counts_ds.getSpace();
+                hsize_t counts_dims[1];
+                counts_space.getSimpleExtentDims(counts_dims, NULL);
+                obj->number_of_base_ = counts_dims[0];
+                obj->train_vector_counts_ =
+                    std::shared_ptr<uint32_t[]>(new uint32_t[counts_dims[0]]);
+                counts_ds.read(obj->train_vector_counts_.get(), H5::PredType::NATIVE_UINT32);
+
+                // Read train_multi_vectors (flat 2D: sum_counts x D)
+                H5::DataSet mv_ds = file.openDataSet("/train_multi_vectors");
+                H5::DataSpace mv_space = mv_ds.getSpace();
+                hsize_t mv_dims[2];
+                mv_space.getSimpleExtentDims(mv_dims, NULL);
+                auto total_train_vectors = mv_dims[0];
+                auto mv_dim = mv_dims[1];
+                if (mv_dim != obj->multi_vector_dim_) {
+                    throw std::runtime_error(
+                        "train_multi_vectors shape does not match multi_vector_dim");
+                }
+                uint64_t total_count = 0;
+                for (int64_t i = 0; i < obj->number_of_base_; ++i) {
+                    total_count += obj->train_vector_counts_[i];
+                }
+                if (total_count != total_train_vectors) {
+                    throw std::runtime_error(
+                        "sum(train_vector_counts) does not match train_multi_vectors shape");
+                }
+                auto flat_train = std::shared_ptr<float[]>(new float[total_train_vectors * mv_dim]);
+                mv_ds.read(flat_train.get(), H5::PredType::NATIVE_FLOAT);
+
+                // Reconstruct MultiVector structures
+                obj->multi_train_vectors_.resize(obj->number_of_base_);
+                float* ptr = flat_train.get();
+                for (int64_t i = 0; i < obj->number_of_base_; ++i) {
+                    uint32_t count = obj->train_vector_counts_[i];
+                    obj->multi_train_vectors_[i].len_ = count;
+                    obj->multi_train_vectors_[i].vectors_ = new float[count * mv_dim];
+                    std::memcpy(
+                        obj->multi_train_vectors_[i].vectors_, ptr, count * mv_dim * sizeof(float));
+                    ptr += count * mv_dim;
+                }
+            }
+
+            {
+                // Read test_vector_counts
+                H5::DataSet counts_ds = file.openDataSet("/test_vector_counts");
+                H5::DataSpace counts_space = counts_ds.getSpace();
+                hsize_t counts_dims[1];
+                counts_space.getSimpleExtentDims(counts_dims, NULL);
+                obj->number_of_query_ = counts_dims[0];
+                obj->test_vector_counts_ =
+                    std::shared_ptr<uint32_t[]>(new uint32_t[counts_dims[0]]);
+                counts_ds.read(obj->test_vector_counts_.get(), H5::PredType::NATIVE_UINT32);
+
+                // Read test_multi_vectors (flat 2D: sum_counts x D)
+                H5::DataSet mv_ds = file.openDataSet("/test_multi_vectors");
+                H5::DataSpace mv_space = mv_ds.getSpace();
+                hsize_t mv_dims[2];
+                mv_space.getSimpleExtentDims(mv_dims, NULL);
+                auto total_test_vectors = mv_dims[0];
+                auto mv_dim = mv_dims[1];
+                if (mv_dim != obj->multi_vector_dim_) {
+                    throw std::runtime_error(
+                        "test_multi_vectors shape does not match multi_vector_dim");
+                }
+                uint64_t total_count = 0;
+                for (int64_t i = 0; i < obj->number_of_query_; ++i) {
+                    total_count += obj->test_vector_counts_[i];
+                }
+                if (total_count != total_test_vectors) {
+                    throw std::runtime_error(
+                        "sum(test_vector_counts) does not match test_multi_vectors shape");
+                }
+                auto flat_test = std::shared_ptr<float[]>(new float[total_test_vectors * mv_dim]);
+                mv_ds.read(flat_test.get(), H5::PredType::NATIVE_FLOAT);
+
+                // Reconstruct MultiVector structures
+                obj->multi_test_vectors_.resize(obj->number_of_query_);
+                float* ptr = flat_test.get();
+                for (int64_t i = 0; i < obj->number_of_query_; ++i) {
+                    uint32_t count = obj->test_vector_counts_[i];
+                    obj->multi_test_vectors_[i].len_ = count;
+                    obj->multi_test_vectors_[i].vectors_ = new float[count * mv_dim];
+                    std::memcpy(
+                        obj->multi_test_vectors_[i].vectors_, ptr, count * mv_dim * sizeof(float));
+                    ptr += count * mv_dim;
+                }
+            }
+
+            // Set data type for multi-vector (always FLOAT32)
+            obj->train_data_type_ = vsag::DATATYPE_FLOAT32;
+            obj->test_data_type_ = vsag::DATATYPE_FLOAT32;
+            obj->train_data_size_ = 4;
+            obj->test_data_size_ = 4;
+        }
+    } else {
+        obj->dim_ = 0;
+        {
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/train");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->train_data_size_ = dims_out[0];
+            obj->train_.reset(new char[obj->train_data_size_]);
+            dataset.read(obj->train_.get(), type, dataspace);
+            parse_sparse_vectors(obj->train_.get(),
+                                 obj->train_data_size_,
+                                 obj->sparse_train_,
+                                 obj->dim_,
+                                 &obj->sparse_train_offsets_);
+            obj->train_.reset();
+            obj->number_of_base_ = obj->sparse_train_.size();
+        }
+        {
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/test");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->test_data_size_ = dims_out[0];
+            obj->test_.reset(new char[obj->test_data_size_]);
+            dataset.read(obj->test_.get(), type, dataspace);
+            parse_sparse_vectors(obj->test_.get(),
+                                 obj->test_data_size_,
+                                 obj->sparse_test_,
+                                 obj->dim_,
+                                 &obj->sparse_test_offsets_);
+            obj->test_.reset();
+            obj->number_of_query_ = obj->sparse_test_.size();
+        }
+
+        // Optional: if the writer also stored the precomputed record-offset
+        // index (/train_offsets, /test_offsets), load it and cross-check
+        // against the one we just rebuilt from the byte stream. Mismatches
+        // indicate a corrupted file and abort the load.
+        auto load_offsets = [&file, &datasets](const std::string& key) -> std::vector<uint64_t> {
+            std::vector<uint64_t> out;
+            if (datasets.count(key) == 0) {
+                return out;
+            }
+            H5::DataSet ds = file.openDataSet("/" + key);
+            H5::DataSpace sp = ds.getSpace();
+            hsize_t dims_out[1];
+            sp.getSimpleExtentDims(dims_out, NULL);
+            out.resize(dims_out[0]);
+            ds.read(out.data(), H5::PredType::NATIVE_UINT64);
+            return out;
+        };
+        auto cross_check = [](const std::vector<uint64_t>& on_disk,
+                              const std::vector<uint64_t>& rebuilt,
+                              const std::string& tag) {
+            if (on_disk.empty()) {
+                return;
+            }
+            if (on_disk.size() != rebuilt.size() ||
+                !std::equal(on_disk.begin(), on_disk.end(), rebuilt.begin())) {
+                throw std::runtime_error(tag + ": stored offsets disagree with byte stream");
+            }
+        };
+        {
+            auto disk_off = load_offsets("train_offsets");
+            if (!disk_off.empty()) {
+                validate_offsets(disk_off,
+                                 static_cast<uint64_t>(obj->sparse_train_.size()),
+                                 obj->train_data_size_,
+                                 "train_offsets");
+            }
+            cross_check(disk_off, obj->sparse_train_offsets_, "train_offsets");
+        }
+        {
+            auto disk_off = load_offsets("test_offsets");
+            if (!disk_off.empty()) {
+                validate_offsets(disk_off,
+                                 static_cast<uint64_t>(obj->sparse_test_.size()),
+                                 obj->test_data_size_,
+                                 "test_offsets");
+            }
+            cross_check(disk_off, obj->sparse_test_offsets_, "test_offsets");
+        }
+
+        // Optional: parse the original tokenized term_id sequences. Sparse
+        // datasets that were created before this feature do not contain
+        // these datasets, so missing keys are silently ignored.
+        // Contract: whenever a *_token_sequences byte stream is present, its
+        // companion *_token_sequences_offsets dataset MUST also be present.
+        // A token_sequences-without-offsets file is considered malformed and
+        // we abort the load to surface the problem early.
+        if (datasets.count("train_token_sequences")) {
+            if (datasets.count("train_token_sequences_offsets") == 0) {
+                throw std::runtime_error(
+                    "train_token_sequences present but train_token_sequences_offsets is missing");
+            }
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/train_token_sequences");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            uint64_t buffer_size = dims_out[0];
+            std::shared_ptr<char[]> buffer(new char[buffer_size]);
+            dataset.read(buffer.get(), type, dataspace);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_train_, &obj->train_token_seq_offsets_);
+            auto disk_off = load_offsets("train_token_sequences_offsets");
+            validate_offsets(disk_off,
+                             static_cast<uint64_t>(obj->sparse_train_.size()),
+                             buffer_size,
+                             "train_token_sequences_offsets");
+            cross_check(disk_off, obj->train_token_seq_offsets_, "train_token_sequences_offsets");
+        } else if (datasets.count("train_token_sequences_offsets")) {
+            throw std::runtime_error(
+                "train_token_sequences_offsets present but train_token_sequences is missing");
+        }
+        if (datasets.count("test_token_sequences")) {
+            if (datasets.count("test_token_sequences_offsets") == 0) {
+                throw std::runtime_error(
+                    "test_token_sequences present but test_token_sequences_offsets is missing");
+            }
+            H5::PredType type = H5::PredType::ALPHA_I8;
+            H5::DataSet dataset = file.openDataSet("/test_token_sequences");
+            H5::DataSpace dataspace = dataset.getSpace();
+            hsize_t dims_out[2];
+            dataspace.getSimpleExtentDims(dims_out, NULL);
+            uint64_t buffer_size = dims_out[0];
+            std::shared_ptr<char[]> buffer(new char[buffer_size]);
+            dataset.read(buffer.get(), type, dataspace);
+            parse_token_sequences(
+                buffer.get(), buffer_size, obj->sparse_test_, &obj->test_token_seq_offsets_);
+            auto disk_off = load_offsets("test_token_sequences_offsets");
+            validate_offsets(disk_off,
+                             static_cast<uint64_t>(obj->sparse_test_.size()),
+                             buffer_size,
+                             "test_token_sequences_offsets");
+            cross_check(disk_off, obj->test_token_seq_offsets_, "test_token_sequences_offsets");
+        } else if (datasets.count("test_token_sequences_offsets")) {
+            throw std::runtime_error(
+                "test_token_sequences_offsets present but test_token_sequences is missing");
+        }
+    }
+
+    if (obj->number_of_base_ <= 0 || obj->number_of_query_ <= 0) {
+        throw std::invalid_argument("train and test datasets must contain vectors");
+    }
+    if (obj->vector_type_ != SPARSE_VECTORS && obj->dim_ <= 0) {
+        throw std::invalid_argument("train and test vector dimensions must be positive");
+    }
+    if (neighbors_shape.first != obj->number_of_query_) {
+        throw std::invalid_argument("neighbors row count must match query count: neighbors=" +
+                                    std::to_string(neighbors_shape.first) +
+                                    ", queries=" + std::to_string(obj->number_of_query_));
+    }
+    if (has_labels) {
+        const auto train_labels_shape = get_shape(file, "train_labels");
+        const auto test_labels_shape = get_shape(file, "test_labels");
+        if (train_labels_shape.second != 0 || train_labels_shape.first != obj->number_of_base_) {
+            throw std::invalid_argument(
+                "train_labels must be one-dimensional with one label per "
+                "base vector");
+        }
+        if (test_labels_shape.second != 0 || test_labels_shape.first != obj->number_of_query_) {
+            throw std::invalid_argument(
+                "test_labels must be one-dimensional with one label per query");
+        }
+    }
+    if (has_valid_ratio) {
+        const auto valid_ratios_shape = get_shape(file, "valid_ratios");
+        if (valid_ratios_shape.second != 0 || valid_ratios_shape.first <= 0) {
+            throw std::invalid_argument("valid_ratios must be a non-empty one-dimensional dataset");
+        }
+    }
+
+    try {
+        H5::Attribute attr = file.openAttribute("distance");
+        H5::StrType str_type = attr.getStrType();
+        std::string metric;
+        attr.read(str_type, metric);
+        obj->metric_ = metric;
+        if (obj->vector_type_ == DENSE_VECTORS || obj->vector_type_ == MULTI_VECTORS) {
+            if (metric == "euclidean") {
+                // the distance in the ground truth (provided by public datasets), is L2 distance,
+                // which cannot be compared with L2Sqr distance (from VSAG) directly
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return sqrt(vsag::L2Sqr(query1, query2, qty_ptr));
+                };
+            } else if (metric == "ip") {
+                if (obj->train_data_type_ == vsag::DATATYPE_FLOAT32) {
+                    obj->distance_func_ = vsag::InnerProductDistance;
+                } else if (obj->train_data_type_ == vsag::DATATYPE_INT8) {
+                    obj->distance_func_ = vsag::INT8InnerProductDistance;
+                }
+            } else if (metric == "angular") {
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return 1 - vsag::InnerProduct(query1, query2, qty_ptr) /
+                                   std::sqrt(vsag::InnerProduct(query1, query1, qty_ptr) *
+                                             vsag::InnerProduct(query2, query2, qty_ptr));
+                };
+            } else {
+                throw std::invalid_argument("unsupported HDF5 distance '" + metric +
+                                            "' for dense vectors");
+            }
+        } else {
+            if (metric == "ip") {
+                obj->distance_func_ =
+                    [](const void* query1, const void* query2, const void* qty_ptr) -> float {
+                    return 1 - get_distance((const SparseVector*)query1,
+                                            (const SparseVector*)query2,
+                                            qty_ptr);
+                };
+            } else {
+                throw std::invalid_argument("unsupported HDF5 distance '" + metric +
+                                            "' for sparse vectors");
+            }
+        }
+    } catch (H5::Exception& err) {
+        throw std::runtime_error("fail to read metric: there is no 'distance' in the dataset");
+    }
+
+    {
+        obj->neighbors_ =
+            std::shared_ptr<int64_t[]>(new int64_t[neighbors_shape.first * neighbors_shape.second]);
+        H5::DataSet dataset = file.openDataSet("/neighbors");
+        H5::DataSpace dataspace = dataset.getSpace();
+        H5::FloatType datatype(H5::PredType::NATIVE_INT64);
+        dataset.read(obj->neighbors_.get(), datatype, dataspace);
+        const auto neighbor_count = neighbors_shape.first * neighbors_shape.second;
+        for (int64_t i = 0; i < neighbor_count; ++i) {
+            if (obj->neighbors_[i] < 0 || obj->neighbors_[i] >= obj->number_of_base_) {
+                throw std::invalid_argument("neighbors contains an id outside the base dataset");
+            }
+        }
+    }
+
+    {
+        obj->distances_ =
+            std::shared_ptr<float[]>(new float[neighbors_shape.first * neighbors_shape.second]);
+        H5::DataSet dataset = file.openDataSet("/distances");
+        H5::DataSpace dataspace = dataset.getSpace();
+        H5::FloatType datatype(H5::PredType::NATIVE_FLOAT);
+        dataset.read(obj->distances_.get(), datatype, dataspace);
+    }
+
+    if (has_labels) {
+        H5::FloatType datatype(H5::PredType::NATIVE_INT64);
+
+        H5::DataSet train_labels_dataset = file.openDataSet("/train_labels");
+        H5::DataSpace train_labels_dataspace = train_labels_dataset.getSpace();
+        obj->train_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_base_]);
+        train_labels_dataset.read(obj->train_labels_.get(), datatype, train_labels_dataspace);
+
+        H5::DataSet test_labels_dataset = file.openDataSet("/test_labels");
+        H5::DataSpace test_labels_dataspace = test_labels_dataset.getSpace();
+        obj->test_labels_ = std::shared_ptr<int64_t[]>(new int64_t[obj->number_of_query_]);
+        test_labels_dataset.read(obj->test_labels_.get(), datatype, test_labels_dataspace);
+
+        if (has_valid_ratio) {
+            H5::FloatType ratio_datatype(H5::PredType::NATIVE_FLOAT);
+            H5::DataSet valid_ratio_dataset = file.openDataSet("/valid_ratios");
+            H5::DataSpace valid_ratio_dataspace = valid_ratio_dataset.getSpace();
+            hsize_t dims_out[1];
+            int ndims = valid_ratio_dataspace.getSimpleExtentDims(dims_out, NULL);
+            obj->number_of_label_ = dims_out[0];
+            obj->valid_ratio_ = std::shared_ptr<float[]>(new float[obj->number_of_label_]);
+            valid_ratio_dataset.read(
+                obj->valid_ratio_.get(), ratio_datatype, valid_ratio_dataspace);
+        }
+    }
+
+    obj->InitializeTrainIds(nullptr);
+    return obj;
+}
+
+std::vector<char>
+serialize_sparse_vectors(const std::vector<SparseVector>& vectors,
+                         size_t& total_size_out,
+                         std::vector<uint64_t>* offsets_out) {
+    size_t total_size = 0;
+    for (const auto& vec : vectors) {
+        total_size += sizeof(uint32_t);  // len_
+        if (vec.len_ > 0) {
+            total_size += vec.len_ * sizeof(uint32_t);  // ids
+            total_size += vec.len_ * sizeof(float);     // vals
+        }
+    }
+    total_size_out = total_size;
+    std::vector<char> buffer(total_size);
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(vectors.size() + 1);
+    }
+    char* ptr = buffer.data();
+    for (const auto& vec : vectors) {
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
+        }
+        std::memcpy(ptr, &vec.len_, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+        if (vec.len_ > 0) {
+            std::memcpy(ptr, vec.ids_, vec.len_ * sizeof(uint32_t));
+            ptr += vec.len_ * sizeof(uint32_t);
+            std::memcpy(ptr, vec.vals_, vec.len_ * sizeof(float));
+            ptr += vec.len_ * sizeof(float);
+        }
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(total_size));
+    }
+    return buffer;
+}
+
+bool
+has_any_token_sequence(const std::vector<SparseVector>& vectors) {
+    for (const auto& vec : vectors) {
+        if (vec.token_seq_len_ > 0 && vec.token_sequence_ != nullptr) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::vector<char>
+serialize_token_sequences(const std::vector<SparseVector>& vectors,
+                          size_t& total_size_out,
+                          std::vector<uint64_t>* offsets_out) {
+    size_t total_size = 0;
+    for (const auto& vec : vectors) {
+        total_size += sizeof(uint32_t);  // token_seq_len_
+        total_size += static_cast<size_t>(vec.token_seq_len_) * sizeof(uint32_t);
+    }
+    total_size_out = total_size;
+    std::vector<char> buffer(total_size);
+    if (offsets_out != nullptr) {
+        offsets_out->clear();
+        offsets_out->reserve(vectors.size() + 1);
+    }
+    char* ptr = buffer.data();
+    for (const auto& vec : vectors) {
+        if (offsets_out != nullptr) {
+            offsets_out->push_back(static_cast<uint64_t>(ptr - buffer.data()));
+        }
+        std::memcpy(ptr, &vec.token_seq_len_, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+        if (vec.token_seq_len_ > 0 && vec.token_sequence_ != nullptr) {
+            const size_t payload_size = static_cast<size_t>(vec.token_seq_len_) * sizeof(uint32_t);
+            std::memcpy(ptr, vec.token_sequence_, payload_size);
+            ptr += payload_size;
+        }
+    }
+    if (offsets_out != nullptr) {
+        offsets_out->push_back(static_cast<uint64_t>(total_size));
+    }
+    return buffer;
+}
+
+void
+EvalDataset::Save(const EvalDatasetPtr& dataset, const std::string& filename) {
+    if (dataset->base_dataset_ != nullptr || dataset->query_dataset_ != nullptr ||
+        dataset->ground_truth_dataset_ != nullptr) {
+        throw std::invalid_argument("saving an in-memory EvalDataset view is not supported");
+    }
+    H5File file(filename, H5F_ACC_TRUNC);
+
+    // write vector type attribute
+    {
+        std::string type_str;
+        if (dataset->vector_type_ == DENSE_VECTORS) {
+            type_str = "dense";
+        } else if (dataset->vector_type_ == SPARSE_VECTORS) {
+            type_str = "sparse";
+        } else if (dataset->vector_type_ == MULTI_VECTORS) {
+            type_str = "multi_vector";
+        } else {
+            type_str = "dense";
+        }
+        StrType str_type(PredType::C_S1, H5T_VARIABLE);
+        auto attr = file.createAttribute("type", str_type, DataSpace(H5S_SCALAR));
+        attr.write(str_type, type_str);
+    }
+
+    // write distance attribute
+    {
+        StrType str_type(PredType::C_S1, H5T_VARIABLE);
+        auto attr = file.createAttribute("distance", str_type, DataSpace(H5S_SCALAR));
+        std::string distance_str = dataset->metric_;
+        attr.write(str_type, distance_str);
+    }
+
+    // write multi_vector_dim attribute (for multi-vector datasets)
+    if (dataset->vector_type_ == MULTI_VECTORS) {
+        hsize_t attr_dims[1] = {1};
+        DataSpace attr_space(1, attr_dims);
+        auto attr = file.createAttribute("multi_vector_dim", PredType::NATIVE_INT64, attr_space);
+        attr.write(PredType::NATIVE_INT64, &dataset->multi_vector_dim_);
+    }
+
+    // write train dataset
+    if (dataset->vector_type_ == DENSE_VECTORS) {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->number_of_base_),
+                           static_cast<hsize_t>(dataset->dim_)};
+        DataSpace dataspace(2, dims);
+        if (dataset->train_data_type_ == DATATYPE_INT8) {
+            DataSet dataset_h5 = file.createDataSet("/train", PredType::ALPHA_I8, dataspace);
+            dataset_h5.write(dataset->train_.get(), PredType::ALPHA_I8);
+        } else if (dataset->train_data_type_ == DATATYPE_FLOAT32) {
+            DataSet dataset_h5 = file.createDataSet("/train", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->train_.get(), PredType::NATIVE_FLOAT);
+        } else {
+            throw std::runtime_error("Unsupported train data type");
+        }
+
+    } else if (dataset->vector_type_ == SPARSE_VECTORS) {
+        size_t total_size;
+        std::vector<uint64_t> offsets;
+        std::vector<char> buffer =
+            serialize_sparse_vectors(dataset->sparse_train_, total_size, &offsets);
+        hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+        DataSpace dataspace(1, dims);
+        DataSet dataset_h5 = file.createDataSet("/train", PredType::ALPHA_I8, dataspace);
+        dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+        // Write the per-record offset index alongside the byte stream so
+        // readers can do O(1) random access to the i-th sparse vector.
+        hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+        DataSpace off_space(1, off_dims);
+        DataSet off_ds = file.createDataSet("/train_offsets", PredType::NATIVE_UINT64, off_space);
+        off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+    }
+
+    // write test dataset
+    if (dataset->vector_type_ == DENSE_VECTORS) {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->number_of_query_),
+                           static_cast<hsize_t>(dataset->dim_)};
+        DataSpace dataspace(2, dims);
+        if (dataset->test_data_type_ == DATATYPE_INT8) {
+            DataSet dataset_h5 = file.createDataSet("/test", PredType::ALPHA_I8, dataspace);
+            dataset_h5.write(dataset->test_.get(), PredType::ALPHA_I8);
+        } else if (dataset->test_data_type_ == DATATYPE_FLOAT32) {
+            DataSet dataset_h5 = file.createDataSet("/test", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->test_.get(), PredType::NATIVE_FLOAT);
+        } else {
+            throw std::runtime_error("Unsupported test data type");
+        }
+    } else if (dataset->vector_type_ == SPARSE_VECTORS) {
+        size_t total_size;
+        std::vector<uint64_t> offsets;
+        std::vector<char> buffer =
+            serialize_sparse_vectors(dataset->sparse_test_, total_size, &offsets);
+        hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+        DataSpace dataspace(1, dims);
+        DataSet dataset_h5 = file.createDataSet("/test", PredType::ALPHA_I8, dataspace);
+        dataset_h5.write(buffer.data(), PredType::NATIVE_CHAR);
+        hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+        DataSpace off_space(1, off_dims);
+        DataSet off_ds = file.createDataSet("/test_offsets", PredType::NATIVE_UINT64, off_space);
+        off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+    }
+
+    // write optional token_sequences datasets for sparse vectors (only if at
+    // least one entry has a non-empty token sequence, to keep backwards
+    // compatibility with datasets that have no original-document field).
+    // Each token sequence stream is paired with its own per-record offsets
+    // dataset so readers can do O(1) random access without re-scanning the
+    // byte stream.
+    if (dataset->vector_type_ == SPARSE_VECTORS) {
+        if (has_any_token_sequence(dataset->sparse_train_)) {
+            size_t total_size;
+            std::vector<uint64_t> offsets;
+            std::vector<char> buffer =
+                serialize_token_sequences(dataset->sparse_train_, total_size, &offsets);
+            hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+            DataSpace dataspace(1, dims);
+            DataSet ds =
+                file.createDataSet("/train_token_sequences", PredType::ALPHA_I8, dataspace);
+            ds.write(buffer.data(), PredType::NATIVE_CHAR);
+            hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+            DataSpace off_space(1, off_dims);
+            DataSet off_ds = file.createDataSet(
+                "/train_token_sequences_offsets", PredType::NATIVE_UINT64, off_space);
+            off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+        }
+        if (has_any_token_sequence(dataset->sparse_test_)) {
+            size_t total_size;
+            std::vector<uint64_t> offsets;
+            std::vector<char> buffer =
+                serialize_token_sequences(dataset->sparse_test_, total_size, &offsets);
+            hsize_t dims[1] = {static_cast<hsize_t>(total_size)};
+            DataSpace dataspace(1, dims);
+            DataSet ds = file.createDataSet("/test_token_sequences", PredType::ALPHA_I8, dataspace);
+            ds.write(buffer.data(), PredType::NATIVE_CHAR);
+            hsize_t off_dims[1] = {static_cast<hsize_t>(offsets.size())};
+            DataSpace off_space(1, off_dims);
+            DataSet off_ds = file.createDataSet(
+                "/test_token_sequences_offsets", PredType::NATIVE_UINT64, off_space);
+            off_ds.write(offsets.data(), PredType::NATIVE_UINT64);
+        }
+    }
+
+    // write neighbors dataset
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->neighbors_shape_.first),
+                           static_cast<hsize_t>(dataset->neighbors_shape_.second)};
+        DataSpace dataspace(2, dims);
+        DataSet dataset_h5 = file.createDataSet("/neighbors", PredType::NATIVE_INT64, dataspace);
+        dataset_h5.write(dataset->neighbors_.get(), PredType::NATIVE_INT64);
+    }
+
+    // write distances dataset
+    {
+        hsize_t dims[2] = {static_cast<hsize_t>(dataset->neighbors_shape_.first),
+                           static_cast<hsize_t>(dataset->neighbors_shape_.second)};
+        DataSpace dataspace(2, dims);
+        DataSet dataset_h5 = file.createDataSet("/distances", PredType::NATIVE_FLOAT, dataspace);
+        dataset_h5.write(dataset->distances_.get(), PredType::NATIVE_FLOAT);
+    }
+
+    // write labels dataset(if exists)
+    if (dataset->train_labels_ && dataset->test_labels_) {
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_base_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/train_labels", PredType::NATIVE_INT64, dataspace);
+            dataset_h5.write(dataset->train_labels_.get(), PredType::NATIVE_INT64);
+        }
+
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_query_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/test_labels", PredType::NATIVE_INT64, dataspace);
+            dataset_h5.write(dataset->test_labels_.get(), PredType::NATIVE_INT64);
+        }
+
+        if (dataset->valid_ratio_) {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_label_)};
+            DataSpace dataspace(1, dims);
+            DataSet dataset_h5 =
+                file.createDataSet("/valid_ratios", PredType::NATIVE_FLOAT, dataspace);
+            dataset_h5.write(dataset->valid_ratio_.get(), PredType::NATIVE_FLOAT);
+        }
+    }
+
+    // write multi-vector datasets (if present)
+    if (dataset->vector_type_ == MULTI_VECTORS) {
+        // Write train_multi_vectors: flat 2D array of all train sub-vectors
+        {
+            int64_t total_sub_vectors = 0;
+            for (int64_t i = 0; i < dataset->number_of_base_; ++i) {
+                total_sub_vectors += dataset->multi_train_vectors_[i].len_;
+            }
+            auto flat_data =
+                std::shared_ptr<float[]>(new float[total_sub_vectors * dataset->multi_vector_dim_]);
+            float* ptr = flat_data.get();
+            for (int64_t i = 0; i < dataset->number_of_base_; ++i) {
+                const auto& mv = dataset->multi_train_vectors_[i];
+                size_t bytes = mv.len_ * dataset->multi_vector_dim_ * sizeof(float);
+                std::memcpy(ptr, mv.vectors_, bytes);
+                ptr += mv.len_ * dataset->multi_vector_dim_;
+            }
+            hsize_t dims[2] = {static_cast<hsize_t>(total_sub_vectors),
+                               static_cast<hsize_t>(dataset->multi_vector_dim_)};
+            DataSpace dataspace(2, dims);
+            DataSet ds =
+                file.createDataSet("/train_multi_vectors", PredType::NATIVE_FLOAT, dataspace);
+            ds.write(flat_data.get(), PredType::NATIVE_FLOAT);
+        }
+
+        // Write test_multi_vectors: flat 2D array of all test sub-vectors
+        {
+            int64_t total_sub_vectors = 0;
+            for (int64_t i = 0; i < dataset->number_of_query_; ++i) {
+                total_sub_vectors += dataset->multi_test_vectors_[i].len_;
+            }
+            auto flat_data =
+                std::shared_ptr<float[]>(new float[total_sub_vectors * dataset->multi_vector_dim_]);
+            float* ptr = flat_data.get();
+            for (int64_t i = 0; i < dataset->number_of_query_; ++i) {
+                const auto& mv = dataset->multi_test_vectors_[i];
+                size_t bytes = mv.len_ * dataset->multi_vector_dim_ * sizeof(float);
+                std::memcpy(ptr, mv.vectors_, bytes);
+                ptr += mv.len_ * dataset->multi_vector_dim_;
+            }
+            hsize_t dims[2] = {static_cast<hsize_t>(total_sub_vectors),
+                               static_cast<hsize_t>(dataset->multi_vector_dim_)};
+            DataSpace dataspace(2, dims);
+            DataSet ds =
+                file.createDataSet("/test_multi_vectors", PredType::NATIVE_FLOAT, dataspace);
+            ds.write(flat_data.get(), PredType::NATIVE_FLOAT);
+        }
+
+        // Write train_vector_counts
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_base_)};
+            DataSpace dataspace(1, dims);
+            DataSet ds =
+                file.createDataSet("/train_vector_counts", PredType::NATIVE_UINT32, dataspace);
+            ds.write(dataset->train_vector_counts_.get(), PredType::NATIVE_UINT32);
+        }
+
+        // Write test_vector_counts
+        {
+            hsize_t dims[1] = {static_cast<hsize_t>(dataset->number_of_query_)};
+            DataSpace dataspace(1, dims);
+            DataSet ds =
+                file.createDataSet("/test_vector_counts", PredType::NATIVE_UINT32, dataspace);
+            ds.write(dataset->test_vector_counts_.get(), PredType::NATIVE_UINT32);
+        }
+    }
+}
+}  // namespace vsag::eval

@@ -1,0 +1,34 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+set (FACTORY_SRC
+        engine.cpp
+        factory.cpp
+        index_creators.cpp
+        index_registry.cpp
+        resource.cpp
+        resource_owner_wrapper.h
+)
+
+add_library (factory OBJECT ${FACTORY_SRC})
+target_link_libraries (factory PRIVATE coverage_config vsag_src_common)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE FACTORY_TESTS "*_test.cpp")
+    add_library (factory_test STATIC ${FACTORY_TESTS})
+    target_link_libraries (factory_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
+    add_dependencies (factory_test Catch2)
+endif ()

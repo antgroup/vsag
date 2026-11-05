@@ -1,0 +1,25 @@
+version: 2.1
+
+# This is the setup workflow. It uses the path-filtering orb to decide
+# whether the real CI pipeline (continue_config.yml) should run, based on
+# which files changed in the commit.
+#
+# Changes confined to documentation (docs/**) do not affect the C++ build
+# or tests, so we skip the main pipeline for docs-only changes.
+
+setup: true
+
+orbs:
+  path-filtering: circleci/path-filtering@2.1.0
+
+workflows:
+  setup-workflow:
+    jobs:
+      - path-filtering/filter:
+          base-revision: main
+          config-path: .circleci/continue_config.yml
+          # For each regex that matches a changed path, set the mapped
+          # pipeline parameter to the given value. `run-build` stays false
+          # unless at least one non-docs file changed.
+          mapping: |
+            ^(?!docs/).* run-build true

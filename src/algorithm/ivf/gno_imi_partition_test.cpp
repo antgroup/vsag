@@ -1,0 +1,230 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "gno_imi_partition.h"
+
+#include "algorithm/inner_index_interface.h"
+#include "impl/allocator/safe_allocator.h"
+#include "impl/inner_search_param.h"
+#include "impl/searcher/basic_searcher.h"
+#include "ivf_parameter.h"
+#include "storage/serialization_template_test.h"
+#include "unittest.h"
+using namespace vsag;
+
+TEST_CASE("GNO-IMI Partition Basic Test", "[ut][GNOIMIPartition]") {
+    constexpr uint64_t first_order_bucket_count = 10;
+    constexpr uint64_t second_order_bucket_count = 10;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    int64_t dim = 128;
+    IndexCommonParam param;
+    param.dim_ = 128;
+    param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    param.allocator_ = allocator;
+    auto param_str = R"({
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "kmeans", 
+        "gno_imi": {
+            "first_order_buckets_count": 10,
+            "second_order_buckets_count": 10
+        }
+    })";
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto strategy_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    strategy_param->FromJson(param_json);
+    auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
+
+    auto dataset = Dataset::Make();
+    int64_t data_count = 10000L;
+    auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
+    dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+
+    partition->Train(dataset);
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    REQUIRE(class_result.size() == data_count);
+
+    SearchStatistics build_stats;
+    QueryContext build_ctx{.stats = &build_stats};
+    constexpr uint64_t build_query_count = 2;
+    partition->ClassifyDatas(vec.data(), build_query_count, 1, &build_ctx);
+    auto build_statistics = JsonType::Parse(build_stats.Dump());
+    REQUIRE(build_statistics["distance_evaluations_by_phase"]["routing"].GetUint64() ==
+            build_statistics["dist_cmp"].GetUint64() +
+                build_query_count * first_order_bucket_count);
+
+    param_str = R"(
+    {
+        "ivf": {
+            "scan_buckets_count": 1,
+            "first_order_scan_ratio": 0.1
+        }
+    })";
+    auto search_param = IVFSearchParameters::FromJson(param_str);
+    InnerSearchParam inner_search_param;
+    inner_search_param.scan_bucket_size = search_param.scan_buckets_count;
+    inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
+    REQUIRE(inner_search_param.scan_bucket_size == 1);
+    REQUIRE(inner_search_param.first_order_scan_ratio == 0.1f);
+    SearchStatistics search_stats;
+    QueryContext search_ctx{.stats = &search_stats};
+    partition->ClassifyDatasForSearch(vec.data(), 1, inner_search_param, &search_ctx);
+    auto search_statistics = JsonType::Parse(search_stats.Dump());
+    const auto scanned_first_order_buckets = static_cast<uint64_t>(std::max(
+        std::floor(first_order_bucket_count * inner_search_param.first_order_scan_ratio), 1.0F));
+    const auto expected_search_evaluations =
+        first_order_bucket_count + scanned_first_order_buckets * second_order_bucket_count;
+    REQUIRE(search_statistics["distance_evaluations_by_phase"]["routing"].GetUint64() ==
+            expected_search_evaluations);
+    uint64_t match_count = 0;
+    for (int64_t i = 0; i < data_count; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
+        auto result =
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, nullptr);
+        auto id = result[0];
+        if (id == class_result[i]) {
+            match_count++;
+        }
+    }
+    std::cout << "match count(first_order_scan_ratio=0.1): " << match_count << std::endl;
+
+    inner_search_param.first_order_scan_ratio = 0.2f;
+    match_count = 0;
+    for (int64_t i = 0; i < data_count; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
+        auto result =
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, nullptr);
+        auto id = result[0];
+        if (id == class_result[i]) {
+            match_count++;
+        }
+    }
+    std::cout << "match count(first_order_scan_ratio=0.2): " << match_count << std::endl;
+
+    inner_search_param.first_order_scan_ratio = 1.0f;
+    match_count = 0;
+    for (int64_t i = 0; i < data_count; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
+        auto result =
+            partition->ClassifyDatasForSearch(vec.data() + i * dim, 1, inner_search_param, nullptr);
+        auto id = result[0];
+        // REQUIRE(id == class_result[i]);
+        if (id == class_result[i]) {
+            match_count++;
+        }
+    }
+    REQUIRE(match_count > 9990);
+    std::cout << "match count(first_order_scan_ratio=1.0): " << match_count << std::endl;
+}
+
+TEST_CASE("GNO-IMI cosine build routing is scale invariant", "[ut][GNOIMIPartition]") {
+    constexpr int64_t dim = 32;
+    constexpr int64_t data_count = 512;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam param;
+    param.dim_ = dim;
+    param.metric_ = MetricType::METRIC_TYPE_COSINE;
+    param.allocator_ = allocator;
+    auto strategy_param = std::make_shared<IVFPartitionStrategyParameters>();
+    strategy_param->FromJson(JsonType::Parse(R"({
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "kmeans",
+        "gno_imi": {
+            "first_order_buckets_count": 4,
+            "second_order_buckets_count": 4
+        }
+    })"));
+    auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
+
+    auto vectors = fixtures::generate_vectors(data_count, dim, false, 95);
+    auto dataset = Dataset::Make();
+    dataset->Float32Vectors(vectors.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+    partition->Train(dataset);
+
+    auto normalized_vectors = vectors;
+    for (int64_t i = 0; i < data_count; ++i) {
+        Normalize(normalized_vectors.data() + i * dim, normalized_vectors.data() + i * dim, dim);
+    }
+    auto raw_result = partition->ClassifyDatas(vectors.data(), data_count, 1, nullptr);
+    auto normalized_result =
+        partition->ClassifyDatas(normalized_vectors.data(), data_count, 1, nullptr);
+    for (uint64_t i = 0; i < raw_result.size(); ++i) {
+        CAPTURE(i);
+        REQUIRE(raw_result[i] == normalized_result[i]);
+    }
+}
+
+TEST_CASE("GNO-IMI Partition Serialize Test", "[ut][GNOIMIPartition]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    int64_t dim = 128;
+    IndexCommonParam param;
+    param.dim_ = 128;
+    param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    param.allocator_ = allocator;
+    auto param_str = R"({
+        "partition_strategy_type": "gno_imi",
+        "ivf_train_type": "kmeans", 
+        "gno_imi": {
+            "first_order_buckets_count": 10,
+            "second_order_buckets_count": 10
+        }
+    })";
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto strategy_param = std::make_shared<vsag::IVFPartitionStrategyParameters>();
+    strategy_param->FromJson(param_json);
+    auto partition = std::make_unique<GNOIMIPartition>(param, strategy_param);
+
+    auto dataset = Dataset::Make();
+    int64_t data_count = 10000L;
+    auto vec = fixtures::generate_vectors(data_count, dim, true, 95);
+    dataset->Float32Vectors(vec.data())->Dim(dim)->NumElements(data_count)->Owner(false);
+
+    partition->Train(dataset);
+    auto class_result = partition->ClassifyDatas(vec.data(), data_count, 1, nullptr);
+    REQUIRE(class_result.size() == data_count);
+
+    auto partition2 = std::make_unique<GNOIMIPartition>(param, strategy_param);
+    test_serializion(*partition, *partition2);
+
+    param_str = R"(
+    {
+        "ivf": {
+            "scan_buckets_count": 1,
+            "first_order_scan_ratio": 1.0
+        }
+    })";
+
+    auto search_param = IVFSearchParameters::FromJson(param_str);
+    InnerSearchParam inner_search_param;
+    inner_search_param.scan_bucket_size = search_param.scan_buckets_count;
+    inner_search_param.first_order_scan_ratio = search_param.first_order_scan_ratio;
+
+    uint64_t match_count = 0;
+    FilterPtr filter = nullptr;
+    for (int64_t i = 0; i < data_count; ++i) {
+        auto query = Dataset::Make();
+        query->Dim(dim)->Float32Vectors(vec.data() + i * dim)->NumElements(1)->Owner(false);
+        auto result = partition2->ClassifyDatasForSearch(
+            vec.data() + i * dim, 1, inner_search_param, nullptr);
+        auto id = result[0];
+        if (id == class_result[i]) {
+            match_count++;
+        }
+    }
+    REQUIRE(match_count > 9990);
+    std::cout << "match count(first_order_scan_ratio=1.0): " << match_count << std::endl;
+}

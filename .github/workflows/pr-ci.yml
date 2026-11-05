@@ -1,0 +1,210 @@
+name: PR CI
+
+on:
+  workflow_call:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: pr-ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  route:
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')))))
+    name: Select CI route
+    runs-on: ubuntu-24.04
+    outputs:
+      team: ${{ steps.route.outputs.team }}
+      image: ${{ steps.route.outputs.image }}
+    steps:
+      # No PR checkout or PR-provided executable code in this routing job.
+      - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        id: route
+        with:
+          script: |
+            // BEGIN ROUTE POLICY
+            core.setOutput('team', 'false');
+            core.setOutput('image', '');
+            const fallback = reason => core.info(`Community CI: ${reason}`);
+            if (context.repo.owner !== 'antgroup' || context.repo.repo !== 'vsag') {
+              return fallback('not the canonical repository');
+            }
+            if (context.eventName !== 'pull_request') {
+              return fallback('this is not a PR');
+            }
+            let stage = 'read PR';
+            try {
+              const eventPR = context.payload.pull_request;
+              if (!eventPR || !Number.isSafeInteger(eventPR.number) || eventPR.number < 1) {
+                return fallback('missing PR identity');
+              }
+              const {data: pr} = await github.rest.pulls.get({
+                owner: 'antgroup', repo: 'vsag', pull_number: eventPR.number
+              });
+              if (pr.state !== 'open' || pr.base.repo.full_name !== 'antgroup/vsag' ||
+                  pr.head.sha !== eventPR.head.sha || pr.base.sha !== eventPR.base.sha) {
+                return fallback('closed PR or stale event');
+              }
+              // Resolve main once; both policy files must come from this trusted commit.
+              stage = 'resolve main';
+              const {data: main} = await github.rest.repos.getCommit({
+                owner: 'antgroup', repo: 'vsag', ref: 'main'
+              });
+              stage = 'read routing config';
+              const {data: configFile} = await github.rest.repos.getContent({
+                owner: 'antgroup', repo: 'vsag', path: '.github/ci-routing.json', ref: main.sha
+              });
+              if (configFile.type !== 'file' || configFile.encoding !== 'base64' ||
+                  !Number.isSafeInteger(configFile.size) || configFile.size < 0 || configFile.size > 16384) {
+                return fallback('invalid routing config file');
+              }
+              stage = 'parse routing config';
+              const config = JSON.parse(Buffer.from(configFile.content, 'base64').toString('utf8'));
+              if (!config || Array.isArray(config) || typeof config !== 'object' ||
+                  typeof config.team_enabled !== 'boolean' || typeof config.team_image !== 'string' ||
+                  Object.keys(config).some(key => !['team_enabled', 'team_image'].includes(key))) {
+                return fallback('invalid routing config schema');
+              }
+              if (!config.team_enabled) {
+                return fallback('team routing is disabled');
+              }
+              const image = config.team_image;
+              if (!/^ghcr\.io\/antgroup\/vsag@sha256:[a-f0-9]{64}$/.test(image)) {
+                return fallback('a digest-pinned team image is required');
+              }
+              stage = 'read allowlist';
+              const {data: file} = await github.rest.repos.getContent({
+                owner: 'antgroup', repo: 'vsag', path: '.github/maintainers.json', ref: main.sha
+              });
+              if (file.type !== 'file' || file.encoding !== 'base64' || file.size > 16384) {
+                return fallback('invalid allowlist file');
+              }
+              stage = 'parse allowlist';
+              const policy = JSON.parse(Buffer.from(file.content, 'base64').toString('utf8'));
+              const names = policy.maintainers;
+              if (!Array.isArray(names) || names.length > 1000 ||
+                  !names.every(name => typeof name === 'string' &&
+                    /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$/i.test(name))) {
+                return fallback('invalid allowlist schema');
+              }
+              if (!names.some(name => name.toLowerCase() === pr.user.login.toLowerCase())) {
+                return fallback('PR author is not allowlisted');
+              }
+              core.info(`Team Linux CI: policy from main at ${main.sha}`);
+              core.setOutput('image', image);
+              core.setOutput('team', 'true');
+            } catch (error) {
+              // Avoid logging arbitrary API bodies, policy contents or credential-bearing URLs.
+              const kind = error instanceof SyntaxError ? 'invalid JSON' : 'request or policy error';
+              const status = Number.isInteger(error?.status) ? ` (HTTP ${error.status})` : '';
+              core.warning(`Could not validate team routing at ${stage}: ${kind}${status}; using community CI.`);
+            }
+            // END ROUTE POLICY
+
+  routing-tests:
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')))))
+    name: CI Routing Tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: node --test tests/scripts/ci_runner_route.test.cjs
+
+  community:
+    if: always() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped')
+    name: Community
+    needs: [route, select-checks]
+    uses: ./.github/workflows/pr-ci-community.yml
+    with:
+      core: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) }}
+      run-docs: ${{ needs.select-checks.outputs.docs == 'true' }}
+      run-simd: ${{ needs.select-checks.outputs.simd == 'true' }}
+      run-lite: ${{ needs.select-checks.outputs.lite == 'true' }}
+      team-linux: ${{ needs.route.outputs.team == 'true' }}
+
+  team:
+    name: Team
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+    needs: route
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) && needs.route.outputs.team == 'true'
+    concurrency:
+      group: vsag-team-vm
+      queue: max
+      cancel-in-progress: false
+    uses: ./.github/workflows/pr-ci-team.yml
+    with:
+      image: ${{ needs.route.outputs.image }}
+
+  select-checks:
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      format: ${{ steps.select.outputs.format }}
+      docs: ${{ steps.select.outputs.docs }}
+      issue: ${{ steps.select.outputs.issue }}
+      simd: ${{ steps.select.outputs.simd }}
+      lite: ${{ steps.select.outputs.lite }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select original event and path scopes
+        id: select
+        run: python3 scripts/ci/checks_policy.py
+
+  gate:
+    # Always instantiate one named context, including out-of-scope runs.
+    # Keeping expressions in the matrix avoids raw expressions in skipped names.
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) && '["PR CI Gate"]' || '["Docs Gate"]') }}
+    if: always()
+    needs: [route, routing-tests, select-checks, community, team]
+    runs-on: ubuntu-24.04
+    env:
+      CHECK_CONTEXT: ${{ matrix.check }}
+      SELECTION_RESULT: ${{ needs.select-checks.result }}
+      CORE_SELECTED: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) }}
+      ROUTE_RESULT: ${{ needs.route.result }}
+      POLICY_TEST_RESULT: ${{ needs.routing-tests.result }}
+      COMMUNITY_RESULT: ${{ needs.community.result }}
+      TEAM_RESULT: ${{ needs.team.result }}
+      TEAM_SELECTED: ${{ needs.route.outputs.team }}
+    steps:
+      - name: Require the selected CI path to pass
+        run: |
+          require_result() {
+            if [ "$2" != "$3" ]; then
+              printf '::error::%s: expected %s, got %s\n' "$1" "$3" "${2:-unset}"
+              exit 1
+            fi
+          }
+          printf 'CI results: route=%s policy=%s community=%s team=%s selected=%s\n' \
+            "$ROUTE_RESULT" "$POLICY_TEST_RESULT" "$COMMUNITY_RESULT" "$TEAM_RESULT" "$TEAM_SELECTED"
+          require_result 'Check selection' "$SELECTION_RESULT" success
+          core_expected=skipped
+          context_expected='Docs Gate'
+          if [ "$CORE_SELECTED" = true ]; then
+            core_expected=success
+            context_expected='PR CI Gate'
+          fi
+          require_result 'Gate identity' "$CHECK_CONTEXT" "$context_expected"
+          require_result 'Route job' "$ROUTE_RESULT" "$core_expected"
+          require_result 'Routing tests' "$POLICY_TEST_RESULT" "$core_expected"
+          require_result 'Community CI' "$COMMUNITY_RESULT" success
+          if [ "$TEAM_SELECTED" = true ]; then
+            require_result 'Team CI' "$TEAM_RESULT" success
+          else
+            require_result 'Unselected team CI' "$TEAM_RESULT" skipped
+          fi

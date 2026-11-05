@@ -1,0 +1,464 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "mci_builder.h"
+
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cmath>
+#include <exception>
+#include <limits>
+#include <map>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#include "impl/logger/logger.h"
+#include "mci_coverage.h"
+#include "mci_local_builder.h"
+#include "simd/fp32_simd.h"
+
+namespace vsag {
+namespace {
+
+constexpr uint64_t K_V3_SCHEDULE_CHUNK = 64;
+// NOLINTNEXTLINE(readability-identifier-naming)
+struct MCIV3ThreadTiming {
+    double candidate_collect{0.0};
+    double query_distance{0.0};
+    double pair_distance{0.0};
+    double edge_sort{0.0};
+    double mce{0.0};
+    double choose{0.0};
+};
+
+// NOLINTNEXTLINE(readability-identifier-naming)
+class MCIThreadJoinGuard {
+public:
+    explicit MCIThreadJoinGuard(Vector<std::thread>& workers) : workers_(workers) {
+    }
+
+    ~MCIThreadJoinGuard() {
+        for (auto& worker : workers_) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+    }
+
+private:
+    Vector<std::thread>& workers_;
+};
+
+double
+// NOLINTNEXTLINE(readability-identifier-naming)
+SecondsSince(const std::chrono::steady_clock::time_point& start) {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+}
+
+const float*
+// NOLINTNEXTLINE(readability-identifier-naming)
+VectorAt(const float* vectors, uint64_t dim, InnerIdType id) {
+    return vectors + static_cast<uint64_t>(id) * dim;
+}
+
+const InnerIdType*
+// NOLINTNEXTLINE(readability-identifier-naming)
+GraphRow(const MCIGraphView& graph, InnerIdType id) {
+    return graph.neighbors + static_cast<uint64_t>(id) * graph.row_stride;
+}
+
+uint64_t
+// NOLINTNEXTLINE(readability-identifier-naming)
+GraphRowCount(const MCIGraphView& graph, InnerIdType id) {
+    if (graph.counts != nullptr) {
+        return graph.counts[id];
+    }
+    return graph.uniform_count;
+}
+
+MCIV3ThreadTiming
+// NOLINTNEXTLINE(readability-identifier-naming)
+SumTiming(const Vector<MCIV3ThreadTiming>& timings) {
+    MCIV3ThreadTiming total;
+    for (const auto& item : timings) {
+        total.candidate_collect += item.candidate_collect;
+        total.query_distance += item.query_distance;
+        total.pair_distance += item.pair_distance;
+        total.edge_sort += item.edge_sort;
+        total.mce += item.mce;
+        total.choose += item.choose;
+    }
+    return total;
+}
+
+}  // namespace
+
+Vector<Vector<InnerIdType>>
+BuildMCICliques(const float* vectors,
+                const MCIGraphView& graph,
+                const MCIV3BuildParams& params,
+                Allocator* allocator) {
+    Vector<Vector<InnerIdType>> result(allocator);
+    if (vectors == nullptr or graph.neighbors == nullptr or params.total == 0 or params.dim == 0 or
+        graph.row_stride == 0) {
+        return result;
+    }
+
+    const auto total = params.total;
+    const auto dim = params.dim;
+    const auto candidate_limit =
+        std::min<uint64_t>({params.candidate_limit, graph.row_stride, total - 1});
+    const auto clique_threshold =
+        std::max<uint64_t>(2, std::min<uint64_t>({params.clique_max, candidate_limit + 1, total}));
+    const auto node_clique_limit = std::max<int>(3, static_cast<int>(total / 100));
+    const auto thread_count = std::max<uint64_t>(1, std::min<uint64_t>(params.thread_count, total));
+    const auto max_saved_cliques =
+        std::min<uint64_t>(candidate_limit, static_cast<uint64_t>(params.max_degree + 2));
+
+    logger::info(
+        "mci v3 clique build started, total={}, dim={}, candidate_limit={}, clique_threshold={}, "
+        "node_clique_limit={}, max_saved_cliques={}, threads={}",
+        total,
+        dim,
+        candidate_limit,
+        clique_threshold,
+        node_clique_limit,
+        max_saved_cliques,
+        thread_count);
+
+    Vector<float> l2_norms(total, allocator);
+    double max_norm_error = 0.0;
+    {
+        std::atomic<uint64_t> next_id{0};
+        Vector<std::thread> workers(allocator);
+        workers.reserve(thread_count);
+        std::mutex norm_mutex;
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
+        MCIThreadJoinGuard join_guard(workers);
+        for (uint64_t tid = 0; tid < thread_count; ++tid) {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
+                double local_max = 0.0;
+                while (true) {
+                    const auto start = next_id.fetch_add(K_V3_SCHEDULE_CHUNK);
+                    if (start >= total) {
+                        break;
+                    }
+                    const auto end = std::min<uint64_t>(total, start + K_V3_SCHEDULE_CHUNK);
+                    for (uint64_t id = start; id < end; ++id) {
+                        const float norm = FP32ComputeIP(
+                            VectorAt(vectors, dim, id), VectorAt(vectors, dim, id), dim);
+                        l2_norms[id] = norm;
+                        local_max = std::max(local_max, std::abs(static_cast<double>(norm) - 1.0));
+                    }
+                }
+                std::lock_guard<std::mutex> lock(norm_mutex);
+                max_norm_error = std::max(max_norm_error, local_max);
+            });
+        }
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
+        }
+    }
+    const bool unit_norm = max_norm_error < 1e-3;
+    logger::info("mci v3 float continuous path enabled, unit_norm={}, max_norm_error={:.6f}",
+                 unit_norm,
+                 max_norm_error);
+
+    auto distance_from_dot = [&](InnerIdType lhs, InnerIdType rhs, float dot) {
+        if (params.metric == MetricType::METRIC_TYPE_COSINE and unit_norm) {
+            const float distance = 2.0F - 2.0F * dot;
+            return distance > 0.0F ? distance : 0.0F;
+        }
+        if (params.metric == MetricType::METRIC_TYPE_IP) {
+            return 1.0F - dot;
+        }
+        const auto norm_product = l2_norms[lhs] * l2_norms[rhs];
+        if (norm_product <= 0.0F) {
+            return 1.0F;
+        }
+        return 1.0F - dot / std::sqrt(norm_product);
+    };
+    auto compute_distance = [&](InnerIdType lhs, InnerIdType rhs) {
+        if (params.metric == MetricType::METRIC_TYPE_L2SQR) {
+            return FP32ComputeL2Sqr(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim);
+        }
+        return distance_from_dot(
+            lhs, rhs, FP32ComputeIP(VectorAt(vectors, dim, lhs), VectorAt(vectors, dim, rhs), dim));
+    };
+    const auto compute_distance_batch = params.metric == MetricType::METRIC_TYPE_L2SQR
+                                            ? FP32ComputeL2SqrBatch4
+                                            : FP32ComputeIPBatch4;
+
+    // C++17 atomic default construction does not initialize the counter values.
+    std::vector<std::atomic<int>> num_cliques_per_node(total);
+    for (auto& count : num_cliques_per_node) {
+        count.store(0, std::memory_order_relaxed);
+    }
+    Vector<Vector<Vector<InnerIdType>>> selected_by_thread(allocator);
+    selected_by_thread.reserve(thread_count);
+    for (uint64_t tid = 0; tid < thread_count; ++tid) {
+        selected_by_thread.emplace_back(allocator);
+    }
+    Vector<MCIV3ThreadTiming> total_timings(thread_count, allocator);
+    std::atomic<uint64_t> total_clique_count{0};
+    std::atomic<uint64_t> clique_containing_seed_count{0};
+
+    float now_alpha = params.alpha;
+    uint64_t previous_uncovered = total;
+    uint64_t uncovered = total;
+    uint64_t round = 0;
+    const auto build_start = std::chrono::steady_clock::now();
+
+    do {
+        ++round;
+        logger::info("mci v3 round started, round={}, alpha={:.4f}, uncovered={}",
+                     round,
+                     now_alpha,
+                     uncovered);
+
+        std::atomic<uint64_t> next_seed{0};
+        uint64_t next_progress = std::max<uint64_t>(1, total / 10);
+        const uint64_t progress_step = std::max<uint64_t>(1, total / 10);
+        std::mutex progress_mutex;
+        std::atomic<uint64_t> sum_candidate_size{0};
+        std::atomic<uint64_t> candidate_count{0};
+        std::atomic<uint64_t> sum_edge_size{0};
+        std::atomic<uint64_t> sum_clique_count{0};
+        Vector<MCIV3ThreadTiming> round_timings(thread_count, allocator);
+        Vector<std::thread> workers(allocator);
+        workers.reserve(thread_count);
+        std::exception_ptr worker_exception;
+        std::mutex exception_mutex;
+        auto catch_worker_exception = [&](auto worker) {
+            try {
+                worker();
+            } catch (...) {
+                std::lock_guard<std::mutex> lock(exception_mutex);
+                if (worker_exception == nullptr) {
+                    worker_exception = std::current_exception();
+                }
+            }
+        };
+        MCIThreadJoinGuard join_guard(workers);
+
+        for (uint64_t tid = 0; tid < thread_count; ++tid) {
+            workers.emplace_back(catch_worker_exception, [&, tid]() {
+                auto local_params = params;
+                local_params.candidate_limit = candidate_limit;
+                MCILocalCliqueBuilder local_builder(local_params, allocator);
+                auto batch_distance = [&](InnerIdType lhs,
+                                          InnerIdType a,
+                                          InnerIdType b,
+                                          InnerIdType c,
+                                          InnerIdType d,
+                                          float* values) {
+                    compute_distance_batch(VectorAt(vectors, dim, lhs),
+                                           dim,
+                                           VectorAt(vectors, dim, a),
+                                           VectorAt(vectors, dim, b),
+                                           VectorAt(vectors, dim, c),
+                                           VectorAt(vectors, dim, d),
+                                           values[0],
+                                           values[1],
+                                           values[2],
+                                           values[3]);
+                    if (params.metric != MetricType::METRIC_TYPE_L2SQR) {
+                        const InnerIdType ids[]{a, b, c, d};
+                        for (uint64_t i = 0; i < 4; ++i) {
+                            values[i] = distance_from_dot(lhs, ids[i], values[i]);
+                        }
+                    }
+                };
+                auto solve_seed = [&](InnerIdType seed) {
+                    auto emit = [&](const auto& clique) {
+                        selected_by_thread[tid].emplace_back(allocator);
+                        selected_by_thread[tid].back().assign(clique.begin(), clique.end());
+                        total_clique_count.fetch_add(1, std::memory_order_relaxed);
+                        if (std::find(clique.begin(), clique.end(), seed) != clique.end()) {
+                            clique_containing_seed_count.fetch_add(1, std::memory_order_relaxed);
+                        }
+                    };
+                    const auto stats = local_builder.Build(seed,
+                                                           GraphRow(graph, seed),
+                                                           GraphRowCount(graph, seed),
+                                                           now_alpha,
+                                                           num_cliques_per_node,
+                                                           compute_distance,
+                                                           batch_distance,
+                                                           emit);
+                    sum_candidate_size.fetch_add(stats.candidates, std::memory_order_relaxed);
+                    candidate_count.fetch_add(1, std::memory_order_relaxed);
+                    sum_edge_size.fetch_add(stats.edges, std::memory_order_relaxed);
+                    sum_clique_count.fetch_add(stats.cliques, std::memory_order_relaxed);
+                    auto& timing = round_timings[tid];
+                    timing.candidate_collect += stats.candidate_collect;
+                    timing.query_distance += stats.query_distance;
+                    timing.pair_distance += stats.pair_distance;
+                    timing.edge_sort += stats.edge_sort;
+                    timing.mce += stats.mce;
+                    timing.choose += stats.choose;
+                };
+
+                while (true) {
+                    const auto start = next_seed.fetch_add(K_V3_SCHEDULE_CHUNK);
+                    if (start >= total) {
+                        break;
+                    }
+                    const auto end = std::min<uint64_t>(total, start + K_V3_SCHEDULE_CHUNK);
+                    {
+                        std::lock_guard<std::mutex> lock(progress_mutex);
+                        while (end >= next_progress and next_progress <= total) {
+                            logger::info("mci v3 round progress, round={}, scanned={}/{}",
+                                         round,
+                                         next_progress,
+                                         total);
+                            next_progress += progress_step;
+                        }
+                    }
+                    for (uint64_t raw_seed = start; raw_seed < end; ++raw_seed) {
+                        const auto seed = static_cast<InnerIdType>(raw_seed);
+                        if (num_cliques_per_node[seed].load(std::memory_order_relaxed) > 0) {
+                            continue;
+                        }
+                        solve_seed(seed);
+                    }
+                }
+            });
+        }
+        for (auto& worker : workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        if (worker_exception != nullptr) {
+            std::rethrow_exception(worker_exception);
+        }
+
+        uncovered = 0;
+        for (uint64_t id = 0; id < total; ++id) {
+            if (num_cliques_per_node[id].load(std::memory_order_relaxed) == 0) {
+                ++uncovered;
+            }
+        }
+
+        for (uint64_t tid = 0; tid < thread_count; ++tid) {
+            total_timings[tid].candidate_collect += round_timings[tid].candidate_collect;
+            total_timings[tid].query_distance += round_timings[tid].query_distance;
+            total_timings[tid].pair_distance += round_timings[tid].pair_distance;
+            total_timings[tid].edge_sort += round_timings[tid].edge_sort;
+            total_timings[tid].mce += round_timings[tid].mce;
+            total_timings[tid].choose += round_timings[tid].choose;
+        }
+        const auto timing = SumTiming(round_timings);
+        const auto scanned_candidates = std::max<uint64_t>(1, candidate_count.load());
+        logger::info(
+            "mci v3 round finished, round={}, alpha={:.4f}, uncovered={}, total_cliques={}, "
+            "avg_candidates={:.2f}, avg_edges={:.2f}, avg_mce_cliques={:.2f}, "
+            "candidate_s={:.3f}, query_s={:.3f}, pair_s={:.3f}, sort_s={:.3f}, mce_s={:.3f}, "
+            "choose_s={:.3f}",
+            round,
+            now_alpha,
+            uncovered,
+            total_clique_count.load(),
+            static_cast<double>(sum_candidate_size.load()) /
+                static_cast<double>(scanned_candidates),
+            static_cast<double>(sum_edge_size.load()) / static_cast<double>(scanned_candidates),
+            static_cast<double>(sum_clique_count.load()) / static_cast<double>(scanned_candidates),
+            timing.candidate_collect,
+            timing.query_distance,
+            timing.pair_distance,
+            timing.edge_sort,
+            timing.mce,
+            timing.choose);
+
+        now_alpha = next_mci_alpha(now_alpha, params.alpha, uncovered, previous_uncovered);
+        previous_uncovered = uncovered;
+        if (now_alpha > 1000.0F) {
+            break;
+        }
+    } while (uncovered > 0);
+
+    if (uncovered > 0) {
+        auto visit_neighbors = [&](InnerIdType seed, auto visitor) {
+            const auto* row = GraphRow(graph, seed);
+            const auto count = std::min<uint64_t>(GraphRowCount(graph, seed), graph.row_stride);
+            for (uint64_t i = 0; i < count; ++i) {
+                if (not visitor(row[i])) {
+                    break;
+                }
+            }
+        };
+        const auto repaired = EnsureMCICliqueCoverage(total,
+                                                      params.max_degree,
+                                                      params.clique_max,
+                                                      num_cliques_per_node,
+                                                      visit_neighbors,
+                                                      selected_by_thread.front(),
+                                                      allocator);
+        total_clique_count.fetch_add(repaired, std::memory_order_relaxed);
+        clique_containing_seed_count.fetch_add(repaired, std::memory_order_relaxed);
+        logger::info("mci v3 final coverage repair, uncovered_before={}, fallback_cliques={}",
+                     uncovered,
+                     repaired);
+        uncovered = 0;
+    }
+
+    const auto timing = SumTiming(total_timings);
+    logger::info(
+        "mci v3 clique build finished, total_cliques={}, seed_cliques={}, uncovered={}, "
+        "wall_s={:.3f}, candidate_s={:.3f}, query_s={:.3f}, pair_s={:.3f}, sort_s={:.3f}, "
+        "mce_s={:.3f}, choose_s={:.3f}",
+        total_clique_count.load(),
+        clique_containing_seed_count.load(),
+        uncovered,
+        SecondsSince(build_start),
+        timing.candidate_collect,
+        timing.query_distance,
+        timing.pair_distance,
+        timing.edge_sort,
+        timing.mce,
+        timing.choose);
+
+    result.reserve(total_clique_count.load());
+    for (auto& thread_cliques : selected_by_thread) {
+        for (auto& clique : thread_cliques) {
+            if (clique.empty()) {
+                continue;
+            }
+            result.emplace_back(allocator);
+            result.back().assign(clique.begin(), clique.end());
+        }
+    }
+    return result;
+}
+
+}  // namespace vsag

@@ -1,0 +1,316 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "inner_index_parameter.h"
+
+#include "common.h"
+#include "datacell/attribute_inverted_interface_parameter.h"
+#include "datacell/extra_info_datacell_parameter.h"
+#include "datacell/flatten_datacell_parameter.h"
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer_parameter.h"
+#include "quantization/transform_quantization/transform_quantizer_parameter.h"
+#include "utils/param_compat_macros.h"
+#include "vsag/constants.h"
+
+namespace vsag {
+
+namespace {
+
+auto
+parse_label_remap_type(const std::string& remap_type) -> LabelRemapType {
+    if (remap_type == LABEL_REMAP_TYPE_VALUE_PG) {
+        return LabelRemapType::PG;
+    }
+    if (remap_type == LABEL_REMAP_TYPE_VALUE_ROBIN) {
+        return LabelRemapType::ROBIN;
+    }
+    throw VsagException(ErrorType::INVALID_ARGUMENT,
+                        fmt::format("invalid label_remap_type: {}", remap_type));
+}
+
+auto
+dump_label_remap_type(LabelRemapType remap_type) -> const char* {
+    return remap_type == LabelRemapType::ROBIN ? LABEL_REMAP_TYPE_VALUE_ROBIN
+                                               : LABEL_REMAP_TYPE_VALUE_PG;
+}
+
+}  // namespace
+
+RaBitQSplitConfig
+ParseRaBitQSplitConfig(const JsonType& external_json) {
+    RaBitQSplitConfig config;
+    if (not external_json.Contains(RABITQ_BITS_PER_DIM_PRECISE)) {
+        return config;
+    }
+
+    CHECK_ARGUMENT(
+        external_json.Contains(RABITQ_BITS_PER_DIM_BASE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, RABITQ_BITS_PER_DIM_BASE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_BASE_QUANTIZATION_TYPE),
+        fmt::format("{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(HGRAPH_PRECISE_QUANTIZATION_TYPE),
+        fmt::format(
+            "{} requires {}", RABITQ_BITS_PER_DIM_PRECISE, HGRAPH_PRECISE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(
+        external_json.Contains(USE_REORDER_KEY) and external_json[USE_REORDER_KEY].IsBool() and
+            external_json[USE_REORDER_KEY].GetBool(),
+        fmt::format("{} requires {}=true", RABITQ_BITS_PER_DIM_PRECISE, USE_REORDER_KEY));
+    CHECK_ARGUMENT(external_json[HGRAPH_BASE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_BASE_QUANTIZATION_TYPE));
+    CHECK_ARGUMENT(external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].IsString(),
+                   fmt::format("{} must be a string", HGRAPH_PRECISE_QUANTIZATION_TYPE));
+
+    const auto base_type = external_json[HGRAPH_BASE_QUANTIZATION_TYPE].GetString();
+    const auto precise_type = external_json[HGRAPH_PRECISE_QUANTIZATION_TYPE].GetString();
+    const bool is_direct = base_type == QUANTIZATION_TYPE_VALUE_RABITQ;
+    const bool is_mrle = base_type == QUANTIZATION_TYPE_VALUE_TQ;
+    CHECK_ARGUMENT(is_direct or is_mrle,
+                   fmt::format("{} requires {}={} or {}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_BASE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ,
+                               QUANTIZATION_TYPE_VALUE_TQ));
+    CHECK_ARGUMENT(precise_type == QUANTIZATION_TYPE_VALUE_RABITQ,
+                   fmt::format("{} requires {}={}",
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               HGRAPH_PRECISE_QUANTIZATION_TYPE,
+                               QUANTIZATION_TYPE_VALUE_RABITQ));
+    if (is_mrle) {
+        CHECK_ARGUMENT(external_json.Contains(INDEX_TQ_CHAIN),
+                       fmt::format("{}={} requires {}",
+                                   HGRAPH_BASE_QUANTIZATION_TYPE,
+                                   QUANTIZATION_TYPE_VALUE_TQ,
+                                   INDEX_TQ_CHAIN));
+        const auto chain =
+            TransformQuantizerParameter::SplitString(external_json[INDEX_TQ_CHAIN].GetString());
+        const std::vector<std::string> expected_chain{TRANSFORMER_TYPE_VALUE_MRLE,
+                                                      QUANTIZATION_TYPE_VALUE_RABITQ};
+        CHECK_ARGUMENT(chain == expected_chain,
+                       "rabitq split transform quantizer requires tq_chain=\"mrle,rabitq\"");
+    }
+
+    config.enabled = true;
+    config.filter_bits = external_json[RABITQ_BITS_PER_DIM_BASE].GetInt();
+    config.supplement_bits = external_json[RABITQ_BITS_PER_DIM_PRECISE].GetInt();
+    const bool valid_filter_bits = config.filter_bits >= 1 and config.filter_bits <= 8;
+    CHECK_ARGUMENT(
+        valid_filter_bits,
+        fmt::format("{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_BASE, config.filter_bits));
+    const bool valid_supplement_bits = config.supplement_bits >= 1 and config.supplement_bits <= 8;
+    CHECK_ARGUMENT(
+        valid_supplement_bits,
+        fmt::format(
+            "{} must be in [1, 8], got {}", RABITQ_BITS_PER_DIM_PRECISE, config.supplement_bits));
+    CHECK_ARGUMENT(config.TotalBits() <= 8,
+                   fmt::format("{} + {} must be no greater than 8, got {}",
+                               RABITQ_BITS_PER_DIM_BASE,
+                               RABITQ_BITS_PER_DIM_PRECISE,
+                               config.TotalBits()));
+    if (external_json.Contains(RABITQ_BITS_PER_DIM_QUERY)) {
+        const int64_t query_bits = external_json[RABITQ_BITS_PER_DIM_QUERY].GetInt();
+        CHECK_ARGUMENT(query_bits == 32,
+                       fmt::format("split storage requires {} to be 32, got {}",
+                                   RABITQ_BITS_PER_DIM_QUERY,
+                                   query_bits));
+    }
+
+    return config;
+}
+
+void
+ApplyRaBitQSplitConfig(const RaBitQSplitConfig& config, JsonType& inner_json) {
+    if (not config.enabled) {
+        return;
+    }
+
+    inner_json[REORDER_SOURCE_KEY].SetString(HGRAPH_REORDER_SOURCE_BASE);
+    inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(RABITQ_SPLIT_CODES);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_VERSION_KEY].SetString(
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY]
+        .SetInt(32);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY]
+        .SetInt(config.filter_bits);
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY]
+        .SetInt(config.TotalBits());
+}
+
+JsonType
+ApplyHoldMoldsToQuantizer(const JsonType& source_json, bool hold_molds) {
+    auto quantizer_json = source_json;  // NOLINT(performance-unnecessary-copy-initialization)
+    auto quantizer_type = Parameter::TryToParseType(quantizer_json);
+    if (quantizer_type == QUANTIZATION_TYPE_VALUE_TQ) {
+        CHECK_ARGUMENT(quantizer_json.Contains(TQ_CHAIN_KEY),
+                       "transform quantizer parameters must contain tq_chain");
+        const auto chain =
+            TransformQuantizerParameter::SplitString(quantizer_json[TQ_CHAIN_KEY].GetString());
+        CHECK_ARGUMENT(not chain.empty(), "tq_chain must contain a bottom quantizer");
+        quantizer_type = chain.back();
+    }
+    if (quantizer_type == QUANTIZATION_TYPE_VALUE_FP32 ||
+        quantizer_type == QUANTIZATION_TYPE_VALUE_INT8) {
+        quantizer_json[HOLD_MOLDS].SetBool(hold_molds);
+    }
+    return quantizer_json;
+}
+
+void
+ValidateMRLEDim(const JsonType& external_json, uint64_t dim) {
+    if (not external_json.Contains(INDEX_MRLE_DIM)) {
+        return;
+    }
+    CHECK_ARGUMENT(
+        external_json[INDEX_MRLE_DIM].IsNumberInteger(),
+        fmt::format("mrle_dim must be an integer, got {}", external_json[INDEX_MRLE_DIM].Dump()));
+    const int64_t mrle_dim = external_json[INDEX_MRLE_DIM].GetInt();
+    const bool valid_mrle_dim = mrle_dim >= 0 and mrle_dim <= static_cast<int64_t>(dim);
+    CHECK_ARGUMENT(valid_mrle_dim,
+                   fmt::format("mrle_dim({}) must be in range [0, {}]", mrle_dim, dim));
+}
+
+bool
+RequiresRawVectorForTransformQuantizer(const JsonType& inner_json) {
+    const auto& base_type = inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY];
+    const bool is_transform_quantizer =
+        base_type.IsString() and base_type.GetString() == QUANTIZATION_TYPE_VALUE_TQ;
+    if (not is_transform_quantizer) {
+        return false;
+    }
+
+    const auto& use_reorder = inner_json[USE_REORDER_KEY];
+    // An omitted reorder_source uses InnerIndexParameter's default precise source.
+    const bool reorders_from_base =
+        inner_json.Contains(REORDER_SOURCE_KEY) and inner_json[REORDER_SOURCE_KEY].IsString() and
+        inner_json[REORDER_SOURCE_KEY].GetString() == HGRAPH_REORDER_SOURCE_BASE;
+    const bool has_precise_decode_source =
+        use_reorder.IsBool() and use_reorder.GetBool() and not reorders_from_base;
+    return not has_precise_decode_source;
+}
+
+bool
+RequiresRawVectorForMRLERaBitQSplit(const JsonType& inner_json) {
+    const auto& codes_type = inner_json[BASE_CODES_KEY][CODES_TYPE_KEY];
+    return codes_type.IsString() and codes_type.GetString() == RABITQ_SPLIT_CODES and
+           RequiresRawVectorForTransformQuantizer(inner_json);
+}
+
+void
+InnerIndexParameter::FromJson(const JsonType& json) {
+    if (json.Contains(USE_REORDER_KEY)) {
+        this->use_reorder = json[USE_REORDER_KEY].GetBool();
+    }
+
+    if (json.Contains(REORDER_SOURCE_KEY)) {
+        this->reorder_source = json[REORDER_SOURCE_KEY].GetString();
+    }
+    CHECK_ARGUMENT(this->reorder_source == HGRAPH_REORDER_SOURCE_PRECISE ||
+                       this->reorder_source == HGRAPH_REORDER_SOURCE_BASE,
+                   fmt::format("invalid reorder_source: {}, supported values are \"{}\" and \"{}\"",
+                               this->reorder_source,
+                               HGRAPH_REORDER_SOURCE_PRECISE,
+                               HGRAPH_REORDER_SOURCE_BASE));
+
+    if (json.Contains(USE_ATTRIBUTE_FILTER_KEY)) {
+        this->use_attribute_filter = json[USE_ATTRIBUTE_FILTER_KEY].GetBool();
+    }
+
+    if (this->use_attribute_filter) {
+        this->attr_inverted_interface_param =
+            std::make_shared<AttributeInvertedInterfaceParameter>();
+        if (json.Contains(ATTR_PARAMS_KEY)) {
+            this->attr_inverted_interface_param->FromJson(json[ATTR_PARAMS_KEY]);
+        }
+    }
+
+    if (json.Contains(BUILD_THREAD_COUNT_KEY)) {
+        this->build_thread_count = json[BUILD_THREAD_COUNT_KEY].GetUint64();
+    }
+
+    if (json.Contains(LABEL_REMAP_TYPE_KEY)) {
+        this->label_remap_type = parse_label_remap_type(json[LABEL_REMAP_TYPE_KEY].GetString());
+    }
+
+    if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+        CHECK_ARGUMENT(
+            json.Contains(PRECISE_CODES_KEY),
+            fmt::format("ivf parameters must contains {} when enable reorder", PRECISE_CODES_KEY));
+        this->precise_codes_param = CreateFlattenParam(json[PRECISE_CODES_KEY]);
+    }
+
+    if (json.Contains(STORE_RAW_VECTOR_KEY)) {
+        this->store_raw_vector = json[STORE_RAW_VECTOR_KEY].GetBool();
+    }
+
+    if (this->store_raw_vector) {
+        this->raw_vector_param = CreateFlattenParam(json[RAW_VECTOR_KEY]);
+    }
+
+    if (json.Contains(EXTRA_INFO_KEY)) {
+        this->extra_info_param = std::make_shared<ExtraInfoDataCellParameter>();
+        this->extra_info_param->FromJson(json[EXTRA_INFO_KEY]);
+    }
+
+    if (json.Contains(TRAIN_SAMPLE_COUNT_KEY)) {
+        this->train_sample_count = json[TRAIN_SAMPLE_COUNT_KEY].GetInt();
+        CHECK_ARGUMENT(
+            this->train_sample_count >= 512,
+            fmt::format("train_sample_count must be greater than or equal to 512, got: {}",
+                        this->train_sample_count));
+    }
+}
+
+JsonType
+InnerIndexParameter::ToJson() const {
+    JsonType json;
+    json[USE_REORDER_KEY].SetBool(this->use_reorder);
+    json[REORDER_SOURCE_KEY].SetString(this->reorder_source);
+    json[BUILD_THREAD_COUNT_KEY].SetUint64(this->build_thread_count);
+    json[LABEL_REMAP_TYPE_KEY].SetString(dump_label_remap_type(this->label_remap_type));
+    json[USE_ATTRIBUTE_FILTER_KEY].SetBool(this->use_attribute_filter);
+    if (use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+        json[PRECISE_CODES_KEY].SetJson(this->precise_codes_param->ToJson());
+    }
+    json[STORE_RAW_VECTOR_KEY].SetBool(this->store_raw_vector);
+    if (this->store_raw_vector) {
+        json[RAW_VECTOR_KEY].SetJson(this->raw_vector_param->ToJson());
+    }
+    if (this->extra_info_param) {
+        json[EXTRA_INFO_KEY].SetJson(this->extra_info_param->ToJson());
+    }
+    if (this->use_attribute_filter) {
+        json[ATTR_PARAMS_KEY].SetJson(this->attr_inverted_interface_param->ToJson());
+    }
+
+    json[TRAIN_SAMPLE_COUNT_KEY].SetInt(this->train_sample_count);
+
+    return json;
+}
+bool
+InnerIndexParameter::CheckCompatibility(const ParamPtr& other) const {
+    PARAM_CAST_OR_RETURN(InnerIndexParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, use_reorder);
+    CHECK_FIELD_EQ(*this, *p, reorder_source);
+    if (this->use_reorder && this->reorder_source != HGRAPH_REORDER_SOURCE_BASE) {
+        CHECK_SUB_PARAM(*this, *p, precise_codes_param);
+    }
+    CHECK_FIELD_EQ(*this, *p, use_attribute_filter);
+    CHECK_FIELD_EQ(*this, *p, label_remap_type);
+    return true;
+}
+}  // namespace vsag

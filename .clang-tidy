@@ -1,0 +1,82 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Disabled checks and reasons:
+#   -performance-enum-size : preserve public and serialized enum representations
+#   -clang-analyzer-deadcode.DeadStores        : value stored but never read (too noisy)
+#   -clang-diagnostic-deprecated-builtins      : deprecated builtins required for toolchain/platform compatibility
+#   -bugprone-easily-swappable-parameters      : too many false positives in current codebase
+#   -modernize-use-trailing-return-type        : conflicts with project style
+#   -modernize-avoid-c-arrays                  : C arrays are intentionally used in SIMD/low-level code
+#   -readability-identifier-length             : short names are acceptable in this codebase
+#   -readability-magic-numbers                 : too noisy for numeric-heavy vector index code
+#   -readability-function-cognitive-complexity : enable after fix all
+#   -readability-redundant-access-specifiers   : keep repeated public:/protected:/private: as visual separators between method groups
+# C++20 library rewrites are a separate migration; shared headers still support C++17.
+#   -modernize-use-ranges
+#   -modernize-use-integer-sign-comparison
+#   -modernize-use-designated-initializers
+#   -readability-container-contains
+#   -readability-math-missing-parentheses : defer repository-wide arithmetic style churn
+#   -readability-redundant-casting : fixed-width/ABI casts may differ across platforms
+#   -readability-avoid-nested-conditional-operator : compact numeric dispatch is intentional
+#   -readability-use-std-min-max : preserve existing floating-point NaN comparisons
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  clang-analyzer-*,
+  -clang-analyzer-deadcode.DeadStores,
+  clang-diagnostic-*,
+  -clang-diagnostic-deprecated-builtins,
+  modernize-*,
+  -modernize-use-trailing-return-type,
+  -modernize-avoid-c-arrays,
+  -modernize-use-ranges,
+  -modernize-use-integer-sign-comparison,
+  -modernize-use-designated-initializers,
+  openmp-*,
+  performance-*,
+  -performance-enum-size,
+  readability-*,
+  -readability-identifier-length,
+  -readability-container-contains,
+  -readability-math-missing-parentheses,
+  -readability-redundant-casting,
+  -readability-avoid-nested-conditional-operator,
+  -readability-use-std-min-max,
+  -readability-magic-numbers,
+  -readability-function-cognitive-complexity,
+  -readability-redundant-access-specifiers
+
+
+HeaderFilterRegex: ''
+WarningsAsErrors: "*"
+
+CheckOptions:
+  - { key: readability-identifier-naming.NamespaceCase,               value: lower_case }
+  - { key: readability-identifier-naming.ClassCase,                   value: CamelCase  }
+  - { key: readability-identifier-naming.StructCase,                  value: CamelCase  }
+  - { key: readability-identifier-naming.TypeTemplateParameterCase,   value: CamelCase  }
+  - { key: readability-identifier-naming.ValueTemplateParameterCase,  value: lower_case }
+  - { key: readability-identifier-naming.FunctionCase,                value: lower_case } # c-style function
+  - { key: readability-identifier-naming.PublicMethodCase,            value: CamelCase  } # interfaces
+  - { key: readability-identifier-naming.PrivateMethodCase,           value: lower_case } # impl
+  - { key: readability-identifier-naming.VariableCase,                value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix,         value: _          }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix,       value: _          }
+  - { key: readability-identifier-naming.MacroDefinitionCase,         value: UPPER_CASE }
+  - { key: readability-identifier-naming.EnumConstantCase,            value: UPPER_CASE }
+  - { key: readability-identifier-naming.GlobalConstantCase,          value: UPPER_CASE }

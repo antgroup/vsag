@@ -1,0 +1,92 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "default_allocator.h"
+
+#include <fmt/format.h>
+
+#include "impl/logger/logger.h"
+#include "vsag_exception.h"
+
+namespace vsag {
+#ifndef NDEBUG
+DefaultAllocator::~DefaultAllocator() {
+    if (not allocated_ptrs_.empty()) {
+        logger::error(fmt::format("There is a memory leak in {}, size: {}",
+                                  DefaultAllocator::Name(),
+                                  allocated_ptrs_.size()));
+        abort();
+    }
+}
+#else
+DefaultAllocator::~DefaultAllocator() = default;
+#endif
+
+void*
+DefaultAllocator::Allocate(uint64_t size) {
+    auto* ptr = malloc(size);
+#ifndef NDEBUG
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    allocated_ptrs_.insert(ptr);
+#endif
+    return ptr;
+}
+
+void
+DefaultAllocator::Deallocate(void* p) {
+#ifndef NDEBUG
+    if (p == nullptr) {
+        return;
+    }
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("deallocate: address {} is not allocated by {}", p, Name()));
+    }
+    allocated_ptrs_.erase(p);
+#endif
+    free(p);
+}
+
+void*
+DefaultAllocator::Reallocate(void* p, uint64_t size) {
+#ifndef NDEBUG
+    if (p == nullptr) {
+        return Allocate(size);
+    }
+    std::lock_guard<std::mutex> guard(set_mutex_);
+    if (allocated_ptrs_.find(p) == allocated_ptrs_.end()) {
+        throw VsagException(
+            ErrorType::INTERNAL_ERROR,
+            fmt::format("reallocate: address {} is not allocated by {}", p, Name()));
+    }
+#endif
+    auto* ptr = realloc(p, size);
+#ifndef NDEBUG
+    if (ptr != nullptr) {
+        allocated_ptrs_.erase(p);
+        allocated_ptrs_.insert(ptr);
+    }
+#endif
+    return ptr;
+}
+
+std::string
+DefaultAllocator::Name() {
+    return "DefaultAllocator";
+}
+
+}  // namespace vsag

@@ -1,0 +1,26 @@
+{
+  "name": "vsag",
+  "version": "0.1.0",
+  "description": "Node.js bindings for VSAG vector search library",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build:native": "cmake-js compile --CDENABLE_NODE_BINDS=ON",
+    "build:ts": "tsc",
+    "build": "npm run build:native && npm run build:ts",
+    "clean": "cmake-js clean && rm -rf dist"
+  },
+  "files": [
+    "dist/",
+    "build/Release/"
+  ],
+  "devDependencies": {
+    "cmake-js": "^7.0.0",
+    "node-addon-api": "^7.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "license": "Apache-2.0"
+}

@@ -1,0 +1,615 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+
+namespace vsag::simd {
+
+// T must satisfy RaBitQTraits: inherits SimdTraits + provides:
+//   static FloatVec bits_to_signed(const uint8_t* bit_ptr, FloatVec pos, FloatVec neg)
+//   static FloatVec bits_select(const uint8_t* bit_ptr, FloatVec weight)
+//
+// For RaBitQFloatBinaryIP: load float vec, decode bits to ±inv_sqrt_d, fmadd accumulate.
+template <typename T>
+inline float
+RaBitQFloatBinaryIPImpl(const float* vector,
+                        const uint8_t* bits,
+                        uint64_t dim,
+                        float inv_sqrt_d,
+                        float (*fallback)(const float*, const uint8_t*, uint64_t, float)) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        return fallback(vector, bits, dim, inv_sqrt_d);
+    }
+
+    auto sum = T::zero();
+    auto pos = inv_sqrt_d > 1e-3f ? T::set1(inv_sqrt_d) : T::set1(1.0f);
+    auto neg = inv_sqrt_d > 1e-3f ? T::set1(-inv_sqrt_d) : T::zero();
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        auto vec = T::load(vector + d);
+        auto b_vec = T::bits_to_signed(bits + (d >> 3), pos, neg);
+        sum = T::fmadd(b_vec, vec, sum);
+    }
+
+    float result = T::reduce_add(sum);
+
+    if (d < dim) {
+        result += fallback(vector + d, bits + (d >> 3), dim - d, inv_sqrt_d);
+    }
+
+    return result;
+}
+
+template <typename T>
+inline void
+RaBitQFloatBinaryIPBatch4Impl(const float* vector,
+                              const uint8_t* bits1,
+                              const uint8_t* bits2,
+                              const uint8_t* bits3,
+                              const uint8_t* bits4,
+                              uint64_t dim,
+                              float inv_sqrt_d,
+                              float* results,
+                              void (*fallback)(const float*,
+                                               const uint8_t*,
+                                               const uint8_t*,
+                                               const uint8_t*,
+                                               const uint8_t*,
+                                               uint64_t,
+                                               float,
+                                               float*)) {
+    if (dim == 0) {
+        results[0] = results[1] = results[2] = results[3] = 0.0f;
+        return;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        fallback(vector, bits1, bits2, bits3, bits4, dim, inv_sqrt_d, results);
+        return;
+    }
+
+    auto pos = inv_sqrt_d > 1e-3f ? T::set1(inv_sqrt_d) : T::set1(1.0f);
+    auto neg = inv_sqrt_d > 1e-3f ? T::set1(-inv_sqrt_d) : T::zero();
+    typename T::FloatVec sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
+    const uint8_t* all_bits[4] = {bits1, bits2, bits3, bits4};
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        auto vec = T::load(vector + d);
+        uint64_t byte_id = d >> 3;
+        for (uint32_t i = 0; i < 4; ++i) {
+            auto binary = T::bits_to_signed(all_bits[i] + byte_id, pos, neg);
+            sums[i] = T::fmadd(binary, vec, sums[i]);
+        }
+    }
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] = T::reduce_add(sums[i]);
+    }
+
+    if (d < dim) {
+        float tail[4];
+        fallback(vector + d,
+                 bits1 + (d >> 3),
+                 bits2 + (d >> 3),
+                 bits3 + (d >> 3),
+                 bits4 + (d >> 3),
+                 dim - d,
+                 inv_sqrt_d,
+                 tail);
+        for (uint32_t i = 0; i < 4; ++i) {
+            results[i] += tail[i];
+        }
+    }
+}
+
+template <typename T>
+inline float
+RaBitQFloatTwoBitCenteredIPImpl(const float* vector,
+                                const uint8_t* bits,
+                                uint64_t dim,
+                                float (*fallback)(const float*, const uint8_t*, uint64_t)) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        return fallback(vector, bits, dim);
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    auto sum = T::zero();
+    const auto pos1 = T::set1(1.0f);
+    const auto neg1 = T::set1(-1.0f);
+    const auto pos_half = T::set1(0.5f);
+    const auto neg_half = T::set1(-0.5f);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto weight = T::bits_to_signed(plane0 + byte_idx, pos1, neg1);
+        weight = T::add(weight, T::bits_to_signed(plane1 + byte_idx, pos_half, neg_half));
+
+        auto vec = T::load(vector + d);
+        sum = T::fmadd(weight, vec, sum);
+    }
+
+    float result = T::reduce_add(sum);
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 1.0f : -1.0f;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 0.5f : -0.5f;
+        result += value * weight;
+    }
+    return result;
+}
+
+template <typename T>
+inline void
+RaBitQFloatTwoBitCenteredIPBatch4Impl(const float* vector,
+                                      const uint8_t* bits1,
+                                      const uint8_t* bits2,
+                                      const uint8_t* bits3,
+                                      const uint8_t* bits4,
+                                      uint64_t dim,
+                                      float* results,
+                                      void (*fallback)(const float*,
+                                                       const uint8_t*,
+                                                       const uint8_t*,
+                                                       const uint8_t*,
+                                                       const uint8_t*,
+                                                       uint64_t,
+                                                       float*)) {
+    if (dim == 0) {
+        results[0] = results[1] = results[2] = results[3] = 0.0f;
+        return;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        fallback(vector, bits1, bits2, bits3, bits4, dim, results);
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    typename T::FloatVec sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
+    const auto pos1 = T::set1(1.0f);
+    const auto neg1 = T::set1(-1.0f);
+    const auto pos_half = T::set1(0.5f);
+    const auto neg_half = T::set1(-0.5f);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto vec = T::load(vector + d);
+        for (uint32_t i = 0; i < 4; ++i) {
+            auto weight = T::bits_to_signed(plane0[i] + byte_idx, pos1, neg1);
+            weight = T::add(weight, T::bits_to_signed(plane1[i] + byte_idx, pos_half, neg_half));
+            sums[i] = T::fmadd(weight, vec, sums[i]);
+        }
+    }
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] = T::reduce_add(sums[i]);
+    }
+
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 1.0f : -1.0f;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 0.5f : -0.5f;
+            results[i] += value * weight;
+        }
+    }
+}
+
+template <typename T>
+inline float
+RaBitQFloatThreeBitCenteredIPImpl(const float* vector,
+                                  const uint8_t* bits,
+                                  uint64_t dim,
+                                  float (*fallback)(const float*, const uint8_t*, uint64_t)) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        return fallback(vector, bits, dim);
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    const uint8_t* plane2 = bits + 2 * plane_bytes;
+    auto sum = T::zero();
+    const auto pos2 = T::set1(2.0f);
+    const auto neg2 = T::set1(-2.0f);
+    const auto pos1 = T::set1(1.0f);
+    const auto neg1 = T::set1(-1.0f);
+    const auto pos_half = T::set1(0.5f);
+    const auto neg_half = T::set1(-0.5f);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto weight = T::bits_to_signed(plane0 + byte_idx, pos2, neg2);
+        weight = T::add(weight, T::bits_to_signed(plane1 + byte_idx, pos1, neg1));
+        weight = T::add(weight, T::bits_to_signed(plane2 + byte_idx, pos_half, neg_half));
+
+        auto vec = T::load(vector + d);
+        sum = T::fmadd(weight, vec, sum);
+    }
+
+    float result = T::reduce_add(sum);
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 2.0f : -2.0f;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 1.0f : -1.0f;
+        weight += (plane2[byte_idx] & bit_mask) != 0U ? 0.5f : -0.5f;
+        result += value * weight;
+    }
+    return result;
+}
+
+template <typename T>
+inline void
+RaBitQFloatThreeBitCenteredIPBatch4Impl(const float* vector,
+                                        const uint8_t* bits1,
+                                        const uint8_t* bits2,
+                                        const uint8_t* bits3,
+                                        const uint8_t* bits4,
+                                        uint64_t dim,
+                                        float* results,
+                                        void (*fallback)(const float*,
+                                                         const uint8_t*,
+                                                         const uint8_t*,
+                                                         const uint8_t*,
+                                                         const uint8_t*,
+                                                         uint64_t,
+                                                         float*)) {
+    if (dim == 0) {
+        results[0] = results[1] = results[2] = results[3] = 0.0f;
+        return;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        fallback(vector, bits1, bits2, bits3, bits4, dim, results);
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    const uint8_t* plane2[4] = {bits1 + 2 * plane_bytes,
+                                bits2 + 2 * plane_bytes,
+                                bits3 + 2 * plane_bytes,
+                                bits4 + 2 * plane_bytes};
+    typename T::FloatVec sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
+    const auto pos2 = T::set1(2.0f);
+    const auto neg2 = T::set1(-2.0f);
+    const auto pos1 = T::set1(1.0f);
+    const auto neg1 = T::set1(-1.0f);
+    const auto pos_half = T::set1(0.5f);
+    const auto neg_half = T::set1(-0.5f);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto vec = T::load(vector + d);
+        for (uint32_t i = 0; i < 4; ++i) {
+            auto weight = T::bits_to_signed(plane0[i] + byte_idx, pos2, neg2);
+            weight = T::add(weight, T::bits_to_signed(plane1[i] + byte_idx, pos1, neg1));
+            weight = T::add(weight, T::bits_to_signed(plane2[i] + byte_idx, pos_half, neg_half));
+            sums[i] = T::fmadd(weight, vec, sums[i]);
+        }
+    }
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] = T::reduce_add(sums[i]);
+    }
+
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 2.0f : -2.0f;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 1.0f : -1.0f;
+            weight += (plane2[i][byte_idx] & bit_mask) != 0U ? 0.5f : -0.5f;
+            results[i] += value * weight;
+        }
+    }
+}
+
+template <typename T>
+inline float
+RaBitQFloatFourBitCenteredIPImpl(const float* vector,
+                                 const uint8_t* bits,
+                                 uint64_t dim,
+                                 float (*fallback)(const float*, const uint8_t*, uint64_t)) {
+    if (dim == 0) {
+        return 0.0F;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        return fallback(vector, bits, dim);
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0 = bits;
+    const uint8_t* plane1 = bits + plane_bytes;
+    const uint8_t* plane2 = bits + 2 * plane_bytes;
+    const uint8_t* plane3 = bits + 3 * plane_bytes;
+    auto sum = T::zero();
+    const auto pos4 = T::set1(4.0F);
+    const auto neg4 = T::set1(-4.0F);
+    const auto pos2 = T::set1(2.0F);
+    const auto neg2 = T::set1(-2.0F);
+    const auto pos1 = T::set1(1.0F);
+    const auto neg1 = T::set1(-1.0F);
+    const auto pos_half = T::set1(0.5F);
+    const auto neg_half = T::set1(-0.5F);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto weight = T::bits_to_signed(plane0 + byte_idx, pos4, neg4);
+        weight = T::add(weight, T::bits_to_signed(plane1 + byte_idx, pos2, neg2));
+        weight = T::add(weight, T::bits_to_signed(plane2 + byte_idx, pos1, neg1));
+        weight = T::add(weight, T::bits_to_signed(plane3 + byte_idx, pos_half, neg_half));
+
+        const auto vec = T::load(vector + d);
+        sum = T::fmadd(weight, vec, sum);
+    }
+
+    float result = T::reduce_add(sum);
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        float weight = (plane0[byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+        weight += (plane1[byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+        weight += (plane2[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+        weight += (plane3[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+        result += value * weight;
+    }
+    return result;
+}
+
+template <typename T>
+inline void
+RaBitQFloatFourBitCenteredIPBatch4Impl(const float* vector,
+                                       const uint8_t* bits1,
+                                       const uint8_t* bits2,
+                                       const uint8_t* bits3,
+                                       const uint8_t* bits4,
+                                       uint64_t dim,
+                                       float* results,
+                                       void (*fallback)(const float*,
+                                                        const uint8_t*,
+                                                        const uint8_t*,
+                                                        const uint8_t*,
+                                                        const uint8_t*,
+                                                        uint64_t,
+                                                        float*)) {
+    if (dim == 0) {
+        results[0] = results[1] = results[2] = results[3] = 0.0F;
+        return;
+    }
+
+    constexpr int W = T::Width;
+    if (dim < static_cast<uint64_t>(W)) {
+        fallback(vector, bits1, bits2, bits3, bits4, dim, results);
+        return;
+    }
+
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    const uint8_t* plane0[4] = {bits1, bits2, bits3, bits4};
+    const uint8_t* plane1[4] = {
+        bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
+    const uint8_t* plane2[4] = {bits1 + 2 * plane_bytes,
+                                bits2 + 2 * plane_bytes,
+                                bits3 + 2 * plane_bytes,
+                                bits4 + 2 * plane_bytes};
+    const uint8_t* plane3[4] = {bits1 + 3 * plane_bytes,
+                                bits2 + 3 * plane_bytes,
+                                bits3 + 3 * plane_bytes,
+                                bits4 + 3 * plane_bytes};
+    typename T::FloatVec sums[4] = {T::zero(), T::zero(), T::zero(), T::zero()};
+    const auto pos4 = T::set1(4.0F);
+    const auto neg4 = T::set1(-4.0F);
+    const auto pos2 = T::set1(2.0F);
+    const auto neg2 = T::set1(-2.0F);
+    const auto pos1 = T::set1(1.0F);
+    const auto neg1 = T::set1(-1.0F);
+    const auto pos_half = T::set1(0.5F);
+    const auto neg_half = T::set1(-0.5F);
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        const auto vec = T::load(vector + d);
+        for (uint32_t i = 0; i < 4; ++i) {
+            auto weight = T::bits_to_signed(plane0[i] + byte_idx, pos4, neg4);
+            weight = T::add(weight, T::bits_to_signed(plane1[i] + byte_idx, pos2, neg2));
+            weight = T::add(weight, T::bits_to_signed(plane2[i] + byte_idx, pos1, neg1));
+            weight = T::add(weight, T::bits_to_signed(plane3[i] + byte_idx, pos_half, neg_half));
+            sums[i] = T::fmadd(weight, vec, sums[i]);
+        }
+    }
+
+    for (uint32_t i = 0; i < 4; ++i) {
+        results[i] = T::reduce_add(sums[i]);
+    }
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const float value = vector[d];
+        for (uint32_t i = 0; i < 4; ++i) {
+            float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
+            weight += (plane1[i][byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
+            weight += (plane2[i][byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
+            weight += (plane3[i][byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
+            results[i] += value * weight;
+        }
+    }
+}
+
+template <typename T>
+inline float
+RaBitQFloatSplitCodeIPImpl(const float* vector,
+                           const uint8_t* one_bit_code,
+                           const uint8_t* supplement_code,
+                           uint64_t dim,
+                           uint32_t supplement_bits) {
+    if (dim == 0) {
+        return 0.0f;
+    }
+
+    constexpr int W = T::Width;
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    auto sum = T::zero();
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto code = T::zero();
+
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            auto weight = T::set1(static_cast<float>(1U << bit));
+            code = T::add(code, T::bits_select(plane + byte_idx, weight));
+        }
+
+        auto one_bit_weight = T::set1(static_cast<float>(1U << supplement_bits));
+        code = T::add(code, T::bits_select(one_bit_code + byte_idx, one_bit_weight));
+
+        auto vec = T::load(vector + d);
+        sum = T::fmadd(code, vec, sum);
+    }
+
+    float result = T::reduce_add(sum);
+
+    const uint32_t one_bit_scalar_weight = 1U << supplement_bits;
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = (one_bit_code[byte_idx] & bit_mask) != 0 ? one_bit_scalar_weight : 0U;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+
+    return result;
+}
+
+// Shared scalar implementation for Full and standalone Lite.
+inline float
+RaBitQFloatSupplementCodeIPScalarImpl(const float* vector,
+                                      const uint8_t* supplement_code,
+                                      uint64_t dim,
+                                      uint32_t supplement_bits) {
+    if (dim == 0 or supplement_bits == 0) {
+        return 0.0F;
+    }
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    float result = 0.0F;
+    for (uint64_t d = 0; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = 0;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0U) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+    return result;
+}
+
+template <typename T>
+inline float
+RaBitQFloatSupplementCodeIPImpl(const float* vector,
+                                const uint8_t* supplement_code,
+                                uint64_t dim,
+                                uint32_t supplement_bits) {
+    if (dim == 0 or supplement_bits == 0) {
+        return 0.0F;
+    }
+
+    constexpr int W = T::Width;
+    const uint64_t plane_bytes = (dim + 7) / 8;
+    auto sum = T::zero();
+
+    uint64_t d = 0;
+    for (; d + W <= dim; d += W) {
+        const uint64_t byte_idx = d >> 3;
+        auto code = T::zero();
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            const auto weight = T::set1(static_cast<float>(1U << bit));
+            code = T::add(code, T::bits_select(plane + byte_idx, weight));
+        }
+        sum = T::fmadd(code, T::load(vector + d), sum);
+    }
+
+    float result = T::reduce_add(sum);
+    for (; d < dim; ++d) {
+        const uint64_t byte_idx = d >> 3;
+        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        uint32_t code = 0;
+        for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
+            const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
+            if ((plane[byte_idx] & bit_mask) != 0U) {
+                code += 1U << bit;
+            }
+        }
+        result += vector[d] * static_cast<float>(code);
+    }
+    return result;
+}
+
+}  // namespace vsag::simd

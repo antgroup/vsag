@@ -1,0 +1,546 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <variant>
+#include <vector>
+
+#include "vsag_exception.h"
+
+namespace vsag {
+enum class OpType {
+    kNone,
+    kUnary,
+    kBinary,
+};
+
+enum class ExpressionType {
+    kNumericConstant,
+    kFieldExpression,
+    kStringConstant,
+    kStrListConstant,
+    kIntListConstant,
+    kArithmeticExpression,
+    kComparisonExpression,
+    kIntListExpression,
+    kStrListExpression,
+    kNotExpression,
+    kLogicalExpression,
+    kFunctionExpression,
+    kRegionFilterExpression,
+};
+
+/**
+ * @class Expression
+ * @brief Abstract base class for all expression types.
+ *
+ * This class provides the interface for expression evaluation and string representation.
+ * All concrete expression types should inherit from this class and implement the pure virtual methods.
+ */
+class Expression {
+public:
+    Expression(ExpressionType expr_type, OpType op_type)
+        : expr_type_(expr_type), op_type_(op_type) {
+    }
+
+    virtual ~Expression() = default;
+    virtual std::string
+    ToString() const = 0;
+
+    ExpressionType
+    GetExprType() const {
+        return expr_type_;
+    }
+
+    OpType
+    GetOpType() const {
+        return op_type_;
+    }
+
+protected:
+    ExpressionType expr_type_;
+    OpType op_type_;
+};
+
+using ExprPtr = std::shared_ptr<Expression>;
+
+// Comparison operators
+enum class ComparisonOperator {
+    EQ,  // =
+    NE,  // !=
+    GT,  // >
+    LT,  // <
+    GE,  // >=
+    LE   // <=
+};
+
+// Logical operators
+enum class LogicalOperator { AND, OR, NOT };
+
+// Arithmetic operators
+enum class ArithmeticOperator {
+    ADD,  // +
+    SUB,  // -
+    MUL,  // *
+    DIV   // /
+};
+
+static std::string
+ToString(const ArithmeticOperator& op) {
+    switch (op) {
+        case ArithmeticOperator::ADD:
+            return "+";
+        case ArithmeticOperator::SUB:
+            return "-";
+        case ArithmeticOperator::MUL:
+            return "*";
+        case ArithmeticOperator::DIV:
+            return "/";
+    }
+    throw std::runtime_error("unsupported type");
+}
+
+static std::string
+ToString(const LogicalOperator& op) {
+    switch (op) {
+        case LogicalOperator::AND:
+            return "AND";
+        case LogicalOperator::OR:
+            return "OR";
+        case LogicalOperator::NOT:
+            return "!";
+    }
+    throw std::runtime_error("unsupported type");
+}
+
+static std::string
+ToString(const ComparisonOperator& op) {
+    switch (op) {
+        case ComparisonOperator::EQ:
+            return "=";
+        case ComparisonOperator::NE:
+            return "!=";
+        case ComparisonOperator::GT:
+            return ">";
+        case ComparisonOperator::LT:
+            return "<";
+        case ComparisonOperator::GE:
+            return ">=";
+        case ComparisonOperator::LE:
+            return "<=";
+    }
+    throw std::runtime_error("unsupported type");
+}
+
+using NumericValue = std::variant<int64_t, uint64_t, double>;
+using StrList = std::vector<std::string>;
+
+inline bool
+CheckSameVType(const NumericValue&& lhs, const NumericValue&& rhs) {
+    return (std::holds_alternative<double>(lhs) && std::holds_alternative<double>(rhs)) ||
+           (std::holds_alternative<int64_t>(lhs) && std::holds_alternative<int64_t>(rhs)) ||
+           (std::holds_alternative<uint64_t>(lhs) && std::holds_alternative<uint64_t>(rhs));
+}
+
+inline NumericValue
+operator+(const NumericValue& lhs, const NumericValue& rhs) {
+    return std::visit(
+        [](auto&& l, auto&& r) -> NumericValue {
+            if (CheckSameVType(l, r)) {
+                return l + r;
+            }
+            throw std::runtime_error("unsupported type");
+        },
+        lhs,
+        rhs);
+}
+
+inline NumericValue
+operator-(const NumericValue& lhs, const NumericValue& rhs) {
+    return std::visit(
+        [](auto&& l, auto&& r) -> NumericValue {
+            if (CheckSameVType(l, r)) {
+                return l - r;
+            }
+            throw std::runtime_error("unsupported type");
+        },
+        lhs,
+        rhs);
+}
+
+inline NumericValue
+operator*(const NumericValue& lhs, const NumericValue& rhs) {
+    return std::visit(
+        [](auto&& l, auto&& r) -> NumericValue {
+            if (CheckSameVType(l, r)) {
+                return l * r;
+            }
+            throw std::runtime_error("unsupported type");
+        },
+        lhs,
+        rhs);
+}
+
+inline NumericValue
+operator/(const NumericValue& lhs, const NumericValue& rhs) {
+    return std::visit(
+        [](auto&& l, auto&& r) -> NumericValue {
+            if (CheckSameVType(l, r) && r != 0) {
+                return l / r;
+            }
+            throw std::runtime_error("unsupported type");
+        },
+        lhs,
+        rhs);
+}
+
+template <typename T>
+T
+GetNumericValue(const NumericValue& value) {
+    return std::visit(
+        [](auto&& arg) -> T {
+            using ArgType = std::decay_t<decltype(arg)>;
+
+            if constexpr (std::is_floating_point_v<T>) {
+                if constexpr (std::is_integral_v<ArgType>) {
+                    throw std::runtime_error("Cannot convert integer to floating-point");
+                }
+            } else {
+                if constexpr (std::is_floating_point_v<ArgType>) {
+                    throw std::runtime_error("Cannot convert floating-point to integer");
+                } else {
+                    if constexpr (std::is_unsigned_v<T>) {
+                        if (arg < 0) {
+                            throw std::runtime_error("Cannot convert negative value to unsigned");
+                        }
+                    }
+                    if (arg < std::numeric_limits<T>::min() ||
+                        arg > std::numeric_limits<T>::max()) {
+                        throw std::runtime_error("Numeric value out of range");
+                    }
+                }
+            }
+
+            return static_cast<T>(arg);
+        },
+        value);
+}
+
+// Field reference
+class FieldExpression : public Expression {
+public:
+    using ptr = std::shared_ptr<FieldExpression>;
+
+    explicit FieldExpression(const std::string& name)
+        : Expression(ExpressionType::kFieldExpression, OpType::kNone), fieldName(name) {
+    }
+
+    std::string
+    ToString() const override {
+        return fieldName;
+    }
+
+    std::string fieldName;
+};
+
+// Numeric constant
+class NumericConstant : public Expression {
+public:
+    using ptr = std::shared_ptr<NumericConstant>;
+
+    explicit NumericConstant(NumericValue value)
+        : Expression(ExpressionType::kNumericConstant, OpType::kNone), value(value) {
+    }
+
+    std::string
+    ToString() const override {
+        return std::visit(
+            [](auto&& arg) -> std::string {
+                using T = std::decay_t<decltype(arg)>;
+
+                if constexpr (std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t>) {
+                    return std::to_string(arg);
+                } else if constexpr (std::is_same_v<T, double>) {
+                    std::string str = std::to_string(arg);
+                    str.erase(str.find_last_not_of('0') + 1, std::string::npos);
+                    if (str.back() == '.') {
+                        str = str + '0';
+                    }
+                    return str;
+                } else {
+                    return "not supported type";
+                }
+            },
+            value);
+    }
+
+    NumericValue value;
+};
+
+// String constant
+class StringConstant : public Expression {
+public:
+    using ptr = std::shared_ptr<StringConstant>;
+
+    explicit StringConstant(const std::string& value)
+        : Expression(ExpressionType::kStringConstant, OpType::kNone), value(value) {
+    }
+
+    std::string
+    ToString() const override {
+        return '"' + value + '"';
+    }
+
+    std::string value;
+};
+
+class StrListConstant : public Expression {
+public:
+    using ptr = std::shared_ptr<StrListConstant>;
+
+    explicit StrListConstant(StrList values)
+        : Expression(ExpressionType::kStrListConstant, OpType::kNone), values(std::move(values)) {
+    }
+
+    std::string
+    ToString() const override {
+        std::string result = "[";
+        for (uint64_t i = 0; i < values.size(); ++i) {
+            if (i != 0)
+                result += ", ";
+            result += '"' + values[i] + '"';
+        }
+        return result + "]";
+    }
+
+    StrList values;
+};
+
+template <typename V>
+class IntListConstant : public Expression {
+public:
+    using ptr = std::shared_ptr<IntListConstant>;
+
+    explicit IntListConstant(std::vector<V> values)
+        : Expression(ExpressionType::kIntListConstant, OpType::kNone), values(std::move(values)) {
+    }
+
+    std::string
+    ToString() const override {
+        std::string result = "[";
+        for (uint64_t i = 0; i < values.size(); ++i) {
+            if (i != 0)
+                result += ", ";
+            result += std::to_string(values[i]);
+        }
+        return result + "]";
+    }
+
+    std::vector<V> values;
+};
+
+// Arithmetic expression
+class ArithmeticExpression : public Expression {
+public:
+    ArithmeticExpression(ExprPtr left, ArithmeticOperator op, ExprPtr right)
+        : Expression(ExpressionType::kArithmeticExpression, OpType::kBinary),
+          left(std::move(left)),
+          op(op),
+          right(std::move(right)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
+    }
+
+    ExprPtr left;
+    ArithmeticOperator op;
+    ExprPtr right;
+};
+
+// Comparison expression
+class ComparisonExpression : public Expression {
+public:
+    ComparisonExpression(ExprPtr left, ComparisonOperator op, ExprPtr right)
+        : Expression(ExpressionType::kComparisonExpression, OpType::kBinary),
+          left(std::move(left)),
+          op(op),
+          right(std::move(right)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
+    }
+
+    ExprPtr left;
+    ComparisonOperator op;
+    ExprPtr right;
+};
+
+// List membership expression
+class IntListExpression : public Expression {
+public:
+    IntListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
+        : Expression(ExpressionType::kIntListExpression, OpType::kBinary),
+          field(std::move(field)),
+          is_not_in(is_not_in),
+          values(std::move(values)) {
+    }
+
+    std::string
+    ToString() const override {
+        const std::string op = is_not_in ? "NOT_IN" : "IN";
+        return "(" + field->ToString() + " " + op + " " + values->ToString() + ")";
+    }
+
+    ExprPtr field;
+    bool is_not_in;  // true for NOT IN, false for IN
+    ExprPtr values;
+};
+
+// List expression
+class StrListExpression : public Expression {
+public:
+    StrListExpression(ExprPtr field, const bool is_not_in, ExprPtr values)
+        : Expression(ExpressionType::kStrListExpression, OpType::kBinary),
+          field(std::move(field)),
+          is_not_in(is_not_in),
+          values(std::move(values)) {
+    }
+
+    std::string
+    ToString() const override {
+        const std::string op = is_not_in ? "NOT_IN" : "IN";
+        return "(" + field->ToString() + " " + op + " " + values->ToString() + ")";
+    }
+
+    ExprPtr field;
+    bool is_not_in;  // true for NOT IN, false for IN
+    ExprPtr values;
+};
+
+// Logical expression
+class LogicalExpression : public Expression {
+public:
+    LogicalExpression(ExprPtr left, LogicalOperator op, ExprPtr right)
+        : Expression(ExpressionType::kLogicalExpression, OpType::kBinary),
+          left(std::move(left)),
+          op(op),
+          right(std::move(right)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "(" + left->ToString() + " " + vsag::ToString(op) + " " + right->ToString() + ")";
+    }
+
+    ExprPtr left;
+    LogicalOperator op;
+    ExprPtr right;
+};
+
+// Not expression
+class NotExpression : public Expression {
+public:
+    explicit NotExpression(ExprPtr expr)
+        : Expression(ExpressionType::kNotExpression, OpType::kUnary), expr(std::move(expr)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "! (" + expr->ToString() + ")";
+    }
+
+    ExprPtr expr;
+};
+
+class FunctionExpression : public Expression {
+public:
+    FunctionExpression(std::string name,
+                       std::vector<std::string> args,
+                       std::vector<std::string> types)
+        : Expression(ExpressionType::kFunctionExpression, OpType::kNone),
+          function_name(std::move(name)),
+          arguments(std::move(args)),
+          argument_types(std::move(types)) {
+        if (arguments.size() != argument_types.size()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "function argument and type counts must match");
+        }
+    }
+
+    std::string
+    ToString() const override {
+        auto join = [](const std::vector<std::string>& values) {
+            std::string result;
+            for (uint64_t i = 0; i < values.size(); ++i) {
+                if (i != 0) {
+                    result += "|";
+                }
+                result += values[i];
+            }
+            return result;
+        };
+        return "FUNCTION (" + function_name + ",\"" + join(arguments) + "\",\"" +
+               join(argument_types) + "\")";
+    }
+
+    std::string function_name;
+    std::vector<std::string> arguments;
+    std::vector<std::string> argument_types;
+};
+
+class RegionFilterExpression : public Expression {
+public:
+    RegionFilterExpression(ExprPtr region_type,
+                           ExprPtr region_list,
+                           ExprPtr residence_list,
+                           ExprPtr regions,
+                           ExprPtr residences,
+                           ExprPtr triggers)
+        : Expression(ExpressionType::kRegionFilterExpression, OpType::kNone),
+          region_type(std::move(region_type)),
+          region_list(std::move(region_list)),
+          residence_list(std::move(residence_list)),
+          regions(std::move(regions)),
+          residences(std::move(residences)),
+          triggers(std::move(triggers)) {
+    }
+
+    std::string
+    ToString() const override {
+        return "region_filter (" + region_type->ToString() + ", " + region_list->ToString() + ", " +
+               residence_list->ToString() + ", " + regions->ToString() + ", " +
+               residences->ToString() + ", " + triggers->ToString() + ")";
+    }
+
+    ExprPtr region_type;
+    ExprPtr region_list;
+    ExprPtr residence_list;
+    ExprPtr regions;
+    ExprPtr residences;
+    ExprPtr triggers;
+};
+
+}  // namespace vsag

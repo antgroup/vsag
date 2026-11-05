@@ -1,0 +1,112 @@
+# Summary
+
+[Introduction](README.md)
+
+# User Guide
+
+- [Installation](guide/installation.md)
+- [Creating an Index](guide/create_index.md)
+- [k-Nearest Neighbor Search](guide/knn_search.md)
+- [Search Statistics](guide/search_statistics.md)
+- [C API](guide/c_api.md)
+- [pyvsag](guide/pyvsag.md)
+
+# Indexes
+
+- [Overview](indexes/README.md)
+- [Index Parameters](resources/index_parameters.md)
+- [HGraph](indexes/hgraph.md)
+  - [Adaptive neighbor pruning](indexes/adaptive_pruning.md)
+- [LazyHGraph](indexes/lazy_hgraph.md)
+- [IVF](indexes/ivf.md)
+- [SINDI](indexes/sindi.md)
+- [SINDI_V2](indexes/sindi_v2.md)
+- [SIMQ](indexes/simq.md)
+- [Pyramid](indexes/pyramid.md)
+- [BruteForce](indexes/brute_force.md)
+
+# Quantization
+
+- [Overview](quantization/README.md)
+- [FP32 (Baseline)](quantization/fp32.md)
+- [Half-Precision (FP16 / BF16)](quantization/fp16_bf16.md)
+- [Scalar Quantization (SQ4 / SQ8)](quantization/sq.md)
+- [Scalar Uniform (SQ4 / SQ8 Uniform)](quantization/sq_uniform.md)
+- [Product Quantization (PQ)](quantization/pq.md)
+- [PQ FastScan](quantization/pqfs.md)
+- [RaBitQ](quantization/rabitq.md)
+- [RaBitQ x+y Split](quantization/rabitq_split.md)
+- [Transform Quantizer (TQ)](advanced/quantization_transform.md)
+
+# Developer Guide
+
+- [Code Structure](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ Design](development/lite_rabitq_design.md)
+- [C++ Coding Guide](development/coding_style.md)
+- [New Index Integration Checklist](development/new_index_checklist.md)
+- [Building](development/building.md)
+- [Offline / Air-gapped Builds](development/offline_build.md)
+- [Running Tests](development/testing.md)
+- [Contributing](development/contributing.md)
+
+# Advanced Features
+
+- [Search Reasoning](advanced/search_reasoning.md)
+- [Build and Train](advanced/build_and_train.md)
+- [HGraph Build Cache](advanced/build_cache.md)
+- [Range Search](advanced/range_search.md)
+- [Calculate Distance by ID](advanced/calc_distance_by_id.md)
+- [Filtered Search](advanced/filtered_search.md)
+- [Iterator Search](advanced/iterator_search.md)
+- [Attribute Filter (Hybrid Search)](advanced/attribute_filter.md)
+- [Serialization](advanced/serialization.md)
+- [New Serialization](advanced/new_serialization.md)
+- [Chunked Serialization](advanced/chunked_serialization.md)
+- [Parallel Deserialization](advanced/parallel_deserialization.md)
+- [Memory Management](advanced/memory.md)
+- [Per-Search Allocator](advanced/search_allocator.md)
+- [Index Introspection](advanced/introspection.md)
+- [Extensibility](advanced/extensibility.md)
+- [User-Defined IO](advanced/user_defined_io.md)
+- [Graph Enhancement](advanced/enhance_graph.md)
+- [Extra Info](advanced/extra_info.md)
+- [Index Lifecycle Management](advanced/index_lifecycle.md)
+- [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
+
+# API Reference
+
+- [Overview](api/README.md)
+- [Factory & Engine](api/factory_engine.md)
+- [Index](api/index_class.md)
+- [Dataset](api/dataset.md)
+- [Search Request & Filters](api/search.md)
+- [Serialization Types](api/serialization.md)
+- [Resource Management](api/resource.md)
+- [Auxiliary Types](api/types.md)
+
+# Performance and Tuning
+
+- [Best Practices](resources/best_practices.md)
+- [Disk-Based Index Best Practices](resources/disk_index.md)
+- [Metric Semantics](resources/metric_semantics.md)
+- [Optimizer (Tune)](advanced/optimizer.md)
+- [Benchmarks](resources/performance.md)
+- [Evaluation Tool](resources/eval.md)
+- [AutoTune Tool](resources/autotune.md)
+  - [AutoTune V1 CLI JSON Contract](resources/autotune_api_v1.md)
+- [HDF5 Dataset Format](resources/dataset_format.md)
+- [Index Analysis Tool](resources/analyze_index.md)
+- [Compatibility Check Tool](resources/check_compatibility.md)
+
+# Resources
+
+- [FAQ](resources/faq.md)
+- [Release Notes](resources/release_notes.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [VSAG 1.0 Historical Roadmap](resources/roadmap_2025.md)
+- [Community](resources/community.md)
+- [Filing Issues with an AI Agent](resources/filing_issues_with_agent.md)
+- [Related Projects](resources/related_projects.md)
+- [Research Papers](resources/research_papers.md)
+- [Contributors](misc/contributors.md)

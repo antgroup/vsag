@@ -1,0 +1,184 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "sparse_term_computer.h"
+
+#include <cstring>
+
+#include "algorithm/sindi/sindi_parameter.h"
+#include "impl/allocator/safe_allocator.h"
+#include "unittest.h"
+
+using namespace vsag;
+
+TEST_CASE("SparseTermComputer Basic Test", "[ut][SparseTermComputer]") {
+    // prepare data
+    auto query_prune_ratio = 0.2;
+    auto query_len = 10;
+    SparseVector query_sv;
+    query_sv.len_ = query_len;
+    query_sv.ids_ = new uint32_t[query_sv.len_];
+    query_sv.vals_ = new float[query_sv.len_];
+    for (auto i = 0; i < query_len; i++) {
+        query_sv.ids_[i] = i;
+        query_sv.vals_[i] = i;
+    }
+
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    SINDISearchParameter search_params;
+    search_params.query_prune_ratio = query_prune_ratio;
+    auto computer = std::make_shared<SparseTermComputer>(query_sv, search_params, allocator.get());
+
+    REQUIRE(computer->sorted_query_.size() == query_len);
+    REQUIRE(computer->pruned_len_ == query_len * (1.0F - query_prune_ratio));
+    for (auto i = 0; i < computer->sorted_query_.size(); i++) {
+        auto id = query_len - i - 1;
+        REQUIRE(computer->sorted_query_[i].first == id);
+        REQUIRE(std::abs(computer->sorted_query_[i].second - (-1.0 * id)) < 1e-3);
+    }
+
+    // test term iterator
+    for (auto i = 0; i < computer->pruned_len_; i++) {
+        REQUIRE(computer->term_iterator_ == i);
+        REQUIRE(computer->HasNextTerm() == true);
+        REQUIRE(computer->NextTermIter() == i);
+        REQUIRE(computer->GetTerm(i) == query_len - i - 1);
+        REQUIRE(computer->term_iterator_ == i + 1);
+    }
+    REQUIRE(computer->HasNextTerm() == false);
+    computer->ResetTerm();
+    REQUIRE(computer->term_iterator_ == 0);
+
+    // test scan
+    auto test_term_it = 5;
+    auto query_id = computer->sorted_query_[test_term_it].first;
+    REQUIRE(query_id == query_len - test_term_it - 1);
+    auto query_val = computer->sorted_query_[test_term_it].second;
+    REQUIRE(std::abs(query_val - (-1.0 * query_id)) < 1e-3);
+    std::vector<uint16_t> term_ids = {0, 2, 4, 6, 8};
+
+    SECTION("Scan with quantized data (uint8_t)") {
+        std::vector<float> dists(10, 0);
+        std::vector<uint8_t> term_vals{0, 2, 4, 6, 8};
+        computer->ScanForAccumulateSQ8(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            REQUIRE(std::abs(dists[id] - (term_vals[i] * query_val)) < 1e-3);
+        }
+    }
+
+    SECTION("Scan with fp16 bytes") {
+        std::vector<float> dists(10, 0);
+        std::vector<float> raw_term_vals = {0.1F, 2.2F, 4.3F, 6.4F, 8.5F};
+        std::vector<uint16_t> fp16_vals(raw_term_vals.size());
+        std::vector<uint8_t> term_vals(raw_term_vals.size() * sizeof(uint16_t));
+        for (uint64_t i = 0; i < raw_term_vals.size(); ++i) {
+            fp16_vals[i] = generic::FloatToFP16(raw_term_vals[i]);
+            std::memcpy(term_vals.data() + i * sizeof(uint16_t), &fp16_vals[i], sizeof(uint16_t));
+        }
+
+        computer->ScanForAccumulateFP16Bytes(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            auto expected = generic::FP16ToFloat(fp16_vals[i]) * query_val;
+            REQUIRE(std::abs(dists[id] - expected) < 1e-3);
+        }
+    }
+
+    SECTION("Scan with float bytes") {
+        std::vector<float> dists(10, 0);
+        std::vector<float> raw_term_vals = {0.1F, 2.2F, 4.3F, 6.4F, 8.5F};
+        std::vector<uint8_t> term_vals(raw_term_vals.size() * sizeof(float));
+        for (uint64_t i = 0; i < raw_term_vals.size(); ++i) {
+            std::memcpy(term_vals.data() + i * sizeof(float), &raw_term_vals[i], sizeof(float));
+        }
+
+        computer->ScanForAccumulateFloatBytes(
+            test_term_it, term_ids.data(), term_vals.data(), term_ids.size(), dists.data());
+        for (uint64_t i = 0; i < term_ids.size(); i++) {
+            auto id = term_ids[i];
+            REQUIRE(std::abs(dists[id] - (raw_term_vals[i] * query_val)) < 1e-3);
+        }
+    }
+
+    // clean
+    delete[] query_sv.vals_;
+    delete[] query_sv.ids_;
+}
+
+TEST_CASE("SparseTermComputer Term Scan Count", "[ut][SparseTermComputer]") {
+    uint32_t query_id = 1;
+    float query_value = 1.0F;
+    SparseVector query{1, &query_id, &query_value};
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("defaults retain the complete posting list") {
+        SINDISearchParameter search_params;
+        SparseTermComputer computer(
+            query, search_params, allocator.get(), std::numeric_limits<uint64_t>::max());
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+    }
+
+    SECTION("ratio limits the posting list") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.3F;
+        SparseTermComputer computer(query, search_params, allocator.get(), 4);
+        REQUIRE(computer.GetTermScanCount(10) == 7);
+    }
+
+    SECTION("per-window override retains the complete posting list") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.5F;
+        SparseTermComputer computer(query, search_params, allocator.get(), 1);
+        REQUIRE(computer.GetTermScanCount(10) == 5);
+        computer.SetTermPruneEnabled(false);
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+        computer.SetTermPruneEnabled(true);
+        REQUIRE(computer.GetTermScanCount(10) == 5);
+    }
+
+    SECTION("threshold is divided by total window count") {
+        SINDISearchParameter search_params;
+        search_params.term_retain_threshold = 10;
+        SparseTermComputer computer(query, search_params, allocator.get(), 4);
+        REQUIRE(computer.GetTermScanCount(10) == 2);
+    }
+
+    SECTION("ratio and threshold use the smaller limit") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.5F;
+        search_params.term_retain_threshold = 18;
+        SparseTermComputer computer(query, search_params, allocator.get(), 3);
+        REQUIRE(computer.GetTermScanCount(20) == 6);
+    }
+
+    SECTION("zero threshold disables the limit") {
+        SINDISearchParameter search_params;
+        search_params.term_retain_threshold = 0;
+        SparseTermComputer computer(query, search_params, allocator.get(), 2);
+        REQUIRE(computer.GetTermScanCount(10) == 10);
+    }
+
+    SECTION("non-empty posting lists retain at least one document") {
+        SINDISearchParameter search_params;
+        search_params.term_prune_ratio = 0.99F;
+        search_params.term_retain_threshold = 1;
+        SparseTermComputer computer(query, search_params, allocator.get(), 2);
+        REQUIRE(computer.GetTermScanCount(10) == 1);
+        REQUIRE(computer.GetTermScanCount(0) == 0);
+    }
+}

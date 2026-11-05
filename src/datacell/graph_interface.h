@@ -1,0 +1,317 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <vector>
+
+#include "basic_types.h"
+#include "container_types.h"
+#include "duplicate_interface.h"
+#include "graph_interface_parameter.h"
+#include "impl/reverse_edge.h"
+#include "index_common_param_fwd.h"
+#include "inner_string_params.h"
+#include "io/common/io_parameter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+class ReverseEdge;
+DEFINE_POINTER(GraphInterface);
+
+class GraphInterface {
+public:
+    GraphInterface() = default;
+
+    virtual ~GraphInterface() = default;
+
+    static GraphInterfacePtr
+    MakeInstance(const GraphInterfaceParamPtr& graph_param, const IndexCommonParam& common_param);
+
+public:
+    virtual void
+    InsertNeighborsById(InnerIdType id, const Vector<InnerIdType>& neighbor_ids) = 0;
+
+    virtual void
+    DeleteNeighborsById(InnerIdType id) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "DeleteNeighborsById is not implemented");
+    }
+
+    virtual void
+    RecoverDeleteNeighborsById(InnerIdType id) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "RecoverDeleteNeighborsById is not implemented");
+    }
+
+    virtual uint32_t
+    GetNeighborSize(InnerIdType id) const = 0;
+
+    virtual void
+    GetNeighbors(InnerIdType id, Vector<InnerIdType>& neighbor_ids) const = 0;
+
+    [[nodiscard]] virtual bool
+    CheckIdExists(InnerIdType id) const = 0;
+
+    virtual void
+    Resize(InnerIdType new_size) = 0;
+
+    virtual void
+    Prefetch(InnerIdType id, uint32_t neighbor_i) = 0;
+
+    virtual void
+    MergeOther(GraphInterfacePtr other, uint64_t bias) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "MergeOther in GraphInterface is not implemented");
+    }
+
+    virtual Vector<InnerIdType>
+    GetIds() const {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "GetIds in GraphInterface is not implemented");
+    }
+
+    virtual uint64_t
+    GetMemoryUsage() const {
+        return 0;
+    }
+
+    virtual void
+    GetIncomingNeighbors(InnerIdType id, Vector<InnerIdType>& neighbors) const {
+        if (reverse_edges_) {
+            reverse_edges_->GetIncomingNeighbors(id, neighbors);
+        } else {
+            neighbors.clear();
+        }
+    }
+
+    // Rebuild derived state after all ReserveIO/WriteRaw/DeserializeTail operations finish.
+    // In the probe path DeserializeTail runs before IO fills, so it cannot do this itself.
+    virtual void
+    FinishDeserialize() {
+    }
+
+    virtual void
+    Move(InnerIdType from, InnerIdType to) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Move not implemented in GraphInterface");
+    }
+
+    virtual void
+    ShrinkToFit(InnerIdType capacity) {
+    }
+
+    virtual void
+    Serialize(StreamWriter& writer) {
+        StreamWriter::WriteObj(writer, this->total_count_);
+        StreamWriter::WriteObj(writer, this->max_capacity_);
+        StreamWriter::WriteObj(writer, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->Serialize(writer);
+        }
+    }
+
+    /**
+     * @brief Byte size of the underlying io data (io_->size_) written by
+     * Serialize between the interface fields and the tail.
+     *
+     * A positive value also signals that this implementation serializes in
+     * the strict head / io data / tail form, so chunked serialization can
+     * precompute the boundaries; the default 0 opts out.
+     */
+    [[nodiscard]] virtual uint64_t
+    GetIOSize() const {
+        return 0;
+    }
+
+    /**
+     * @brief Chunked-restore hooks: ReserveIO, WriteRaw and DeserializeTail.
+     *
+     * Implement all three or none. The parallel load probes only ReserveIO and
+     * treats UNSUPPORTED_INDEX_OPERATION as "this io keeps no deserialized
+     * bytes", falling back to consuming the component in place; it then assumes
+     * the other two are available. An implementation that provided two of the
+     * three would fail in the tail phase, after the chunk writes already landed.
+     * Both current implementations gate the three on one `if constexpr`, so they
+     * cannot come apart; keep it that way rather than relying on a runtime check.
+     */
+    /**
+     * @brief Read the head (interface fields + io size) and pre-allocate
+     * the io data extent, so that WriteRaw can fill it concurrently.
+     *
+     * The extent is overwritten in full right after this call, so the io
+     * backing it should use a backend declaring
+     * Capabilities::CanResizeForOverwrite; without it the pre-allocation
+     * falls back to a zero-filling Resize, which is a measurable cost for
+     * large components.
+     *
+     * @return the io data size in bytes
+     */
+    virtual uint64_t
+    ReserveIO(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support ReserveIO");
+    }
+
+    /**
+     * @brief Write raw io data bytes into [offset, offset + size); the
+     * extent must be pre-allocated by ReserveIO. Callers may invoke this
+     * concurrently on non-overlapping ranges.
+     */
+    virtual void
+    WriteRaw(const uint8_t* data, uint64_t size, uint64_t offset) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support WriteRaw");
+    }
+
+    /// Read the tail (e.g. code line size, node versions) following the io data.
+    /// Restore layout/configuration derived from these fields, such as the layout's code size.
+    /// The probe path calls this before WriteRaw fills the backing IO: defer any reconstruction
+    /// that reads backing IO contents (e.g. reverse edges) to FinishDeserialize after all fills join.
+    virtual void
+    DeserializeTail(StreamReader& reader) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "GraphInterface does not support DeserializeTail");
+    }
+
+    virtual void
+    Deserialize(StreamReader& reader) {
+        StreamReader::ReadObj(reader, this->total_count_);
+        StreamReader::ReadObj(reader, this->max_capacity_);
+        StreamReader::ReadObj(reader, this->maximum_degree_);
+
+        if (duplicate_tracker_) {
+            duplicate_tracker_->DeserializeBounded(reader, this->max_capacity_);
+        }
+    }
+
+    uint64_t
+    CalcSerializeSize() {
+        auto calSizeFunc = [](uint64_t cursor, uint64_t size, void* buf) { return; };
+        WriteFuncStreamWriter writer(calSizeFunc, 0);
+        this->Serialize(writer);
+        return writer.cursor_;
+    }
+
+    [[nodiscard]] virtual InnerIdType
+    TotalCount() const {
+        return this->total_count_;
+    }
+
+    [[nodiscard]] virtual InnerIdType
+    MaximumDegree() const {
+        return this->maximum_degree_;
+    }
+
+    [[nodiscard]] virtual InnerIdType
+    MaxCapacity() const {
+        return this->max_capacity_;
+    }
+
+    [[nodiscard]] virtual bool
+    InMemory() const {
+        return true;
+    }
+
+    virtual void
+    SetMaximumDegree(uint32_t maximum_degree) {
+        this->maximum_degree_ = maximum_degree;
+    }
+
+    virtual void
+    SetTotalCount(InnerIdType total_count) {
+        this->total_count_ = total_count;
+    };
+
+    virtual void
+    SetMaxCapacity(InnerIdType capacity) {
+        this->max_capacity_ = std::max(capacity, this->total_count_.load());
+    };
+
+    virtual void
+    InitIO(const IOParamPtr& io_param) {
+    }
+
+protected:
+    void
+    UpdateReverseEdges(InnerIdType id,
+                       const Vector<InnerIdType>& old_neighbors,
+                       const Vector<InnerIdType>& new_neighbors);
+
+public:
+    virtual DuplicateTrackerPtr
+    CreateDuplicateTracker() {
+        return nullptr;
+    }
+
+    void
+    InitDuplicateTracker() {
+        duplicate_tracker_ = CreateDuplicateTracker();
+        if (duplicate_tracker_ != nullptr) {
+            duplicate_tracker_->Resize(max_capacity_);
+        }
+    }
+
+    DuplicateTrackerPtr
+    GetDuplicateTracker() const {
+        return duplicate_tracker_;
+    }
+
+    void
+    SetDuplicateTracker(DuplicateTrackerPtr tracker) {
+        duplicate_tracker_ = tracker;
+    }
+
+    void
+    SetDuplicateId(InnerIdType group_id, InnerIdType duplicate_id) {
+        if (duplicate_tracker_) {
+            duplicate_tracker_->SetDuplicateId(group_id, duplicate_id);
+        }
+    }
+
+    std::vector<InnerIdType>
+    GetDuplicateIds(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetDuplicateIds(id);
+        }
+        return {};
+    }
+
+    [[nodiscard]] InnerIdType
+    GetGroupId(InnerIdType id) const {
+        if (duplicate_tracker_) {
+            return duplicate_tracker_->GetGroupId(id);
+        }
+        return id;
+    }
+
+public:
+    InnerIdType max_capacity_{100};
+    uint32_t maximum_degree_{0};
+
+    std::atomic<InnerIdType> total_count_{0};
+    Allocator* allocator_{nullptr};
+
+protected:
+    DuplicateTrackerPtr duplicate_tracker_{nullptr};
+    std::unique_ptr<ReverseEdge> reverse_edges_{nullptr};
+};
+
+}  // namespace vsag

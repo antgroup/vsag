@@ -1,0 +1,137 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <limits>
+#include <type_traits>
+#include <utility>
+
+#include "typing.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+DEFINE_POINTER2(DistHeap, DistanceHeap);
+
+class DistanceHeap {
+public:
+    using DistanceRecord = std::pair<float, InnerIdType>;
+
+    struct AuxiliaryDistanceRecord {
+        DistanceRecord record;
+        float auxiliary;
+        BucketIdType source_bucket_id{-1};
+        InnerIdType source_offset_id{std::numeric_limits<InnerIdType>::max()};
+        uint32_t reserved{0};
+        uint64_t source_version{std::numeric_limits<uint64_t>::max()};
+    };
+
+    static_assert(sizeof(AuxiliaryDistanceRecord) == 32);
+
+    template <class HeapImpl>
+    HeapImpl&
+    GetImpl() {
+        return static_cast<HeapImpl>(*this);
+    }
+
+    struct CompareMax {
+        constexpr bool
+        operator()(DistanceRecord const& a, DistanceRecord const& b) const noexcept {
+            return a.first < b.first;
+        }
+    };
+
+    struct CompareMin {
+        constexpr bool
+        operator()(DistanceRecord const& a, DistanceRecord const& b) const noexcept {
+            return a.first > b.first;
+        }
+    };
+
+public:
+    template <bool max_heap, bool fixed_size>
+    static DistHeapPtr
+    MakeInstanceBySize(Allocator* allocator, int64_t max_size);
+
+    template <bool max_heap, bool fixed_size>
+    static DistHeapPtr
+    MakeInstanceBySizeWithAuxiliary(Allocator* allocator, int64_t max_size);
+
+public:
+    explicit DistanceHeap(Allocator* allocator);
+
+    explicit DistanceHeap(Allocator* allocator, int64_t max_size);
+
+    virtual ~DistanceHeap() = default;
+
+    virtual void
+    Push(const DistanceRecord& record);
+
+    virtual void
+    Push(float dist, InnerIdType id) = 0;
+
+    virtual void
+    PushWithAuxiliary(float dist, InnerIdType id, float auxiliary);
+
+    virtual void
+    PushWithAuxiliary(float dist,
+                      InnerIdType id,
+                      float auxiliary,
+                      BucketIdType source_bucket_id,
+                      InnerIdType source_offset_id,
+                      uint64_t source_version);
+
+    [[nodiscard]] virtual const DistanceRecord&
+    Top() const = 0;
+
+    virtual void
+    Pop() = 0;
+
+    [[nodiscard]] virtual uint64_t
+    Size() const = 0;
+
+    [[nodiscard]] virtual bool
+    Empty() const = 0;
+
+    [[nodiscard]] virtual const DistanceRecord*
+    GetData() const = 0;
+
+    [[nodiscard]] virtual bool
+    StoresAuxiliary() const;
+
+    [[nodiscard]] virtual const AuxiliaryDistanceRecord*
+    GetDataWithAuxiliary() const;
+
+    virtual void
+    Merge(const DistanceHeap& other);
+
+protected:
+    Allocator* allocator_{nullptr};
+    int64_t max_size_{-1};
+};
+
+using DistanceRecordVector = Vector<DistanceHeap::DistanceRecord>;
+
+struct RaBitQCandidateRecord {
+    float lower_bound{std::numeric_limits<float>::max()};
+    float filter_inner_product{std::numeric_limits<float>::quiet_NaN()};
+    InnerIdType id{0};
+    // NaN means that an exact full distance is unavailable for the current query.
+    float full_distance{std::numeric_limits<float>::quiet_NaN()};
+};
+
+using RaBitQCandidateVector = Vector<RaBitQCandidateRecord>;
+}  // namespace vsag

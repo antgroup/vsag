@@ -1,0 +1,11 @@
+# This is a CODEOWNERS file that defines the reviewers of
+# specific directories or files. All the reviewers defined
+# in this will automatically be invited to review a pull
+# request in which modified files match the pattern.
+
+# NOTE: Due to the increasing volume of code submissions driven by AI-assisted
+# coding, human review now serves primarily as a gating step for merge approval.
+# The substantive code review is performed by review agents (Copilot / Gemini).
+
+# All files require review from all four maintainers
+*                        @wxyucs @LHT129 @inabao @jiaweizone

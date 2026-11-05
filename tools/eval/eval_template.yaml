@@ -1,0 +1,27 @@
+global:
+    exporters:
+      print-directly:
+        format: "table"
+        to: "stdout"
+      save-to-file:
+        format: "json"
+        to: "file://tmp/eval_example_output.json"
+      send-to-influxdb:
+        format: "line_protocol"
+        to: "influxdb://127.0.0.1:8086/api/v2/write?org=7d71a0eb85deafbe&bucket=583a2fd8dd85e66c&precision=ns"
+        vars:
+          token: "Token mlIiP-zVfcooHhMbGG9Yk-KfrkHyDc2h-rphnIBda8UMe_6Qocy8tNmV323yxOPEAsC8uIs6_nb-XUSMEAO76A=="
+
+eval_case1:
+    datapath: "/tmp/sift-128-euclidean.hdf5"
+    type: "search" # `build` or `search` or `build,search`
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"fp32","max_degree":32,"ef_construction":300}}'
+    search_params: '{"hgraph":{"ef_search":60}}'
+    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    topk: 10
+    range: 0.5
+    delete_index_after_search: false # free up storage space used by index
+    num_threads_building: 16
+    num_threads_searching: 16

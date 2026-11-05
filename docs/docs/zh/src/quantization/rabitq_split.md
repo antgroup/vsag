@@ -1,0 +1,547 @@
+# RaBitQ x+y Split
+
+RaBitQ x+y split 是 HGraph、IVF 和 Pyramid 面向低比特底库码的存储与搜索模式。
+每条向量拆成
+两条记录：
+
+- 图遍历或 IVF 桶扫描只读取 `x` 个 filter bits。
+- 只有进入重排的候选才读取 `y` 个 supplement bits。
+- 最终重排距离使用完整的 `x+y` bits。
+
+这种布局缩小了图遍历的热数据，同时保留更高精度的 RaBitQ 距离用于最终排序。
+它也支持把 filter record 留在内存中，把访问频率更低的 supplement record 放到磁盘。
+
+## 启用 split 模式
+
+当 base 和 precise 的量化类型都为 `rabitq`，并且配置了
+`rabitq_bits_per_dim_precise` 时，HGraph、IVF 和 Pyramid 自动选择 split 模式：
+
+```json
+{
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 960,
+    "index_param": {
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "use_reorder": true,
+        "rabitq_bits_per_dim_query": 32,
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_error_rate": 1.9,
+        "max_degree": 64,
+        "ef_construction": 400
+    }
+}
+```
+
+相关参数如下：
+
+| 参数 | 含义 |
+| --- | --- |
+| `base_quantization_type` | 必须为 `"rabitq"`。 |
+| `precise_quantization_type` | split 模式下同样必须为 `"rabitq"`。 |
+| `rabitq_bits_per_dim_base` | `x`，图遍历时读取的 filter bit 数。 |
+| `rabitq_bits_per_dim_precise` | `y`，重排时额外读取的 supplement bit 数。 |
+| `rabitq_bits_per_dim_query` | split storage 必须使用 `32`。 |
+| `rabitq_error_rate` | lower-bound 误差项的默认正数倍率。 |
+| `use_reorder` | 建议设为 `true`，使用 `x+y` 距离排序候选。 |
+| `rabitq_fused_datacell` | 仅用于 HGraph；启用融合布局，默认值为 `false`。 |
+| `train_sample_count` | HGraph 最大训练采样数，默认值为 `65536`；显式配置时最小为 `512`。 |
+
+参数约束为：
+
+```text
+1 <= x <= 8
+1 <= y <= 8
+x + y <= 8
+```
+
+如果不配置 `rabitq_bits_per_dim_precise`，HGraph、IVF 和 Pyramid 使用
+standard RaBitQ 路径，
+不会创建 split storage。
+
+### HGraph 融合内存布局
+
+仅对 HGraph，将 `rabitq_fused_datacell` 设为 `true` 后，底层节点的邻居、
+cluster id、label、x-bit code 和 y-bit supplement 会存入同一个 cache-line
+对齐的 record。Pyramid 使用普通 split storage；`rabitq_fused_datacell` 不是
+Pyramid 参数。HGraph 专用搜索循环直接读取该 record，并联合预取图邻居和
+量化码。codec 使用固定随机种子可复现训练的 16 个 residual clusters。
+
+默认情况下，fused HGraph 最多使用 65,536 个向量训练基础 RaBitQ 量化器和 fused
+KMeans codec。`train_sample_count` 小于数据集大小时，使用固定 seed 的均匀 reservoir
+sampling 选择相应数量的向量。增大该值可能提升 cluster centroid 的质量，但会增加
+构建时间和训练阶段的临时内存；将其设置为不小于数据集大小即可使用全部向量训练。
+
+对于关注单查询延迟的场景，可以使用 `rabitq_use_fht: true`，以 FHT/Kac 旋转替代
+稠密随机正交矩阵。该选项与 `rabitq_fused_datacell` 相互独立。这两个选项都必须在
+`Build` 前设置；已有的稠密旋转索引或普通 split 索引需要重建，不能通过检索参数
+切换。
+
+该选项创建支持增量修改的内存索引。完成 `Build` 或 Deserialize 后，仍支持
+`Add`、mark remove、向量/ID/属性/extra-info 更新、检索（包括过滤、iterator、
+Range Search 和并发查询）、按 ID 计算距离、内存统计以及 Serialize/Deserialize。
+force remove、Merge、
+Tune、Clone、ExportModel 和 Build Cache 导入导出仍不支持。`Build` 和 Deserialize
+默认保留 mutable 状态以及搜索锁和节点锁；确认不再修改后，可以显式调用
+`SetImmutable`，以终态切换移除搜索路径上的这些锁，之后的修改请求会被
+拒绝。
+
+每个 record 以 4-byte 邻居数量开头，随后是纯 `InnerIdType` 邻居 ID；节点不再有
+version，邻居 ID 也不编码 version。之后依次保存 cluster id、对齐后的 external
+label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。存储可以在
+`Build` 以及后续 `Add` 期间按需增长。
+
+优化构建会临时使用 SQ8 scalar code 计算对称的 base-to-base 图距离，构建
+完成后立即释放；最终索引只保留 fused RaBitQ record。构建后的 `Add` 会按需
+解码 fused record 来更新图，不会常驻保存 SQ8 或原始向量副本；关注插入
+吞吐时建议使用批量 Add。
+
+当 `graph_type="pipnn"` 时，fused HGraph 并行预编码整个批次，并在发布索引时复用
+这些字节，每条输入只编码一次。临时编码缓冲区随输入批次增大；输入标签全部被接受时，
+该缓冲区会在 PiPNN 构建底层图前释放。
+
+融合布局是显式启用的，并且比普通 split storage 有更严格的约束：
+
+- `1 <= x <= 4`、`y >= 1` 且 `x + y <= 8`。
+- metric 必须是 L2 或内积。
+- graph、filter code 和 supplement code 必须全部使用内存 IO。
+- 必须关闭 MCI、`deduplicate_storage`、remove metadata、reverse edges 和 force remove。
+- fused 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
+- 不支持旧版 v0.14 序列化格式。
+- fused slab 使用独立 wire version；当前格式会明确拒绝曾包含 node version 和
+  remove flags 的开发期旧格式，不提供迁移分支。
+
+未启用该参数的索引保持原有布局、行为和序列化格式。
+
+使用以下搜索参数启用 filter/lower-bound 搜索路径：
+
+```json
+{
+    "hgraph": {
+        "ef_search": 200,
+        "parallelism": 4,
+        "rabitq_one_bit_search": true,
+        "rabitq_error_rate": 1.9
+    }
+}
+```
+
+Pyramid 需要把对应搜索参数放在 `pyramid` 下：
+
+```json
+{
+    "pyramid": {
+        "ef_search": 200,
+        "rabitq_one_bit_search": true,
+        "rabitq_error_rate": 1.9
+    }
+}
+```
+
+外部搜索参数仍命名为 `rabitq_one_bit_search`，但对 split 索引，它会使用
+`rabitq_bits_per_dim_base` 配置的全部 `x` 个 filter bits。
+`hgraph.rabitq_error_rate` 和 `pyramid.rabitq_error_rate` 可以分别为对应索引的
+单次搜索覆盖默认值，且不需要重建索引。原生 HGraph fused record 保存
+乘倍率前的几何误差尺度；HNSW-compatible fused `1+7` record 保留按规范
+默认值缩放的 metadata，并在查询时按相对该默认值的倍率应用 override。
+
+IVF 桶扫描会自动使用配置的 `x` 个 filter bits，不需要
+`rabitq_one_bit_search` 开关。`ivf.factor` 控制进入 supplement 重排的
+过滤阶段候选数（`factor * topk`）。
+## 搜索流程
+
+split 搜索分为四个阶段：
+
+1. query 只做一次变换和归一化。residual IVF 使用原始变换 query 构建一份
+   共享的 HighAcc lookup table。
+2. IVF 桶扫描只读取 packed x-bit filter record，并输出距离估计及可复用的
+   量化 filter 内积。
+3. IVF 按 filter distance 保留 `factor * topk` 个候选；candidate heap 同时携带
+   source bucket、offset 和 version，用于在并发更新时校验保存的内积。
+4. 正常重排只读取 y-bit supplement，并与保存的 filter contribution 合并。只有
+   候选无效或过期时的正确性 fallback 才重新读取 packed x bits。
+
+## 编码和 bit-plane
+
+定义：
+
+```text
+d       = 变换后的维度
+x       = 每维 filter bit 数
+y       = 每维 supplement bit 数
+B       = x + y
+P       = ceil(d / 8)，一个 bit-plane 的字节数
+q_i     = 变换并归一化后的 query 坐标
+u_i     = 无符号 B-bit 底库码，0 <= u_i < 2^B
+```
+
+完整 code 的中心化表示为：
+
+```text
+c_B = (2^B - 1) / 2
+z_i = u_i - c_B
+N_B = sqrt(sum_i z_i^2)
+```
+
+`PackIntoPlanes` 把 `u_i` 的每一个逻辑 bit 存成独立 bit-plane。filter 和
+supplement 的划分为：
+
+```text
+f_i = floor(u_i / 2^y)    # 高 x bits
+s_i = u_i mod 2^y         # 低 y bits
+u_i = 2^y * f_i + s_i
+```
+
+物理布局让高位 filter planes 连续存储：
+
+```text
+filter record:     logical B-1, B-2, ..., B-x
+supplement record: logical 0, 1, ..., y-1
+```
+
+因此图遍历只需扫描 `x * P` 字节的 plane payload；重排只额外读取 `y * P`
+字节的 plane payload，不计元数据和对齐。
+
+## Datacell 布局
+
+`RaBitQSplitDataCell` 内部维护两个 `RaBitQSplitCodeStorage`。
+
+### Filter record
+
+`x_bit_cell_` 中的 filter record 包含：
+
+```text
+x 个高位 bit-plane
+base norm
+x > 1 时的 filter-code norm
+可选 MRQ residual norm
+IP/cosine 使用的可选 raw norm
+lower-bound error
+filter approximation error
+```
+
+每条向量的 filter plane payload 为：
+
+```text
+FilterPlanesSize = x * ceil(d / 8)
+```
+
+filter record 是图遍历的热数据。只要 x-bit 估计有效，图搜索和预取都不需要
+访问 supplement record。
+
+### Supplement record
+
+`supplement_cell_` 中的 supplement record 包含：
+
+```text
+y 个低位 bit-plane
+full-code norm
+full-code approximation error
+当前 metric 和 transform 所需的其他元数据
+```
+
+每条向量的 supplement plane payload 为：
+
+```text
+SupplementPlanesSize = y * ceil(d / 8)
+```
+
+完整 code 的 payload 约为每条向量 `(x+y) * d / 8` 字节，此外还有对齐后的
+norm、error 和可选 transform 元数据。
+
+## X-bit filter 距离和 lower bound
+
+第 `i` 维 filter code 为 `f_i`，取值范围 `[0, 2^x - 1]`。定义：
+
+```text
+c_x   = (2^x - 1) / 2
+N_x   = sqrt(sum_i (f_i - c_x)^2)
+S_x   = sum_i q_i * f_i
+Q_sum = sum_i q_i
+rho_x = (S_x - c_x * Q_sum) / N_x
+```
+
+构建索引时，RaBitQ 保存 filter approximation error 的绝对值 `E_x`，并计算
+几何误差尺度：
+
+```text
+E_safe    = clamp(abs(E_x), 1e-5, 1)
+epsilon_x = sqrt(max(0, 1 - E_safe^2) / max(1, d - 1))
+```
+
+修正后的 filter 内积估计为：
+
+```text
+rho_hat_x = rho_x / abs(E_x)
+```
+
+对 L2，设 base norm 为 `N_o`、query norm 为 `N_q`，x-bit 距离和 lower bound 为：
+
+```text
+D_x = N_o^2 + N_q^2 - 2 * N_o * N_q * rho_hat_x
+
+LB = D_x
+     - 2 * N_o * N_q * rabitq_error_rate * epsilon_x / abs(E_x)
+```
+
+实现还会从 `LB` 中减去一个很小的浮点保护量。IP 和 cosine 会按各自的 metric
+换算误差项。
+
+lower bound 只用于安全地排除候选。`D_x` 是图遍历距离，最终排序使用完整的
+`x+y` 距离。
+
+## IVF 1-bit、2-bit 和 3-bit 的 32-vector FastScan 布局
+
+IVF split storage 使用 `x = 1..3` 时，`RaBitQSplitBucketDataCell` 会把每个桶
+按 32 个候选一组打包。桶内 packed blocks 是 filter code 唯一的持久化布局，
+其中保存面向 SIMD 的 filter planes 和紧凑元数据。只有正确性 fallback 或按 ID
+读取完整 code 时，才从 block 临时 unpack 单 lane x bits；正常 supplement 重排
+只读取独立的 y-bit record。
+
+设 `G = ceil(d / 8) * 2`，即单个 bitplane 的四维分组数。每组为每个候选保存
+一个四位 mask，32 个 mask 转置为 16 bytes。低 nibble 表示候选 `0..15`，
+高 nibble 表示候选 `16..31`；两部分均采用 lane 顺序
+`0, 8, 1, 9, ..., 7, 15`。多个 bitplane 保持分离，并按 plane-major 顺序连续
+存放。
+
+对于 `x = 1`，每组构建一个 16 项子集和表：
+
+```text
+LUT_g[m] = sum(q_(4g+j) for j in [0, 3] when bit_j(m) is set)
+```
+
+对于 `x = 2` 或 `x = 3`，设 bitplane 0 为最高位，中心化 LUT 为：
+
+```text
+weight(x, p) = 2^(x - p - 2)
+LUT_(p,g)[m] = weight(x, p) * sum((2 * bit_j(m) - 1) * q_(4g+j))
+```
+
+2-bit 的 plane 权重是 `{1, 0.5}`，3-bit 是 `{2, 1, 0.5}`。超出 `d` 的坐标
+按零处理。
+
+1-bit 和 2-bit 扫描使用一个 query 级统一 uint8 quantizer。3-bit 扫描对每个
+plane 独立量化，避免低权重 plane 因最高 plane 的值域大四倍而损失有效精度：
+
+```text
+delta[p] = (v_max[p] - v_min[p]) / 255
+plane_sum[p] ~= G * v_min[p] + delta[p] * sum LUT_u8[p][code]
+centered_ip ~= plane_sum[0] + plane_sum[1] + plane_sum[2]
+```
+
+3-bit scanner 对三个连续 plane 分别调用一次 `PQFastScanLookUp32`。总 shuffle
+分组数和 packed-code 大小仍是 `3 * G`，与单次合并扫描相同，但可以使用独立
+反量化 scale。
+
+对于 1-bit，使用 `sum(q)` 和 `sqrt(d)` 把 lookup sum 转换为归一化二值内积。
+对于 2-bit 和 3-bit，lookup sum 已是中心化内积，再除以保存的 filter-code
+norm。随后所有路径都使用 RaBitQ norm 和 error 元数据恢复过滤阶段距离。
+
+packed filter planes 后紧跟 32 个候选的元数据。桶尾不足 32 条的 block 用零码
+补齐，扫描器只返回有效候选。运行时会分派到 generic、SSE、AVX2 或 AVX-512
+实现。byte-LUT 反量化结果会保存为 `S_x` 并在最终 `x+y` 估计中复用，因此过滤与
+重排共享同一个 LUT 量化误差。更宽的 filter 继续使用
+bit-plane batch 路径。
+
+配置示例：
+
+```json
+{
+    "rabitq_bits_per_dim_base": 1,
+    "rabitq_bits_per_dim_precise": 7,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 2,
+    "rabitq_bits_per_dim_precise": 6,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+```json
+{
+    "rabitq_bits_per_dim_base": 3,
+    "rabitq_bits_per_dim_precise": 5,
+    "rabitq_bits_per_dim_query": 32
+}
+```
+
+### GIST1M 对比实验
+
+下表对比传统 8-bit IVF RaBitQ 与 split 布局在
+`gist-960-euclidean.hdf5` 上的结果。数据集包含 1,000,000 条 960 维 L2
+base 向量；索引使用 1,024 个桶、100,000 条训练样本、16 个构建线程，并设置
+`rabitq_bits_per_dim_query = 32`。搜索使用单线程、扫描 32 个桶、`factor = 10`、
+top-10，共计时 5,000 次查询。split 搜索结果启用了上述 32-vector FastScan 布局。
+
+| 布局 | 构建时间（秒） | 构建 TPS | 索引内存（bytes） | 搜索 QPS | 平均延迟（ms） | Recall@10 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 传统 RaBitQ 8-bit | 150.742 | 6,633.840 | 1,284,595,208 | 17.767 | 56.280 | 0.9197 |
+| Split RaBitQ 1+7 | 551.701 | 1,812.576 | 1,450,355,304 | 118.333 | 8.447 | 0.9019 |
+| Split RaBitQ 2+6 | 509.431 | 1,962.974 | 1,582,237,512 | 74.786 | 13.368 | 0.9128 |
+| Split RaBitQ 3+5 | 496.873 | 2,012.589 | 1,702,580,248 | 67.892 | 14.726 | 0.9094 |
+
+这些数据用于单机方案对比，并非通用的性能承诺。split storage 需要构建两路编码，
+并在内存中保存一份桶级 FastScan 副本；作为交换，filter 扫描不再为每个候选读取
+完整 8-bit code。在该负载中，2+6 的召回最接近传统 8-bit RaBitQ，同时搜索吞吐
+约提升 4.2 倍；1+7 的吞吐最高，但召回损失也更明显。
+
+## Query lookup table 和 SIMD
+
+当 `x = 2` 或 `x = 3` 时，query computer 会构建 FastScan 风格的 byte lookup
+table。每一行对应八个 query 坐标，并包含 256 个表项：
+
+```text
+LUT[block][byte_value]
+    = byte_value 在该 8-D block 中置位位置对应的 q_i 之和
+```
+
+随后每个 filter plane 的每个字节只需要查表一次，不必逐坐标解码八次。不同
+filter plane 再按二进制权重合成为 `S_x`。
+
+AVX2 和 AVX512 kernel 会同时 gather 多个 LUT 表项，并提供 batch-of-four 路径；
+scalar 实现作为可移植 fallback。关键入口为：
+
+- `RaBitQFloatMultiBitIPByLookup`
+- `RaBitQFloatMultiBitIPBatch4ByLookup`
+- `RaBitQFloatBuildByteIPLookupTable`
+
+不在专用范围内的 x-bit 宽度仍由通用 bit-plane 计算路径支持。
+
+## Reorder 只扫描 y 个 supplement bits
+
+完整无符号 code 满足：
+
+```text
+sum_i q_i * u_i
+    = 2^y * sum_i q_i * f_i
+      + sum_i q_i * s_i
+```
+
+当 `x >= 2` 时，HGraph fused 专用 search/reorder 路径会把遍历阶段算出的精确
+x-bit filter inner product 直接传给 reorder，并直接从 node record 读取 code，
+因此 full rerank 只计算 y supplement planes 对应的第二项。对使用 x-bit lookup
+filter 的 L2 搜索，HGraph、IVF 和 Pyramid 会把之前计算的 filter distance
+作为 hint 传给 reorder。`ComputeDistWithSplitCodeAndFilterDist` 从 hint 恢复第一项，
+只从 y 个 supplement planes 计算第二项：
+
+```text
+full contribution = shifted filter contribution + supplement contribution
+```
+
+因此 fused `2+y`、`3+y`、`4+y` 会复用精确的 x-bit filter inner product，每个
+重排候选只扫描 y 个 supplement planes。携带 filter-IP/full-distance 的 richer
+candidate 只存在于 HGraph fused 专用路径；通用 HGraph searcher、Pyramid 和
+`ReorderInterface` 继续使用原有 distance/id candidate 协议。
+fused `1+y` 的遍历使用 4-bit query bit-plane 与 popcount 近似值；精确重排会
+重新计算它的 1-bit 精确贡献，因为该近似值不能作为精确 full-distance hint。
+如果没有可用 hint，代码会直接从两个 split records 计算相同的最终距离。
+
+## 内存、磁盘和混合 IO
+
+如果没有单独配置 supplement IO，两个 record 使用相同的 base IO 类型。
+
+### 两个 record 都在内存
+
+```json
+{
+    "base_io_type": "block_memory_io"
+}
+```
+
+### 两个 record 都在磁盘
+
+```json
+{
+    "base_io_type": "async_io",
+    "base_file_path": "/data/hgraph_rabitq_split"
+}
+```
+
+VSAG 会为 filter 和 supplement record 创建不同的 backing path。
+
+### Filter 在内存，supplement 在磁盘
+
+```json
+{
+    "base_io_type": "block_memory_io",
+    "base_supplement_io_type": "async_io",
+    "base_file_path": "/data/hgraph_rabitq_split"
+}
+```
+
+当前支持的 mixed-IO 组合把 `x_bit_cell_` 保存在 block memory，把
+`supplement_cell_` 放在 async IO。批量重排时，filter record 通过直接指针读取，
+`MultiRead` 只拉取 supplement records。可以显式设置
+`base_supplement_file_path`；否则 VSAG 根据 `base_file_path` 生成 supplement path。
+
+## 序列化和加载
+
+使用标准的索引级序列化接口即可，业务侧不需要分别持久化两个 record。
+
+```cpp
+std::ofstream out("/path/to/index.bin", std::ios::binary);
+auto serialized = index->Serialize(out);
+
+auto loaded = vsag::Factory::CreateIndex("hgraph", index_params).value();
+std::ifstream in("/path/to/index.bin", std::ios::binary);
+auto deserialized = loaded->Deserialize(in);
+```
+
+split datacell 按以下顺序序列化：
+
+1. datacell 基础状态和 supplement IO type。
+2. filter storage。
+3. supplement storage。
+4. RaBitQ quantizer 状态。
+
+创建目标索引时必须使用与序列化索引兼容的参数，尤其是 `dim`、`metric_type`、
+x/y bit 数和 query bits。修改编码参数需要重建索引；只调整搜索参数
+`hgraph.rabitq_error_rate` 或 `pyramid.rabitq_error_rate` 不需要。
+
+对于 fused 索引，codec model 随 split datacell 序列化，每个节点的 code 只在
+bottom-graph slab 中序列化一次。普通和 streaming 往返都会保留该布局，
+不会再生成一份随节点数增长的 split code 副本。
+
+## 实现位置
+
+| 模块 | 文件 / 入口 |
+| --- | --- |
+| 外部 x/y 参数映射 | `hgraph_param_mapping.cpp`、`pyramid.cpp` |
+| split record 和 IO | `src/datacell/rabitq_split_datacell.h` |
+| plane 布局和 code 拆分 | `RaBitQuantizer::StoredPlaneIndex`、`SplitCode` |
+| filter 距离和 lower bound | `ComputeDistWithOneBitLowerBound` |
+| 直接计算 split distance | `ComputeDistWithSplitCode` |
+| 使用 filter distance hint 的 reorder | `ComputeDistWithSplitCodeAndFilterDist`、`ComputeDistWithSplitCodeAndFilterIP` |
+| SIMD dispatch | `src/simd/rabitq_simd.cpp` |
+| AVX2 / AVX512 lookup kernel | `src/simd/avx2.cpp`、`src/simd/avx512.cpp` |
+| 内存/磁盘/混合 IO 示例 | `examples/cpp/323_index_hgraph_rabitq_split.cpp` |
+
+## 使用注意
+
+- Pyramid 增量 `Add` 会在搜图和剪枝时使用有界的操作内缓存，复用解包后的标量编码；
+  模型反序列化后同样生效，无需增加参数，持久化的 split record 格式保持不变。
+- split storage 当前可用于 HGraph、IVF 和 Pyramid，并且要求 fp32 query code。
+  Pyramid 的 split 索引默认启用 one-bit split 搜索路径；如需强制使用普通
+  搜索路径，
+  可以在 `pyramid` 搜索参数下传 `rabitq_one_bit_search: false`。
+- 支持 `l2`、`ip` 和 `cosine`。当 `x >= 2` 时，canonical 普通 split 路径和
+  HGraph fused 路径会为 L2 和内积直接复用精确 filter inner product；其他情况
+  会安全地计算完整 split distance。
+- fused datacell 只支持 L2、内积以及上文所述的纯内存配置。
+- HGraph fused 在 `Build` 和反序列化后保持可变，支持构建后 `Add`、mark remove
+  以及向量/ID/属性/extra-info 更新，但不支持 force remove。需要无锁只读检索
+  路径时，显式调用 `SetImmutable`。
+- 启用 `support_duplicate: true` 时，重复向量 build probe 和展开 alias 的查询使用
+  HGraph canonical searcher；fused slab 仍负责保存 code 和 graph。
+- 除非已经验证仅靠 x-bit 遍历距离能满足召回要求，否则应保持
+  `use_reorder: true`。
+- 修改 x、y、metric 或 transform 参数后必须重建索引；在搜索参数中覆盖
+  `hgraph.rabitq_error_rate` 或 `pyramid.rabitq_error_rate` 不需要重建。
+- RaBitQ 通用说明见 [RaBitQ](rabitq.md)，完整 HGraph 参数见
+  [HGraph 索引](../indexes/hgraph.md) 和 [Pyramid 索引](../indexes/pyramid.md)。

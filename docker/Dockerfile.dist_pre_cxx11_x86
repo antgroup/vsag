@@ -1,0 +1,6 @@
+
+# base image
+FROM dockcross/manylinux2014-x64
+
+# install deps
+RUN yum update && yum install -y gcc-gfortran python3-devel libaio-devel

@@ -1,0 +1,117 @@
+# Contributing to VSAG
+
+First of all, thank you for taking the time to contribute to VSAG! Contributors like you are what keep the project alive and growing. 🎉
+
+> If this is your first open-source contribution, we recommend walking through the
+> [First Contributions](https://github.com/firstcontributions/first-contributions) tutorial to get
+> familiar with the basic workflow.
+
+The sections below cover what you may want to know before contributing.
+
+## Ways to Contribute
+
+1. **Report bugs.** File a bug issue with enough detail to reproduce the problem. If you consider
+   the issue urgent, mention the VSAG team in a comment.
+2. **Propose features.** File a feature request issue describing the expected behavior. Discuss the
+   design with the VSAG team and the community before implementation. Once the plan is agreed,
+   follow the [contribution flow](#contribution-flow).
+3. **Implement features or fix bugs.** Pick up an open issue and follow the
+   [contribution flow](#contribution-flow). Feel free to ask for clarifications by commenting on
+   the issue and @-mentioning the VSAG team.
+
+## Contribution Flow
+
+> We use [GitHub Flow](https://docs.github.com/en/get-started/using-github/github-flow) to
+> collaborate on VSAG.
+
+1. Fork the VSAG repository on GitHub.
+2. Clone your fork locally: `git clone git@github.com:<yourname>/vsag.git`.
+3. Create a working branch: `git checkout -b my-topic-branch`.
+4. Make changes, run local checks, commit, and push with
+   `git push --set-upstream origin my-topic-branch`.
+5. Open a pull request on GitHub.
+
+If you already have a local clone, update it before starting so that merge conflicts are less
+likely:
+
+```bash
+git remote add upstream git@github.com:antgroup/vsag.git
+git checkout main
+git pull upstream main
+git checkout -b my-topic-branch
+```
+
+## Guidelines
+
+Before opening a pull request, make sure your changes pass local checks and follow the VSAG
+coding style.
+
+- New features must ship with tests that demonstrate correct behavior and guard against
+  regressions.
+- Bug fixes should add a regression test covering the triggering case; a missing test is usually
+  what allowed the bug in the first place.
+- Preserve API compatibility when editing code under `include/`.
+- Do not include internal headers (from `src/`) in public headers (under `include/`).
+- When contributing a new feature, remember that the maintenance cost shifts to the VSAG team by
+  default — we evaluate contributions by weighing benefit against long-term maintenance.
+
+## Signing Off (DCO)
+
+All contributions to this project must include a
+[Developer Certificate of Origin (DCO)](https://developercertificate.org/) sign-off. The sign-off
+**must** be included in every commit message in the form
+`Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without a DCO
+sign-off cannot be accepted.
+
+```text
+This is my commit message
+
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+Git provides a `-s` flag that appends the trailer automatically:
+
+```bash
+git commit -s -m "This is my commit message"
+```
+
+For contributions made with the help of an AI coding agent (OpenCode, Claude Code, Codex,
+etc.), only human contributors sign off on the DCO; the AI agent **must not** add its
+own `Signed-off-by` trailer, because only a human can legally certify the DCO. Each human
+contributor still adds their own `Signed-off-by:` trailer as usual. Instead of signing off,
+attribute the AI agent with an `Assisted-by:` trailer that follows the
+[Linux kernel AI Coding Assistants policy](https://docs.kernel.org/process/coding-assistants.html),
+in the form `Assisted-by: AgentName:ModelVersion`. Place the human `Signed-off-by:` line(s) first,
+followed by the `Assisted-by:` line, for example:
+
+```text
+Signed-off-by: Random J Developer <random@developer.example.org>
+Assisted-by: OpenCode:claude-opus-4.7
+```
+
+The human submitter is responsible for reviewing AI-generated changes, ensuring license
+compliance, and taking full responsibility for the contribution.
+
+## Commit Messages and PR Labels
+
+- Follow [Conventional Commits](https://www.conventionalcommits.org/); common prefixes include
+  `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`, `ci:`.
+- If a commit must skip CI, put `[skip ci]` at the **beginning** of the subject line, e.g.
+  `[skip ci] docs: fix typo in README`.
+- Every PR **must** carry two labels (enforced by Mergify, required to merge):
+  - `kind/*`: `kind/bug`, `kind/feature`, `kind/improvement`, or `kind/documentation`.
+  - `version/*`: the target release, e.g. `version/1.0`, `version/0.18`.
+
+## Coding Style
+
+Read the [C++ Coding Guide](coding_style.md) before changing C++ code. It documents the exact
+clang-format 20 and clang-tidy 20 rules, naming conventions, diagnostic suppressions, and local
+commands required by VSAG.
+
+## Local Testing
+
+Run the full test suite and make sure it passes:
+
+```bash
+make test
+```

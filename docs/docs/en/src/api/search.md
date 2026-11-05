@@ -1,0 +1,268 @@
+# Search Request & Filters
+
+This page covers the types that describe *how* to search: the unified
+[`SearchRequest`](#searchrequest), the filtering primitives [`Filter`](#filter) and
+[`Bitset`](#bitset), and the [`IteratorContext`](#iteratorcontext) used for incremental search. The
+deprecated [`SearchParam`](#searchparam-deprecated) is documented at the end for migration.
+
+## `SearchRequest`
+
+Declared in `vsag/search_request.h`. `SearchRequest` is a plain struct that bundles every option for
+[`Index::SearchWithRequest`](index_class.md#searchwithrequest). Fill in the fields you need and leave
+the rest at their defaults.
+
+```cpp
+vsag::SearchRequest request;
+request.query_ = query;      // DatasetPtr with one query vector
+request.mode_ = vsag::SearchMode::KNN_SEARCH;
+request.topk_ = 10;
+request.params_str_ = R"({"hgraph": {"ef_search": 100}})";
+
+auto result = index->SearchWithRequest(request);
+```
+
+### `SearchMode`
+
+```cpp
+enum class SearchMode {
+    KNN_SEARCH = 1,    // return the top-k nearest vectors
+    RANGE_SEARCH = 2,  // return all vectors within radius_
+};
+```
+
+### Basic fields
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `query_` | `DatasetPtr` | `nullptr` | The query. HGraph and IVF KNN requests support multiple query vectors; other requests allow one. |
+| `mode_` | `SearchMode` | `KNN_SEARCH` | KNN vs. range search. |
+| `topk_` | `int64_t` | `10` | Neighbors to return (KNN mode). Must be positive. |
+| `radius_` | `float` | `0.5` | Distance threshold (range mode). Non-negative. |
+| `limited_size_` | `int64_t` | `-1` | Cap on range results; `-1` means no limit. |
+| `params_str_` | `std::string` | `""` | Algorithm-specific search params as JSON (e.g. `ef_search`). |
+
+### Custom query distance callback
+
+`distance_batch_func_` optionally supplies query-to-vector scores from application code. It receives
+stable external vector IDs, so a closure can keep the query and query-specific state outside VSAG:
+
+```cpp
+request.distance_batch_size_ = 32;
+request.distance_batch_func_ = [query](const int64_t* ids, uint64_t count, float* scores) {
+    for (uint64_t i = 0; i < count; ++i) {
+        scores[i] = Score(query, ids[i]);
+    }
+};
+```
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `distance_batch_func_` | `SearchDistanceBatchFunc` | `nullptr` | Fills one score for each input external ID, in input order. Smaller finite scores are better. |
+| `distance_batch_size_` | `uint64_t` | `1` | Maximum IDs passed to one callback invocation. Set this to the scorer's efficient batch width for batched inference or external data access. Must be positive when a callback is set. |
+
+The callback is request-scoped and is not serialized. It may capture the query. `hgraph` permits a
+null `query_` in callback mode, while `ivf` still requires one query vector for bucket routing. The
+callback must be stable for one request, thread-safe if the caller enables parallel execution,
+non-throwing, and must write only finite scores.
+
+`brute_force` uses the callback for exact KNN and range search. `hgraph` supports KNN only; the
+callback drives graph traversal and final ordering, while the graph remains built with its configured
+built-in metric. Therefore recall under the callback score is not guaranteed. HGraph may score
+filtered traversal nodes to preserve graph connectivity, but filtered nodes are never returned.
+Callback HGraph does not support parallel search or `brute_force_threshold`; those configurations
+are rejected rather than silently changing search semantics.
+
+`ivf` supports callback KNN with a non-null single query vector. IVF uses its configured built-in
+metric to select `scan_buckets_count` buckets, then applies the callback to candidates in those
+buckets. The callback controls candidate ranking but cannot recover vectors outside the selected
+buckets; increase `scan_buckets_count` to improve recall. Callback IVF does not support range search,
+`disable_bucket_scan`, or bucket-graph search. Those configurations are rejected.
+Reordering is automatically disabled in callback mode. Other indexes do not support the callback.
+
+IVF callback search supports bucket-parallel execution using `parallelism` in the IVF search
+parameters (for example, `{"ivf":{"scan_buckets_count":8,"parallelism":4}}`)
+when a thread pool is available; otherwise it executes serially. Each worker owns its attribute
+Executor, batch buffers, and result heap. The processing order is **attribute filter → distance
+callback → local top-k score check → request filter → heap insertion**. The potentially expensive
+request filter is called only if the worker heap is not full or the score can improve it. Only
+candidates passing that filter enter the heap and tighten its threshold. Merging worker heaps does
+not call the filter again.
+
+Both the callback and request filter, including their shared/captured state, must support concurrent
+calls when parallel search is enabled. Filter decisions must remain stable during a request and
+must not depend on invocation order or whether other IDs have been checked.
+Batch composition and invocation order can vary; per-ID
+scores must not depend on either. `distance_batch_size_` remains the maximum width of each call,
+not a concurrency limit. Equal-score result IDs may differ with execution order. Worker-local
+thresholds can be looser than a serial threshold, so parallel search may perform more filter calls;
+score pruning reduces filter and heap work, not distance evaluations already submitted to the callback.
+In reasoning output, scored candidates are recorded as visited even if the score gate skips them.
+A filter rejection is recorded only when that filter actually runs and rejects the candidate;
+diagnostics never invoke the expensive filter solely to classify a score-pruned candidate.
+
+### IVF bucket routing
+
+IVF accepts `{"ivf":{"scan_buckets_count":N,"disable_bucket_scan":true}}` through
+`params_str_`. This routing-only mode returns the `N` selected bucket IDs per query in the
+result `Dataset` instead of vector labels. `NumElements()` equals the number of queries,
+`Dim()` equals `scan_buckets_count`, `GetIds()` contains bucket IDs (with `-1` for empty
+slots), and `GetDistances()` has distances to bucket centroids. No vector scan is performed,
+so filters, `topk`, range limits, reordering, and reasoning options are ignored.
+
+### IVF bucket IDs bypass
+
+The `bucket_ids_` field allows callers to provide pre-selected bucket IDs, bypassing IVF's
+internal bucket routing (`ClassifyDatasForSearch`). When non-empty, the search skips centroid-based
+selection and scans only the specified buckets.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `bucket_ids_` | `std::vector<std::vector<int64_t>>` | `{}` | Pre-selected bucket IDs for bypassing IVF routing. |
+
+**Semantics:**
+- **Empty** (default): Use normal bucket routing via `ClassifyDatasForSearch`.
+- **Non-empty**: Skip routing and scan only the provided bucket IDs.
+- **Batch IVF KNN**: One outer `bucket_ids_` entry per query vector.
+  Result is rectangular: `NumElements()` is query count, `Dim()` is `topk_`.
+  Missing neighbors are `-1` with infinite distance.
+
+**Constraints:**
+- Batch IVF search supports KNN only; custom query distance and reasoning labels are unsupported.
+- A non-empty outer vector must contain exactly one non-empty entry per query vector.
+- Each bucket ID must be in range `[0, bucket_count)`.
+- Duplicate bucket IDs are rejected.
+- Incompatible with `disable_bucket_scan` mode.
+- Caller is responsible for ordering bucket IDs (no automatic sorting).
+
+### Filtering fields
+
+Three filtering mechanisms are available and are combined with logical **AND** when more than one is
+enabled.
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `enable_attribute_filter_` | `bool` | `false` | Enable SQL-style attribute filtering. |
+| `attribute_filter_str_` | `std::string` | `""` | The filter expression (see below). Requires `enable_attribute_filter_`. |
+| `enable_filter_` | `bool` | `false` | Enable a custom [`Filter`](#filter) callback. |
+| `filter_` | `FilterPtr` | `nullptr` | The filter object. Requires `enable_filter_`. |
+| `enable_bitset_filter_` | `bool` | `false` | Enable a [`Bitset`](#bitset) filter. |
+| `bitset_filter_` | `BitsetPtr` | `nullptr` | The bitset. `Test(id) == true` **excludes** id. Requires `enable_bitset_filter_`. |
+
+The `attribute_filter_str_` grammar is SQL-like. Examples:
+
+```text
+category = 'electronics' AND price != 1000
+multi_in(category, ['electronics', 'clothing']) AND multi_notin(color, ['red', 'blue'])
+```
+
+See [Attribute Filter (Hybrid Search)](../advanced/attribute_filter.md) and
+[Filtered Search](../advanced/filtered_search.md).
+
+### Resource & iterator fields
+
+| Field | Type | Default | Meaning |
+|-------|------|---------|---------|
+| `search_allocator_` | `Allocator*` | `nullptr` | Per-search allocator; falls back to the index allocator when null. |
+| `enable_iterator_search_` | `bool` | `false` | Enable incremental (iterator) search. |
+| `p_iter_ctx_` | `IteratorContext**` | `nullptr` | Handle to the iterator state, reused across calls. |
+| `is_last_search_` | `bool` | `false` | Marks the final call of an iterator sequence. |
+| `expected_labels_` | `std::vector<int64_t>` | `{}` | Ids expected in the result; enables reasoning analysis of missed recalls. |
+
+See [Per-Search Allocator](../advanced/search_allocator.md) and
+[Iterator Search](../advanced/iterator_search.md), plus `examples/cpp/313`/`314` for the allocator.
+
+## `Filter`
+
+Declared in `vsag/filter.h`. Implement this abstract class to express arbitrary "keep this id?"
+logic. Hold it through `FilterPtr` (`std::shared_ptr<Filter>`).
+
+```cpp
+class Filter {
+public:
+    enum class Distribution { NONE = 0, RELATED_TO_VECTOR };
+
+    virtual bool CheckValid(int64_t id) const = 0;          // true  => KEEP the id
+    virtual bool CheckValid(const char* data) const;         // extra-info variant (default true)
+    virtual float ValidRatio() const;                        // fraction kept (default 1.0)
+    virtual Distribution FilterDistribution() const;         // hint (default NONE)
+    virtual void GetValidIds(const int64_t** valid_ids, int64_t& count) const;
+};
+```
+
+> **Convention:** `Filter::CheckValid(id)` returns `true` to **keep** a vector. This is the opposite
+> of the `bitset` / `std::function<bool(int64_t)>` pre-filter overloads on
+> [`Index`](index_class.md#knnsearch-overloads), where `true` means *filtered out*. Keep this
+> distinction in mind when choosing an overload.
+
+| Member | Purpose |
+|--------|---------|
+| `CheckValid(int64_t id)` | Core predicate. `true` keeps the id in results. |
+| `CheckValid(const char* data)` | Predicate over an element's extra-info bytes. Defaults to `true`. |
+| `ValidRatio()` | Estimated fraction of vectors that pass; lets the engine pick a strategy. |
+| `FilterDistribution()` | `RELATED_TO_VECTOR` hints validity correlates with vector position. |
+| `GetValidIds(...)` | Optionally expose the explicit valid-id set. |
+
+See `examples/cpp/301_feature_filter.cpp`.
+
+## `Bitset`
+
+Declared in `vsag/bitset.h`. A compact set of bit flags keyed by position, held through `BitsetPtr`.
+It is used both as a filtering input and as a utility (e.g. the result of
+[`l2_and_filtering`](types.md#utility-functions)).
+
+```cpp
+static BitsetPtr Random(int64_t length);  // random bitset of the given length
+static BitsetPtr Make();                  // empty bitset
+
+void Set(int64_t pos, bool value);
+void Set(int64_t pos);       // = Set(pos, true)
+bool Test(int64_t pos) const;
+uint64_t Count();            // number of set bits
+std::string Dump();          // debug dump
+```
+
+> When a `Bitset` is used as a search pre-filter (`bitset_filter_`, or the `invalid` argument of
+> `KnnSearch` / `RangeSearch`), `Test(id) == true` means the id is **filtered out**.
+
+## `IteratorContext`
+
+Declared in `vsag/iterator_context.h`. An opaque handle that stores the position of an in-progress
+iterator search so that subsequent calls resume where the previous one stopped.
+
+```cpp
+class IteratorContext {
+public:
+    virtual ~IteratorContext() = default;
+};
+```
+
+You do not construct or inspect it directly. VSAG allocates it on the first iterator search; pass the
+same handle back (via `SearchRequest::p_iter_ctx_`, or the `KnnSearch` iterator overload) on each
+subsequent call, and set the last-search flag on the final call so the engine can release it. See
+[Iterator Search](../advanced/iterator_search.md).
+
+## `SearchParam` (deprecated)
+
+Declared in `vsag/search_param.h`. `SearchParam` predates `SearchRequest` and is retained only for
+the deprecated `KnnSearch(query, k, SearchParam&)` overload.
+
+```cpp
+struct SearchParam {  // [[deprecated]] use SearchRequest
+    bool is_iter_filter{false};
+    bool is_last_search{false};
+    const std::string& parameters;
+    FilterPtr filter{nullptr};
+    Allocator* allocator{nullptr};
+    IteratorContext* iter_ctx{nullptr};
+};
+```
+
+**Prefer [`SearchRequest`](#searchrequest) + [`SearchWithRequest`](index_class.md#searchwithrequest)
+for all new code.** `SearchParam` holds `parameters` by reference, so the referenced string must
+outlive the call.
+
+## See also
+
+- [Index](index_class.md) — the search methods that consume these types.
+- [Dataset](dataset.md) — building the `query_` and reading results.
+- [Auxiliary Types](types.md) — attribute value types used by attribute filters.

@@ -1,0 +1,49 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+add_subdirectory (thread_pool)
+add_subdirectory (allocator)
+add_subdirectory (filter)
+add_subdirectory (heap)
+add_subdirectory (transform)
+add_subdirectory (bitset)
+add_subdirectory (cluster)
+add_subdirectory (logger)
+add_subdirectory (searcher)
+add_subdirectory (odescent)
+add_subdirectory (pipnn)
+add_subdirectory (reorder)
+add_subdirectory (blas)
+add_subdirectory (reasoning)
+add_subdirectory (label_table)
+
+file (GLOB IMPL_SRCS "*.cpp")
+list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
+
+add_library (impl OBJECT ${IMPL_SRCS})
+target_link_libraries (impl PRIVATE transform thread_pool allocator heap vsag_blas
+    bitset logger filter cluster searcher odescent pipnn reorder reasoning label_table coverage_config vsag_src_common)
+
+set (IMPL_LIBS transform thread_pool allocator heap bitset vsag_blas
+    logger filter impl cluster searcher odescent pipnn reorder reasoning label_table PARENT_SCOPE)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE IMPL_TESTS "*_test.cpp")
+    add_library (impl_test STATIC ${IMPL_TESTS})
+    target_link_libraries (impl_test PRIVATE Catch2::Catch2 vsag_static unittest_deps)
+    vsag_link_openmp_private (impl_test)
+    add_dependencies (impl_test Catch2)
+endif ()

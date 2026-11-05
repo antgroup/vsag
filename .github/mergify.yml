@@ -1,0 +1,156 @@
+pull_request_rules:
+  - name: add area/ci label
+    conditions:
+      - or:
+          - files~=^\.circleci/.*$
+          - files~=^\.github/.*$
+          - files~=^scripts/.*$
+          - files~=^cmake/.*$
+          - files~=^CMakeLists\.txt$
+    actions:
+      label:
+        add:
+          - area/ci
+
+  - name: add area/docker label
+    conditions:
+      - files~=^docker/.*$
+    actions:
+      label:
+        add:
+          - area/docker
+
+  - name: add area/docs label
+    conditions:
+      - files~=^docs/.*$
+    actions:
+      label:
+        add:
+          - area/docs
+
+  - name: add area/examples label
+    conditions:
+      - files~=^examples/.*$
+    actions:
+      label:
+        add:
+          - area/examples
+
+  - name: add area/dependencies label
+    conditions:
+      - files~=^extern/.*$
+    actions:
+      label:
+        add:
+          - area/dependencies
+
+  - name: add module/api label
+    conditions:
+      - files~=^include/.*$
+    actions:
+      label:
+        add:
+          - module/api
+
+  - name: add module/attr label
+    conditions:
+      - files~=^src/attr/.*$
+    actions:
+      label:
+        add:
+          - module/attr
+
+  - name: add module/datacell label
+    conditions:
+      - or:
+          - files~=^src/datacell/.*$
+          - files~=^src/io/.*$
+          - files~=^src/quantization/.*$
+    actions:
+      label:
+        add:
+          - module/datacell
+
+  - name: add module/index label
+    conditions:
+      - or:
+          - files~=^src/index/.*$
+          - files~=^src/algorithm/.*$
+    actions:
+      label:
+        add:
+          - module/index
+
+  - name: add module/simd label
+    conditions:
+      - files~=^src/simd/.*$
+    actions:
+      label:
+        add:
+          - module/simd
+
+  - name: add area/bindings-python label
+    conditions:
+      - or:
+          - files~=^python/.*$
+          - files~=^python_bindings/.*$
+    actions:
+      label:
+        add:
+          - area/bindings-python
+
+  - name: add area/bindings-node label
+    conditions:
+      - or:
+          - files~=^node_bindings/.*$
+          - files~=^typescript/.*$
+    actions:
+      label:
+        add:
+          - area/bindings-node
+
+  - name: add area/tools label
+    conditions:
+      - files~=^tools/.*$
+    actions:
+      label:
+        add:
+          - area/tools
+
+  - name: add area/testing label
+    conditions:
+      - files~=^tests/.*$
+    actions:
+      label:
+        add:
+          - area/testing
+merge_protections:
+  - name: Require kind label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^kind/
+
+  - name: Require version label
+    if:
+      - base=main
+    success_conditions:
+      - label~=^version/
+
+  - name: Require linked issue for feature/bug PRs
+    # Defense-in-depth fallback for the `PR Issue Link Check` GitHub
+    # Action. If the Action is ever disabled or skipped, Mergify still
+    # refuses to merge `kind/feature` / `kind/bug` PRs whose description
+    # does not reference an issue via a GitHub auto-closing keyword.
+    if:
+      - or:
+          - base=main
+          - base~=^0\.
+      - or:
+          - label=kind/feature
+          - label=kind/bug
+    success_conditions:
+      - >-
+        body~=(?im)(?:^|[\s\-\*])(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+(?:#\d+|[\w.\-]+/[\w.\-]+#\d+|https?://github\.com/[\w.\-]+/[\w.\-]+/issues/\d+)
+merge_protections_settings:
+  reporting_method: check-runs

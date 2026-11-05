@@ -1,0 +1,2859 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#define VSAG_SINDI_TEST_ACCESS
+#include "sindi.h"
+
+#include <array>
+#include <cmath>
+#include <cstring>
+#include <map>
+#include <set>
+#include <sstream>
+#include <tuple>
+
+#include "algorithm/sparse_distance.h"
+#include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
+#include "simd/fp16_simd.h"
+#include "storage/serialization_tags.h"
+#include "storage/serialization_template_test.h"
+#include "storage/streaming_serialization_test_utils.h"
+#include "unittest.h"
+using namespace vsag;
+
+namespace {
+
+using vsag::test::EraseStreamingBlock;
+using vsag::test::InsertUnknownStreamingBlock;
+
+float
+sparse_inner_product_distance(uint32_t len1,
+                              const uint32_t* ids1,
+                              const float* vals1,
+                              uint32_t len2,
+                              const uint32_t* ids2,
+                              const float* vals2) {
+    float sum = 0.0F;
+    uint32_t i = 0;
+    uint32_t j = 0;
+    while (i < len1 && j < len2) {
+        if (ids1[i] < ids2[j]) {
+            ++i;
+        } else if (ids1[i] > ids2[j]) {
+            ++j;
+        } else {
+            sum += vals1[i] * vals2[j];
+            ++i;
+            ++j;
+        }
+    }
+    return 1.0F - sum;
+}
+
+}  // namespace
+
+namespace vsag {
+
+class SINDITestAccess {
+public:
+    static bool
+    UseTermListsHeapInsert(const SINDI& index,
+                           const SINDISearchParameter& search_param,
+                           const std::optional<float>& distance_threshold = std::nullopt) {
+        return index.UseTermListsHeapInsert(search_param, distance_threshold);
+    }
+
+    static float
+    TermListsHeapInsertPruneThreshold() {
+        return SINDI::K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD;
+    }
+
+    static void
+    SerializeImmutableWindow(const SINDI& index,
+                             StreamWriter& writer,
+                             const ImmutableSINDIWindow& window) {
+        index.serialize_immutable_window(writer, window);
+    }
+
+    static void
+    DeserializeImmutableWindow(const SINDI& index,
+                               StreamReader& reader,
+                               ImmutableSINDIWindow& window,
+                               bool postings_sorted = false) {
+        index.deserialize_immutable_window(reader, window, postings_sorted);
+    }
+
+    static uint32_t
+    MapperSize(const SINDI& index) {
+        return index.term_id_mapper_ == nullptr ? 0 : index.term_id_mapper_->Size();
+    }
+
+    static std::optional<uint32_t>
+    TryMap(const SINDI& index, uint32_t term) {
+        return index.term_id_mapper_->TryMap(term);
+    }
+
+    static QuantizationParams
+    QuantizationParamsValue(const SINDI& index) {
+        return *index.quantization_params_;
+    }
+
+    static bool
+    ReadIndexFooter(SINDI& index, StreamReader& reader, JsonType& basic_info) {
+        return index.read_index_footer(reader, basic_info);
+    }
+
+    static uint32_t
+    MutableWindowCount(const SINDI& index) {
+        return index.mutable_term_datacell_->GetWindowCount();
+    }
+
+    static bool
+    MutableTermIsSorted(const SINDI& index, uint32_t window, uint32_t term) {
+        const auto& data = index.mutable_term_datacell_->GetWindow(window);
+        const auto& ids = *data.term_ids_[term];
+        const auto& values = *data.term_datas_[term];
+        const auto code_size = index.mutable_term_datacell_->GetTermValueCodeSize();
+        for (uint32_t i = 1; i < data.term_sizes_[term]; ++i) {
+            const auto previous = sindi_datacell_utils::DecodeValue(
+                values.data() + static_cast<uint64_t>(i - 1) * code_size,
+                index.sparse_value_quant_type_,
+                index.quantization_params_.get());
+            const auto current = sindi_datacell_utils::DecodeValue(
+                values.data() + static_cast<uint64_t>(i) * code_size,
+                index.sparse_value_quant_type_,
+                index.quantization_params_.get());
+            if (previous < current || (previous == current && ids[i - 1] > ids[i])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static void
+    AppendEmptyMutableWindow(SINDI& index) {
+        index.mutable_term_datacell_->windows_.emplace_back(index.allocator_);
+    }
+};
+
+}  // namespace vsag
+
+class MockFilter : public Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        // return true if id is even, otherwise false
+        return id % 2 == 0;
+    }
+};
+
+class MockValidIdFilter : public Filter {
+public:
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return valid_ids_set_.find(id) != valid_ids_set_.end();
+    }
+
+    void
+    GetValidIds(const int64_t** valid_ids, int64_t& count) const override {
+        *valid_ids = valid_ids_.data();
+        count = static_cast<int64_t>(valid_ids_.size());
+    }
+
+    void
+    SetValidIds(std::vector<int64_t> valid_ids) {
+        valid_ids_ = std::move(valid_ids);
+        valid_ids_set_.clear();
+        valid_ids_set_.reserve(valid_ids_.size());
+        for (auto id : valid_ids_) {
+            valid_ids_set_.insert(id);
+        }
+    }
+
+private:
+    std::vector<int64_t> valid_ids_;
+    std::unordered_set<int64_t> valid_ids_set_;
+};
+
+class CountingFilter : public Filter {
+public:
+    explicit CountingFilter(int64_t only_valid_id, bool accept_all = false)
+        : only_valid_id_(only_valid_id), accept_all_(accept_all) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        ++count_;
+        return WouldAccept(id);
+    }
+
+    [[nodiscard]] bool
+    WouldAccept(int64_t id) const {
+        return accept_all_ or id == only_valid_id_;
+    }
+
+    [[nodiscard]] uint64_t
+    Count() const {
+        return count_;
+    }
+
+private:
+    int64_t only_valid_id_{-1};
+    bool accept_all_{false};
+    mutable uint64_t count_{0};
+};
+
+TEST_CASE("SINDI Range Remap Filter Callback Lifetime", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const uint64_t callback_limit = GENERATE(0, 5);
+    CAPTURE(immutable, callback_limit);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->remap_term_ids = true;
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 1000;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    auto filter = std::make_shared<CountingFilter>(-1, true);
+    const auto parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 8, "query_prune_ratio": 0.0,
+            "filter_callback_limit": {}}}}})",
+        callback_limit);
+    uint32_t unknown_term = 2000;
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &unknown_term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    // Alternate empty and normal queries to check that each search owns a fresh budget.
+    for (uint64_t iteration = 0; iteration < 2; ++iteration) {
+        const auto before = filter->Count();
+        query_vector.ids_ = &unknown_term;
+        auto empty = index.RangeSearch(query, 0.0F, parameters, filter, 8);
+        REQUIRE(empty->GetDim() == 0);
+        REQUIRE(filter->Count() == before);
+        REQUIRE(filter.use_count() == 1);
+        REQUIRE_FALSE(empty->GetStatistics().empty());
+
+        query_vector.ids_ = &term;
+        auto result = index.RangeSearch(query, 0.0F, parameters, filter, 8);
+        const auto expected_count = callback_limit == 0 ? count : callback_limit;
+        REQUIRE(filter->Count() - before == expected_count);
+        REQUIRE(result->GetDim() == expected_count);
+        REQUIRE(filter.use_count() == 1);
+        std::set<int64_t> result_ids;
+        for (int64_t i = 0; i < result->GetDim(); ++i) {
+            REQUIRE(result->GetIds()[i] >= 0);
+            REQUIRE(result->GetIds()[i] < count);
+            REQUIRE(result->GetDistances()[i] == 0.0F);
+            result_ids.insert(result->GetIds()[i]);
+        }
+        REQUIRE(result_ids.size() == expected_count);
+    }
+}
+
+TEST_CASE("SINDI Filter Callback Limit", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    const auto search_mode = GENERATE(SearchMode::KNN_SEARCH, SearchMode::RANGE_SEARCH);
+    const bool use_search_request = GENERATE(false, true);
+    CAPTURE(immutable, query_prune_ratio, search_mode, use_search_request);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 8;
+    uint32_t term = 3;
+    std::vector<float> values(count, 1.0F);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+
+    const auto search = [&](const std::string& parameters, const FilterPtr& filter) {
+        if (use_search_request) {
+            SearchRequest request;
+            request.query_ = query;
+            request.mode_ = search_mode;
+            request.topk_ = 4;
+            request.radius_ = 0.0F;
+            request.limited_size_ = 4;
+            request.params_str_ = parameters;
+            request.enable_filter_ = true;
+            request.filter_ = filter;
+            // Avoid GCC 13's -O2/ASan stringop-overread false positive for assignment of {2}.
+            request.expected_labels_.push_back(2);
+            return index.SearchWithRequest(request);
+        }
+        if (search_mode == SearchMode::RANGE_SEARCH) {
+            return index.RangeSearch(query, 0.0F, parameters, filter, 4);
+        }
+        return index.KnnSearch(query, 4, parameters, filter);
+    };
+
+    const auto limited_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 3}}}})",
+        query_prune_ratio);
+    auto limited_filter = std::make_shared<CountingFilter>(2);
+    auto limited_result = search(limited_parameters, limited_filter);
+
+    REQUIRE(limited_filter->Count() == 3);
+    REQUIRE(limited_result->GetDim() == 1);
+    REQUIRE(limited_result->GetIds()[0] == 2);
+    REQUIRE(limited_filter->WouldAccept(limited_result->GetIds()[0]));
+
+    auto rejecting_filter = std::make_shared<CountingFilter>(-1);
+    auto rejected_result = search(limited_parameters, rejecting_filter);
+    REQUIRE(rejecting_filter->Count() == 3);
+    REQUIRE(rejected_result->GetDim() == 0);
+
+    const auto unlimited_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 0}}}})",
+        query_prune_ratio);
+    auto unlimited_filter = std::make_shared<CountingFilter>(2);
+    auto unlimited_result = search(unlimited_parameters, unlimited_filter);
+
+    REQUIRE(unlimited_filter->Count() > 3);
+    REQUIRE(unlimited_result->GetDim() == 1);
+    REQUIRE(unlimited_result->GetIds()[0] == 2);
+
+    if (not immutable) {
+        REQUIRE(index.Remove(std::vector<int64_t>{0}, RemoveMode::MARK_REMOVE) == 1);
+        const auto deleted_parameters = fmt::format(
+            R"({{"sindi": {{"n_candidate": 4, "query_prune_ratio": {}, "filter_callback_limit": 1}}}})",
+            query_prune_ratio);
+        auto deleted_filter = std::make_shared<CountingFilter>(1);
+        auto deleted_result = search(deleted_parameters, deleted_filter);
+
+        REQUIRE(deleted_filter->Count() == 1);
+        REQUIRE(deleted_result->GetDim() == 1);
+        REQUIRE(deleted_result->GetIds()[0] == 1);
+
+        if (use_search_request) {
+            SearchRequest request;
+            request.query_ = query;
+            request.mode_ = search_mode;
+            request.topk_ = 4;
+            request.radius_ = 0.0F;
+            request.limited_size_ = 4;
+            request.params_str_ = deleted_parameters;
+            auto unfiltered_result = index.SearchWithRequest(request);
+
+            REQUIRE(unfiltered_result->GetDim() == 4);
+            for (int64_t i = 0; i < unfiltered_result->GetDim(); ++i) {
+                REQUIRE(unfiltered_result->GetIds()[i] != 0);
+            }
+        }
+    }
+}
+
+TEST_CASE("SINDI Filtered KNN Restores Heap Top Across Windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    const bool immutable = GENERATE(false, true);
+    const float query_prune_ratio = GENERATE(0.0F, 0.2F);
+    CAPTURE(immutable, query_prune_ratio);
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = immutable;
+
+    constexpr uint64_t count = 5;
+    uint32_t term = 3;
+    std::vector<float> values = {10.0F, 1.0F, 1.0F, 1.0F, 1.0F};
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto search_parameters = fmt::format(
+        R"({{"sindi": {{"n_candidate": 1, "query_prune_ratio": {}}}}})", query_prune_ratio);
+
+    auto filter = std::make_shared<CountingFilter>(-1, true);
+    auto result = index.KnnSearch(query, 1, search_parameters, filter);
+
+    REQUIRE(result->GetDim() == 1);
+    REQUIRE(result->GetIds()[0] == 0);
+    REQUIRE(filter->Count() == 1);
+}
+
+TEST_CASE("SINDI Heap Insert Strategy Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    auto make_index = [&](float doc_prune_ratio, bool use_reorder = false) {
+        auto param = std::make_shared<vsag::SINDIParameter>();
+        param->term_id_limit = 30001;
+        param->window_size = 10000;
+        param->doc_prune_ratio = doc_prune_ratio;
+        param->avg_doc_term_length = 100;
+        param->use_reorder = use_reorder;
+        return SINDI(param, common_param);
+    };
+
+    auto make_search_param = [](float query_prune_ratio) {
+        SINDISearchParameter search_param;
+        search_param.query_prune_ratio = query_prune_ratio;
+        return search_param;
+    };
+
+    SECTION("uses distance insertion when both prune ratios are no greater than threshold") {
+        std::array<float, 3> prune_ratios = {
+            0.0F, 0.05F, SINDITestAccess::TermListsHeapInsertPruneThreshold()};
+        for (auto doc_prune_ratio : prune_ratios) {
+            auto index = make_index(doc_prune_ratio);
+            for (auto query_prune_ratio : prune_ratios) {
+                auto search_param = make_search_param(query_prune_ratio);
+                REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(index, search_param));
+            }
+        }
+    }
+
+    SECTION("matches threshold rule for distance and term-list insertion") {
+        auto doc_prune_ratio = GENERATE(0.0F, 0.2F);
+        auto query_prune_ratio = GENERATE(0.0F, 0.2F);
+        auto index = make_index(doc_prune_ratio);
+        auto search_param = make_search_param(query_prune_ratio);
+        REQUIRE(SINDITestAccess::UseTermListsHeapInsert(index, search_param) ==
+                (doc_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold() ||
+                 query_prune_ratio > SINDITestAccess::TermListsHeapInsertPruneThreshold()));
+    }
+
+    SECTION("retains term-list insertion only for safe KNN thresholds") {
+        auto search_param = make_search_param(0.2F);
+        auto non_reorder = make_index(0.0F);
+        REQUIRE(SINDITestAccess::UseTermListsHeapInsert(non_reorder, search_param, 0.5F));
+        REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(non_reorder, search_param, 1.0F));
+
+        auto reorder = make_index(0.0F, true);
+        REQUIRE_FALSE(SINDITestAccess::UseTermListsHeapInsert(reorder, search_param, 0.5F));
+    }
+}
+
+TEST_CASE("SINDI term prune keeps highest stored values after build", "[ut][SINDI]") {
+    const auto build_prune = GENERATE(0, 1, 2, 3);
+    const auto immutable = GENERATE(false, true);
+    const auto quantization = GENERATE(SparseValueQuantizationType::FP32,
+                                       SparseValueQuantizationType::FP16,
+                                       SparseValueQuantizationType::SQ8);
+    DYNAMIC_SECTION("immutable=" << immutable
+                                 << ", quantization=" << static_cast<int>(quantization)) {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        IndexCommonParam common_param;
+        common_param.allocator_ = allocator;
+        common_param.metric_ = MetricType::METRIC_TYPE_IP;
+        common_param.dim_ = 8;
+
+        auto parameter = std::make_shared<SINDIParameter>();
+        parameter->term_id_limit = 8;
+        parameter->window_size = 10000;
+        parameter->doc_prune_ratio = 0.0F;
+        parameter->term_prune_ratio = build_prune == 1 || build_prune == 3 ? 0.5F : 0.0F;
+        parameter->term_retain_threshold = build_prune >= 2 ? 2 : 0;
+        parameter->use_reorder = false;
+        parameter->sparse_value_quant_type = quantization;
+        parameter->immutable = immutable;
+        SINDI index(parameter, common_param);
+
+        uint32_t term = 3;
+        std::array<float, 4> values = {1.0F, 3.0F, 2.0F, 3.0F};
+        std::array<int64_t, 4> labels = {10, 11, 12, 13};
+        std::array<SparseVector, 4> vectors;
+        for (uint32_t document = 0; document < vectors.size(); ++document) {
+            vectors[document] = SparseVector{1, &term, values.data() + document};
+        }
+
+        auto base = Dataset::Make();
+        base->NumElements(vectors.size())
+            ->SparseVectors(vectors.data())
+            ->Ids(labels.data())
+            ->Owner(false);
+        REQUIRE(index.Build(base).empty());
+
+        float query_value = 1.0F;
+        SparseVector sparse_query{1, &term, &query_value};
+        auto query = Dataset::Make();
+        query->NumElements(1)->SparseVectors(&sparse_query)->Owner(false);
+        std::string search_parameters = R"({
+            "sindi": {
+                "query_prune_ratio": 0.0,
+                "term_prune_ratio": 0.0,
+                "term_retain_threshold": 2,
+                "n_candidate": 4
+            }
+        })";
+        if (build_prune != 0) {
+            search_parameters = R"({"sindi": {"query_prune_ratio": 0,
+                "term_prune_ratio": 0, "term_retain_threshold": 0, "n_candidate": 4}})";
+        }
+        const auto result = index.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(result->GetDim() == 2);
+        std::set<int64_t> result_labels(result->GetIds(),
+                                        result->GetIds() + static_cast<uint64_t>(result->GetDim()));
+        REQUIRE(result_labels == std::set<int64_t>{11, 13});
+        std::stringstream restored_stream;
+        IOStreamWriter restored_writer(restored_stream);
+        index.Serialize(restored_writer);
+        SINDI restored(parameter, common_param);
+        IOStreamReader restored_reader(restored_stream);
+        restored.Deserialize(restored_reader);
+        const auto restored_result = restored.KnnSearch(query, 4, search_parameters, nullptr);
+        REQUIRE(restored_result->GetDim() == 2);
+        REQUIRE(std::set<int64_t>(restored_result->GetIds(), restored_result->GetIds() + 2) ==
+                result_labels);
+
+        std::stringstream stream;
+        IOStreamWriter writer(stream);
+        index.Serialize(writer);
+        std::stringstream footer_stream(stream.str());
+        IOStreamReader footer_reader(footer_stream);
+        JsonType basic_info;
+        REQUIRE(SINDITestAccess::ReadIndexFooter(index, footer_reader, basic_info));
+        REQUIRE(basic_info["sindi_posting_list_format_version"].GetInt() == 1);
+    }
+}
+
+TEST_CASE("SINDI sorts incremental partial windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 4;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+
+    uint32_t term = 3;
+    std::array<float, 2> initial_values = {1.0F, 2.0F};
+    std::array<int64_t, 2> initial_labels = {10, 11};
+    std::array<SparseVector, 2> initial_vectors;
+    for (uint64_t i = 0; i < initial_vectors.size(); ++i) {
+        initial_vectors[i] = SparseVector{1, &term, initial_values.data() + i};
+    }
+    auto base = Dataset::Make();
+    base->NumElements(initial_vectors.size())
+        ->SparseVectors(initial_vectors.data())
+        ->Ids(initial_labels.data())
+        ->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
+
+    float appended_value = 4.0F;
+    int64_t appended_label = 12;
+    SparseVector appended_vector{1, &term, &appended_value};
+    auto appended = Dataset::Make();
+    appended->NumElements(1)->SparseVectors(&appended_vector)->Ids(&appended_label)->Owner(false);
+    REQUIRE(index.Add(appended).empty());
+    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto search_parameters = R"({"sindi": {"n_candidate": 1, "term_retain_threshold": 1}})";
+    REQUIRE(index.KnnSearch(query, 1, search_parameters, nullptr)->GetIds()[0] == appended_label);
+
+    appended_value = 3.0F;
+    appended_label = 13;
+    REQUIRE(index.Add(appended).empty());
+    REQUIRE(SINDITestAccess::MutableTermIsSorted(index, 0, term));
+}
+
+TEST_CASE("SINDI term retain threshold is divided across windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->doc_prune_ratio = 0.0F;
+    parameter->avg_doc_term_length = 1;
+    parameter->immutable = GENERATE(false, true);
+
+    constexpr uint64_t count = 10001;
+    uint32_t term = 3;
+    std::vector<float> values(count);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        values[i] = static_cast<float>(i + 1);
+        labels[i] = static_cast<int64_t>(i);
+        vectors[i] = SparseVector{1, &term, values.data() + i};
+    }
+    values.back() = 20000.0F;
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+
+    float query_value = 1.0F;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const auto search_parameters = R"({"sindi": {"n_candidate": 2, "term_retain_threshold": 2}})";
+    const auto result = index.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 10000);
+    REQUIRE(result->GetIds()[1] == 9999);
+}
+
+TEST_CASE("SINDI trims serialized trailing empty windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 1;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->term_id_limit = 8;
+    parameter->window_size = 10000;
+    parameter->doc_prune_ratio = 0.0F;
+    uint32_t term = 3;
+    float value = 4.0F;
+    int64_t label = 7;
+    SparseVector vector{1, &term, &value};
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&vector)->Ids(&label)->Owner(false);
+
+    SINDI index(parameter, common_param);
+    REQUIRE(index.Build(base).empty());
+    SINDITestAccess::AppendEmptyMutableWindow(index);
+    REQUIRE(SINDITestAccess::MutableWindowCount(index) == 2);
+
+    std::stringstream legacy_stream;
+    IOStreamWriter legacy_writer(legacy_stream);
+    index.Serialize(legacy_writer);
+    SINDI legacy_restored(parameter, common_param);
+    IOStreamReader legacy_reader(legacy_stream);
+    legacy_restored.Deserialize(legacy_reader);
+    REQUIRE(SINDITestAccess::MutableWindowCount(legacy_restored) == 1);
+
+    std::stringstream streaming_buffer;
+    REQUIRE_NOTHROW(index.SerializeStreaming(streaming_buffer));
+    SINDI streaming_restored(parameter, common_param);
+    REQUIRE_NOTHROW(streaming_restored.DeserializeStreaming(streaming_buffer));
+    REQUIRE(SINDITestAccess::MutableWindowCount(streaming_restored) == 1);
+}
+
+SINDIParameterPtr
+create_exact_sindi_param(uint32_t term_id_limit,
+                         bool remap_term_ids = false,
+                         uint32_t avg_doc_term_length = 100) {
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 50000,
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": {}
+    }})",
+                                 term_id_limit,
+                                 remap_term_ids ? "true" : "false",
+                                 avg_doc_term_length);
+    auto param_json = JsonType::Parse(param_str);
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(param_json);
+    return index_param;
+}
+
+TEST_CASE("SINDI streaming compatibility", "[ut][SINDI][streaming][compatibility]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 64;
+
+    constexpr uint32_t num_base = 128;
+    constexpr int64_t max_dim = 64;
+    constexpr int64_t max_id = 30000;
+    std::vector<int64_t> ids(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 114);
+    auto base = Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    static constexpr auto param_str = R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
+    })";
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(JsonType::Parse(param_str));
+
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    REQUIRE(index->Build(base).empty());
+
+    std::stringstream stream;
+    REQUIRE_NOTHROW(index->SerializeStreaming(stream));
+    const auto bytes = stream.str();
+
+    std::stringstream metadata_stream(bytes);
+    const auto metadata_result = Index::GetStreamingMetadata(metadata_stream);
+    REQUIRE(metadata_result.has_value());
+    const auto metadata = JsonType::Parse(metadata_result.value().metadata_json);
+    REQUIRE(metadata[BASIC_INFO]["sindi_posting_list_format_version"].GetInt() == 1);
+
+    SECTION("skips unknown non-critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, false);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_NOTHROW(restored->DeserializeStreaming(deserialize_stream));
+        REQUIRE(restored->GetNumElements() == num_base);
+
+        std::stringstream load_stream(mutated);
+        auto loaded = Index::Load(load_stream, "{}");
+        REQUIRE(loaded.has_value());
+        REQUIRE(loaded.value()->GetNumElements() == num_base);
+    }
+
+    SECTION("rejects unknown critical block") {
+        auto mutated = InsertUnknownStreamingBlock(bytes, true);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    SECTION("rejects missing required block") {
+        auto mutated = EraseStreamingBlock(bytes, StreamSerializationTag::SINDI_WINDOWS);
+        auto restored = std::make_unique<SINDI>(index_param, common_param);
+        std::stringstream deserialize_stream(mutated);
+        REQUIRE_THROWS(restored->DeserializeStreaming(deserialize_stream));
+
+        std::stringstream load_stream(mutated);
+        REQUIRE_FALSE(Index::Load(load_stream, "{}").has_value());
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+std::vector<std::pair<int64_t, float>>
+brute_force_sparse_knn(const SparseVector& query,
+                       const std::vector<SparseVector>& base,
+                       const std::vector<int64_t>& ids,
+                       int64_t k,
+                       Allocator* allocator) {
+    auto [query_ids, query_vals] = sort_sparse_vector(query, allocator);
+    std::vector<std::pair<int64_t, float>> result;
+    result.reserve(base.size());
+    for (uint64_t i = 0; i < base.size(); ++i) {
+        auto [base_ids, base_vals] = sort_sparse_vector(base[i], allocator);
+        auto distance = sparse_inner_product_distance(query.len_,
+                                                      query_ids.data(),
+                                                      query_vals.data(),
+                                                      base[i].len_,
+                                                      base_ids.data(),
+                                                      base_vals.data());
+        result.emplace_back(ids[i], distance);
+    }
+    std::sort(result.begin(), result.end(), [](const auto& lhs, const auto& rhs) {
+        if (lhs.second == rhs.second) {
+            return lhs.first < rhs.first;
+        }
+        return lhs.second < rhs.second;
+    });
+    result.resize(static_cast<uint64_t>(k));
+    return result;
+}
+
+TEST_CASE("SINDI Basic Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Prepare Base and Query Dataset
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 114;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    static constexpr auto param_str = R"({{
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
+    }})";
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    auto another_index = std::make_unique<SINDI>(index_param, common_param);
+
+    // test build
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test add failed
+    SparseVector invalid_sv;
+    int64_t tmp_id = 999999;
+    uint32_t invalid_term_id = 30002;
+    invalid_sv.ids_ = &invalid_term_id;
+    invalid_sv.len_ = 1;
+    auto invalid_data = vsag::Dataset::Make();
+    invalid_data->NumElements(invalid_sv.len_)
+        ->SparseVectors(&invalid_sv)
+        ->Ids(&tmp_id)
+        ->Owner(false);
+    auto add_res = index->Add(invalid_data);
+    REQUIRE(add_res.size() == 1);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test serialize
+    test_serializion(*index, *another_index);
+    REQUIRE(another_index->GetNumElements() == num_base);
+
+    // test search process
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    auto mock_filter = std::make_shared<MockFilter>();
+    auto mock_valid_filter = std::make_shared<MockValidIdFilter>();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+    REQUIRE(index->CalcDistanceById(query, -1, true) == -1.0F);
+    int64_t valid_count = static_cast<int64_t>(num_base * 0.5);
+    std::vector<int64_t> valid_ids(valid_count, 0);
+    valid_ids.push_back(invalid_term_id);
+    for (int64_t i = 0; i < valid_count; i++) {
+        valid_ids[i] = i;
+    }
+    mock_valid_filter->SetValidIds(valid_ids);
+
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        // gt
+        auto bf_result = brute_force_sparse_knn(sv_base[i], sv_base, ids, k, allocator.get());
+
+        // test basic performance
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetDim() == k);
+        for (int j = 0; j < k; j++) {
+            REQUIRE(result->GetIds()[j] == bf_result[j].first);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result[j].second) < 3e-3);
+        }
+
+        // test filter with knn
+        auto filter_knn_result = index->KnnSearch(query, k, search_param_str, mock_filter);
+        REQUIRE(filter_knn_result->GetDim() == k);
+        auto cur = 0;
+        for (int j = 0; j < k; j++) {
+            if (mock_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == filter_knn_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
+        auto valid_filter_knn_result =
+            index->KnnSearch(query, k, search_param_str, mock_valid_filter);
+        REQUIRE(valid_filter_knn_result->GetDim() == k);
+        cur = 0;
+        for (int j = 0; j < k; j++) {
+            if (mock_valid_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == valid_filter_knn_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
+        // test serialize
+        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
+        for (int j = 0; j < another_result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - another_result->GetDistances()[j]) < 1e-3);
+        }
+
+        // test range search limit
+        auto range_result_limit_3 = index->RangeSearch(query, 0, search_param_str, nullptr, 3);
+        REQUIRE(range_result_limit_3->GetDim() == 3);
+        for (int j = 0; j < 3; j++) {
+            REQUIRE(result->GetIds()[j] == range_result_limit_3->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - range_result_limit_3->GetDistances()[j]) <
+                    1e-3);
+        }
+
+        // test filter with range limit
+        auto filter_range_limit_result =
+            index->RangeSearch(query, 0, search_param_str, mock_filter, 3);
+        REQUIRE(filter_range_limit_result->GetDim() == 3);
+        cur = 0;
+        for (int j = 0; j < 3; j++) {
+            if (mock_filter->CheckValid(range_result_limit_3->GetIds()[j])) {
+                REQUIRE(range_result_limit_3->GetIds()[j] ==
+                        filter_range_limit_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+
+        // test range search radius
+        auto target_radius = result->GetDistances()[5];
+        auto range_result_radius_3 =
+            index->RangeSearch(query, target_radius, search_param_str, nullptr);
+        for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
+            REQUIRE(range_result_radius_3->GetDistances()[j] <= target_radius);
+        }
+
+        // test filter with range radius
+        auto filter_range_radius_result =
+            index->RangeSearch(query, target_radius, search_param_str, mock_filter);
+        cur = 0;
+        for (int j = 0; j < range_result_radius_3->GetDim(); j++) {
+            if (mock_filter->CheckValid(range_result_radius_3->GetIds()[j])) {
+                REQUIRE(range_result_radius_3->GetIds()[j] ==
+                        filter_range_radius_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI FP16 rerank build search add and serialize", "[ut][SINDI][fp16]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 8;
+
+    auto parameter = std::make_shared<SINDIParameter>();
+    parameter->FromJson(JsonType::Parse(R"({
+        "term_id_limit": 16,
+        "window_size": 10000,
+        "doc_prune_ratio": 0.0,
+        "use_quantization": false,
+        "use_reorder": true,
+        "rerank_type": "fp16",
+        "avg_doc_term_length": 3
+    })"));
+
+    uint32_t ids0[] = {1, 4, 7};
+    float values0[] = {100.1F, 0.3333F, 0.2F};
+    uint32_t ids1[] = {1, 4};
+    float values1[] = {0.1F, 0.15F};
+    uint32_t ids2[] = {2, 7};
+    float values2[] = {1.0F, 0.05F};
+    SparseVector vectors[] = {{3, ids0, values0}, {2, ids1, values1}, {2, ids2, values2}};
+    int64_t labels[] = {10, 20, 30};
+    auto base = Dataset::Make();
+    base->NumElements(3)->SparseVectors(vectors)->Ids(labels)->Owner(false);
+
+    SINDI built(parameter, common_param);
+    REQUIRE(built.Build(base).empty());
+    SINDI loaded(parameter, common_param);
+    test_serializion(built, loaded);
+
+    auto unchanged = Dataset::Make();
+    unchanged->NumElements(1)->SparseVectors(vectors)->Owner(false);
+    REQUIRE(loaded.UpdateVector(labels[0], unchanged));
+
+    float changed_values[] = {101.0F, values0[1], values0[2]};
+    SparseVector changed_vector{3, ids0, changed_values};
+    auto changed = Dataset::Make();
+    changed->NumElements(1)->SparseVectors(&changed_vector)->Owner(false);
+    REQUIRE_FALSE(loaded.UpdateVector(labels[0], changed));
+
+    SparseVector query_vector{3, ids0, values0};
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    const std::string search_parameters = R"({
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 3
+        }
+    })";
+    auto result = loaded.KnnSearch(query, 2, search_parameters, nullptr);
+    REQUIRE(result->GetDim() == 2);
+    REQUIRE(result->GetIds()[0] == 10);
+    const auto statistics = JsonType::Parse(result->GetStatistics());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["sparse_fp16"].GetUint64() > 0);
+
+    const auto rounded = [](float value) {
+        return generic::FP16ToFloat(generic::FloatToFP16(value));
+    };
+    const float expected_distance = 1.0F - values0[0] * rounded(values0[0]) -
+                                    values0[1] * rounded(values0[1]) -
+                                    values0[2] * rounded(values0[2]);
+    REQUIRE(std::abs(loaded.CalcDistanceById(query, 10, true) - expected_distance) < 1e-6F);
+
+    float added_value = 0.75F;
+    uint32_t added_id = 4;
+    int64_t added_label = 40;
+    SparseVector added_vector{1, &added_id, &added_value};
+    auto added = Dataset::Make();
+    added->NumElements(1)->SparseVectors(&added_vector)->Ids(&added_label)->Owner(false);
+    REQUIRE(loaded.Add(added).empty());
+    REQUIRE(loaded.GetNumElements() == 4);
+
+    auto fp32_parameter = std::make_shared<SINDIParameter>();
+    auto fp32_json = parameter->ToJson();
+    fp32_json[SPARSE_RERANK_TYPE].SetString(SPARSE_RERANK_TYPE_FP32);
+    fp32_parameter->FromJson(fp32_json);
+    SINDI fp32(fp32_parameter, common_param);
+    constexpr uint64_t estimate_count = 10'000;
+    const uint64_t fp16_memory = loaded.EstimateMemory(estimate_count);
+    const uint64_t fp32_memory = fp32.EstimateMemory(estimate_count);
+    REQUIRE(fp16_memory < fp32_memory);
+    REQUIRE(fp32_memory - fp16_memory == estimate_count * 4);
+}
+
+TEST_CASE("SINDI range search ignores repeated zero-distance candidates", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 3;
+
+    const bool immutable = GENERATE(false, true);
+    const bool use_reorder = GENERATE(false, true);
+    auto index_param = std::make_shared<SINDIParameter>();
+    index_param->FromJson(JsonType::Parse(fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 60000,
+        "term_id_limit": 4000,
+        "immutable": {}
+    }})",
+                                                      use_reorder,
+                                                      immutable)));
+    SINDI index(index_param, common_param);
+
+    std::vector<std::vector<uint32_t>> indices = {{5, 100, 2000}, {5, 50, 2000}, {10, 100, 3000}};
+    std::vector<std::vector<float>> values = {
+        {0.5F, 0.8F, 0.6F}, {0.3F, 0.9F, 0.1F}, {0.7F, 0.4F, 0.5F}};
+    std::vector<SparseVector> sparse_vectors(indices.size());
+    for (uint64_t i = 0; i < sparse_vectors.size(); ++i) {
+        sparse_vectors[i] = {
+            static_cast<uint32_t>(indices[i].size()), indices[i].data(), values[i].data()};
+    }
+    std::vector<int64_t> ids = {1, 2, 3};
+    auto base = Dataset::Make();
+    base->NumElements(static_cast<int64_t>(ids.size()))
+        ->Ids(ids.data())
+        ->SparseVectors(sparse_vectors.data())
+        ->Owner(false);
+    REQUIRE(index.Build(base).empty());
+
+    auto query = Dataset::Make();
+    query->NumElements(1)->SparseVectors(sparse_vectors.data())->Owner(false);
+    // Force term-list heap insertion while retaining terms shared by multiple documents.
+    const std::string search_params =
+        R"({"sindi": {"query_prune_ratio": 0.2, "n_candidate": 100}})";
+    auto result = index.RangeSearch(query, 1.0F, search_params, nullptr);
+
+    REQUIRE(result->GetDim() == 3);
+    const std::map<int64_t, float> expected_results =
+        use_reorder ? std::map<int64_t, float>{{1, -0.25F}, {2, 0.79F}, {3, 0.68F}}
+                    : std::map<int64_t, float>{{1, 0.0F}, {2, 0.94F}, {3, 0.68F}};
+    std::set<int64_t> result_ids;
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        const auto id = result->GetIds()[i];
+        const auto expected = expected_results.find(id);
+        REQUIRE(expected != expected_results.end());
+        REQUIRE(std::abs(result->GetDistances()[i] - expected->second) < 1e-5F);
+        result_ids.insert(id);
+    }
+    REQUIRE(result_ids == std::set<int64_t>{1, 2, 3});
+}
+
+TEST_CASE("SINDI Quantization Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Prepare Base and Query Dataset
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 114;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    static constexpr auto param_str = R"({{
+        "use_reorder": true,
+        "use_quantization": true,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 30001,
+        "avg_doc_term_length": 100
+    }})";
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(fmt::format(param_str));
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    auto exact_param = create_exact_sindi_param(30001);
+    auto exact_index = std::make_unique<SINDI>(exact_param, common_param);
+
+    // test build
+    auto exact_build_res = exact_index->Build(base);
+    REQUIRE(exact_build_res.size() == 0);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test search process
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    int64_t correct_count = 0;
+
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        // gt
+        auto bf_result = exact_index->KnnSearch(query, k, search_param_str, nullptr);
+
+        // test basic performance
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetNumElements() == bf_result->GetNumElements());
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+
+        std::unordered_set<int64_t> gt_ids;
+        for (int j = 0; j < k; j++) {
+            gt_ids.insert(bf_result->GetIds()[j]);
+        }
+        for (int j = 0; j < k; j++) {
+            if (gt_ids.find(result->GetIds()[j]) != gt_ids.end()) {
+                correct_count++;
+            }
+        }
+    }
+
+    float recall = static_cast<float>(correct_count) / (num_query * k);
+    REQUIRE(recall > 0.99);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Immutable Sparse Deserialize KNN Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    const char* sparse_value_quant_type = GENERATE("fp32", "sq8", "fp16");
+    const bool remap_term_ids = GENERATE(false, true);
+    const bool use_reorder = GENERATE(false, true);
+    const bool use_term_lists_heap_insert = GENERATE(false, true);
+    const std::string use_quantization =
+        std::string(sparse_value_quant_type) == "fp16"
+            ? R"("fp16")"
+            : (std::string(sparse_value_quant_type) == "sq8" ? "true" : "false");
+
+    uint32_t num_base = 300;
+    uint32_t num_query = 20;
+    int64_t max_dim = 64;
+    int64_t max_id = 3000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 2024;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 1000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            if (remap_term_ids) {
+                sv_base[i].ids_[j] += id_offset;
+            }
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    uint32_t term_id_limit = remap_term_ids ? static_cast<uint32_t>(unique_terms.size()) + 100
+                                            : static_cast<uint32_t>(max_id) + 1;
+    auto source_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 64,
+        "immutable": true
+    }})",
+                                        use_reorder,
+                                        use_quantization,
+                                        term_id_limit,
+                                        remap_term_ids);
+    auto target_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 64,
+        "immutable": true
+    }})",
+                                        use_reorder,
+                                        use_quantization,
+                                        term_id_limit,
+                                        remap_term_ids);
+
+    auto source_param = std::make_shared<vsag::SINDIParameter>();
+    source_param->FromJson(vsag::JsonType::Parse(source_param_str));
+    auto target_param = std::make_shared<vsag::SINDIParameter>();
+    target_param->FromJson(vsag::JsonType::Parse(target_param_str));
+    auto source = std::make_unique<SINDI>(source_param, common_param);
+    auto immutable = std::make_unique<SINDI>(target_param, common_param);
+
+    auto build_res = source->Build(base);
+    REQUIRE(build_res.empty());
+    test_serializion(*source, *immutable);
+    REQUIRE(immutable->GetNumElements() == num_base);
+
+    auto search_param_str = fmt::format(R"(
+    {{
+        "sindi": {{
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 30,
+            "use_term_lists_heap_insert": {}
+        }}
+    }}
+    )",
+                                        use_term_lists_heap_insert);
+
+    auto query = vsag::Dataset::Make();
+    for (uint32_t i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+        auto source_result = source->KnnSearch(query, k, search_param_str, nullptr);
+        auto immutable_result = immutable->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(immutable_result->GetDim() == source_result->GetDim());
+        for (int64_t j = 0; j < immutable_result->GetDim(); ++j) {
+            REQUIRE(immutable_result->GetIds()[j] == source_result->GetIds()[j]);
+            REQUIRE(std::abs(immutable_result->GetDistances()[j] -
+                             source_result->GetDistances()[j]) < 1e-3);
+        }
+
+        auto source_range_result = source->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        auto immutable_range_result =
+            immutable->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        REQUIRE(immutable_range_result->GetDim() == source_range_result->GetDim());
+        for (int64_t j = 0; j < immutable_range_result->GetDim(); ++j) {
+            REQUIRE(immutable_range_result->GetIds()[j] == source_range_result->GetIds()[j]);
+            REQUIRE(std::abs(immutable_range_result->GetDistances()[j] -
+                             source_range_result->GetDistances()[j]) < 1e-3);
+        }
+
+        constexpr int64_t range_limit = 3;
+        auto limited_source_range_result =
+            source->RangeSearch(query, 0.0F, search_param_str, nullptr, range_limit);
+        auto limited_immutable_range_result =
+            immutable->RangeSearch(query, 0.0F, search_param_str, nullptr, range_limit);
+        REQUIRE(limited_immutable_range_result->GetDim() == limited_source_range_result->GetDim());
+        for (int64_t j = 0; j < limited_immutable_range_result->GetDim(); ++j) {
+            REQUIRE(limited_immutable_range_result->GetIds()[j] ==
+                    limited_source_range_result->GetIds()[j]);
+            REQUIRE(std::abs(limited_immutable_range_result->GetDistances()[j] -
+                             limited_source_range_result->GetDistances()[j]) < 1e-3);
+        }
+    }
+
+    SparseVector immutable_vector;
+    REQUIRE_THROWS(source->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
+    REQUIRE_THROWS(immutable->GetSparseVectorByInnerId(0, &immutable_vector, allocator.get()));
+    auto distances = immutable->CalcDistancesById(query, ids.data(), num_base);
+    REQUIRE(distances->GetDim() == num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        REQUIRE(std::abs(immutable->CalcDistanceById(query, ids[i]) -
+                         distances->GetDistances()[i]) < 1e-3F);
+    }
+    REQUIRE(immutable->CalcDistanceById(query, -1, false) == -1.0F);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Immutable Runtime Rejects Mutable Operations", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "avg_doc_term_length": 10,
+        "immutable": true
+    })"));
+
+    SINDI index(param, common_param);
+    auto empty_base = vsag::Dataset::Make();
+    REQUIRE_THROWS_AS(index.Add(empty_base), vsag::VsagException);
+
+    std::stringstream ss;
+    vsag::IOStreamWriter writer(ss);
+    REQUIRE_NOTHROW(index.Serialize(writer));
+}
+
+TEST_CASE("SINDI immutable build flushes local ids across windows", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    auto param = std::make_shared<SINDIParameter>();
+    param->FromJson(JsonType::Parse(R"({
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": 16,
+        "immutable": true
+    })"));
+
+    constexpr uint32_t count = 10001;
+    uint32_t term_ids[] = {3};
+    float term_values[] = {1.0F};
+    std::vector<SparseVector> vectors(count, SparseVector{1, term_ids, term_values});
+    std::vector<int64_t> labels(count);
+    std::iota(labels.begin(), labels.end(), 0);
+    auto base = Dataset::Make();
+    base->NumElements(count)->SparseVectors(vectors.data())->Ids(labels.data())->Owner(false);
+
+    SINDI index(param, common_param);
+    REQUIRE(index.Build(base).empty());
+    REQUIRE(index.GetNumElements() == count);
+
+    std::stringstream stream;
+    IOStreamWriter writer(stream);
+    index.Serialize(writer);
+    stream.seekg(0, std::ios::beg);
+    IOStreamReader reader(stream);
+    int64_t serialized_count = 0;
+    uint32_t window_count = 0;
+    StreamReader::ReadObj(reader, serialized_count);
+    StreamReader::ReadObj(reader, window_count);
+    REQUIRE(serialized_count == count);
+    REQUIRE(window_count == 2);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Serialization Size", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 50000000,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    ImmutableSINDIWindow window(allocator.get());
+    window.sorted_global_terms.push_back(24000000);
+    window.offsets.push_back(0);
+    window.offsets.push_back(1);
+    window.id_payloads.push_back(7);
+    window.value_payloads.resize(sizeof(float));
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    SINDITestAccess::SerializeImmutableWindow(index, writer, window);
+
+    constexpr uint64_t vector_header_bytes = sizeof(uint64_t) * 4;
+    constexpr uint64_t vector_payload_bytes =
+        sizeof(uint32_t) + sizeof(uint32_t) * 2 + sizeof(uint16_t) + sizeof(float);
+    REQUIRE(writer.GetCursor() == vector_header_bytes + vector_payload_bytes);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Term Count", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    const uint64_t excessive_term_count = 101;
+    StreamWriter::WriteObj(writer, excessive_term_count);
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow window(allocator.get());
+    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, window),
+                      vsag::VsagException);
+}
+
+TEST_CASE("SINDI Immutable Sparse Window Rejects Excessive Posting Count", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+
+    auto param = std::make_shared<vsag::SINDIParameter>();
+    param->FromJson(vsag::JsonType::Parse(R"({
+        "use_quantization": false,
+        "window_size": 10000,
+        "term_id_limit": 100,
+        "remap_term_ids": true,
+        "immutable": true
+    })"));
+    SINDI index(param, common_param);
+
+    std::stringstream stream;
+    vsag::IOStreamWriter writer(stream);
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{0});
+    StreamWriter::WriteVector(writer, std::vector<uint32_t>{0, 10001});
+
+    vsag::IOStreamReader reader(stream);
+    ImmutableSINDIWindow window(allocator.get());
+    REQUIRE_THROWS_AS(SINDITestAccess::DeserializeImmutableWindow(index, reader, window),
+                      vsag::VsagException);
+}
+
+TEST_CASE("SINDI Immutable Build Search And Serialize Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    auto param_tuple = GENERATE(std::make_tuple("fp32", false, false),
+                                std::make_tuple("sq8", false, true),
+                                std::make_tuple("fp16", true, false),
+                                std::make_tuple("fp32", true, true));
+    const auto* sparse_value_quant_type = std::get<0>(param_tuple);
+    const bool remap_term_ids = std::get<1>(param_tuple);
+    const bool use_reorder = std::get<2>(param_tuple);
+    const std::string use_quantization =
+        std::string(sparse_value_quant_type) == "fp16"
+            ? R"("fp16")"
+            : (std::string(sparse_value_quant_type) == "sq8" ? "true" : "false");
+
+    constexpr uint32_t num_base = 10050;
+    constexpr uint32_t num_query = 2;
+    constexpr uint32_t window_size = 10000;
+    constexpr int64_t max_dim = 48;
+    constexpr int64_t max_id = 1000;
+    constexpr uint32_t id_offset = 700000;
+
+    std::vector<int64_t> ids(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base = fixtures::GenerateSparseVectors(num_base, max_dim, max_id, 0, 10, 2243);
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            if (remap_term_ids) {
+                sv_base[i].ids_[j] += id_offset;
+            }
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    uint32_t term_id_limit = remap_term_ids ? static_cast<uint32_t>(unique_terms.size()) + 10
+                                            : static_cast<uint32_t>(max_id) + 1;
+    auto mutable_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": {},
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 48,
+        "immutable": false
+    }})",
+                                         use_reorder,
+                                         use_quantization,
+                                         window_size,
+                                         term_id_limit,
+                                         remap_term_ids);
+    auto immutable_param_str = fmt::format(R"({{
+        "use_reorder": {},
+        "use_quantization": {},
+        "doc_prune_ratio": 0.0,
+        "window_size": {},
+        "term_id_limit": {},
+        "remap_term_ids": {},
+        "avg_doc_term_length": 48,
+        "immutable": true
+    }})",
+                                           use_reorder,
+                                           use_quantization,
+                                           window_size,
+                                           term_id_limit,
+                                           remap_term_ids);
+
+    auto mutable_param = std::make_shared<vsag::SINDIParameter>();
+    mutable_param->FromJson(vsag::JsonType::Parse(mutable_param_str));
+    auto immutable_param = std::make_shared<vsag::SINDIParameter>();
+    immutable_param->FromJson(vsag::JsonType::Parse(immutable_param_str));
+    auto mutable_index = std::make_unique<SINDI>(mutable_param, common_param);
+    auto immutable_index = std::make_unique<SINDI>(immutable_param, common_param);
+
+    REQUIRE(mutable_index->Build(base).empty());
+    REQUIRE(immutable_index->Build(base).empty());
+    REQUIRE(immutable_index->GetNumElements() == num_base);
+
+    auto add_data = vsag::Dataset::Make();
+    add_data->NumElements(1)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+    REQUIRE_THROWS_AS(immutable_index->Add(add_data), vsag::VsagException);
+
+    auto immutable_from_immutable = std::make_unique<SINDI>(immutable_param, common_param);
+    auto mutable_from_immutable = std::make_unique<SINDI>(mutable_param, common_param);
+    REQUIRE_THROWS_AS(test_serializion(*immutable_index, *mutable_from_immutable),
+                      vsag::VsagException);
+    test_serializion(*immutable_index, *immutable_from_immutable);
+
+    auto immutable_from_mutable = std::make_unique<SINDI>(immutable_param, common_param);
+    REQUIRE_THROWS_AS(test_serializion(*mutable_index, *immutable_from_mutable),
+                      vsag::VsagException);
+
+    static constexpr auto search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 40,
+            "use_term_lists_heap_insert": true
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (uint32_t i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+        auto expected = mutable_index->KnnSearch(query, 10, search_param_str, nullptr);
+        auto built = immutable_index->KnnSearch(query, 10, search_param_str, nullptr);
+        const auto parallel_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":2}})";
+        auto parallel_mutable = mutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+        auto parallel_immutable = immutable_index->KnnSearch(query, 10, parallel_param, nullptr);
+        const auto reduced_param = R"({"sindi":{"query_prune_ratio":0,"term_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":4,"worker_n_candidate":20}})";
+        auto reduced = immutable_index->KnnSearch(query, 10, reduced_param, nullptr);
+        const auto eight_worker_param = R"({"sindi":{"query_prune_ratio":0,
+            "n_candidate":40,"window_parallelism":8,"worker_n_candidate":10}})";
+        auto eight_worker = immutable_index->KnnSearch(query, 10, eight_worker_param, nullptr);
+        const auto insufficient_param = R"({"sindi":{"n_candidate":40,
+            "window_parallelism":2,"worker_n_candidate":19}})";
+        REQUIRE_THROWS_AS(immutable_index->KnnSearch(query, 10, insufficient_param, nullptr),
+                          vsag::VsagException);
+        auto immutable_roundtrip =
+            immutable_from_immutable->KnnSearch(query, 10, search_param_str, nullptr);
+        REQUIRE(built->GetDim() == expected->GetDim());
+        REQUIRE(parallel_mutable->GetDim() == expected->GetDim());
+        REQUIRE(parallel_immutable->GetDim() == expected->GetDim());
+        REQUIRE(reduced->GetDim() == expected->GetDim());
+        REQUIRE(eight_worker->GetDim() == expected->GetDim());
+        REQUIRE(immutable_roundtrip->GetDim() == expected->GetDim());
+        for (int64_t j = 0; j < expected->GetDim(); ++j) {
+            REQUIRE(built->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(parallel_mutable->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(parallel_immutable->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(immutable_roundtrip->GetIds()[j] == expected->GetIds()[j]);
+            REQUIRE(std::abs(parallel_mutable->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+            REQUIRE(std::abs(parallel_immutable->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+            REQUIRE(std::abs(built->GetDistances()[j] - expected->GetDistances()[j]) < 1e-3);
+            REQUIRE(std::abs(immutable_roundtrip->GetDistances()[j] - expected->GetDistances()[j]) <
+                    1e-3);
+        }
+
+        auto expected_range = mutable_index->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        auto built_range = immutable_index->RangeSearch(query, 0.0F, search_param_str, nullptr);
+        REQUIRE(built_range->GetDim() == expected_range->GetDim());
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap Basic Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Same density as original SINDI test but with large sparse term IDs
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;  // same as original test for good overlap
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 42;
+    int64_t k = 10;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Shift all term IDs by a large offset to make them sparse in uint32 range
+    // This simulates real-world vocabulary IDs that are non-contiguous
+    constexpr uint32_t id_offset = 3000000;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    // Count unique terms to set term_id_limit
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 3000;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+    auto another_index = std::make_unique<SINDI>(index_param, common_param);
+
+    // Build a brute-force index for ground truth (uses original sparse IDs directly)
+    auto exact_param = create_exact_sindi_param(term_id_limit, true);
+    auto exact_index = std::make_unique<SINDI>(exact_param, common_param);
+
+    auto exact_build_res = exact_index->Build(base);
+    REQUIRE(exact_build_res.size() == 0);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+    REQUIRE(index->GetNumElements() == num_base);
+
+    // test serialize/deserialize
+    test_serializion(*index, *another_index);
+    REQUIRE(another_index->GetNumElements() == num_base);
+
+    // test search
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = exact_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+        for (int j = 0; j < result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 3e-3);
+        }
+
+        // test serialized index gives same results
+        auto another_result = another_index->KnnSearch(query, k, search_param_str, nullptr);
+        for (int j = 0; j < another_result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == another_result->GetIds()[j]);
+        }
+    }
+
+    // test unknown query terms
+    {
+        SparseVector unknown_query;
+        uint32_t unknown_ids[] = {1, 2};  // IDs not in [id_offset, id_offset+max_id]
+        float unknown_vals[] = {1.0f, 2.0f};
+        unknown_query.len_ = 2;
+        unknown_query.ids_ = unknown_ids;
+        unknown_query.vals_ = unknown_vals;
+        query->NumElements(1)->SparseVectors(&unknown_query)->Owner(false);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetDim() == 0);
+    }
+
+    // test incremental add
+    {
+        uint32_t num_add = 100;
+        std::vector<int64_t> add_ids(num_add);
+        for (uint32_t i = 0; i < num_add; ++i) {
+            add_ids[i] = num_base + i;
+        }
+        auto sv_add =
+            fixtures::GenerateSparseVectors(num_add, max_dim, max_id, min_val, max_val, 99);
+        for (uint32_t i = 0; i < num_add; ++i) {
+            for (uint32_t j = 0; j < sv_add[i].len_; ++j) {
+                sv_add[i].ids_[j] += id_offset;
+            }
+        }
+        auto add_data = vsag::Dataset::Make();
+        add_data->NumElements(num_add)
+            ->SparseVectors(sv_add.data())
+            ->Ids(add_ids.data())
+            ->Owner(false);
+        auto add_res = index->Add(add_data);
+        REQUIRE(index->GetNumElements() == num_base + num_add);
+
+        query->NumElements(1)->SparseVectors(sv_add.data())->Owner(false);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        REQUIRE(result->GetDim() == k);
+
+        for (auto& item : sv_add) {
+            delete[] item.vals_;
+            delete[] item.ids_;
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Reorder Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 77;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": true,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto exact_param = create_exact_sindi_param(term_id_limit, true);
+    auto exact_index = std::make_unique<SINDI>(exact_param, common_param);
+
+    auto exact_build_res = exact_index->Build(base);
+    REQUIRE(exact_build_res.size() == 0);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = exact_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+        for (int j = 0; j < result->GetDim(); j++) {
+            REQUIRE(result->GetIds()[j] == bf_result->GetIds()[j]);
+            REQUIRE(std::abs(result->GetDistances()[j] - bf_result->GetDistances()[j]) < 3e-3);
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap Term ID Limit Exceeded", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Use small max_id so first doc has reasonable unique term count
+    common_param.dim_ = 10;
+    auto sv_base = fixtures::GenerateSparseVectors(10, 10, 50, 0, 10, 123);
+
+    // Count unique terms in first doc to set a limit that allows first doc but not all
+    std::set<uint32_t> first_doc_terms;
+    for (uint32_t j = 0; j < sv_base[0].len_; ++j) {
+        first_doc_terms.insert(sv_base[0].ids_[j]);
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(first_doc_terms.size()) + 2;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 10
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    std::vector<int64_t> ids(10);
+    for (int64_t i = 0; i < 10; ++i) {
+        ids[i] = i;
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(10)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    auto failed = index->Build(base);
+    REQUIRE(failed.size() > 0);
+    REQUIRE(index->GetNumElements() > 0);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Quantization Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 55;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": true,
+        "use_quantization": true,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto exact_param = create_exact_sindi_param(term_id_limit, true);
+    auto exact_index = std::make_unique<SINDI>(exact_param, common_param);
+
+    auto exact_build_res = exact_index->Build(base);
+    REQUIRE(exact_build_res.size() == 0);
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    int64_t correct_count = 0;
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto bf_result = exact_index->KnnSearch(query, k, search_param_str, nullptr);
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+
+        REQUIRE(result->GetDim() == bf_result->GetDim());
+
+        std::unordered_set<int64_t> gt_ids;
+        for (int j = 0; j < k; j++) {
+            gt_ids.insert(bf_result->GetIds()[j]);
+        }
+        for (int j = 0; j < k; j++) {
+            if (gt_ids.find(result->GetIds()[j]) != gt_ids.end()) {
+                correct_count++;
+            }
+        }
+    }
+
+    float recall = static_cast<float>(correct_count) / (num_query * k);
+    REQUIRE(recall > 0.95);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap with Filter Test", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t num_base = 1000;
+    uint32_t num_query = 100;
+    int64_t max_dim = 128;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 66;
+    int64_t k = 10;
+    constexpr uint32_t id_offset = 2000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 100
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto mock_filter = std::make_shared<MockFilter>();
+    auto query = vsag::Dataset::Make();
+
+    for (int i = 0; i < num_query; ++i) {
+        query->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+
+        auto result = index->KnnSearch(query, k, search_param_str, nullptr);
+        auto filter_result = index->KnnSearch(query, k, search_param_str, mock_filter);
+
+        REQUIRE(filter_result->GetDim() == k);
+        for (int j = 0; j < filter_result->GetDim(); j++) {
+            REQUIRE(mock_filter->CheckValid(filter_result->GetIds()[j]));
+        }
+
+        auto cur = 0;
+        for (int j = 0; j < k && cur < filter_result->GetDim(); j++) {
+            if (mock_filter->CheckValid(result->GetIds()[j])) {
+                REQUIRE(result->GetIds()[j] == filter_result->GetIds()[cur]);
+                cur++;
+            }
+        }
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap GetSparseVectorByInnerId Reverse Mapping", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t num_base = 50;
+    int64_t max_dim = 32;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 5000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 88;
+    constexpr uint32_t id_offset = 4000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 32
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    for (uint32_t i = 0; i < num_base; ++i) {
+        SparseVector retrieved;
+        index->GetSparseVectorByInnerId(i, &retrieved, allocator.get());
+
+        std::set<uint32_t> original_ids;
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            original_ids.insert(sv_base[i].ids_[j]);
+        }
+
+        for (uint32_t j = 0; j < retrieved.len_; ++j) {
+            REQUIRE(original_ids.count(retrieved.ids_[j]) > 0);
+        }
+
+        allocator->Deallocate(retrieved.ids_);
+        allocator->Deallocate(retrieved.vals_);
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI Remap UpdateVector Compatibility", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    uint32_t num_base = 50;
+    int64_t max_dim = 32;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 5000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 33;
+    constexpr uint32_t id_offset = 4000000;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base[i].ids_[j] += id_offset;
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t term_id_limit = static_cast<uint32_t>(unique_terms.size()) + 100;
+
+    auto param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 32
+    }})",
+                                 term_id_limit);
+
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto index_param = std::make_shared<vsag::SINDIParameter>();
+    index_param->FromJson(param_json);
+    auto index = std::make_unique<SINDI>(index_param, common_param);
+
+    auto build_res = index->Build(base);
+    REQUIRE(build_res.size() == 0);
+
+    for (uint32_t i = 0; i < std::min(num_base, 10u); ++i) {
+        auto update_data = vsag::Dataset::Make();
+        update_data->NumElements(1)->SparseVectors(sv_base.data() + i)->Owner(false);
+        bool result = index->UpdateVector(ids[i], update_data);
+        REQUIRE(result == true);
+    }
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI DMQ EstimateMemory uses compact IDs and shared codebooks", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 100000;
+
+    constexpr uint32_t term_id_limit = 100000;
+    constexpr uint64_t num_elements = 1000;
+    auto estimate_memory = [&](bool remap_term_ids, uint32_t shared_codebook_threshold) {
+        auto parameter = std::make_shared<SINDIParameter>();
+        parameter->FromString(fmt::format(R"({{
+            "use_reorder": true,
+            "rerank_type": "dmq8",
+            "term_id_limit": {},
+            "window_size": 10000,
+            "avg_doc_term_length": 100,
+            "remap_term_ids": {},
+            "dmq_shared_codebook_threshold": {}
+        }})",
+                                          term_id_limit,
+                                          remap_term_ids,
+                                          shared_codebook_threshold));
+        return SINDI(parameter, common_param).EstimateMemory(num_elements);
+    };
+
+    const uint64_t shared_memory = estimate_memory(false, 1024);
+    const uint64_t unshared_memory = estimate_memory(false, 0);
+    REQUIRE(shared_memory * 10 < unshared_memory);
+
+    const uint64_t remapped_shared_memory = estimate_memory(true, 1024);
+    constexpr uint64_t term_id_mapper_entry_memory_bytes = 54;
+    REQUIRE(remapped_shared_memory - shared_memory ==
+            term_id_limit * term_id_mapper_entry_memory_bytes);
+}
+
+TEST_CASE("SINDI Remap Memory Comparison", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Generate data with dense overlap but large sparse term IDs
+    uint32_t num_base = 500;
+    int64_t max_dim = 64;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 30000;
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 42;
+    constexpr uint32_t id_offset = 5000000;  // shift IDs to simulate sparse vocab
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Make a copy before shifting (for the no-remap index)
+    std::vector<SparseVector> sv_base_shifted(num_base);
+    for (uint32_t i = 0; i < num_base; ++i) {
+        sv_base_shifted[i].len_ = sv_base[i].len_;
+        sv_base_shifted[i].ids_ = new uint32_t[sv_base[i].len_];
+        sv_base_shifted[i].vals_ = new float[sv_base[i].len_];
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            sv_base_shifted[i].ids_[j] = sv_base[i].ids_[j] + id_offset;
+            sv_base_shifted[i].vals_[j] = sv_base[i].vals_[j];
+        }
+    }
+
+    // Count unique terms
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base_shifted[i].len_; ++j) {
+            unique_terms.insert(sv_base_shifted[i].ids_[j]);
+        }
+    }
+    uint32_t unique_count = static_cast<uint32_t>(unique_terms.size());
+
+    // Index WITHOUT remap: needs term_id_limit >= max_shifted_id
+    uint32_t no_remap_limit = id_offset + max_id + 1;  // ~5030001
+    auto no_remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": false,
+        "avg_doc_term_length": 64
+    }})",
+                                          no_remap_limit);
+
+    auto no_remap_json = vsag::JsonType::Parse(no_remap_param_str);
+    auto no_remap_param = std::make_shared<vsag::SINDIParameter>();
+    no_remap_param->FromJson(no_remap_json);
+    auto no_remap_index = std::make_unique<SINDI>(no_remap_param, common_param);
+
+    auto base_no_remap = vsag::Dataset::Make();
+    base_no_remap->NumElements(num_base)
+        ->SparseVectors(sv_base_shifted.data())
+        ->Ids(ids.data())
+        ->Owner(false);
+    auto res1 = no_remap_index->Build(base_no_remap);
+    REQUIRE(res1.size() == 0);
+
+    // Index WITH remap: term_id_limit = unique terms + headroom
+    uint32_t remap_limit = unique_count + 100;
+    auto remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                       remap_limit);
+
+    auto remap_json = vsag::JsonType::Parse(remap_param_str);
+    auto remap_param = std::make_shared<vsag::SINDIParameter>();
+    remap_param->FromJson(remap_json);
+    auto remap_index = std::make_unique<SINDI>(remap_param, common_param);
+
+    auto base_remap = vsag::Dataset::Make();
+    base_remap->NumElements(num_base)
+        ->SparseVectors(sv_base_shifted.data())
+        ->Ids(ids.data())
+        ->Owner(false);
+    auto res2 = remap_index->Build(base_remap);
+    REQUIRE(res2.size() == 0);
+
+    // Compare memory usage
+    auto mem_no_remap = no_remap_index->EstimateMemory(num_base);
+    auto mem_remap = remap_index->EstimateMemory(num_base);
+
+    // Remap should use significantly less memory
+    // no_remap: ~5M slots × 20B = ~100MB overhead
+    // remap: ~30K slots × 20B + mapper = ~2MB overhead
+    REQUIRE(mem_remap < mem_no_remap);
+    float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
+    WARN("Memory comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings="
+                                        << savings_ratio << " unique_terms=" << unique_count);
+    REQUIRE(savings_ratio > 0.9f);  // at least 90% memory reduction
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+    for (auto& item : sv_base_shifted) {
+        delete[] item.ids_;
+        delete[] item.vals_;
+    }
+}
+
+TEST_CASE("SINDI Remap Memory Comparison - MD5 Vocabulary", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+
+    // Simulate MD5 hash-based tokenizer: term IDs scattered across uint32 range
+    // Actual unique terms ~5M, but raw IDs could be anywhere in [0, 2^32)
+    // Without remap: term_id_limit must be >= max_raw_id (impossible if > 50M)
+    // With remap: term_id_limit = 5M (fits within the 50M limit)
+
+    // We can't actually test with 5M terms (too slow in QEMU), so we use
+    // a scaled-down version that demonstrates the same principle:
+    // 50K unique terms with raw IDs scattered in [0, 10M) range
+    uint32_t num_base = 500;
+    int64_t max_dim = 64;
+    common_param.dim_ = max_dim;
+    int64_t max_id = 10000;  // base range for generation
+    float min_val = 0;
+    float max_val = 10;
+    int seed_base = 77;
+
+    std::vector<int64_t> ids(num_base);
+    for (int64_t i = 0; i < num_base; ++i) {
+        ids[i] = i;
+    }
+
+    auto sv_base =
+        fixtures::GenerateSparseVectors(num_base, max_dim, max_id, min_val, max_val, seed_base);
+
+    // Simulate MD5: scatter term IDs across a large range using a hash-like transform
+    std::mt19937 rng(12345);
+    std::unordered_map<uint32_t, uint32_t> id_scatter;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            uint32_t orig = sv_base[i].ids_[j];
+            if (id_scatter.find(orig) == id_scatter.end()) {
+                // Map to a random ID in [0, 9999999] (simulating MD5 spread)
+                id_scatter[orig] = rng() % 10000000;
+            }
+            sv_base[i].ids_[j] = id_scatter[orig];
+        }
+    }
+
+    // Find max scattered ID
+    uint32_t max_scattered_id = 0;
+    std::set<uint32_t> unique_terms;
+    for (uint32_t i = 0; i < num_base; ++i) {
+        for (uint32_t j = 0; j < sv_base[i].len_; ++j) {
+            unique_terms.insert(sv_base[i].ids_[j]);
+            max_scattered_id = std::max(max_scattered_id, sv_base[i].ids_[j]);
+        }
+    }
+    uint32_t unique_count = static_cast<uint32_t>(unique_terms.size());
+
+    // Without remap: needs term_id_limit >= max_scattered_id + 1
+    uint32_t no_remap_limit = max_scattered_id + 1;
+
+    // With remap: only needs unique_count
+    uint32_t remap_limit = unique_count + 100;
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_base)->SparseVectors(sv_base.data())->Ids(ids.data())->Owner(false);
+
+    // Build without remap
+    auto no_remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": false,
+        "avg_doc_term_length": 64
+    }})",
+                                          no_remap_limit);
+
+    auto no_remap_json = vsag::JsonType::Parse(no_remap_param_str);
+    auto no_remap_param = std::make_shared<vsag::SINDIParameter>();
+    no_remap_param->FromJson(no_remap_json);
+    auto no_remap_index = std::make_unique<SINDI>(no_remap_param, common_param);
+    auto res1 = no_remap_index->Build(base);
+    REQUIRE(res1.size() == 0);
+
+    // Build with remap
+    auto remap_param_str = fmt::format(R"({{
+        "use_reorder": false,
+        "use_quantization": false,
+        "doc_prune_ratio": 0.0,
+        "window_size": 10000,
+        "term_id_limit": {},
+        "remap_term_ids": true,
+        "avg_doc_term_length": 64
+    }})",
+                                       remap_limit);
+
+    auto remap_json = vsag::JsonType::Parse(remap_param_str);
+    auto remap_param = std::make_shared<vsag::SINDIParameter>();
+    remap_param->FromJson(remap_json);
+    auto remap_index = std::make_unique<SINDI>(remap_param, common_param);
+    auto res2 = remap_index->Build(base);
+    REQUIRE(res2.size() == 0);
+
+    // Compare memory
+    auto mem_no_remap = no_remap_index->EstimateMemory(num_base);
+    auto mem_remap = remap_index->EstimateMemory(num_base);
+    float savings_ratio = 1.0f - static_cast<float>(mem_remap) / static_cast<float>(mem_no_remap);
+    WARN("MD5 vocab comparison: no_remap=" << mem_no_remap << " remap=" << mem_remap << " savings="
+                                           << savings_ratio << " unique_terms=" << unique_count
+                                           << " max_id=" << max_scattered_id);
+
+    REQUIRE(mem_remap < mem_no_remap);
+    REQUIRE(savings_ratio > 0.9f);
+
+    // Verify search still works with remap
+    std::string search_param_str = R"(
+    {
+        "sindi": {
+            "query_prune_ratio": 0.0,
+            "term_prune_ratio": 0.0,
+            "n_candidate": 20
+        }
+    }
+    )";
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->SparseVectors(sv_base.data())->Owner(false);
+    auto result = remap_index->KnnSearch(query, 5, search_param_str, nullptr);
+    REQUIRE(result->GetDim() > 0);
+
+    for (auto& item : sv_base) {
+        delete[] item.vals_;
+        delete[] item.ids_;
+    }
+}
+
+TEST_CASE("SINDI prunes before remapping and calibrates SQ8 from raw values", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.6,
+                "use_quantization": true,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base).empty());
+            REQUIRE(SINDITestAccess::MapperSize(index) == 1);
+            REQUIRE(SINDITestAccess::TryMap(index, 100).has_value());
+            REQUIRE_FALSE(SINDITestAccess::TryMap(index, 200).has_value());
+
+            const auto quantization = SINDITestAccess::QuantizationParamsValue(index);
+            REQUIRE(std::abs(quantization.min_val - 0.1F) < 1e-6F);
+            REQUIRE(std::abs(quantization.max_val - 1.0F) < 1e-6F);
+            REQUIRE(std::abs(quantization.diff - 0.9F) < 1e-6F);
+
+            uint32_t missing_term = 200;
+            float query_value = 1.0F;
+            SparseVector missing_query{1, &missing_term, &query_value};
+            auto query = Dataset::Make();
+            query->NumElements(1)->SparseVectors(&missing_query)->Owner(false);
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false) - 1.0F) < 1e-6F);
+
+            uint32_t retained_term = 100;
+            SparseVector retained_query{1, &retained_term, &query_value};
+            query->SparseVectors(&retained_query);
+            REQUIRE(std::abs(index.CalcDistanceById(query, label, false)) < 1e-6F);
+        }
+    }
+}
+
+TEST_CASE("SINDI nonprune remaps terms in input order", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.0,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base).empty());
+            REQUIRE(SINDITestAccess::MapperSize(index) == 2);
+            REQUIRE(SINDITestAccess::TryMap(index, 200) == 0);
+            REQUIRE(SINDITestAccess::TryMap(index, 100) == 1);
+        }
+    }
+}
+
+TEST_CASE("SINDI nonprune remap preserves upstream overflow state", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {200, 100};
+    float term_values[] = {0.1F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 1,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.0,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": true,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            REQUIRE(index.Build(base) == std::vector<int64_t>{label});
+            REQUIRE(index.GetNumElements() == 0);
+            REQUIRE(SINDITestAccess::MapperSize(index) == 1);
+            REQUIRE(SINDITestAccess::TryMap(index, 200) == 0);
+            REQUIRE_FALSE(SINDITestAccess::TryMap(index, 100).has_value());
+        }
+    }
+}
+
+TEST_CASE("SINDI validates terms before document pruning", "[ut][SINDI]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common_param;
+    common_param.allocator_ = allocator;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = 2;
+
+    uint32_t term_ids[] = {17, 3};
+    float term_values[] = {0.01F, 1.0F};
+    SparseVector sparse_vector{2, term_ids, term_values};
+    int64_t label = 7;
+    auto base = Dataset::Make();
+    base->NumElements(1)->SparseVectors(&sparse_vector)->Ids(&label)->Owner(false);
+
+    for (const bool immutable : {false, true}) {
+        DYNAMIC_SECTION("immutable=" << immutable) {
+            auto parameter = std::make_shared<SINDIParameter>();
+            parameter->FromJson(JsonType::Parse(fmt::format(R"({{
+                "term_id_limit": 16,
+                "window_size": 10000,
+                "doc_prune_ratio": 0.6,
+                "use_quantization": false,
+                "use_reorder": false,
+                "remap_term_ids": false,
+                "immutable": {}
+            }})",
+                                                            immutable)));
+            SINDI index(parameter, common_param);
+            const auto failed_ids = index.Build(base);
+            REQUIRE(failed_ids.size() == 1);
+            REQUIRE(failed_ids[0] == label);
+            REQUIRE(index.GetNumElements() == 0);
+        }
+    }
+}

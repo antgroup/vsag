@@ -1,0 +1,78 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "memmove_heap.h"
+
+#include <algorithm>
+namespace vsag {
+template <bool max_heap, bool fixed_size>
+MemmoveHeap<max_heap, fixed_size>::MemmoveHeap(Allocator* allocator, int64_t max_size)
+    : DistanceHeap(allocator, max_size), ordered_buffer_(allocator) {
+    if constexpr (fixed_size) {
+        ordered_buffer_.resize(max_size + 1);
+    }
+}
+
+template <bool max_heap, bool fixed_size>
+void
+MemmoveHeap<max_heap, fixed_size>::Push(float dist, InnerIdType id) {
+    using CompareType = std::conditional_t<max_heap, CompareMax, CompareMin>;
+    if constexpr (fixed_size) {
+        if (this->Size() < max_size_ or (dist < this->Top().first) == max_heap) {
+            DistanceRecord record = {dist, id};
+            auto pos = std::upper_bound(this->ordered_buffer_.begin(),
+                                        this->ordered_buffer_.begin() + cur_size_,
+                                        record,
+                                        CompareType()) -
+                       this->ordered_buffer_.begin();
+            // std::pair is not trivially copyable; shift constructed records by assignment.
+            std::move_backward(ordered_buffer_.begin() + pos,
+                               ordered_buffer_.begin() + max_size_,
+                               ordered_buffer_.begin() + max_size_ + 1);
+            ordered_buffer_[pos] = record;
+            this->cur_size_++;
+            if (this->Size() > this->max_size_) {
+                this->Pop();
+            }
+        }
+    } else {
+        DistanceRecord record = {dist, id};
+        auto pos = std::upper_bound(this->ordered_buffer_.begin(),
+                                    this->ordered_buffer_.begin() + cur_size_,
+                                    record,
+                                    CompareType()) -
+                   this->ordered_buffer_.begin();
+        // Pop() only decrements cur_size_, so ordered_buffer_ may already hold a
+        // stale tail beyond cur_size_. Reuse that slot instead of emplace_back,
+        // which both bounds the buffer growth and keeps the upper_bound above
+        // (which searches only [begin, begin + cur_size_)) consistent with the
+        // shift range below.
+        if (static_cast<int64_t>(ordered_buffer_.size()) <= cur_size_) {
+            ordered_buffer_.emplace_back(record);
+        }
+        std::move_backward(ordered_buffer_.begin() + pos,
+                           ordered_buffer_.begin() + cur_size_,
+                           ordered_buffer_.begin() + cur_size_ + 1);
+        ordered_buffer_[pos] = record;
+        cur_size_++;
+    }
+}
+
+template class MemmoveHeap<true, true>;
+template class MemmoveHeap<true, false>;
+template class MemmoveHeap<false, true>;
+template class MemmoveHeap<false, false>;
+
+}  // namespace vsag

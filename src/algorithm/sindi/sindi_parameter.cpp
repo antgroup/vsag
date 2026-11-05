@@ -1,0 +1,361 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "sindi_parameter.h"
+
+#include <limits>
+
+#include "impl/logger/logger.h"
+#include "inner_string_params.h"
+#include "utils/param_compat_macros.h"
+
+namespace vsag {
+namespace {
+uint32_t
+parse_positive_worker_count(const JsonType& value, uint32_t maximum, const std::string& name) {
+    CHECK_ARGUMENT(value.IsNumberInteger(), name + " must be an integer");
+    uint64_t count = 0;
+    if (value.IsNumberUnsigned()) {
+        count = value.GetUint64();
+    } else {
+        const auto signed_count = value.GetInt();
+        CHECK_ARGUMENT(signed_count > 0, name + " must be positive");
+        count = static_cast<uint64_t>(signed_count);
+    }
+    CHECK_ARGUMENT(count > 0, name + " must be positive");
+    CHECK_ARGUMENT(count <= maximum, fmt::format("{} must be in [1, {}]", name, maximum));
+    return static_cast<uint32_t>(count);
+}
+}  // namespace
+
+std::string
+SparseValueQuantizationTypeToString(SparseValueQuantizationType type) {
+    switch (type) {
+        case SparseValueQuantizationType::FP32:
+            return QUANTIZATION_TYPE_VALUE_FP32;
+        case SparseValueQuantizationType::SQ8:
+            return QUANTIZATION_TYPE_VALUE_SQ8;
+        case SparseValueQuantizationType::FP16:
+            return QUANTIZATION_TYPE_VALUE_FP16;
+        default:
+            CHECK_ARGUMENT(false, "unknown sparse value quantization type");
+    }
+    return QUANTIZATION_TYPE_VALUE_FP32;
+}
+
+static SparseValueQuantizationType
+parse_sparse_value_quant_type(const std::string& type_name) {
+    if (type_name == QUANTIZATION_TYPE_VALUE_FP32) {
+        return SparseValueQuantizationType::FP32;
+    }
+    if (type_name == QUANTIZATION_TYPE_VALUE_SQ8) {
+        return SparseValueQuantizationType::SQ8;
+    }
+    if (type_name == QUANTIZATION_TYPE_VALUE_FP16) {
+        return SparseValueQuantizationType::FP16;
+    }
+    CHECK_ARGUMENT(
+        false, fmt::format("use_quantization must be false, true, or fp16, but got {}", type_name));
+    return SparseValueQuantizationType::FP32;
+}
+
+namespace {
+
+constexpr auto LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY = "use_term_lists_heap_insert";
+
+}  // namespace
+
+void
+SINDIParameter::FromJson(const JsonType& json) {
+    if (json.Contains(SPARSE_TERM_ID_LIMIT)) {
+        term_id_limit = json[SPARSE_TERM_ID_LIMIT].GetInt();
+
+        CHECK_ARGUMENT(
+            (0 < term_id_limit and term_id_limit <= 50'000'000),
+            fmt::format("term_id_limit must be in (0, 50'000'000], but got {}", term_id_limit));
+    } else {
+        term_id_limit = DEFAULT_TERM_ID_LIMIT;
+    }
+
+    if (json.Contains(SPARSE_DOC_PRUNE_RATIO)) {
+        doc_prune_ratio = json[SPARSE_DOC_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= doc_prune_ratio and doc_prune_ratio < 1.0F),
+                       fmt::format("doc_prune_ratio must be in [0, 1), got {}", doc_prune_ratio));
+    } else {
+        doc_prune_ratio = DEFAULT_DOC_PRUNE_RATIO;
+    }
+
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    if (json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
+                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
+    }
+    if (json.Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_TERM_RETAIN_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "term_retain_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            term_retain_threshold = threshold_json.GetUint64();
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+
+    if (json.Contains(USE_REORDER_KEY)) {
+        use_reorder = json[USE_REORDER_KEY].GetBool();
+    } else {
+        use_reorder = DEFAULT_USE_REORDER;
+    }
+
+    sparse_value_quant_type = SparseValueQuantizationType::FP32;
+    if (json.Contains(USE_QUANTIZATION)) {
+        auto use_quantization = json[USE_QUANTIZATION];
+        if (use_quantization.IsString()) {
+            sparse_value_quant_type = parse_sparse_value_quant_type(use_quantization.GetString());
+        } else {
+            CHECK_ARGUMENT(use_quantization.IsBool(),
+                           "use_quantization must be false, true, or fp16");
+            if (use_quantization.GetBool()) {
+                sparse_value_quant_type = SparseValueQuantizationType::SQ8;
+            }
+        }
+    }
+
+    if (json.Contains(SPARSE_WINDOW_SIZE)) {
+        window_size = json[SPARSE_WINDOW_SIZE].GetInt();
+        CHECK_ARGUMENT(
+            (10'000 <= window_size and window_size <= 60'000),
+            fmt::format("window_size must in [10000, 60000], but now is {}", window_size));
+    } else {
+        window_size = DEFAULT_WINDOW_SIZE;
+    }
+
+    if (json.Contains(SPARSE_AVG_DOC_TERM_LENGTH)) {
+        avg_doc_term_length = json[SPARSE_AVG_DOC_TERM_LENGTH].GetInt();
+        CHECK_ARGUMENT((0 < avg_doc_term_length),
+                       fmt::format("avg_doc_term_length must be greater than 0, but now is {}",
+                                   avg_doc_term_length));
+    } else {
+        avg_doc_term_length = DEFAULT_AVG_DOC_TERM_LENGTH;
+    }
+
+    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_FOOTER)) {
+        deserialize_without_footer = json[SPARSE_DESERIALIZE_WITHOUT_FOOTER].GetBool();
+    }
+
+    if (json.Contains(SPARSE_DESERIALIZE_WITHOUT_BUFFER)) {
+        deserialize_without_buffer = json[SPARSE_DESERIALIZE_WITHOUT_BUFFER].GetBool();
+    }
+
+    if (json.Contains(SPARSE_REMAP_TERM_IDS)) {
+        remap_term_ids = json[SPARSE_REMAP_TERM_IDS].GetBool();
+    }
+
+    if (json.Contains(SPARSE_RERANK_TYPE)) {
+        rerank_type = json[SPARSE_RERANK_TYPE].GetString();
+    } else {
+        rerank_type = SPARSE_RERANK_TYPE_FP32;
+    }
+    CHECK_ARGUMENT(rerank_type == SPARSE_RERANK_TYPE_FP32 ||
+                       rerank_type == SPARSE_RERANK_TYPE_FP16 ||
+                       rerank_type == SPARSE_RERANK_TYPE_DMQ8,
+                   fmt::format("rerank_type must be fp32, fp16, or dmq8, got {}", rerank_type));
+    CHECK_ARGUMENT(use_reorder || rerank_type == SPARSE_RERANK_TYPE_FP32,
+                   fmt::format("rerank_type={} requires use_reorder=true", rerank_type));
+
+    if (json.Contains(SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD)) {
+        const auto threshold_json = json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "dmq_shared_codebook_threshold must be an integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            const auto threshold = threshold_json.GetUint64();
+            CHECK_ARGUMENT(threshold <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(threshold >= 0,
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            CHECK_ARGUMENT(static_cast<uint64_t>(threshold) <= std::numeric_limits<uint32_t>::max(),
+                           fmt::format("dmq_shared_codebook_threshold must be in [0, {}], got {}",
+                                       std::numeric_limits<uint32_t>::max(),
+                                       threshold));
+            dmq_shared_codebook_threshold = static_cast<uint32_t>(threshold);
+        }
+    } else {
+        dmq_shared_codebook_threshold = DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD;
+    }
+
+    if (json.Contains(SPARSE_IMMUTABLE)) {
+        immutable = json[SPARSE_IMMUTABLE].GetBool();
+    }
+}
+
+JsonType
+SINDIParameter::ToJson() const {
+    JsonType json;
+    json[SPARSE_TERM_ID_LIMIT].SetInt(term_id_limit);
+    json[SPARSE_DOC_PRUNE_RATIO].SetFloat(doc_prune_ratio);
+    json[SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
+    json[USE_REORDER_KEY].SetBool(use_reorder);
+    if (sparse_value_quant_type == SparseValueQuantizationType::FP16) {
+        json[USE_QUANTIZATION].SetString(QUANTIZATION_TYPE_VALUE_FP16);
+    } else {
+        json[USE_QUANTIZATION].SetBool(sparse_value_quant_type == SparseValueQuantizationType::SQ8);
+    }
+    json[SPARSE_WINDOW_SIZE].SetInt(window_size);
+    json[SPARSE_AVG_DOC_TERM_LENGTH].SetInt(avg_doc_term_length);
+    json[SPARSE_REMAP_TERM_IDS].SetBool(remap_term_ids);
+    if (immutable) {
+        json[SPARSE_IMMUTABLE].SetBool(true);
+    }
+    json[SPARSE_RERANK_TYPE].SetString(rerank_type);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        json[SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD].SetInt(
+            static_cast<int64_t>(dmq_shared_codebook_threshold));
+    }
+    return json;
+}
+
+bool
+SINDIParameter::CheckCompatibility(const vsag::ParamPtr& other) const {
+    PARAM_CAST_OR_RETURN(SINDIParameter, p, other);
+    CHECK_FIELD_EQ(*this, *p, term_id_limit);
+    CHECK_FIELD_EQ(*this, *p, window_size);
+    CHECK_FIELD_EQ(*this, *p, doc_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_prune_ratio);
+    CHECK_FIELD_EQ(*this, *p, term_retain_threshold);
+    CHECK_FIELD_EQ(*this, *p, use_reorder);
+    CHECK_FIELD_EQ(*this, *p, sparse_value_quant_type);
+    CHECK_FIELD_EQ(*this, *p, avg_doc_term_length);
+    CHECK_FIELD_EQ(*this, *p, remap_term_ids);
+    CHECK_FIELD_EQ(*this, *p, immutable);
+    CHECK_FIELD_EQ(*this, *p, rerank_type);
+    if (rerank_type == SPARSE_RERANK_TYPE_DMQ8) {
+        CHECK_FIELD_EQ(*this, *p, dmq_shared_codebook_threshold);
+    }
+    return true;
+}
+
+void
+SINDISearchParameter::FromJson(const JsonType& json) {
+    CHECK_ARGUMENT(json.Contains(INDEX_SINDI),
+                   fmt::format("parameters must contains {}", INDEX_SINDI));
+    const auto search_json = json[INDEX_SINDI];
+
+    execution_options = SindiSearchOptions::Parse(json);
+
+    // Parse common search parameters (timeout_ms, factor, etc.)
+    IndexSearchParameter::FromJson(search_json);
+
+    term_prune_ratio = DEFAULT_TERM_PRUNE_RATIO;
+    term_retain_threshold = DEFAULT_TERM_RETAIN_THRESHOLD;
+    filter_callback_limit = DEFAULT_FILTER_CALLBACK_LIMIT;
+    if (search_json.Contains(SPARSE_TERM_PRUNE_RATIO)) {
+        term_prune_ratio = search_json[SPARSE_TERM_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT((0.0F <= term_prune_ratio and term_prune_ratio < 1.0F),
+                       fmt::format("term_prune_ratio must be in [0, 1), got {}", term_prune_ratio));
+    }
+    if (search_json.Contains(SPARSE_TERM_RETAIN_THRESHOLD)) {
+        const auto threshold_json = search_json[SPARSE_TERM_RETAIN_THRESHOLD];
+        CHECK_ARGUMENT(threshold_json.IsNumberInteger(),
+                       "term_retain_threshold must be a non-negative integer");
+        if (threshold_json.IsNumberUnsigned()) {
+            term_retain_threshold = threshold_json.GetUint64();
+        } else {
+            const auto threshold = threshold_json.GetInt();
+            CHECK_ARGUMENT(
+                threshold >= 0,
+                fmt::format("term_retain_threshold must be non-negative, got {}", threshold));
+            term_retain_threshold = static_cast<uint64_t>(threshold);
+        }
+    }
+    if (search_json.Contains(SPARSE_FILTER_CALLBACK_LIMIT)) {
+        const auto limit_json = search_json[SPARSE_FILTER_CALLBACK_LIMIT];
+        CHECK_ARGUMENT(limit_json.IsNumberInteger(),
+                       "filter_callback_limit must be a non-negative integer");
+        if (limit_json.IsNumberUnsigned()) {
+            filter_callback_limit = limit_json.GetUint64();
+        } else {
+            const auto limit = limit_json.GetInt();
+            CHECK_ARGUMENT(
+                limit >= 0,
+                fmt::format("filter_callback_limit must be non-negative, got {}", limit));
+            filter_callback_limit = static_cast<uint64_t>(limit);
+        }
+    }
+
+    if (search_json.Contains(SPARSE_QUERY_PRUNE_RATIO)) {
+        query_prune_ratio = search_json[SPARSE_QUERY_PRUNE_RATIO].GetFloat();
+        CHECK_ARGUMENT(
+            (0.0F <= query_prune_ratio and query_prune_ratio < 1.0F),
+            fmt::format("query_prune_ratio must be in [0, 1), got {}", query_prune_ratio));
+    } else {
+        query_prune_ratio = DEFAULT_QUERY_PRUNE_RATIO;
+    }
+    if (search_json.Contains(SPARSE_N_CANDIDATE)) {
+        n_candidate = search_json[SPARSE_N_CANDIDATE].GetInt();
+    } else {
+        n_candidate = DEFAULT_N_CANDIDATE;
+    }
+    window_parallelism = 1;
+    if (search_json.Contains("window_parallelism")) {
+        window_parallelism = parse_positive_worker_count(
+            search_json["window_parallelism"], 16, "window_parallelism");
+    }
+    execution_options.rerank_parallelism = window_parallelism;
+    worker_n_candidate = 0;
+    if (search_json.Contains("worker_n_candidate")) {
+        worker_n_candidate = parse_positive_worker_count(search_json["worker_n_candidate"],
+                                                         std::numeric_limits<uint32_t>::max(),
+                                                         "worker_n_candidate");
+    }
+
+    if (search_json.Contains(LEGACY_USE_TERM_LISTS_HEAP_INSERT_KEY)) {
+        logger::warn(
+            "SINDI search parameter use_term_lists_heap_insert is ignored. "
+            "Remove this key; heap insertion is derived from doc_prune_ratio "
+            "and query_prune_ratio with the current SINDI prune-ratio threshold");
+    }
+}
+JsonType
+SINDISearchParameter::ToJson() const {
+    JsonType json;
+    json[INDEX_SINDI].SetJson(JsonType());
+    json[INDEX_SINDI][SPARSE_QUERY_PRUNE_RATIO].SetFloat(query_prune_ratio);
+    json[INDEX_SINDI][SPARSE_N_CANDIDATE].SetInt(n_candidate);
+    if (worker_n_candidate != 0) {
+        json[INDEX_SINDI]["worker_n_candidate"].SetInt(worker_n_candidate);
+    }
+    json[INDEX_SINDI]["window_parallelism"].SetInt(window_parallelism);
+    json[INDEX_SINDI][SPARSE_FILTER_CALLBACK_LIMIT].SetUint64(filter_callback_limit);
+    json[INDEX_SINDI][SPARSE_TERM_PRUNE_RATIO].SetFloat(term_prune_ratio);
+    json[INDEX_SINDI][SPARSE_TERM_RETAIN_THRESHOLD].SetUint64(term_retain_threshold);
+    execution_options.WriteTo(json);
+    return json;
+}
+
+}  // namespace vsag

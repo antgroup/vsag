@@ -1,0 +1,36 @@
+name: asan-with-simd-option-build-asan-simd
+description: Shared build_asan_simd execution; callers own runners and dependencies.
+inputs:
+  matrix-simd-option:
+    description: Caller matrix.simd_option
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Load Cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: "5G"
+        save: ${{ github.event_name != 'pull_request' }}
+        key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+    - name: Make Asan
+      shell: sh
+      run: |
+        export EXTRA_DEFINED=`echo "${{ inputs.matrix-simd-option }}" | awk -F';' '{print $2}'`
+        export EXTRA_KEY=`echo "${{ inputs.matrix-simd-option }}" | awk -F';' '{print $1}'`
+        echo ${EXTRA_DEFINED}
+        echo ${EXTRA_KEY}
+        echo "SIMD_KEY=${EXTRA_KEY}" >> $GITHUB_ENV
+        export VSAG_ENABLE_INTEL_MKL=ON CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=4
+    - name: Clean
+      shell: sh
+      run: find ./build -type f -name "*.o" -exec rm -f {} +
+    - name: Save Test
+      uses: actions/upload-artifact@v5
+      with:
+        path: ./build
+        name: test-x86-${{ env.SIMD_KEY }}-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 3
+        overwrite: 'true'

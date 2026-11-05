@@ -1,0 +1,130 @@
+name: CI Images
+
+on:
+  push:
+    branches: ['main']
+    paths:
+      - 'docker/**'
+      - '.github/workflows/update-ci-image.yml'
+      - 'scripts/deps/install_toolchain_ubuntu.sh'
+  pull_request:
+    branches: ['main']
+    paths:
+      - 'docker/**'
+      - '.github/workflows/update-ci-image.yml'
+      - 'scripts/deps/install_toolchain_ubuntu.sh'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-ci-images-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_PREFIX: ci-main
+  IMAGE_REPOS: vsaglib/vsag ghcr.io/antgroup/vsag
+
+jobs:
+  build:
+    if: github.repository == 'antgroup/vsag'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            file_prefix: x86
+            runner: ubuntu-26.04
+          - arch: arm64
+            file_prefix: aarch64
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    env:
+      ARCH: ${{ matrix.arch }}
+      FILE_PREFIX: ${{ matrix.file_prefix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build on the native runner and verify the toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          variants=(base openblas)
+          if [[ "$ARCH" == amd64 ]]; then variants+=(mkl); fi
+          for variant in "${variants[@]}"; do
+            # The existing variant Dockerfiles use the local base built in this loop.
+            image="vsaglib/vsag:ci-${FILE_PREFIX}-$variant"
+            docker buildx build --builder default --load --provenance=false \
+              --platform "linux/$ARCH" -f "docker/Dockerfile.${FILE_PREFIX}.$variant" -t "$image" .
+            test "$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$image")" = "linux/$ARCH"
+            docker run --rm "$image" sh -ec 'clang-tidy-20 --version | grep -E "version 20[.]"'
+          done
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push the native images under run-specific staging tags
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for variant in base openblas mkl; do
+            if [[ "$ARCH" == arm64 && "$variant" == mkl ]]; then continue; fi
+            for repo in $IMAGE_REPOS; do
+              target="$repo:$IMAGE_PREFIX-$variant-run-$GITHUB_RUN_ID-$ARCH"
+              docker tag "vsaglib/vsag:ci-${FILE_PREFIX}-$variant" "$target"
+              docker push "$target"
+            done
+          done
+
+  publish:
+    needs: build
+    if: github.event_name == 'push' && github.repository == 'antgroup/vsag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish the platform indexes and verify their contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          for repo in $IMAGE_REPOS; do
+            for variant in base openblas mkl; do
+              target="$repo:$IMAGE_PREFIX-$variant"
+              sources=("$target-run-$GITHUB_RUN_ID-amd64")
+              expected='["linux/amd64"]'
+              if [[ "$variant" != mkl ]]; then
+                sources+=("$target-run-$GITHUB_RUN_ID-arm64")
+                expected='["linux/amd64","linux/arm64"]'
+              fi
+              docker buildx imagetools create --prefer-index=true -t "$target" "${sources[@]}"
+              docker buildx imagetools inspect --raw "$target" |
+                jq -e --argjson expected "$expected" \
+                  '([.manifests[].platform | .os + "/" + .architecture] | sort) == $expected'
+            done
+          done

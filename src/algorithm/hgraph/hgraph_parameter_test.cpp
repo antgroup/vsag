@@ -1,0 +1,1357 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "hgraph_parameter.h"
+
+#include <fmt/format.h>
+
+#include <catch2/catch_approx.hpp>
+#include <cmath>
+
+#include "hgraph.h"
+#include "index_common_param.h"
+#include "inner_string_params.h"
+#include "parameter_test.h"
+#include "unittest.h"
+
+#define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
+    SECTION(section_name) {                                                                \
+        HGraphDefaultParam param1;                                                         \
+        HGraphDefaultParam param2;                                                         \
+        param1.param_member = val1;                                                        \
+        param2.param_member = val2;                                                        \
+        auto param_str1 = generate_hgraph_param(param1);                                   \
+        auto param_str2 = generate_hgraph_param(param2);                                   \
+        auto hgraph_param1 = std::make_shared<vsag::HGraphParameter>();                    \
+        auto hgraph_param2 = std::make_shared<vsag::HGraphParameter>();                    \
+        hgraph_param1->FromString(param_str1);                                             \
+        hgraph_param2->FromString(param_str2);                                             \
+        if (expect_compatible) {                                                           \
+            REQUIRE(hgraph_param1->CheckCompatibility(hgraph_param2));                     \
+        } else {                                                                           \
+            REQUIRE_FALSE(hgraph_param1->CheckCompatibility(hgraph_param2));               \
+        }                                                                                  \
+    }
+
+struct HGraphDefaultParam {
+    std::string base_codes_io_type = "block_memory_io";
+    std::string base_codes_quantization_type = "pq";
+    int base_codes_pq_dim = 8;
+    std::string precise_codes_io_type = "block_memory_io";
+    std::string graph_io_type = "block_memory_io";
+    std::string graph_storage_type = "flat";
+    std::string precise_codes_quantization_type = "fp32";
+    int max_degree = 26;
+    bool support_remove = true;
+    int remove_flag_bit = 8;
+    bool use_attribute_filter = false;
+    bool support_duplicate = false;
+    bool deduplicate_storage = false;
+    float duplicate_distance_threshold = 0.0F;
+    bool support_force_remove = false;
+    bool use_reorder = true;
+};
+
+std::string
+generate_hgraph_param(const HGraphDefaultParam& param) {
+    static constexpr auto param_str = R"({{
+        "base_codes": {{
+            "codes_type": "flatten_codes",
+            "io_params": {{
+                "file_path": "./default_file_path",
+                "type": "{}"
+            }},
+            "quantization_params": {{
+                "pca_dim": 0,
+                "pq_dim": {},
+                "sq4_uniform_trunc_rate": 0.05,
+                "type": "{}"
+            }}
+        }},
+        "build_by_base": false,
+        "extra_info": {{
+            "io_params": {{
+                "file_path": "./default_file_path",
+                "type": "block_memory_io"
+            }}
+        }},
+        "graph": {{
+            "graph_storage_type": "{}",
+            "init_capacity": 100,
+            "io_params": {{
+                "file_path": "./default_file_path",
+                "type": "block_memory_io"
+            }},
+            "max_degree": {},
+            "support_remove": {},
+            "remove_flag_bit": {}
+        }},
+        "ignore_reorder": false,
+        "precise_codes": {{
+            "codes_type": "flatten_codes",
+            "io_params": {{
+                "file_path": "./default_file_path",
+                "type": "{}"
+            }},
+            "quantization_params": {{
+                "pca_dim": 0,
+                "pq_dim": 1,
+                "sq4_uniform_trunc_rate": 0.05,
+                "type": "{}"
+            }}
+        }},
+        "type": "hgraph",
+        "use_attribute_filter": {},
+        "use_reorder": {},
+        "support_duplicate": {},
+        "deduplicate_storage": {},
+        "duplicate_distance_threshold": {},
+        "support_force_remove": {}
+    }})";
+
+    return fmt::format(param_str,
+                       param.base_codes_io_type,
+                       param.base_codes_pq_dim,
+                       param.base_codes_quantization_type,
+                       param.graph_storage_type,
+                       param.max_degree,
+                       param.support_remove,
+                       param.remove_flag_bit,
+                       param.precise_codes_io_type,
+                       param.precise_codes_quantization_type,
+                       param.use_attribute_filter,
+                       param.use_reorder,
+                       param.support_duplicate,
+                       param.deduplicate_storage,
+                       param.duplicate_distance_threshold,
+                       param.support_force_remove);
+}
+
+// clang-format off
+TEST_CASE("HGraph Parameters CheckCompatibility", "[ut][HGraphParameter][CheckCompatibility]") {
+    SECTION("wrong parameter type") {
+        HGraphDefaultParam default_param;
+        auto param_str = generate_hgraph_param(default_param);
+        auto param = std::make_shared<vsag::HGraphParameter>();
+        param->FromString(param_str);
+        REQUIRE(param->CheckCompatibility(param));
+        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+    }
+
+    TEST_COMPATIBILITY_CASE(
+        "different base codes io type", base_codes_io_type, "memory_io", "block_memory_io", true)
+    TEST_COMPATIBILITY_CASE("different pq dim", base_codes_pq_dim, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different base codes quantization type",
+                            base_codes_quantization_type,
+                            "sq4",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE("different graph type", graph_storage_type, "flat", "compressed", false)
+    TEST_COMPATIBILITY_CASE("different max degree", max_degree, 26, 30, false)
+    TEST_COMPATIBILITY_CASE("different support remove", support_remove, true, false, false)
+    TEST_COMPATIBILITY_CASE("different remove flag bit", remove_flag_bit, 8, 16, false)
+    TEST_COMPATIBILITY_CASE("different use reorder", use_reorder, true, false, false)
+    TEST_COMPATIBILITY_CASE("different precise codes io type",
+                            precise_codes_io_type,
+                            "memory_io",
+                            "block_memory_io",
+                            true)
+    TEST_COMPATIBILITY_CASE("different precise codes quantization type",
+                            precise_codes_quantization_type,
+                            "fp32",
+                            "sq8",
+                            false)
+    TEST_COMPATIBILITY_CASE(
+        "different use attribute filter", use_attribute_filter, true, false, false)
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, true, false, false)
+    SECTION("different deduplicate storage") {
+        HGraphDefaultParam param1;
+        HGraphDefaultParam param2;
+        param1.support_duplicate = true;
+        param2.support_duplicate = true;
+        param1.deduplicate_storage = true;
+        param2.deduplicate_storage = false;
+        auto hgraph_param1 = std::make_shared<vsag::HGraphParameter>();
+        auto hgraph_param2 = std::make_shared<vsag::HGraphParameter>();
+        hgraph_param1->FromString(generate_hgraph_param(param1));
+        hgraph_param2->FromString(generate_hgraph_param(param2));
+        REQUIRE_FALSE(hgraph_param1->CheckCompatibility(hgraph_param2));
+    }
+    TEST_COMPATIBILITY_CASE("different duplicate distance threshold",
+                            duplicate_distance_threshold,
+                            0.0F,
+                            0.1F,
+                            false)
+    TEST_COMPATIBILITY_CASE(
+        "different support force remove", support_force_remove, true, false, false)
+    SECTION("conjugate graph is backward compatible") {
+        HGraphDefaultParam default_param;
+        auto param_str = generate_hgraph_param(default_param);
+        auto enabled = std::make_shared<vsag::HGraphParameter>();
+        auto disabled = std::make_shared<vsag::HGraphParameter>();
+        enabled->FromString(param_str);
+        disabled->FromString(param_str);
+        enabled->use_conjugate_graph = true;
+
+        REQUIRE(enabled->CheckCompatibility(disabled));
+        REQUIRE_FALSE(disabled->CheckCompatibility(enabled));
+    }
+}
+// clang-format on
+
+TEST_CASE("HGraph maps support_duplicate to graph parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": true,
+        "deduplicate_storage": true,
+        "duplicate_distance_threshold": 0.25,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->deduplicate_storage);
+    REQUIRE(typed_param->duplicate_distance_threshold == 0.25F);
+    REQUIRE(typed_param->bottom_graph_param->support_duplicate_);
+}
+
+TEST_CASE("HGraph maps conjugate graph parameters", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({"use_conjugate_graph": true})");
+    auto mapped = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->use_conjugate_graph);
+    REQUIRE(mapped->ToJson()[vsag::PARAMETER_USE_CONJUGATE_GRAPH].GetBool());
+
+    auto enabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":10,"use_conjugate_graph_search":true}})");
+    REQUIRE(enabled.use_conjugate_graph_search);
+    auto disabled = vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph":{"ef_search":10,"use_conjugate_graph_search":false}})");
+    REQUIRE_FALSE(disabled.use_conjugate_graph_search);
+}
+
+TEST_CASE("HGraph maps resize increase count bit", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->resize_increase_count_bit == vsag::DEFAULT_RESIZE_INCREASE_COUNT_BIT);
+
+    auto configured_param =
+        std::dynamic_pointer_cast<vsag::HGraphParameter>(vsag::HGraph::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->resize_increase_count_bit == 1);
+    REQUIRE(configured_param->ToJson()[vsag::RESIZE_INCREASE_COUNT_BIT].GetUint64() == 1);
+
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 0})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 32})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": 1.5})"), common_param));
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"resize_increase_count_bit": -1})"), common_param));
+}
+
+TEST_CASE("HGraph maps train sample count", "[ut][HGraphParameter][train_sample_count]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto default_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param != nullptr);
+    REQUIRE(default_param->train_sample_count == 65536L);
+    REQUIRE(std::string(vsag::HGRAPH_TRAIN_SAMPLE_COUNT) == "train_sample_count");
+
+    auto configured_param =
+        std::dynamic_pointer_cast<vsag::HGraphParameter>(vsag::HGraph::CheckAndMappingExternalParam(
+            vsag::JsonType::Parse(R"({"train_sample_count": 500000})"), common_param));
+    REQUIRE(configured_param != nullptr);
+    REQUIRE(configured_param->train_sample_count == 500000L);
+    REQUIRE(configured_param->ToJson()[vsag::TRAIN_SAMPLE_COUNT_KEY].GetInt() == 500000L);
+
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"train_sample_count": 511})"), common_param));
+}
+
+TEST_CASE("HGraph rejects deduplicate_storage without support_duplicate", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": false,
+        "deduplicate_storage": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph rejects deduplicate_storage with force remove", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_duplicate": true,
+        "deduplicate_storage": true,
+        "support_force_remove": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph maps flat MCI parameters", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true,
+        "use_mci": false,
+        "mci_mcs": 8,
+        "mci_clique_max": 4,
+        "mci_alpha": 1.2,
+        "mci_knng_source": "odescent",
+        "mci_incremental_join_ratio_threshold": 0.7,
+        "mci_incremental_degree_min": 70,
+        "mci_incremental_clique_max": 4,
+        "mci_delete_clique_size_threshold": 5,
+        "mci_delete_node_mct_threshold": 2
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->mci_parameters.enabled);
+    REQUIRE(typed_param->mci_parameters.mcs == 8);
+    REQUIRE(typed_param->mci_parameters.clique_max == 4);
+    REQUIRE(typed_param->mci_parameters.alpha == 1.2F);
+    REQUIRE(typed_param->mci_parameters.knng_source == "odescent");
+    REQUIRE(typed_param->mci_parameters.incremental_join_ratio_threshold == 0.7F);
+    REQUIRE(typed_param->mci_parameters.incremental_degree_min == 70);
+    REQUIRE(typed_param->mci_parameters.incremental_clique_max == 4);
+    REQUIRE(typed_param->mci_parameters.delete_clique_size_threshold == 5);
+    REQUIRE(typed_param->mci_parameters.delete_node_mct_threshold == 2);
+
+    auto json = typed_param->ToJson();
+    REQUIRE_FALSE(json.Contains("mci"));
+    REQUIRE(json["use_mci"].GetBool());
+    REQUIRE(json["mci_mcs"].GetInt() == 8);
+    REQUIRE(json["mci_clique_max"].GetInt() == 4);
+    REQUIRE(json["mci_alpha"].GetFloat() == 1.2F);
+    REQUIRE(json["mci_knng_source"].GetString() == "odescent");
+    REQUIRE(json["mci_delete_clique_size_threshold"].GetInt() == 5);
+    REQUIRE(json["mci_delete_node_mct_threshold"].GetInt() == 2);
+}
+
+TEST_CASE("HGraph MCI deletion threshold defaults and overrides round-trip",
+          "[ut][HGraphParameter][mci]") {
+    const vsag::HGraphMCIParameters defaults;
+    REQUIRE(defaults.delete_clique_size_threshold == 30);
+    REQUIRE(defaults.delete_node_mct_threshold == 3);
+    const bool explicit_threshold = GENERATE(false, true);
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+        "graph_type":"nsw","max_degree":32,"ef_construction":100,"use_mci":true})");
+    if (explicit_threshold) {
+        // Preserve explicitly configured historical thresholds rather than replacing them.
+        json["mci_delete_clique_size_threshold"].SetInt(3);
+    }
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param != nullptr);
+    const uint64_t expected = explicit_threshold ? 3 : 30;
+    REQUIRE(param->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(param->mci_parameters.delete_node_mct_threshold == 3);
+    REQUIRE(param->ToJson()["mci_delete_clique_size_threshold"].GetInt() == expected);
+    auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
+    REQUIRE(restored->mci_parameters.delete_clique_size_threshold == expected);
+    REQUIRE(restored->CheckCompatibility(param));
+}
+
+TEST_CASE("HGraph MCI incremental degree targets round-trip and validate",
+          "[ut][HGraphParameter][mci][degree_add]") {
+    vsag::HGraphMCIParameters defaults;
+    REQUIRE(defaults.IncrementalDegreeTarget(0) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(1) == 0);
+    REQUIRE(defaults.IncrementalDegreeTarget(2) == 1);
+    REQUIRE(defaults.incremental_degree_min == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(50) == 49);
+    REQUIRE(defaults.IncrementalDegreeTarget(51) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(70) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(71) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(100) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(101) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(6000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(9999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(19999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(20000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(509999) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(510000) == 51);
+    REQUIRE(defaults.IncrementalDegreeTarget(800000) == 80);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 100);
+    defaults.mcs = 32;
+    REQUIRE(defaults.IncrementalDegreeTarget(32) == 31);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 50);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 50);
+    defaults.mcs = 200;
+    defaults.incremental_degree_min = 40;
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 40);
+    defaults.incremental_degree_min = 100;
+    REQUIRE(defaults.IncrementalDegreeTarget(100) == 99);
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 100);
+    defaults.incremental_degree_min = 70;
+    REQUIRE(defaults.IncrementalDegreeTarget(10000) == 70);
+    defaults.mcs = 400;
+    REQUIRE(defaults.IncrementalDegreeTarget(1500000) == 150);
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 200);
+    defaults.mcs = 1;
+    REQUIRE(defaults.IncrementalDegreeTarget(3241378) == 70);
+    defaults.mcs = 200;
+    defaults.incremental_degree_n_divisor = 1;
+    defaults.incremental_degree_mcs_divisor = 1;
+    REQUIRE(defaults.IncrementalDegreeTarget(3) == 2);
+
+    const std::string key = GENERATE("mci_incremental_degree_min",
+                                     "mci_incremental_degree_n_divisor",
+                                     "mci_incremental_degree_mcs_divisor");
+    CAPTURE(key);
+    auto json = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+        "graph_type":"nsw","max_degree":32,"ef_construction":100})");
+    json[key].SetInt(4);
+    vsag::IndexCommonParam common;
+    common.dim_ = 16;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    const auto mapped = vsag::HGraph::CheckAndMappingExternalParam(json, common);
+    const auto param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(param->mci_parameters.enabled);
+    REQUIRE(param->mci_parameters.incremental_degree_min ==
+            (key == "mci_incremental_degree_min" ? 4 : 50));
+    REQUIRE(param->ToJson()["mci_incremental_degree_min"].GetInt() ==
+            (key == "mci_incremental_degree_min" ? 4 : 50));
+    REQUIRE(param->ToJson()[key].GetInt() == 4);
+    auto restored = std::make_shared<vsag::HGraphParameter>(param->ToJson());
+    REQUIRE(restored->CheckCompatibility(param));
+    auto changed = param->ToJson();
+    changed[key].SetInt(5);
+    auto incompatible = std::make_shared<vsag::HGraphParameter>(changed);
+    REQUIRE_FALSE(incompatible->CheckCompatibility(param));
+    for (int invalid : {0, -1}) {
+        json[key].SetInt(invalid);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    }
+}
+
+TEST_CASE("HGraph enables MCI from any public trigger", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "fp32",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100
+        })");
+    };
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto is_mci_enabled = [&](const vsag::JsonType& param) {
+        auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+        REQUIRE(typed != nullptr);
+        return typed->mci_parameters.enabled;
+    };
+
+    SECTION("disabled without a trigger") {
+        auto param = make_param();
+        param["use_mci"].SetBool(false);
+        REQUIRE_FALSE(is_mci_enabled(param));
+    }
+    SECTION("use_mci true") {
+        auto param = make_param();
+        param["use_mci"].SetBool(true);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("nested parameters are rejected") {
+        auto param = make_param();
+        param["mci"].SetJson(vsag::JsonType::Parse(R"({"mcs": 8})"));
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_mcs") {
+        auto param = make_param();
+        param["mci_mcs"].SetInt(8);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_clique_max") {
+        auto param = make_param();
+        param["mci_clique_max"].SetInt(4);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_alpha") {
+        auto param = make_param();
+        param["mci_alpha"].SetFloat(1.2F);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_knng_source") {
+        auto param = make_param();
+        param["mci_knng_source"].SetString("odescent");
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_join_ratio_threshold") {
+        auto param = make_param();
+        param["mci_incremental_join_ratio_threshold"].SetFloat(0.7F);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_degree_min") {
+        auto param = make_param();
+        param["mci_incremental_degree_min"].SetInt(70);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_incremental_clique_max") {
+        auto param = make_param();
+        param["mci_incremental_clique_max"].SetInt(4);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(3);
+        REQUIRE(is_mci_enabled(param));
+    }
+
+    SECTION("internal knng path is rejected") {
+        auto param = make_param();
+        param["mci_knng_path"].SetString("/build-host/graph.bin");
+        REQUIRE_THROWS(is_mci_enabled(param));
+    }
+}
+
+TEST_CASE("HGraph accepts MCI with force remove", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_force_remove": true,
+        "use_mci": true
+    })");
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    param["support_duplicate"].SetBool(true);
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph rejects invalid flat MCI parameters", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "odescent",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": true,
+            "mci_mcs": 8,
+            "mci_clique_max": 4,
+            "mci_incremental_degree_min": 70,
+            "mci_incremental_clique_max": 4,
+            "mci_delete_clique_size_threshold": 3,
+            "mci_delete_node_mct_threshold": 3
+        })");
+    };
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("mci_mcs") {
+        auto param = make_param();
+        param["mci_mcs"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_clique_max") {
+        auto param = make_param();
+        param["mci_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_incremental_degree_min") {
+        auto param = make_param();
+        param["mci_incremental_degree_min"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_incremental_clique_max") {
+        auto param = make_param();
+        param["mci_incremental_clique_max"].SetInt(-1);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_clique_size_threshold") {
+        auto param = make_param();
+        param["mci_delete_clique_size_threshold"].SetInt(0);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_delete_node_mct_threshold") {
+        auto param = make_param();
+        param["mci_delete_node_mct_threshold"].SetInt(0);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+    SECTION("mci_knng_source") {
+        auto param = make_param();
+        param["mci_knng_source"].SetString("unknown");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+}
+
+TEST_CASE("HGraph Search Parameters parse MCI seed ratio", "[ut][HGraphParameter]") {
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_mci": true,
+            "mci_seed_ratio": 0.25
+        }
+    })");
+
+    REQUIRE(params.use_mci);
+    REQUIRE(std::abs(params.mci_seed_ratio - 0.25F) < 1e-5F);
+
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200
+        }
+    })");
+    REQUIRE(defaults.mci_seed_ratio == 0.1F);
+    REQUIRE(defaults.mci_hgraph_valid_ratio_threshold == 0.05F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_count": 64
+        }
+    })"));
+    auto unbounded = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_ratio": 100.0
+        }
+    })");
+    REQUIRE(unbounded.mci_seed_ratio == 100.0F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_ratio": -0.1
+        }
+    })"));
+}
+
+TEST_CASE("HGraph Search Parameters parse hybrid traversal and seed coverage",
+          "[ut][HGraphParameter]") {
+    auto defaults = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200
+        }
+    })");
+    REQUIRE_FALSE(defaults.use_hybrid_traversal);
+    REQUIRE(defaults.hybrid_vob == 0.0);
+    REQUIRE(defaults.hybrid_filter_cost_ratio == 1.0);
+    REQUIRE(defaults.mci_seed_coverage == 1.0F);
+    REQUIRE(defaults.mci_seed_max_count == 32768);
+
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 32.0,
+            "hybrid_filter_cost_ratio": 2.5,
+            "mci_seed_coverage": 0.1,
+            "mci_seed_max_count": 4096
+        }
+    })");
+    REQUIRE(params.use_hybrid_traversal);
+    REQUIRE(params.hybrid_vob == 32.0);
+    REQUIRE(params.hybrid_filter_cost_ratio == 2.5);
+    REQUIRE(params.mci_seed_coverage == 0.1F);
+    REQUIRE(params.mci_seed_max_count == 4096);
+
+    // hybrid_vob <= 0 is the documented way to disable the early stop, not an error.
+    auto unbounded = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "use_hybrid_traversal": true,
+            "hybrid_vob": 0.0
+        }
+    })");
+    REQUIRE(unbounded.hybrid_vob == 0.0);
+
+    // mci_seed_max_count == 0 means "unlimited" and must be accepted.
+    auto unlimited = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "mci_seed_max_count": 0
+        }
+    })");
+    REQUIRE(unlimited.mci_seed_max_count == 0);
+
+    for (const auto* bad : {R"({"hgraph":{"ef_search":200,"hybrid_vob":-1.0}})",
+                            R"({"hgraph":{"ef_search":200,"hybrid_filter_cost_ratio":-0.5}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_coverage":-0.1}})",
+                            R"({"hgraph":{"ef_search":200,"mci_seed_max_count":-1}})"}) {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(bad));
+    }
+}
+
+TEST_CASE("HGraph Search Parameters parse RaBitQ error rate", "[ut][HGraphParameter]") {
+    auto params = vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "rabitq_one_bit_search": true,
+            "rabitq_error_rate": 2.5
+        }
+    })");
+
+    REQUIRE(params.ef_search == 200);
+    REQUIRE(params.rabitq_one_bit_search);
+    REQUIRE(std::abs(params.rabitq_error_rate - 2.5F) < 1e-5F);
+
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(R"({
+        "hgraph": {
+            "ef_search": 200,
+            "rabitq_error_rate": 0.0
+        }
+    })"));
+}
+
+TEST_CASE("HGraph Search Parameters reject ef_search integer overflow",
+          "[ut][HGraphSearchParameters][ef_search]") {
+    REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+        R"({"hgraph": {"ef_search": 9223372036854775808}})"));
+}
+
+TEST_CASE("HGraph maps label_remap_type to inner index parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "label_remap_type": "robin",
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->bottom_graph_param != nullptr);
+    REQUIRE(typed_param->label_remap_type == vsag::LabelRemapType::ROBIN);
+}
+
+TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
+          "[ut][HGraphSearchParameters][brute_force_threshold]") {
+    SECTION("default is 0") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.brute_force_threshold == 0.0F);
+    }
+
+    SECTION("accepts values in [0, 1]") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.25}})");
+        REQUIRE(params.brute_force_threshold == 0.25F);
+
+        params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})");
+        REQUIRE(params.brute_force_threshold == 1.0F);
+
+        params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.0}})");
+        REQUIRE(params.brute_force_threshold == 0.0F);
+    }
+
+    SECTION("rejects out-of-range values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": -0.1}})"));
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.5}})"));
+    }
+}
+
+TEST_CASE("HGraphSearchParameters parses skip_ratio and skip_strategy",
+          "[ut][HGraphSearchParameters][skip_ratio]") {
+    SECTION("default values") {
+        auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
+        REQUIRE(params.skip_ratio == 0.2F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("custom skip_ratio") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 0.5}})");
+        REQUIRE(params.skip_ratio == 0.5F);
+    }
+
+    SECTION("custom skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "deterministic_accumulative"}})");
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("both skip_ratio and skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"(
+                {
+                    "hgraph": {
+                        "ef_search": 32,
+                        "skip_ratio": 0.3,
+                        "skip_strategy": "deterministic_accumulative"
+                    }
+                })");
+        REQUIRE(params.skip_ratio == 0.3F);
+        REQUIRE(params.skip_strategy_type ==
+                vsag::FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+    }
+
+    SECTION("random skip_strategy") {
+        auto params = vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "random"}})");
+        REQUIRE(params.skip_strategy_type == vsag::FilterSearchSkipStrategyType::RANDOM);
+    }
+
+    SECTION("skip_ratio out of range - too high") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": 1.5}})"));
+    }
+
+    SECTION("skip_ratio out of range - negative") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_ratio": -0.1}})"));
+    }
+
+    SECTION("skip_strategy rejects unknown values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": "unknown"}})"));
+    }
+
+    SECTION("skip_strategy rejects non-string values") {
+        REQUIRE_THROWS(vsag::HGraphSearchParameters::FromJson(
+            R"({"hgraph": {"ef_search": 32, "skip_strategy": 123}})"));
+    }
+}
+
+TEST_CASE("HGraph maps support_force_remove to inner parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "support_force_remove": true,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_force_remove);
+}
+
+TEST_CASE("HGraph maps RaBitQ x+y split params", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "block_memory_io",
+        "base_file_path": "/tmp/vsag_rabitq_split_base",
+        "base_supplement_io_type": "async_io",
+        "base_supplement_file_path": "/tmp/vsag_rabitq_split_supplement",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true,
+        "reorder_source": "base"
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter->GetTypeName() ==
+            std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
+            std::string("/tmp/vsag_rabitq_split_supplement"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+}
+
+TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphParameter]") {
+    auto make_param = []() {
+        return vsag::JsonType::Parse(R"({
+            "base_quantization_type": "rabitq",
+            "precise_quantization_type": "rabitq",
+            "base_io_type": "memory_io",
+            "base_supplement_io_type": "memory_io",
+            "rabitq_bits_per_dim_base": 1,
+            "rabitq_bits_per_dim_precise": 7,
+            "graph_io_type": "memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 200,
+            "use_reorder": true,
+            "reorder_source": "base",
+            "rabitq_fused_datacell": true
+        })");
+    };
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 960;
+    common_param.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(make_param(), common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->rabitq_fused_datacell);
+    REQUIRE_FALSE(typed_param->mci_parameters.enabled);
+    REQUIRE(typed_param->base_codes_param->name == std::string(vsag::RABITQ_SPLIT_DATA_CELL));
+
+    auto require_invalid_argument = [&](vsag::JsonType param, const std::string& message) {
+        bool rejected = false;
+        try {
+            static_cast<void>(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        } catch (const vsag::VsagException& exception) {
+            rejected = true;
+            REQUIRE(exception.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(exception.what()) == message);
+        }
+        REQUIRE(rejected);
+    };
+
+    SECTION("accept filter widths one through four") {
+        for (int32_t filter_bits = 1; filter_bits <= 4; ++filter_bits) {
+            auto param = make_param();
+            param["rabitq_bits_per_dim_base"].SetInt(filter_bits);
+            param["rabitq_bits_per_dim_precise"].SetInt(8 - filter_bits);
+            CAPTURE(filter_bits);
+            REQUIRE_NOTHROW(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        }
+    }
+
+    SECTION("reject filter widths above four") {
+        auto param = make_param();
+        param["rabitq_bits_per_dim_base"].SetInt(5);
+        param["rabitq_bits_per_dim_precise"].SetInt(3);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject MCI") {
+        auto param = make_param();
+        param["use_mci"].SetBool(true);
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject non-memory supplement") {
+        auto param = make_param();
+        param["base_supplement_io_type"].SetString("mmap_io");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("reject non-memory graph IO") {
+        auto param = make_param();
+        param[vsag::HGRAPH_GRAPH_IO_TYPE].SetString("mmap_io");
+        param[vsag::HGRAPH_GRAPH_FILE_PATH].SetString("/tmp/vsag_fused_graph");
+        require_invalid_argument(param, "rabitq_fused_datacell only supports an in-memory graph");
+    }
+
+    SECTION("reject non-memory base IO") {
+        auto param = make_param();
+        param[vsag::HGRAPH_BASE_IO_TYPE].SetString("mmap_io");
+        param[vsag::HGRAPH_BASE_FILE_PATH].SetString("/tmp/vsag_fused_base");
+        require_invalid_argument(param, "rabitq_fused_datacell only supports memory IO");
+    }
+
+    SECTION("reject compressed graph") {
+        auto param = make_param();
+        param[vsag::HGRAPH_GRAPH_STORAGE_TYPE].SetString("compressed");
+        require_invalid_argument(param, "rabitq_fused_datacell requires flat graph storage");
+    }
+
+    SECTION("reject deduplicate storage") {
+        auto param = make_param();
+        param[vsag::HGRAPH_SUPPORT_DUPLICATE].SetBool(true);
+        param[vsag::HGRAPH_DEDUPLICATE_STORAGE].SetBool(true);
+        require_invalid_argument(param,
+                                 "rabitq_fused_datacell does not support deduplicate_storage");
+    }
+
+    SECTION("reject force remove") {
+        auto param = make_param();
+        param[vsag::HGRAPH_SUPPORT_FORCE_REMOVE].SetBool(true);
+        require_invalid_argument(param, "rabitq_fused_datacell does not support force remove");
+    }
+
+    SECTION("reject cosine") {
+        common_param.metric_ = vsag::MetricType::METRIC_TYPE_COSINE;
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(make_param(), common_param));
+    }
+
+    SECTION("reject PCA with INVALID_ARGUMENT") {
+        auto param = make_param();
+        param[vsag::RABITQ_PCA_DIM].SetInt(480);
+        bool rejected = false;
+        try {
+            static_cast<void>(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        } catch (const vsag::VsagException& exception) {
+            rejected = true;
+            REQUIRE(exception.error_.type == vsag::ErrorType::INVALID_ARGUMENT);
+            REQUIRE(std::string(exception.what()).find("does not support PCA") !=
+                    std::string::npos);
+        }
+        REQUIRE(rejected);
+    }
+}
+
+TEST_CASE("HGraph maps RaBitQ without y bits to standard RaBitQ", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "sq8",
+        "base_io_type": "block_memory_io",
+        "precise_io_type": "block_memory_io",
+        "rabitq_bits_per_dim_base": 3,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("flatten"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() ==
+            std::string("standard"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 3);
+}
+
+TEST_CASE("HGraph maps mrle_dim external parameter", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, fp32",
+        "base_io_type": "block_memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "mrle_dim": 127,
+        "graph_io_type": "block_memory_io",
+        "graph_storage_type": "flat",
+        "graph_type": "nsw",
+        "max_degree": 32,
+        "ef_construction": 100,
+        "use_reorder": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
+    auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["quantization_params"][vsag::MRLE_DIM_KEY].GetInt() == 127);
+}
+
+TEST_CASE("HGraph mrle_dim validation rejects out-of-range values", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    SECTION("mrle_dim exceeds dim") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false,
+            "mrle_dim": 200
+        })");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("mrle_dim is negative") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false,
+            "mrle_dim": -1
+        })");
+        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+    }
+
+    SECTION("mrle_dim default is 0 when omitted") {
+        auto param = vsag::JsonType::Parse(R"({
+            "base_quantization_type": "tq",
+            "tq_chain": "mrle, fp32",
+            "base_io_type": "block_memory_io",
+            "precise_quantization_type": "fp32",
+            "precise_io_type": "block_memory_io",
+            "graph_io_type": "block_memory_io",
+            "graph_storage_type": "flat",
+            "graph_type": "nsw",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "use_reorder": false
+        })");
+        auto hgraph_param = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+        auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(hgraph_param);
+        REQUIRE(typed_param != nullptr);
+        auto base_json = typed_param->base_codes_param->ToJson();
+        REQUIRE(base_json.Contains("quantization_params"));
+        auto qp = base_json["quantization_params"];
+        REQUIRE(qp.Contains(vsag::MRLE_DIM_KEY));
+        REQUIRE(qp[vsag::MRLE_DIM_KEY].GetInt() == 0);
+    }
+}
+
+TEST_CASE("HGraph maps fast RaBitQ to base and precise quantizers", "[ut][HGraphParameter]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 4,
+        "fast_encode_rabitq": false,
+        "fast_encode_rabitq_rounds": 9,
+        "use_reorder": true,
+        "reorder_source": "precise"
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->base_codes_param != nullptr);
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto precise_json = typed_param->precise_codes_param->ToJson();
+    REQUIRE_FALSE(base_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(base_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 9);
+    REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 9);
+}
+
+TEST_CASE("HGraph maps MRLE RaBitQ split to base reorder", "[ut][HGraphParameter][MRLE]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 64,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+    REQUIRE(typed_param->precise_codes_param == nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["quantization_params"]["type"].GetString() == std::string("tq"));
+    REQUIRE(base_json["quantization_params"]["tq_chain"].GetString() == std::string("mrle,rabitq"));
+    REQUIRE(base_json["quantization_params"]["mrle_dim"].GetInt() == 64);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+
+    param["tq_chain"].SetString("pca, rabitq");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+}
+
+TEST_CASE("HGraph rejects TQ-only fields for non-TQ quantizers", "[ut][HGraphParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto tq_chain = vsag::JsonType::Parse(R"({"base_quantization_type":"fp32",
+                                               "tq_chain":"mrle,fp32"})");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(tq_chain, common_param));
+
+    auto mrle_dim = vsag::JsonType::Parse(R"({"base_quantization_type":"int8",
+                                               "mrle_dim":64})");
+    REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(mrle_dim, common_param));
+}
+
+TEST_CASE("HGraph adaptive pruning accepts legacy parameters",
+          "[ut][HGraphParameter][adaptive_pruning]") {
+    auto old_json = vsag::JsonType::Parse(generate_hgraph_param(HGraphDefaultParam{}));
+    old_json.Erase("adaptive_pruning");
+    auto old_parameter = std::make_shared<vsag::HGraphParameter>(old_json);
+    CHECK_FALSE(old_parameter->adaptive_pruning.enabled);
+    auto roundtrip = std::make_shared<vsag::HGraphParameter>(old_parameter->ToJson());
+    CHECK(roundtrip->CheckCompatibility(old_parameter));
+    CHECK(old_parameter->CheckCompatibility(roundtrip));
+    roundtrip->alpha = 1.5F;
+    roundtrip->adaptive_pruning.adjust_step = 0.03F;
+    CHECK(old_parameter->CheckCompatibility(roundtrip));
+    roundtrip->adaptive_pruning.enabled = true;
+    CHECK_FALSE(old_parameter->CheckCompatibility(roundtrip));
+}
+
+TEST_CASE("HGraph flat adaptive parameters map and reject obsolete options",
+          "[ut][HGraphParameter][adaptive_pruning]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 8;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto json = vsag::JsonType::Parse(R"({"adaptive_pruning":true,
+        "adaptive_pruning_adjust_step":0.03,"adaptive_pruning_apply_to_reverse":true})");
+    auto parameter = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+        vsag::HGraph::CheckAndMappingExternalParam(json, common));
+    REQUIRE(parameter != nullptr);
+    CHECK(parameter->adaptive_pruning.enabled);
+    CHECK(parameter->adaptive_pruning.apply_to_reverse);
+    CHECK(parameter->adaptive_pruning.adjust_step == Catch::Approx(0.03F));
+    CHECK(parameter->ToJson()["adaptive_pruning"].GetBool());
+    CHECK_FALSE(parameter->ToJson().Contains("fill_rejected"));
+    for (const auto* field : {"fill_rejected", "adaptive_pruning_fill_rejected"}) {
+        auto obsolete = vsag::JsonType::Parse(json.Dump());
+        obsolete[field].SetBool(false);
+        CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(obsolete, common));
+    }
+    json["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
+}

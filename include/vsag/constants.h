@@ -1,0 +1,309 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+
+namespace vsag {
+
+constexpr uint64_t DEFAULT_RESIZE_INCREASE_COUNT_BIT = 10;
+constexpr uint64_t MIN_RESIZE_INCREASE_COUNT_BIT = 1;
+constexpr uint64_t MAX_RESIZE_INCREASE_COUNT_BIT = 31;
+
+extern const char* const INDEX_HGRAPH;
+extern const char* const INDEX_LAZY_HGRAPH;
+extern const char* const INDEX_PYRAMID;
+extern const char* const INDEX_SINDI;
+extern const char* const INDEX_SINDI_V2;
+extern const char* const INDEX_BRUTE_FORCE;
+extern const char* const INDEX_IVF;
+extern const char* const INDEX_WARP;
+extern const char* const INDEX_SIMQ;
+extern const char* const DIM;
+extern const char* const NUM_ELEMENTS;
+extern const char* const IDS;
+extern const char* const DISTS;
+extern const char* const FLOAT32_VECTORS;
+extern const char* const FLOAT16_VECTORS;
+extern const char* const SPARSE_VECTORS;
+extern const char* const INT8_VECTORS;
+extern const char* const ATTRIBUTE_SETS;
+extern const char* const DATASET_PATHS;
+extern const char* const EXTRA_INFOS;
+extern const char* const EXTRA_INFO_SIZE;
+extern const char* const VECTOR_COUNTS;
+extern const char* const MULTI_VECTORS;
+extern const char* const MULTI_VECTOR_DIM;
+extern const char* const SOURCE_ID;
+
+extern const char* const SIMPLEFLAT_VECTORS;
+extern const char* const SIMPLEFLAT_IDS;
+extern const char* const METRIC_L2;
+extern const char* const METRIC_COSINE;
+extern const char* const METRIC_IP;
+extern const char* const DATATYPE_FLOAT32;
+extern const char* const DATATYPE_FLOAT16;
+extern const char* const DATATYPE_BFLOAT16;
+extern const char* const DATATYPE_INT8;
+extern const char* const DATATYPE_SPARSE;
+extern const char* const BLANK_INDEX;
+
+// environment-level-parameters
+extern const char* const PREFETCH_STRIDE_VISIT;
+extern const char* const PREFETCH_STRIDE_CODE;
+extern const char* const PREFETCH_DEPTH_CODE;
+
+// parameters
+extern const char* const PARAMETER_DTYPE;
+extern const char* const PARAMETER_DIM;
+extern const char* const PARAMETER_METRIC_TYPE;
+extern const char* const PARAMETER_REPR;
+extern const char* const REPR_DENSE;
+extern const char* const REPR_SPARSE;
+extern const char* const REPR_MULTI_VECTOR;
+extern const char* const PARAMETER_USE_CONJUGATE_GRAPH;
+extern const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH;
+extern const char* const PARAMETER_USE_OLD_SERIAL_FORMAT;
+
+extern const char* const ODESCENT_PARAMETER_ALPHA;
+extern const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN;
+extern const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE;
+extern const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE;
+extern const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE;
+extern const char* const GRAPH_TYPE_ODESCENT;
+extern const char* const GRAPH_TYPE_NSW;
+extern const char* const GRAPH_TYPE_PIPNN;
+
+extern const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE;
+extern const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE;
+extern const char* const PIPNN_PARAMETER_FANOUT;
+extern const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT;
+extern const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT;
+extern const char* const PIPNN_PARAMETER_RESERVOIR_SIZE;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING;
+extern const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP;
+
+extern const char* const INDEX_PARAM;
+
+extern const char* const PYRAMID_SUPPORT_DUPLICATE;
+extern const char* const PYRAMID_EF_CONSTRUCTION;
+extern const char* const PYRAMID_USE_REORDER;
+extern const char* const PYRAMID_BASE_QUANTIZATION_TYPE;
+extern const char* const PYRAMID_GRAPH_MAX_DEGREE;
+extern const char* const PYRAMID_BUILD_ALPHA;
+extern const char* const PYRAMID_GRAPH_TYPE;
+extern const char* const PYRAMID_GRAPH_STORAGE_TYPE;
+extern const char* const PYRAMID_BUILD_THREAD_COUNT;
+extern const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE;
+extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE;
+extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY;
+extern const char* const PYRAMID_RABITQ_BITS_PER_DIM_PRECISE;
+extern const char* const PYRAMID_RABITQ_PCA_DIM;
+extern const char* const PYRAMID_RABITQ_USE_FHT;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ;
+extern const char* const PYRAMID_FAST_ENCODE_RABITQ_ROUNDS;
+extern const char* const PYRAMID_BASE_IO_TYPE;
+extern const char* const PYRAMID_BASE_SUPPLEMENT_IO_TYPE;
+extern const char* const PYRAMID_BASE_PQ_DIM;
+extern const char* const PYRAMID_BASE_FILE_PATH;
+extern const char* const PYRAMID_BASE_SUPPLEMENT_FILE_PATH;
+extern const char* const PYRAMID_PRECISE_IO_TYPE;
+extern const char* const PYRAMID_PRECISE_FILE_PATH;
+extern const char* const PYRAMID_PARAMETER_EF_SEARCH;
+extern const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH;
+extern const char* const PYRAMID_PARAMETER_HOPS_LIMIT;
+extern const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH;
+extern const char* const PYRAMID_PARAMETER_HIERARCHIES;
+extern const char* const PYRAMID_PARAMETER_HIERARCHY_OP;
+extern const char* const PYRAMID_NO_BUILD_LEVELS;
+extern const char* const PYRAMID_HIERARCHIES;
+extern const char* const PYRAMID_INDEX_MIN_SIZE;
+extern const char* const PYRAMID_STORE_PATHS;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER;
+extern const char* const PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+
+extern const char PART_SLASH;
+extern const char PART_BAR;
+// statstic key
+extern const char* const STATSTIC_MEMORY;
+extern const char* const STATSTIC_INDEX_NAME;
+extern const char* const STATSTIC_DATA_NUM;
+
+extern const char* const STATSTIC_KNN_TIME;
+extern const char* const STATSTIC_KNN_IO;
+extern const char* const STATSTIC_KNN_HOP;
+extern const char* const STATSTIC_KNN_IO_TIME;
+extern const char* const STATSTIC_KNN_CACHE_HIT;
+extern const char* const STATSTIC_RANGE_TIME;
+extern const char* const STATSTIC_RANGE_IO;
+extern const char* const STATSTIC_RANGE_HOP;
+extern const char* const STATSTIC_RANGE_CACHE_HIT;
+extern const char* const STATSTIC_RANGE_IO_TIME;
+
+//Error message
+extern const char* const MESSAGE_PARAMETER;
+
+// Serialize key
+extern const char* const SERIALIZE_MAGIC_NUM;
+extern const char* const SERIALIZE_VERSION;
+
+extern const char* const SQ4_UNIFORM_TRUNC_RATE;
+extern const char* const RABITQ_PCA_DIM;
+extern const char* const RABITQ_VERSION;
+extern const char* const RABITQ_BITS_PER_DIM_QUERY;
+extern const char* const RABITQ_BITS_PER_DIM_BASE;
+extern const char* const RABITQ_BITS_PER_DIM_PRECISE;
+extern const char* const RABITQ_BITS_PER_DIM_FILTER;
+extern const char* const RABITQ_ERROR_RATE;
+extern const char* const RABITQ_USE_FHT;
+extern const char* const FAST_ENCODE_RABITQ;
+extern const char* const FAST_ENCODE_RABITQ_ROUNDS;
+extern const char* const INDEX_TQ_CHAIN;
+extern const char* const INDEX_MRLE_DIM;
+
+extern const char* const HGRAPH_SUPPORT_REMOVE;
+extern const char* const HGRAPH_SUPPORT_FORCE_REMOVE;
+extern const char* const HGRAPH_REMOVE_FLAG_BIT;
+
+// hgraph params
+extern const char* const HGRAPH_USE_REORDER;
+extern const char* const HGRAPH_REORDER_SOURCE;
+extern const char* const HGRAPH_REORDER_SOURCE_PRECISE;
+extern const char* const HGRAPH_REORDER_SOURCE_BASE;
+extern const char* const HGRAPH_USE_ELP_OPTIMIZER;
+extern const char* const HGRAPH_USE_REVERSE_EDGES;
+extern const char* const HGRAPH_IGNORE_REORDER;
+extern const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION;
+extern const char* const HGRAPH_BASE_CODES_TYPE;
+extern const char* const HGRAPH_BASE_QUANTIZATION_TYPE;
+extern const char* const HGRAPH_GRAPH_MAX_DEGREE;
+extern const char* const HGRAPH_BUILD_EF_CONSTRUCTION;
+extern const char* const HGRAPH_BUILD_ALPHA;
+extern const char* const HGRAPH_ADAPTIVE_PRUNING;
+extern const char* const PYRAMID_ADAPTIVE_PRUNING;
+extern const char* const HGRAPH_INIT_CAPACITY;
+extern const char* const RESIZE_INCREASE_COUNT_BIT;
+extern const char* const HGRAPH_GRAPH_TYPE;
+extern const char* const HGRAPH_GRAPH_STORAGE_TYPE;
+extern const char* const HGRAPH_GRAPH_IO_TYPE;
+extern const char* const HGRAPH_GRAPH_FILE_PATH;
+extern const char* const HGRAPH_BUILD_THREAD_COUNT;
+extern const char* const HGRAPH_TRAIN_SAMPLE_COUNT;
+extern const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE;
+extern const char* const HGRAPH_BASE_IO_TYPE;
+extern const char* const HGRAPH_BASE_SUPPLEMENT_IO_TYPE;
+extern const char* const HGRAPH_BASE_PQ_DIM;
+extern const char* const HGRAPH_BASE_FILE_PATH;
+extern const char* const HGRAPH_BASE_DIRECT_READ;
+extern const char* const HGRAPH_BASE_SUPPLEMENT_FILE_PATH;
+extern const char* const HGRAPH_BASE_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_BASE_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_GRAPH_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_GRAPH_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_PRECISE_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_PRECISE_ENABLE_PREFETCH_HINT;
+extern const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE;
+extern const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE;
+extern const char* const HGRAPH_PRECISE_IO_TYPE;
+extern const char* const HGRAPH_PRECISE_USER_DEFINED_IO;
+extern const char* const HGRAPH_PRECISE_FILE_PATH;
+extern const char* const HGRAPH_PRECISE_DIRECT_READ;
+extern const char* const HGRAPH_PARAMETER_EF_RUNTIME;
+extern const char* const HGRAPH_PARAMETER_HOPS_LIMIT;
+extern const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH;
+extern const char* const HGRAPH_RABITQ_FUSED_DATACELL;
+extern const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD;
+extern const char* const HGRAPH_PARAMETER_SKIP_RATIO;
+extern const char* const HGRAPH_PARAMETER_SKIP_STRATEGY;
+extern const char* const HGRAPH_USE_MCI;
+extern const char* const HGRAPH_USE_HYBRID_TRAVERSAL;
+extern const char* const HGRAPH_HYBRID_VOB;
+extern const char* const HGRAPH_HYBRID_FILTER_COST_RATIO;
+extern const char* const HGRAPH_MCI_SEED_COVERAGE;
+extern const char* const HGRAPH_MCI_SEED_MAX_COUNT;
+extern const char* const HGRAPH_MCI_MCS;
+extern const char* const HGRAPH_MCI_CLIQUE_MAX;
+extern const char* const HGRAPH_MCI_ALPHA;
+extern const char* const HGRAPH_MCI_KNNG_SOURCE;
+extern const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH;
+extern const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT;
+extern const char* const HGRAPH_MCI_SEED_RATIO;
+extern const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD;
+extern const char* const HGRAPH_EXTRA_INFO_SIZE;
+extern const char* const HGRAPH_SUPPORT_DUPLICATE;
+extern const char* const HGRAPH_DEDUPLICATE_STORAGE;
+extern const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD;
+extern const char* const HGRAPH_LABEL_REMAP_TYPE;
+extern const char* const HGRAPH_USE_EXTRA_INFO_FILTER;
+extern const char* const STORE_RAW_VECTOR;
+extern const char* const RAW_VECTOR_IO_TYPE;
+extern const char* const RAW_VECTOR_FILE_PATH;
+extern const char* const HGRAPH_PERSIST_SOURCE_ID;
+extern const char* const PYRAMID_PERSIST_SOURCE_ID;
+
+extern const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE;
+extern const char* const BRUTE_FORCE_BASE_IO_TYPE;
+extern const char* const BRUTE_FORCE_BASE_PQ_DIM;
+extern const char* const BRUTE_FORCE_BASE_FILE_PATH;
+extern const char* const BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE;
+extern const char* const BRUTE_FORCE_PRECISE_IO_TYPE;
+extern const char* const BRUTE_FORCE_PRECISE_FILE_PATH;
+extern const char* const BRUTE_FORCE_THREAD_COUNT;
+extern const char* const BRUTE_FORCE_USE_RESIDUAL;
+
+extern const char* const IVF_USE_RESIDUAL;
+extern const char* const IVF_USE_REORDER;
+extern const char* const IVF_TRAIN_TYPE;
+extern const char* const IVF_USE_ROUTE_GRAPH;
+extern const char* const IVF_ENABLE_GPU_BUILD;
+extern const char* const IVF_GPU_DEVICE_ID;
+extern const char* const IVF_GPU_MEMORY_BUDGET;
+extern const char* const IVF_GPU_MIN_WORK_THRESHOLD;
+extern const char* const IVF_KMEANS_ITER_COUNT;
+extern const char* const IVF_BUCKETS_COUNT;
+extern const char* const IVF_BASE_QUANTIZATION_TYPE;
+extern const char* const IVF_BASE_IO_TYPE;
+extern const char* const IVF_BASE_PQ_DIM;
+extern const char* const IVF_BASE_FILE_PATH;
+extern const char* const IVF_BASE_ENABLE_READ_CACHE;
+extern const char* const IVF_BASE_CACHE_TOTAL_SIZE;
+extern const char* const IVF_PRECISE_ENABLE_READ_CACHE;
+extern const char* const IVF_PRECISE_ENABLE_PREFETCH_HINT;
+extern const char* const IVF_PRECISE_CACHE_TOTAL_SIZE;
+extern const char* const IVF_PRECISE_QUANTIZATION_TYPE;
+extern const char* const IVF_PRECISE_IO_TYPE;
+extern const char* const IVF_PRECISE_FILE_PATH;
+extern const char* const IVF_PRECISE_CODES_LAYOUT;
+extern const char* const IVF_PRECISE_CODES_LAYOUT_FLAT;
+extern const char* const IVF_PRECISE_CODES_LAYOUT_BUCKET;
+extern const char* const USE_ATTRIBUTE_FILTER;
+extern const char* const IVF_THREAD_COUNT;
+
+extern const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT;
+extern const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT;
+
+// serialization
+extern const char* const SERIAL_MAGIC_BEGIN;
+extern const char* const SERIAL_MAGIC_END;
+extern const char* const SERIAL_META_KEY;
+extern const char* const SERIAL_STREAM_MAGIC;
+extern const uint16_t SERIAL_STREAM_FORMAT_MAJOR;
+extern const uint16_t SERIAL_STREAM_FORMAT_MINOR;
+extern const uint32_t SERIAL_STREAM_SECTION_END;
+
+}  // namespace vsag

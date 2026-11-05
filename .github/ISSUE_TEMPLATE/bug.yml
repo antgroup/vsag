@@ -1,0 +1,131 @@
+name: Bug report
+description: Report a defect or unexpected behavior in VSAG.
+title: "[bug](<scope>): <short imperative summary>"
+labels: ["kind/bug"]
+assignees: ["wxyucs"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in every
+        required field. If you genuinely cannot provide a value, write `N/A`
+        and explain in **Additional context**.
+
+        Tip: you can let an AI agent draft this issue for you. See
+        [tools/issue-helper](../../tools/issue-helper/README.md) or run
+        `/create-issue` inside Claude Code, OpenCode or Codex.
+
+  - type: dropdown
+    id: module
+    attributes:
+      label: Affected module
+      description: Select the primary product module, or not applicable for a cross-cutting issue.
+      options:
+        - module/api
+        - module/attr
+        - module/datacell
+        - module/index
+        - module/simd
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      description: Select the primary cross-cutting area, or not applicable if none applies.
+      options:
+        - area/bindings-node
+        - area/bindings-python
+        - area/ci
+        - area/dependencies
+        - area/docker
+        - area/docs
+        - area/examples
+        - area/testing
+        - area/tools
+        - not applicable
+        - other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - cpp
+        - python
+        - both
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: VSAG version
+      description: Tag (e.g. `v0.11.0`) or commit SHA.
+      placeholder: v0.11.0
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of what the bug is.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce_code
+    attributes:
+      label: Minimal reproducer
+      description: |
+        Smallest C++ or Python snippet that reproduces the bug. Wrap it in a
+        fenced code block with the appropriate language tag (```cpp or
+        ```python).
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Run `bash scripts/check_environment.sh` from the repository root and paste
+        the output here. Add anything the script does not capture (containerized?
+        CPU model, NUMA, etc.).
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual behavior
+      description: Include error messages, stack traces, or numerical results.
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: References
+      description: |
+        Optional. Links to relevant code (`path:line`), docs
+        (`https://vsag.io/docs/...`), or related issues/PRs.
+
+  - type: textarea
+    id: additional_context
+    attributes:
+      label: Additional context

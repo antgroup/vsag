@@ -1,0 +1,466 @@
+# HGraph
+
+HGraph 是 VSAG 的旗舰 **图索引**。它构建的是多层近邻图，
+提供了丰富的量化方案、统一的构建参数 schema（`index_param`），并原生支持精排（reorder）、
+增量更新、删除、以及基于 ELP 的运行时自动调优。
+
+对于大多数稠密向量场景（文本 / 图像 / 多模态 embedding，维度 64–4096，规模从数千到数亿），
+HGraph 都是推荐的默认索引。
+
+- 源码：`src/algorithm/hgraph.{h,cpp}`
+- 示例：[`examples/cpp/103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp)
+
+## 磁盘读缓存示例
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+使用 1,000 个 64 维向量，基础 SQ8 编码存于内存，精排 FP32 编码存于磁盘（`async_io`）。
+示例设置 `build_by_base: true`，让构图读取内存中的基础编码，避免在这个小型用法示例中反复填充磁盘读缓存。
+这会改变构图所用的量化编码，因此该示例不是召回率基准，也不演示使用精排编码构图。
+
+读缓存保持启用，预算为 131,072 字节（一个 128-KiB 页）；256,000 字节的 FP32 数据跨越两页。
+示例序列化为 `BinarySet` 后恢复新索引，并检查恢复后的元素数量、top-10 结果形状、ID 范围及距离是否有限。
+请在新的工作目录中使用可写文件路径运行。写入和持久化行为保持不变。
+专门的 AsyncIO 测试覆盖单页缓存的淘汰与重新加载、写入失效及无效读取；
+HGraph 读缓存功能测试继续覆盖使用精排编码构图的路径。
+
+## 工作原理
+
+1. **构图。** 向量被组织成层级近邻图：上层作为导航入口，底层连接每个数据点到在
+   `max_degree` 预算内的最近邻。构图算法可以是 NSW 风格插入（`graph_type: "nsw"`，默认）、
+   ODescent（`graph_type: "odescent"`）或 PiPNN（`graph_type: "pipnn"`）。
+2. **量化。** 底层存储使用可配置的量化器进行压缩（`base_quantization_type` —
+   `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。
+   可选地再保留一份高精度副本（`use_reorder: true` 搭配 `precise_quantization_type`），
+   用于对粗排结果进行重打分。
+3. **搜索。** 自顶向下在图上做贪心 beam search，扩展候选集到 `ef_search` 个节点；如启用精排，
+   最终结果会在高精度表示上重新打分。
+
+## 快速开始
+
+```cpp
+#include <vsag/vsag.h>
+
+std::string params = R"({
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "max_degree": 32,
+        "ef_construction": 400
+    }
+})";
+auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+
+// 构建索引。
+auto base = vsag::Dataset::Make();
+base->NumElements(n)->Dim(128)->Ids(ids)->Float32Vectors(data)->Owner(false);
+index->Build(base);
+
+// 执行检索。
+auto query = vsag::Dataset::Make();
+query->NumElements(1)->Dim(128)->Float32Vectors(q)->Owner(false);
+auto result = index->KnnSearch(
+    query, /*topk=*/10, R"({"hgraph": {"ef_search": 100}})").value();
+```
+
+## 构建参数
+
+构建参数放在 `index_param` 下。下表列出最常用的配置项；完整列表请见
+[索引参数](../resources/index_parameters.md)。
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `base_quantization_type` | string | —（必填） | `fp32`、`fp16`、`bf16`、`sq8`、`sq8_local`、`sq4_local`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq` —— 各量化器细节见[量化章节](../quantization/) |
+| `max_degree` | int | `64` | 图节点最大出度 |
+| `ef_construction` | int | `400` | 构建阶段的候选集大小（越大召回越高，构建越慢） |
+| `alpha` | float | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
+| `graph_type` | string | `"nsw"` | 构图算法：`nsw`、`odescent` 或 `pipnn` |
+| `pipnn_max_leaf_size` | int | `1024` | 分区叶子的最大点数；越大候选覆盖可能越高，叶内距离计算也越多 |
+| `pipnn_min_leaf_size` | int | `64` | 合并过小叶子时使用的目标规模 |
+| `pipnn_leader_sample_rate` | float | `0.005` | 分区 leader 的采样比率；每个分区最少使用 `2` 个、最多 `1000` 个 leader，且不超过分区点数 |
+| `pipnn_fanout` | int[] | `[10, 2]` | 每个列出的分区层级中，一个点加入的最近 leader 分区数；更深层使用 `1` |
+| `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；小于 `pipnn_min_leaf_size` 的叶子至少使用 `4` |
+| `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
+| `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 实验性逐点动态 alpha，仅用于 PiPNN 最终剪枝，要求 L2 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | 调整步长；启用时要求有限、非负、`alpha - 2*step > 0`，且 `alpha + 3*step` 有限 |
+| `use_reverse_edges` | bool | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且 `graph_storage_type: "compressed"` 不支持 |
+| `label_remap_type` | string | `"pg"` | label 到内部 ID 的 map 实现：`"pg"` 或 `"robin"`；恢复或组合兼容索引时应保持一致 |
+| `use_reorder` | bool | `false` | 是否额外保留一份高精度副本用于精排 |
+| `reorder_source` | string | `"precise"` | 从 `"precise"` 编码或直接从 `"base"` 编码重排；RaBitQ x+y split（包括 `tq_chain: "mrle, rabitq"`）会自动设置为 `"base"` |
+| `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型（仅在 `use_reorder: true` 时生效） |
+| `base_pq_dim` | int | `1` | PQ 子空间数（`pq` / `pqfs` 时必填） |
+| `mrle_dim` | int | `0` | `tq_chain` 中 MRLE 的输出维度，范围 `[0, dim]`；`0` 表示输入维度 |
+| `fast_encode_rabitq` | bool | `true` | 使用多 bit RaBitQ 快速编码；设为 `false` 使用原有精确编码器 |
+| `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的坐标微调轮数，范围 `[1, 32]` |
+| `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
+| `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
+| `build_thread_count` | int | `100` | 构建阶段并发线程数 |
+| `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
+| `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
+| `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |
+| `support_remove` | bool | `false` | 是否启用 mark-remove 恢复路径所需的图删除追踪元数据 |
+| `support_force_remove` | bool | `false` | 是否启用 `RemoveMode::FORCE_REMOVE` 及其额外同步 |
+| `store_raw_vector` | bool | `false` | 除量化副本外再保留原始向量（`cosine` 场景有用） |
+| `use_elp_optimizer` | bool | `false` | 构建完成后自动调优检索参数 |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 存储后端（`memory_io`、`block_memory_io`、`buffer_io`、`async_io`、`uring_io`、`mmap_io`） |
+| `base_file_path` / `precise_file_path` | string | — | 磁盘后端时的文件路径（使用 `mmap_io` / `async_io` / `uring_io` / `buffer_io` 时必填） |
+| `base_direct_read` / `precise_direct_read` | bool | `false` | 使用 `uring_io` 时，以 direct IO 打开对应文件而非经过页缓存 |
+| `hgraph_init_capacity` | int | `100` | 初始容量提示（不会限制最终规模） |
+| `persist_source_id` | bool | `false` | 序列化时保留 Source ID 元数据，使恢复后的索引仍可导出可复用的构建缓存 |
+| `use_conjugate_graph` | bool | `false` | 启用 `Feedback`/`Pretrain` 图增强；详见[图索引增强](../advanced/enhance_graph.md) |
+| `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
+
+`sq8_local` 和 `sq4_local` 支持 float32 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
+
+`use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
+存储约翻倍，因此默认关闭。
+
+`label_remap_type` 只改变内部 label map，不改变用户 ID。默认值为 `"pg"`；
+`"robin"` 选择另一种 robin-map 实现，建议针对实际 ID 分布实测后再调整。
+
+### PiPNN 构建边界
+
+设置 `graph_type: "pipnn"` 可让初次全量 `Build` 使用
+[PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
+`metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
+HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
+存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
+上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
+现有的 `alpha` 参数控制 PiPNN 的最终 robust pruning。
+
+`build_thread_count` 会并行化向量预处理、分区、候选边生成和最终剪枝。性能测试时应固定
+`OPENBLAS_NUM_THREADS=1`，避免 BLAS 线程影响构建线程扩展性。可复现配置
+`tools/eval/pipnn_parallel.yaml` 会在 SIFT1M 上以相同 Recall@10 目标比较 NSW、ODescent 和
+PiPNN，并通过查询验证每一份生成的图。
+
+
+### 实验性 PiPNN 动态 alpha
+
+在 `index_param` 中设置 `pipnn_adaptive_pruning: true`，将 [PR #2933](https://github.com/antgroup/vsag/pull/2933) 的逐点计数反馈规则用于 PiPNN 最终 reservoir 剪枝。此实验功能默认关闭，仅支持 L2 和初始批量 `Build`；分区、leaf 内候选、relative hash、reservoir 内容、后续增量 `Add` 及 ODescent 路由层构建保持原有行为。
+
+设目标度数为 K，首轮按配置的 alpha 扫描原有有序 reservoir，得到接受集合 A 和已扫描的拒绝集合 B；未扫描尾部不计入 B。步长非零时，若 `0 < |A| < K`，保留 A，根据 `K/|A| <= 1.5`、`(1.5, 3]`、`> 3` 分别将 alpha 增加 1、2、3 个步长，重扫 B。若 `|A| = K`，根据 `|B|/K < 2.5`、`[2.5, 5)`、`>= 5` 分别将 alpha 减少 2、1、0 个步长，清空 A 并重扫完整原候选列表（包括首轮未扫描尾部）。收紧后若不足 K，保留当前接受项，按原 alpha 重扫收紧阶段新产生的拒绝集合。不会无条件补入被拒绝的邻居。
+
+拒绝条件仍为 `alpha * d(已选邻居, 候选) < d(源点, 候选)`。保留 PiPNN 的 BF16 源点距离缓存、FP32 两点平方 L2 计算和 `(距离, 源点 ID 差, ID)` 排序。PiPNN 原算法已对较短 reservoir 剪枝，因此零步长会复现其原单轮邻接结果。贪心选择和度数上限意味着 Recall 不一定随 alpha 单调增加。
+
+策略和步长会序列化；加载已启用的索引要求策略、基础 alpha、步长一致，旧参数缺失字段按关闭处理。关闭时保留原有行为。该功能属于实验性质，需对比构建开销和匹配召回率时的查询吞吐。
+
+### 向量存储去重
+
+同时设置 `support_duplicate: true` 和 `deduplicate_storage: true` 后，重复向量会共享
+同一个物理编码槽位，但仍保留各自的标签。该选项支持使用 `graph_type: "nsw"` 或 `"pipnn"` 的
+稠密向量 HGraph 索引；`graph_type: "odescent"` 不支持。
+
+PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每个代表向量只编码一次，
+各 label 的属性和 extra_info 仍独立保存，也可同时启用动态 alpha。
+`duplicate_distance_threshold` 不参与 PiPNN 批量分组；后续增量 `Add` 沿用现有的
+距离阈值或编码判重规则。量化器仍使用原有训练样本进行训练。
+
+启用存储去重后，暂不支持以下操作和配置：
+
+- 强制删除（`support_force_remove: true`）；
+- 调用 `ImportCache()` 后基于缓存加速构建；
+- `Merge`；
+- v0.14 旧版序列化格式。
+
+`UpdateVector` 仅支持尚未与其他重复组成员共享向量存储的 ID。
+
+当前序列化格式和 streaming serialization 均受支持。
+
+## 支持的输入数据类型
+
+顶层构建配置中的 `dtype` 字段决定 `Dataset` 如何解释原始向量字节。HGraph 支持四种输入类型，
+`dtype` 值、对应的 `Dataset` setter 与演示示例见下表。
+
+| `dtype`     | 元素类型 | `Dataset` setter         | 示例                                                                                                  |
+|-------------|----------|--------------------------|-------------------------------------------------------------------------------------------------------|
+| `float32`   | `float`  | `Float32Vectors`         | [`103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp) |
+| `int8`      | `int8_t` | `Int8Vectors`            | [`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp) |
+| `float16`   | `uint16_t`（按 IEEE 754 binary16 位模式打包） | `Float16Vectors` | [`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp) |
+| `bfloat16`  | `uint16_t`（按 Brain Float 位模式打包） | `Float16Vectors`（与 FP16 共用） | 在 `321_index_fp16_hgraph.cpp` 基础上按下文调整                                                       |
+
+`dim` 始终表示逻辑维度（元素数量），与字节长度无关，因此四种数据类型下 `dim` 取值相同。
+
+### `int8` 输入
+
+量化好的 `int8` 向量直接通过 `Int8Vectors` 传入：
+
+```cpp
+std::vector<int8_t> data(num_vectors * dim);  // 填入 int8 元素
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Int8Vectors(data.data())->Owner(false);
+```
+
+对应构建配置（注意 `dtype: "int8"`）：
+
+```json
+{
+    "dtype": "int8",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+查询时同样使用 `Int8Vectors` 和相同的 `dtype`。可运行示例：
+[`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp)。
+
+### `float16` / `bfloat16` 输入
+
+FP16 与 BF16 都通过 `Float16Vectors` 传入，参数类型为 `const uint16_t*`，指向各元素的 16 位
+存储。从 `float` 到 16 位格式的转换由调用方负责。VSAG 源码树内提供了便捷辅助函数
+（`vsag::generic::FloatToFP16` 位于
+[`src/simd/fp16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/fp16_simd.h)，
+`vsag::generic::FloatToBF16` 位于
+[`src/simd/bf16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/bf16_simd.h)），
+但它们是**内部头文件**，并未通过 `include/vsag/` 对外安装。链接已安装版 VSAG 库的应用需要自行
+完成转换（例如复制这段小工具函数、使用 `_cvtss_sh` / F16C 内置指令，或调用任意 FP16 库）。下面
+的示例代码为了简洁直接使用了源码树内的辅助函数：
+
+```cpp
+// 下面的 fp16/bf16 辅助函数位于 src/simd/，并未随 VSAG 一并安装。
+// 链接已安装版 VSAG 时，请替换为自行实现的 float -> uint16_t 转换。
+#include "simd/fp16_simd.h"  // FloatToFP16（BF16 场景改为 simd/bf16_simd.h / FloatToBF16）
+
+std::vector<uint16_t> data(num_vectors * dim);
+for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = vsag::generic::FloatToFP16(some_float_source());
+}
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Float16Vectors(data.data())->Owner(false);
+```
+
+构建配置：
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+切换到 BF16 时，将 `dtype` 改为 `"bfloat16"`、把 `FloatToFP16` 替换为 `FloatToBF16` 即可；
+`Float16Vectors` setter 与构建/检索流程不变。可运行 FP16 示例：
+[`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp)。
+
+> **注意。** `321_index_fp16_hgraph.cpp` 文件头注释提到 `BFloat16Vectors()`，但该 setter 并不
+> 存在 —— FP16 与 BF16 都通过 `Float16Vectors` 传入。无论 `dtype` 是 `"float16"` 还是
+> `"bfloat16"`，都使用同一个 setter。
+
+### 输入类型选择建议
+
+- 对精度要求最高、且内存预算充裕时，选 `float32`（默认）。
+- 想把输入存储减半，选 `float16` / `bfloat16`。FP16 指数范围更小，BF16 尾数位更少但指数范围
+  与 FP32 一致，对 embedding 类向量通常更友好。
+- 数据本身已是整数量化结果（来自上游量化器或 int8 输出的模型）时，选 `int8`。此时通常仍配合
+  `pq` / `sq8` 之类的索引内量化器使用。
+
+`dtype` 仅约束**输入**表示；索引内的实际存储仍由 `base_quantization_type`（以及
+`use_reorder: true` 下的 `precise_quantization_type`）决定，因此
+`dtype: "float16"` + `base_quantization_type: "sq8"` 这样的组合是允许的。
+
+## 检索参数
+
+检索参数放在 `hgraph` 子对象下：
+
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `ef_search` | int64 | —（必填） | 正数搜索前沿大小；接受到 `INT64_MAX`，不存在与 `topk` 相关的上限。值越大，召回、延迟和前沿内存通常都越高。 |
+| `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
+| `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
+| `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
+| `brute_force_threshold` | float | `0.0` | 选择率感知的暴搜回退开关。当取值 `> 0` 且当前 filter 的 `ValidRatio()` 小于等于 `brute_force_threshold` 时，搜索会**完全跳过图遍历**，直接在通过过滤的 id 上用最佳精度的 flatten 编码做一次暴力扫描（细节见下一节）。取值范围 `[0.0, 1.0]`；默认 `0.0` 表示关闭，保持原有行为。 |
+| `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
+| `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
+| `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
+| `factor` | float | `0.0` | 精排候选数放大因子。当 `> 1.0` 时，精排候选池上限为 `k * factor`（但不会低于 `max(ef_search, k)`）；默认 `0.0` 保持原行为，使用 `ef_search` 个候选。 |
+| `parallelism` | int | `1` | 单次 HGraph 搜索的并行 worker 数。`<= 0` 的值在解析时重置为 `1`；并行执行需要已配置的执行器，否则搜索回退为顺序执行。 |
+| `timeout_ms` | int | 不限 | 每次查询的墙上时间超时（毫秒）。计时器在路由完成后启动；超时后搜索返回当前前沿。仅尽最大努力——不会中断正在执行的距离计算批次。 |
+| `use_extra_info_filter` | bool | `false` | 从 extra-info 构造查询 filter，而非基于普通 label 成员关系。需在构建时配置对应 extra-info 列。 |
+| `use_conjugate_graph_search` | bool | `true` | 搜索增强阶段。当构建时 `use_conjugate_graph: true` 时，通过共轭图扩展结果以提升召回；设为 `false` 跳过。仅在已构建共轭图时生效。 |
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk, R"({"hgraph": {"ef_search": 200}})").value();
+```
+
+### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
+
+图搜索在大多数候选都能通过过滤时是最优策略——图遍历能很快进入查询邻域。但是当
+过滤越来越严格（只有极少数向量能通过）时，beam 需要扩展非常多的节点才能凑够
+`ef_search` 个**通过过滤的**候选，此时召回率会下降，延迟反而上升。在某个临界点，
+对通过过滤的 id 做一次完整暴扫既更快又精确。
+
+`brute_force_threshold` 允许 HGraph 在每次查询时自动按 filter 选择率做这个切换：
+
+```cpp
+// 当 filter 仅保留 ≤ 1% 的 id 时，自动改走暴力扫描。
+auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+工作原理（实现位于 `src/algorithm/hgraph/hgraph_search.cpp`）：
+
+- 暴搜回退仅在**同时**满足以下条件时触发：
+    - `brute_force_threshold > 0.0`，**并且**
+    - 提供了 filter，**并且**
+    - `filter->ValidRatio() <= brute_force_threshold`。
+- `Filter::ValidRatio()` 的准确性会直接影响是否切换 —— 这是用户提供的提示值。
+  详见 [带过滤的搜索](../advanced/filtered_search.md) 中关于该方法的约定。
+- 暴搜会遍历所有通过过滤的内部 id，并按 64 一批用当前最精确的 flatten 存储
+  计算距离（顺序：若启用了 `store_raw_vector` 则用原始向量；否则若
+  `use_reorder=true` 则用精排副本；否则用基础量化编码）。
+- 由于暴搜在有精排副本时本身就用了精确编码，**走暴搜分支的查询不会再做精排**。
+- 该机制对 `KnnSearch`（非迭代器重载，也即 `SearchWithRequest` 与标准的
+  `KnnSearch(query, k, params, filter)` 走的入口）和 `RangeSearch` 生效；对
+  迭代器风格的 `KnnSearch(..., IteratorContext*&, ...)` **不生效**，因为一次
+  扫描无法分页跨越多次迭代调用。
+
+取值建议：
+
+- 不带过滤或过滤通过率较高的场景，保持默认 `0.0`。
+- 高选择性过滤（如 `ValidRatio` ≤ 0.05）下，`0.01–0.05` 是合理起点。再往上调
+  实际上等于「只要带 filter 就走暴搜」。
+- 暴搜的代价大致是 `O(N × dim)`，`N` 是索引内总向量数（与选择率无关，因为
+  每个 id 都要走一次 `CheckValid`）。当原本需要把 `ef_search` 调到很大才能
+  维持召回时，暴搜带来的收益最明显。
+
+可运行示例：
+[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)。
+
+### 过滤跳过策略（skip_ratio 与 skip_strategy）
+
+当搜索带有 filter 时，HGraph 在图遍历过程中需要频繁调用 Filter::CheckValid() 来验证每个候选点是否有效。这个检查可能很耗时（特别是复杂过滤逻辑）。skip_ratio 和 skip_strategy 提供了一种概率性优化：通过跳过部分 filter 检查来加速搜索，但可能降低召回率。
+
+#### 工作原理
+
+这是一个概率性优化策略：我们事先不知道哪些点是有效的，因此按概率决定是否访问每个点。
+
+- skip_ratio（默认 0.2）：控制跳过 filter 检查的激进程度。skip_ratio=0.2 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大，跳过的越多，速度越快，但召回率可能越低。
+- skip_strategy（默认 "deterministic_accumulative"）：决定如何分配跳过：
+  - "random"：随机跳过。每个点被访问的概率为 `visit_ratio = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)`，大约跳过 `skip_ratio` 比例的无效点。
+  - "deterministic_accumulative"：确定性累积跳过。按固定间隔做出访问决策，使长期访问比例趋近于目标 `visit_ratio`，相比 random 策略方差更小。
+
+具体公式：
+- 设 valid_ratio 为 filter 的全局有效率（来自 Filter::ValidRatio()）
+- 每个点被访问的概率 = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)
+- 如果 Filter::ValidRatio() 估计准确，期望跳过约 skip_ratio 比例的无效候选检查
+
+#### 使用示例
+
+```cpp
+// 保守设置：跳过 10% 的无效候选检查，适合召回率要求高、延迟不那么关键的场景
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.1}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// 使用随机策略
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.2, "skip_strategy": "random"}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// 激进跳过：跳过 50% 的无效候选检查，以更低延迟为目标
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.5}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+#### 取值建议
+
+- 默认 0.2：适合大多数场景，在性能和召回率之间取得平衡。
+- 0.1 或更低：保守设置，适合对召回率要求高、延迟不那么关键、可接受召回率下降的场景（如实时推荐系统）。
+- 0.5 或更高：激进跳过，适合对延迟敏感、可接受召回率下降的场景。
+- 0.0：不跳过任何点，等同于关闭此优化（所有点都会被检查）。
+
+注意事项：
+- 仅在带 filter 的搜索中生效。无 filter 时这些参数会被忽略。
+- 如果 Filter::ValidRatio() 估计准确，性能优化效果更好。
+- 与 brute_force_threshold 可同时使用：当 filter 非常严格（ValidRatio 很小）时，brute_force_threshold 会触发暴搜回退；否则使用图遍历 + skip 优化。
+
+## 何时选择 HGraph
+
+- 维度大约在 64–4096 的稠密 float 向量。
+- 对延迟敏感且要求高召回的场景。
+- 需要增量插入（可选通过 `support_force_remove` 打开物理删除）的混合负载。
+- 内存受限环境，可用 `sq8` / `sq4_uniform` / `pq` 压缩，再配合 `use_reorder` 弥补召回。
+
+对于 Source ID 稳定的每日构建或快照构建，参见
+[HGraph 构建缓存](../advanced/build_cache.md)。其中说明了 `Dataset::SourceID`、
+`ExportCache`/`ImportCache`、`persist_source_id` 与缓存命中率诊断。
+
+如果你的业务偏向粗粒度分桶（每次查询只扫部分桶）或严重受 SSD I/O 制约，建议先对比
+[IVF](ivf.md) 再决定是否选择 HGraph。
+
+## 相关文档
+
+- [创建索引](../guide/create_index.md)
+- [图索引增强](../advanced/enhance_graph.md)
+- [优化器](../advanced/optimizer.md)
+- [序列化格式](../advanced/serialization.md)
+
+## 实验性自适应剪枝
+
+完整规则、几何示例与相关研究见[自适应剪枝算法文档](adaptive_pruning.md)。
+
+参数平铺在 `index_param` 下，`adaptive_pruning` 是布尔开关；旧实验版嵌套对象和已删除的 `fill_rejected` 参数会报错。使用旧实验格式的索引需重新构建。
+
+`index_param.adaptive_pruning` 为 NSW **底层新节点正向选边**启用多轮 L2 剪枝，默认关闭。
+普通 `Build`、并行插入、`Add` 以及 NSW 优化构建（包括 RaBitQ split/fused）共用该选择器。
+设置 `adaptive_pruning_apply_to_reverse: true` 后，底层已满的反向邻居表也使用自适应剪枝。
+邻居表未满时仍直接追加新节点；已满时以被更新的旧节点为中心，将旧邻居与新节点合并为候选，
+在原有节点锁内使用相同的 alpha 和步长策略完成选边和写回。
+上层和更新/细化仍使用固定 alpha。启用时仍拒绝 ODescent、导入缓存后的构建、IP/cosine
+以及 `adaptive_pruning_apply_to_upper: true`。
+
+将以下字段放在 `index_param` 内。这是 GIST 参考实验配置，不按维度自动设置，也不代表已验证性能收益：
+
+```json
+{
+    "alpha": 1.06,
+    "graph_type": "nsw",
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": false,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+| 字段 | 默认值 | 含义 |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | 启用自适应选择器 |
+| `adaptive_pruning_adjust_step` | `0.06` | alpha 调整步长 δ |
+| `adaptive_pruning_apply_to_reverse` | `false` | 对已满的底层反向邻居表启用自适应剪枝；需同时 `adaptive_pruning: true` |
+| `adaptive_pruning_apply_to_upper` | `false` | 预留；启用时不支持 `true` |
+
+基准值沿用已有 `alpha`。启用时要求 alpha 和 δ 有限，δ 非负，`alpha - 2*δ > 0`，
+且 `alpha + 3*δ` 有限。距离来自原有建图距离提供器，必须为有限、非负的 L2 值；
+此开关不改变建图量化器。
+
+候选按 `(距离, 内部 ID)` 排序、去重并删除自环。若已选 s 满足
+`alpha * d(s,c) < d(center,c)`，则拒绝候选 c。第一轮接受数达到图的实际最大度 K 时停止，保留未扫描尾部。
+
+- 接受集合 A 不满 K：保留 A，以 `alpha + k*δ` 重扫拒绝集合。
+  `K/|A| > 3` 取 k=3，`1.5 < K/|A| <= 3` 取 k=2，其余取 k=1。
+  不追加仍被拒绝的候选，允许邻接表不足 K。
+- A 达到 K：清空 A，以 `alpha - k*δ` 重扫完整排序候选（含原尾部）。
+  以第一轮拒绝集合 B 计算：`|B|/K >= 5` 取 k=0，`2.5 <= |B|/K < 5` 取 k=1，其余取 k=2。
+  若仍不满 K，以基准 alpha 重扫新的拒绝集合；此分支不无条件补边。
+- δ=0：只执行一次基准扫描，不补边。关闭功能时保留 legacy 的全部规则，
+  包括候选不足 K 时直接返回的短路，因此两者不等价。
+
+临时数据和可选统计仅属于单次调用；不增加全局计数或修改图锁协议。
+序列化保存该配置。加载时 adaptive_pruning 必须相同；启用时还要求 alpha、步长和作用范围一致，
+否则兼容性检查失败。没有该字段的旧索引按关闭处理。
+

@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 480" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
+  <title>Quantizer selection decision tree</title>
+  <desc>Decision tree that helps pick a base quantizer in VSAG based on memory budget, vector dimension and reorder needs.</desc>
+  <style>
+    .node { fill: #fff7d6; stroke: #b88a16; stroke-width: 1.2; }
+    .leaf { fill: #f4bd37; stroke: #b88a16; stroke-width: 1.4; }
+    .leaf-dark { fill: #3e3a39; stroke: #1a1614; stroke-width: 1.4; }
+    .branch { stroke: #3e3a39; stroke-width: 1.2; fill: none; }
+    .lbl { fill: #1a1614; }
+    .lbl-light { fill: #ffffff; }
+    .lbl-muted { fill: #6e6a66; }
+  </style>
+
+  <text class="lbl" x="20" y="24">Picking a base quantizer</text>
+
+  <!-- root -->
+  <g transform="translate(280,50)">
+    <rect class="node" x="0" y="0" width="160" height="46" rx="6"/>
+    <text class="lbl" x="14" y="20">memory budget?</text>
+    <text class="lbl-muted" x="14" y="38">(vs accuracy)</text>
+  </g>
+
+  <!-- branches from root -->
+  <path class="branch" d="M320 96 L130 150"/>
+  <path class="branch" d="M360 96 L360 150"/>
+  <path class="branch" d="M400 96 L590 150"/>
+
+  <!-- branch labels -->
+  <text class="lbl-muted" x="170" y="125">strict</text>
+  <text class="lbl-muted" x="340" y="125">balanced</text>
+  <text class="lbl-muted" x="540" y="125">loose</text>
+
+  <!-- level 2: three boxes -->
+  <!-- strict: high compression -->
+  <g transform="translate(30,150)">
+    <rect class="node" x="0" y="0" width="200" height="46" rx="6"/>
+    <text class="lbl" x="14" y="20">need ~64&#xD7; compression?</text>
+    <text class="lbl-muted" x="14" y="38">dim &#x2265; 128 typical</text>
+  </g>
+  <!-- balanced -->
+  <g transform="translate(260,150)">
+    <rect class="node" x="0" y="0" width="200" height="46" rx="6"/>
+    <text class="lbl" x="14" y="20">8 bytes per coord ok?</text>
+    <text class="lbl-muted" x="14" y="38">4&#xD7; vs fp32</text>
+  </g>
+  <!-- loose -->
+  <g transform="translate(490,150)">
+    <rect class="node" x="0" y="0" width="200" height="46" rx="6"/>
+    <text class="lbl" x="14" y="20">need exact distances?</text>
+    <text class="lbl-muted" x="14" y="38">training data?</text>
+  </g>
+
+  <!-- branches from strict -->
+  <path class="branch" d="M97  196 L70  250"/>
+  <path class="branch" d="M163 196 L195 250"/>
+  <text class="lbl-muted" x="55"  y="222">yes</text>
+  <text class="lbl-muted" x="175" y="222">no</text>
+
+  <!-- branches from balanced -->
+  <path class="branch" d="M327 196 L345 250"/>
+  <path class="branch" d="M393 196 L515 250"/>
+  <text class="lbl-muted" x="310" y="222">yes</text>
+  <text class="lbl-muted" x="405" y="222">no</text>
+
+  <!-- branches from loose -->
+  <path class="branch" d="M557 196 L515 250"/>
+  <path class="branch" d="M623 196 L650 250"/>
+  <text class="lbl-muted" x="540" y="222">no</text>
+  <text class="lbl-muted" x="635" y="222">yes</text>
+
+  <!-- leaves -->
+  <g transform="translate(20,250)">
+    <!-- rabitq -->
+    <g transform="translate(0,0)">
+      <rect class="leaf" x="0" y="0" width="100" height="40" rx="6"/>
+      <text class="lbl" x="14" y="18">rabitq</text>
+      <text class="lbl-muted" x="14" y="34">~1 bit/dim</text>
+    </g>
+    <!-- pq / pqfs -->
+    <g transform="translate(120,0)">
+      <rect class="leaf" x="0" y="0" width="110" height="40" rx="6"/>
+      <text class="lbl" x="14" y="18">pq / pqfs</text>
+      <text class="lbl-muted" x="14" y="34">4-8 b/dim</text>
+    </g>
+    <!-- sq family -->
+    <g transform="translate(240,0)">
+      <rect class="leaf" x="0" y="0" width="170" height="40" rx="6"/>
+      <text class="lbl" x="14" y="18">sq* family</text>
+      <text class="lbl-muted" x="14" y="34">4-8 b/dim</text>
+    </g>
+    <!-- fp16 / bf16 -->
+    <g transform="translate(430,0)">
+      <rect class="leaf" x="0" y="0" width="130" height="40" rx="6"/>
+      <text class="lbl" x="14" y="18">fp16 / bf16</text>
+      <text class="lbl-muted" x="14" y="34">16 b/dim</text>
+    </g>
+    <!-- fp32 -->
+    <g transform="translate(580,0)">
+      <rect class="leaf-dark" x="0" y="0" width="100" height="40" rx="6"/>
+      <text class="lbl-light" x="14" y="18">fp32</text>
+      <text class="lbl-light" x="14" y="34">no loss</text>
+    </g>
+  </g>
+
+  <!-- reorder hint band -->
+  <g transform="translate(40,330)">
+    <rect class="node" x="0" y="0" width="660" height="50" rx="6"/>
+    <text class="lbl" x="14" y="20">tight memory + good recall?  pair a small base quantizer with</text>
+    <text class="lbl" x="14" y="38">use_reorder=true and precise_quantization_type=&quot;fp16&quot; or &quot;fp32&quot;</text>
+  </g>
+
+  <!-- bottom row of caveats -->
+  <g transform="translate(40,400)">
+    <text class="lbl-muted" x="0" y="14">&#x2022; pq / pqfs need training: sample &#x2265; 256 &#xB7; 2^pq_bits per sub-space</text>
+    <text class="lbl-muted" x="0" y="32">&#x2022; sq*_uniform fit one global [min, max] (smaller meta, less robust)</text>
+    <text class="lbl-muted" x="0" y="50">&#x2022; rabitq + reorder is the standard recipe for recall-critical search</text>
+  </g>
+</svg>

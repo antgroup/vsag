@@ -1,0 +1,112 @@
+# Summary
+
+[介绍](README.md)
+
+# 用户指南
+
+- [安装](guide/installation.md)
+- [创建索引](guide/create_index.md)
+- [k-近邻搜索](guide/knn_search.md)
+- [查询统计信息](guide/search_statistics.md)
+- [C API](guide/c_api.md)
+- [pyvsag](guide/pyvsag.md)
+
+# 索引
+
+- [总览](indexes/README.md)
+- [索引参数](resources/index_parameters.md)
+- [HGraph](indexes/hgraph.md)
+  - [自适应邻居剪枝](indexes/adaptive_pruning.md)
+- [LazyHGraph](indexes/lazy_hgraph.md)
+- [IVF](indexes/ivf.md)
+- [SINDI](indexes/sindi.md)
+- [SINDI_V2](indexes/sindi_v2.md)
+- [SIMQ](indexes/simq.md)
+- [Pyramid](indexes/pyramid.md)
+- [BruteForce](indexes/brute_force.md)
+
+# 量化
+
+- [总览](quantization/README.md)
+- [FP32（基线）](quantization/fp32.md)
+- [半精度浮点（FP16 / BF16）](quantization/fp16_bf16.md)
+- [标量量化（SQ4 / SQ8）](quantization/sq.md)
+- [Uniform 标量量化（SQ4 / SQ8 Uniform）](quantization/sq_uniform.md)
+- [乘积量化（PQ）](quantization/pq.md)
+- [PQ FastScan](quantization/pqfs.md)
+- [RaBitQ](quantization/rabitq.md)
+- [RaBitQ x+y Split](quantization/rabitq_split.md)
+- [量化变换（TQ）](advanced/quantization_transform.md)
+
+# 开发者指南
+
+- [代码目录结构](development/code_structure.md)
+- [VSAG Lite](development/lite_first.md)
+- [Lite RaBitQ 设计](development/lite_rabitq_design.md)
+- [C++ 编码指南](development/coding_style.md)
+- [新索引接入检查清单](development/new_index_checklist.md)
+- [编译构建](development/building.md)
+- [离线 / 内网环境构建](development/offline_build.md)
+- [运行测试](development/testing.md)
+- [贡献到 VSAG](development/contributing.md)
+
+# 高级功能
+
+- [搜索归因分析](advanced/search_reasoning.md)
+- [索引构建与训练](advanced/build_and_train.md)
+- [HGraph 构建缓存](advanced/build_cache.md)
+- [范围搜索](advanced/range_search.md)
+- [按 ID 计算距离](advanced/calc_distance_by_id.md)
+- [带过滤的搜索](advanced/filtered_search.md)
+- [迭代式搜索](advanced/iterator_search.md)
+- [属性过滤（混合搜索）](advanced/attribute_filter.md)
+- [序列化格式](advanced/serialization.md)
+- [新序列化格式](advanced/new_serialization.md)
+- [分块序列化格式](advanced/chunked_serialization.md)
+- [并行反序列化](advanced/parallel_deserialization.md)
+- [内存管理](advanced/memory.md)
+- [搜索路径 Allocator](advanced/search_allocator.md)
+- [索引自省](advanced/introspection.md)
+- [可扩展性](advanced/extensibility.md)
+- [用户自定义 IO](advanced/user_defined_io.md)
+- [图索引增强](advanced/enhance_graph.md)
+- [Extra Info（附加信息）](advanced/extra_info.md)
+- [索引生命周期管理](advanced/index_lifecycle.md)
+- [HGraph MCI 挂件](advanced/hgraph_mci_companion.md)
+
+# API 参考
+
+- [总览](api/README.md)
+- [Factory 与 Engine](api/factory_engine.md)
+- [Index](api/index_class.md)
+- [Dataset](api/dataset.md)
+- [搜索请求与过滤器](api/search.md)
+- [序列化类型](api/serialization.md)
+- [资源管理](api/resource.md)
+- [辅助类型](api/types.md)
+
+# 性能与调优
+
+- [最佳实践](resources/best_practices.md)
+- [磁盘索引最佳实践](resources/disk_index.md)
+- [度量语义](resources/metric_semantics.md)
+- [优化器](advanced/optimizer.md)
+- [标准环境性能参考](resources/performance.md)
+- [性能评估工具](resources/eval.md)
+- [AutoTune 工具](resources/autotune.md)
+  - [AutoTune V1 CLI JSON 契约](resources/autotune_api_v1.md)
+- [HDF5 数据集格式](resources/dataset_format.md)
+- [索引分析工具](resources/analyze_index.md)
+- [兼容性检查工具](resources/check_compatibility.md)
+
+# 资源
+
+- [FAQ 常见问题](resources/faq.md)
+- [版本日志](resources/release_notes.md)
+  - [VSAG 1.0](resources/release_notes/v1.0.md)
+- [VSAG 1.0 历史路线图](resources/roadmap_2025.md)
+- [开源社区](resources/community.md)
+- [使用 AI Agent 创建 Issue](resources/filing_issues_with_agent.md)
+- [关联项目](resources/related_projects.md)
+- [科研论文](resources/research_papers.md)
+- [贡献者列表](misc/contributors.md)

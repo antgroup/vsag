@@ -1,0 +1,284 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 780 560" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Microsoft YaHei', 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>IVF 索引示意图</title>
+  <desc>IVF 将嵌入空间按 k-means 中心划分成 buckets_count 个 Voronoi 单元（桶），每条基向量以配置的粗量化形式写入距离最近的中心对应的倒排列表。查询时先选出与 q 距离最近的 scan_buckets_count 个中心，只对这些桶内的向量打分，启用精排时再对 factor*topk 个粗排候选用高精度副本重打分得到最终 topk。</desc>
+
+  <defs>
+    <marker id="arrow-search" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#e8590c"/>
+    </marker>
+    <clipPath id="space-clip">
+      <rect x="0" y="0" width="540" height="380" rx="10"/>
+    </clipPath>
+  </defs>
+
+  <style>
+    .title    { fill: #1a1a1a; font-size: 16px; font-weight: 600; }
+    .subtitle { fill: #6b7280; font-size: 12px; }
+    .lbl      { fill: #1f2937; }
+    .lbl-mute { fill: #6b7280; }
+    .layer-lbl { fill: #475569; font-size: 11px; font-weight: 600; letter-spacing: 0.6px; }
+    .layer-sub { fill: #94a3b8; font-size: 11px; }
+
+    .band       { fill: #f8fafc; stroke: #e2e8f0; stroke-width: 1; }
+
+    /* Voronoi cells */
+    .cell        { fill: #ffffff; stroke: #cbd5e1; stroke-width: 1; }
+    .cell-hi     { fill: #fff4e6; stroke: #e8590c; stroke-width: 1.4; }
+
+    /* Base vectors (small dots) */
+    .pt          { fill: #94a3b8; stroke: none; }
+    .pt-hi       { fill: #ffd8a8; stroke: #e8590c; stroke-width: 1; }
+    .pt-result   { fill: #e03131; stroke: #a61e1e; stroke-width: 1.2; }
+
+    /* Centroids */
+    .centroid    { fill: #5c7cfa; stroke: #364fc7; stroke-width: 1.4; }
+    .centroid-hi { fill: #e8590c; stroke: #a14503; stroke-width: 1.5; }
+
+    .probe       { stroke: #e8590c; stroke-width: 1.4; fill: none; stroke-dasharray: 4 3; stroke-linecap: round; opacity: 0.85; }
+    .search      { stroke: #e8590c; stroke-width: 2; fill: none; stroke-linecap: round; }
+
+    .step-badge  { fill: #e8590c; stroke: #ffffff; stroke-width: 2; }
+    .step-num    { fill: #ffffff; font-size: 11px; font-weight: 700; }
+
+    .note-box    { fill: #ffffff; stroke: #e2e8f0; stroke-width: 1; }
+  </style>
+
+  <!-- Header -->
+  <text class="title"    x="40" y="34">IVF</text>
+  <text class="subtitle" x="40" y="52">基于中心的 Voronoi 分桶 · 仅扫描距离 q 最近的 scan_buckets_count 个桶</text>
+
+  <!-- =========================================================
+       Embedding space panel (Voronoi diagram)
+       Panel origin: (40, 80), size 540 x 380.
+       Centroids (panel coords):
+         c0 ( 95,  75)
+         c1 (245,  55)
+         c2 (415,  90)
+         c3 ( 75, 210)
+         c4 (215, 175)  [highlighted]
+         c5 (370, 195)  [highlighted, contains q]
+         c6 ( 90, 330)
+         c7 (260, 320)  [highlighted, neighbour cell]
+         c8 (440, 305)
+       Cells are drawn as hand-crafted convex polygons that
+       approximately tile the panel.
+       ========================================================= -->
+  <g transform="translate(40, 80)">
+    <rect class="band" x="0" y="0" width="540" height="380" rx="10"/>
+    <text class="layer-lbl" x="14" y="20">嵌入空间</text>
+    <text class="layer-sub" x="100" y="20">共 buckets_count 个单元 · 每个单元一个中心</text>
+
+    <g clip-path="url(#space-clip)">
+      <!-- Voronoi-like cells. The three highlighted cells (c4, c5, c7) sit in the middle band. -->
+      <!-- c0 top-left -->
+      <polygon class="cell" points="0,40 170,40 165,125 30,140 0,135"/>
+      <!-- c1 top-center -->
+      <polygon class="cell" points="170,40 335,40 330,130 165,125"/>
+      <!-- c2 top-right -->
+      <polygon class="cell" points="335,40 540,40 540,150 340,140 330,130"/>
+      <!-- c3 mid-left -->
+      <polygon class="cell" points="0,135 30,140 165,125 150,255 25,260 0,255"/>
+      <!-- c4 mid-center (highlighted) -->
+      <polygon class="cell-hi" points="165,125 330,130 320,250 150,255"/>
+      <!-- c5 mid-right (highlighted, contains q) -->
+      <polygon class="cell-hi" points="330,130 340,140 540,150 540,270 325,260 320,250"/>
+      <!-- c6 bottom-left -->
+      <polygon class="cell" points="0,255 25,260 150,255 165,380 0,380"/>
+      <!-- c7 bottom-center (highlighted, holds nearest neighbour) -->
+      <polygon class="cell-hi" points="150,255 320,250 325,260 350,380 165,380"/>
+      <!-- c8 bottom-right -->
+      <polygon class="cell" points="325,260 540,270 540,380 350,380"/>
+    </g>
+
+    <!-- ============ base vectors (panel coords) ============ -->
+    <!-- c0 -->
+    <circle class="pt" cx="50"  cy="60"  r="2.5"/>
+    <circle class="pt" cx="80"  cy="85"  r="2.5"/>
+    <circle class="pt" cx="115" cy="62"  r="2.5"/>
+    <circle class="pt" cx="130" cy="95"  r="2.5"/>
+    <circle class="pt" cx="60"  cy="105" r="2.5"/>
+    <circle class="pt" cx="100" cy="115" r="2.5"/>
+    <!-- c1 -->
+    <circle class="pt" cx="200" cy="55"  r="2.5"/>
+    <circle class="pt" cx="225" cy="80"  r="2.5"/>
+    <circle class="pt" cx="260" cy="60"  r="2.5"/>
+    <circle class="pt" cx="290" cy="85"  r="2.5"/>
+    <circle class="pt" cx="245" cy="100" r="2.5"/>
+    <circle class="pt" cx="195" cy="100" r="2.5"/>
+    <circle class="pt" cx="305" cy="110" r="2.5"/>
+    <!-- c2 -->
+    <circle class="pt" cx="365" cy="65"  r="2.5"/>
+    <circle class="pt" cx="395" cy="80"  r="2.5"/>
+    <circle class="pt" cx="430" cy="58"  r="2.5"/>
+    <circle class="pt" cx="465" cy="90"  r="2.5"/>
+    <circle class="pt" cx="500" cy="72"  r="2.5"/>
+    <circle class="pt" cx="445" cy="115" r="2.5"/>
+    <circle class="pt" cx="385" cy="115" r="2.5"/>
+    <circle class="pt" cx="510" cy="115" r="2.5"/>
+    <!-- c3 -->
+    <circle class="pt" cx="40"  cy="170" r="2.5"/>
+    <circle class="pt" cx="75"  cy="195" r="2.5"/>
+    <circle class="pt" cx="110" cy="180" r="2.5"/>
+    <circle class="pt" cx="55"  cy="225" r="2.5"/>
+    <circle class="pt" cx="115" cy="230" r="2.5"/>
+    <circle class="pt" cx="135" cy="200" r="2.5"/>
+    <!-- c4 (highlighted) -->
+    <circle class="pt-hi" cx="195" cy="155" r="2.8"/>
+    <circle class="pt-hi" cx="225" cy="170" r="2.8"/>
+    <circle class="pt-hi" cx="260" cy="155" r="2.8"/>
+    <circle class="pt-hi" cx="290" cy="175" r="2.8"/>
+    <circle class="pt-hi" cx="190" cy="205" r="2.8"/>
+    <circle class="pt-hi" cx="240" cy="215" r="2.8"/>
+    <circle class="pt-hi" cx="285" cy="220" r="2.8"/>
+    <circle class="pt-hi" cx="220" cy="235" r="2.8"/>
+    <!-- c5 (highlighted, contains q) -->
+    <circle class="pt-hi" cx="360" cy="155" r="2.8"/>
+    <circle class="pt-hi" cx="395" cy="170" r="2.8"/>
+    <circle class="pt-hi" cx="430" cy="158" r="2.8"/>
+    <circle class="pt-hi" cx="475" cy="180" r="2.8"/>
+    <circle class="pt-hi" cx="505" cy="200" r="2.8"/>
+    <circle class="pt-hi" cx="360" cy="215" r="2.8"/>
+    <circle class="pt-hi" cx="445" cy="220" r="2.8"/>
+    <circle class="pt-hi" cx="490" cy="240" r="2.8"/>
+    <circle class="pt-hi" cx="400" cy="240" r="2.8"/>
+    <!-- c6 -->
+    <circle class="pt" cx="50"  cy="290" r="2.5"/>
+    <circle class="pt" cx="85"  cy="310" r="2.5"/>
+    <circle class="pt" cx="120" cy="295" r="2.5"/>
+    <circle class="pt" cx="60"  cy="345" r="2.5"/>
+    <circle class="pt" cx="110" cy="350" r="2.5"/>
+    <circle class="pt" cx="135" cy="325" r="2.5"/>
+    <!-- c7 (highlighted) -->
+    <circle class="pt-hi" cx="195" cy="290" r="2.8"/>
+    <circle class="pt-hi" cx="230" cy="305" r="2.8"/>
+    <circle class="pt-hi" cx="270" cy="295" r="2.8"/>
+    <circle class="pt-hi" cx="310" cy="315" r="2.8"/>
+    <circle class="pt-hi" cx="205" cy="345" r="2.8"/>
+    <circle class="pt-hi" cx="250" cy="355" r="2.8"/>
+    <circle class="pt-hi" cx="300" cy="350" r="2.8"/>
+    <!-- c8 -->
+    <circle class="pt" cx="380" cy="295" r="2.5"/>
+    <circle class="pt" cx="420" cy="280" r="2.5"/>
+    <circle class="pt" cx="460" cy="300" r="2.5"/>
+    <circle class="pt" cx="500" cy="285" r="2.5"/>
+    <circle class="pt" cx="395" cy="335" r="2.5"/>
+    <circle class="pt" cx="445" cy="345" r="2.5"/>
+    <circle class="pt" cx="490" cy="335" r="2.5"/>
+    <circle class="pt" cx="515" cy="315" r="2.5"/>
+
+    <!-- ============ centroids ============ -->
+    <circle class="centroid"    cx="95"  cy="75"  r="6"/>
+    <circle class="centroid"    cx="245" cy="55"  r="6"/>
+    <circle class="centroid"    cx="415" cy="90"  r="6"/>
+    <circle class="centroid"    cx="75"  cy="210" r="6"/>
+    <circle class="centroid-hi" cx="240" cy="190" r="7"/>
+    <circle class="centroid-hi" cx="425" cy="200" r="7"/>
+    <circle class="centroid"    cx="90"  cy="330" r="6"/>
+    <circle class="centroid-hi" cx="255" cy="325" r="7"/>
+    <circle class="centroid"    cx="445" cy="320" r="6"/>
+
+    <!-- centroid labels -->
+    <text class="lbl-mute" x="95"  y="92"  text-anchor="middle" font-size="10">c0</text>
+    <text class="lbl-mute" x="245" y="42"  text-anchor="middle" font-size="10">c1</text>
+    <text class="lbl-mute" x="415" y="107" text-anchor="middle" font-size="10">c2</text>
+    <text class="lbl-mute" x="75"  y="227" text-anchor="middle" font-size="10">c3</text>
+    <text class="lbl"      x="240" y="207" text-anchor="middle" font-size="10" font-weight="700" fill="#a14503">c4</text>
+    <text class="lbl"      x="425" y="217" text-anchor="middle" font-size="10" font-weight="700" fill="#a14503">c5</text>
+    <text class="lbl-mute" x="90"  y="347" text-anchor="middle" font-size="10">c6</text>
+    <text class="lbl"      x="255" y="342" text-anchor="middle" font-size="10" font-weight="700" fill="#a14503">c7</text>
+    <text class="lbl-mute" x="445" y="337" text-anchor="middle" font-size="10">c8</text>
+
+    <!-- ============ query q ============ -->
+    <!-- q sits inside cell c5, near its boundary with c4/c7 -->
+    <polygon points="345,205 347.9,212.1 355.5,212.1 349.4,216.5 351.7,223.6 345,219.2 338.3,223.6 340.6,216.5 334.5,212.1 342.1,212.1"
+             fill="#e03131" stroke="#a61e1e" stroke-width="1.1" stroke-linejoin="round"/>
+    <text class="lbl" x="345" y="240" text-anchor="middle" font-size="11" font-weight="700" fill="#a61e1e">q</text>
+
+    <!-- ============ probe lines: q → 3 highlighted centroids ============ -->
+    <line class="probe" x1="345" y1="210" x2="240" y2="190"/>
+    <line class="probe" x1="345" y1="210" x2="425" y2="200"/>
+    <line class="probe" x1="345" y1="210" x2="255" y2="325"/>
+
+    <!-- nearest neighbour to q (in c5, very close to q) -->
+    <circle class="pt-result" cx="360" cy="215" r="4.2"/>
+  </g>
+
+  <!-- =========================================================
+       Step badges placed in/near the panel (svg coords).
+       Panel origin (40, 80).
+       ========================================================= -->
+  <g>
+    <!-- 1: probe centroids — placed near q in the embedding panel -->
+    <circle class="step-badge" cx="320" cy="265" r="11"/>
+    <text class="step-num"    x="320" y="269" text-anchor="middle">1</text>
+
+    <!-- 2: scan buckets — placed in upper-right of highlighted c5 -->
+    <circle class="step-badge" cx="540" cy="240" r="11"/>
+    <text class="step-num"    x="540" y="244" text-anchor="middle">2</text>
+
+    <!-- step 3 (reorder) is post-processing and has no spatial location;
+         it appears only in the right-side legend. -->
+  </g>
+
+  <!-- =========================================================
+       Right-side legend / annotations
+       ========================================================= -->
+  <g transform="translate(600, 92)">
+    <g>
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">1</text>
+      <text class="lbl" x="28" y="8" font-weight="600">选取中心</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">计算 q 到全部</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">buckets_count 个中心的距离</text>
+    </g>
+
+    <g transform="translate(0, 58)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">2</text>
+      <text class="lbl" x="28" y="8" font-weight="600">扫描最近桶</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">仅对 scan_buckets_count</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">个桶内的向量打分</text>
+    </g>
+
+    <g transform="translate(0, 116)">
+      <circle class="step-badge" cx="10" cy="10" r="9"/>
+      <text x="10" y="14" text-anchor="middle" fill="#fff" font-size="10" font-weight="700">3</text>
+      <text class="lbl" x="28" y="8" font-weight="600">精排（可选）</text>
+      <text class="lbl-mute" x="28" y="22" font-size="11">对 factor*topk 个粗排候选</text>
+      <text class="lbl-mute" x="28" y="36" font-size="11">用高精度副本重打分 → topk</text>
+    </g>
+
+    <g transform="translate(0, 174)">
+      <rect class="note-box" x="0" y="0" width="160" height="92" rx="6"/>
+      <text class="layer-lbl" x="10" y="18" font-size="10">存储</text>
+      <text class="lbl-mute"  x="10" y="36" font-size="11">base_quantization_type：</text>
+      <text class="lbl"       x="10" y="50" font-size="11">sq8 · pq · pqfs · rabitq · ...</text>
+
+      <line x1="10" y1="58" x2="150" y2="58" stroke="#e2e8f0"/>
+
+      <text class="layer-lbl" x="10" y="74" font-size="10">分桶策略</text>
+      <text class="lbl-mute"  x="10" y="88" font-size="11">ivf · gno_imi（双层）</text>
+    </g>
+  </g>
+
+  <!-- =========================================================
+       Bottom legend
+       ========================================================= -->
+  <g transform="translate(40, 495)">
+    <circle class="centroid" cx="6" cy="0" r="6"/>
+    <text class="lbl-mute" x="18" y="4">中心</text>
+
+    <circle class="centroid-hi" cx="92" cy="0" r="6"/>
+    <text class="lbl-mute" x="104" y="4">被选中的中心</text>
+
+    <circle class="pt-hi" cx="218" cy="0" r="4"/>
+    <text class="lbl-mute" x="228" y="4">被扫描桶内的向量</text>
+
+    <polygon points="384,-6.2 386.2,-1.4 391.5,-1.4 387.2,1.6 388.8,6.2 384,3.2 379.2,6.2 380.8,1.6 376.5,-1.4 381.8,-1.4"
+             fill="#e03131" stroke="#a61e1e" stroke-width="1" stroke-linejoin="round"/>
+    <text class="lbl-mute" x="398" y="4">查询 q</text>
+
+    <circle class="pt-result" cx="464" cy="0" r="5"/>
+    <text class="lbl-mute" x="476" y="4">最近邻</text>
+  </g>
+</svg>

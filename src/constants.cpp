@@ -1,0 +1,311 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "vsag/constants.h"
+
+#include "inner_string_params.h"
+namespace vsag {
+
+const char* const INDEX_HGRAPH = "hgraph";
+const char* const INDEX_LAZY_HGRAPH = "lazy_hgraph";
+const char* const INDEX_PYRAMID = "pyramid";
+const char* const INDEX_SINDI = "sindi";
+const char* const INDEX_SINDI_V2 = "sindi_v2";
+const char* const INDEX_BRUTE_FORCE = "brute_force";
+const char* const INDEX_IVF = "ivf";
+const char* const INDEX_GNO_IMI = "gno_imi";
+const char* const INDEX_WARP = "warp";
+const char* const INDEX_SIMQ = "simq";
+
+const char* const DIM = "dim";
+const char* const NUM_ELEMENTS = "num_elements";
+const char* const IDS = "ids";
+const char* const DISTS = "dists";
+const char* const FLOAT32_VECTORS = "f32_vectors";
+const char* const FLOAT16_VECTORS = "f16_vectors";
+const char* const SPARSE_VECTORS = "sparse_vectors";
+const char* const INT8_VECTORS = "i8_vectors";
+const char* const ATTRIBUTE_SETS = "attribute_sets";
+const char* const DATASET_PATHS = "paths";
+const char* const EXTRA_INFOS = "extra_infos";
+const char* const EXTRA_INFO_SIZE = "extra_info_size";
+const char* const VECTOR_COUNTS = "vector_counts";
+const char* const MULTI_VECTORS = "multi_vectors";
+const char* const MULTI_VECTOR_DIM = "multi_vector_dim";
+const char* const SOURCE_ID = "source_id";
+
+const char* const SIMPLEFLAT_VECTORS = "simpleflat_vectors";
+const char* const SIMPLEFLAT_IDS = "simpleflat_ids";
+const char* const METRIC_L2 = "l2";
+const char* const METRIC_COSINE = "cosine";
+const char* const METRIC_IP = "ip";
+const char* const DATATYPE_FLOAT32 = "float32";
+const char* const DATATYPE_FLOAT16 = "float16";
+const char* const DATATYPE_BFLOAT16 = "bfloat16";
+const char* const DATATYPE_INT8 = "int8";
+const char* const DATATYPE_SPARSE = "sparse";
+const char* const BLANK_INDEX = "blank_index";
+
+// environment-level-parameters
+const char* const PREFETCH_STRIDE_VISIT = "prefetch_stride_visit";
+const char* const PREFETCH_STRIDE_CODE = "prefetch_stride_codes";
+const char* const PREFETCH_DEPTH_CODE = "prefetch_depth_codes";
+
+// parameters
+const char* const PARAMETER_DTYPE = "dtype";
+const char* const PARAMETER_DIM = "dim";
+const char* const PARAMETER_METRIC_TYPE = "metric_type";
+const char* const PARAMETER_REPR = "repr";
+const char* const REPR_DENSE = "dense";
+const char* const REPR_SPARSE = "sparse";
+const char* const REPR_MULTI_VECTOR = "multi_vector";
+const char* const PARAMETER_USE_CONJUGATE_GRAPH = "use_conjugate_graph";
+const char* const PARAMETER_USE_CONJUGATE_GRAPH_SEARCH = "use_conjugate_graph_search";
+const char* const PARAMETER_USE_OLD_SERIAL_FORMAT = "use_old_serial_format";
+
+const char* const ODESCENT_PARAMETER_ALPHA = "alpha";
+const char* const ODESCENT_PARAMETER_GRAPH_ITER_TURN = "graph_iter_turn";
+const char* const ODESCENT_PARAMETER_NEIGHBOR_SAMPLE_RATE = "neighbor_sample_rate";
+const char* const ODESCENT_PARAMETER_MIN_IN_DEGREE = "min_in_degree";
+const char* const ODESCENT_PARAMETER_BUILD_BLOCK_SIZE = "build_block_size";
+
+const char* const GRAPH_TYPE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_NSW = "nsw";
+const char* const GRAPH_TYPE_PIPNN = "pipnn";
+
+const char* const PIPNN_PARAMETER_MAX_LEAF_SIZE = "pipnn_max_leaf_size";
+const char* const PIPNN_PARAMETER_MIN_LEAF_SIZE = "pipnn_min_leaf_size";
+const char* const PIPNN_PARAMETER_LEADER_SAMPLE_RATE = "pipnn_leader_sample_rate";
+const char* const PIPNN_PARAMETER_FANOUT = "pipnn_fanout";
+const char* const PIPNN_PARAMETER_LEAF_NEIGHBOR_COUNT = "pipnn_leaf_neighbor_count";
+const char* const PIPNN_PARAMETER_HASH_PLANE_COUNT = "pipnn_hash_plane_count";
+const char* const PIPNN_PARAMETER_RESERVOIR_SIZE = "pipnn_reservoir_size";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING = "pipnn_adaptive_pruning";
+const char* const PIPNN_PARAMETER_ADAPTIVE_PRUNING_ADJUST_STEP =
+    "pipnn_adaptive_pruning_adjust_step";
+
+const char* const INDEX_PARAM = "index_param";
+
+const char PART_SLASH = '/';
+const char PART_BAR = '|';
+
+// statistics key
+const char* const STATSTIC_MEMORY = "memory";
+const char* const STATSTIC_INDEX_NAME = "index_name";
+const char* const STATSTIC_DATA_NUM = "data_num";
+
+const char* const STATSTIC_KNN_TIME = "knn_time";
+const char* const STATSTIC_KNN_IO = "knn_io";
+const char* const STATSTIC_KNN_HOP = "knn_hop";
+const char* const STATSTIC_KNN_IO_TIME = "knn_io_time";
+const char* const STATSTIC_KNN_CACHE_HIT = "knn_cache_hit";
+const char* const STATSTIC_RANGE_TIME = "range_time";
+const char* const STATSTIC_RANGE_IO = "range_io";
+const char* const STATSTIC_RANGE_HOP = "range_hop";
+const char* const STATSTIC_RANGE_CACHE_HIT = "range_cache_hit";
+const char* const STATSTIC_RANGE_IO_TIME = "range_io_time";
+
+//Error message
+const char* const MESSAGE_PARAMETER = "invalid parameter";
+
+// Serialize key
+const char* const SERIALIZE_MAGIC_NUM = "MAGIC_NUM";
+const char* const SERIALIZE_VERSION = "VERSION";
+
+const char* const SQ4_UNIFORM_TRUNC_RATE = "sq4_uniform_trunc_rate";
+const char* const RABITQ_PCA_DIM = "rabitq_pca_dim";
+const char* const RABITQ_VERSION = "rabitq_version";
+const char* const RABITQ_BITS_PER_DIM_QUERY = "rabitq_bits_per_dim_query";
+const char* const RABITQ_BITS_PER_DIM_BASE = "rabitq_bits_per_dim_base";
+const char* const RABITQ_BITS_PER_DIM_PRECISE = "rabitq_bits_per_dim_precise";
+const char* const RABITQ_BITS_PER_DIM_FILTER = "rabitq_bits_per_dim_filter";
+const char* const RABITQ_ERROR_RATE = "rabitq_error_rate";
+const char* const RABITQ_USE_FHT = "rabitq_use_fht";
+const char* const FAST_ENCODE_RABITQ = "fast_encode_rabitq";
+const char* const FAST_ENCODE_RABITQ_ROUNDS = "fast_encode_rabitq_rounds";
+const char* const INDEX_TQ_CHAIN = "tq_chain";
+const char* const INDEX_MRLE_DIM = "mrle_dim";
+
+const char* const HGRAPH_SUPPORT_REMOVE = "support_remove";
+const char* const HGRAPH_SUPPORT_FORCE_REMOVE = "support_force_remove";
+const char* const HGRAPH_REMOVE_FLAG_BIT = "remove_flag_bit";
+const char* const HGRAPH_USE_REORDER = USE_REORDER_KEY;
+const char* const HGRAPH_REORDER_SOURCE = "reorder_source";
+const char* const HGRAPH_REORDER_SOURCE_PRECISE = "precise";
+const char* const HGRAPH_REORDER_SOURCE_BASE = "base";
+const char* const HGRAPH_USE_ELP_OPTIMIZER = HGRAPH_USE_ELP_OPTIMIZER_KEY;
+const char* const HGRAPH_USE_REVERSE_EDGES = HGRAPH_USE_REVERSE_EDGES_KEY;
+const char* const HGRAPH_IGNORE_REORDER = "ignore_reorder";
+const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION = "build_by_base";
+const char* const HGRAPH_BASE_CODES_TYPE = "base_codes_type";
+const char* const HGRAPH_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const HGRAPH_GRAPH_MAX_DEGREE = "max_degree";
+const char* const HGRAPH_BUILD_EF_CONSTRUCTION = "ef_construction";
+const char* const HGRAPH_BUILD_ALPHA = "alpha";
+const char* const HGRAPH_ADAPTIVE_PRUNING = "adaptive_pruning";
+const char* const PYRAMID_ADAPTIVE_PRUNING = "adaptive_pruning";
+const char* const HGRAPH_INIT_CAPACITY = "hgraph_init_capacity";
+const char* const RESIZE_INCREASE_COUNT_BIT = "resize_increase_count_bit";
+const char* const HGRAPH_GRAPH_TYPE = "graph_type";
+const char* const HGRAPH_GRAPH_STORAGE_TYPE = "graph_storage_type";
+const char* const HGRAPH_GRAPH_IO_TYPE = "graph_io_type";
+const char* const HGRAPH_GRAPH_FILE_PATH = "graph_file_path";
+const char* const HGRAPH_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const HGRAPH_TRAIN_SAMPLE_COUNT = "train_sample_count";
+const char* const HGRAPH_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const HGRAPH_BASE_IO_TYPE = "base_io_type";
+const char* const HGRAPH_BASE_SUPPLEMENT_IO_TYPE = "base_supplement_io_type";
+const char* const HGRAPH_BASE_PQ_DIM = "base_pq_dim";
+const char* const HGRAPH_BASE_FILE_PATH = "base_file_path";
+const char* const HGRAPH_BASE_DIRECT_READ = "base_direct_read";
+const char* const HGRAPH_BASE_SUPPLEMENT_FILE_PATH = "base_supplement_file_path";
+const char* const HGRAPH_BASE_ENABLE_READ_CACHE = "base_enable_read_cache";
+const char* const HGRAPH_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
+const char* const HGRAPH_GRAPH_ENABLE_READ_CACHE = "graph_enable_read_cache";
+const char* const HGRAPH_GRAPH_CACHE_TOTAL_SIZE = "graph_cache_total_size";
+const char* const HGRAPH_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const HGRAPH_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
+const char* const HGRAPH_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
+const char* const HGRAPH_RAW_VECTOR_ENABLE_READ_CACHE = "raw_vector_enable_read_cache";
+const char* const HGRAPH_RAW_VECTOR_CACHE_TOTAL_SIZE = "raw_vector_cache_total_size";
+const char* const HGRAPH_PRECISE_IO_TYPE = "precise_io_type";
+const char* const HGRAPH_PRECISE_USER_DEFINED_IO = "precise_user_defined_io";
+const char* const HGRAPH_PRECISE_FILE_PATH = "precise_file_path";
+const char* const HGRAPH_PRECISE_DIRECT_READ = "precise_direct_read";
+const char* const HGRAPH_PARAMETER_EF_RUNTIME = "ef_search";
+const char* const HGRAPH_PARAMETER_HOPS_LIMIT = "hops_limit";
+const char* const HGRAPH_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
+const char* const HGRAPH_RABITQ_FUSED_DATACELL = "rabitq_fused_datacell";
+const char* const HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD = "brute_force_threshold";
+const char* const HGRAPH_PARAMETER_SKIP_RATIO = "skip_ratio";
+const char* const HGRAPH_PARAMETER_SKIP_STRATEGY = "skip_strategy";
+const char* const HGRAPH_USE_MCI = "use_mci";
+const char* const HGRAPH_USE_HYBRID_TRAVERSAL = "use_hybrid_traversal";
+const char* const HGRAPH_HYBRID_VOB = "hybrid_vob";
+const char* const HGRAPH_HYBRID_FILTER_COST_RATIO = "hybrid_filter_cost_ratio";
+const char* const HGRAPH_MCI_SEED_COVERAGE = "mci_seed_coverage";
+const char* const HGRAPH_MCI_SEED_MAX_COUNT = "mci_seed_max_count";
+const char* const HGRAPH_MCI_MCS = "mci_mcs";
+const char* const HGRAPH_MCI_CLIQUE_MAX = "mci_clique_max";
+const char* const HGRAPH_MCI_ALPHA = "mci_alpha";
+const char* const HGRAPH_MCI_KNNG_SOURCE = "mci_knng_source";
+const char* const HGRAPH_MCI_KNNG_SOURCE_HGRAPH = "hgraph";
+const char* const HGRAPH_MCI_KNNG_SOURCE_ODESCENT = "odescent";
+const char* const HGRAPH_MCI_SEED_RATIO = "mci_seed_ratio";
+const char* const HGRAPH_MCI_HGRAPH_VALID_RATIO_THRESHOLD = "hgraph_valid_ratio_threshold";
+const char* const HGRAPH_EXTRA_INFO_SIZE = "extra_info_size";
+const char* const HGRAPH_SUPPORT_DUPLICATE = "support_duplicate";
+const char* const HGRAPH_DEDUPLICATE_STORAGE = "deduplicate_storage";
+const char* const HGRAPH_DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
+const char* const HGRAPH_LABEL_REMAP_TYPE = "label_remap_type";
+const char* const HGRAPH_USE_EXTRA_INFO_FILTER = "use_extra_info_filter";
+const char* const STORE_RAW_VECTOR = "store_raw_vector";
+const char* const RAW_VECTOR_IO_TYPE = "raw_vector_io_type";
+const char* const RAW_VECTOR_FILE_PATH = "raw_vector_file_path";
+const char* const HGRAPH_PERSIST_SOURCE_ID = "persist_source_id";
+const char* const PYRAMID_PERSIST_SOURCE_ID = HGRAPH_PERSIST_SOURCE_ID;
+
+const char* const BRUTE_FORCE_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const BRUTE_FORCE_BASE_IO_TYPE = "base_io_type";
+const char* const BRUTE_FORCE_BASE_PQ_DIM = "base_pq_dim";
+const char* const BRUTE_FORCE_BASE_FILE_PATH = "base_file_path";
+const char* const BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const BRUTE_FORCE_PRECISE_IO_TYPE = "precise_io_type";
+const char* const BRUTE_FORCE_PRECISE_FILE_PATH = "precise_file_path";
+const char* const BRUTE_FORCE_THREAD_COUNT = "thread_count";
+const char* const BRUTE_FORCE_USE_RESIDUAL = "use_residual";
+
+const char* const IVF_USE_RESIDUAL = "use_residual";
+const char* const IVF_USE_REORDER = "use_reorder";
+const char* const IVF_TRAIN_TYPE = "ivf_train_type";
+const char* const IVF_USE_ROUTE_GRAPH = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT = "kmeans_iter_count";
+const char* const IVF_BUCKETS_COUNT = "buckets_count";
+const char* const IVF_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const IVF_BASE_IO_TYPE = "base_io_type";
+const char* const IVF_BASE_PQ_DIM = "base_pq_dim";
+const char* const IVF_BASE_FILE_PATH = "base_file_path";
+const char* const IVF_BASE_ENABLE_READ_CACHE = "base_enable_read_cache";
+const char* const IVF_BASE_CACHE_TOTAL_SIZE = "base_cache_total_size";
+const char* const IVF_PRECISE_ENABLE_READ_CACHE = "precise_enable_read_cache";
+const char* const IVF_PRECISE_ENABLE_PREFETCH_HINT = "precise_enable_prefetch_hint";
+const char* const IVF_PRECISE_CACHE_TOTAL_SIZE = "precise_cache_total_size";
+
+const char* const PYRAMID_SUPPORT_DUPLICATE = SUPPORT_DUPLICATE;
+const char* const PYRAMID_EF_CONSTRUCTION = EF_CONSTRUCTION_KEY;
+const char* const PYRAMID_USE_REORDER = USE_REORDER_KEY;
+const char* const PYRAMID_BASE_QUANTIZATION_TYPE = "base_quantization_type";
+const char* const PYRAMID_GRAPH_MAX_DEGREE = "max_degree";
+const char* const PYRAMID_BUILD_ALPHA = "alpha";
+const char* const PYRAMID_GRAPH_TYPE = "graph_type";
+const char* const PYRAMID_GRAPH_STORAGE_TYPE = "graph_storage_type";
+const char* const PYRAMID_BUILD_THREAD_COUNT = "build_thread_count";
+const char* const PYRAMID_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const PYRAMID_RABITQ_BITS_PER_DIM_BASE = RABITQ_BITS_PER_DIM_BASE;
+const char* const PYRAMID_RABITQ_BITS_PER_DIM_QUERY = RABITQ_BITS_PER_DIM_QUERY;
+const char* const PYRAMID_RABITQ_BITS_PER_DIM_PRECISE = RABITQ_BITS_PER_DIM_PRECISE;
+const char* const PYRAMID_RABITQ_PCA_DIM = RABITQ_PCA_DIM;
+const char* const PYRAMID_RABITQ_USE_FHT = RABITQ_USE_FHT;
+const char* const PYRAMID_FAST_ENCODE_RABITQ = FAST_ENCODE_RABITQ;
+const char* const PYRAMID_FAST_ENCODE_RABITQ_ROUNDS = FAST_ENCODE_RABITQ_ROUNDS;
+const char* const PYRAMID_BASE_IO_TYPE = "base_io_type";
+const char* const PYRAMID_BASE_SUPPLEMENT_IO_TYPE = "base_supplement_io_type";
+const char* const PYRAMID_BASE_PQ_DIM = "base_pq_dim";
+const char* const PYRAMID_BASE_FILE_PATH = "base_file_path";
+const char* const PYRAMID_BASE_SUPPLEMENT_FILE_PATH = "base_supplement_file_path";
+const char* const PYRAMID_PRECISE_IO_TYPE = "precise_io_type";
+const char* const PYRAMID_PRECISE_FILE_PATH = "precise_file_path";
+const char* const PYRAMID_PARAMETER_EF_SEARCH = "ef_search";
+const char* const PYRAMID_PARAMETER_SUBINDEX_EF_SEARCH = "subindex_ef_search";
+const char* const PYRAMID_PARAMETER_HOPS_LIMIT = "hops_limit";
+const char* const PYRAMID_PARAMETER_RABITQ_ONE_BIT_SEARCH = "rabitq_one_bit_search";
+// search-time param key (in search JSON under "pyramid")
+const char* const PYRAMID_PARAMETER_HIERARCHIES = "hierarchies";
+const char* const PYRAMID_PARAMETER_HIERARCHY_OP = "hierarchy_op";
+const char* const PYRAMID_NO_BUILD_LEVELS = "no_build_levels";
+// build-time param key (in index_param JSON); same literal as search-time but kept separate
+// so either can evolve independently without coupling the other context
+const char* const PYRAMID_HIERARCHIES = "hierarchies";
+const char* const PYRAMID_INDEX_MIN_SIZE = "index_min_size";
+const char* const PYRAMID_STORE_PATHS = "store_paths";
+const char* const PYRAMID_ROOT_GRAPH_TYPE = "root_graph_type";
+const char* const PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER = "single_layer";
+const char* const PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER = "multi_layer";
+
+const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT = "first_order_buckets_count";
+const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT = "second_order_buckets_count";
+
+const char* const IVF_PRECISE_QUANTIZATION_TYPE = "precise_quantization_type";
+const char* const IVF_PRECISE_IO_TYPE = "precise_io_type";
+const char* const IVF_PRECISE_FILE_PATH = "precise_file_path";
+const char* const IVF_PRECISE_CODES_LAYOUT = "precise_codes_layout";
+const char* const IVF_PRECISE_CODES_LAYOUT_FLAT = "flat";
+const char* const IVF_PRECISE_CODES_LAYOUT_BUCKET = "bucket";
+const char* const USE_ATTRIBUTE_FILTER = "use_attribute_filter";
+const char* const IVF_THREAD_COUNT = "thread_count";
+
+const char* const SERIAL_MAGIC_BEGIN = "vsag0000";
+const char* const SERIAL_MAGIC_END = "0000gasv";
+const char* const SERIAL_META_KEY = "_meta";
+const char* const SERIAL_STREAM_MAGIC = "vsagstm0";
+const uint16_t SERIAL_STREAM_FORMAT_MAJOR = 1;
+const uint16_t SERIAL_STREAM_FORMAT_MINOR = 0;
+const uint32_t SERIAL_STREAM_SECTION_END = 0;
+
+};  // namespace vsag

@@ -1,0 +1,50 @@
+
+# Base CI image for VSAG on x86_64.
+#
+# This image carries the common toolchain shared by every CI variant
+# (compilers, build tools, runtime headers, etc.) but intentionally does NOT
+# install any BLAS implementation. BLAS backends are layered on top of this
+# image in the variant Dockerfiles:
+#
+#   * docker/Dockerfile.x86.mkl      -> vsaglib/vsag:ci-x86-mkl
+#   * docker/Dockerfile.x86.openblas -> vsaglib/vsag:ci-x86-openblas
+#
+# Keeping the base image free of any BLAS implementation lets us:
+#   * share most of the build context between the two CI variants (faster
+#     `update-ci-image` runs, smaller registry footprint after dedup);
+#   * make it trivial to add a third backend (e.g. AOCL/ARMPL) later.
+
+FROM ubuntu:26.04
+
+# Use the same GCC 13 / LLVM 20 setup as hosted CI and local Ubuntu builds.
+COPY scripts/deps/install_toolchain_ubuntu.sh /tmp/install-toolchain.sh
+ENV CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 FC=/usr/bin/gfortran-13
+# Keep GCC 11's ASan runtime and the pre-t64 libaio name for main's Ubuntu 22.04 artifacts.
+# Install and clean together so package lists are absent from the toolchain layer.
+RUN DEBIAN_FRONTEND=noninteractive bash /tmp/install-toolchain.sh \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y wget sudo git cmake ninja-build gdb ccache build-essential \
+        lcov python3-pip python3-venv time python3-dev libomp-20-dev libaio-dev \
+        libcurl4-openssl-dev liburing-dev libasan6 \
+    && test "$("$CC" -dumpversion | cut -d. -f1)" = 13 \
+    && test "$("$CXX" -dumpversion | cut -d. -f1)" = 13 \
+    && test -e /usr/lib/x86_64-linux-gnu/libasan.so.6 \
+    && test -e /usr/lib/x86_64-linux-gnu/libaio.so.1t64 \
+    && ln -s libaio.so.1t64 /usr/lib/x86_64-linux-gnu/libaio.so.1 \
+    && test -e /usr/lib/x86_64-linux-gnu/libaio.so.1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/install-toolchain.sh
+
+# Pin the x86 GitHub CLI used by compatibility checks; no credentials enter the image.
+RUN set -eu; \
+    gh_version=2.75.0; \
+    gh_sha256=98f910f4cde42a345e241f867f42b2229dda60267d7f87a56d283842519a4cb7; \
+    download_dir="$(mktemp -d)"; \
+    cd "$download_dir"; \
+    archive="gh_${gh_version}_linux_amd64.tar.gz"; \
+    wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${gh_version}/${archive}"; \
+    printf '%s  %s\n' "$gh_sha256" "$archive" | sha256sum -c -; \
+    tar xzf "$archive"; \
+    install -m 0755 "gh_${gh_version}_linux_amd64/bin/gh" /usr/local/bin/gh; \
+    test "$(gh --version | head -1 | awk '{print $3}')" = "$gh_version"; \
+    cd /; \
+    rm -rf "$download_dir"

@@ -1,0 +1,903 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <nlohmann/json.hpp>
+#include <set>
+#include <type_traits>
+#include <utility>
+
+#include "algorithm/inner_index_interface.h"
+#include "common.h"
+#include "impl/reasoning/reasoning_context.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "index/search_session_provider.h"
+#include "index_common_param.h"
+#include "query_context.h"
+#include "search_metrics_internal.h"
+#include "utils/search_lock.h"
+#include "utils/search_threshold.h"
+#include "vsag/index.h"
+namespace vsag {
+
+GENERATE_HAS_STATIC_CLASS_FUNCTION(CheckAndMappingExternalParam,
+                                   ParamPtr,
+                                   std::declval<const JsonType&>(),
+                                   std::declval<const IndexCommonParam&>());
+
+template <typename T, typename = void>
+struct HasTypedSearchWithRequest : std::false_type {};
+
+template <typename T>
+struct HasTypedSearchWithRequest<
+    T,
+    std::void_t<decltype(std::declval<const T&>().SearchWithRequest(
+        std::declval<const SearchRequest&>(), std::declval<SearchMetrics*>()))>> : std::true_type {
+};
+
+template <class T>
+class IndexImpl : public Index, public SearchSessionProvider {
+    static_assert(std::is_base_of<InnerIndexInterface, T>::value);
+    static_assert(HasStaticCheckAndMappingExternalParam<T>::value);
+
+public:
+    IndexImpl(const JsonType& external_param, const IndexCommonParam& common_param)
+        : Index(), common_param_(common_param) {
+        auto param_ptr = T::CheckAndMappingExternalParam(external_param, common_param);
+        this->inner_index_ = std::make_shared<T>(param_ptr, common_param);
+        this->inner_index_->InitFeatures();
+    }
+
+    IndexImpl(InnerIndexPtr inner_index, const IndexCommonParam& common_param)
+        : inner_index_(std::move(inner_index)), common_param_(common_param) {
+        this->inner_index_->InitFeatures();
+    }
+
+    ~IndexImpl() override {
+        const SearchLockScope public_search_scope(false);
+        this->inner_index_.reset();
+    }
+
+#define CHECK_AND_RETURN_EMPTY_DATASET          \
+    if (GetNumElements() == 0) {                \
+        return DatasetImpl::MakeEmptyDataset(); \
+    }
+
+#define CHECK_QUERY_RETURN_EMPTY_DATASET(query)                 \
+    if ((query) != nullptr && (query)->GetNumElements() == 0) { \
+        return make_empty_search_result();                      \
+    }
+#define CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters) \
+    if (GetNumElements() == 0 && !this->ShouldSkipEmptyCheck(parameters) &&       \
+        ((query) == nullptr || (query)->GetNumElements() <= 1 ||                  \
+         this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {              \
+        return make_empty_search_result();                                        \
+    }
+#define CHECK_IMMUTABLE_INDEX(operation_str)                                       \
+    if (this->inner_index_->immutable_.load(std::memory_order_acquire)) {          \
+        return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,        \
+                                    "immutable index no support " operation_str)); \
+    }
+
+#define CHECK_DESERIALIZE_EMPTY_INDEX                                                        \
+    if (GetNumElements() != 0) {                                                             \
+        return tl::unexpected(                                                               \
+            Error(ErrorType::INDEX_NOT_EMPTY, "failed to deserialize: index is not empty")); \
+    }
+
+#define CHECK_NONEMPTY_DATASET(dataset)     \
+    if ((dataset)->GetNumElements() == 0) { \
+        return std::vector<int64_t>();      \
+    }
+
+    // Every public operation owns its locking policy, including reads and mutation of another
+    // index from a search callback. Only a search backend may explicitly opt into lock elision.
+public:
+    tl::expected<std::vector<int64_t>, Error>
+    Add(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("add");
+        CHECK_NONEMPTY_DATASET(base);
+        SAFE_CALL(return this->inner_index_->Add(base));
+    }
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override {
+        const SearchLockScope public_search_scope(false);
+        if (not CheckFeature(IndexFeature::SUPPORT_ANALYZE_INDEX_BY_SEARCH)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support search analysis");
+        }
+        return this->inner_index_->AnalyzeIndexBySearch(request);
+    }
+
+    tl::expected<std::vector<int64_t>, Error>
+    Build(const DatasetPtr& base) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("build");
+        CHECK_NONEMPTY_DATASET(base);
+        SAFE_CALL(return this->inner_index_->Build(base));
+    }
+
+    tl::expected<bool, Error>
+    Tune(const std::string& parameters, bool disable_future_tuning = false) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("tune");
+        SAFE_CALL(return this->inner_index_->Tune(parameters, disable_future_tuning));
+    }
+
+    tl::expected<float, Error>
+    CalcDistanceById(const DatasetPtr& vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
+    }
+
+    tl::expected<float, Error>
+    CalcDistanceById(const float* vector,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(
+            return this->inner_index_->CalcDistanceById(vector, id, calculate_precise_distance));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
+            query, ids, count, calculate_precise_distance, topk));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    CalcDistancesById(const DatasetPtr& query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->CalcDistancesById(
+            query, ids, count, calculate_precise_distance, topk));
+    }
+
+    [[nodiscard]] bool
+    CheckFeature(IndexFeature feature) const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->CheckFeature(feature);
+    }
+
+    [[nodiscard]] bool
+    CheckIdExist(int64_t id) const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->CheckIdExist(id);
+    }
+
+    tl::expected<IndexPtr, Error>
+    Clone(const std::shared_ptr<Allocator>& allocator = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
+        IndexCommonParam common_param = this->common_param_;
+        if (allocator != nullptr) {
+            common_param.allocator_ = allocator;
+        }
+        auto clone_value = this->clone_inner_index(common_param);
+        if (not clone_value.has_value()) {
+            LOG_ERROR_AND_RETURNS(clone_value.error().type, clone_value.error().message);
+        }
+        return std::make_shared<IndexImpl<T>>(clone_value.value(), common_param);
+    }
+
+    tl::expected<Checkpoint, Error>
+    ContinueBuild(const DatasetPtr& base, const BinarySet& binary_set) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("continue build");
+        SAFE_CALL(return this->inner_index_->ContinueBuild(base, binary_set));
+    }
+
+    tl::expected<void, Error>
+    Deserialize(const BinarySet& binary_set) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->Deserialize(binary_set));
+    }
+
+    tl::expected<void, Error>
+    Deserialize(const ReaderSet& reader_set) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->Deserialize(reader_set));
+    }
+
+    tl::expected<void, Error>
+    Deserialize(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->Deserialize(in_stream));
+    }
+
+    tl::expected<void, Error>
+    ParallelDeserialize(DeserializeReader& reader) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->ParallelDeserialize(reader));
+    }
+
+    tl::expected<void, Error>
+    DeserializeStreaming(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_DESERIALIZE_EMPTY_INDEX;
+        SAFE_CALL(this->inner_index_->DeserializeStreaming(in_stream));
+    }
+
+    [[nodiscard]] uint64_t
+    EstimateMemory(uint64_t num_elements) const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->EstimateMemory(num_elements);
+    }
+
+    tl::expected<DatasetPtr, Error>
+    ExportIDs() const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->ExportIDs());
+    }
+
+    tl::expected<IndexPtr, Error>
+    ExportModel() const override {
+        const SearchLockScope public_search_scope(false);
+        auto model_value = this->export_model_inner();
+        if (not model_value.has_value()) {
+            LOG_ERROR_AND_RETURNS(model_value.error().type, model_value.error().message);
+        }
+        return std::make_shared<IndexImpl<T>>(model_value.value(), this->common_param_);
+    }
+
+    tl::expected<void, Error>
+    ExportCache(std::ostream& out_stream) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->ExportCache(out_stream));
+    }
+
+    tl::expected<void, Error>
+    ImportCache(std::istream& in_stream) override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->ImportCache(in_stream));
+    }
+
+    tl::expected<void, Error>
+    RebuildIVFBucketGraphs() override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("rebuild bucket graphs");
+        SAFE_CALL(this->inner_index_->RebuildBucketGraphs());
+    }
+    tl::expected<DatasetPtr, Error>
+    GetDataByIds(const int64_t* ids, int64_t count) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->GetDataByIds(ids, count));
+    };
+
+    tl::expected<DatasetPtr, Error>
+    GetDataByIdsWithFlag(const int64_t* ids,
+                         int64_t count,
+                         uint64_t selected_data_flag) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->GetDataByIdsWithFlag(ids, count, selected_data_flag));
+    };
+
+    tl::expected<std::vector<IndexDetailInfo>, Error>
+    GetIndexDetailInfos() const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->GetIndexDetailInfos());
+    }
+
+    tl::expected<DetailDataPtr, Error>
+    GetDetailDataByName(const std::string& name, IndexDetailInfo& info) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->GetDetailDataByName(name, info));
+    }
+
+    [[nodiscard]] uint64_t
+    EstimateBuildMemory(uint64_t num_elements) const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->EstimateBuildMemory(num_elements);
+    }
+
+    virtual tl::expected<void, Error>
+    GetExtraInfoByIds(const int64_t* ids, int64_t count, char* extra_infos) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->GetExtraInfoByIds(ids, count, extra_infos));
+    };
+
+    IndexType
+    GetIndexType() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetIndexType();
+    }
+
+    [[nodiscard]] uint64_t
+    GetMemoryUsage() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetMemoryUsage();
+    }
+
+    [[nodiscard]] std::unordered_map<std::string, uint64_t>
+    GetMemoryUsageDetail() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetMemoryUsageDetail();
+    }
+
+    tl::expected<std::pair<int64_t, int64_t>, Error>
+    GetMinAndMaxId() const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->GetMinAndMaxId());
+    }
+
+    [[nodiscard]] int64_t
+    GetNumElements() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetNumElements();
+    }
+
+    [[nodiscard]] int64_t
+    GetNumberRemoved() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetNumberRemoved();
+    }
+
+    tl::expected<DatasetPtr, Error>
+    GetRawVectorByIds(const int64_t* ids,
+                      int64_t count,
+                      Allocator* specified_allocator) const override {
+        const SearchLockScope public_search_scope(false);
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS)) {
+            return tl::unexpected(Error(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                        "index no support to get raw vector by ids"));
+        }
+        SAFE_CALL(return this->inner_index_->GetVectorByIds(ids, count, specified_allocator));
+    };
+
+    [[nodiscard]] std::string
+    GetStats() const override {
+        const SearchLockScope public_search_scope(false);
+        if (not CheckFeature(IndexFeature::SUPPORT_GET_STATS)) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "index does not support static analysis");
+        }
+        return this->inner_index_->GetStats();
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              BitsetPtr invalid = nullptr) const override {
+        const SearchLockScope public_search_scope(false);
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, invalid));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const std::function<bool(int64_t)>& filter) const override {
+        const SearchLockScope public_search_scope(false);
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override {
+        const SearchLockScope public_search_scope(false);
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->KnnSearch(query, k, parameters, filter));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query, int64_t k, SearchParam& search_param) const override {
+        const SearchLockScope public_search_scope(false);
+        auto threshold_validation = ValidateThresholdParameters(search_param.parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, search_param.parameters);
+        if (search_param.is_iter_filter) {
+            SAFE_CALL(return this->inner_index_->KnnSearch(query,
+                                                           k,
+                                                           search_param.parameters,
+                                                           search_param.filter,
+                                                           search_param.allocator,
+                                                           search_param.iter_ctx,
+                                                           search_param.is_last_search));
+        } else {
+            SAFE_CALL(return this->inner_index_->KnnSearch(
+                query, k, search_param.parameters, search_param.filter, search_param.allocator));
+        }
+    }
+
+    tl::expected<DatasetPtr, Error>
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              IteratorContext*& iter_ctx,
+              bool is_last_filter) const override {
+        const SearchLockScope public_search_scope(false);
+        auto threshold_validation = ValidateThresholdParameters(parameters);
+        if (not threshold_validation.has_value()) {
+            return tl::unexpected(threshold_validation.error());
+        }
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->KnnSearch(
+            query, k, parameters, filter, nullptr, iter_ctx, is_last_filter));
+    }
+
+    using Index::OpenSearchSession;
+
+    tl::expected<std::unique_ptr<SearchSession>, Error>
+    CreateSearchSession(const DatasetPtr& query,
+                        int64_t k_per_call,
+                        const std::string& parameters,
+                        const FilterPtr& filter,
+                        Allocator* allocator) const override {
+        const SearchLockScope public_search_scope(false);
+        // InnerIndexInterface stores a raw allocator; retain common resources too.
+        // Destruction order releases the backend before its allocator/thread pool.
+        struct SessionOwner {
+            IndexCommonParam resources;
+            InnerIndexPtr backend;
+        };
+        SAFE_CALL(
+            auto lifetime = std::make_shared<SessionOwner>(
+                SessionOwner{this->common_param_, this->inner_index_});
+            std::shared_ptr<const InnerIndexInterface> owner(lifetime, this->inner_index_.get());
+            return this->inner_index_->OpenSearchSession(
+                query, k_per_call, parameters, filter, allocator, std::move(owner)));
+    }
+
+    tl::expected<void, Error>
+    Merge(const std::vector<MergeUnit>& merge_units) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("merge");
+        SAFE_CALL(this->inner_index_->Merge(merge_units));
+    }
+
+    tl::expected<uint32_t, Error>
+    Pretrain(const std::vector<int64_t>& base_tag_ids,
+             uint32_t k,
+             const std::string& parameters) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("pretrain");
+        SAFE_CALL(return this->inner_index_->Pretrain(base_tag_ids, k, parameters));
+    }
+
+    tl::expected<uint32_t, Error>
+    Feedback(const DatasetPtr& query,
+             int64_t k,
+             const std::string& parameters,
+             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("feedback");
+        if (query->GetNumElements() == 0) {
+            return 0;
+        }
+        SAFE_CALL(return this->inner_index_->Feedback(query, k, parameters, global_optimum_tag_id));
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->RangeSearch(query, radius, parameters, limited_size));
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                BitsetPtr invalid,
+                int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->RangeSearch(
+            query, radius, parameters, invalid, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const std::function<bool(int64_t)>& filter,
+                int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->RangeSearch(
+            query, radius, parameters, filter, limited_size));
+    }
+
+    tl::expected<DatasetPtr, Error>
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_QUERY_RETURN_EMPTY_DATASET(query);
+        CHECK_EMPTY_INDEX_RETURN_EMPTY_DATASET_IF_SINGLE_QUERY(query, parameters);
+        SAFE_CALL(return this->inner_index_->RangeSearch(
+            query, radius, parameters, filter, limited_size));
+    }
+
+    tl::expected<uint32_t, Error>
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("remove");
+        SAFE_CALL(return this->inner_index_->Remove(ids, mode));
+    }
+
+    [[nodiscard]] tl::expected<BinarySet, Error>
+    Serialize() const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(return this->inner_index_->Serialize());
+    }
+
+    [[nodiscard]] tl::expected<void, Error>
+    Serialize(WriteFuncType write_func) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->Serialize(write_func));
+    }
+
+    tl::expected<void, Error>
+    Serialize(std::ostream& out_stream) override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->Serialize(out_stream));
+    }
+
+    tl::expected<void, Error>
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->Serialize(writer, chunk_size));
+    }
+
+    tl::expected<void, Error>
+    SerializeStreaming(std::ostream& out_stream) const override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->SerializeStreaming(out_stream));
+    }
+
+    [[nodiscard]] tl::expected<DatasetPtr, Error>
+    SearchWithRequest(const SearchRequest& request) const override {
+        const SearchLockScope public_search_scope(false);
+        bool want_statistics = true;
+        std::optional<SearchRequest> normalized_request;
+        std::optional<nlohmann::json> parsed_params;
+        // Heuristic pre-filter only: false positives may trigger an extra parse, while the parsed
+        // top-level JSON object remains authoritative for the reserved option. Parse escaped
+        // inputs too: JSON permits Unicode escapes in keys (e.g. "want_\\u0073tatistics"). Note the
+        // fallback defaults to collecting statistics, so an unparsed false option is a false
+        // negative that only over-collects — it never suppresses a request that asked for metrics.
+        // Requests whose key is fully Unicode-escaped (containing neither the literal substring
+        // nor an easy textual marker) are intentionally left to the conservative backslash check.
+        const bool may_have_statistics_option =
+            request.params_str_.find("\"want_statistics\"") != std::string::npos or
+            request.params_str_.find('\\') != std::string::npos;
+        if (may_have_statistics_option or not request.bucket_ids_.empty()) {
+            try {
+                parsed_params.emplace(nlohmann::json::parse(request.params_str_));
+                if (parsed_params->contains("want_statistics")) {
+                    if (not(*parsed_params)["want_statistics"].is_boolean()) {
+                        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                    "want_statistics must be a boolean"));
+                    }
+                    want_statistics = (*parsed_params)["want_statistics"].get<bool>();
+                    normalized_request.emplace(request);
+                    parsed_params->erase("want_statistics");
+                    normalized_request->params_str_ = parsed_params->dump();
+                }
+            } catch (const nlohmann::json::exception&) {
+                // Preserve legacy behavior: concrete indexes handle malformed params.
+                parsed_params.reset();
+            }
+        }
+        const auto& effective_request = normalized_request ? normalized_request.value() : request;
+
+        // Validate bucket_ids_ structural constraints before empty-index early return
+        if (not effective_request.bucket_ids_.empty()) {
+            if (effective_request.query_ == nullptr) {
+                return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                            "query_ cannot be null when bucket_ids_ is set"));
+            }
+            if (effective_request.bucket_ids_.size() !=
+                static_cast<size_t>(effective_request.query_->GetNumElements())) {
+                return tl::unexpected(Error(
+                    ErrorType::INVALID_ARGUMENT,
+                    "bucket_ids_ size (" + std::to_string(effective_request.bucket_ids_.size()) +
+                        ") must match the number of query vectors (" +
+                        std::to_string(effective_request.query_->GetNumElements()) + ")"));
+            }
+            if (this->GetIndexType() != IndexType::IVF &&
+                effective_request.bucket_ids_.size() != 1) {
+                return tl::unexpected(
+                    Error(ErrorType::INVALID_ARGUMENT,
+                          "bucket_ids_ supports multiple query vectors only for IVF indexes"));
+            }
+            for (uint64_t query_idx = 0; query_idx < effective_request.bucket_ids_.size();
+                 ++query_idx) {
+                const auto& ids = effective_request.bucket_ids_[query_idx];
+                if (ids.empty()) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_ids_[" + std::to_string(query_idx) +
+                                  "] must not be empty; use an empty outer vector "
+                                  "for default routing"));
+                }
+                std::set<int64_t> seen_ids;
+                for (auto id : ids) {
+                    if (id < 0) {
+                        return tl::unexpected(
+                            Error(ErrorType::INVALID_ARGUMENT,
+                                  "bucket_id " + std::to_string(id) + " is negative"));
+                    }
+                    if (not seen_ids.insert(id).second) {
+                        return tl::unexpected(Error(ErrorType::INVALID_ARGUMENT,
+                                                    "duplicate bucket_id " + std::to_string(id)));
+                    }
+                }
+            }
+            try {
+                if (parsed_params and parsed_params->contains("ivf") and
+                    (*parsed_params)["ivf"].contains("disable_bucket_scan") and
+                    (*parsed_params)["ivf"]["disable_bucket_scan"].get<bool>()) {
+                    return tl::unexpected(
+                        Error(ErrorType::INVALID_ARGUMENT,
+                              "bucket_ids_ is incompatible with disable_bucket_scan mode"));
+                }
+            } catch (const nlohmann::json::exception&) {
+                // Preserve the existing concrete-index validation for malformed IVF parameters.
+            }
+        }
+        SAFE_CALL(
+            ValidateSearchThreshold(effective_request.threshold_);
+            if constexpr (HasTypedSearchWithRequest<T>::value) {
+                std::optional<SearchMetrics> metrics;
+                if (want_statistics) {
+                    metrics.emplace();
+                }
+                if (GetNumElements() == 0 &&
+                    !this->ShouldSkipEmptyCheck(effective_request.params_str_) &&
+                    (effective_request.query_ == nullptr ||
+                     effective_request.query_->GetNumElements() <= 1 ||
+                     this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
+                    auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
+                    if (metrics) {
+                        CHECK_ARGUMENT(
+                            AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
+                            "search result does not support typed metrics");
+                    } else {
+                        result->Statistics("{}");
+                    }
+                    return result;
+                }
+                auto typed_index = std::static_pointer_cast<T>(this->inner_index_);
+                auto result = typed_index->SearchWithRequest(effective_request,
+                                                             metrics ? &metrics.value() : nullptr);
+                if (metrics) {
+                    CHECK_ARGUMENT(
+                        AttachSearchMetrics(result, std::move(metrics.value()).Snapshot()),
+                        "search result does not support typed metrics");
+                } else {
+                    result->Statistics("{}");
+                }
+                return result;
+            } else {
+                if (GetNumElements() == 0 &&
+                    !this->ShouldSkipEmptyCheck(effective_request.params_str_) &&
+                    (effective_request.query_ == nullptr ||
+                     effective_request.query_->GetNumElements() <= 1 ||
+                     this->inner_index_->GetIndexType() != IndexType::HGRAPH)) {
+                    auto result = make_empty_search_result();
+                    if (!effective_request.expected_labels_.empty()) {
+                        result->Reasoning(ReasoningContext::MakeStatusReport(
+                            ReasoningReportStatus::kEmptyIndex, this->inner_index_->GetName()));
+                    }
+                    if (not want_statistics) {
+                        result->Statistics("{}");
+                    }
+                    return result;
+                }
+                auto result = this->inner_index_->SearchWithRequest(effective_request);
+                if (not want_statistics) {
+                    // Intentionally clears any legacy JSON statistics the inner index produced so
+                    // an opting-out caller sees "{}" rather than partial accounting.
+                    result->Statistics("{}");
+                }
+                return result;
+            })
+    }
+
+    tl::expected<void, Error>
+    SetImmutable() override {
+        const SearchLockScope public_search_scope(false);
+        SAFE_CALL(this->inner_index_->SetImmutable());
+    }
+
+    tl::expected<void, Error>
+    Train(const DatasetPtr& data) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("train");
+        if (data->GetNumElements() != 0) {
+            SAFE_CALL(this->inner_index_->Train(data));
+        }
+        return {};
+    }
+
+    virtual tl::expected<void, Error>
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("update attribute");
+        SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs));
+    }
+
+    tl::expected<void, Error>
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("update attribute with origin attributes");
+        SAFE_CALL(this->inner_index_->UpdateAttribute(id, new_attrs, origin_attrs));
+    }
+
+    virtual tl::expected<bool, Error>
+    UpdateExtraInfo(const DatasetPtr& new_base) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("update extra info");
+        if (new_base->GetNumElements() == 0) {
+            return false;
+        }
+        SAFE_CALL(return this->inner_index_->UpdateExtraInfo(new_base));
+    }
+
+    tl::expected<bool, Error>
+    UpdateId(int64_t old_id, int64_t new_id) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("update id");
+        SAFE_CALL(return this->inner_index_->UpdateId(old_id, new_id));
+    }
+
+    tl::expected<bool, Error>
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override {
+        const SearchLockScope public_search_scope(false);
+        CHECK_IMMUTABLE_INDEX("update vector");
+        if (new_base->GetNumElements() == 0) {
+            return false;
+        }
+        SAFE_CALL(return this->inner_index_->UpdateVector(id, new_base, force_update));
+    }
+
+public:
+    [[nodiscard]] inline InnerIndexPtr
+    GetInnerIndex() const {
+        return this->inner_index_;
+    }
+
+    [[nodiscard]] inline const IndexCommonParam&
+    GetCommonParam() const {
+        return this->common_param_;
+    }
+
+    [[nodiscard]] const AttrTypeSchema*
+    GetAttrTypeSchema() const override {
+        const SearchLockScope public_search_scope(false);
+        return this->inner_index_->GetAttrTypeSchema();
+    }
+
+private:
+    tl::expected<InnerIndexPtr, Error>
+    clone_inner_index(const IndexCommonParam& common_param) const {
+        SAFE_CALL(return this->inner_index_->Clone(common_param));
+    }
+
+    tl::expected<InnerIndexPtr, Error>
+    export_model_inner() const {
+        SAFE_CALL(return this->inner_index_->ExportModel(this->common_param_));
+    }
+
+private:
+    tl::expected<void, Error>
+    ValidateThresholdParameters(const std::string& parameters) const {
+        try {
+            ParseSearchThreshold(parameters);
+            return {};
+        } catch (const VsagException& e) {
+            return tl::unexpected(e.error_);
+        } catch (const std::exception& e) {
+            return tl::unexpected(Error(ErrorType::UNKNOWN_ERROR, e.what()));
+        }
+    }
+
+    DatasetPtr
+    make_empty_search_result() const {
+        auto result = DatasetImpl::MakeEmptyDataset();
+        switch (GetIndexType()) {
+            case IndexType::HGRAPH:
+            case IndexType::IVF:
+            case IndexType::PYRAMID:
+            case IndexType::BRUTEFORCE:
+            case IndexType::SINDI:
+            case IndexType::SIMQ: {
+                SearchStatistics statistics;
+                result->Statistics(statistics.Dump());
+                break;
+            }
+            default:
+                break;
+        }
+        return result;
+    }
+
+    bool
+    ShouldSkipEmptyCheck(const std::string& params_str) const {
+        if (GetNumElements() != 0 || params_str.empty()) {
+            return false;
+        }
+        try {
+            auto params_json = nlohmann::json::parse(params_str);
+            return params_json.contains("ivf") &&
+                   params_json["ivf"].contains("disable_bucket_scan") &&
+                   params_json["ivf"]["disable_bucket_scan"].get<bool>();
+        } catch (const nlohmann::json::exception&) {
+            return false;
+        }
+    }
+
+    InnerIndexPtr inner_index_{nullptr};
+    IndexCommonParam common_param_{};
+};
+
+}  // namespace vsag

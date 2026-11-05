@@ -1,0 +1,126 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <functional>
+#include <string>
+#include <vector>
+
+#include "algorithm/hgraph/hgraph_parameter.h"
+#include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "datacell/graph_interface.h"
+#include "impl/adaptive_pruning.h"
+#include "impl/odescent/odescent_graph_parameter.h"
+#include "index_common_param.h"
+#include "typing.h"
+#include "utils/pointer_define.h"
+#include "vsag/index.h"
+
+namespace vsag {
+
+DEFINE_POINTER2(PyramidParam, PyramidParameters);
+struct PyramidHierarchyParameters {
+public:
+    void
+    FromJson(const JsonType& json);
+
+    JsonType
+    ToJson() const;
+
+    bool
+    CheckCompatibility(const PyramidHierarchyParameters& other) const;
+
+public:
+    std::string name;
+    std::vector<int32_t> no_build_levels;
+    int64_t max_degree{64};
+    uint64_t ef_construction{400};
+    float alpha{1.2F};
+    uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
+};
+
+struct PyramidParameters : public InnerIndexParameter {
+public:
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
+
+public:
+    GraphInterfaceParamPtr graph_param{nullptr};
+    FlattenInterfaceParamPtr base_codes_param{nullptr};
+    ODescentParameterPtr odescent_param{nullptr};
+    PiPNNGraphBuilderParameter pipnn_param{};
+
+    std::vector<int32_t> no_build_levels;
+    std::vector<PyramidHierarchyParameters> hierarchies;
+    uint64_t ef_construction{400};
+    int64_t max_degree{64};
+    std::string graph_type{GRAPH_TYPE_VALUE_NSW};
+    AdaptivePruningParameter adaptive_pruning;
+    float alpha{1.2F};
+    uint32_t index_min_size{0};
+    std::string root_graph_type{PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER};
+    GraphStorageTypes root_graph_storage_type{GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT};
+
+    bool support_duplicate{false};
+    bool has_hierarchies{false};
+    bool persist_source_id{false};
+    bool store_paths{false};
+};
+
+class PyramidSearchParameters : public IndexSearchParameter {
+public:
+    enum class HierarchyOp {
+        SINGLE,
+        UNION,
+        INTERSECTION,
+    };
+
+    static PyramidSearchParameters
+    FromJson(const std::string& json_string);
+
+    bool
+    HasHierarchySelector() const;
+
+public:
+    uint64_t ef_search{100};
+    uint64_t subindex_ef_search{50};
+    uint32_t hops_limit{std::numeric_limits<uint32_t>::max()};
+    bool has_rabitq_one_bit_search{false};
+    bool rabitq_one_bit_search{false};
+    float rabitq_error_rate{std::numeric_limits<float>::quiet_NaN()};
+    std::vector<std::string> hierarchies;
+    HierarchyOp hierarchy_op{HierarchyOp::SINGLE};
+
+private:
+    PyramidSearchParameters() = default;
+};
+
+void
+validate_pyramid_external_root_graph_config(const JsonType& external_param,
+                                            const PyramidParameters& params);
+
+}  // namespace vsag

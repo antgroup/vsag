@@ -1,0 +1,25 @@
+---
+# VSAG C++ Code Formatting Configuration
+# CRITICAL: Requires clang-format version 20 EXACTLY
+# Do NOT use version 16, 17, 18 or any other version - formatting will differ!
+# Install with: sudo apt-get install clang-format-20
+Language: Cpp
+BasedOnStyle: Google
+AccessModifierOffset: -4
+AlwaysBreakAfterReturnType: All
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: false
+AllowShortIfStatementsOnASingleLine: false
+AlignTrailingComments: true
+
+ColumnLimit: 100
+DerivePointerAlignment: false
+IndentWidth: 4
+
+# Appended Options
+SortIncludes: true
+Standard: Latest
+BinPackParameters: false
+BinPackArguments: false
+ReflowComments: false
+---

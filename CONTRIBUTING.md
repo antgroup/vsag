@@ -1,0 +1,205 @@
+# Contributing to VSAG
+
+First of all, thanks for taking the time to contribute to vsag! It's people like you that help vsag come to fruition. :tada:
+
+The following are a set of guidelines for contributing to vsag. Following these guidelines helps contributing to this project easy and transparent. These are mostly guideline, not rules. Use your best judgment, and feel free to propose changes to this document in a pull request.
+
+As for everything else in the project, the contributions to vsag are governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Contribution Checklist
+
+Before you make any contributions, make sure you follow this list.
+
+-   Read [Contributing to vsag](CONTRIBUTING.md).
+-   Check if the changes are consistent with the [coding style](CONTRIBUTING.md#coding-style), and format your code accordingly.
+-   Run [tests](CONTRIBUTING.md#run-tests-with-code-coverage) and check your code coverage rate.
+-   Reduced PR CI does not waive local validation. Follow the [pre-submission checklist](docs/agents/contribution-workflow.md#required-validation-before-opening-or-updating-a-pr) for checks moved out of PR CI and report any unvalidated platforms.
+
+## What contributions can I make?
+
+Contributions to vsag fall into the following categories.
+
+1.  To report a bug or a problem with documentation, please file an [issue](https://github.com/antgroup/vsag/issues/new/choose) providing the details of the problem. If you believe the issue needs priority attention, please comment on the issue to notify the team. You can also let an AI agent draft the issue body for you — see `.github/ISSUE_TEMPLATE/ISSUE_GUIDE.md` and `tools/issue-helper/`.
+2.  To propose a new feature, please file a new feature request [issue](https://github.com/antgroup/vsag/issues/new/choose). Describe the intended feature and discuss the design and implementation with the team and community. Once the team agrees that the plan looks good, go ahead and implement it, following the [Contributing code](CONTRIBUTING.md#contributing-code).
+3.  To implement a feature or bug-fix for an existing outstanding issue, follow the [Contributing code](CONTRIBUTING.md#contributing-code). If you need more context on a particular issue, comment on the issue to let people know.
+
+## How can I contribute?
+
+### Contributing code
+
+If you have improvements to vsag, send us your pull requests! For those just getting started, see [GitHub workflow](#github-workflow). Make sure to refer to the related issue in your pull request's comment.
+
+### GitHub workflow
+
+Please create a new branch from an up-to-date main on your fork.
+
+1.  Fork the repository on GitHub.
+2.  Clone your fork to your local machine with `git clone git@github.com:<yourname>/vsag.git`.
+3.  Create a branch with `git checkout -b my-topic-branch`.
+4.  Make your changes, commit, then push to to GitHub with `git push --set-upstream origin my-topic-branch`.
+5.  Visit GitHub and make your pull request.
+
+If you have an existing local repository, please update it before you start, to minimize the chance of merge conflicts.
+
+```shell
+git remote add upstream git@github.com:antgroup/vsag.git
+git checkout main
+git pull upstream main
+git checkout -b my-topic-branch
+```
+
+### General guidelines
+
+Before sending your pull requests for review, make sure your changes are consistent with the guidelines and follow the vsag coding style.
+
+-   Include unit tests when you contribute new features, as they help to prove that your code works correctly, and also guard against future breaking changes to lower the maintenance cost.
+-   Bug fixes also require unit tests, because the presence of bugs usually indicates insufficient test coverage.
+-   Keep API compatibility in mind when you change code in vsag. Reviewers of your pull request will comment on any API compatibility issues.
+-   When you contribute a new feature to vsag, the maintenance burden is (by default) transferred to the vsag team. This means that the benefit of the contribution must be compared against the cost of maintaining the feature.
+
+### Developer Certificate of Origin (DCO)
+
+All contributions to this project must be accompanied by acknowledgment of, and agreement to, the [Developer Certificate of Origin](https://developercertificate.org/). Acknowledgment of and agreement to the Developer Certificate of Origin _must_ be included in the comment section of each contribution and _must_ take the form of `Signed-off-by: {{Full Name}} <{{email address}}>` (without the `{}`). Contributions without this acknowledgment will be required to add it before being accepted. If contributors are unable or unwilling to agree to the Developer Certificate of Origin, their contribution will not be included.
+
+Contributors sign-off that they adhere to DCO by adding the following Signed-off-by line to commit messages:
+
+```text
+This is my commit message
+
+Signed-off-by: Random J Developer <random@developer.example.org>
+```
+
+Git also has a `-s` command line option to append this automatically to your commit message:
+
+```shell
+$ git commit -s -m 'This is my commit message'
+```
+
+## Coding Style
+The coding style used in vsag generally follow [Google C++ Style Guide](https://google.github.io/styleguide/cppguide.html).
+And we made the following changes based on the guide:
+
+-   4 spaces for indentation
+-   Adopt .cpp file extension instead of .cc extension
+-   100-character line length
+
+### Format code
+
+**Important**: VSAG requires **clang-format version 20 EXACTLY**. Do not use higher or lower versions as they may produce different formatting.
+
+Install clang-format-20:
+```shell
+# Ubuntu/Debian
+$ sudo apt-get install clang-format-20
+```
+
+To format the code:
+```shell
+$ make fmt
+```
+
+The format script will automatically verify you're using clang-format-20 and will fail if a different version is detected.
+
+### Run clang-tidy
+
+**Important**: VSAG requires **clang-tidy version 20 EXACTLY**. Do not use higher or lower versions as they may produce different diagnostics.
+
+Install clang-tidy-20:
+```shell
+# Ubuntu/Debian
+$ sudo apt-get install clang-tidy-20
+```
+
+To run lint checks:
+
+`make lint` reads compile commands from `build-release/`, so run `make release` first.
+
+```shell
+$ make release
+$ make lint
+```
+
+To apply clang-tidy fixes in place:
+```shell
+$ make fix-lint
+```
+
+The lint wrapper will automatically verify you're using clang-tidy-20 and will fail if a different version is detected.
+
+## Run tests with code coverage
+
+Before submitting your PR, make sure you have run unit test, and your code coverage rate is >= 90%.
+
+Install lcov
+```shell
+$ sudo apt-get install lcov
+```
+Compile with coverage flags, run tests, and collect the coverage report:
+```shell
+$ make cov
+$ VSAG_TEST_SEED=424242 bash scripts/testing/test_parallel_bg.sh
+$ bash scripts/coverage/collect_cpp_coverage.sh
+$ bash scripts/coverage/check_cov.sh
+```
+
+This matches the CI source population: maintained production code under `src/` and public headers under `include/`, excluding the generated `src/version.h` and vendored `include/vsag/expected.hpp`. The collector retains branch records and writes normalized repository-relative paths to `coverage/coverage.info`.
+
+SIMD pull requests targeting `main` also receive a bounded pre-merge comparison against the PR base: measured
+patch lines must reach 80%, and SIMD-scoped line coverage must not regress. This partial-suite
+result is separate from full-project coverage; other C++ areas are not yet protected by it.
+See the [testing guide](docs/docs/en/src/development/testing.md#pre-merge-simd-stage) for details.
+
+## Pull Request Labels
+
+Every pull request **must** have the following two labels before it can be merged:
+
+-   A **`kind/*`** label indicating the type of change: `kind/bug` (bug fix), `kind/feature` (new feature), `kind/improvement` (refactor, chore, or minor improvement), or `kind/documentation` (documentation change).
+-   A **`version/*`** label indicating the target version, e.g. `version/1.0`, `version/0.18`.
+
+Mergify enforces these labels via check runs. The PR merge will be blocked until both labels are present.
+
+## Linking an Issue
+
+PRs labeled **`kind/bug`** or **`kind/feature`** must reference an existing
+issue in the PR description using a GitHub-recognized auto-closing keyword,
+so the issue closes automatically when the PR merges:
+
+```text
+Fixes: #1234
+Closes: #1234
+Resolves: #1234
+```
+
+Cross-repo references (`owner/repo#1234`) and full issue URLs are also
+accepted. PRs labeled `kind/improvement` or `kind/documentation` are
+exempt from this requirement.
+
+This rule is enforced by:
+
+1.  The `PR Issue Link Check` GitHub Action, which runs on every PR
+    targeting `main` or `0.*` branches. Repo administrators are expected
+    to add it to the **required status checks** for those branches so
+    that a failed check actually blocks merge.
+2.  A Mergify `merge_protections` rule as a defense-in-depth fallback.
+
+If the check fails, edit the PR description to add the required keyword
+and the check will re-run automatically.
+
+## Commit message and skip CI
+
+-   Follow Conventional Commits in the subject line, such as `feat:`, `fix:`, `docs:`, or `chore:`.
+-   If you need to skip CI, put `[skip ci]` at the beginning of the commit subject.
+
+Example:
+
+```text
+[skip ci] docs: update contribution examples
+```
+
+### Community and team CI
+
+PR CI uses a common routing entry point. GitHub-hosted community checks remain
+available to every contributor. An opt-in team Linux path reads its contributor
+allowlist exclusively from `.github/maintainers.json` on `main`; personal forks
+are supported. Compilation on the team path uses 16 jobs. See [CI routing and rollback](docs/agents/ci-routing.md)
+for activation prerequisites, required-check migration, and manual fallback.

@@ -1,0 +1,1176 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "hgraph.h"
+
+#include <datacell/compressed_graph_datacell_parameter.h>
+#include <fmt/format.h>
+
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <utility>
+
+#include "algorithm/inner_index_interface.h"
+#include "analyzer/analyzer.h"
+#include "analyzer/hgraph_analyzer.h"
+#include "attr/argparse.h"
+#include "common.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/hgraph_rabitq_fused_datacell.h"
+#include "datacell/rabitq_split_datacell.h"
+#include "datacell/sparse_graph_datacell.h"
+#include "dataset_impl.h"
+#include "impl/filter/filter_headers.h"
+#include "impl/filter/iterator_filter.h"
+#include "impl/heap/standard_heap.h"
+#include "impl/odescent/odescent_graph_builder.h"
+#include "impl/pruning_strategy.h"
+#include "impl/reasoning/reasoning_context.h"
+#include "impl/reorder/flatten_reorder.h"
+#include "impl/searcher/hgraph_rabitq_searcher.h"
+#include "index/index_impl.h"
+#include "io/reader_io/reader_io_parameter.h"
+#include "io/user_defined_io/user_defined_io_parameter.h"
+#include "typing.h"
+#include "utils/util_functions.h"
+#include "utils/visited_list.h"
+#include "vsag/options.h"
+
+namespace vsag {
+
+class HGraphAnalyzer;
+
+void
+HGraph::check_fused_mutation_supported(std::string_view operation) const {
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            fmt::format("fused RaBitQ HGraph does not support {}", operation));
+    }
+}
+
+void
+HGraph::check_user_defined_precise_io_supported(std::string_view operation) const {
+    // Cloning or exporting a model re-creates datacells from the same IO parameters, which
+    // for user-defined IO re-binds this index's Reader/Writer pair into the copy: the copy
+    // would share (Clone) or resize (ExportModel + build) the source backing store. Reject
+    // until user-defined storage can supply independent bytes for lifecycle copies.
+    if (this->has_precise_reorder() and this->high_precise_codes_ != nullptr) {
+        const auto hgraph_param =
+            std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+        if (hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+            std::dynamic_pointer_cast<UserDefinedIOParameter>(
+                hgraph_param->precise_codes_param->io_parameter) != nullptr) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                fmt::format(
+                    "user_defined_io precise codes do not support {}: the bound Reader/Writer "
+                    "pair would be shared with the copy",
+                    operation));
+        }
+    }
+}
+
+HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonParam& common_param)
+    : InnerIndexInterface(hgraph_param, common_param),
+      route_graphs_(common_param.allocator_.get()),
+      pending_code_writes_(common_param.allocator_.get()),
+      cache_(std::make_unique<BuildCache>(common_param.allocator_.get())),
+      use_elp_optimizer_(hgraph_param->use_elp_optimizer),
+      ignore_reorder_(hgraph_param->ignore_reorder),
+      build_by_base_(hgraph_param->build_by_base),
+      reorder_by_base_(hgraph_param->reorder_source == HGRAPH_REORDER_SOURCE_BASE),
+      ef_construct_(hgraph_param->ef_construction),
+      adaptive_pruning_(hgraph_param->adaptive_pruning),
+      alpha_(hgraph_param->alpha),
+      duplicate_distance_threshold_(hgraph_param->duplicate_distance_threshold),
+      support_force_remove_(hgraph_param->support_force_remove),
+      odescent_param_(hgraph_param->odescent_param),
+      pipnn_param_(hgraph_param->pipnn_param),
+      graph_type_(hgraph_param->graph_type),
+      hierarchical_datacell_param_(hgraph_param->hierarchical_graph_param),
+      mci_parameters_(hgraph_param->mci_parameters),
+      use_old_serial_format_(common_param.use_old_serial_format_),
+      use_conjugate_graph_(hgraph_param->use_conjugate_graph) {
+    // No-op unless adaptive pruning is enabled.
+    adaptive_pruning_.Validate(alpha_);
+    if (adaptive_pruning_.enabled) {
+        CHECK_ARGUMENT(graph_type_ == GRAPH_TYPE_VALUE_NSW,
+                       "adaptive_pruning currently supports only nsw graph construction");
+        CHECK_ARGUMENT(common_param.metric_ == MetricType::METRIC_TYPE_L2SQR,
+                       "adaptive_pruning currently supports only L2 distance");
+    }
+    this->support_duplicate_ = hgraph_param->support_duplicate;
+    this->deduplicate_storage_ = hgraph_param->deduplicate_storage;
+    const bool is_dense_vector = common_param.repr_ == RecordRepr::DENSE &&
+                                 common_param.data_type_ != DataTypes::DATA_TYPE_SPARSE;
+    if (this->deduplicate_storage_ && not is_dense_vector) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage only supports dense vectors");
+    }
+    if (this->graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
+        const bool valid_adaptive_metric = not this->pipnn_param_.adaptive_pruning or
+                                           common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
+        CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
+        if (common_param.repr_ != RecordRepr::DENSE or
+            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "HGraph PiPNN only supports dense float32 indexes");
+        }
+    }
+    if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
+        this->graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "HGraph deduplicate_storage only supports nsw or pipnn graph");
+    }
+    this->persist_source_id_ = hgraph_param->persist_source_id;
+    if (this->using_dedup_storage()) {
+        this->code_slot_map_ = std::make_shared<CodeSlotMap>(allocator_);
+    }
+    neighbors_mutex_ = std::make_shared<PointsMutex>(0, common_param.allocator_.get());
+    this->basic_flatten_codes_ =
+        FlattenInterface::MakeInstance(hgraph_param->base_codes_param, common_param);
+    if (has_precise_reorder()) {
+        this->high_precise_codes_ =
+            FlattenInterface::MakeInstance(hgraph_param->precise_codes_param, common_param);
+    }
+    this->searcher_ = std::make_shared<BasicSearcher>(common_param, neighbors_mutex_);
+    this->mci_searcher_ = std::make_shared<MCISearcher>(common_param);
+    this->hybrid_mci_searcher_ = std::make_shared<HybridMCISearcher>(common_param);
+    if (this->mci_parameters_.enabled) {
+        this->mci_cliques_ = std::make_shared<CliqueDataCell>(common_param.allocator_.get());
+    }
+    if (this->use_conjugate_graph_) {
+        this->conjugate_graph_ = std::make_shared<ConjugateGraph>(common_param.allocator_.get());
+    }
+
+    if (hgraph_param->rabitq_fused_datacell) {
+        auto split_codes =
+            std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(basic_flatten_codes_);
+        CHECK_ARGUMENT(split_codes != nullptr,
+                       "rabitq_fused_datacell requires in-memory RaBitQ split codes");
+        rabitq_split_codes_ = split_codes;
+        auto graph_param =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+        CHECK_ARGUMENT(graph_param != nullptr, "rabitq_fused_datacell requires flat graph storage");
+        rabitq_fused_searcher_ =
+            std::make_shared<HGraphRaBitQSearcher>(common_param, neighbors_mutex_);
+        rabitq_fused_datacell_ =
+            std::make_shared<HGraphRaBitQFusedDataCell>(graph_param,
+                                                        split_codes->OneBitCodeSize(),
+                                                        split_codes->SupplementCodeSize(),
+                                                        common_param);
+        split_codes->AttachFusedCodeStorage(rabitq_fused_datacell_.get());
+        this->bottom_graph_ = rabitq_fused_datacell_;
+    } else {
+        this->bottom_graph_ =
+            GraphInterface::MakeInstance(hgraph_param->bottom_graph_param, common_param);
+    }
+    if (this->support_duplicate_) {
+        this->label_table_->SetDuplicateTracker(this->bottom_graph_->GetDuplicateTracker());
+    }
+    mult_ = 1 / log(1.0 * static_cast<double>(this->bottom_graph_->MaximumDegree()));
+
+    this->resize_increase_count_bit_ = hgraph_param->resize_increase_count_bit;
+
+    this->parallel_searcher_ =
+        std::make_shared<ParallelSearcher>(common_param, thread_pool_, neighbors_mutex_);
+
+    UnorderedMap<std::string, float> default_param(common_param.allocator_.get());
+    default_param.insert(
+        {PREFETCH_DEPTH_CODE, (this->basic_flatten_codes_->code_size_ + 63.0) / 64.0});
+    this->basic_flatten_codes_->SetRuntimeParameters(default_param);
+
+    if (use_elp_optimizer_) {
+        optimizer_ = std::make_shared<Optimizer<BasicSearcher>>(common_param);
+    }
+    check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param);
+    if (this->using_dedup_storage()) {
+        this->basic_flatten_codes_ = MakeCodeSlotFlattenAdapter(
+            this->basic_flatten_codes_, this->code_slot_map_, allocator_, &this->total_count_);
+        if (this->high_precise_codes_ != nullptr) {
+            this->high_precise_codes_ = MakeCodeSlotFlattenAdapter(
+                this->high_precise_codes_, this->code_slot_map_, allocator_, &this->total_count_);
+        }
+        if (this->raw_vector_ != nullptr and not this->create_new_raw_vector_) {
+            // Rebind an existing FP32 raw alias to the wrapped base/reorder codes.
+            // false refreshes the alias/flags without allocating another raw flatten.
+            this->check_and_init_raw_vector(hgraph_param->raw_vector_param, common_param, false);
+        }
+        if (this->create_new_raw_vector_ && this->raw_vector_ != nullptr) {
+            this->raw_vector_ = MakeCodeSlotFlattenAdapter(
+                this->raw_vector_, this->code_slot_map_, allocator_, &this->total_count_);
+        }
+    }
+    // Reorder retains its flatten pointer, so initialize it after slot wrapping.
+    init_resize_bit_and_reorder();
+    resize(bottom_graph_->max_capacity_);
+}
+
+bool
+HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
+    this->check_fused_mutation_supported("Tune");
+    std::scoped_lock lock(this->add_mutex_);
+    if (this->immutable_.load(std::memory_order_acquire) or
+        not this->index_feature_list_->CheckFeature(IndexFeature::SUPPORT_TUNE)) {
+        return false;
+    }
+
+    // parse
+    auto parsed_params = JsonType::Parse(parameters);
+    JsonType hgraph_json;
+    if (parsed_params.Contains(INDEX_PARAM)) {
+        hgraph_json = parsed_params[INDEX_PARAM];
+    }
+
+    // map
+    auto inner_json = map_hgraph_param(hgraph_json);
+    ValidateMRLEDim(hgraph_json, this->dim_);
+    const bool requires_raw_vector = RequiresRawVectorForMRLERaBitQSplit(inner_json);
+    if (requires_raw_vector) {
+        inner_json[STORE_RAW_VECTOR_KEY].SetBool(true);
+    }
+
+    // construct param obj
+    auto hgraph_parameter = std::make_shared<HGraphParameter>();
+    hgraph_parameter->FromJson(inner_json);
+    auto inner_parameter = std::make_shared<InnerIndexParameter>();
+    inner_parameter->FromJson(inner_json);
+
+    // init new_basic_code obj
+    auto common_param = this->basic_flatten_codes_->ExportCommonParam();
+    auto new_basic_code =
+        FlattenInterface::MakeInstance(hgraph_parameter->base_codes_param, common_param);
+    FlattenInterfacePtr new_precise_code;
+    const bool new_use_reorder = inner_parameter->use_reorder;
+    const bool new_reorder_by_base = inner_parameter->reorder_source == HGRAPH_REORDER_SOURCE_BASE;
+    const bool need_precise_codes = new_use_reorder and not new_reorder_by_base;
+    if (need_precise_codes) {
+        new_precise_code =
+            FlattenInterface::MakeInstance(hgraph_parameter->precise_codes_param, common_param);
+    }
+    const auto current_count = total_count_.load(std::memory_order_acquire);
+    auto covers_active_ids = [this, current_count](const FlattenInterfacePtr& codes) {
+        if (codes == nullptr or codes->TotalCount() < current_count) {
+            return false;
+        }
+        if (this->using_dedup_storage()) {
+            // Each logical ID is bound exactly once, after all its physical codes are written.
+            return this->code_slot_map_->PublishedLogicalCount() == current_count;
+        }
+        const auto code = codes == basic_flatten_codes_  ? BASE_CODE
+                          : codes == high_precise_codes_ ? PRECISE_CODE
+                                                         : RAW_CODE;
+        std::shared_lock codes_lock(this->persistent_codes_mutex_);
+        return std::all_of(this->pending_code_writes_.begin(),
+                           this->pending_code_writes_.end(),
+                           [code](const auto& entry) { return (entry.second & code) == 0; });
+    };
+
+    // Check which codes need to be rebuilt.
+    bool is_tune_base_code = false;
+    bool is_tune_precise_code = false;
+    const bool is_tune_raw_code = requires_raw_vector and not covers_active_ids(raw_vector_);
+    FlattenInterfacePtr new_raw_code;
+    if (is_tune_raw_code) {
+        new_raw_code =
+            FlattenInterface::MakeInstance(hgraph_parameter->raw_vector_param, common_param);
+    }
+    const bool drop_precise_codes = not need_precise_codes;
+    if (basic_flatten_codes_->GetQuantizerName() != new_basic_code->GetQuantizerName()) {
+        is_tune_base_code = true;
+    }
+    if (need_precise_codes and
+        (not covers_active_ids(high_precise_codes_) or
+         high_precise_codes_->GetQuantizerName() != new_precise_code->GetQuantizerName())) {
+        is_tune_precise_code = true;
+    }
+
+    FlattenInterfacePtr tune_source;
+    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        // Add can reserve IDs before an enqueue failure leaves their vectors unwritten.
+        // Every ID rebuilt below must be covered; allocated capacity is not valid data.
+        if (covers_active_ids(raw_vector_)) {
+            tune_source = raw_vector_;
+        } else if (covers_active_ids(high_precise_codes_) and
+                   high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            tune_source = high_precise_codes_;
+        } else if (covers_active_ids(basic_flatten_codes_) and
+                   basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+            tune_source = basic_flatten_codes_;
+        } else {
+            return false;
+        }
+    }
+
+    auto decode_tune_source = [&](InnerIdType inner_id, float* data) {
+        auto buffer = tune_source->AcquireCodesById(inner_id);
+        if (not buffer) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                fmt::format("failed to get vector by inner id {}", inner_id));
+        }
+        tune_source->Decode(buffer.Data(), data);
+    };
+
+    auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
+    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        for (InnerIdType i = 0; i < train_count; i++) {
+            decode_tune_source(i, train_data.data() + i * dim_);
+        }
+    }
+
+    auto wrap_new_code = [this](FlattenInterfacePtr code) -> FlattenInterfacePtr {
+        if (not this->using_dedup_storage() or code == nullptr) {
+            return code;
+        }
+
+        auto physical_capacity = this->physical_code_capacity_.load(std::memory_order_acquire);
+        if (physical_capacity > 0) {
+            code->Resize(physical_capacity);
+        }
+        return MakeCodeSlotFlattenAdapter(
+            std::move(code), this->code_slot_map_, this->allocator_, &this->total_count_);
+    };
+
+    auto tune_and_rebuild =
+        [&](bool need_tune, FlattenInterfacePtr old_code, FlattenInterfacePtr new_code) {
+            if (not need_tune) {
+                return old_code;
+            }
+
+            new_code = wrap_new_code(new_code);
+            new_code->Train(train_data.data(), train_count);
+
+            Vector<float> insert_buffer(dim_, 0, allocator_);
+            for (int64_t i = 0; i < current_count; ++i) {
+                decode_tune_source(i, insert_buffer.data());
+                new_code->InsertVector(static_cast<const void*>(insert_buffer.data()), i);
+            }
+            return new_code;
+        };
+
+    auto new_basic = tune_and_rebuild(is_tune_base_code, basic_flatten_codes_, new_basic_code);
+    auto new_precise =
+        tune_and_rebuild(is_tune_precise_code, high_precise_codes_, new_precise_code);
+    auto new_raw = tune_and_rebuild(is_tune_raw_code, raw_vector_, new_raw_code);
+
+    const auto old_raw_code = raw_vector_ == basic_flatten_codes_  ? BASE_CODE
+                              : raw_vector_ == high_precise_codes_ ? PRECISE_CODE
+                                                                   : RAW_CODE;
+
+    // Acquire exclusive global lock to atomically swap flatten codes,
+    // preventing concurrent searches from accessing partially updated state.
+    {
+        std::scoped_lock locks(this->global_mutex_, this->persistent_codes_mutex_);
+        auto param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+        basic_flatten_codes_ = new_basic;
+        if (drop_precise_codes) {
+            high_precise_codes_.reset();
+            param->precise_codes_param.reset();
+        } else {
+            high_precise_codes_ = new_precise;
+            if (is_tune_precise_code) {
+                param->precise_codes_param = hgraph_parameter->precise_codes_param;
+            }
+        }
+        if (is_tune_base_code) {
+            param->base_codes_param = hgraph_parameter->base_codes_param;
+        }
+        use_reorder_ = new_use_reorder;
+        reorder_by_base_ = new_reorder_by_base;
+        param->use_reorder = new_use_reorder;
+        param->reorder_source = inner_parameter->reorder_source;
+
+        if (requires_raw_vector) {
+            raw_vector_ = new_raw;
+            has_raw_vector_ = true;
+            create_new_raw_vector_ = true;
+            param->store_raw_vector = true;
+            param->raw_vector_param = hgraph_parameter->raw_vector_param;
+        } else {
+            check_and_init_raw_vector(param->raw_vector_param, common_param, false);
+        }
+        {
+            const uint8_t rebuilt = (is_tune_base_code ? BASE_CODE : 0) |
+                                    (is_tune_precise_code or drop_precise_codes ? PRECISE_CODE : 0);
+            // Raw may now alias rebuilt codes, or retain the old FP32 storage. Derive its
+            // coverage from that actual storage, before clearing the old base/precise bits.
+            const uint8_t raw_pending_code =
+                raw_vector_ == basic_flatten_codes_  ? (is_tune_base_code ? 0 : BASE_CODE)
+                : raw_vector_ == high_precise_codes_ ? (is_tune_precise_code ? 0 : PRECISE_CODE)
+                : is_tune_raw_code                   ? 0
+                                                     : old_raw_code;
+            for (auto it = pending_code_writes_.begin(); it != pending_code_writes_.end();) {
+                const bool raw_pending = (it->second & raw_pending_code) != 0;
+                it.value() &= ~(rebuilt | RAW_CODE);
+                if (raw_pending) {
+                    it.value() |= RAW_CODE;
+                }
+                if (it->second == 0) {
+                    it = pending_code_writes_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+
+        init_resize_bit_and_reorder();
+
+        // set status
+        if (disable_future_tuning) {
+            this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
+            if (not requires_raw_vector) {
+                this->raw_vector_.reset();
+                has_raw_vector_ = false;
+                create_new_raw_vector_ = false;
+            }
+        }
+    }
+    return true;
+}
+
+uint64_t
+HGraph::EstimateMemory(uint64_t num_elements) const {
+    uint64_t estimate_memory = 0;
+    auto block_size = Options::Instance().block_size_limit();
+    auto element_count =
+        next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
+
+    auto block_memory_ceil = [](uint64_t memory, uint64_t block_size) -> uint64_t {
+        return static_cast<uint64_t>(
+            std::ceil(static_cast<double>(memory) / static_cast<double>(block_size)) *
+            static_cast<double>(block_size));
+    };
+
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
+        estimate_memory += block_memory_ceil(fused_memory, block_size);
+    } else {
+        if (this->basic_flatten_codes_->InMemory()) {
+            auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
+            estimate_memory += block_memory_ceil(base_memory, block_size);
+        }
+        if (bottom_graph_->InMemory()) {
+            auto bottom_graph_memory =
+                (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
+            estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+        }
+    }
+
+    if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
+        not this->ignore_reorder_) {
+        auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
+        estimate_memory += block_memory_ceil(precise_memory, block_size);
+    }
+
+    if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && this->extra_infos_->InMemory()) {
+        auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * element_count;
+        estimate_memory += block_memory_ceil(extra_info_memory, block_size);
+    }
+
+    auto label_map_memory =
+        element_count * (sizeof(std::pair<LabelType, InnerIdType>) + 2 * sizeof(void*));
+    estimate_memory += label_map_memory;
+
+    auto sparse_graph_memory = (this->mult_ * 0.05 * static_cast<double>(element_count)) *
+                               sizeof(InnerIdType) *
+                               (static_cast<double>(this->bottom_graph_->maximum_degree_) / 2 + 1);
+    estimate_memory += static_cast<uint64_t>(sparse_graph_memory);
+
+    auto other_memory = element_count * (sizeof(LabelType) + sizeof(std::shared_mutex) +
+                                         sizeof(std::shared_ptr<std::shared_mutex>));
+    estimate_memory += other_memory;
+
+    if (this->mci_parameters_.enabled) {
+        const auto mci_membership_memory =
+            element_count * this->mci_parameters_.clique_max * 2 * sizeof(InnerIdType);
+        const auto mci_offset_memory = element_count * 2 * sizeof(InnerIdType);
+        const auto mci_delta_row_memory = element_count * 2 * sizeof(Vector<InnerIdType>);
+        estimate_memory += mci_membership_memory + mci_offset_memory + mci_delta_row_memory;
+    }
+
+    return estimate_memory;
+}
+
+GraphInterfacePtr
+HGraph::generate_one_route_graph() {
+    return std::make_shared<SparseGraphDataCell>(hierarchical_datacell_param_, this->allocator_);
+}
+
+float
+HGraph::CalcDistanceById(const float* query, int64_t id, bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    return calc_native_distance_by_id(query, id, calculate_precise_distance);
+}
+
+float
+HGraph::CalcDistanceById(const DatasetPtr& query,
+                         int64_t id,
+                         bool calculate_precise_distance) const {
+    CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+    CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+    if (data_type_ != DataTypes::DATA_TYPE_SPARSE) {
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+    }
+    const auto* native_query = get_data(query);
+    CHECK_ARGUMENT(native_query != nullptr, "distance query representation must match index dtype");
+    if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+        const auto& sparse = query->GetSparseVectors()[0];
+        const bool valid_sparse =
+            sparse.len_ == 0 || (sparse.ids_ != nullptr && sparse.vals_ != nullptr);
+        CHECK_ARGUMENT(valid_sparse, "sparse query requires term IDs and values");
+    }
+    return calc_native_distance_by_id(native_query, id, calculate_precise_distance);
+}
+
+float
+HGraph::calc_native_distance_by_id(const void* native_query,
+                                   int64_t id,
+                                   bool calculate_precise_distance) const {
+    const auto* query = static_cast<const float*>(native_query);
+    FlattenInterfacePtr flat;
+    std::shared_lock<std::shared_mutex> lock;
+    if (!this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    flat = this->basic_flatten_codes_;
+    if (has_precise_reorder() && calculate_precise_distance) {
+        flat = this->high_precise_codes_;
+    }
+    if (create_new_raw_vector_ && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
+    const bool reads_fused_codes =
+        this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
+    if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
+        lock.unlock();
+    }
+    return InnerIndexInterface::calc_distance_by_id(query, id, flat);
+}
+
+DatasetPtr
+HGraph::CalcDistancesById(const float* query,
+                          const int64_t* ids,
+                          int64_t count,
+                          bool calculate_precise_distance,
+                          int64_t topk) const {
+    CHECK_ARGUMENT(data_type_ == DataTypes::DATA_TYPE_FLOAT,
+                   "non-float32 HGraph distance requires a native Dataset query");
+    const bool valid_topk = topk == -1 || topk > 0;
+    CHECK_ARGUMENT(valid_topk, "distance topk must be -1 or positive");
+    FlattenInterfacePtr flat;
+    std::shared_lock<std::shared_mutex> lock;
+    if (!this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    flat = this->basic_flatten_codes_;
+    if (has_precise_reorder() && calculate_precise_distance) {
+        flat = this->high_precise_codes_;
+    }
+    if (create_new_raw_vector_ && calculate_precise_distance) {
+        flat = this->raw_vector_;
+    }
+    const bool reads_fused_codes =
+        this->rabitq_fused_datacell_ != nullptr and flat == this->basic_flatten_codes_;
+    // FusedComputer resolves raw code views through the fused block directory. Keep the
+    // graph-wide read lock until distance evaluation completes so concurrent growth cannot
+    // mutate that directory while code views are being acquired.
+    if (lock.owns_lock() and not this->using_dedup_storage() and not reads_fused_codes) {
+        lock.unlock();
+    }
+    std::vector<bool> validity;
+    auto result = InnerIndexInterface::calc_distance_by_id(query, ids, count, flat, &validity);
+    if (topk == -1) {
+        return result;
+    }
+    return ApplyTopkWithValidity(result->GetDistances(), ids, count, 1, topk, validity, allocator_);
+}
+
+std::pair<int64_t, int64_t>
+HGraph::GetMinAndMaxId() const {
+    int64_t min_id = INT64_MAX;
+    int64_t max_id = INT64_MIN;
+    std::shared_lock<std::shared_mutex> lock(this->label_lookup_mutex_);
+    if (this->total_count_ == 0) {
+        throw VsagException(ErrorType::INTERNAL_ERROR, "Label map size is zero");
+    }
+    for (int i = 0; i < this->total_count_; ++i) {
+        if (this->label_table_->IsRemoved(i)) {
+            continue;
+        }
+        auto label = this->label_table_->GetLabelById(i);
+        max_id = std::max(label, max_id);
+        min_id = std::min(label, min_id);
+    }
+    return {min_id, max_id};
+}
+
+InnerIndexPtr
+HGraph::ExportModel(const IndexCommonParam& param) const {
+    this->check_fused_mutation_supported("ExportModel");
+    this->check_user_defined_precise_io_supported("ExportModel");
+    auto index = std::make_shared<HGraph>(this->create_param_ptr_, param);
+    this->basic_flatten_codes_->ExportModel(index->basic_flatten_codes_);
+    if (has_precise_reorder()) {
+        this->high_precise_codes_->ExportModel(index->high_precise_codes_);
+    }
+    return index;
+}
+
+InnerIndexPtr
+HGraph::Clone(const IndexCommonParam& param) {
+    this->check_fused_mutation_supported("Clone");
+    this->check_user_defined_precise_io_supported("Clone");
+    return InnerIndexInterface::Clone(param);
+}
+
+void
+HGraph::GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const {
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    if (raw_vector_ != nullptr) {
+        raw_vector_->GetCodesById(inner_id, data);
+        return;
+    }
+
+    if (this->has_precise_reorder()) {
+        this->high_precise_codes_->GetCodesById(inner_id, data);
+        return;
+    }
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "fused RaBitQ codes do not expose a global merged code");
+    }
+    this->basic_flatten_codes_->GetCodesById(inner_id, data);
+}
+
+void
+HGraph::Merge(const std::vector<MergeUnit>& merge_units) {
+    this->check_fused_mutation_supported("Merge");
+    CHECK_ARGUMENT(not this->using_dedup_storage(),
+                   "HGraph deduplicate_storage does not support Merge");
+    // Validate every participant before resizing or copying any unit. Copying an unwritten
+    // slot is unsafe even if another code store could serve as a complete Tune source.
+    CHECK_ARGUMENT(this->pending_code_writes_.empty(),
+                   "HGraph Merge requires complete code writes in the destination");
+    for (const auto& unit : merge_units) {
+        const auto implementation = std::dynamic_pointer_cast<IndexImpl<HGraph>>(unit.index);
+        CHECK_ARGUMENT(implementation != nullptr, "HGraph Merge requires HGraph inputs");
+        const auto other = std::dynamic_pointer_cast<HGraph>(implementation->GetInnerIndex());
+        CHECK_ARGUMENT(other->pending_code_writes_.empty(),
+                       "HGraph Merge requires complete code writes in every input");
+        CHECK_ARGUMENT(this->support_duplicate_ == other->support_duplicate_,
+                       "cannot merge HGraph with different support_duplicate settings");
+        CHECK_ARGUMENT(not other->using_dedup_storage(),
+                       "HGraph deduplicate_storage does not support Merge");
+    }
+    int64_t total_count = this->GetNumElements();
+    for (const auto& unit : merge_units) {
+        total_count += unit.index->GetNumElements();
+    }
+    if (max_capacity_ < total_count) {
+        this->resize(total_count);
+    }
+    for (const auto& merge_unit : merge_units) {
+        const auto other_index = std::dynamic_pointer_cast<HGraph>(
+            std::dynamic_pointer_cast<IndexImpl<HGraph>>(merge_unit.index)->GetInnerIndex());
+        auto logical_bias = this->total_count_.load(std::memory_order_acquire);
+        if (total_count_ == 0) {
+            this->entry_point_id_ = other_index->entry_point_id_;
+        }
+        basic_flatten_codes_->MergeOther(other_index->basic_flatten_codes_, logical_bias);
+        label_table_->MergeOther(other_index->label_table_, merge_unit.id_map_func);
+        if (has_precise_reorder()) {
+            high_precise_codes_->MergeOther(other_index->high_precise_codes_, logical_bias);
+        }
+        bottom_graph_->MergeOther(other_index->bottom_graph_, logical_bias);
+        if (route_graphs_.size() < other_index->route_graphs_.size()) {
+            route_graphs_.push_back(this->generate_one_route_graph());
+        }
+        for (int j = 0; j < std::min(other_index->route_graphs_.size(), route_graphs_.size());
+             ++j) {
+            route_graphs_[j]->MergeOther(other_index->route_graphs_[j], logical_bias);
+        }
+        this->total_count_ += other_index->GetNumElements();
+        // Merged ids are fully built before being handed over, so they are immediately visible.
+        this->PublishThroughTotalCount();
+    }
+    if (this->odescent_param_ == nullptr) {
+        odescent_param_ = std::make_shared<ODescentParameter>();
+    }
+
+    auto build_data = (has_precise_reorder() and not build_by_base_) ? this->high_precise_codes_
+                                                                     : this->basic_flatten_codes_;
+    for (InnerIdType inner_id = 0; inner_id < this->total_count_; ++inner_id) {
+        Vector<InnerIdType> neighbors(this->allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
+        neighbors.resize(neighbors.size() / 2);
+        this->bottom_graph_->InsertNeighborsById(inner_id, neighbors);
+    }
+    {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree();
+        ODescent odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
+        odescent_builder.Build(bottom_graph_);
+        odescent_builder.SaveGraph(bottom_graph_);
+    }
+    for (auto& graph : route_graphs_) {
+        odescent_param_->max_degree = bottom_graph_->MaximumDegree() / 2;
+        ODescent sparse_odescent_builder(
+            odescent_param_, build_data, allocator_, this->thread_pool_.get());
+        auto ids = graph->GetIds();
+        sparse_odescent_builder.Build(ids, graph);
+        sparse_odescent_builder.SaveGraph(graph);
+        this->entry_point_id_ = ids.back();
+    }
+    if (this->mci_parameters_.enabled) {
+        this->build_mci_clique_index();
+    }
+}
+
+void
+HGraph::GetVectorByInnerId(InnerIdType inner_id, float* data) const {
+    std::shared_lock<std::shared_mutex> lock;
+    if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        lock = this->acquire_global_read_lock();
+    }
+    auto codes = (has_precise_reorder()) ? high_precise_codes_ : basic_flatten_codes_;
+    codes = (create_new_raw_vector_) ? raw_vector_ : codes;
+    auto buffer = codes->AcquireCodesById(inner_id);
+    if (not buffer) {
+        if (rabitq_fused_datacell_ != nullptr and codes.get() == basic_flatten_codes_.get() and
+            rabitq_split_codes_ != nullptr and
+            rabitq_split_codes_->DecodeFusedById(inner_id, data)) {
+            return;
+        }
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            fmt::format("failed to get vector by inner id {}", inner_id));
+    }
+    codes->Decode(buffer.Data(), data);
+}
+
+void
+HGraph::SetImmutable() {
+    if (this->immutable_.load(std::memory_order_acquire)) {
+        return;
+    }
+    std::scoped_lock<std::shared_mutex> add_lock(this->add_mutex_);
+    std::scoped_lock<std::shared_mutex> wlock(this->global_mutex_);
+    auto empty_mutex = std::make_shared<EmptyMutex>();
+    this->searcher_->SetMutexArray(empty_mutex);
+    this->parallel_searcher_->SetMutexArray(empty_mutex);
+    if (this->rabitq_fused_searcher_ != nullptr) {
+        this->rabitq_fused_searcher_->SetMutexArray(empty_mutex);
+    }
+    this->neighbors_mutex_ = empty_mutex;
+    this->immutable_.store(true, std::memory_order_release);
+}
+
+void
+HGraph::SetIO(const std::shared_ptr<Reader> reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(create_param_ptr_);
+    const bool user_defined_precise_io =
+        hgraph_param != nullptr and hgraph_param->precise_codes_param != nullptr and
+        std::dynamic_pointer_cast<UserDefinedIOParameter>(
+            hgraph_param->precise_codes_param->io_parameter) != nullptr;
+    // Deserialize has already written precise codes into the bound writable pair. Only
+    // reader_io datacells need to attach to the serialized input reader here; replacing
+    // the user-defined pair with a ReaderIOParameter would fail after loading the data.
+    if (has_precise_reorder() and not user_defined_precise_io) {
+        high_precise_codes_->InitIO(reader_param);
+    }
+    basic_flatten_codes_->InitIO(reader_param);
+    bottom_graph_->InitIO(reader_param);
+}
+
+void
+HGraph::SetPreciseCodesIO(const std::shared_ptr<Reader>& reader) {
+    auto reader_param = std::make_shared<ReaderIOParameter>();
+    reader_param->reader = reader;
+    high_precise_codes_->InitIO(reader_param);
+}
+
+const static uint64_t QUERY_SAMPLE_SIZE = 10;
+const static int64_t DEFAULT_TOPK = 100;
+
+AnalyzerBasePtr
+HGraph::CreateAnalyzer(const AnalyzerParam& param) const {
+    return std::make_shared<HGraphAnalyzer>(this, param);
+}
+
+std::string
+HGraph::GetStats() const {
+    auto populate_mci_stats = [this](JsonType& stats) {
+        if (this->mci_cliques_ != nullptr) {
+            const auto mci_stats = this->mci_cliques_->CollectStats(this->total_count_.load());
+            stats["mci_has_index"].SetBool(mci_stats.has_index);
+            stats["mci_total_nodes"].SetInt(static_cast<int64_t>(mci_stats.total_nodes));
+            stats["mci_covered_nodes"].SetInt(static_cast<int64_t>(mci_stats.covered_nodes));
+            stats["mci_covered_node_ratio"].SetFloat(
+                static_cast<float>(mci_stats.covered_node_ratio));
+            stats["mci_base_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_clique_count));
+            stats["mci_delta_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_count));
+            stats["mci_total_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_clique_count));
+            stats["mci_retired_clique_count"].SetInt(
+                static_cast<int64_t>(mci_stats.retired_clique_count));
+            stats["mci_inactive_node_count"].SetInt(
+                static_cast<int64_t>(mci_stats.inactive_node_count));
+            stats["mci_base_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.base_membership_count));
+            stats["mci_delta_extra_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_extra_membership_count));
+            stats["mci_delta_clique_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.delta_clique_membership_count));
+            stats["mci_total_membership_count"].SetInt(
+                static_cast<int64_t>(mci_stats.total_membership_count));
+            stats["mci_avg_membership_per_node"].SetFloat(
+                static_cast<float>(mci_stats.avg_membership_per_node));
+            stats["mci_avg_clique_size"].SetFloat(static_cast<float>(mci_stats.avg_clique_size));
+            stats["mci_max_membership_per_node"].SetInt(
+                static_cast<int64_t>(mci_stats.max_membership_per_node));
+            stats["mci_max_clique_size"].SetInt(static_cast<int64_t>(mci_stats.max_clique_size));
+            stats["mci_memory_usage"].SetInt(
+                static_cast<int64_t>(this->mci_cliques_->GetMemoryUsage()));
+        }
+    };
+
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["total_count"].SetInt64(0);
+        stats["live_count"].SetInt64(0);
+        stats["deleted_count"].SetInt64(GetNumberRemoved());
+        stats["_analysis"]["skipped"]["structure"].SetString("index is empty");
+        populate_mci_stats(stats);
+        AddAnalysisMetadata(stats, GetName(), "stats", "partial");
+        return stats.Dump(4);
+    }
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = DEFAULT_TOPK;
+    analyzer_param.base_sample_size = std::min(QUERY_SAMPLE_SIZE, this->total_count_.load());
+    analyzer_param.search_params =
+        fmt::format(R"({{"hgraph": {{"ef_search": {}}}}})", ef_construct_);
+    auto analyzer = CreateAnalyzer(analyzer_param);
+    JsonType stats = analyzer->GetStats();
+    // Build-time cache hit-rate is a transient property of the
+    // build_with_cache() path (taken only after ImportCache()), so it lives on
+    // HGraph rather than in the post-hoc analyzer. A negative rate means this
+    // index was not built from an imported cache.
+    if (this->build_cache_hit_rate_ >= 0.0F) {
+        stats["build_cache_hit_rate"].SetFloat(this->build_cache_hit_rate_);
+        stats["build_cache_hit_nodes"].SetUint64(this->build_cache_hit_nodes_);
+        stats["build_cache_missed_nodes"].SetUint64(this->build_cache_missed_nodes_);
+    } else {
+        stats["build_cache_hit_rate"]["skipped_reason"].SetString(
+            "index was not built from an imported cache");
+    }
+    populate_mci_stats(stats);
+    AddAnalysisMetadata(stats, GetName(), "stats", "complete");
+    return stats.Dump(4);
+}
+
+void
+HGraph::init_resize_bit_and_reorder() {
+    if (use_reorder_) {
+        auto reorder_codes = this->get_reorder_codes();
+        if (this->using_dedup_storage() and
+            GetCodeSlotPhysicalFlatten(reorder_codes) == reorder_codes) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "storage deduplication requires wrapped reorder codes");
+        }
+        auto fused_graph =
+            reorder_codes.get() == basic_flatten_codes_.get() ? rabitq_fused_datacell_ : nullptr;
+        reorder_ = std::make_shared<FlattenReorder>(reorder_codes, allocator_, fused_graph);
+    }
+}
+
+void
+HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                                  const IndexCommonParam& common_param,
+                                  bool is_create_new) {
+    if (raw_vector_param == nullptr) {
+        return;
+    }
+
+    if (is_create_new) {
+        raw_vector_ = FlattenInterface::MakeInstance(raw_vector_param, common_param);
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ == nullptr) {
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+    if (basic_flatten_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32 and
+        high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() != QUANTIZATION_TYPE_VALUE_FP32) {
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    auto io_type_name = raw_vector_param->io_parameter->GetTypeName();
+    if (io_type_name != IO_TYPE_VALUE_BLOCK_MEMORY_IO and io_type_name != IO_TYPE_VALUE_MEMORY_IO) {
+        create_new_raw_vector_ = true;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = basic_flatten_codes_;
+        has_raw_vector_ = true;
+        return;
+    }
+
+    if (high_precise_codes_ != nullptr and
+        high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
+        raw_vector_ = high_precise_codes_;
+        has_raw_vector_ = true;
+        return;
+    }
+}
+
+bool
+HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) {
+    std::shared_lock<std::shared_mutex> force_remove_rlock;
+    if (this->support_force_remove()) {
+        force_remove_rlock = std::shared_lock<std::shared_mutex>(this->force_remove_mutex_);
+    }
+    // check if id exists and get copied base data
+    uint32_t inner_id = 0;
+    {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+        inner_id = this->label_table_->GetIdByLabel(id);
+    }
+
+    // the validation of the new vector
+    void* new_base_vec = nullptr;
+    uint64_t data_size = 0;
+    get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                       "updated vector dimension must match the index dimension");
+        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
+        this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
+    }
+    if (not force_update) {
+        std::shared_lock label_lock(this->label_lookup_mutex_);
+
+        float self_dist = 0.0F;
+        if (this->rabitq_fused_datacell_ == nullptr) {
+            // 1. check whether vectors are same
+            Vector<int8_t> base_data(data_size, allocator_);
+            GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
+            const float old_self_dist =
+                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
+            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            if (std::abs(old_self_dist - self_dist) < 1e-3) {
+                return true;
+            }
+        } else {
+            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+        }
+
+        // 2. check whether the neighborhood relationship is same
+        Vector<InnerIdType> neighbors(allocator_);
+        this->bottom_graph_->GetNeighbors(inner_id, neighbors);
+        for (auto neighbor_inner_id : neighbors) {
+            // don't compare with itself
+            if (neighbor_inner_id == inner_id) {
+                continue;
+            }
+
+            float neighbor_dist = 0;
+            try {
+                neighbor_dist =
+                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
+                                           this->label_table_->GetLabelById(neighbor_inner_id));
+            } catch (const std::runtime_error& e) {
+                // incase that neighbor has been deleted
+                continue;
+            }
+            if (neighbor_dist < self_dist) {
+                return false;
+            }
+        }
+    }
+
+    if (this->using_dedup_storage()) {
+        auto duplicate_tracker = this->bottom_graph_->GetDuplicateTracker();
+        CHECK_ARGUMENT(duplicate_tracker != nullptr,
+                       "deduplicate_storage update requires duplicate tracker");
+        if (duplicate_tracker->GetGroupSize(inner_id) > 1) {
+            throw VsagException(
+                ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                "updating a member of a deduplicated vector group is not supported");
+        }
+    }
+
+    // note that only modify vector need to obtain unique lock
+    // and the lock has been obtained inside datacell
+    std::unique_lock<std::shared_mutex> fused_write_lock;
+    std::shared_lock<std::shared_mutex> map_lock;
+    if (this->rabitq_fused_datacell_ != nullptr) {
+        fused_write_lock = std::unique_lock<std::shared_mutex>(this->global_mutex_);
+    } else if (this->using_dedup_storage() && !this->immutable_.load(std::memory_order_acquire)) {
+        map_lock = this->acquire_global_read_lock();
+    }
+    std::unique_lock<std::shared_mutex> codes_lock(this->persistent_codes_mutex_);
+    bool update_status = basic_flatten_codes_->UpdateVector(new_base_vec, inner_id);
+    if (update_status and rabitq_fused_datacell_ != nullptr) {
+        this->sync_fused_node_codes(inner_id, new_base_vec);
+    }
+    if (has_precise_reorder()) {
+        update_status = update_status && high_precise_codes_->UpdateVector(new_base_vec, inner_id);
+    }
+    return update_status;
+}
+
+bool
+HGraph::UpdateExtraInfo(const DatasetPtr& new_base) {
+    return InnerIndexInterface::UpdateExtraInfo(new_base);
+}
+
+std::string
+HGraph::AnalyzeIndexBySearch(const SearchRequest& request) {
+    CHECK_ARGUMENT(request.query_ != nullptr, "analysis query cannot be null");
+    CHECK_ARGUMENT(request.topk_ > 0, "analysis topk must be greater than 0");
+    if (GetNumElements() == 0) {
+        JsonType stats;
+        stats["_analysis"]["skipped"]["search"].SetString("index is empty");
+        AddAnalysisMetadata(stats,
+                            GetName(),
+                            "search",
+                            "not_applicable",
+                            request.query_->GetNumElements(),
+                            request.topk_);
+        return stats.Dump(4);
+    }
+    AnalyzerParam analyzer_param(allocator_);
+    analyzer_param.topk = request.topk_;
+    auto analyzer = CreateAnalyzer(analyzer_param);
+    JsonType stats = analyzer->AnalyzeIndexBySearch(request);
+    AddAnalysisMetadata(
+        stats, GetName(), "search", "complete", request.query_->GetNumElements(), request.topk_);
+    return stats.Dump(4);
+}
+
+void
+HGraph::GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const {
+    this->attr_filter_index_->GetAttribute(0, inner_id, attr);
+}
+
+void
+HGraph::cal_memory_usage() const {
+    // Read the version before walking the components, so a mutation that lands mid-walk stays
+    // unaccounted and simply forces one more recalculation on the next query.
+    const auto version = this->memory_usage_version_.load(std::memory_order_acquire);
+    auto memory = sizeof(HGraph);
+    memory += this->neighbors_mutex_->GetMemoryUsage();
+    memory += this->pool_->GetMemoryUsage();
+    memory += this->label_table_->GetMemoryUsage();
+    memory += this->basic_flatten_codes_->GetMemoryUsage();
+    if (this->code_slot_map_ != nullptr) {
+        memory += this->code_slot_map_->GetMemoryUsage();
+    }
+    memory += this->bottom_graph_->GetMemoryUsage();
+    for (const auto& graph : this->route_graphs_) {
+        memory += graph->GetMemoryUsage();
+    }
+    if (has_precise_reorder()) {
+        memory += this->high_precise_codes_->GetMemoryUsage();
+    }
+
+    if (this->extra_infos_ != nullptr and this->extra_info_size_ > 0) {
+        memory += this->extra_infos_->GetMemoryUsage();
+    }
+
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr) {
+        memory += raw_vector_->GetMemoryUsage();
+    }
+    if (this->mci_cliques_ != nullptr) {
+        memory += this->mci_cliques_->GetMemoryUsage();
+    }
+    // Keep the conjugate-graph lock until the publish below. Feedback() patches the cached counter
+    // with fetch_add instead of bumping the version (tests/test_hgraph.cpp pins that exact-delta
+    // contract), and it takes conjugate_graph_mutex_ and then memory_usage_mutex_ in this same
+    // order. Releasing the graph lock before the store would let its delta be overwritten by a
+    // total computed before the edge landed, with no later invalidation left to repair it.
+    std::shared_lock<std::shared_mutex> conjugate_lock(this->conjugate_graph_mutex_,
+                                                       std::defer_lock);
+    if (this->conjugate_graph_ != nullptr) {
+        conjugate_lock.lock();
+        memory += this->conjugate_graph_->GetMemoryUsage();
+    }
+
+    std::unique_lock lock(this->memory_usage_mutex_);
+    // A concurrent walk that sampled a younger version may have published already; never
+    // downgrade the accounting to an older snapshot.
+    if (version < this->memory_usage_accounted_version_.load(std::memory_order_acquire)) {
+        return;
+    }
+    this->current_memory_usage_.store(memory);
+    this->memory_usage_accounted_version_.store(version, std::memory_order_release);
+}
+
+void
+HGraph::mark_memory_usage_dirty() const {
+    this->memory_usage_version_.fetch_add(1, std::memory_order_release);
+}
+
+uint64_t
+HGraph::GetMemoryUsage() const {
+    const bool stale = this->memory_usage_accounted_version_.load(std::memory_order_acquire) !=
+                       this->memory_usage_version_.load(std::memory_order_acquire);
+    if (not stale) {
+        return InnerIndexInterface::GetMemoryUsage();
+    }
+    // The breakdown dereferences component containers that mutating paths replace or grow, so it
+    // has to exclude them. It never waits for them though: the locks are taken with try_lock and a
+    // busy mutation simply leaves the cached value in place, which keeps the getter free of any
+    // lock-ordering hazard (the mutating paths do not agree on one) and avoids stalling a caller
+    // that polls the counter. label_lookup_mutex_ is not needed: LabelTable::GetMemoryUsage()
+    // serialises its own storage against reallocation and remap mutations.
+    std::shared_lock<std::shared_mutex> force_remove_lock(this->force_remove_mutex_,
+                                                          std::defer_lock);
+    std::shared_lock<std::shared_mutex> global_lock(this->global_mutex_, std::defer_lock);
+    const bool force_remove_needed =
+        not this->immutable_.load(std::memory_order_acquire) and this->support_force_remove();
+    if ((not force_remove_needed or force_remove_lock.try_lock()) and global_lock.try_lock()) {
+        // Readiness is only meaningful under the structural lock: resize(), Merge() and
+        // SetImmutable() replace these pointers while holding global_mutex_ exclusively, so
+        // comparing them with nullptr outside it would itself be a data race.
+        if (this->neighbors_mutex_ != nullptr and this->pool_ != nullptr and
+            this->label_table_ != nullptr and this->basic_flatten_codes_ != nullptr and
+            this->bottom_graph_ != nullptr) {
+            this->cal_memory_usage();
+        }
+    }
+    return InnerIndexInterface::GetMemoryUsage();
+}
+
+}  // namespace vsag

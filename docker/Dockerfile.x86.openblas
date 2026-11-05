@@ -1,0 +1,17 @@
+
+# OpenBLAS variant of the VSAG CI image for x86_64.
+#
+# Built on top of vsaglib/vsag:ci-x86-base (see docker/Dockerfile.x86.base).
+# Ships a pre-installed system OpenBLAS (plus LAPACKE headers) so the CI jobs
+# that exercise the OpenBLAS backend can opt in to `-DUSE_SYSTEM_OPENBLAS=ON`
+# and skip the per-job OpenBLAS source build.
+#
+# The daily x86 ASan job still leaves `USE_SYSTEM_OPENBLAS` unset so that the
+# from-source build path keeps getting exercised; the pre-installed packages
+# here are simply ignored in that case.
+
+FROM vsaglib/vsag:ci-x86-base
+
+# Install system OpenBLAS + LAPACKE. liblapacke-dev pulls in the C headers
+# needed for VSAG's CMake `find_path(LAPACKE_INCLUDE NAMES lapacke.h)` probe.
+RUN apt update && apt install -y libopenblas-dev liblapacke-dev

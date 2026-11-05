@@ -1,0 +1,35 @@
+name: asan-build-and-test-test-asan-x86
+description: Shared test_asan_x86 execution; callers own runners and dependencies.
+inputs:
+  matrix-test-type:
+    description: Caller matrix.test_type
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Clean Env
+      shell: sh
+      run: rm -rf ./build
+    - name: Download Test
+      uses: actions/download-artifact@v5
+      with:
+        name: test_x86-${{ github.run_id }}
+        path: ./build
+    - name: Do Asan Test In ${{ inputs.matrix-test-type }}
+      shell: sh
+      run: |
+        echo leak:libomp.so > omp.supp
+        echo leak:libgomp.so >> omp.supp
+        export LSAN_OPTIONS="suppressions=$(pwd)/omp.supp"
+        chmod +x ./build/tests/${{ inputs.matrix-test-type }}
+        ./scripts/testing/test_parallel_by_name.sh ${{ inputs.matrix-test-type }}
+    - name: Upload Log
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        path: ./log
+        name: log-x86-${{ inputs.matrix-test-type }}-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 3
+        overwrite: 'true'

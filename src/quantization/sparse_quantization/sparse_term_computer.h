@@ -1,0 +1,300 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <algorithm>
+#include <cstdint>
+#include <cstring>
+#include <limits>
+#include <memory>
+#include <type_traits>
+
+#include "algorithm/sindi/sindi_parameter.h"
+#include "algorithm/sindi_v2/sindi_v2_parameter.h"
+#include "metric_type.h"
+#include "simd/fp16_simd.h"
+#include "simd/fp32_simd.h"
+#include "simd/sq8_simd.h"
+#include "utils/pointer_define.h"
+#include "utils/sparse_vector_transform.h"
+
+namespace vsag {
+
+struct QuantizationParams {
+    float min_val = 0.0f;
+    float max_val = 0.0f;
+    float diff = 1.0f;
+};
+
+static constexpr int INVALID_TERM = -1;
+DEFINE_POINTER(QuantizationParams)
+DEFINE_POINTER(SparseTermComputer)
+class SparseTermComputer {
+public:
+    ~SparseTermComputer() = default;
+
+    explicit SparseTermComputer(const SparseVector& sparse_query,
+                                const SINDISearchParameter& search_param,
+                                Allocator* allocator = nullptr,
+                                uint64_t window_num = 1)
+        : sorted_query_(allocator),
+          raw_query_(sparse_query),
+          query_retain_ratio_(1.0F - search_param.query_prune_ratio),
+          term_retain_ratio_(1.0F - search_param.term_prune_ratio),
+          term_retain_threshold_per_window_(search_param.term_retain_threshold == 0
+                                                ? std::numeric_limits<uint64_t>::max()
+                                                : search_param.term_retain_threshold /
+                                                      std::max<uint64_t>(window_num, 1)) {
+        SetQuery(sparse_query);
+    }
+
+    explicit SparseTermComputer(const SparseVector& sparse_query,
+                                const SINDIV2SearchParameter& search_param,
+                                Allocator* allocator = nullptr,
+                                uint64_t window_num = 1)
+        : sorted_query_(allocator),
+          raw_query_(sparse_query),
+          query_retain_ratio_(1.0F - search_param.query_prune_ratio),
+          term_retain_ratio_(1.0F - search_param.term_prune_ratio),
+          term_retain_threshold_per_window_(search_param.term_retain_threshold == 0
+                                                ? std::numeric_limits<uint64_t>::max()
+                                                : search_param.term_retain_threshold /
+                                                      std::max<uint64_t>(window_num, 1)) {
+        SetQuery(sparse_query);
+    }
+
+    // Preserve query/pruning state while rebinding mutable storage to worker scratch.
+    SparseTermComputer(const SparseTermComputer& other, Allocator* allocator)
+        : sorted_query_(other.sorted_query_, allocator),
+          raw_query_(other.raw_query_),
+          query_retain_ratio_(other.query_retain_ratio_),
+          term_retain_ratio_(other.term_retain_ratio_),
+          term_retain_threshold_per_window_(other.term_retain_threshold_per_window_),
+          pruned_len_(other.pruned_len_),
+          term_iterator_(other.term_iterator_),
+          term_prune_enabled_(other.term_prune_enabled_),
+          allocator_(allocator) {
+    }
+
+    void
+    SetQuery(const SparseVector& sparse_query) {
+        sort_sparse_vector(sparse_query, sorted_query_);
+
+        pruned_len_ = (uint32_t)(query_retain_ratio_ * sparse_query.len_);
+        if (pruned_len_ == 0) {
+            if (sorted_query_.size() != 0) {
+                pruned_len_ = 1;
+            }
+        }
+
+        for (auto i = 0; i < sorted_query_.size(); i++) {
+            sorted_query_[i].second *= -1;  // note that: dist_ip = -1 * query * base
+        }
+    }
+
+    void
+    ScanForAccumulateSQ8(uint32_t term_iterator,
+                         const uint16_t* term_ids,
+                         const uint8_t* term_datas,
+                         uint32_t term_count,
+                         float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        // TODO(ZXY): add prefetch to decrease cache miss like:
+        //  __builtin_prefetch(term_ids + term_count / 2, 0, 3);
+        //  __builtin_prefetch(term_datas + term_count / 2, 0, 3);
+        //  __builtin_prefetch(global_dists + term_ids[term_count / 2], 0, 3);
+
+        SQ8SparseAccumulate(global_dists, term_ids, term_datas, query_val, term_count);
+    }
+
+    void
+    ScanForAccumulateFP16Bytes(uint32_t term_iterator,
+                               const uint16_t* term_ids,
+                               const uint8_t* term_datas,
+                               uint32_t term_count,
+                               float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+        AccumulateFP16Bytes(global_dists, term_ids, term_datas, query_val, term_count);
+    }
+
+    void
+    ScanForAccumulateFloatBytes(uint32_t term_iterator,
+                                const uint16_t* term_ids,
+                                const uint8_t* term_datas,
+                                uint32_t term_count,
+                                float* global_dists) {
+        float query_val = sorted_query_[term_iterator].second;
+        AccumulateFloatBytes(global_dists, term_ids, term_datas, query_val, term_count);
+    }
+
+    inline void
+    ScanForCalculateDist(uint32_t term_iterator,
+                         const uint16_t* term_ids,
+                         const float* term_datas,
+                         uint32_t term_count,
+                         uint16_t target_id,
+                         float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (auto i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                *dist += query_val * term_datas[i];
+                break;
+            }
+        }
+    }
+
+    inline void
+    ScanForCalculateDistFP16Bytes(uint32_t term_iterator,
+                                  const uint16_t* term_ids,
+                                  const uint8_t* term_datas,
+                                  uint32_t term_count,
+                                  uint16_t target_id,
+                                  float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (uint32_t i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                uint16_t value = 0;
+                std::memcpy(
+                    &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+                *dist += query_val * generic::FP16ToFloat(value);
+                break;
+            }
+        }
+    }
+
+    inline void
+    ScanForCalculateDistFloatBytes(uint32_t term_iterator,
+                                   const uint16_t* term_ids,
+                                   const uint8_t* term_datas,
+                                   uint32_t term_count,
+                                   uint16_t target_id,
+                                   float* dist) {
+        float query_val = sorted_query_[term_iterator].second;
+
+        for (uint32_t i = 0; i < term_count; i++) {
+            if (term_ids[i] == target_id) {
+                float value = 0.0F;
+                std::memcpy(
+                    &value, term_datas + static_cast<uint64_t>(i) * sizeof(value), sizeof(value));
+                *dist += query_val * value;
+                break;
+            }
+        }
+    }
+
+    inline bool
+    HasNextTerm() {
+        return term_iterator_ < pruned_len_;
+    }
+
+    inline uint32_t
+    NextTermIter() {
+        return term_iterator_++;
+    }
+
+    inline void
+    ResetTerm() {
+        term_iterator_ = 0;
+    }
+
+    uint32_t
+    GetTerm(uint32_t term_iterator) {
+        return sorted_query_[term_iterator].first;
+    }
+
+    [[nodiscard]] uint32_t
+    GetTermScanCount(uint32_t term_size) const {
+        if (term_size == 0 or not term_prune_enabled_) {
+            return term_size;
+        }
+        const auto ratio_limit =
+            static_cast<uint32_t>(static_cast<float>(term_size) * term_retain_ratio_);
+        const auto scan_count = static_cast<uint32_t>(
+            std::min<uint64_t>(ratio_limit, term_retain_threshold_per_window_));
+        return std::max<uint32_t>(scan_count, 1);
+    }
+
+    void
+    SetTermPruneEnabled(bool enabled) {
+        term_prune_enabled_ = enabled;
+    }
+
+private:
+    static constexpr uint32_t BYTE_ACCUMULATE_BATCH_SIZE = 32;
+
+    static void
+    AccumulateFP16Bytes(float* global_dists,
+                        const uint16_t* term_ids,
+                        const uint8_t* term_datas,
+                        float query_val,
+                        uint32_t term_count) {
+        uint32_t offset = 0;
+        while (offset < term_count) {
+            const uint32_t remaining = term_count - offset;
+            const uint32_t batch_size =
+                remaining < BYTE_ACCUMULATE_BATCH_SIZE ? remaining : BYTE_ACCUMULATE_BATCH_SIZE;
+            uint16_t values[BYTE_ACCUMULATE_BATCH_SIZE];
+            std::memcpy(values,
+                        term_datas + static_cast<uint64_t>(offset) * sizeof(uint16_t),
+                        static_cast<uint64_t>(batch_size) * sizeof(uint16_t));
+            FP16SparseAccumulate(global_dists, term_ids + offset, values, query_val, batch_size);
+            offset += batch_size;
+        }
+    }
+
+    static void
+    AccumulateFloatBytes(float* global_dists,
+                         const uint16_t* term_ids,
+                         const uint8_t* term_datas,
+                         float query_val,
+                         uint32_t term_count) {
+        uint32_t offset = 0;
+        while (offset < term_count) {
+            const uint32_t remaining = term_count - offset;
+            const uint32_t batch_size =
+                remaining < BYTE_ACCUMULATE_BATCH_SIZE ? remaining : BYTE_ACCUMULATE_BATCH_SIZE;
+            float values[BYTE_ACCUMULATE_BATCH_SIZE];
+            std::memcpy(values,
+                        term_datas + static_cast<uint64_t>(offset) * sizeof(float),
+                        static_cast<uint64_t>(batch_size) * sizeof(float));
+            FP32SparseAccumulate(global_dists, term_ids + offset, values, query_val, batch_size);
+            offset += batch_size;
+        }
+    }
+
+public:
+    Vector<std::pair<uint32_t, float>> sorted_query_;
+
+    const SparseVector& raw_query_;
+
+    float query_retain_ratio_{0.0F};
+
+    float term_retain_ratio_{0.0F};
+
+    uint64_t term_retain_threshold_per_window_{std::numeric_limits<uint64_t>::max()};
+
+    uint32_t pruned_len_{0};
+
+    uint32_t term_iterator_{0};
+
+    bool term_prune_enabled_{true};
+
+    Allocator* const allocator_{nullptr};
+};
+}  // namespace vsag

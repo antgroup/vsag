@@ -1,0 +1,632 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "vsag/allocator.h"
+#include "vsag/attribute.h"
+#include "vsag/constants.h"
+#include "vsag/search_metrics.h"
+
+namespace vsag {
+
+struct SparseVector {
+    uint32_t len_ = 0;         // the length of the vector (i.e., the count of non-zero vals)
+    uint32_t* ids_ = nullptr;  // contains ids with size of len_
+                               // (The ids_ will be sorted in ascending order inside the index.
+                               // it is recommended to sort them before putting them into VSAG.)
+    float* vals_ = nullptr;    // contains vals with size of len_
+
+    // Optional original tokenized document content for the sparse vector.
+    // When present, token_sequence_ owns a buffer of token_seq_len_ uint32_t
+    // term ids, preserving the original tokenization order (duplicates and
+    // ordering are kept as-is, unlike the deduplicated/sorted ids_).
+    uint32_t token_seq_len_ = 0;          // length of the original token sequence
+    uint32_t* token_sequence_ = nullptr;  // original tokenized term ids, length = token_seq_len_
+};
+
+/**
+ * @brief Represents one document's multi-vector data.
+ *
+ * @details
+ * Each document may contain a variable number of dense sub-vectors.
+ * The sub-vector dimensionality is defined at the Dataset level via
+ * MultiVectorDim(), not per-element.
+ *
+ * @note When Owner(true) is set on the Dataset, each element's vectors_
+ * pointer must be independently allocated (not an offset into a shared
+ * buffer), because the Dataset destructor will free each vectors_ separately.
+ */
+struct MultiVector {
+    uint32_t len_ = 0;          // number of sub-vectors in this document
+    float* vectors_ = nullptr;  // flat array of len_ * MultiVectorDim floats
+};
+
+class Dataset;
+using DatasetPtr = std::shared_ptr<Dataset>;
+
+/**
+ * @brief This class represents a dataset with various attributes such as
+ * dimensions, ids, vectors, and more.
+ *
+ * @details
+ * The core design employs the "Fluent Interface" or "Builder Pattern". Almost all setter
+ * methods return a shared pointer to the instance (`DatasetPtr`), enabling method chaining.
+ * This makes the process of constructing a dataset both intuitive and concise.
+ *
+ * @verbatim
+ *
+ *  [How to Build a Dataset]
+ *
+ *  +------------------+
+ *  | Dataset::Make()  |  <-- 1. Create instance via static factory method
+ *  +------------------+
+ *          |
+ *          v
+ *  .----------------------------------------------------------.
+ *  |                      Dataset Object                      |
+ *  |                                                          |
+ *  |  [Metadata]               [Core Data Pointers]           |
+ *  |  - num_elements           - ids*                         |
+ *  |  - dim                    - distances*                   |
+ *  |                           - vectors* (float, int8, etc.) |
+ *  |  [Ownership]              - sparse_vectors*              |
+ *  |  - is_owner               - ...                          |
+ *  |  - allocator*                                            |
+ *  '----------------------------------------------------------'
+ *          |         ^
+ *          |         |
+ *          '---------'  <-- 2. Chain setter methods; each returns the
+ *                           updated object pointer.
+ *
+ *      .Dim(128)
+ *      .NumElements(1000)
+ *      .Float32Vectors(data)
+ *      .Ids(ids)
+ *      ...
+ *
+ * @endverbatim
+ *
+ * @code
+ * // Example: How to create a dataset using method chaining
+ * #include "dataset.h"
+ *
+ * void example() {
+ *     // Assume data_vectors and data_ids are already prepared
+ *     const float* data_vectors = new float[128 * 10000]; // Example data
+ *     const int64_t* data_ids = new int64_t[10000];      // Example ids
+ *
+ *     // Fluently construct a Dataset object using method chaining
+ *     DatasetPtr my_dataset = vsag::Dataset::Make()
+ *                                 ->Dim(128)
+ *                                 ->NumElements(10000)
+ *                                 ->Float32Vectors(data_vectors)
+ *                                 ->Ids(data_ids)
+ *                                 ->Owner(true); // Declare that this instance takes ownership of the data
+ *
+ *     // my_dataset is now configured and ready for use.
+ * }
+ * @endcode
+ */
+class Dataset : public std::enable_shared_from_this<Dataset> {
+public:
+    /**
+     * @brief Creates a new instance of a Dataset.
+     *
+     * @return DatasetPtr A shared pointer to the new dataset instance.
+     */
+    static DatasetPtr
+    Make();
+
+    virtual ~Dataset() = default;
+
+    /**
+     * @brief Configures ownership and sets an optional allocator.
+     *
+     * @param is_owner Boolean indicating if this dataset is owned.
+     * @param allocator An allocator for resource management.
+     * @return DatasetPtr A shared pointer to the configured dataset instance.
+     */
+    virtual DatasetPtr
+    Owner(bool is_owner, Allocator* allocator) = 0;
+
+    /**
+     * @brief Configures ownership.
+     * No provided outside allocator to allocate or deallocate
+     *
+     * @param is_owner Boolean indicating if this dataset is owned.
+     * @return DatasetPtr A shared pointer to the configured dataset instance.
+     */
+    DatasetPtr
+    Owner(bool is_owner) {
+        return Owner(is_owner, nullptr);
+    }
+
+    virtual DatasetPtr
+    Append(const DatasetPtr& other) = 0;
+
+    virtual DatasetPtr
+    DeepCopy(Allocator* allocator = nullptr) const = 0;
+
+public:
+    /**
+     * @brief Sets the number of elements in the dataset.
+     *
+     * @param num_elements The number of elements.
+     * @return DatasetPtr A shared pointer to the dataset with updated number of elements.
+     */
+    virtual DatasetPtr
+    NumElements(int64_t num_elements) = 0;
+
+    /**
+     * @brief Retrieves the number of elements in the dataset.
+     *
+     * @return int64_t The number of elements.
+     */
+    virtual int64_t
+    GetNumElements() const = 0;
+
+    /**
+     * @brief Sets the dimensionality of the dataset.
+     *
+     * @param dim The dimensionality value.
+     * @return DatasetPtr A shared pointer to the dataset with updated dimensionality.
+     */
+    virtual DatasetPtr
+    Dim(int64_t dim) = 0;
+
+    /**
+     * @brief Retrieves the dimensionality of the dataset.
+     *
+     * @return int64_t The dimensionality.
+     */
+    virtual int64_t
+    GetDim() const = 0;
+
+    /**
+     * @brief Sets the ID array for the dataset.
+     *
+     * @param ids Pointer to the array of IDs.
+     * @return DatasetPtr A shared pointer to the dataset with set IDs.
+     */
+    virtual DatasetPtr
+    Ids(const int64_t* ids) = 0;
+
+    /**
+     * @brief Retrieves the ID array of the dataset.
+     *
+     * @return const int64_t* pointer to the array of IDs.
+     */
+    virtual const int64_t*
+    GetIds() const = 0;
+
+    /**
+     * @brief Sets the distances array for the dataset.
+     *
+     * @param dists Pointer to the array of distances.
+     * @return DatasetPtr A shared pointer to the dataset with updated distances.
+     */
+    virtual DatasetPtr
+    Distances(const float* dists) = 0;
+
+    /**
+     * @brief Retrieves the distances array of the dataset.
+     *
+     * @return const float* Pointer to the array of distances.
+     */
+    virtual const float*
+    GetDistances() const = 0;
+
+    /**
+     * @brief Sets the int8 vector array for the dataset.
+     *
+     * @param vectors Pointer to the array of int8 vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated int8 vectors.
+     */
+    virtual DatasetPtr
+    Int8Vectors(const int8_t* vectors) = 0;
+
+    /**
+     * @brief Retrieves the int8 vector array of the dataset.
+     *
+     * @return const int8_t* Pointer to the array of int8 vectors.
+     */
+    virtual const int8_t*
+    GetInt8Vectors() const = 0;
+
+    /**
+     * @brief Sets the float32 vector array for the dataset.
+     *
+     * @param vectors Pointer to the array of float32 vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated float32 vectors.
+     */
+    virtual DatasetPtr
+    Float32Vectors(const float* vectors) = 0;
+
+    /**
+     * @brief Retrieves the float32 vector array of the dataset.
+     *
+     * @return const float* Pointer to the array of float32 vectors.
+     */
+    virtual const float*
+    GetFloat32Vectors() const = 0;
+
+    /**
+     * @brief Sets the float16/bfloat16 vector array for the dataset.
+     *
+     * @param vectors Pointer to the array of float16/bfloat16 vectors (uint16_t*).
+     * @return DatasetPtr A shared pointer to the dataset with updated vectors.
+     */
+    virtual DatasetPtr
+    Float16Vectors(const uint16_t* vectors) = 0;
+
+    /**
+     * @brief Retrieves the float16/bfloat16 vector array of the dataset.
+     *
+     * @return const uint16_t* Pointer to the array of float16/bfloat16 vectors.
+     */
+    virtual const uint16_t*
+    GetFloat16Vectors() const = 0;
+
+    /**
+     * @brief Sets the sparse vector array for the dataset.
+     *
+     * @param vectors Pointer to the struct of sparse vectors.
+     * @return DatasetPtr A shared pointer to the dataset with updated sparse vectors.
+     */
+    virtual DatasetPtr
+    SparseVectors(const SparseVector* sparse_vectors) = 0;
+
+    /**
+     * @brief Retrieves the sparse struct of the dataset.
+     *
+     * @return const SparseVector to the array of sparse vectors.
+     */
+    virtual const SparseVector*
+    GetSparseVectors() const = 0;
+
+    /**
+     * @brief Sets the attribute sets for the dataset.
+     * @param attr_sets Pointer to the attribute sets.
+     * 
+     * @return DatasetPtr A shared pointer to the dataset with updated attribute sets.
+     */
+    virtual DatasetPtr
+    AttributeSets(const AttributeSet* attr_sets) = 0;
+
+    /**
+     * @brief Retrieves the attribute sets of the dataset.
+     * 
+     * @return const AttributeSet* Pointer to the attribute sets.
+     */
+    virtual const AttributeSet*
+    GetAttributeSets() const = 0;
+
+    /**
+     * @brief Sets the paths array for the dataset.
+     *
+     * @param paths Pointer to the array of paths.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     */
+    virtual DatasetPtr
+    Paths(const std::string* paths) = 0;
+
+    /**
+     * @brief Sets the paths array for a named hierarchy.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Pointer to the array of paths.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     */
+    virtual DatasetPtr
+    Paths(const std::string& hierarchy_name, const std::string* paths) = 0;
+
+    /**
+     * @brief Sets one or multiple paths per element for a named hierarchy.
+     *
+     * @details
+     * The outer vector must contain exactly NumElements() entries. Each non-empty inner vector
+     * contains the independent paths assigned to that element. An empty string represents the
+     * hierarchy root. The path strings use '/' to separate hierarchy levels.
+     *
+     * Unlike the pointer overload, the dataset stores this container by value, so its lifetime is
+     * independent of Owner().
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Paths grouped by dataset element.
+     * @return DatasetPtr A shared pointer to the dataset with updated paths.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    DatasetPtr
+    Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths);
+
+    /**
+     * @brief Retrieves the paths array of the dataset.
+     *
+     * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the default hierarchy uses structured paths.
+     */
+    virtual const std::string*
+    GetPaths() const = 0;
+
+    /**
+     * @brief Retrieves the paths array of a named hierarchy.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @return const std::string* Pointer to the array of paths.
+     * @note Returns nullptr when the hierarchy uses structured paths.
+     */
+    virtual const std::string*
+    GetPaths(const std::string& hierarchy_name) const = 0;
+
+    /**
+     * @brief Retrieves paths grouped by dataset element for a named hierarchy.
+     *
+     * @details
+     * This overload normalizes both the legacy single-path representation and the structured
+     * multi-path representation into one non-empty path vector per dataset element.
+     *
+     * @param hierarchy_name The hierarchy name. An empty string targets the default hierarchy.
+     * @param paths Output paths grouped by dataset element. Cleared when the hierarchy is absent.
+     * @return true when the hierarchy is present, otherwise false.
+     * @note This overload is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    bool
+    GetPaths(const std::string& hierarchy_name, std::vector<std::vector<std::string>>& paths) const;
+
+    /**
+     * @brief Sets a named array of uint32 metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     */
+    virtual DatasetPtr
+    UInt32Metadata(const std::string& name, const uint32_t* values) = 0;
+
+    /**
+     * @brief Retrieves a named array of uint32 metadata values.
+     *
+     * @param name Metadata name.
+     * @return const uint32_t* Pointer to the metadata values, or nullptr when absent.
+     */
+    virtual const uint32_t*
+    GetUInt32Metadata(const std::string& name) const = 0;
+
+    /**
+     * @brief Sets a named array of int64 metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     * @note For SINDI/SINDI_V2 base metadata named `publish_time_stamp`, zero is reserved for a
+     * missing timestamp and never matches a time selector.
+     */
+    DatasetPtr
+    Int64Metadata(const std::string& name, const int64_t* values);
+
+    /**
+     * @brief Retrieves a named array of int64 metadata values.
+     *
+     * @param name Metadata name.
+     * @return const int64_t* Pointer to the metadata values, or nullptr when absent.
+     * @note This method is non-virtual so extending the API does not change Dataset's vtable.
+     */
+    const int64_t*
+    GetInt64Metadata(const std::string& name) const;
+
+    /**
+     * @brief Sets a named array of string metadata values.
+     *
+     * The array contains one value per dataset element. It follows the same ownership rules as
+     * the other pointer-backed Dataset fields.
+     *
+     * @param name Metadata name.
+     * @param values Pointer to the metadata values.
+     * @return DatasetPtr A shared pointer to the dataset with updated metadata.
+     */
+    virtual DatasetPtr
+    StringMetadata(const std::string& name, const std::string* values) = 0;
+
+    /**
+     * @brief Retrieves a named array of string metadata values.
+     *
+     * @param name Metadata name.
+     * @return const std::string* Pointer to the metadata values, or nullptr when absent.
+     */
+    virtual const std::string*
+    GetStringMetadata(const std::string& name) const = 0;
+
+    /**
+     * @brief Sets the extra info for the dataset.
+     *
+     * @param paths Pointer to extra info.
+     * @return DatasetPtr A shared pointer to the dataset with extra info.
+     */
+    virtual DatasetPtr
+    ExtraInfos(const char* extra_info) = 0;
+
+    /**
+     * @brief Retrieves the extra info of the dataset.
+     *
+     * @return const char* Pointer to the extra info.
+     */
+    virtual const char*
+    GetExtraInfos() const = 0;
+
+    /**
+     * @brief Sets the extra_info's size of the element of dataset.
+     *
+     * @param extra_info_size The extra_info's size value.
+     * @return DatasetPtr A shared pointer to the dataset.
+     */
+    virtual DatasetPtr
+    ExtraInfoSize(int64_t extra_info_size) = 0;
+
+    /**
+     * @brief Retrieves the extra_info's size of the element of dataset.
+     *
+     * @return int64_t The extra_info's size.
+     */
+    virtual int64_t
+    GetExtraInfoSize() const = 0;
+
+    /*
+     * @brief Sets the Statistics for the dataset.
+     *
+     * @param Statistics The Statistics string.
+     * @return DatasetPtr A shared pointer to the dataset with updated Statistics.
+     */
+    virtual DatasetPtr
+    Statistics(const std::string& Statistics) = 0;
+
+    /**
+     * @brief Retrieves the all Statistics of the dataset.
+     *
+     * @return std::string The Statistics string.
+     */
+    virtual std::string
+    GetStatistics() const = 0;
+
+    /**
+     * @brief Retrieves the Statistics of the dataset.
+     *
+     * @param stat_keys The vector of stat keys.
+     * @return std::vector<std::string> The vector of stat values.
+     */
+    virtual std::vector<std::string>
+    GetStatistics(const std::vector<std::string>& stat_keys) const = 0;
+
+    /**
+     * @brief Returns the typed search-statistics snapshot when supported and collected.
+     *
+     * @return std::nullopt when statistics were not collected or when the Dataset implementation
+     * does not support typed search statistics.
+     */
+    [[nodiscard]] std::optional<SearchResultMetrics>
+    GetSearchMetrics() const;
+
+    /**
+     * @brief Sets the Reasoning report for the dataset.
+     *
+     * @param reasoning_json The Reasoning report as a JSON string.
+     * @return DatasetPtr A shared pointer to the dataset with updated Reasoning.
+     */
+    virtual DatasetPtr
+    Reasoning(const std::string& reasoning_json) = 0;
+
+    /**
+     * @brief Retrieves the Reasoning report of the dataset.
+     *
+     * @return const std::string& The Reasoning report JSON string.
+     */
+    virtual const std::string&
+    GetReasoning() const = 0;
+
+    /**
+     * @brief Sets the vector counts array for the dataset (for multi-vector documents).
+     *
+     * @param counts Pointer to the array of vector counts per document.
+     * @return DatasetPtr A shared pointer to the dataset with updated vector counts.
+     */
+    virtual DatasetPtr
+    VectorCounts(const uint32_t* counts) = 0;
+
+    /**
+     * @brief Retrieves the vector counts array of the dataset.
+     *
+     * @return const uint32_t* Pointer to the array of vector counts per document.
+     */
+    virtual const uint32_t*
+    GetVectorCounts() const = 0;
+
+    /**
+     * @brief Sets the multi-vector array for the dataset.
+     *
+     * @details
+     * Each element in the array represents one document's multi-vector data.
+     * The sub-vector dimensionality is defined by MultiVectorDim().
+     *
+     * @note When Owner(true) is set, each MultiVector element's vectors_ pointer
+     * must be independently allocated (not an offset into a shared buffer),
+     * because the destructor will free each vectors_ separately.
+     *
+     * @param multi_vectors Pointer to the array of MultiVector structs (length = NumElements).
+     * @return DatasetPtr A shared pointer to the dataset with updated multi-vectors.
+     */
+    virtual DatasetPtr
+    MultiVectors(const MultiVector* multi_vectors) = 0;
+
+    /**
+     * @brief Retrieves the multi-vector array of the dataset.
+     *
+     * @return const MultiVector* Pointer to the array of MultiVector structs, or nullptr if not set.
+     */
+    virtual const MultiVector*
+    GetMultiVectors() const = 0;
+
+    /**
+     * @brief Sets the sub-vector dimensionality for multi-vector data.
+     *
+     * @details
+     * This defines the number of floats per sub-vector in each MultiVector element.
+     * It is independent of Dim(), which describes the dense single-vector dimensionality.
+     *
+     * @param dim The sub-vector dimensionality (must be > 0 when MultiVectors is used).
+     * @return DatasetPtr A shared pointer to the dataset with updated multi-vector dim.
+     */
+    virtual DatasetPtr
+    MultiVectorDim(int64_t dim) = 0;
+
+    /**
+     * @brief Retrieves the sub-vector dimensionality for multi-vector data.
+     *
+     * @return int64_t The sub-vector dimensionality, or 0 if not set.
+     */
+    virtual int64_t
+    GetMultiVectorDim() const = 0;
+
+    /**
+     * @brief Sets the source ID for the dataset.
+     *
+     * @param source_id Pointer to the source ID string.
+     * @return DatasetPtr A shared pointer to the dataset with updated source ID.
+     */
+    virtual DatasetPtr
+    SourceID(const std::string* source_id) = 0;
+
+    /**
+     * @brief Retrieves the source ID of the dataset.
+     *
+     * @return const std::string* Pointer to the source ID string.
+     */
+    virtual const std::string*
+    GetSourceID() const = 0;
+};
+
+}  // namespace vsag

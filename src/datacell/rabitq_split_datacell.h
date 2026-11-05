@@ -1,0 +1,3623 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <exception>
+#include <future>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <type_traits>
+
+#include "common.h"
+#include "flatten_interface.h"
+#include "flatten_optimized_build_interface.h"
+#include "flatten_pairwise_distance_interface.h"
+#include "impl/cluster/kmeans_cluster.h"
+#include "impl/thread_pool/safe_thread_pool.h"
+#include "inner_string_params.h"
+#include "io/async_io/async_io_parameter.h"
+#include "io/buffer_io/buffer_io_parameter.h"
+#include "io/common/io_parameter.h"
+#include "io/memory_io/memory_io.h"
+#include "io/memory_io/memory_io_parameter.h"
+#include "io/mmap_io/mmap_io.h"
+#include "io/mmap_io/mmap_io_parameter.h"
+#include "layout/fixed_layout.h"
+#include "quantization/bottom_quantizer_accessor.h"
+#include "quantization/rabitq_quantization/rabitq_quantizer.h"
+#include "query_context.h"
+#include "rabitq_fused_code_storage.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "type_helpers.h"
+#include "utils/byte_buffer.h"
+#include "utils/timer.h"
+
+namespace vsag {
+
+class MMapIO;
+
+class RaBitQSplitResidualOriginalQueryInterface {
+public:
+    virtual ~RaBitQSplitResidualOriginalQueryInterface() = default;
+
+    virtual void
+    InsertVectorWithFilterCodeAndResidualFullFactor(const void* vector,
+                                                    InnerIdType idx,
+                                                    const float* transformed_centroid,
+                                                    uint8_t* filter_code,
+                                                    float* full_add) = 0;
+
+    virtual void
+    PackageFastScan32ResidualWithFullFactors(const InnerIdType* ids,
+                                             InnerIdType valid_size,
+                                             const float* transformed_centroid,
+                                             uint8_t* block,
+                                             float* full_adds) const = 0;
+
+    [[nodiscard]] virtual bool
+    ComputeResidualFullFactorForId(const uint8_t* filter_code,
+                                   InnerIdType id,
+                                   const float* transformed_centroid,
+                                   float* full_add) const = 0;
+
+    [[nodiscard]] virtual bool
+    RecoverFastScan32OriginalQueryFilterInnerProduct(
+        const ComputerInterfacePtr& computer,
+        const uint8_t* block,
+        InnerIdType index_in_block,
+        float shared_filter_inner_product,
+        float* original_filter_inner_product) const = 0;
+
+    virtual void
+    QueryWithOriginalQueryFilterInnerProducts(float* result_dists,
+                                              uint8_t* computed,
+                                              const float* filter_inner_products,
+                                              const float* full_adds,
+                                              float query_bucket_norm_sqr,
+                                              const ComputerInterfacePtr& computer,
+                                              const InnerIdType* ids,
+                                              InnerIdType id_count,
+                                              QueryContext* ctx) const = 0;
+};
+
+struct RaBitQFusedTraversalQuery {
+    const uint8_t* query_planes{nullptr};
+    const float* transformed_query{nullptr};
+    const float* cluster_g_add{nullptr};
+    const float* cluster_g_error{nullptr};
+    uint64_t dim{0};
+    uint64_t one_bit_metadata_offset{0};
+    uint64_t supplement_metadata_offset{0};
+    uint32_t cluster_count{0};
+    uint32_t filter_bits{0};
+    uint32_t supplement_bits{0};
+    float query_delta{0.0F};
+    float query_vl{0.0F};
+    float query_sum{0.0F};
+    float default_rabitq_error_rate{0.0F};
+    bool affine{false};
+    bool filter_inner_product_is_exact{false};
+};
+
+class RaBitQSplitDataCellInterface {
+public:
+    virtual ~RaBitQSplitDataCellInterface() = default;
+
+    [[nodiscard]] virtual uint64_t
+    OneBitCodeSize() const = 0;
+
+    [[nodiscard]] virtual uint64_t
+    SupplementCodeSize() const = 0;
+
+    [[nodiscard]] virtual uint32_t
+    FusedFilterBits() const = 0;
+
+    [[nodiscard]] virtual uint32_t
+    FusedSupplementBits() const = 0;
+
+    [[nodiscard]] virtual bool
+    UsesLegacyHnswFusedCodec() const = 0;
+
+    virtual void
+    AttachFusedCodeStorage(RabitQFusedInterface* storage) = 0;
+
+    [[nodiscard]] virtual bool
+    UsesExternalFusedCodeStorage() const = 0;
+
+    virtual bool
+    CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const = 0;
+
+    virtual bool
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation = true) const = 0;
+
+    virtual void
+    QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
+                                           float* lower_bounds,
+                                           float* filter_inner_products,
+                                           const ComputerInterfacePtr& computer,
+                                           const InnerIdType* idx,
+                                           InnerIdType id_count,
+                                           QueryContext* ctx = nullptr) = 0;
+
+    virtual void
+    QueryWithFilterIPHint(float* result_dists,
+                          const float* filter_inner_products,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) = 0;
+
+    virtual bool
+    ComputeOneBitWithFilterIP(const ComputerInterfacePtr& computer,
+                              const uint8_t* one_bit_code,
+                              float* distance,
+                              float* lower_bound,
+                              float* filter_inner_product,
+                              QueryContext* ctx) const = 0;
+
+    virtual bool
+    ComputeFullWithFilterIP(const ComputerInterfacePtr& computer,
+                            const uint8_t* one_bit_code,
+                            const uint8_t* supplement_code,
+                            float filter_inner_product,
+                            float* distance,
+                            QueryContext* ctx) const = 0;
+
+    virtual bool
+    ComputeFull(const ComputerInterfacePtr& computer,
+                const uint8_t* one_bit_code,
+                const uint8_t* supplement_code,
+                float* distance,
+                QueryContext* ctx) const = 0;
+
+    virtual void
+    TrainFusedCodec(const float* data, uint64_t count, uint32_t cluster_count) = 0;
+
+    virtual bool
+    EncodeFused(const float* data,
+                uint8_t* one_bit_code,
+                uint8_t* supplement_code,
+                uint32_t* cluster_id) const = 0;
+
+    virtual ComputerInterfacePtr
+    FactoryFusedComputer(const void* query) const = 0;
+
+    virtual bool
+    GetFusedTraversalQuery(const ComputerInterfacePtr& computer,
+                           RaBitQFusedTraversalQuery* query) const = 0;
+
+    virtual bool
+    ComputeFusedOneBitWithFilterIP(const ComputerInterfacePtr& computer,
+                                   uint32_t cluster_id,
+                                   const uint8_t* one_bit_code,
+                                   const uint8_t* supplement_code,
+                                   float* distance,
+                                   float* lower_bound,
+                                   float* filter_inner_product,
+                                   QueryContext* ctx) const = 0;
+
+    virtual bool
+    ComputeFusedFullWithFilterIP(const ComputerInterfacePtr& computer,
+                                 uint32_t cluster_id,
+                                 const uint8_t* one_bit_code,
+                                 const uint8_t* supplement_code,
+                                 float filter_inner_product,
+                                 float* distance,
+                                 QueryContext* ctx) const = 0;
+
+    virtual bool
+    ComputeFusedFull(const ComputerInterfacePtr& computer,
+                     uint32_t cluster_id,
+                     const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     float* distance,
+                     QueryContext* ctx) const = 0;
+
+    [[nodiscard]] virtual std::string
+    ExportFusedCodec() const = 0;
+
+    virtual void
+    ImportFusedCodec(const std::string& serialized) = 0;
+};
+
+template <MetricType metric,
+          typename OneBitIOTmpl,
+          typename SupplementIOTmpl = OneBitIOTmpl,
+          typename QuantizerT = RaBitQuantizer<metric>>
+class RaBitQSplitDataCell : public FlattenInterface,
+                            public FlattenOptimizedBuildInterface,
+                            public FlattenPairwiseDistanceInterface,
+                            public RaBitQSplitResidualOriginalQueryInterface,
+                            public RaBitQSplitDataCellInterface {
+public:
+    using Accessor = BottomQuantizerAccessor<QuantizerT>;
+    using BottomQuantizer = typename Accessor::BottomQuantizerType;
+    using BottomComputer = typename Accessor::BottomComputerType;
+
+    static_assert(std::is_same_v<BottomQuantizer, RaBitQuantizer<metric>>,
+                  "RaBitQSplitDataCell requires RaBitQuantizer as bottom quantizer");
+
+    class OptimizedBuildComputer final : public ComputerInterface {
+    public:
+        OptimizedBuildComputer(uint64_t record_size, Allocator* allocator)
+            : scalar_code_(record_size, allocator) {
+        }
+
+        ByteBuffer scalar_code_;
+        uint64_t code_sum_{0};
+    };
+
+    class PairwiseDistanceComputer final : public FlattenPairwiseDistanceComputer {
+    public:
+        explicit PairwiseDistanceComputer(RaBitQSplitDataCell& source)
+            : source_(source),
+              codes_(source.allocator_),
+              packed_code_(source.code_size_, source.allocator_) {
+        }
+
+        float
+        Compute(InnerIdType id1, InnerIdType id2, QueryContext* ctx = nullptr) override {
+            // Keep both entries alive if fetching the second ID evicts the first one.
+            const auto left = acquire(id1);
+            const auto right = acquire(id2);
+            const float distance =
+                source_.bottom_quantizer().ComputeScalarCodesDistance(left->scalar_code_.data,
+                                                                      left->code_sum_,
+                                                                      right->scalar_code_.data,
+                                                                      right->code_sum_);
+            source_.add_distance_evaluations(ctx, 1);
+            return distance;
+        }
+
+    private:
+        std::shared_ptr<OptimizedBuildComputer>
+        acquire(InnerIdType id) {
+            const auto found = codes_.find(id);
+            if (found != codes_.end()) {
+                return found->second;
+            }
+            auto code = std::make_shared<OptimizedBuildComputer>(
+                source_.bottom_quantizer().GetScalarCodeSize(), source_.allocator_);
+            CHECK_ARGUMENT(source_.GetCodesById(id, packed_code_.data),
+                           "failed to read split RaBitQ pairwise code");
+            code->code_sum_ = source_.bottom_quantizer().UnpackScalarCode(packed_code_.data,
+                                                                          code->scalar_code_.data);
+            if (codes_.size() == CACHE_CAPACITY) {
+                codes_.erase(order_[next_]);
+            }
+            codes_.emplace(id, code);
+            order_[next_] = id;
+            next_ = (next_ + 1) % CACHE_CAPACITY;
+            return code;
+        }
+
+        // Bound auxiliary memory independently of the index size. FIFO eviction keeps the
+        // cache local to one search/connection, without retaining stale codes across Add calls.
+        static constexpr uint64_t CACHE_CAPACITY = 512;
+        RaBitQSplitDataCell& source_;
+        UnorderedMap<InnerIdType, std::shared_ptr<OptimizedBuildComputer>> codes_;
+        ByteBuffer packed_code_;
+        std::array<InnerIdType, CACHE_CAPACITY> order_{};
+        uint64_t next_{0};
+    };
+
+    std::unique_ptr<FlattenPairwiseDistanceComputer>
+    FactoryPairwiseDistanceComputer() override {
+        if (this->optimized_build_active_ or this->fused_code_storage_ != nullptr) {
+            return nullptr;
+        }
+        return std::make_unique<PairwiseDistanceComputer>(*this);
+    }
+
+    class FusedComputer final : public ComputerInterface {
+    public:
+        explicit FusedComputer(Allocator* allocator)
+            : transformed_query_(allocator),
+              hnsw_query_planes_(allocator),
+              hnsw_g_add_(allocator),
+              hnsw_g_error_(allocator) {
+        }
+
+        Vector<float> transformed_query_;
+        Vector<uint8_t> hnsw_query_planes_;
+        float hnsw_query_delta_{0.0F};
+        float hnsw_query_vl_{0.0F};
+        float hnsw_query_sum_{0.0F};
+        Vector<float> hnsw_g_add_;
+        Vector<float> hnsw_g_error_;
+        float query_raw_norm_{0.0F};
+        typename RaBitQuantizer<metric>::norm_type mrq_norm_sqr_{0.0F};
+    };
+
+    RaBitQSplitDataCell() = default;
+
+    explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
+                                 const IOParamPtr& io_param,
+                                 const IndexCommonParam& common_param)
+        : RaBitQSplitDataCell(quantization_param, io_param, nullptr, common_param) {
+    }
+
+    explicit RaBitQSplitDataCell(const QuantizerParamPtr& quantization_param,
+                                 const IOParamPtr& io_param,
+                                 const IOParamPtr& supplement_io_param,
+                                 const IndexCommonParam& common_param)
+        : common_param_(common_param), allocator_(common_param.allocator_.get()) {
+        this->quantizer_ = std::make_shared<QuantizerT>(quantization_param, common_param);
+        this->quantization_param_ =
+            std::dynamic_pointer_cast<RaBitQuantizerParameter>(quantization_param);
+        if (not this->bottom_quantizer().SupportSplitCodeStorage()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "rabitq split data cell requires rabitq_version=split, "
+                                "rabitq_bits_per_dim_query=32, and "
+                                "rabitq_bits_per_dim_base in [1, 8]");
+        }
+        // When a supplement-specific IO param is supplied, use it directly so
+        // the caller can pick an entirely different IO type (e.g. x-bit in
+        // memory + supplement on disk). Otherwise fall back to the shared
+        // io_param with the legacy file-path suffix to keep the two backing
+        // files separate for file-backed IO.
+        const bool shares_io_param = supplement_io_param == nullptr;
+        const IOParamPtr one_bit_io_param = SuffixIOParam(io_param, "_onebit", shares_io_param);
+        const IOParamPtr supp_io_param = (supplement_io_param != nullptr)
+                                             ? supplement_io_param
+                                             : SuffixIOParam(io_param, "_supplement", true);
+        if (supplement_io_param != nullptr) {
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+        }
+        this->x_bit_layout_ =
+            std::make_shared<FixedLayout<OneBitIOTmpl>>(one_bit_io_param, common_param);
+        this->supplement_layout_ =
+            std::make_shared<FixedLayout<SupplementIOTmpl>>(supp_io_param, common_param);
+        this->refresh_code_sizes();
+    }
+
+    class FastScan32Computer final : public ComputerInterface {
+    public:
+        FastScan32Computer(uint64_t high_acc_lookup_size,
+                           Allocator* allocator,
+                           ComputerInterfacePtr bound_computer,
+                           BottomComputer* bound_bottom_computer,
+                           const uint8_t* query,
+                           uint64_t query_size)
+            : high_acc_lookup_size_(high_acc_lookup_size),
+              allocator_(allocator),
+              bound_computer_(std::move(bound_computer)),
+              bound_bottom_computer_(bound_bottom_computer) {
+            const uint64_t query_seed = HashQuery(query, query_size);
+            high_acc_random_state_ = MixSeed(query_seed ^ kHighAccSeedDomain);
+        }
+
+        const uint8_t*
+        PrepareHighAccQuery(const BottomQuantizer& quantizer, BottomComputer& computer) {
+            CHECK_ARGUMENT(&computer == bound_bottom_computer_,
+                           "FastScan query computer does not match its factory computer");
+            std::call_once(high_acc_query_once_, [&]() {
+                auto lookup_table = std::make_unique<ByteBuffer>(high_acc_lookup_size_, allocator_);
+                quantizer.PrepareFastScan32HighAccQuery(computer,
+                                                        lookup_table->data,
+                                                        high_acc_deltas_,
+                                                        high_acc_sum_vls_,
+                                                        high_acc_query_sum_,
+                                                        &high_acc_random_state_);
+                high_acc_lookup_table_ = std::move(lookup_table);
+            });
+            return high_acc_lookup_table_->data;
+        }
+
+    private:
+        static constexpr uint64_t kHighAccSeedDomain = 0x686967684163634CULL;
+
+        static uint64_t
+        MixSeed(uint64_t value) {
+            value = (value ^ (value >> 30U)) * 0xBF58476D1CE4E5B9ULL;
+            value = (value ^ (value >> 27U)) * 0x94D049BB133111EBULL;
+            return value ^ (value >> 31U);
+        }
+
+        static uint64_t
+        HashQuery(const uint8_t* query, uint64_t query_size) {
+            CHECK_ARGUMENT(query != nullptr, "FastScan query is not initialized");
+            uint64_t hash = 0xCBF29CE484222325ULL;
+            for (uint64_t i = 0; i < query_size; ++i) {
+                hash ^= query[i];
+                hash *= 0x100000001B3ULL;
+            }
+            hash ^= query_size;
+            return MixSeed(hash);
+        }
+
+    public:
+        uint64_t high_acc_lookup_size_;
+        Allocator* allocator_;
+        ComputerInterfacePtr bound_computer_;
+        BottomComputer* bound_bottom_computer_;
+        std::unique_ptr<ByteBuffer> high_acc_lookup_table_;
+        float high_acc_deltas_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
+        float high_acc_sum_vls_[BottomQuantizer::FASTSCAN_MAX_FILTER_BITS]{};
+        float high_acc_query_sum_{0.0F};
+        uint64_t high_acc_random_state_{0};
+        std::once_flag high_acc_query_once_;
+    };
+
+    [[nodiscard]] bool
+    SupportFastScan32() const override {
+        return this->bottom_quantizer().SupportFastScan32();
+    }
+
+    [[nodiscard]] uint64_t
+    GetFastScan32BlockSize() const override {
+        return this->bottom_quantizer().GetFastScan32BlockSize();
+    }
+
+    ComputerInterfacePtr
+    FactoryFastScan32Computer(const ComputerInterfacePtr& computer) const override {
+        if (not this->SupportFastScan32()) {
+            return nullptr;
+        }
+        auto* bottom_computer = this->get_bottom_computer(computer);
+        return std::make_shared<FastScan32Computer>(
+            this->bottom_quantizer().GetFastScan32HighAccLookupSize(),
+            this->allocator_,
+            computer,
+            bottom_computer,
+            bottom_computer->buf_,
+            this->bottom_quantizer().GetQueryCodeSize());
+    }
+
+    void
+    PackageFastScan32(const InnerIdType* ids,
+                      InnerIdType valid_size,
+                      uint8_t* block) const override {
+        CHECK_ARGUMENT(valid_size <= BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                       "invalid FastScan batch size");
+        ByteBuffer one_bit_codes(this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                                 this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        memset(
+            one_bit_codes.data, 0, this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE);
+        for (InnerIdType i = 0; i < valid_size; ++i) {
+            if (ids[i] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            auto* one_bit_code = one_bit_codes.data + i * this->one_bit_code_size_;
+            if (this->optimized_build_active_) {
+                bool need_release = false;
+                const auto* scalar_code =
+                    this->optimized_build_scalar_layout_->Read(ids[i], need_release);
+                CHECK_ARGUMENT(scalar_code != nullptr,
+                               "failed to read scalar RaBitQ code for FastScan packaging");
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_code, one_bit_code, supplement_code.data);
+                if (need_release) {
+                    this->optimized_build_scalar_layout_->Release(scalar_code);
+                }
+            } else {
+                CHECK_ARGUMENT(this->x_bit_layout_->Read(ids[i], one_bit_code),
+                               "failed to read RaBitQ filter code for FastScan packaging");
+            }
+        }
+        this->bottom_quantizer().PackageFastScan32(one_bit_codes.data, valid_size, block);
+    }
+
+    void
+    PackageFastScan32Residual(const InnerIdType* ids,
+                              InnerIdType valid_size,
+                              const float* transformed_centroid,
+                              uint8_t* block) const override {
+        CHECK_ARGUMENT(valid_size <= BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                       "invalid FastScan batch size");
+        ByteBuffer one_bit_codes(this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                                 this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        memset(
+            one_bit_codes.data, 0, this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE);
+        for (InnerIdType i = 0; i < valid_size; ++i) {
+            if (ids[i] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            auto* one_bit_code = one_bit_codes.data + i * this->one_bit_code_size_;
+            if (this->optimized_build_active_) {
+                bool need_release = false;
+                const auto* scalar_code =
+                    this->optimized_build_scalar_layout_->Read(ids[i], need_release);
+                CHECK_ARGUMENT(scalar_code != nullptr,
+                               "failed to read scalar RaBitQ code for FastScan packaging");
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_code, one_bit_code, supplement_code.data);
+                if (need_release) {
+                    this->optimized_build_scalar_layout_->Release(scalar_code);
+                }
+            } else {
+                CHECK_ARGUMENT(this->x_bit_layout_->Read(ids[i], one_bit_code),
+                               "failed to read RaBitQ filter code for FastScan packaging");
+            }
+        }
+        this->bottom_quantizer().PackageFastScan32Residual(
+            one_bit_codes.data, transformed_centroid, valid_size, block);
+    }
+    void
+    PackageFastScan32ResidualWithFullFactors(const InnerIdType* ids,
+                                             InnerIdType valid_size,
+                                             const float* transformed_centroid,
+                                             uint8_t* block,
+                                             float* full_adds) const override {
+        CHECK_ARGUMENT(valid_size <= BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                       "invalid FastScan batch size");
+        CHECK_ARGUMENT(full_adds != nullptr, "residual full factors are required");
+        ByteBuffer one_bit_codes(this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE,
+                                 this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        memset(
+            one_bit_codes.data, 0, this->one_bit_code_size_ * BottomQuantizer::FASTSCAN_BATCH_SIZE);
+        std::fill_n(full_adds, valid_size, std::numeric_limits<float>::quiet_NaN());
+        for (InnerIdType i = 0; i < valid_size; ++i) {
+            if (ids[i] == std::numeric_limits<InnerIdType>::max()) {
+                continue;
+            }
+            auto* one_bit_code = one_bit_codes.data + i * this->one_bit_code_size_;
+            if (this->optimized_build_active_) {
+                bool need_release = false;
+                const auto* scalar_code =
+                    this->optimized_build_scalar_layout_->Read(ids[i], need_release);
+                CHECK_ARGUMENT(scalar_code != nullptr,
+                               "failed to read scalar RaBitQ code for FastScan packaging");
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_code, one_bit_code, supplement_code.data);
+                if (need_release) {
+                    this->optimized_build_scalar_layout_->Release(scalar_code);
+                }
+            } else {
+                CHECK_ARGUMENT(this->x_bit_layout_->Read(ids[i], one_bit_code),
+                               "failed to read RaBitQ filter code for FastScan packaging");
+                CHECK_ARGUMENT(this->supplement_layout_->Read(ids[i], supplement_code.data),
+                               "failed to read RaBitQ supplement code for FastScan packaging");
+            }
+            this->bottom_quantizer().ComputeResidualFullFactor(
+                one_bit_code, supplement_code.data, transformed_centroid, full_adds + i);
+        }
+        this->bottom_quantizer().PackageFastScan32Residual(
+            one_bit_codes.data, transformed_centroid, valid_size, block);
+    }
+
+    void
+    EnableExternalFilterCodeStorage() override {
+        this->external_filter_code_storage_ = true;
+    }
+
+    [[nodiscard]] uint64_t
+    GetFilterCodeSize() const override {
+        return this->one_bit_code_size_;
+    }
+
+    void
+    SetFastScan32Code(const uint8_t* filter_code,
+                      InnerIdType index_in_block,
+                      uint8_t* block) const override {
+        this->bottom_quantizer().SetFastScan32Code(filter_code, index_in_block, block);
+    }
+
+    void
+    SetFastScan32ResidualCode(const uint8_t* filter_code,
+                              const float* transformed_centroid,
+                              InnerIdType index_in_block,
+                              uint8_t* block) const override {
+        this->bottom_quantizer().SetFastScan32ResidualCode(
+            filter_code, transformed_centroid, index_in_block, block);
+    }
+
+    void
+    UnpackFastScan32Code(const uint8_t* block,
+                         InnerIdType index_in_block,
+                         uint8_t* filter_code) const override {
+        this->bottom_quantizer().UnpackFastScan32Code(block, index_in_block, filter_code);
+    }
+
+    void
+    InsertVectorWithFilterCode(const void* vector, InnerIdType idx, uint8_t* filter_code) override {
+        CHECK_ARGUMENT(not this->optimized_build_active_,
+                       "optimized build filter codes are packaged during finalization");
+        {
+            std::lock_guard lock(this->mutex_);
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_.load(std::memory_order_relaxed);
+            }
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
+        }
+        ByteBuffer full_code(this->code_size_, this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
+        this->supplement_layout_->Write(idx, supplement_code.data);
+    }
+    void
+    InsertVectorWithFilterCodeAndResidualFullFactor(const void* vector,
+                                                    InnerIdType idx,
+                                                    const float* transformed_centroid,
+                                                    uint8_t* filter_code,
+                                                    float* full_add) override {
+        CHECK_ARGUMENT(not this->optimized_build_active_,
+                       "optimized build filter codes are packaged during finalization");
+        CHECK_ARGUMENT(full_add != nullptr, "residual full factor output is required");
+        {
+            std::lock_guard lock(this->mutex_);
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_.load(std::memory_order_relaxed);
+            }
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
+        }
+        ByteBuffer full_code(this->code_size_, this->allocator_);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        this->quantizer_->EncodeOne(static_cast<const float*>(vector), full_code.data);
+        this->bottom_quantizer().SplitCode(full_code.data, filter_code, supplement_code.data);
+        *full_add = std::numeric_limits<float>::quiet_NaN();
+        this->bottom_quantizer().ComputeResidualFullFactor(
+            filter_code, supplement_code.data, transformed_centroid, full_add);
+        this->supplement_layout_->Write(idx, supplement_code.data);
+    }
+
+    [[nodiscard]] bool
+    ComputeResidualFullFactorForId(const uint8_t* filter_code,
+                                   InnerIdType id,
+                                   const float* transformed_centroid,
+                                   float* full_add) const override {
+        bool need_release = false;
+        const uint8_t* supplement_code = nullptr;
+        bool computed = false;
+        try {
+            supplement_code = this->get_supplement_code(id, need_release);
+            if (supplement_code != nullptr) {
+                computed = this->bottom_quantizer().ComputeResidualFullFactor(
+                    filter_code, supplement_code, transformed_centroid, full_add);
+            }
+        } catch (...) {
+            this->release_supplement_code(supplement_code, need_release);
+            throw;
+        }
+        this->release_supplement_code(supplement_code, need_release);
+        return computed;
+    }
+
+    void
+    QueryWithFilterCodes(float* result_dists,
+                         const float* hint_dists,
+                         const float* filter_inner_products,
+                         const ComputerInterfacePtr& computer,
+                         const InnerIdType* idx,
+                         const uint8_t* filter_codes,
+                         InnerIdType id_count,
+                         QueryContext* ctx = nullptr) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_supplement(idx[i]);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+            bool supplement_need_release = false;
+            const uint8_t* supplement_code = nullptr;
+            const auto* filter_code =
+                filter_codes + static_cast<uint64_t>(i) * this->one_bit_code_size_;
+            try {
+                supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
+                bool computed = false;
+                if (filter_inner_products != nullptr and
+                    this->is_finite_float_bits(filter_inner_products[i])) {
+                    computed =
+                        this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterInnerProduct(
+                            *comp, supplement_code, filter_inner_products[i], result_dists + i);
+                    if (computed) {
+                        this->add_full_count(ctx, 1);
+                        this->add_reorder_hint_full_count(ctx, 1);
+                    } else {
+                        this->add_reorder_fallback_full_count(ctx, 1);
+                    }
+                }
+                if (not computed) {
+                    const float hint =
+                        hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+                    this->compute_full_dist(
+                        filter_code, supplement_code, comp, result_dists + i, ctx, hint);
+                }
+            } catch (...) {
+                this->release_supplement_code(supplement_code, supplement_need_release);
+                throw;
+            }
+            this->release_supplement_code(supplement_code, supplement_need_release);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithFilterInnerProducts(float* result_dists,
+                                 uint8_t* computed,
+                                 const float* filter_inner_products,
+                                 const ComputerInterfacePtr& computer,
+                                 const InnerIdType* idx,
+                                 InnerIdType id_count,
+                                 QueryContext* ctx = nullptr) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            if (this->is_finite_float_bits(filter_inner_products[i])) {
+                this->prefetch_supplement(idx[i]);
+            }
+        }
+
+        uint64_t computed_count = 0;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            computed[i] = 0U;
+            if (i + this->prefetch_stride_code_ < id_count and
+                this->is_finite_float_bits(
+                    filter_inner_products[i + this->prefetch_stride_code_])) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+            if (not this->is_finite_float_bits(filter_inner_products[i])) {
+                continue;
+            }
+
+            bool supplement_need_release = false;
+            const uint8_t* supplement_code = nullptr;
+            try {
+                supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
+                computed[i] = static_cast<uint8_t>(
+                    this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterInnerProduct(
+                        *comp, supplement_code, filter_inner_products[i], result_dists + i));
+            } catch (...) {
+                this->release_supplement_code(supplement_code, supplement_need_release);
+                throw;
+            }
+            this->release_supplement_code(supplement_code, supplement_need_release);
+            computed_count += computed[i];
+        }
+        this->add_full_count(ctx, computed_count);
+        this->add_reorder_hint_full_count(ctx, computed_count);
+        this->add_reorder_fallback_full_count(ctx,
+                                              static_cast<uint64_t>(id_count) - computed_count);
+        this->add_distance_evaluations(ctx, computed_count);
+    }
+    void
+    QueryWithOriginalQueryFilterInnerProducts(float* result_dists,
+                                              uint8_t* computed,
+                                              const float* filter_inner_products,
+                                              const float* full_adds,
+                                              float query_bucket_norm_sqr,
+                                              const ComputerInterfacePtr& computer,
+                                              const InnerIdType* idx,
+                                              InnerIdType id_count,
+                                              QueryContext* ctx) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            if (this->is_finite_float_bits(filter_inner_products[i]) and
+                this->is_finite_float_bits(full_adds[i])) {
+                this->prefetch_supplement(idx[i]);
+            }
+        }
+
+        uint64_t computed_count = 0;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            computed[i] = 0U;
+            if (i + this->prefetch_stride_code_ < id_count and
+                this->is_finite_float_bits(
+                    filter_inner_products[i + this->prefetch_stride_code_]) and
+                this->is_finite_float_bits(full_adds[i + this->prefetch_stride_code_])) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+            if (not this->is_finite_float_bits(filter_inner_products[i]) or
+                not this->is_finite_float_bits(full_adds[i])) {
+                continue;
+            }
+
+            bool need_release = false;
+            const uint8_t* supplement_code = nullptr;
+            try {
+                supplement_code = this->get_supplement_code(idx[i], need_release);
+                computed[i] = static_cast<uint8_t>(
+                    this->bottom_quantizer()
+                        .ComputeDistWithSplitCodeAndOriginalQueryFilterInnerProduct(
+                            *comp,
+                            supplement_code,
+                            filter_inner_products[i],
+                            full_adds[i],
+                            query_bucket_norm_sqr,
+                            result_dists + i));
+            } catch (...) {
+                this->release_supplement_code(supplement_code, need_release);
+                throw;
+            }
+            this->release_supplement_code(supplement_code, need_release);
+            computed_count += computed[i];
+        }
+        this->add_full_count(ctx, computed_count);
+        this->add_reorder_hint_full_count(ctx, computed_count);
+        this->add_reorder_fallback_full_count(ctx,
+                                              static_cast<uint64_t>(id_count) - computed_count);
+        this->add_distance_evaluations(ctx, computed_count);
+    }
+
+    [[nodiscard]] bool
+    GetCodesByIdWithFilterCode(InnerIdType id,
+                               const uint8_t* filter_code,
+                               uint8_t* codes) const override {
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        if (not this->supplement_layout_->Read(id, supplement_code.data)) {
+            return false;
+        }
+        memset(codes, 0, this->code_size_);
+        this->bottom_quantizer().MergeSplitCode(filter_code, supplement_code.data, codes);
+        return true;
+    }
+
+    float
+    ComputePairVectorsWithFilterCodes(InnerIdType id1,
+                                      const uint8_t* filter_code1,
+                                      InnerIdType id2,
+                                      const uint8_t* filter_code2) override {
+        ByteBuffer codes1(this->code_size_, this->allocator_);
+        ByteBuffer codes2(this->code_size_, this->allocator_);
+        CHECK_ARGUMENT(this->GetCodesByIdWithFilterCode(id1, filter_code1, codes1.data),
+                       "failed to read first split RaBitQ code");
+        CHECK_ARGUMENT(this->GetCodesByIdWithFilterCode(id2, filter_code2, codes2.data),
+                       "failed to read second split RaBitQ code");
+        return this->bottom_quantizer().Compute(codes1.data, codes2.data);
+    }
+
+    void
+    PrefetchSupplement(InnerIdType id) override {
+        this->prefetch_supplement(id);
+    }
+
+    void
+    DiscardFilterCodes() override {
+        this->x_bit_layout_->Shrink(0);
+    }
+
+    [[nodiscard]] bool
+    HasFilterCodes() const override {
+        if (this->total_count_.load(std::memory_order_relaxed) == 0) {
+            return false;
+        }
+        ByteBuffer filter_code(this->one_bit_code_size_, this->allocator_);
+        return this->x_bit_layout_->Read(0, filter_code.data);
+    }
+
+    void
+    MergeSupplementCodes(const FlattenInterfacePtr& other, InnerIdType bias) override {
+        auto ptr = std::dynamic_pointer_cast<
+            RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
+        CHECK_ARGUMENT(ptr != nullptr, "merge supplement codes datacell type mismatch");
+        const InnerIdType final_count = bias + ptr->total_count_.load(std::memory_order_relaxed);
+        const InnerIdType required_count =
+            std::max(this->total_count_.load(std::memory_order_relaxed), final_count);
+        this->supplement_layout_->Resize(required_count);
+        ByteBuffer supplement_code(this->supplement_code_size_, this->allocator_);
+        for (InnerIdType id = 0; id < ptr->total_count_.load(std::memory_order_relaxed); ++id) {
+            CHECK_ARGUMENT(ptr->supplement_layout_->Read(id, supplement_code.data),
+                           "failed to read source supplement code");
+            this->supplement_layout_->Write(bias + id, supplement_code.data);
+        }
+        this->total_count_.store(required_count, std::memory_order_release);
+        this->max_capacity_ = std::max(this->max_capacity_, required_count);
+    }
+
+    void
+    QueryFastScan32Batch(float* result_dists,
+                         uint32_t* computed_masks,
+                         const ComputerInterfacePtr& computer,
+                         const ComputerInterfacePtr& fastscan_computer,
+                         const uint8_t* blocks,
+                         InnerIdType total_size,
+                         float* filter_inner_products = nullptr,
+                         QueryContext* ctx = nullptr) const override {
+        auto* fastscan = dynamic_cast<FastScan32Computer*>(fastscan_computer.get());
+        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
+        auto* bottom_computer = this->get_bottom_computer(computer);
+        const auto* lookup_table =
+            fastscan->PrepareHighAccQuery(this->bottom_quantizer(), *bottom_computer);
+        this->bottom_quantizer().ComputeDistsWithFastScan32HighAccBatch(
+            *bottom_computer,
+            blocks,
+            total_size,
+            lookup_table,
+            fastscan->high_acc_deltas_,
+            fastscan->high_acc_sum_vls_,
+            fastscan->high_acc_query_sum_,
+            result_dists,
+            computed_masks,
+            filter_inner_products);
+        this->add_filter_count(ctx, total_size);
+        this->add_distance_evaluations(ctx, total_size);
+    }
+
+    void
+    QueryFastScan32BatchSharedResidual(float* result_dists,
+                                       uint32_t* computed_masks,
+                                       const ComputerInterfacePtr& computer,
+                                       const ComputerInterfacePtr& fastscan_computer,
+                                       const uint8_t* blocks,
+                                       InnerIdType total_size,
+                                       float query_bucket_norm_sqr,
+                                       float* filter_inner_products = nullptr,
+                                       QueryContext* ctx = nullptr) const override {
+        auto* fastscan = dynamic_cast<FastScan32Computer*>(fastscan_computer.get());
+        CHECK_ARGUMENT(fastscan != nullptr, "invalid RaBitQ FastScan computer");
+        auto* bottom_computer = this->get_bottom_computer(computer);
+        const auto* lookup_table =
+            fastscan->PrepareHighAccQuery(this->bottom_quantizer(), *bottom_computer);
+        this->bottom_quantizer().ComputeDistsWithFastScan32SharedResidualHighAccBatch(
+            *bottom_computer,
+            blocks,
+            total_size,
+            lookup_table,
+            fastscan->high_acc_deltas_,
+            fastscan->high_acc_sum_vls_,
+            fastscan->high_acc_query_sum_,
+            query_bucket_norm_sqr,
+            result_dists,
+            computed_masks,
+            filter_inner_products);
+        this->add_filter_count(ctx, total_size);
+        this->add_distance_evaluations(ctx, total_size);
+    }
+
+    [[nodiscard]] bool
+    RecoverFastScan32OriginalQueryFilterInnerProduct(
+        const ComputerInterfacePtr& computer,
+        const uint8_t* block,
+        InnerIdType index_in_block,
+        float shared_filter_inner_product,
+        float* original_filter_inner_product) const override {
+        return this->bottom_quantizer().RecoverFastScan32OriginalQueryFilterInnerProduct(
+            *this->get_bottom_computer(computer),
+            block,
+            index_in_block,
+            shared_filter_inner_product,
+            original_filter_inner_product);
+    }
+
+    [[nodiscard]] float
+    ComputeTransformedResidualQueryNormSqr(const float* transformed_query) const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            return this->bottom_quantizer().ComputeTransformedResidualQueryNormSqr(
+                transformed_query);
+        }
+        return FlattenInterface::ComputeTransformedResidualQueryNormSqr(transformed_query);
+    }
+
+    void
+    Query(float* result_dists,
+          const ComputerInterfacePtr& computer,
+          const InnerIdType* idx,
+          InnerIdType id_count,
+          QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            this->query_fused_full(result_dists, computer, idx, id_count, ctx);
+            return;
+        }
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
+            if (id_count > 1) {
+                if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
+                    this->query_full_dist_by_supplement_multiread(
+                        result_dists, comp, idx, id_count, ctx);
+                    this->add_distance_evaluations(ctx, id_count);
+                    return;
+                }
+                this->query_full_dist_by_multiread(result_dists, comp, idx, id_count, ctx);
+                this->add_distance_evaluations(ctx, id_count);
+                return;
+            }
+        }
+
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_full_code(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+            }
+            this->compute_full_dist(idx[i], comp, result_dists + i, ctx);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryById(float* result_dists,
+              InnerIdType query_id,
+              const InnerIdType* idx,
+              InnerIdType id_count,
+              QueryContext* ctx = nullptr) override {
+        if (not this->optimized_build_active_) {
+            // Persisted split storage has no temporary scalar codes. Merge the query once and
+            // reuse its full code; optimized builds use the scalar-code path below.
+            ByteBuffer query_code(this->code_size_, allocator_);
+            ByteBuffer base_code(this->code_size_, allocator_);
+            if (not this->GetCodesById(query_id, query_code.data)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read split RaBitQ query code");
+            }
+            for (InnerIdType i = 0; i < id_count; ++i) {
+                if (i + this->prefetch_stride_code_ < id_count) {
+                    this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+                }
+                if (not this->GetCodesById(idx[i], base_code.data)) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "failed to read split RaBitQ base code");
+                }
+                result_dists[i] = this->bottom_quantizer().Compute(query_code.data, base_code.data);
+            }
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+
+        auto query_lease = this->optimized_build_scalar_layout_->Acquire(query_id);
+        if (not query_lease) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "failed to read temporary scalar RaBitQ query code");
+        }
+        this->query_optimized_build_code_pairs(result_dists,
+                                               query_lease.Data(),
+                                               (*this->optimized_build_code_sums_)[query_id],
+                                               idx,
+                                               id_count);
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithDistanceHint(float* result_dists,
+                          const float* hint_dists,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            this->query_fused_full(result_dists, computer, idx, id_count, ctx);
+            return;
+        }
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        if constexpr (not OneBitIOTmpl::InMemory or not SupplementIOTmpl::InMemory) {
+            if (id_count > 1) {
+                if constexpr (OneBitIOTmpl::InMemory and not SupplementIOTmpl::InMemory) {
+                    this->query_full_dist_by_supplement_multiread(
+                        result_dists, comp, idx, id_count, ctx, hint_dists);
+                    this->add_distance_evaluations(ctx, id_count);
+                    return;
+                }
+                this->query_full_dist_by_multiread(
+                    result_dists, comp, idx, id_count, ctx, hint_dists);
+                this->add_distance_evaluations(ctx, id_count);
+                return;
+            }
+        }
+
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_full_code(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+            }
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            this->compute_full_dist(idx[i], comp, result_dists + i, ctx, hint);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithDistanceFilter(float* result_dists,
+                            const ComputerInterfacePtr& computer,
+                            const InnerIdType* idx,
+                            InnerIdType id_count,
+                            float threshold,
+                            QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            this->query_fused_with_distance_filter(
+                result_dists, computer, idx, id_count, threshold, ctx);
+            return;
+        }
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_full_code(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+            }
+
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* one_bit_code = one_bit_lease.Data();
+            float one_bit_dist = 0.0F;
+            float lower_bound = std::numeric_limits<float>::max();
+            bool computed = false;
+            computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                *comp,
+                one_bit_code,
+                &one_bit_dist,
+                &lower_bound,
+                this->query_rabitq_error_rate(ctx));
+
+            if (computed and IsFiniteRaBitQValue(lower_bound) and lower_bound >= threshold) {
+                result_dists[i] = threshold;
+                continue;
+            }
+
+            auto supplement_lease = this->supplement_layout_->Acquire(idx[i]);
+            this->compute_full_dist(
+                one_bit_code, supplement_lease.Data(), comp, result_dists + i, ctx);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithDistanceLowerBoundAndFilterIP(float* result_dists,
+                                           float* lower_bounds,
+                                           float* filter_inner_products,
+                                           const ComputerInterfacePtr& computer,
+                                           const InnerIdType* idx,
+                                           InnerIdType id_count,
+                                           QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr) {
+            this->query_fused_lower_bound(
+                result_dists, lower_bounds, filter_inner_products, computer, idx, id_count, ctx);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_filter_count(ctx, id_count);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_one_bit(idx[i]);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_one_bit(idx[i + this->prefetch_stride_code_]);
+            }
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* one_bit_code = one_bit_lease.Data();
+            const bool computed =
+                this->bottom_quantizer().ComputeDistWithOneBitLowerBoundAndFilterIP(
+                    *comp,
+                    one_bit_code,
+                    result_dists + i,
+                    lower_bounds == nullptr ? nullptr : lower_bounds + i,
+                    filter_inner_products == nullptr ? nullptr : filter_inner_products + i,
+                    this->query_rabitq_error_rate(ctx));
+            if (not computed) {
+                if (filter_inner_products != nullptr) {
+                    filter_inner_products[i] = std::numeric_limits<float>::quiet_NaN();
+                }
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i],
+                    one_bit_code,
+                    comp,
+                    result_dists + i,
+                    lower_bounds == nullptr ? nullptr : lower_bounds + i,
+                    ctx);
+            }
+        }
+    }
+
+    void
+    QueryWithDistanceLowerBound(float* result_dists,
+                                float* lower_bounds,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            this->query_fused_lower_bound(
+                result_dists, lower_bounds, nullptr, computer, idx, id_count, ctx);
+            return;
+        }
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            if (lower_bounds != nullptr) {
+                std::fill(lower_bounds, lower_bounds + id_count, std::numeric_limits<float>::max());
+            }
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_filter_count(ctx, id_count);
+        if constexpr (not OneBitIOTmpl::InMemory) {
+            if (id_count > 1) {
+                this->query_one_bit_lower_bound_by_multiread(
+                    result_dists, lower_bounds, comp, idx, id_count, ctx);
+                this->add_distance_evaluations(ctx, id_count);
+                return;
+            }
+        }
+
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_one_bit(idx[i]);
+        }
+
+        InnerIdType i = 0;
+        for (; i + 3 < id_count; i += 4) {
+            for (int64_t j = 0; j < 4; ++j) {
+                if (i + j + this->prefetch_stride_code_ < id_count) {
+                    this->prefetch_one_bit(idx[i + j + this->prefetch_stride_code_]);
+                }
+            }
+
+            auto lease1 = this->x_bit_layout_->Acquire(idx[i]);
+            auto lease2 = this->x_bit_layout_->Acquire(idx[i + 1]);
+            auto lease3 = this->x_bit_layout_->Acquire(idx[i + 2]);
+            auto lease4 = this->x_bit_layout_->Acquire(idx[i + 3]);
+            const auto* code1 = lease1.Data();
+            const auto* code2 = lease2.Data();
+            const auto* code3 = lease3.Data();
+            const auto* code4 = lease4.Data();
+            {
+                bool computed1 = false, computed2 = false, computed3 = false, computed4 = false;
+                auto* lower_bound1 = lower_bounds == nullptr ? nullptr : lower_bounds + i;
+                auto* lower_bound2 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 1;
+                auto* lower_bound3 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 2;
+                auto* lower_bound4 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 3;
+                this->bottom_quantizer().ComputeDistsWithOneBitLowerBoundBatch4(
+                    *comp,
+                    code1,
+                    code2,
+                    code3,
+                    code4,
+                    result_dists[i],
+                    result_dists[i + 1],
+                    result_dists[i + 2],
+                    result_dists[i + 3],
+                    lower_bound1,
+                    lower_bound2,
+                    lower_bound3,
+                    lower_bound4,
+                    computed1,
+                    computed2,
+                    computed3,
+                    computed4,
+                    this->query_rabitq_error_rate(ctx));
+                if (not computed1) {
+                    this->add_filter_fallback_full_count(ctx, 1);
+                    this->compute_full_dist_after_one_bit_failure(
+                        idx[i], code1, comp, result_dists + i, lower_bound1, ctx);
+                }
+                if (not computed2) {
+                    this->add_filter_fallback_full_count(ctx, 1);
+                    this->compute_full_dist_after_one_bit_failure(
+                        idx[i + 1], code2, comp, result_dists + i + 1, lower_bound2, ctx);
+                }
+                if (not computed3) {
+                    this->add_filter_fallback_full_count(ctx, 1);
+                    this->compute_full_dist_after_one_bit_failure(
+                        idx[i + 2], code3, comp, result_dists + i + 2, lower_bound3, ctx);
+                }
+                if (not computed4) {
+                    this->add_filter_fallback_full_count(ctx, 1);
+                    this->compute_full_dist_after_one_bit_failure(
+                        idx[i + 3], code4, comp, result_dists + i + 3, lower_bound4, ctx);
+                }
+            }
+        }
+
+        for (; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_one_bit(idx[i + this->prefetch_stride_code_]);
+            }
+
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* one_bit_code = one_bit_lease.Data();
+            auto* lower_bound = lower_bounds == nullptr ? nullptr : lower_bounds + i;
+            bool computed = false;
+            computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                *comp,
+                one_bit_code,
+                result_dists + i,
+                lower_bound,
+                this->query_rabitq_error_rate(ctx));
+            if (not computed) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i], one_bit_code, comp, result_dists + i, lower_bound, ctx);
+            }
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithFilterIPHint(float* result_dists,
+                          const float* filter_inner_products,
+                          const ComputerInterfacePtr& computer,
+                          const InnerIdType* idx,
+                          InnerIdType id_count,
+                          QueryContext* ctx = nullptr) override {
+        if (fused_code_storage_ != nullptr) {
+            this->query_fused_full_with_filter_ip(
+                result_dists, filter_inner_products, computer, idx, id_count, ctx);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_full_code(idx[i]);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_full_code(idx[i + this->prefetch_stride_code_]);
+            }
+            this->compute_full_dist_with_filter_ip(idx[i],
+                                                   comp,
+                                                   result_dists + i,
+                                                   ctx,
+                                                   filter_inner_products == nullptr
+                                                       ? std::numeric_limits<float>::quiet_NaN()
+                                                       : filter_inner_products[i]);
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    void
+    QueryWithFilterInnerProduct(float* result_dists,
+                                const float* filter_inner_products,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count,
+                                QueryContext* ctx = nullptr) override {
+        if (this->optimized_build_active_) {
+            this->query_optimized_build_codes(result_dists, computer, idx, id_count);
+            this->add_distance_evaluations(ctx, id_count);
+            return;
+        }
+
+        auto* comp = this->get_bottom_computer(computer);
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->prefetch_supplement(idx[i]);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->prefetch_supplement(idx[i + this->prefetch_stride_code_]);
+            }
+
+            bool computed = false;
+            const float filter_inner_product = filter_inner_products[i];
+            if (this->is_finite_float_bits(filter_inner_product)) {
+                bool supplement_need_release = false;
+                const uint8_t* supplement_code = nullptr;
+                try {
+                    supplement_code = this->get_supplement_code(idx[i], supplement_need_release);
+                    computed =
+                        this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterInnerProduct(
+                            *comp, supplement_code, filter_inner_product, result_dists + i);
+                } catch (...) {
+                    this->release_supplement_code(supplement_code, supplement_need_release);
+                    throw;
+                }
+                this->release_supplement_code(supplement_code, supplement_need_release);
+            }
+
+            if (computed) {
+                this->add_full_count(ctx, 1);
+                this->add_reorder_hint_full_count(ctx, 1);
+            } else {
+                if (this->is_finite_float_bits(filter_inner_product)) {
+                    this->add_reorder_fallback_full_count(ctx, 1);
+                }
+                this->compute_full_dist(idx[i], comp, result_dists + i, ctx);
+            }
+        }
+        this->add_distance_evaluations(ctx, id_count);
+    }
+
+    ComputerInterfacePtr
+    FactoryComputer(const void* query) override {
+        if (fused_code_storage_ != nullptr) {
+            return this->FactoryFusedComputer(query);
+        }
+        auto computer = this->quantizer_->FactoryComputer();
+        computer->SetQuery(static_cast<const float*>(query));
+        return computer;
+    }
+
+    [[nodiscard]] bool
+    SupportResidualQueryTransform() const override {
+        return metric == MetricType::METRIC_TYPE_L2SQR and
+               std::is_same_v<QuantizerT, BottomQuantizer>;
+    }
+
+    [[nodiscard]] uint64_t
+    GetResidualQueryTransformSize() const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            return this->bottom_quantizer().GetResidualQueryTransformSize();
+        }
+        return 0;
+    }
+
+    void
+    TransformResidualQuery(const float* query, float* transformed_query) const override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            this->bottom_quantizer().TransformResidualQuery(query, transformed_query);
+            return;
+        }
+        FlattenInterface::TransformResidualQuery(query, transformed_query);
+    }
+
+    ComputerInterfacePtr
+    FactoryComputerFromResidualQuery(const float* transformed_query) override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            auto computer = this->quantizer_->FactoryComputer();
+            this->bottom_quantizer().ProcessTransformedResidualQuery(
+                transformed_query, *this->get_bottom_computer(computer));
+            return computer;
+        }
+        return FlattenInterface::FactoryComputerFromResidualQuery(transformed_query);
+    }
+
+    void
+    ResetComputerFromResidualQuery(const float* transformed_query,
+                                   ComputerInterfacePtr& computer) override {
+        if constexpr (std::is_same_v<QuantizerT, BottomQuantizer>) {
+            if (computer == nullptr) {
+                computer = this->quantizer_->FactoryComputer();
+            }
+            this->bottom_quantizer().ProcessTransformedResidualQuery(
+                transformed_query, *this->get_bottom_computer(computer));
+            return;
+        }
+        FlattenInterface::ResetComputerFromResidualQuery(transformed_query, computer);
+    }
+
+    ComputerInterfacePtr
+    FactoryComputerForBuild(const void* query, InnerIdType id) override {
+        if (this->optimized_build_active_) {
+            auto computer = std::make_shared<OptimizedBuildComputer>(
+                this->optimized_build_record_size_, this->allocator_);
+            if (not this->optimized_build_scalar_layout_->Read(id, computer->scalar_code_.data)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read scalar RaBitQ build query code");
+            }
+            computer->code_sum_ = (*this->optimized_build_code_sums_)[id];
+            return computer;
+        }
+        return this->FactoryComputer(query);
+    }
+
+    void
+    Train(const void* data, uint64_t count) override {
+        if (this->quantizer_) {
+            this->quantizer_->Train(static_cast<const float*>(data), count);
+        }
+    }
+
+    bool
+    BeginOptimizedBuild(const FlattenOptimizedBuildContext& context) override {
+        if (this->optimized_build_active_ or
+            not this->bottom_quantizer().SupportScalarCodeBuild()) {
+            return false;
+        }
+        auto io_param = std::make_shared<MemoryIOParameter>();
+        auto build_codes = std::make_shared<FixedLayout<MemoryIO>>(io_param, this->common_param_);
+        build_codes->SetCodeSize(this->bottom_quantizer().GetScalarCodeSize());
+        auto code_sums = std::make_unique<Vector<uint64_t>>(this->allocator_);
+        if (this->max_capacity_ > 0) {
+            build_codes->Resize(this->max_capacity_);
+            code_sums->resize(this->max_capacity_, 0);
+        }
+        this->optimized_build_scalar_layout_ = build_codes;
+        this->optimized_build_code_sums_ = std::move(code_sums);
+        this->optimized_build_record_size_ = this->bottom_quantizer().GetScalarCodeSize();
+        this->refresh_prefetch_bytes();
+        this->optimized_build_context_ = context;
+        this->optimized_build_active_ = true;
+        return true;
+    }
+
+    void
+    FinalizeOptimizedBuild() override {
+        if (not this->optimized_build_active_) {
+            return;
+        }
+
+        // HGraph writes cluster-residual fused codes directly into the node slab while the
+        // temporary scalar codes are used for graph construction. There is no ordinary split
+        // storage to materialize for this mode.
+        if (this->fused_code_storage_ != nullptr) {
+            this->AbortOptimizedBuild();
+            return;
+        }
+
+        // Finalize workers write disjoint IDs, but the backing IO must already be fully sized so
+        // no worker enters a concurrent reallocation path.
+        const InnerIdType final_capacity =
+            std::max(this->max_capacity_, this->total_count_.load(std::memory_order_relaxed));
+        if (not this->external_filter_code_storage_) {
+            this->x_bit_layout_->Resize(final_capacity);
+        }
+        this->supplement_layout_->Resize(final_capacity);
+        this->max_capacity_ = final_capacity;
+
+        auto finalize_range = [this](InnerIdType begin, InnerIdType end) {
+            ByteBuffer one_bit_code(this->one_bit_code_size_, allocator_);
+            ByteBuffer supplement_code(this->supplement_code_size_, allocator_);
+            for (InnerIdType id = begin; id < end; ++id) {
+                auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(id);
+                if (not scalar_lease) {
+                    throw VsagException(ErrorType::INTERNAL_ERROR,
+                                        "failed to read temporary scalar RaBitQ build code");
+                }
+                this->bottom_quantizer().PackScalarCodeToSplitCode(
+                    scalar_lease.Data(), one_bit_code.data, supplement_code.data);
+                if (not this->external_filter_code_storage_) {
+                    this->x_bit_layout_->Write(id, one_bit_code.data);
+                }
+                this->supplement_layout_->Write(id, supplement_code.data);
+            }
+        };
+
+        const auto& thread_pool = this->optimized_build_context_.thread_pool;
+        const uint64_t worker_count = std::min<uint64_t>(
+            this->optimized_build_context_.thread_count,
+            static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)));
+        constexpr bool supports_parallel_finalize = not std::is_same_v<OneBitIOTmpl, MMapIO> and
+                                                    not std::is_same_v<SupplementIOTmpl, MMapIO>;
+        // MMapIO writes update shared logical size state even after Resize, so disjoint writes are
+        // not thread-safe for that backend.
+        if (thread_pool != nullptr and worker_count > 1 and supports_parallel_finalize) {
+            const uint64_t block_size =
+                (static_cast<uint64_t>(this->total_count_.load(std::memory_order_relaxed)) +
+                 worker_count - 1) /
+                worker_count;
+            std::vector<std::future<void>> futures;
+            futures.reserve(worker_count);
+            auto wait_futures = [&futures]() {
+                std::exception_ptr first_exception = nullptr;
+                for (auto& future : futures) {
+                    if (not future.valid()) {
+                        continue;
+                    }
+                    try {
+                        future.get();
+                    } catch (...) {
+                        if (not first_exception) {
+                            first_exception = std::current_exception();
+                        }
+                    }
+                }
+                if (first_exception) {
+                    std::rethrow_exception(first_exception);
+                }
+            };
+            try {
+                for (uint64_t begin = 0; begin < this->total_count_.load(std::memory_order_relaxed);
+                     begin += block_size) {
+                    const uint64_t end = std::min<uint64_t>(
+                        begin + block_size, this->total_count_.load(std::memory_order_relaxed));
+                    futures.emplace_back(
+                        thread_pool->GeneralEnqueue(finalize_range,
+                                                    static_cast<InnerIdType>(begin),
+                                                    static_cast<InnerIdType>(end)));
+                }
+            } catch (...) {
+                const auto enqueue_exception = std::current_exception();
+                try {
+                    wait_futures();
+                } catch (...) {
+                }
+                std::rethrow_exception(enqueue_exception);
+            }
+            wait_futures();
+        } else {
+            finalize_range(0, this->total_count_.load(std::memory_order_relaxed));
+        }
+
+        this->optimized_build_active_ = false;
+        this->optimized_build_scalar_layout_.reset();
+        this->optimized_build_code_sums_.reset();
+        this->optimized_build_record_size_ = 0;
+        this->refresh_prefetch_bytes();
+        this->optimized_build_context_ = {};
+    }
+
+    void
+    AbortOptimizedBuild() noexcept override {
+        this->optimized_build_active_ = false;
+        this->optimized_build_scalar_layout_.reset();
+        this->optimized_build_code_sums_.reset();
+        this->optimized_build_record_size_ = 0;
+        this->refresh_prefetch_bytes();
+        this->optimized_build_context_ = {};
+    }
+
+    [[nodiscard]] bool
+    IsOptimizedBuildActive() const override {
+        return this->optimized_build_active_;
+    }
+
+    void
+    InsertVector(const void* vector,
+                 InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
+        {
+            std::lock_guard lock(this->mutex_);
+            if (idx == std::numeric_limits<InnerIdType>::max()) {
+                idx = this->total_count_.load(std::memory_order_relaxed);
+            }
+            // Optimized-build workers write disjoint IDs without locking, so both temporary
+            // arrays must be fully sized before the workers start.
+            CHECK_ARGUMENT(
+                not this->optimized_build_active_ or
+                    static_cast<uint64_t>(idx) < this->optimized_build_code_sums_->size(),
+                "optimized RaBitQ build storage must be resized before inserting vectors");
+            this->total_count_.store(
+                std::max(this->total_count_.load(std::memory_order_relaxed), idx + 1),
+                std::memory_order_release);
+        }
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            return;
+        }
+        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+    }
+
+    bool
+    UpdateVector(const void* vector,
+                 InnerIdType idx = std::numeric_limits<InnerIdType>::max()) override {
+        if (idx >= this->total_count_.load(std::memory_order_acquire)) {
+            return false;
+        }
+        if (this->fused_code_storage_ != nullptr) {
+            return true;
+        }
+        std::lock_guard lock(this->mutex_);
+        this->write_encoded_vector(static_cast<const float*>(vector), idx);
+        return true;
+    }
+
+    void
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override {
+        auto dim = quantizer_->GetDim();
+        for (InnerIdType i = 0; i < count; ++i) {
+            auto idx = idx_vec == nullptr ? std::numeric_limits<InnerIdType>::max() : idx_vec[i];
+            this->InsertVector(static_cast<const float*>(vectors) + dim * i, idx);
+        }
+    }
+
+    // Pair-distance residual codes live in the rotated space. Keep a derived cache in that
+    // same space; fused_centroids_ remains in the original space for assignment/serialization.
+    void
+    refresh_fused_cluster_stats() {
+        const uint64_t cluster_count = fused_quantizers_.size();
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        fused_rotated_centroids_.clear();
+        fused_centroid_sums_.assign(cluster_count, 0.0F);
+        fused_centroid_pair_ip_.assign(cluster_count * cluster_count, 0.0F);
+        if (cluster_count == 0 or fused_centroids_.size() != cluster_count * dim) {
+            return;
+        }
+        fused_rotated_centroids_.resize(cluster_count * dim);
+        Vector<float> transformed_centroid(dim, 0.0F, this->allocator_);
+        for (uint64_t i = 0; i < cluster_count; ++i) {
+            float raw_norm = 0.0F;
+            typename BottomQuantizer::norm_type mrq_norm_sqr = 0.0F;
+            this->bottom_quantizer().TransformFusedQuery(
+                fused_centroids_.data() + i * dim, transformed_centroid, raw_norm, mrq_norm_sqr);
+            std::copy(transformed_centroid.begin(),
+                      transformed_centroid.end(),
+                      fused_rotated_centroids_.data() + i * dim);
+            const float* centroid_i = fused_rotated_centroids_.data() + i * dim;
+            float sum = 0.0F;
+            for (uint64_t d = 0; d < dim; ++d) {
+                sum += centroid_i[d];
+            }
+            fused_centroid_sums_[i] = sum;
+            for (uint64_t j = 0; j <= i; ++j) {
+                const float* centroid_j = fused_rotated_centroids_.data() + j * dim;
+                const float ip = FP32ComputeIP(centroid_i, centroid_j, dim);
+                fused_centroid_pair_ip_[i * cluster_count + j] = ip;
+                fused_centroid_pair_ip_[j * cluster_count + i] = ip;
+            }
+        }
+    }
+
+    // Code-domain pair distance for fused codes; false when the layout is not the
+    // HNSW-compatible 1 + 7 codec, in which case the reconstruction path is used.
+    bool
+    compute_fused_pair_distance(InnerIdType id1, InnerIdType id2, float* distance) const {
+        if constexpr (metric != MetricType::METRIC_TYPE_IP and
+                      metric != MetricType::METRIC_TYPE_L2SQR) {
+            return false;
+        }
+        const uint64_t dim = static_cast<uint64_t>(common_param_.dim_);
+        // The code-domain kernels unpack whole 64-lane blocks; other dimensions (and other
+        // codec layouts) keep using the float reconstruction path.
+        if (fused_code_storage_ == nullptr or fused_quantizers_.empty() or
+            fused_centroid_sums_.size() != fused_quantizers_.size() or
+            fused_rotated_centroids_.size() != fused_quantizers_.size() * dim or
+            (dim & 63U) != 0U or bottom_quantizer().FilterBits() != 1 or
+            bottom_quantizer().ReorderBits() != 7) {
+            return false;
+        }
+        RaBitQFusedCodeView view1;
+        RaBitQFusedCodeView view2;
+        if (not fused_code_storage_->GetFusedCodeView(id1, view1) or
+            not fused_code_storage_->GetFusedCodeView(id2, view2) or
+            view1.cluster_id >= fused_quantizers_.size() or
+            view2.cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+            const uint64_t cluster_count = fused_quantizers_.size();
+            const uint64_t index1 =
+                static_cast<uint64_t>(view1.cluster_id) * cluster_count + view2.cluster_id;
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairIP(
+                view1.one_bit_code,
+                view1.supplement_code,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim,
+                fused_centroid_sums_[view1.cluster_id],
+                view2.one_bit_code,
+                view2.supplement_code,
+                fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim,
+                fused_centroid_sums_[view2.cluster_id],
+                fused_centroid_pair_ip_[index1],
+                distance);
+        } else {
+            const bool same_cluster = view1.cluster_id == view2.cluster_id;
+            // c1 - c2 is derived here rather than tabulated for every cluster pair: that table
+            // would cost cluster_count^2 * dim floats (hundreds of MB for a few hundred clusters
+            // at dim 1024), while one subtraction pass over dim per cross-cluster pair is small
+            // next to the pair distance itself.
+            const float* centroid_diff = nullptr;
+            float centroid_diff_sq = 0.0F;
+            if (not same_cluster) {
+                // Per-thread scratch does not mutate this datacell. Retain the largest dimension
+                // seen by this thread to avoid per-pair allocation; release it at thread exit.
+                thread_local std::vector<float> diff_scratch;
+                if (diff_scratch.size() < dim) {
+                    diff_scratch.resize(dim);
+                }
+                const float* centroid1 =
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view1.cluster_id) * dim;
+                const float* centroid2 =
+                    fused_rotated_centroids_.data() + static_cast<uint64_t>(view2.cluster_id) * dim;
+                float sq = 0.0F;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    const float delta = centroid1[d] - centroid2[d];
+                    diff_scratch[d] = delta;
+                    sq += delta * delta;
+                }
+                centroid_diff = diff_scratch.data();
+                centroid_diff_sq = sq;
+            }
+            const float centroid_diff_sum =
+                fused_centroid_sums_[view1.cluster_id] - fused_centroid_sums_[view2.cluster_id];
+            return fused_quantizers_[view1.cluster_id]->ComputeFusedPairL2Difference(
+                view1.one_bit_code,
+                view1.supplement_code,
+                view2.one_bit_code,
+                view2.supplement_code,
+                centroid_diff_sq,
+                centroid_diff_sum,
+                centroid_diff,
+                distance);
+        }
+    }
+
+    float
+    ComputePairVectors(InnerIdType id1, InnerIdType id2) override {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            // Cheapest path first: the HNSW-compatible 1 + 7 codec can be compared directly in
+            // the code domain, without reconstructing either float vector.
+            float code_domain_distance = 0.0F;
+            if (this->compute_fused_pair_distance(id1, id2, &code_domain_distance)) {
+                return code_domain_distance;
+            }
+            // Pairwise distances only ever compare one distance against another, and the inverse
+            // rotation is a conformal map. Reconstructing the rotated-domain vectors and skipping
+            // the rotation therefore preserves every pruning decision while removing the
+            // transform from the hottest path of construction.
+            Vector<float> vector1(this->common_param_.dim_, 0.0F, this->allocator_);
+            Vector<float> vector2(this->common_param_.dim_, 0.0F, this->allocator_);
+            CHECK_ARGUMENT(this->DecodeFusedById(id1, vector1.data(), false),
+                           "failed to decode the first fused RaBitQ vector");
+            CHECK_ARGUMENT(this->DecodeFusedById(id2, vector2.data(), false),
+                           "failed to decode the second fused RaBitQ vector");
+            const auto dim = static_cast<uint64_t>(this->common_param_.dim_);
+            if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
+                return FP32ComputeL2Sqr(vector1.data(), vector2.data(), dim);
+            }
+            if constexpr (metric == MetricType::METRIC_TYPE_IP) {
+                return 1.0F - FP32ComputeIP(vector1.data(), vector2.data(), dim);
+            }
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ pairwise distance does not support this metric");
+        }
+        if (this->optimized_build_active_) {
+            auto lease1 = this->optimized_build_scalar_layout_->Acquire(id1);
+            auto lease2 = this->optimized_build_scalar_layout_->Acquire(id2);
+            if (not lease1 or not lease2) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build codes");
+            }
+            return this->bottom_quantizer().ComputeScalarCodesDistance(
+                lease1.Data(),
+                (*optimized_build_code_sums_)[id1],
+                lease2.Data(),
+                (*optimized_build_code_sums_)[id2]);
+        }
+        ByteBuffer codes1(this->code_size_, allocator_);
+        ByteBuffer codes2(this->code_size_, allocator_);
+        this->GetCodesById(id1, codes1.data);
+        this->GetCodesById(id2, codes2.data);
+        return this->bottom_quantizer().Compute(codes1.data, codes2.data);
+    }
+
+    void
+    Resize(InnerIdType new_capacity) override {
+        if (new_capacity <= this->max_capacity_) {
+            return;
+        }
+        if (this->fused_code_storage_ != nullptr) {
+            if (this->optimized_build_active_) {
+                this->optimized_build_scalar_layout_->Resize(new_capacity);
+                this->optimized_build_code_sums_->resize(new_capacity, 0);
+            }
+            this->max_capacity_ = new_capacity;
+            return;
+        }
+        if (not this->external_filter_code_storage_) {
+            this->x_bit_layout_->Resize(new_capacity);
+        }
+        this->supplement_layout_->Resize(new_capacity);
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_layout_->Resize(new_capacity);
+            this->optimized_build_code_sums_->resize(new_capacity, 0);
+        }
+        this->max_capacity_ = new_capacity;
+    }
+
+    void
+    Prefetch(InnerIdType id) override {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            this->fused_code_storage_->PrefetchFusedCodes(id, false);
+            return;
+        }
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_layout_->Prefetch(id,
+                                                           this->optimized_build_prefetch_bytes_);
+            return;
+        }
+        this->prefetch_one_bit(id);
+    }
+
+    bool
+    SetRuntimeParameters(const UnorderedMap<std::string, float>& new_params) override {
+        const bool changed = FlattenInterface::SetRuntimeParameters(new_params);
+        if (new_params.find(PREFETCH_DEPTH_CODE) != new_params.end()) {
+            this->refresh_prefetch_bytes();
+        }
+        return changed;
+    }
+
+    [[nodiscard]] uint64_t
+    GetOneBitPrefetchBytes() const {
+        return this->one_bit_prefetch_bytes_;
+    }
+
+    [[nodiscard]] uint64_t
+    GetSupplementPrefetchBytes() const {
+        return this->supplement_prefetch_bytes_;
+    }
+
+    void
+    ExportModel(const FlattenInterfacePtr& other) const override {
+        std::stringstream ss;
+        IOStreamWriter writer(ss);
+        this->quantizer_->Serialize(writer);
+        ss.seekg(0, std::ios::beg);
+        IOStreamReader reader(ss);
+        auto ptr = std::dynamic_pointer_cast<
+            RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "Export model's rabitq split datacell failed");
+        }
+        ptr->quantizer_->Deserialize(reader);
+        ptr->refresh_code_sizes();
+    }
+
+    void
+    InitIO(const IOParamPtr& io_param) override {
+        if (this->fused_code_storage_ != nullptr) {
+            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
+                           "fused RaBitQ code storage requires memory IO");
+            return;
+        }
+        const bool shares_io_param = this->supplement_io_type_.empty();
+        this->x_bit_layout_->InitIO(SuffixIOParam(io_param, "_onebit", shares_io_param));
+        // In hybrid mode (one-bit and supplement use different IO backends)
+        // the caller-facing `io_param` is the one-bit IO parameter type and
+        // cannot be passed directly to `supplement_layout_`. Rebuild a fresh
+        // IOParameter of the recorded supplement type so the underlying IO
+        // implementation receives the correct parameter subclass.
+        this->supplement_layout_->InitIO(RebuildSupplementIOParam(io_param));
+    }
+
+    void
+    InitIO(const IOParamPtr& one_bit_io_param, const IOParamPtr& supplement_io_param) {
+        if (this->fused_code_storage_ != nullptr) {
+            CHECK_ARGUMENT(OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory,
+                           "fused RaBitQ code storage requires memory IO");
+            return;
+        }
+        const bool shares_io_param = supplement_io_param == nullptr;
+        this->x_bit_layout_->InitIO(SuffixIOParam(one_bit_io_param, "_onebit", shares_io_param));
+        if (supplement_io_param != nullptr) {
+            // Refresh the recorded supplement type so subsequent
+            // single-parameter InitIO calls (e.g. from Deserialize) can
+            // reconstruct the same IO subtype.
+            this->supplement_io_type_ = supplement_io_param->GetTypeName();
+            this->supplement_layout_->InitIO(supplement_io_param);
+        } else {
+            this->supplement_layout_->InitIO(RebuildSupplementIOParam(one_bit_io_param));
+        }
+    }
+
+    IndexCommonParam
+    ExportCommonParam() override {
+        return common_param_;
+    }
+
+    [[nodiscard]] std::string
+    GetQuantizerName() override {
+        return this->quantizer_->Name();
+    }
+
+    [[nodiscard]] bool
+    SupportSplitCodeStorage() const override {
+        return true;
+    }
+
+    [[nodiscard]] MetricType
+    GetMetricType() override {
+        return this->quantizer_->Metric();
+    }
+
+    [[nodiscard]] uint64_t
+    OneBitCodeSize() const override {
+        return one_bit_code_size_;
+    }
+
+    [[nodiscard]] uint64_t
+    SupplementCodeSize() const override {
+        return supplement_code_size_;
+    }
+
+    [[nodiscard]] uint32_t
+    FusedFilterBits() const override {
+        return bottom_quantizer().FilterBits();
+    }
+
+    [[nodiscard]] uint32_t
+    FusedSupplementBits() const override {
+        return bottom_quantizer().ReorderBits();
+    }
+
+    [[nodiscard]] bool
+    UsesLegacyHnswFusedCodec() const override {
+        return IsLegacyHnswFusedCodec();
+    }
+
+    void
+    AttachFusedCodeStorage(RabitQFusedInterface* storage) override {
+        CHECK_ARGUMENT(storage != nullptr, "fused RaBitQ code storage must not be null");
+        CHECK_ARGUMENT(not optimized_build_active_,
+                       "cannot attach fused RaBitQ storage during optimized build");
+        CHECK_ARGUMENT(storage->FusedOneBitCodeSize() == one_bit_code_size_ and
+                           storage->FusedSupplementCodeSize() == supplement_code_size_,
+                       "fused RaBitQ code sizes do not match the split model");
+        fused_code_storage_ = storage;
+        x_bit_layout_->Shrink(0);
+        supplement_layout_->Shrink(0);
+    }
+
+    [[nodiscard]] bool
+    UsesExternalFusedCodeStorage() const override {
+        return fused_code_storage_ != nullptr;
+    }
+
+    bool
+    CopySplitCodes(InnerIdType id, uint8_t* one_bit_code, uint8_t* supplement_code) const override {
+        if (this->optimized_build_active_ or one_bit_code == nullptr or
+            supplement_code == nullptr) {
+            return false;
+        }
+        if (fused_code_storage_ != nullptr) {
+            RaBitQFusedCodeView view;
+            if (not fused_code_storage_->GetFusedCodeView(id, view)) {
+                return false;
+            }
+            std::memcpy(one_bit_code, view.one_bit_code, one_bit_code_size_);
+            std::memcpy(supplement_code, view.supplement_code, supplement_code_size_);
+            return true;
+        }
+        return this->x_bit_layout_->Read(id, one_bit_code) and
+               this->supplement_layout_->Read(id, supplement_code);
+    }
+
+    bool
+    DecodeFusedById(InnerIdType id, float* data, bool apply_inverse_rotation) const override {
+        if (data == nullptr or fused_code_storage_ == nullptr or id >= this->TotalCount() or
+            fused_quantizers_.empty()) {
+            return false;
+        }
+        RaBitQFusedCodeView view;
+        if (not fused_code_storage_->GetFusedCodeView(id, view) or
+            view.cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        return fused_quantizers_[view.cluster_id]->DecodeFusedSplitCode(view.one_bit_code,
+                                                                        view.supplement_code,
+                                                                        IsLegacyHnswFusedCodec(),
+                                                                        data,
+                                                                        apply_inverse_rotation);
+    }
+
+    bool
+    ComputeOneBitWithFilterIP(const ComputerInterfacePtr& computer,
+                              const uint8_t* one_bit_code,
+                              float* distance,
+                              float* lower_bound,
+                              float* filter_inner_product,
+                              QueryContext* ctx) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_filter_count(ctx, 1);
+        const bool computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBoundAndFilterIP(
+            *comp,
+            one_bit_code,
+            distance,
+            lower_bound,
+            filter_inner_product,
+            this->query_rabitq_error_rate(ctx));
+        if (not computed) {
+            this->add_filter_fallback_full_count(ctx, 1);
+        }
+        return computed;
+    }
+
+    bool
+    ComputeFullWithFilterIP(const ComputerInterfacePtr& computer,
+                            const uint8_t* one_bit_code,
+                            const uint8_t* supplement_code,
+                            float filter_inner_product,
+                            float* distance,
+                            QueryContext* ctx) const override {
+        if (this->bottom_quantizer().FilterBits() < 2) {
+            return false;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_full_count(ctx, 1);
+        const bool computed = this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterIP(
+            *comp, one_bit_code, supplement_code, filter_inner_product, distance);
+        if (computed) {
+            this->add_reorder_hint_full_count(ctx, 1);
+        } else {
+            this->add_reorder_fallback_full_count(ctx, 1);
+        }
+        return computed;
+    }
+
+    bool
+    ComputeFull(const ComputerInterfacePtr& computer,
+                const uint8_t* one_bit_code,
+                const uint8_t* supplement_code,
+                float* distance,
+                QueryContext* ctx) const override {
+        auto* comp = this->get_bottom_computer(computer);
+        this->add_full_count(ctx, 1);
+        return this->bottom_quantizer().ComputeDistWithSplitCode(
+            *comp, one_bit_code, supplement_code, distance);
+    }
+
+    void
+    TrainFusedCodec(const float* data, uint64_t count, uint32_t cluster_count) override {
+        CHECK_ARGUMENT(data != nullptr and count > 0,
+                       "fused RaBitQ training data must not be empty");
+        CHECK_ARGUMENT(cluster_count == 16, "fused RaBitQ requires exactly 16 clusters");
+        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
+                       "fused RaBitQ quantizer parameter is unavailable");
+        CHECK_ARGUMENT(this->AreFusedVectorsFinite(data, count),
+                       "fused RaBitQ training data must contain only finite values");
+
+        KMeansCluster kmeans(
+            static_cast<int32_t>(common_param_.dim_), allocator_, common_param_.thread_pool_);
+        const auto trained_cluster_count =
+            static_cast<uint32_t>(std::min<uint64_t>(cluster_count, count));
+        kmeans.Run(trained_cluster_count,
+                   data,
+                   count,
+                   25,
+                   nullptr,
+                   false,
+                   1e-6F,
+                   KMeansInitMethod::KMEANS_PLUS_PLUS,
+                   0x52425131U,
+                   true);
+        fused_centroids_.resize(static_cast<uint64_t>(cluster_count) * common_param_.dim_);
+        for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
+            const auto source_cluster = cluster_id % trained_cluster_count;
+            std::copy_n(
+                kmeans.k_centroids_ + static_cast<uint64_t>(source_cluster) * common_param_.dim_,
+                common_param_.dim_,
+                fused_centroids_.data() + static_cast<uint64_t>(cluster_id) * common_param_.dim_);
+        }
+
+        fused_quantizers_.clear();
+        fused_quantizers_.reserve(cluster_count);
+        for (uint32_t cluster_id = 0; cluster_id < cluster_count; ++cluster_id) {
+            auto quantizer =
+                std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
+            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
+            quantizer->SetCentroid(fused_centroids_.data() +
+                                   static_cast<uint64_t>(cluster_id) * common_param_.dim_);
+            fused_quantizers_.push_back(std::move(quantizer));
+        }
+        refresh_fused_cluster_stats();
+    }
+
+    bool
+    EncodeFused(const float* data,
+                uint8_t* one_bit_code,
+                uint8_t* supplement_code,
+                uint32_t* cluster_id) const override {
+        if (data == nullptr or one_bit_code == nullptr or supplement_code == nullptr or
+            cluster_id == nullptr or fused_quantizers_.empty()) {
+            return false;
+        }
+        if (not this->AreFusedVectorsFinite(data, 1)) {
+            return false;
+        }
+        *cluster_id = NearestFusedCluster(data);
+        ByteBuffer full_code(code_size_, allocator_);
+        auto& quantizer = fused_quantizers_[*cluster_id];
+        if (not quantizer->EncodeOne(data, full_code.data)) {
+            return false;
+        }
+        quantizer->SplitCode(full_code.data, one_bit_code, supplement_code);
+        if (IsLegacyHnswFusedCodec()) {
+            quantizer->EncodeHnswOneBitMetadata(data, one_bit_code);
+            if (not quantizer->EncodeHnswSupplement(data, supplement_code)) {
+                return false;
+            }
+        } else if (not quantizer->EncodeFusedAffineMetadata(data, one_bit_code, supplement_code)) {
+            return false;
+        }
+        return true;
+    }
+
+    ComputerInterfacePtr
+    FactoryFusedComputer(const void* query) const override {
+        auto result = std::make_shared<FusedComputer>(allocator_);
+        if (fused_quantizers_.empty()) {
+            return result;
+        }
+        result->transformed_query_.resize(fused_quantizers_.front()->GetDim());
+        fused_quantizers_.front()->TransformFusedQuery(static_cast<const float*>(query),
+                                                       result->transformed_query_,
+                                                       result->query_raw_norm_,
+                                                       result->mrq_norm_sqr_);
+        if (bottom_quantizer().FilterBits() == 1) {
+            fused_quantizers_.front()->PrepareHnswFourBitQuery(result->transformed_query_.data(),
+                                                               result->hnsw_query_planes_,
+                                                               result->hnsw_query_delta_,
+                                                               result->hnsw_query_vl_,
+                                                               result->hnsw_query_sum_);
+        } else {
+            double query_sum = 0.0;
+            for (const float value : result->transformed_query_) {
+                query_sum += static_cast<double>(value);
+            }
+            result->hnsw_query_sum_ = static_cast<float>(query_sum);
+        }
+        result->hnsw_g_add_.resize(fused_quantizers_.size());
+        result->hnsw_g_error_.resize(fused_quantizers_.size());
+        for (uint64_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
+            fused_quantizers_[cluster_id]->ComputeHnswCentroidTerms(
+                result->transformed_query_.data(),
+                result->hnsw_g_add_[cluster_id],
+                result->hnsw_g_error_[cluster_id]);
+        }
+        return result;
+    }
+
+    bool
+    GetFusedTraversalQuery(const ComputerInterfacePtr& computer,
+                           RaBitQFusedTraversalQuery* query) const override {
+        if (query == nullptr) {
+            return false;
+        }
+        *query = {};
+        auto* fused_computer = static_cast<FusedComputer*>(computer.get());
+        if (fused_computer == nullptr or fused_quantizers_.empty()) {
+            return false;
+        }
+        const auto filter_bits = bottom_quantizer().FilterBits();
+        query->query_planes =
+            filter_bits == 1 ? fused_computer->hnsw_query_planes_.data() : nullptr;
+        query->transformed_query = fused_computer->transformed_query_.data();
+        query->cluster_g_add = fused_computer->hnsw_g_add_.data();
+        query->cluster_g_error = fused_computer->hnsw_g_error_.data();
+        query->dim = common_param_.dim_;
+        query->one_bit_metadata_offset = IsLegacyHnswFusedCodec()
+                                             ? bottom_quantizer().PlaneBytes()
+                                             : bottom_quantizer().OneBitRecordNormOffset();
+        query->supplement_metadata_offset = bottom_quantizer().SupplementMetaOffset();
+        query->cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
+        query->filter_bits = filter_bits;
+        query->supplement_bits = bottom_quantizer().ReorderBits();
+        query->query_delta = fused_computer->hnsw_query_delta_;
+        query->query_vl = fused_computer->hnsw_query_vl_;
+        query->query_sum = fused_computer->hnsw_query_sum_;
+        query->default_rabitq_error_rate = bottom_quantizer().DefaultRaBitQErrorRate();
+        query->affine = not IsLegacyHnswFusedCodec();
+        query->filter_inner_product_is_exact = query->affine and filter_bits >= 2;
+        return query->transformed_query != nullptr and query->cluster_g_add != nullptr and
+               query->cluster_g_error != nullptr and
+               (filter_bits != 1 or query->query_planes != nullptr);
+    }
+
+    bool
+    ComputeFusedOneBitWithFilterIP(const ComputerInterfacePtr& computer,
+                                   uint32_t cluster_id,
+                                   const uint8_t* one_bit_code,
+                                   const uint8_t* supplement_code,
+                                   float* distance,
+                                   float* lower_bound,
+                                   float* filter_inner_product,
+                                   QueryContext* ctx) const override {
+        auto* fused_computer = static_cast<FusedComputer*>(computer.get());
+        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        this->add_filter_count(ctx, 1);
+        if (filter_inner_product != nullptr) {
+            *filter_inner_product = std::numeric_limits<float>::quiet_NaN();
+        }
+        float local_filter_inner_product = std::numeric_limits<float>::quiet_NaN();
+        bool computed = false;
+        if (IsLegacyHnswFusedCodec()) {
+            computed = fused_quantizers_[cluster_id]->ComputeHnswOneBit(
+                fused_computer->hnsw_query_planes_.data(),
+                fused_computer->hnsw_query_delta_,
+                fused_computer->hnsw_query_vl_,
+                fused_computer->hnsw_query_sum_,
+                fused_computer->hnsw_g_add_[cluster_id],
+                fused_computer->hnsw_g_error_[cluster_id],
+                one_bit_code,
+                supplement_code,
+                distance,
+                lower_bound,
+                &local_filter_inner_product,
+                this->query_rabitq_error_rate(ctx));
+        } else {
+            RaBitQFusedIPPrecision precision = RaBitQFusedIPPrecision::INVALID;
+            const auto* query_planes = bottom_quantizer().FilterBits() == 1
+                                           ? fused_computer->hnsw_query_planes_.data()
+                                           : nullptr;
+            computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFilter(
+                fused_computer->transformed_query_.data(),
+                query_planes,
+                fused_computer->hnsw_query_delta_,
+                fused_computer->hnsw_query_vl_,
+                fused_computer->hnsw_query_sum_,
+                fused_computer->hnsw_g_add_[cluster_id],
+                fused_computer->hnsw_g_error_[cluster_id],
+                one_bit_code,
+                this->query_rabitq_error_rate(ctx),
+                distance,
+                lower_bound,
+                &local_filter_inner_product,
+                &precision);
+            if (computed and bottom_quantizer().FilterBits() >= 2 and
+                precision == RaBitQFusedIPPrecision::EXACT and filter_inner_product != nullptr) {
+                *filter_inner_product = local_filter_inner_product;
+            }
+        }
+        if (not computed and (ctx == nullptr or ctx->enable_rabitq_reorder)) {
+            this->add_filter_fallback_full_count(ctx, 1);
+        }
+        return computed;
+    }
+
+    bool
+    ComputeFusedFullWithFilterIP(const ComputerInterfacePtr& computer,
+                                 uint32_t cluster_id,
+                                 const uint8_t* one_bit_code,
+                                 const uint8_t* supplement_code,
+                                 float filter_inner_product,
+                                 float* distance,
+                                 QueryContext* ctx) const override {
+        auto* fused_computer = static_cast<FusedComputer*>(computer.get());
+        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        this->add_full_count(ctx, 1);
+        bool computed = false;
+        if (not IsLegacyHnswFusedCodec() and bottom_quantizer().FilterBits() >= 2) {
+            computed = fused_quantizers_[cluster_id]->ComputeFusedAffineFullWithFilterIP(
+                fused_computer->transformed_query_.data(),
+                fused_computer->hnsw_query_sum_,
+                fused_computer->hnsw_g_add_[cluster_id],
+                one_bit_code,
+                supplement_code,
+                filter_inner_product,
+                distance);
+        }
+        if (computed) {
+            this->add_reorder_hint_full_count(ctx, 1);
+        } else {
+            this->add_reorder_fallback_full_count(ctx, 1);
+        }
+        return computed;
+    }
+
+    bool
+    ComputeFusedFull(const ComputerInterfacePtr& computer,
+                     uint32_t cluster_id,
+                     const uint8_t* one_bit_code,
+                     const uint8_t* supplement_code,
+                     float* distance,
+                     QueryContext* ctx) const override {
+        auto* fused_computer = static_cast<FusedComputer*>(computer.get());
+        if (fused_computer == nullptr or cluster_id >= fused_quantizers_.size()) {
+            return false;
+        }
+        this->add_full_count(ctx, 1);
+        if (not IsLegacyHnswFusedCodec()) {
+            return fused_quantizers_[cluster_id]->ComputeFusedAffineFullDirect(
+                fused_computer->transformed_query_.data(),
+                fused_computer->hnsw_query_sum_,
+                fused_computer->hnsw_g_add_[cluster_id],
+                one_bit_code,
+                supplement_code,
+                distance);
+        }
+        const float inv_sqrt_dim = 1.0F / std::sqrt(static_cast<float>(common_param_.dim_));
+        const float signed_ip = RaBitQFloatBinaryIP(fused_computer->transformed_query_.data(),
+                                                    one_bit_code,
+                                                    common_param_.dim_,
+                                                    inv_sqrt_dim);
+        const float filter_inner_product =
+            0.5F * (signed_ip / inv_sqrt_dim + fused_computer->hnsw_query_sum_);
+        float lower_bound = 0.0F;
+        return fused_quantizers_[cluster_id]->ComputeHnswFull(
+            fused_computer->transformed_query_.data(),
+            fused_computer->hnsw_query_sum_,
+            fused_computer->hnsw_g_add_[cluster_id],
+            fused_computer->hnsw_g_error_[cluster_id],
+            one_bit_code,
+            supplement_code,
+            filter_inner_product,
+            distance,
+            &lower_bound);
+    }
+
+    [[nodiscard]] std::string
+    ExportFusedCodec() const override {
+        if (fused_quantizers_.empty()) {
+            return {};
+        }
+        std::stringstream output;
+        IOStreamWriter writer(output);
+        constexpr uint32_t version = 1;
+        StreamWriter::WriteObj(writer, version);
+        StreamWriter::WriteVector(writer, fused_centroids_);
+        const auto cluster_count = static_cast<uint32_t>(fused_quantizers_.size());
+        StreamWriter::WriteObj(writer, cluster_count);
+        return output.str();
+    }
+
+    void
+    ImportFusedCodec(const std::string& serialized) override {
+        CHECK_ARGUMENT(not serialized.empty(), "fused RaBitQ codec payload is empty");
+        CHECK_ARGUMENT(this->quantization_param_ != nullptr,
+                       "fused RaBitQ quantizer parameter is unavailable");
+        constexpr uint64_t cluster_count = 16;
+        constexpr uint64_t fixed_payload_size =
+            sizeof(uint32_t) + sizeof(uint64_t) + sizeof(uint32_t);
+        constexpr uint64_t bytes_per_dimension = cluster_count * sizeof(float);
+        CHECK_ARGUMENT(common_param_.dim_ > 0, "invalid fused RaBitQ dimension");
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        CHECK_ARGUMENT(dim <= (std::numeric_limits<uint64_t>::max() - fixed_payload_size) /
+                                  bytes_per_dimension,
+                       "fused RaBitQ codec size overflow");
+        const uint64_t expected_centroid_count = cluster_count * dim;
+        const uint64_t expected_payload_size =
+            fixed_payload_size + expected_centroid_count * sizeof(float);
+        CHECK_ARGUMENT(serialized.size() == expected_payload_size,
+                       "invalid fused RaBitQ codec payload size");
+
+        std::stringstream input(serialized);
+        IOStreamReader reader(input);
+        uint32_t version = 0;
+        StreamReader::ReadObj(reader, version);
+        CHECK_ARGUMENT(version == 1, "unsupported fused RaBitQ codec version");
+        uint64_t centroid_count = 0;
+        StreamReader::ReadObj(reader, centroid_count);
+        CHECK_ARGUMENT(centroid_count == expected_centroid_count,
+                       "invalid fused RaBitQ centroid payload");
+        fused_centroids_.resize(expected_centroid_count);
+        reader.Read(reinterpret_cast<char*>(fused_centroids_.data()),
+                    expected_centroid_count * sizeof(float));
+        uint32_t serialized_cluster_count = 0;
+        StreamReader::ReadObj(reader, serialized_cluster_count);
+        CHECK_ARGUMENT(serialized_cluster_count == cluster_count,
+                       "invalid fused RaBitQ cluster count");
+        CHECK_ARGUMENT(reader.GetCursor() == reader.Length(),
+                       "trailing fused RaBitQ codec payload");
+
+        fused_quantizers_.clear();
+        fused_quantizers_.reserve(serialized_cluster_count);
+        for (uint32_t cluster_id = 0; cluster_id < serialized_cluster_count; ++cluster_id) {
+            auto quantizer =
+                std::make_shared<RaBitQuantizer<metric>>(quantization_param_, common_param_);
+            quantizer->ShareFusedModelFrom(this->bottom_quantizer());
+            quantizer->SetCentroid(fused_centroids_.data() +
+                                   static_cast<uint64_t>(cluster_id) * common_param_.dim_);
+            fused_quantizers_.push_back(std::move(quantizer));
+        }
+        refresh_fused_cluster_stats();
+    }
+
+    bool
+    Decode(const uint8_t* codes, float* data) override {
+        return this->quantizer_->DecodeOne(codes, data);
+    }
+
+    bool
+    Encode(const float* data, uint8_t* codes) override {
+        return this->quantizer_->EncodeOne(data, codes);
+    }
+
+    bool
+    CompareRawVectorWithId(const void* vector, InnerIdType id) override {
+        if (this->fused_code_storage_ == nullptr) {
+            return FlattenInterface::CompareRawVectorWithId(vector, id);
+        }
+        if (vector == nullptr) {
+            return false;
+        }
+        ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
+        ByteBuffer supplement_code(supplement_code_size_, allocator_);
+        uint32_t cluster_id = 0;
+        if (not this->EncodeFused(static_cast<const float*>(vector),
+                                  one_bit_code.data,
+                                  supplement_code.data,
+                                  &cluster_id)) {
+            return false;
+        }
+        RaBitQFusedCodeView stored;
+        if (not this->fused_code_storage_->GetFusedCodeView(id, stored)) {
+            return false;
+        }
+        return stored.cluster_id == cluster_id and
+               std::memcmp(stored.one_bit_code, one_bit_code.data, one_bit_code_size_) == 0 and
+               std::memcmp(stored.supplement_code, supplement_code.data, supplement_code_size_) ==
+                   0;
+    }
+
+    [[nodiscard]] const uint8_t*
+    GetCodesById(InnerIdType id, bool& need_release) const override {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            need_release = false;
+            return nullptr;
+        }
+        if (this->optimized_build_active_) {
+            auto* codes = static_cast<uint8_t*>(allocator_->Allocate(this->code_size_));
+            if (not this->GetCodesById(id, codes)) {
+                allocator_->Deallocate(codes);
+                need_release = false;
+                return nullptr;
+            }
+            need_release = true;
+            return codes;
+        }
+        auto* codes = static_cast<uint8_t*>(allocator_->Allocate(this->code_size_));
+        this->GetCodesById(id, codes);
+        need_release = true;
+        return codes;
+    }
+
+    void
+    Release(const uint8_t* data) const override {
+        allocator_->Deallocate(const_cast<uint8_t*>(data));
+    }
+
+    bool
+    GetCodesById(InnerIdType id, uint8_t* codes) const override {
+        if (this->fused_code_storage_ != nullptr and not this->optimized_build_active_) {
+            return false;
+        }
+        if (this->optimized_build_active_) {
+            auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(id);
+            if (not scalar_lease) {
+                return false;
+            }
+            memset(codes, 0, this->code_size_);
+            this->bottom_quantizer().PackScalarCode(scalar_lease.Data(), codes);
+            return true;
+        }
+        ByteBuffer one_bit(one_bit_code_size_, allocator_);
+        ByteBuffer supplement(supplement_code_size_, allocator_);
+        bool one_bit_ok = this->x_bit_layout_->Read(id, one_bit.data);
+        bool supplement_ok = this->supplement_layout_->Read(id, supplement.data);
+        if (not one_bit_ok or not supplement_ok) {
+            return false;
+        }
+        memset(codes, 0, this->code_size_);
+        this->bottom_quantizer().MergeSplitCode(one_bit.data, supplement.data, codes);
+        return true;
+    }
+
+    [[nodiscard]] bool
+    InMemory() const override {
+        return OneBitIOTmpl::InMemory and SupplementIOTmpl::InMemory;
+    }
+
+    bool
+    HoldMolds() const override {
+        return this->quantizer_->HoldMolds();
+    }
+
+    void
+    Serialize(StreamWriter& writer) override {
+        CHECK_ARGUMENT(not this->optimized_build_active_,
+                       "cannot serialize RaBitQ split codes during optimized build");
+        FlattenInterface::Serialize(writer);
+        if (this->fused_code_storage_ != nullptr) {
+            StreamWriter::WriteObj(writer, kFusedModelMagic);
+            StreamWriter::WriteObj(writer, kFusedModelVersion);
+            StreamWriter::WriteObj(writer, this->one_bit_code_size_);
+            StreamWriter::WriteObj(writer, this->supplement_code_size_);
+            this->quantizer_->Serialize(writer);
+            return;
+        }
+        StreamWriter::WriteString(writer, this->supplement_io_type_);
+        this->serialize_supplement_layout(writer);
+        this->x_bit_layout_->Serialize(writer);
+        this->supplement_layout_->Serialize(writer);
+        this->quantizer_->Serialize(writer);
+    }
+
+    void
+    Deserialize(LvalueOrRvalue<StreamReader> reader) override {
+        FlattenInterface::Deserialize(reader);
+        if (this->fused_code_storage_ != nullptr) {
+            const uint64_t payload_cursor = reader->GetCursor();
+            uint64_t magic = 0;
+            StreamReader::ReadObj(reader, magic);
+            if (magic == kFusedModelMagic) {
+                uint32_t version = 0;
+                uint64_t serialized_one_bit_size = 0;
+                uint64_t serialized_supplement_size = 0;
+                StreamReader::ReadObj(reader, version);
+                StreamReader::ReadObj(reader, serialized_one_bit_size);
+                StreamReader::ReadObj(reader, serialized_supplement_size);
+                CHECK_ARGUMENT(version == kFusedModelVersion,
+                               "unsupported fused RaBitQ model-only serialization version");
+                this->quantizer_->Deserialize(reader);
+                this->refresh_code_sizes();
+                CHECK_ARGUMENT(serialized_one_bit_size == this->one_bit_code_size_ and
+                                   serialized_supplement_size == this->supplement_code_size_ and
+                                   this->fused_code_storage_->FusedOneBitCodeSize() ==
+                                       this->one_bit_code_size_ and
+                                   this->fused_code_storage_->FusedSupplementCodeSize() ==
+                                       this->supplement_code_size_,
+                               "serialized fused RaBitQ code sizes do not match the node layout");
+                return;
+            }
+            reader->Seek(payload_cursor);
+            this->DeserializeSupplementIOType(reader);
+            // Legacy (detached-code) payloads also carry the supplement layout descriptor
+            // written by `serialize_supplement_layout` before the two serialized code layouts.
+            (void)this->deserialize_supplement_layout(*reader);
+            auto skip_serialized_layout = [](StreamReader& stream) {
+                uint64_t size = 0;
+                StreamReader::ReadObj(stream, size);
+                const uint64_t cursor = stream.GetCursor();
+                CHECK_ARGUMENT(cursor <= stream.Length() and size <= stream.Length() - cursor,
+                               "serialized RaBitQ split code payload exceeds its stream boundary");
+                stream.Seek(cursor + size);
+            };
+            skip_serialized_layout(*reader);
+            skip_serialized_layout(*reader);
+            this->quantizer_->Deserialize(reader);
+            this->refresh_code_sizes();
+            CHECK_ARGUMENT(
+                this->fused_code_storage_->FusedOneBitCodeSize() == this->one_bit_code_size_ and
+                    this->fused_code_storage_->FusedSupplementCodeSize() ==
+                        this->supplement_code_size_,
+                "legacy split RaBitQ code sizes do not match the fused node layout");
+            return;
+        }
+        this->DeserializeSupplementIOType(reader);
+        const auto supplement_layout = this->deserialize_supplement_layout(reader);
+        this->validate_supplement_layout(supplement_layout);
+        this->x_bit_layout_->Deserialize(reader);
+        this->supplement_layout_->Deserialize(reader);
+        this->quantizer_->Deserialize(reader);
+        this->refresh_code_sizes();
+        this->validate_supplement_layout(supplement_layout);
+    }
+
+    void
+    MergeOther(const FlattenInterfacePtr& other, InnerIdType bias) override {
+        if (this->fused_code_storage_ != nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage does not support MergeOther");
+        }
+        auto ptr = std::dynamic_pointer_cast<
+            RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>>(other);
+        if (ptr == nullptr) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "Merge rabitq split datacell failed: not match type");
+        }
+
+        for (InnerIdType i = 0; i < ptr->total_count_.load(std::memory_order_relaxed); ++i) {
+            ByteBuffer one_bit(one_bit_code_size_, allocator_);
+            ByteBuffer supplement(supplement_code_size_, allocator_);
+            ptr->x_bit_layout_->Read(i, one_bit.data);
+            ptr->supplement_layout_->Read(i, supplement.data);
+            auto target_id = static_cast<InnerIdType>(bias + i);
+            this->x_bit_layout_->Write(target_id, one_bit.data);
+            this->supplement_layout_->Write(target_id, supplement.data);
+        }
+        auto target =
+            static_cast<InnerIdType>(bias + ptr->total_count_.load(std::memory_order_relaxed));
+        auto prev = this->total_count_.load(std::memory_order_relaxed);
+        while (target > prev &&
+               !this->total_count_.compare_exchange_weak(
+                   prev, target, std::memory_order_release, std::memory_order_relaxed)) {
+        }
+    }
+
+    void
+    Move(InnerIdType from, InnerIdType to) override {
+        if (this->fused_code_storage_ != nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage does not support Move");
+        }
+        if (this->optimized_build_active_) {
+            ByteBuffer build_record(this->optimized_build_record_size_, allocator_);
+            this->optimized_build_scalar_layout_->Read(from, build_record.data);
+            this->optimized_build_scalar_layout_->Write(to, build_record.data);
+            (*this->optimized_build_code_sums_)[to] = (*this->optimized_build_code_sums_)[from];
+            return;
+        }
+        ByteBuffer one_bit(one_bit_code_size_, allocator_);
+        ByteBuffer supplement(supplement_code_size_, allocator_);
+        this->x_bit_layout_->Read(from, one_bit.data);
+        this->supplement_layout_->Read(from, supplement.data);
+        this->x_bit_layout_->Write(to, one_bit.data);
+        this->supplement_layout_->Write(to, supplement.data);
+    }
+
+    void
+    ShrinkToFit(InnerIdType capacity) override {
+        if (this->fused_code_storage_ != nullptr) {
+            throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                                "fused RaBitQ code storage does not support ShrinkToFit");
+        }
+        this->x_bit_layout_->Shrink(capacity);
+        this->supplement_layout_->Shrink(capacity);
+        if (this->optimized_build_active_) {
+            this->optimized_build_scalar_layout_->Shrink(capacity);
+            this->optimized_build_code_sums_->resize(capacity);
+            this->optimized_build_code_sums_->shrink_to_fit();
+        }
+        this->max_capacity_ = capacity;
+    }
+
+    uint64_t
+    GetMemoryUsage() const override {
+        uint64_t memory =
+            sizeof(RaBitQSplitDataCell<metric, OneBitIOTmpl, SupplementIOTmpl, QuantizerT>);
+        memory += this->x_bit_layout_->GetMemoryUsage();
+        memory += this->supplement_layout_->GetMemoryUsage();
+        if (this->optimized_build_scalar_layout_ != nullptr) {
+            memory += this->optimized_build_scalar_layout_->GetMemoryUsage();
+        }
+        if (this->optimized_build_code_sums_ != nullptr) {
+            memory += this->optimized_build_code_sums_->capacity() * sizeof(uint64_t);
+        }
+        memory += sizeof(QuantizerT);
+        memory += fused_quantizers_.size() * sizeof(RaBitQuantizer<metric>);
+        memory += fused_centroids_.capacity() * sizeof(float);
+        memory += fused_rotated_centroids_.capacity() * sizeof(float);
+        memory += fused_centroid_sums_.capacity() * sizeof(float);
+        memory += fused_centroid_pair_ip_.capacity() * sizeof(float);
+        return memory;
+    }
+
+public:
+    IndexCommonParam common_param_;
+    RaBitQuantizerParamPtr quantization_param_{nullptr};
+    std::shared_ptr<QuantizerT> quantizer_{nullptr};
+    std::vector<std::shared_ptr<RaBitQuantizer<metric>>> fused_quantizers_;
+    std::vector<float> fused_centroids_;
+    std::vector<float> fused_rotated_centroids_;
+    std::vector<float> fused_centroid_sums_;
+    std::vector<float> fused_centroid_pair_ip_;
+    std::shared_ptr<FixedLayout<OneBitIOTmpl>> x_bit_layout_{nullptr};
+    std::shared_ptr<FixedLayout<SupplementIOTmpl>> supplement_layout_{nullptr};
+    std::shared_ptr<FixedLayout<MemoryIO>> optimized_build_scalar_layout_{nullptr};
+    std::unique_ptr<Vector<uint64_t>> optimized_build_code_sums_{nullptr};
+    FlattenOptimizedBuildContext optimized_build_context_{};
+
+    Allocator* allocator_{nullptr};
+    uint64_t one_bit_code_size_{0};
+    uint64_t supplement_code_size_{0};
+    // Type name (e.g. "async_io") of the dedicated supplement IO when the
+    // caller supplies a separate `supplement_io_param` at construction time.
+    // Empty string means "supplement shares the same IO type as the x-bit
+    // storage" (the legacy single-IO behaviour). Recorded so that the
+    // single-parameter `InitIO(const IOParamPtr&)` overload (e.g. invoked
+    // from Deserialize) can rebuild a parameter of the correct concrete
+    // IOParameter subclass for `supplement_layout_` instead of feeding it the
+    // mismatched one-bit IO parameter type.
+    std::string supplement_io_type_{};
+    bool optimized_build_active_{false};
+    uint64_t optimized_build_record_size_{0};
+    bool external_filter_code_storage_{false};
+    RabitQFusedInterface* fused_code_storage_{nullptr};
+    uint64_t one_bit_prefetch_bytes_{0};
+    uint64_t supplement_prefetch_bytes_{0};
+    uint64_t optimized_build_prefetch_bytes_{0};
+
+private:
+    static constexpr uint64_t SUPPLEMENT_STORAGE_MAGIC = 0x3150505553514252ULL;
+    static constexpr uint32_t SUPPLEMENT_STORAGE_VERSION = 1;
+
+    struct SupplementStorageLayout {
+        uint64_t dim{0};
+        uint32_t bits{0};
+        uint64_t record_size{0};
+    };
+
+    void
+    serialize_supplement_layout(StreamWriter& writer) const {
+        StreamWriter::WriteObj(writer, SUPPLEMENT_STORAGE_MAGIC);
+        StreamWriter::WriteObj(writer, SUPPLEMENT_STORAGE_VERSION);
+        const uint64_t dim = static_cast<uint64_t>(this->bottom_quantizer().GetDim());
+        StreamWriter::WriteObj(writer, dim);
+        StreamWriter::WriteObj(writer, this->bottom_quantizer().ReorderBits());
+        StreamWriter::WriteObj(writer, this->bottom_quantizer().GetSupplementCodeSize());
+    }
+
+    SupplementStorageLayout
+    deserialize_supplement_layout(StreamReader& reader) const {
+        uint64_t magic = 0;
+        uint32_t version = 0;
+        SupplementStorageLayout layout;
+        StreamReader::ReadObj(reader, magic);
+        StreamReader::ReadObj(reader, version);
+        StreamReader::ReadObj(reader, layout.dim);
+        StreamReader::ReadObj(reader, layout.bits);
+        StreamReader::ReadObj(reader, layout.record_size);
+        CHECK_ARGUMENT(magic == SUPPLEMENT_STORAGE_MAGIC,
+                       "invalid packed RaBitQ supplement storage marker");
+        CHECK_ARGUMENT(version == SUPPLEMENT_STORAGE_VERSION,
+                       "unsupported packed RaBitQ supplement storage version");
+        return layout;
+    }
+
+    void
+    validate_supplement_layout(const SupplementStorageLayout& layout) const {
+        CHECK_ARGUMENT(layout.dim == this->bottom_quantizer().GetDim(),
+                       "packed RaBitQ supplement dimension mismatch");
+        CHECK_ARGUMENT(layout.bits == this->bottom_quantizer().ReorderBits(),
+                       "packed RaBitQ supplement bit width mismatch");
+        CHECK_ARGUMENT(layout.record_size == this->bottom_quantizer().GetSupplementCodeSize(),
+                       "packed RaBitQ supplement record size mismatch");
+    }
+
+    [[nodiscard]] static bool
+    is_finite_float_bits(float value) {
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        return (bits & 0x7F800000U) != 0x7F800000U;
+    }
+
+    BottomQuantizer&
+    bottom_quantizer() {
+        return Accessor::GetQuantizer(*this->quantizer_);
+    }
+
+    const BottomQuantizer&
+    bottom_quantizer() const {
+        return Accessor::GetQuantizer(*this->quantizer_);
+    }
+
+    BottomComputer*
+    get_bottom_computer(const ComputerInterfacePtr& computer) const {
+        auto* outer_computer = static_cast<Computer<QuantizerT>*>(computer.get());
+        return &Accessor::GetComputer(*outer_computer);
+    }
+
+    static constexpr uint64_t kFusedModelMagic = 0x524246534D4F444CULL;
+    static constexpr uint32_t kFusedModelVersion = 1;
+
+    [[nodiscard]] bool
+    IsLegacyHnswFusedCodec() const {
+        return bottom_quantizer().FilterBits() == 1 and bottom_quantizer().ReorderBits() == 7;
+    }
+
+    [[nodiscard]] bool
+    AreFusedVectorsFinite(const float* data, uint64_t count) const {
+        if (data == nullptr) {
+            return false;
+        }
+        const auto dim = static_cast<uint64_t>(common_param_.dim_);
+        for (uint64_t row = 0; row < count; ++row) {
+            for (uint64_t d = 0; d < dim; ++d, ++data) {
+                if (not IsFiniteRaBitQValue(*data)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    [[nodiscard]] uint32_t
+    NearestFusedCluster(const float* data) const {
+        uint32_t nearest = 0;
+        double nearest_distance = std::numeric_limits<double>::max();
+        for (uint32_t cluster_id = 0; cluster_id < fused_quantizers_.size(); ++cluster_id) {
+            const auto* centroid =
+                fused_centroids_.data() + static_cast<uint64_t>(cluster_id) * common_param_.dim_;
+            const double distance =
+                FP32ComputeL2Sqr(data, centroid, static_cast<uint64_t>(common_param_.dim_));
+            if (distance < nearest_distance) {
+                nearest_distance = distance;
+                nearest = cluster_id;
+            }
+        }
+        return nearest;
+    }
+
+    static IOParamPtr
+    SuffixIOParam(const IOParamPtr& io_param, const std::string& suffix, bool split_cache = false) {
+        if (io_param == nullptr) {
+            return nullptr;
+        }
+        auto json = io_param->ToJson();
+        if (json.Contains(IO_FILE_PATH_KEY)) {
+            std::string path = json[IO_FILE_PATH_KEY].GetString();
+            json[IO_FILE_PATH_KEY].SetString(path + suffix);
+        }
+        if (split_cache and io_param->enable_read_cache_) {
+            json[READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetUint64(io_param->read_cache_total_size_ / 2);
+        }
+        return IOParameter::GetIOParameterByJson(json);
+    }
+
+    // Builds the IO parameter that should be handed to `supplement_layout_`
+    // given the caller-supplied `io_param` (which is always typed for the
+    // one-bit storage). If `supplement_io_type_` is empty the two storages
+    // share the same IO type and we fall back to the legacy file-path-suffix
+    // behaviour. Otherwise the JSON is cloned, its `type` field rewritten to
+    // the recorded supplement type, the optional file path suffixed, and a
+    // new IOParameter is constructed via the factory so `supplement_layout_`
+    // receives the IOParameter subclass it actually expects.
+    IOParamPtr
+    RebuildSupplementIOParam(const IOParamPtr& io_param) const {
+        if (io_param == nullptr) {
+            return nullptr;
+        }
+        if (this->supplement_io_type_.empty()) {
+            return SuffixIOParam(io_param, "_supplement", true);
+        }
+        auto json = io_param->ToJson();
+        json[TYPE_KEY].SetString(this->supplement_io_type_);
+        if (json.Contains(IO_FILE_PATH_KEY)) {
+            std::string path = json[IO_FILE_PATH_KEY].GetString();
+            json[IO_FILE_PATH_KEY].SetString(path + "_supplement");
+        }
+        return IOParameter::GetIOParameterByJson(json);
+    }
+
+    static bool
+    IsKnownIOType(const std::string& io_type) {
+        return IOParameter::KindFromName(io_type) != IOKind::UNKNOWN;
+    }
+
+    void
+    DeserializeSupplementIOType(StreamReader& reader) {
+        this->supplement_io_type_.clear();
+        const uint64_t cursor = reader.GetCursor();
+        uint64_t length = 0;
+        StreamReader::ReadObj(reader, length);
+
+        if (length == 0) {
+            return;
+        }
+
+        constexpr uint64_t kMaxIOTypeLength = 64;
+        if (length > kMaxIOTypeLength or reader.GetCursor() + length > reader.Length()) {
+            reader.Seek(cursor);
+            return;
+        }
+
+        std::string io_type(length, '\0');
+        reader.Read(io_type.data(), length);
+        if (IsKnownIOType(io_type)) {
+            this->supplement_io_type_ = std::move(io_type);
+            return;
+        }
+
+        reader.Seek(cursor);
+    }
+
+    void
+    refresh_code_sizes() {
+        this->code_size_ = static_cast<uint32_t>(quantizer_->GetCodeSize());
+        this->one_bit_code_size_ = this->bottom_quantizer().GetOneBitCodeSize();
+        this->supplement_code_size_ = this->bottom_quantizer().GetSupplementCodeSize();
+        this->x_bit_layout_->SetCodeSize(one_bit_code_size_);
+        this->supplement_layout_->SetCodeSize(supplement_code_size_);
+        this->refresh_prefetch_bytes();
+    }
+
+    [[nodiscard]] static uint64_t
+    calculate_prefetch_bytes(uint64_t record_size, uint32_t max_cache_lines) {
+        constexpr uint64_t cache_line_size = 64;
+        const uint64_t record_cache_lines =
+            record_size / cache_line_size +
+            static_cast<uint64_t>(record_size % cache_line_size != 0);
+        return std::min<uint64_t>(record_cache_lines, max_cache_lines) * cache_line_size;
+    }
+
+    void
+    refresh_prefetch_bytes() {
+        this->one_bit_prefetch_bytes_ =
+            calculate_prefetch_bytes(this->one_bit_code_size_, this->prefetch_depth_code_);
+        this->supplement_prefetch_bytes_ =
+            calculate_prefetch_bytes(this->supplement_code_size_, this->prefetch_depth_code_);
+        this->optimized_build_prefetch_bytes_ = calculate_prefetch_bytes(
+            this->optimized_build_record_size_, this->prefetch_depth_code_);
+    }
+
+    void
+    write_encoded_vector(const float* vector, InnerIdType idx) {
+        if (this->optimized_build_active_) {
+            ByteBuffer scalar_code(this->optimized_build_record_size_, allocator_);
+            Vector<float> transformed_input(this->allocator_);
+            const float* bottom_input =
+                Accessor::PrepareBottomInput(*this->quantizer_, vector, transformed_input);
+            uint64_t code_sum = 0;
+            if (not this->bottom_quantizer().EncodeOneToScalarCode(
+                    bottom_input, scalar_code.data, code_sum)) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to encode temporary scalar RaBitQ build code");
+            }
+            (*this->optimized_build_code_sums_)[idx] = code_sum;
+            this->optimized_build_scalar_layout_->Write(idx, scalar_code.data);
+            return;
+        }
+        ByteBuffer full_code(this->code_size_, allocator_);
+        this->quantizer_->EncodeOne(vector, full_code.data);
+        ByteBuffer one_bit_code(one_bit_code_size_, allocator_);
+        ByteBuffer supplement_code(supplement_code_size_, allocator_);
+        this->bottom_quantizer().SplitCode(full_code.data, one_bit_code.data, supplement_code.data);
+        this->x_bit_layout_->Write(idx, one_bit_code.data);
+        this->supplement_layout_->Write(idx, supplement_code.data);
+    }
+
+    [[nodiscard]] RaBitQFusedCodeView
+    get_fused_code_view(InnerIdType id) const {
+        RaBitQFusedCodeView view;
+        if (not fused_code_storage_->GetFusedCodeView(id, view)) {
+            throw VsagException(
+                ErrorType::INTERNAL_ERROR, "failed to read fused RaBitQ code for id ", id);
+        }
+        return view;
+    }
+
+    void
+    prefetch_fused_codes(const InnerIdType* ids,
+                         InnerIdType id_count,
+                         bool include_supplement) const {
+        const auto count = std::min<InnerIdType>(prefetch_stride_code_, id_count);
+        for (InnerIdType i = 0; i < count; ++i) {
+            fused_code_storage_->PrefetchFusedCodes(ids[i], include_supplement);
+        }
+    }
+
+    void
+    query_fused_full(float* result_dists,
+                     const ComputerInterfacePtr& computer,
+                     const InnerIdType* ids,
+                     InnerIdType id_count,
+                     QueryContext* ctx) const {
+        this->prefetch_fused_codes(ids, id_count, true);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + prefetch_stride_code_ < id_count) {
+                fused_code_storage_->PrefetchFusedCodes(ids[i + prefetch_stride_code_], true);
+            }
+            const auto view = this->get_fused_code_view(ids[i]);
+            CHECK_ARGUMENT(this->ComputeFusedFull(computer,
+                                                  view.cluster_id,
+                                                  view.one_bit_code,
+                                                  view.supplement_code,
+                                                  result_dists + i,
+                                                  ctx),
+                           "failed to compute fused RaBitQ distance");
+        }
+    }
+
+    void
+    query_fused_lower_bound(float* result_dists,
+                            float* lower_bounds,
+                            float* filter_inner_products,
+                            const ComputerInterfacePtr& computer,
+                            const InnerIdType* ids,
+                            InnerIdType id_count,
+                            QueryContext* ctx) const {
+        const bool enable_reorder = ctx == nullptr or ctx->enable_rabitq_reorder;
+        this->prefetch_fused_codes(ids, id_count, false);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + prefetch_stride_code_ < id_count) {
+                fused_code_storage_->PrefetchFusedCodes(ids[i + prefetch_stride_code_], false);
+            }
+            const auto view = this->get_fused_code_view(ids[i]);
+            float local_lower_bound = std::numeric_limits<float>::max();
+            float local_filter_ip = std::numeric_limits<float>::quiet_NaN();
+            const bool computed = this->ComputeFusedOneBitWithFilterIP(computer,
+                                                                       view.cluster_id,
+                                                                       view.one_bit_code,
+                                                                       view.supplement_code,
+                                                                       result_dists + i,
+                                                                       &local_lower_bound,
+                                                                       &local_filter_ip,
+                                                                       ctx);
+            if (not enable_reorder) {
+                if (not IsFiniteRaBitQValue(result_dists[i])) {
+                    result_dists[i] = std::numeric_limits<float>::max();
+                }
+                local_lower_bound = result_dists[i];
+                local_filter_ip = std::numeric_limits<float>::quiet_NaN();
+            } else if (not computed) {
+                CHECK_ARGUMENT(this->ComputeFusedFull(computer,
+                                                      view.cluster_id,
+                                                      view.one_bit_code,
+                                                      view.supplement_code,
+                                                      result_dists + i,
+                                                      ctx),
+                               "failed to compute fused RaBitQ distance");
+                local_lower_bound = std::numeric_limits<float>::max();
+                local_filter_ip = std::numeric_limits<float>::quiet_NaN();
+            }
+            if (lower_bounds != nullptr) {
+                lower_bounds[i] = local_lower_bound;
+            }
+            if (filter_inner_products != nullptr) {
+                filter_inner_products[i] = local_filter_ip;
+            }
+        }
+    }
+
+    void
+    query_fused_with_distance_filter(float* result_dists,
+                                     const ComputerInterfacePtr& computer,
+                                     const InnerIdType* ids,
+                                     InnerIdType id_count,
+                                     float threshold,
+                                     QueryContext* ctx) const {
+        const bool enable_reorder = ctx == nullptr or ctx->enable_rabitq_reorder;
+        this->prefetch_fused_codes(ids, id_count, false);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            const auto view = this->get_fused_code_view(ids[i]);
+            float lower_bound = std::numeric_limits<float>::max();
+            float filter_inner_product = std::numeric_limits<float>::quiet_NaN();
+            const bool computed = this->ComputeFusedOneBitWithFilterIP(computer,
+                                                                       view.cluster_id,
+                                                                       view.one_bit_code,
+                                                                       view.supplement_code,
+                                                                       result_dists + i,
+                                                                       &lower_bound,
+                                                                       &filter_inner_product,
+                                                                       ctx);
+            if (not enable_reorder) {
+                if (not IsFiniteRaBitQValue(result_dists[i])) {
+                    result_dists[i] = std::numeric_limits<float>::max();
+                } else if (computed and IsFiniteRaBitQValue(lower_bound) and
+                           lower_bound >= threshold) {
+                    result_dists[i] = threshold;
+                }
+                continue;
+            }
+            if (computed and IsFiniteRaBitQValue(lower_bound) and lower_bound >= threshold) {
+                result_dists[i] = threshold;
+                continue;
+            }
+            CHECK_ARGUMENT(this->ComputeFusedFull(computer,
+                                                  view.cluster_id,
+                                                  view.one_bit_code,
+                                                  view.supplement_code,
+                                                  result_dists + i,
+                                                  ctx),
+                           "failed to compute fused RaBitQ distance");
+        }
+    }
+
+    void
+    query_fused_full_with_filter_ip(float* result_dists,
+                                    const float* filter_inner_products,
+                                    const ComputerInterfacePtr& computer,
+                                    const InnerIdType* ids,
+                                    InnerIdType id_count,
+                                    QueryContext* ctx) const {
+        this->prefetch_fused_codes(ids, id_count, true);
+        const bool exact_filter_ip_hint =
+            not IsLegacyHnswFusedCodec() and this->bottom_quantizer().FilterBits() >= 2;
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            const auto view = this->get_fused_code_view(ids[i]);
+            const float filter_ip = filter_inner_products == nullptr
+                                        ? std::numeric_limits<float>::quiet_NaN()
+                                        : filter_inner_products[i];
+            bool computed = false;
+            if (exact_filter_ip_hint and IsFiniteRaBitQValue(filter_ip)) {
+                computed = this->ComputeFusedFullWithFilterIP(computer,
+                                                              view.cluster_id,
+                                                              view.one_bit_code,
+                                                              view.supplement_code,
+                                                              filter_ip,
+                                                              result_dists + i,
+                                                              ctx);
+            }
+            if (not computed) {
+                CHECK_ARGUMENT(this->ComputeFusedFull(computer,
+                                                      view.cluster_id,
+                                                      view.one_bit_code,
+                                                      view.supplement_code,
+                                                      result_dists + i,
+                                                      ctx),
+                               "failed to compute fused RaBitQ distance");
+            }
+        }
+    }
+
+    void
+    query_optimized_build_codes(float* result_dists,
+                                const ComputerInterfacePtr& computer,
+                                const InnerIdType* idx,
+                                InnerIdType id_count) const {
+        if (const auto* build_computer =
+                dynamic_cast<const OptimizedBuildComputer*>(computer.get());
+            build_computer != nullptr) {
+            this->query_optimized_build_code_pairs(result_dists,
+                                                   build_computer->scalar_code_.data,
+                                                   build_computer->code_sum_,
+                                                   idx,
+                                                   id_count);
+            return;
+        }
+        auto* comp = this->get_bottom_computer(computer);
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            auto scalar_lease = this->optimized_build_scalar_layout_->Acquire(idx[i]);
+            if (not scalar_lease) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build code");
+            }
+            this->bottom_quantizer().ComputeDistWithScalarCode(
+                *comp, scalar_lease.Data(), result_dists + i);
+        }
+    }
+
+    void
+    query_optimized_build_code_pairs(float* result_dists,
+                                     const uint8_t* query_code,
+                                     uint64_t query_sum,
+                                     const InnerIdType* idx,
+                                     InnerIdType id_count) const {
+        for (uint32_t i = 0; i < this->prefetch_stride_code_ and i < id_count; ++i) {
+            this->optimized_build_scalar_layout_->Prefetch(idx[i],
+                                                           this->optimized_build_prefetch_bytes_);
+        }
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            if (i + this->prefetch_stride_code_ < id_count) {
+                this->optimized_build_scalar_layout_->Prefetch(
+                    idx[i + this->prefetch_stride_code_], this->optimized_build_prefetch_bytes_);
+            }
+            auto base_lease = this->optimized_build_scalar_layout_->Acquire(idx[i]);
+            if (not base_lease) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "failed to read temporary scalar RaBitQ build code");
+            }
+            result_dists[i] = this->bottom_quantizer().ComputeScalarCodesDistance(
+                query_code,
+                query_sum,
+                base_lease.Data(),
+                (*this->optimized_build_code_sums_)[idx[i]]);
+        }
+    }
+
+    void
+    prefetch_one_bit(InnerIdType id) {
+        this->x_bit_layout_->Prefetch(id, this->one_bit_prefetch_bytes_);
+    }
+
+    void
+    prefetch_supplement(InnerIdType id) const {
+        this->supplement_layout_->Prefetch(id, this->supplement_prefetch_bytes_);
+    }
+
+    void
+    prefetch_full_code(InnerIdType id) {
+        this->prefetch_one_bit(id);
+        this->prefetch_supplement(id);
+    }
+
+    const uint8_t*
+    get_one_bit_code(InnerIdType id, bool& need_release) const {
+        return this->x_bit_layout_->Read(id, need_release);
+    }
+
+    void
+    release_one_bit_code(const uint8_t* code, bool need_release) const {
+        if (need_release) {
+            this->x_bit_layout_->Release(code);
+        }
+    }
+
+    const uint8_t*
+    get_supplement_code(InnerIdType id, bool& need_release) const {
+        return this->supplement_layout_->Read(id, need_release);
+    }
+
+    void
+    release_supplement_code(const uint8_t* code, bool need_release) const {
+        if (need_release) {
+            this->supplement_layout_->Release(code);
+        }
+    }
+
+    [[nodiscard]] static float
+    query_rabitq_error_rate(QueryContext* ctx) {
+        return ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
+    }
+
+    void
+    add_distance_evaluations(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations and
+            count > 0)
+            ctx->stats->AddDistance(ctx->distance_phase, DistanceEvaluationBackend::RABITQ, count);
+    }
+
+    void
+    add_filter_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_filter_count.fetch_add(static_cast<uint32_t>(count),
+                                                      std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                    std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_filter_fallback_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_filter_fallback_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                    std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_reorder_hint_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_reorder_hint_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                 std::memory_order_relaxed);
+        }
+    }
+
+    void
+    add_reorder_fallback_full_count(QueryContext* ctx, uint64_t count) const {
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->rabitq_reorder_fallback_full_count.fetch_add(static_cast<uint32_t>(count),
+                                                                     std::memory_order_relaxed);
+        }
+    }
+
+    void
+    query_one_bit_lower_bound_by_multiread(float* result_dists,
+                                           float* lower_bounds,
+                                           BottomComputer* computer,
+                                           const InnerIdType* idx,
+                                           InnerIdType id_count,
+                                           QueryContext* ctx) const {
+        Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+        ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
+        double io_cost_ms = 0.0F;
+        {
+            Timer timer(io_cost_ms);
+            this->x_bit_layout_->MultiRead(idx, id_count, one_bit_codes.data, search_alloc);
+        }
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+
+        InnerIdType i = 0;
+        for (; i + 3 < id_count; i += 4) {
+            const auto* code1 = one_bit_codes.data + i * one_bit_code_size_;
+            const auto* code2 = code1 + one_bit_code_size_;
+            const auto* code3 = code2 + one_bit_code_size_;
+            const auto* code4 = code3 + one_bit_code_size_;
+            bool computed1 = false, computed2 = false, computed3 = false, computed4 = false;
+            auto* lower_bound1 = lower_bounds == nullptr ? nullptr : lower_bounds + i;
+            auto* lower_bound2 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 1;
+            auto* lower_bound3 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 2;
+            auto* lower_bound4 = lower_bounds == nullptr ? nullptr : lower_bounds + i + 3;
+            this->bottom_quantizer().ComputeDistsWithOneBitLowerBoundBatch4(
+                *computer,
+                code1,
+                code2,
+                code3,
+                code4,
+                result_dists[i],
+                result_dists[i + 1],
+                result_dists[i + 2],
+                result_dists[i + 3],
+                lower_bound1,
+                lower_bound2,
+                lower_bound3,
+                lower_bound4,
+                computed1,
+                computed2,
+                computed3,
+                computed4,
+                this->query_rabitq_error_rate(ctx));
+            if (not computed1) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i], code1, computer, result_dists + i, lower_bound1, ctx);
+            }
+            if (not computed2) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i + 1], code2, computer, result_dists + i + 1, lower_bound2, ctx);
+            }
+            if (not computed3) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i + 2], code3, computer, result_dists + i + 2, lower_bound3, ctx);
+            }
+            if (not computed4) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i + 3], code4, computer, result_dists + i + 3, lower_bound4, ctx);
+            }
+        }
+
+        for (; i < id_count; ++i) {
+            auto* lower_bound = lower_bounds == nullptr ? nullptr : lower_bounds + i;
+            const auto* one_bit_code = one_bit_codes.data + i * one_bit_code_size_;
+            bool computed = this->bottom_quantizer().ComputeDistWithOneBitLowerBound(
+                *computer,
+                one_bit_code,
+                result_dists + i,
+                lower_bound,
+                this->query_rabitq_error_rate(ctx));
+            if (not computed) {
+                this->add_filter_fallback_full_count(ctx, 1);
+                this->compute_full_dist_after_one_bit_failure(
+                    idx[i], one_bit_code, computer, result_dists + i, lower_bound, ctx);
+            }
+        }
+    }
+
+    void
+    query_full_dist_by_multiread(float* result_dists,
+                                 BottomComputer* computer,
+                                 const InnerIdType* idx,
+                                 InnerIdType id_count,
+                                 QueryContext* ctx,
+                                 const float* hint_dists = nullptr) const {
+        Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+        ByteBuffer one_bit_codes(id_count * one_bit_code_size_, search_alloc);
+        ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
+        double io_cost_ms = 0.0F;
+        {
+            Timer timer(io_cost_ms);
+            this->x_bit_layout_->MultiRead(idx, id_count, one_bit_codes.data, search_alloc);
+            this->supplement_layout_->MultiRead(idx, id_count, supplement_codes.data, search_alloc);
+        }
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(id_count * 2, std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            const auto* one_bit_code = one_bit_codes.data + i * one_bit_code_size_;
+            const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            this->compute_full_dist(
+                one_bit_code, supplement_code, computer, result_dists + i, ctx, hint);
+        }
+    }
+
+    void
+    query_full_dist_by_supplement_multiread(float* result_dists,
+                                            BottomComputer* computer,
+                                            const InnerIdType* idx,
+                                            InnerIdType id_count,
+                                            QueryContext* ctx,
+                                            const float* hint_dists = nullptr) const {
+        Allocator* search_alloc = select_query_allocator(ctx, allocator_);
+        ByteBuffer supplement_codes(id_count * supplement_code_size_, search_alloc);
+        double io_cost_ms = 0.0F;
+        {
+            Timer timer(io_cost_ms);
+            this->supplement_layout_->MultiRead(idx, id_count, supplement_codes.data, search_alloc);
+        }
+        if (ctx != nullptr and ctx->stats != nullptr) {
+            ctx->stats->io_cnt.fetch_add(id_count, std::memory_order_relaxed);
+            ctx->stats->io_time_ms.fetch_add(static_cast<uint32_t>(io_cost_ms),
+                                             std::memory_order_relaxed);
+        }
+
+        for (InnerIdType i = 0; i < id_count; ++i) {
+            auto one_bit_lease = this->x_bit_layout_->Acquire(idx[i]);
+            const auto* supplement_code = supplement_codes.data + i * supplement_code_size_;
+            const float hint =
+                hint_dists == nullptr ? std::numeric_limits<float>::max() : hint_dists[i];
+            this->compute_full_dist(
+                one_bit_lease.Data(), supplement_code, computer, result_dists + i, ctx, hint);
+        }
+    }
+
+    void
+    compute_full_dist_after_one_bit_failure(InnerIdType id,
+                                            const uint8_t* one_bit_code,
+                                            BottomComputer* computer,
+                                            float* result_dist,
+                                            float* lower_bound,
+                                            QueryContext* ctx) const {
+        auto supplement_lease = this->supplement_layout_->Acquire(id);
+        this->compute_full_dist(one_bit_code, supplement_lease.Data(), computer, result_dist, ctx);
+        if (lower_bound != nullptr) {
+            *lower_bound = std::numeric_limits<float>::max();
+        }
+    }
+
+    void
+    compute_full_dist(const uint8_t* one_bit_code,
+                      const uint8_t* supplement_code,
+                      BottomComputer* computer,
+                      float* result_dist,
+                      QueryContext* ctx = nullptr,
+                      float hint_dist = std::numeric_limits<float>::max()) const {
+        this->add_full_count(ctx, 1);
+        bool computed = false;
+        const bool has_hint = this->bottom_quantizer().FilterBits() >= 2 and
+                              IsFiniteRaBitQValue(hint_dist) and
+                              hint_dist < std::numeric_limits<float>::max();
+        if (has_hint) {
+            computed = this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterDist(
+                *computer, one_bit_code, supplement_code, hint_dist, result_dist);
+        }
+        if (computed) {
+            this->add_reorder_hint_full_count(ctx, 1);
+        } else if (has_hint) {
+            this->add_reorder_fallback_full_count(ctx, 1);
+        }
+        if (not computed and not this->bottom_quantizer().ComputeDistWithSplitCode(
+                                 *computer, one_bit_code, supplement_code, result_dist)) {
+            ByteBuffer full_code(this->code_size_, allocator_);
+            this->bottom_quantizer().MergeSplitCode(one_bit_code, supplement_code, full_code.data);
+            computer->ComputeDist(full_code.data, result_dist);
+        }
+    }
+
+    void
+    compute_full_dist_with_filter_ip(const uint8_t* one_bit_code,
+                                     const uint8_t* supplement_code,
+                                     Computer<RaBitQuantizer<metric>>* computer,
+                                     float* result_dist,
+                                     QueryContext* ctx,
+                                     float filter_inner_product) const {
+        this->add_full_count(ctx, 1);
+        const bool has_hint = this->bottom_quantizer().FilterBits() >= 2 and
+                              IsFiniteRaBitQValue(filter_inner_product);
+        bool computed = false;
+        if (has_hint) {
+            computed = this->bottom_quantizer().ComputeDistWithSplitCodeAndFilterIP(
+                *computer, one_bit_code, supplement_code, filter_inner_product, result_dist);
+        }
+        if (computed) {
+            this->add_reorder_hint_full_count(ctx, 1);
+            return;
+        }
+        if (has_hint) {
+            this->add_reorder_fallback_full_count(ctx, 1);
+        }
+        if (not this->bottom_quantizer().ComputeDistWithSplitCode(
+                *computer, one_bit_code, supplement_code, result_dist)) {
+            ByteBuffer full_code(this->code_size_, allocator_);
+            this->bottom_quantizer().MergeSplitCode(one_bit_code, supplement_code, full_code.data);
+            computer->ComputeDist(full_code.data, result_dist);
+        }
+    }
+
+    void
+    compute_full_dist_with_filter_ip(InnerIdType id,
+                                     Computer<RaBitQuantizer<metric>>* computer,
+                                     float* result_dist,
+                                     QueryContext* ctx,
+                                     float filter_inner_product) const {
+        auto one_bit_lease = this->x_bit_layout_->Acquire(id);
+        auto supplement_lease = this->supplement_layout_->Acquire(id);
+        this->compute_full_dist_with_filter_ip(one_bit_lease.Data(),
+                                               supplement_lease.Data(),
+                                               computer,
+                                               result_dist,
+                                               ctx,
+                                               filter_inner_product);
+    }
+
+    void
+    compute_full_dist(InnerIdType id,
+                      BottomComputer* computer,
+                      float* result_dist,
+                      QueryContext* ctx = nullptr,
+                      float hint_dist = std::numeric_limits<float>::max()) const {
+        auto one_bit_lease = this->x_bit_layout_->Acquire(id);
+        auto supplement_lease = this->supplement_layout_->Acquire(id);
+        this->compute_full_dist(
+            one_bit_lease.Data(), supplement_lease.Data(), computer, result_dist, ctx, hint_dist);
+    }
+};
+
+}  // namespace vsag

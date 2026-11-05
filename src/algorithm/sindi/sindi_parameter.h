@@ -1,0 +1,115 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <cstdint>
+#include <string>
+
+#include "algorithm/index_search_parameter.h"
+#include "algorithm/inner_index_parameter.h"
+#include "impl/searcher/sindi_search_options.h"
+#include "index_common_param.h"
+#include "utils/pointer_define.h"
+
+namespace vsag {
+
+DEFINE_POINTER(SINDIParameter);
+
+enum class SparseValueQuantizationType {
+    FP32,
+    SQ8,
+    FP16,
+};
+
+static constexpr const char* SPARSE_RERANK_TYPE = "rerank_type";
+static constexpr const char* SPARSE_RERANK_TYPE_FP32 = "fp32";
+static constexpr const char* SPARSE_RERANK_TYPE_FP16 = "fp16";
+static constexpr const char* SPARSE_RERANK_TYPE_DMQ8 = "dmq8";
+
+static constexpr const char* SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = "dmq_shared_codebook_threshold";
+static constexpr uint32_t DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD = 1024;
+
+std::string
+SparseValueQuantizationTypeToString(SparseValueQuantizationType type);
+
+class SINDIParameter : public InnerIndexParameter {
+public:
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    bool
+    CheckCompatibility(const vsag::ParamPtr& other) const override;
+
+    SINDIParameter() = default;
+
+public:
+    // index
+    uint32_t term_id_limit{0};
+
+    uint32_t window_size{0};
+
+    float doc_prune_ratio{0};
+
+    float term_prune_ratio{0};
+
+    uint64_t term_retain_threshold{0};
+
+    bool use_reorder{false};
+
+    SparseValueQuantizationType sparse_value_quant_type{SparseValueQuantizationType::FP32};
+
+    bool remap_term_ids{false};
+
+    std::string rerank_type{SPARSE_RERANK_TYPE_FP32};
+
+    uint32_t dmq_shared_codebook_threshold{DEFAULT_SPARSE_DMQ_SHARED_CODEBOOK_THRESHOLD};
+
+    bool immutable{false};
+
+    // temporal parameter
+    bool deserialize_without_footer{false};
+    bool deserialize_without_buffer{false};
+    uint32_t avg_doc_term_length{100};
+};
+
+class SINDISearchParameter : public Parameter, public IndexSearchParameter {
+public:
+    void
+    FromJson(const JsonType& json) override;
+
+    JsonType
+    ToJson() const override;
+
+    SINDISearchParameter() = default;
+
+public:
+    // search
+    uint32_t n_candidate{0};
+    uint32_t worker_n_candidate{0};
+    uint32_t window_parallelism{1};
+    SindiSearchOptions execution_options;
+    uint64_t filter_callback_limit{0};
+
+    // data cell
+    float query_prune_ratio{0};
+    float term_prune_ratio{0};
+    uint64_t term_retain_threshold{0};
+};
+
+}  // namespace vsag

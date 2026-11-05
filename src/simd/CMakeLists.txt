@@ -1,0 +1,157 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+include (CheckCXXCompilerFlag)
+
+set (SIMD_SRCS
+        generic.cpp
+        sse.cpp
+        avx.cpp
+        avx2.cpp
+        avx512.cpp
+        avx512vpopcntdq.cpp
+        amx.cpp
+        neon.cpp
+        sve.cpp
+        simd.cpp
+        simd_status.cpp
+        basic_func.cpp
+        bit_simd.cpp
+        fp32_simd.cpp
+        fp16_simd.cpp
+        int8_simd.cpp
+        bf16_simd.cpp
+        pqfs_simd.cpp
+        sq8_simd.cpp
+        sq8_local_simd.cpp
+        sq4_local_simd.cpp
+        sq4_simd.cpp
+        sq4_uniform_simd.cpp
+        sq8_uniform_simd.cpp
+        rabitq_simd.cpp
+        normalize.cpp
+)
+if (DIST_CONTAINS_SSE)
+    set_source_files_properties (
+            sse.cpp
+            PROPERTIES COMPILE_FLAGS
+            "-msse -msse2 -msse3 -mssse3 -msse4 -msse4a -msse4.1 -msse4.2")
+endif ()
+if (DIST_CONTAINS_AVX)
+    set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
+endif ()
+if (DIST_CONTAINS_AVX2)
+    set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+endif ()
+
+set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
+# AVX512PF/ER are unused and unsupported by Clang 20. Keep GCC compilation
+# commands compatible with clang-tidy as well as the actual SIMD kernels.
+
+if (DIST_CONTAINS_AVX512)
+    set_source_files_properties (
+            avx512.cpp
+            PROPERTIES
+            COMPILE_FLAGS
+            "${AVX512_FLAGS}"
+    )
+endif ()
+if (DIST_CONTAINS_AVX512VPOPCNTDQ)
+    set(AVX512VPOPCNTDQ_FLAGS "${AVX512_FLAGS} -mavx512vpopcntdq")
+    set_source_files_properties (
+            avx512vpopcntdq.cpp
+            PROPERTIES
+            COMPILE_FLAGS
+            "${AVX512VPOPCNTDQ_FLAGS}"
+    )
+endif ()
+if (DIST_CONTAINS_AMX)
+    set_source_files_properties (
+            amx.cpp
+            PROPERTIES
+            COMPILE_FLAGS
+            "-mavx512f -mavx512vl -mavx512bw -mavx512dq -mavx512vnni -mavx512bf16 -mamx-tile -mamx-int8 -mamx-bf16"
+    )
+endif ()
+if (DIST_CONTAINS_NEON)
+    set_source_files_properties (neon.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a")
+endif ()
+if (DIST_CONTAINS_SVE)
+    set_source_files_properties (sve.cpp PROPERTIES COMPILE_FLAGS "-march=armv8-a+sve")
+endif ()
+add_library (simd STATIC ${SIMD_SRCS})
+target_compile_options (simd PRIVATE
+    -O3
+    -ftree-vectorize
+    -fno-builtin-malloc
+    -fno-builtin-calloc
+    -fno-builtin-realloc
+    -fno-builtin-free
+    -funroll-loops)
+if (NOT APPLE)
+    target_compile_options (simd PRIVATE -fopenmp -fopenmp-simd)
+endif ()
+
+function (simd_add_definitions flag_variable definition)
+    if (${flag_variable})
+        target_compile_definitions (simd PUBLIC ${definition})
+    endif ()
+endfunction ()
+
+simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
+simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
+simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
+simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
+simd_add_definitions (DIST_CONTAINS_AVX512VPOPCNTDQ -DENABLE_AVX512VPOPCNTDQ=1)
+simd_add_definitions (DIST_CONTAINS_AMX -DENABLE_AMX=1)
+simd_add_definitions (DIST_CONTAINS_NEON -DENABLE_NEON=1)
+simd_add_definitions (DIST_CONTAINS_SVE -DENABLE_SVE=1)
+
+target_link_libraries (simd
+    PRIVATE cpuinfo coverage_config)
+if (TARGET vsag_openmp)
+    target_link_libraries (simd PRIVATE vsag_openmp)
+endif ()
+add_dependencies (simd cpuinfo)
+install (TARGETS simd ARCHIVE DESTINATION lib)
+
+if (ENABLE_TESTS)
+    file (GLOB_RECURSE SIMD_TESTS "*_test.cpp")
+    add_library (simd_test STATIC ${SIMD_TESTS})
+
+    if (DIST_CONTAINS_SSE)
+        target_compile_definitions (simd_test PRIVATE ENABLE_SSE=1)
+    endif ()
+    if (DIST_CONTAINS_AVX)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AVX=1)
+    endif ()
+    if (DIST_CONTAINS_AVX2)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AVX2=1)
+    endif ()
+    if (DIST_CONTAINS_AVX512)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AVX512=1)
+    endif ()
+    if (DIST_CONTAINS_AVX512VPOPCNTDQ)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AVX512VPOPCNTDQ=1)
+    endif ()
+    if (DIST_CONTAINS_AMX)
+        target_compile_definitions (simd_test PRIVATE ENABLE_AMX=1)
+    endif ()
+    if (DIST_CONTAINS_NEON)
+        target_compile_definitions (simd_test PRIVATE ENABLE_NEON=1)
+    endif ()
+    target_link_libraries (simd_test PRIVATE Catch2::Catch2 unittest_deps)
+    add_dependencies (simd_test Catch2)
+endif ()

@@ -1,0 +1,47 @@
+# GitHub-hosted runners provide 16 GB Memory and 14 GB Storage, which can only test some small datasets
+# https://docs.github.com/en/actions/using-github-hosted-runners/using-github-hosted-runners/about-github-hosted-runners#standard-github-hosted-runners-for-public-repositories
+
+global:
+  exporters:
+    e1: # give a name you like, will not be used
+      format: "text"
+      to: "stdout"
+    e2:
+      format: "json"
+      to: "file://tmp/github-perf.json"
+
+SIFT:
+    datapath: "/tmp/data/sift-128-euclidean.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":128,"dtype":"float32","metric_type":"l2","index_param":{"base_quantization_type":"sq8_uniform","max_degree":32,"ef_construction":400}}'
+    search_params: '{"hgraph":{"ef_search":29}}'
+    index_path: "/tmp/sift-128-euclidean/index/hgraph_index"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: true
+
+GloVe-100:
+    datapath: "/tmp/data/glove-100-angular.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":100,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"fp32","max_degree":64,"ef_construction":400}}'
+    search_params: '{"hgraph":{"ef_search":120}}'
+    index_path: "/tmp/glove-100-angular/index/hgraph_index"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: true
+
+NYTimes:
+    datapath: "/tmp/data/nytimes-256-angular.hdf5"
+    type: "build,search" # build, search
+    index_name: "hgraph"
+    create_params: '{"dim":256,"dtype":"float32","metric_type":"cosine","index_param":{"base_quantization_type":"sq8_uniform","max_degree":48,"ef_construction":400}}'
+    search_params: '{"hgraph":{"ef_search":90}}'
+    index_path: "/tmp/nytimes-256-angular/index/hgraph_index"
+    topk: 10
+    search_mode: "knn" # ["knn", "range", "knn_filter", "range_filter"]
+    range: 0.5
+    delete_index_after_search: true

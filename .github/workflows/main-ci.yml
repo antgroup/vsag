@@ -1,0 +1,863 @@
+name: Branch CI
+
+on:
+  push:
+    branches: [main, '0.*']
+  workflow_call:
+    inputs:
+      profile:
+        type: string
+        default: full-branch
+    secrets:
+      CODECOV_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+
+# No branch-wide concurrency: every main commit keeps its own run.
+jobs:
+  changes:
+    if: ${{ github.event.deleted != true && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && (inputs.profile == '' || inputs.profile == 'full-branch') }}
+    name: Classify changes
+    runs-on: ubuntu-24.04
+    outputs:
+      heavy: ${{ steps.policy.outputs.heavy }}
+      lint: ${{ steps.policy.outputs.lint }}
+      pattern: ${{ steps.policy.outputs.pattern }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select main checks
+        id: policy
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.sha }}
+        run: python3 scripts/ci/main_ci_policy.py
+
+  summary:
+    name: Branch Summary
+    if: ${{ always() && github.event.deleted != true && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && (inputs.profile == '' || inputs.profile == 'full-branch') }}
+    needs: [changes, platforms, python, tsan, lint]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify selected checks
+        env:
+          MAIN_NEEDS: ${{ toJSON(needs) }}
+        run: python3 scripts/ci/main_ci_summary.py
+
+  select-checks:
+    if: ${{ github.event.deleted != true && (inputs.profile == '' || inputs.profile == 'full-branch') }}
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      format: ${{ steps.select.outputs.format }}
+      docs: ${{ steps.select.outputs.docs }}
+      issue: ${{ steps.select.outputs.issue }}
+      simd: ${{ steps.select.outputs.simd }}
+      lite: ${{ steps.select.outputs.lite }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select original event and path scopes
+        id: select
+        run: python3 scripts/ci/checks_policy.py
+
+  clang-format-check:
+    needs: select-checks
+    if: ${{ always() && (inputs.profile == '' || inputs.profile == 'full-branch') }}
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event.deleted != true && (needs.select-checks.result != 'success' || needs.select-checks.outputs.format == 'true')) && '["Format Check"]' || '["Format Check Not Required"]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require successful check selection
+        if: matrix.check == 'Format Check'
+        env:
+          SELECTION_RESULT: ${{ needs.select-checks.result }}
+        run: |
+          if [ "$SELECTION_RESULT" != success ]; then
+            echo '::error::Check selection did not succeed; formatting cannot be declared unnecessary.'
+            exit 1
+          fi
+      - name: Checkout code
+        if: matrix.check == 'Format Check'
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-format
+        if: matrix.check == 'Format Check'
+
+  validate:
+    needs: select-checks
+    if: ${{ always() && (inputs.profile == '' || inputs.profile == 'full-branch') }}
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event.deleted != true && github.ref == 'refs/heads/main' && (needs.select-checks.result != 'success' || needs.select-checks.outputs.docs == 'true')) && '["Branch Docs"]' || '["Branch Docs Not Required"]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require successful check selection
+        if: matrix.check == 'Branch Docs'
+        env:
+          SELECTION_RESULT: ${{ needs.select-checks.result }}
+        run: |
+          if [ "$SELECTION_RESULT" != success ]; then
+            echo '::error::Check selection did not succeed; documentation checks cannot be declared unnecessary.'
+            exit 1
+          fi
+      - name: Checkout repository
+        if: matrix.check == 'Branch Docs'
+        uses: actions/checkout@v4
+      - uses: ./.github/actions/check-docs
+        if: matrix.check == 'Branch Docs'
+  entry-scope:
+    name: Select branch profile
+    runs-on: ubuntu-latest
+    outputs:
+      non_docs: ${{ steps.scope.outputs.non_docs }}
+      version: ${{ steps.scope.outputs.version }}
+      simd: ${{ steps.scope.outputs.simd }}
+      profile: ${{ steps.scope.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: scope
+        env:
+          PROFILE: ${{ inputs.profile || 'full-branch' }}
+        run: python3 scripts/ci/branch_entry_policy.py
+  platforms-build-asan-x86:
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'))) }}
+    name: Asan Build X86
+    runs-on: ubuntu-24.04
+    container:
+      image: vsaglib/vsag:ci-x86-mkl
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: asan_build_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-build-asan-x86
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+  platforms-build-asan-aarch64:
+    name: Asan Build Aarch64
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: asan_build_aarch-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-build-asan-aarch64
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
+  platforms-build-asan-macos-arm64:
+    name: Asan Build macOS arm64
+    runs-on: macos-15
+    concurrency:
+      group: asan_build_macos-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Free Disk Space
+        run: rm -rf "${RUNNER_TOOL_CACHE:-/Users/runner/hostedtoolcache}"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-build-asan-macos-arm64
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
+  platforms-test-asan-x86:
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')))) && needs.platforms-build-asan-x86.result == 'success' }}
+    name: Test X86
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-x86
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: test_asan_x86-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    strategy:
+      matrix:
+        test_type:
+          - unittests
+          - functests
+    container:
+      image: vsaglib/vsag:ci-x86-mkl
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-test-asan-x86
+        id: execute
+        with:
+          matrix-test-type: ${{ matrix.test_type }}
+  platforms-test-asan-aarch64:
+    name: Test Aarch64
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-aarch64
+    env:
+      SMOKE: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      matrix:
+        test_type:
+          - unittests
+          - functests
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: test_asan_aarch64-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-test-asan-aarch64
+        id: execute
+        with:
+          matrix-test-type: ${{ matrix.test_type }}
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.platforms-build-asan-aarch64.result == 'success' }}
+  platforms-test-asan-macos-arm64:
+    name: Test macOS arm64
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-macos-arm64
+    env:
+      SMOKE: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
+      FULL_EXAMPLES: ${{ false }}
+    runs-on: macos-15
+    strategy:
+      matrix:
+        test_type:
+          - unittests
+          - functests
+    concurrency:
+      group: test_asan_macos-${{ matrix.test_type }}-${{ github.sha }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-test-asan-macos-arm64
+        id: execute
+        with:
+          matrix-test-type: ${{ matrix.test_type }}
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.platforms-build-asan-macos-arm64.result == 'success' }}
+  platforms-test-example-x86:
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')))) && needs.platforms-build-asan-x86.result == 'success' }}
+    name: Test Example X86
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-x86
+    runs-on: ubuntu-24.04
+    container:
+      image: vsaglib/vsag:ci-x86-mkl
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: test_example_x86--${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-test-example-x86
+        id: execute
+  platforms-test-example-aarch64:
+    name: Test Example Aarch64
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-aarch64
+    env:
+      SMOKE: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: vsaglib/vsag:ci-aarch64-openblas
+      volumes:
+        - /opt:/useless
+    concurrency:
+      group: test_example_aarch64--${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-build-and-test-test-example-aarch64
+        id: execute
+        with:
+          inputs-smoke: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) }}
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.platforms-build-asan-aarch64.result == 'success' }}
+  platforms-clean-up:
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!false)) && needs.platforms-test-asan-x86.result == 'success' && needs.platforms-test-asan-aarch64.result == 'success' && needs.platforms-test-asan-macos-arm64.result == 'success' }}
+    name: Clean Up
+    needs:
+      - entry-scope
+      - changes
+      - platforms-test-asan-x86
+      - platforms-test-asan-aarch64
+      - platforms-test-asan-macos-arm64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/asan-build-and-test-clean-up
+        id: execute
+  platforms:
+    name: Platforms result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'asan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - platforms-build-asan-x86
+      - platforms-build-asan-aarch64
+      - platforms-build-asan-macos-arm64
+      - platforms-test-asan-x86
+      - platforms-test-asan-aarch64
+      - platforms-test-asan-macos-arm64
+      - platforms-test-example-x86
+      - platforms-test-example-aarch64
+      - platforms-clean-up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) && '["platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-aarch64"]' || '["platforms-build-asan-x86", "platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-x86", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-x86", "platforms-test-example-aarch64"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  python-build-python-wheel-x86:
+    name: Python Wheel Build X86
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: python_build_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /useless/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-build-and-test-build-python-wheel-x86
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
+  python-build-python-wheel-aarch64:
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'))) }}
+    name: Python Wheel Build Aarch64
+    runs-on: ubuntu-24.04-arm
+    concurrency:
+      group: python_build_aarch64-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-build-and-test-build-python-wheel-aarch64
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+  python-test-python-x86:
+    name: Test Python X86
+    needs:
+      - entry-scope
+      - changes
+      - python-build-python-wheel-x86
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: test_python_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-build-and-test-test-python-x86
+        id: execute
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-build-python-wheel-x86.result == 'success' }}
+  python-test-python-aarch64:
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')))) && needs.python-build-python-wheel-aarch64.result == 'success' }}
+    name: Test Python Aarch64
+    needs:
+      - entry-scope
+      - changes
+      - python-build-python-wheel-aarch64
+    runs-on: ubuntu-24.04-arm
+    concurrency:
+      group: test_python_aarch64-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: rm -rf /opt/hostedtoolcache
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/python-build-and-test-test-python-aarch64
+        id: execute
+  python-clean-up:
+    name: Clean Up
+    needs:
+      - entry-scope
+      - changes
+      - python-test-python-x86
+      - python-test-python-aarch64
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/python-build-and-test-clean-up
+        id: execute
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-test-python-x86.result == 'success' && needs.python-test-python-aarch64.result == 'success' }}
+  python:
+    name: Python result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - python-build-python-wheel-x86
+      - python-build-python-wheel-aarch64
+      - python-test-python-x86
+      - python-test-python-aarch64
+      - python-clean-up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) && '["python-build-python-wheel-x86", "python-test-python-x86"]' || '["python-build-python-wheel-x86", "python-build-python-wheel-aarch64", "python-test-python-x86", "python-test-python-aarch64"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  tsan-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      non_markdown: ${{ steps.execute.outputs.non_markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-changes
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'tsan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
+  tsan-build-tsan:
+    name: Build with TSAN
+    needs:
+      - entry-scope
+      - changes
+      - tsan-changes
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'tsan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (github.event_name != 'pull_request' || needs.tsan-changes.outputs.non_markdown == 'true')) && needs.tsan-changes.result == 'success' }}
+    runs-on: ubuntu-24.04
+    env:
+      EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          cleanup_failed=0
+          for path in /useless/*; do
+            case "$path" in
+              /useless/runner-cache) continue ;;
+            esac
+            rm -rf -- "$path" || cleanup_failed=1
+          done
+          node24_diagnostics after
+          exit "$cleanup_failed"
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+      - uses: ./.github/actions/tsan-build-and-test-build-tsan
+        id: execute
+  tsan-test-tsan:
+    name: Run TSAN Tests
+    needs:
+      - entry-scope
+      - changes
+      - tsan-changes
+      - tsan-build-tsan
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'tsan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (github.event_name != 'pull_request' || needs.tsan-changes.outputs.non_markdown == 'true')) && needs.tsan-changes.result == 'success' && needs.tsan-build-tsan.result == 'success' }}
+    runs-on: ubuntu-24.04
+    concurrency:
+      group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/tsan-build-and-test-test-tsan
+        id: execute
+  tsan:
+    name: Tsan result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'tsan' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - tsan-changes
+      - tsan-build-tsan
+      - tsan-test-tsan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ (github.event_name != 'pull_request' || needs.tsan-changes.outputs.non_markdown == 'true') && '["tsan-changes", "tsan-build-tsan", "tsan-test-tsan"]' || '["tsan-changes"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  lint-clang-tidy-check:
+    name: Lint
+    runs-on: ubuntu-latest
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+    concurrency:
+      group: lint-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/lint-clang-tidy-check
+        id: execute
+        with:
+          inputs-mode: ${{ needs.changes.outputs.lint || 'full' }}
+          inputs-pattern: ${{ needs.changes.outputs.pattern || '' }}
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'lint' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || (needs.changes.result == 'success' && needs.changes.outputs.lint != 'none')))))) && (true) }}
+  lint:
+    name: Lint result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'lint' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || (needs.changes.result == 'success' && needs.changes.outputs.lint != 'none')))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - lint-clang-tidy-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ '["lint-clang-tidy-check"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  coverage-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      non_markdown: ${{ steps.execute.outputs.non_markdown }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/coverage-changes
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'coverage' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.version == 'true'))))) && (true) }}
+  coverage-coverage:
+    name: Test Coverage
+    needs:
+      - entry-scope
+      - changes
+      - coverage-changes
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'coverage' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.version == 'true'))))) && (github.event_name != 'push' || needs.coverage-changes.outputs.non_markdown == 'true')) && needs.coverage-changes.result == 'success' }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: coverage-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    env:
+      VSAG_FETCHCONTENT_BASE_DIR: ${{ github.workspace }}/.ci-fetchcontent
+      VSAG_THIRDPARTY_DOWNLOAD_DIR: ${{ github.workspace }}/.ci-downloads
+      VSAG_TEST_SEED: 424242
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: '0'
+          persist-credentials: false
+      - uses: ./.github/actions/coverage-coverage
+        id: execute
+        with:
+          secrets-CODECOV-TOKEN: ${{ secrets.CODECOV_TOKEN }}
+  coverage:
+    name: Coverage result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'coverage' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.version == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - coverage-changes
+      - coverage-coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ (github.event_name != 'push' || needs.coverage-changes.outputs.non_markdown == 'true') && '["coverage-changes", "coverage-coverage"]' || '["coverage-changes"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  compatibility-compatibility:
+    name: Check Compatibility
+    runs-on: ubuntu-latest
+    concurrency:
+      group: compatibility-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-openblas
+    env:
+      COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
+    steps:
+      - name: Install GitHub CLI
+        env:
+          GH_VERSION: 2.75.0
+        run: |
+          if command -v gh >/dev/null 2>&1; then
+            gh --version
+            exit 0
+          fi
+          wget --tries=3 --timeout=30 -q "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -O /tmp/gh.tar.gz
+          tar xzf /tmp/gh.tar.gz -C /tmp
+          install -m 0755 /tmp/gh_${GH_VERSION}_linux_amd64/bin/gh /usr/local/bin/gh
+          rm -rf /tmp/gh.tar.gz /tmp/gh_${GH_VERSION}_linux_amd64
+          gh --version
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/check-compatibility-compatibility
+        id: execute
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'compatibility' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true'))))) && (true) }}
+  compatibility:
+    name: Compatibility result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'compatibility' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - compatibility-compatibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ '["compatibility-compatibility"]' }}
+        run: python3 scripts/ci/check_job_results.py
+  simd-build-asan-simd:
+    name: Asan Build Simd
+    runs-on: ubuntu-24.04
+    container:
+      image: vsaglib/vsag:ci-x86-mkl
+      volumes:
+        - /opt:/useless
+    strategy:
+      matrix:
+        simd_option:
+          - "avx;-DDISABLE_AVX2_FORCE=1"
+          - "sse;-DDISABLE_AVX_FORCE=1"
+          - "generic;-DDISABLE_SSE_FORCE=1"
+    concurrency:
+      group: build-${{ matrix.simd_option }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          cleanup_failed=0
+          for path in /useless/*; do
+            case "$path" in
+              /useless/runner-cache) continue ;;
+            esac
+            rm -rf -- "$path" || cleanup_failed=1
+          done
+          node24_diagnostics after
+          exit "$cleanup_failed"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-with-simd-option-build-asan-simd
+        id: execute
+        with:
+          matrix-simd-option: ${{ matrix.simd_option }}
+    needs:
+      - entry-scope
+      - changes
+    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'simd' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.simd == 'true'))))) && (true) }}
+  simd-test-asan-simd:
+    name: Unit Test Simd
+    needs:
+      - entry-scope
+      - changes
+      - simd-build-asan-simd
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        test_type:
+          - unittests
+          - functests
+        simd_key:
+          - avx
+          - sse
+          - generic
+    concurrency:
+      group: test-${{ matrix.simd_key }}-${{ matrix.test_type }}-${{ github.event.pull_request.number || github.sha }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    container:
+      image: vsaglib/vsag:ci-x86-mkl
+      volumes:
+        - /opt:/useless
+    steps:
+      - name: Free Disk Space
+        run: |
+          node24_diagnostics() {
+            echo "::group::Node.js 24 diagnostics ($1 cleanup)"
+            date -u '+%Y-%m-%dT%H:%M:%SZ' || true
+            ls -ld /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node || true
+            for path in /__e /__e/node24 /__e/node24/bin /__e/node24/bin/node; do
+              readlink "$path" || true
+              readlink -f "$path" || true
+              stat -L "$path" || true
+            done
+            awk '$5 ~ /^\/(__e|useless|__t)(\/|$)/' /proc/self/mountinfo || true
+            timeout -k 1s 5s /__e/node24/bin/node --version || echo "node --version exit=$?"
+            echo "::endgroup::"
+          }
+          node24_diagnostics before
+          cleanup_failed=0
+          for path in /useless/*; do
+            case "$path" in
+              /useless/runner-cache) continue ;;
+            esac
+            rm -rf -- "$path" || cleanup_failed=1
+          done
+          node24_diagnostics after
+          exit "$cleanup_failed"
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/asan-with-simd-option-test-asan-simd
+        id: execute
+        with:
+          matrix-simd-key: ${{ matrix.simd_key }}
+          matrix-test-type: ${{ matrix.test_type }}
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'simd' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.simd == 'true'))))) && (true)) && needs.simd-build-asan-simd.result == 'success' }}
+  simd-clean-up:
+    name: Clean Up
+    needs:
+      - entry-scope
+      - changes
+      - simd-test-asan-simd
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        simd_key:
+          - avx
+          - sse
+          - generic
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/asan-with-simd-option-clean-up
+        id: execute
+        with:
+          matrix-simd-key: ${{ matrix.simd_key }}
+    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'simd' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.simd == 'true'))))) && (true)) && needs.simd-test-asan-simd.result == 'success' }}
+  simd:
+    name: Simd result
+    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'simd' || (needs.entry-scope.outputs.profile == 'full-branch' && (needs.entry-scope.outputs.simd == 'true'))))) }}
+    needs:
+      - entry-scope
+      - changes
+      - simd-build-asan-simd
+      - simd-test-asan-simd
+      - simd-clean-up
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Require complete selected results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          REQUIRED: ${{ '["simd-build-asan-simd", "simd-test-asan-simd", "simd-clean-up"]' }}
+        run: python3 scripts/ci/check_job_results.py

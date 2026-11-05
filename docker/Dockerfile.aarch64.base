@@ -1,0 +1,34 @@
+
+# Base CI image for VSAG on aarch64.
+#
+# This image carries the common toolchain shared by every aarch64 CI variant
+# (compilers, build tools, runtime headers, etc.) but intentionally does NOT
+# install any BLAS implementation. BLAS backends are layered on top of this
+# image in the variant Dockerfiles:
+#
+#   * docker/Dockerfile.aarch64.openblas -> vsaglib/vsag:ci-aarch64-openblas
+#
+# Unlike x86_64 there is no Intel MKL variant here: Intel oneAPI MKL ships
+# x86-only, so on aarch64 OpenBLAS is the sole BLAS backend. Keeping the base
+# image free of any BLAS implementation still lets us:
+#   * share the build context across future aarch64 variants;
+#   * make it trivial to add another backend (e.g. Arm Performance Libraries)
+#     later.
+#
+# `FROM ubuntu:26.04` is a multi-arch manifest; building this Dockerfile on an
+# aarch64 host (the ubuntu-26.04-arm runner in docker/update-ci-image.yml)
+# selects the arm64 base automatically, so no QEMU emulation is required.
+
+FROM ubuntu:26.04
+
+# The shared installer selects native GCC 13 and LLVM 20 on both architectures.
+COPY scripts/deps/install_toolchain_ubuntu.sh /tmp/install-toolchain.sh
+ENV CC=/usr/bin/gcc-13 CXX=/usr/bin/g++-13 FC=/usr/bin/gfortran-13
+# Clean package lists in the same layer that installs the toolchain and dependencies.
+RUN DEBIAN_FRONTEND=noninteractive bash /tmp/install-toolchain.sh \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y wget gpg sudo git cmake ninja-build gdb ccache build-essential \
+        lcov python3-pip python3-venv time python3-dev libaio-dev libcurl4-openssl-dev liburing-dev \
+    && test "$("$CC" -dumpversion | cut -d. -f1)" = 13 \
+    && test "$("$CXX" -dumpversion | cut -d. -f1)" = 13 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/install-toolchain.sh

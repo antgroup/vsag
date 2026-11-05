@@ -1,0 +1,318 @@
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <type_traits>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+namespace vsag {
+
+/**
+ * @enum IOErrorCode
+ * @brief Enumeration for I/O error codes.
+ *
+ * This enum defines various error codes that can occur during I/O operations.
+ */
+enum class IOErrorCode {
+    IO_SUCCESS = 0,  ///< Operation was successful.
+    IO_ERROR = 1,    ///< General I/O error.
+    IO_TIMEOUT = 2   ///< I/O operation timed out.
+};
+
+/**
+ * @typedef CallBack
+ * @brief Type alias for a callback function used in asynchronous I/O operations.
+ *
+ * The callback function takes two parameters: an I/O error code and an error message.
+ */
+using CallBack = std::function<void(IOErrorCode code, const std::string& message)>;
+
+class Reader;
+using ReaderPtr = std::shared_ptr<Reader>;
+
+class Writer;
+using WriterPtr = std::shared_ptr<Writer>;
+
+/**
+ * @brief Optional interface for readers that support best-effort prefetch hints.
+ *
+ * Reader implementations may inherit from both Reader and ReaderPrefetcher. Keeping this hook in
+ * a separate interface avoids changing the Reader vtable for existing implementations. ReaderIO
+ * safely ignores prefetch hints when its Reader does not implement this interface. Implementations
+ * should return promptly, suppress hint failures, and must not affect subsequent reads.
+ */
+class ReaderPrefetcher {
+public:
+    virtual ~ReaderPrefetcher() = default;
+
+    virtual void
+    Prefetch(uint64_t offset, uint64_t len) = 0;
+};
+
+/**
+ * @class Reader
+ * @brief An abstract base class for reading data from various sources.
+ *
+ * The `Reader` class provides a standard interface for reading data synchronously and
+ * asynchronously from files or memory. Implementations of this class must provide concrete
+ * implementations for the pure virtual functions: Read & AsyncRead & Size.
+ */
+class Reader {
+public:
+    /// Default constructor.
+    Reader() = default;
+
+    /// Default destructor.
+    virtual ~Reader() = default;
+
+public:
+    /**
+     * @brief Reads a specified number of bytes from the data source.
+     *
+     * This pure virtual function synchronously reads `len` bytes from the source starting
+     * at `offset` and copies them to the memory pointed to by `dest`. This method is thread-safe.
+     *
+     * @param offset The starting position for reading in the data source.
+     * @param len The number of bytes to read.
+     * @param dest Pointer to the memory where the read bytes will be copied.
+     */
+    virtual void
+    Read(uint64_t offset, uint64_t len, void* dest) = 0;
+
+    /**
+     * @brief Asynchronously reads a specified number of bytes from the data source.
+     *
+     * This pure virtual function asynchronously reads `len` bytes from the source starting
+     * at `offset` and copies them to the memory pointed to by `dest`. Upon completion, the
+     * provided callback function is called with the result of the operation.
+     *
+     * @param offset The starting position for reading in the data source.
+     * @param len The number of bytes to read.
+     * @param dest Pointer to the memory where the read bytes will be copied.
+     * @param callback Function to call upon completion with the result of the operation.
+     */
+    virtual void
+    AsyncRead(uint64_t offset, uint64_t len, void* dest, CallBack callback) = 0;
+
+    /**
+     * @brief Performs multiple synchronous read operations from the data source.
+     *
+     * This virtual function initiates a batch of read operations, each reading a specified
+     * number of bytes from the source starting at a given offset and appending the bytes to one
+     * packed destination buffer. The lengths and offsets are arrays where each index corresponds
+     * to a single read operation.
+     *
+     * @param dests    Destination buffer of at least `sum(lens)` bytes. Results are packed in
+     *                 request order; zero-length requests occupy no space.
+     * @param lens     Array of lengths (in bytes) for each read operation. Must match the
+     *                 number of operations specified by `count`.
+     * @param offsets  Array of starting positions in the data source for each read operation.
+     *                 Must match the number of operations specified by `count`.
+     * @param count    The total number of read operations to perform.
+     *
+     * @return         Returns `true` if all read operations completed successfully,
+     *                 `false` otherwise (e.g., due to invalid parameters or I/O errors).
+     *
+     * @note This function is thread-safe and operates synchronously, blocking until all
+     *       read operations are completed.
+     * @note `lens` and `offsets` must each contain `count` valid elements; the destination buffer
+     *       must have enough space for all requested bytes. Null pointers or mismatched array sizes
+     *       may result in undefined behavior for custom Reader implementations.
+     * @note Request `i` lands at `dests + lens[0] + ... + lens[i-1]`. Source offsets do not
+     *       create gaps in the destination.
+     */
+    virtual bool
+    MultiRead(uint8_t* dests, const uint64_t* lens, const uint64_t* offsets, uint64_t count);
+
+    /**
+     * @brief Returns the size of the data source.
+     *
+     * This pure virtual function returns the total size of the data source.
+     *
+     * @return uint64_t The size of the data source.
+     */
+    [[nodiscard]] virtual uint64_t
+    Size() const = 0;
+};
+
+/**
+ * @brief Synchronous random-access writer for externally managed storage.
+ *
+ * A successful Write makes the bytes visible through the paired Reader and consumes the source
+ * synchronously, so the caller may reuse or release the source buffer after Write returns. Resize
+ * preserves the existing prefix through min(old_size, new_size), zero-fills growth only if the
+ * implementation's storage normally does so, and truncates bytes beyond a smaller new size.
+ * This interface does not provide crash durability, transactions, or synchronization for
+ * overlapping writes.
+ */
+class Writer {
+public:
+    Writer() = default;
+    virtual ~Writer() = default;
+
+    virtual void
+    Write(uint64_t offset, uint64_t len, const void* source) = 0;
+
+    virtual void
+    Resize(uint64_t size) = 0;
+};
+
+struct UserDefinedIOPair {
+    ReaderPtr reader;
+    WriterPtr writer;
+};
+
+/**
+ * @brief Named Reader and Writer pairs retained by indexes created with user-defined IO.
+ */
+class UserDefinedIOSet {
+public:
+    /**
+     * @brief Retains shared ownership of a named pair.
+     * Parameters are taken by value and moved into the set: passing lvalue shared_ptrs copies them,
+     * so the caller's own handles stay valid and can be reused. Passing an rvalue transfers the
+     * caller's handle. The set keeps the pair alive for as long as the entry exists.
+     * Configure the set before sharing it with index construction; concurrent mutation is unsupported.
+     */
+    void
+    Set(const std::string& name, ReaderPtr reader, WriterPtr writer) {
+        if (name.empty()) {
+            throw std::invalid_argument("user defined IO name must not be empty");
+        }
+        if (reader == nullptr or writer == nullptr) {
+            throw std::invalid_argument("user defined IO Reader and Writer must not be null");
+        }
+        if (data_.find(name) != data_.end()) {
+            throw std::invalid_argument("duplicate user defined IO name: " + name);
+        }
+        data_.emplace(name, UserDefinedIOPair{std::move(reader), std::move(writer)});
+    }
+
+    /**
+     * @brief Returns a copy of the named pair, or std::nullopt when absent.
+     * The copy retains independent shared ownership, so it stays valid regardless of later
+     * mutation or destruction of the set, avoiding the dangling-pointer hazard of a borrowed view.
+     */
+    [[nodiscard]] std::optional<UserDefinedIOPair>
+    Get(const std::string& name) const {
+        const auto iter = data_.find(name);
+        if (iter == data_.end()) {
+            return std::nullopt;
+        }
+        return iter->second;
+    }
+
+    [[nodiscard]] bool
+    Contains(const std::string& name) const {
+        return data_.find(name) != data_.end();
+    }
+
+private:
+    std::unordered_map<std::string, UserDefinedIOPair> data_;
+};
+
+/**
+ * @class ReaderSet
+ * @brief A class for managing a collection of `Reader` objects.
+ *
+ * The `ReaderSet` class allows associating `Reader` objects with string names for easy retrieval
+ * and management. It supports adding, retrieving, and checking the existence of readers in the set.
+ */
+class ReaderSet {
+public:
+    /// Default constructor and destructor.
+    ReaderSet() = default;
+    ~ReaderSet() = default;
+
+public:
+    /**
+     * @brief Associates a `Reader` with a name and stores it in the set.
+     *
+     * This function associates a given `Reader` object with a specified name and stores it
+     * in the set for future retrieval.
+     *
+     * @param name The name to associate with the `Reader`.
+     * @param reader Shared pointer to the `Reader` to store.
+     */
+    void
+    Set(const std::string& name, ReaderPtr reader) {
+        data_[name] = std::move(reader);
+    }
+
+    /**
+     * @brief Retrieves the `Reader` associated with a given name.
+     *
+     * This function retrieves the `Reader` object associated with the specified name.
+     * If no `Reader` is associated with the name, it returns `nullptr`.
+     *
+     * @param name The name associated with the `Reader` to retrieve.
+     * @return std::shared_ptr<Reader> Shared pointer to the `Reader` associated with the name, or `nullptr`.
+     */
+    ReaderPtr
+    Get(const std::string& name) const {
+        if (data_.find(name) == data_.end()) {
+            return nullptr;
+        }
+        return data_.at(name);
+    }
+
+    /**
+     * @brief Retrieves a list of all names.
+     *
+     * This function returns a vector containing all the names in the set.
+     *
+     * @return std::vector<std::string> A vector containing all the names.
+     */
+    std::vector<std::string>
+    GetKeys() const {
+        std::vector<std::string> keys;
+        keys.resize(data_.size());
+        transform(
+            data_.begin(),
+            data_.end(),
+            keys.begin(),
+            [](const std::pair<std::string, std::shared_ptr<Reader>>& pair) { return pair.first; });
+        return keys;
+    }
+
+    /**
+     * @brief Checks if a `Reader` is associated with a given name.
+     *
+     * This function checks if there is a `Reader` object associated with the specified name in the set.
+     *
+     * @param key The name to check for association with a `Reader`.
+     * @return bool Returns `true` if a `Reader` is associated with the name, otherwise `false`.
+     */
+    bool
+    Contains(const std::string& key) const {
+        return data_.find(key) != data_.end();
+    }
+
+private:
+    ///< Map storing `Reader` objects associated with names.
+    std::unordered_map<std::string, std::shared_ptr<Reader>> data_;
+};
+
+}  // namespace vsag

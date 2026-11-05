@@ -1,0 +1,1153 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "dataset_impl.h"
+
+#include <algorithm>
+#include <cstring>
+#include <memory>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "typing.h"
+#include "vsag_exception.h"
+
+namespace vsag {
+
+DatasetPtr
+Dataset::Make() {
+    return std::make_shared<DatasetImpl>();
+}
+
+std::optional<SearchResultMetrics>
+Dataset::GetSearchMetrics() const {
+    const auto* accessor = dynamic_cast<const SearchMetricsDatasetAccessor*>(this);
+    return accessor == nullptr ? std::nullopt : accessor->GetSearchMetricsInternal();
+}
+
+DatasetPtr
+Dataset::Paths(const std::string& hierarchy_name, std::vector<std::vector<std::string>> paths) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support multiple paths");
+    }
+    return dataset->Paths(hierarchy_name, std::move(paths));
+}
+
+DatasetPtr
+Dataset::Int64Metadata(const std::string& name, const int64_t* values) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support int64 metadata");
+    }
+    return dataset->Int64Metadata(name, values);
+}
+
+const int64_t*
+Dataset::GetInt64Metadata(const std::string& name) const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->GetInt64Metadata(name);
+    }
+    return nullptr;
+}
+
+bool
+Dataset::GetPaths(const std::string& hierarchy_name,
+                  std::vector<std::vector<std::string>>& paths) const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->CopyPaths(hierarchy_name, paths);
+    }
+
+    paths.clear();
+    const auto* legacy_paths = GetPaths(hierarchy_name);
+    if (legacy_paths == nullptr) {
+        return false;
+    }
+    const auto num_elements = GetNumElements();
+    if (num_elements < 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "NumElements() must not be negative");
+    }
+    paths.reserve(static_cast<uint64_t>(num_elements));
+    for (int64_t i = 0; i < num_elements; ++i) {
+        paths.push_back({legacy_paths[i]});
+    }
+    return true;
+}
+
+const std::string*
+GetDatasetPaths(const Dataset& dataset,
+                const std::string& hierarchy_name,
+                uint64_t element_index,
+                uint64_t& path_count) {
+    if (const auto* dataset_impl = dynamic_cast<const DatasetImpl*>(&dataset)) {
+        return dataset_impl->GetPaths(hierarchy_name, element_index, path_count);
+    }
+
+    path_count = 0;
+    const auto* paths = dataset.GetPaths(hierarchy_name);
+    if (paths == nullptr) {
+        return nullptr;
+    }
+    if (dataset.GetNumElements() < 0 ||
+        element_index >= static_cast<uint64_t>(dataset.GetNumElements())) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Path element index is outside NumElements()");
+    }
+    path_count = 1;
+    return paths + element_index;
+}
+
+DatasetPtr
+DatasetImpl::NumElements(int64_t num_elements) {
+    const auto count_iter = data_.find(NUM_ELEMENTS);
+    const bool is_count_update =
+        count_iter != data_.end() && std::get<int64_t>(count_iter->second) != num_elements;
+    for (const auto& [key, value] : data_) {
+        if (not IsPathsKey(key)) {
+            continue;
+        }
+        if (const auto* paths = std::get_if<MultiPaths>(&value)) {
+            if (num_elements < 0 ||
+                (not is_count_update && paths->size() != static_cast<uint64_t>(num_elements))) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "The multi-path outer vector must match NumElements()");
+            }
+        }
+    }
+    data_[NUM_ELEMENTS] = num_elements;
+    return shared_from_this();
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string* paths) {
+    ReplacePaths(DATASET_PATHS, paths);
+    return shared_from_this();
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string& hierarchy_name, const std::string* paths) {
+    const auto key = hierarchy_name.empty() ? DATASET_PATHS : HierarchyPathsKey(hierarchy_name);
+    ReplacePaths(key, paths);
+    return shared_from_this();
+}
+
+void
+DatasetImpl::ReplacePaths(const std::string& key, var paths) {
+    auto iter = data_.find(key);
+    if (iter == data_.end()) {
+        data_.emplace(key, std::move(paths));
+        return;
+    }
+
+    const auto* old_paths = std::get_if<const std::string*>(&iter->second);
+    const auto* new_paths = std::get_if<const std::string*>(&paths);
+    if (old_paths != nullptr && *old_paths != nullptr &&
+        (new_paths == nullptr || *old_paths != *new_paths)) {
+        retired_paths_.push_back(*old_paths);
+    }
+    iter->second = std::move(paths);
+}
+
+DatasetPtr
+DatasetImpl::Paths(const std::string& hierarchy_name, MultiPaths paths) {
+    for (const auto& element_paths : paths) {
+        if (element_paths.empty()) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Each element must have at least one hierarchy path");
+        }
+    }
+    if (auto iter = data_.find(NUM_ELEMENTS); iter != data_.end()) {
+        const auto num_elements = std::get<int64_t>(iter->second);
+        if (num_elements < 0 || paths.size() != static_cast<uint64_t>(num_elements)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "The multi-path outer vector must match NumElements()");
+        }
+    }
+
+    const auto key = hierarchy_name.empty() ? DATASET_PATHS : HierarchyPathsKey(hierarchy_name);
+    ReplacePaths(key, std::move(paths));
+    return shared_from_this();
+}
+
+const std::string*
+DatasetImpl::GetPaths(const std::string& hierarchy_name,
+                      uint64_t element_index,
+                      uint64_t& path_count) const {
+    path_count = 0;
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return nullptr;
+    }
+
+    if (const auto* paths = std::get_if<const std::string*>(value)) {
+        if (*paths == nullptr) {
+            return nullptr;
+        }
+        if (GetNumElements() < 0 || element_index >= static_cast<uint64_t>(GetNumElements())) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Path element index is outside NumElements()");
+        }
+        path_count = 1;
+        return *paths + element_index;
+    }
+
+    const auto& paths = std::get<MultiPaths>(*value);
+    if (GetNumElements() < 0 || paths.size() != static_cast<uint64_t>(GetNumElements())) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "The multi-path outer vector must match NumElements()");
+    }
+    if (element_index >= paths.size()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Path element index is outside NumElements()");
+    }
+
+    const auto& element_paths = paths[element_index];
+    path_count = element_paths.size();
+    return element_paths.data();
+}
+
+bool
+DatasetImpl::HasPaths(const std::string& hierarchy_name) const {
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return false;
+    }
+    if (const auto* paths = std::get_if<const std::string*>(value)) {
+        return *paths != nullptr;
+    }
+    return true;
+}
+
+bool
+DatasetImpl::CopyPaths(const std::string& hierarchy_name, MultiPaths& paths) const {
+    paths.clear();
+    const auto* value = FindPaths(hierarchy_name);
+    if (value == nullptr) {
+        return false;
+    }
+    if (const auto* legacy_paths = std::get_if<const std::string*>(value)) {
+        if (*legacy_paths == nullptr) {
+            return false;
+        }
+        const auto num_elements = GetNumElements();
+        if (num_elements < 0) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "NumElements() must not be negative");
+        }
+        paths.reserve(static_cast<uint64_t>(num_elements));
+        for (int64_t i = 0; i < num_elements; ++i) {
+            paths.push_back({(*legacy_paths)[i]});
+        }
+        return true;
+    }
+
+    const auto& multi_paths = std::get<MultiPaths>(*value);
+    const auto num_elements = GetNumElements();
+    if (num_elements < 0 || multi_paths.size() != static_cast<uint64_t>(num_elements)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "The multi-path outer vector must match NumElements()");
+    }
+    paths = multi_paths;
+    return true;
+}
+
+DatasetPtr
+DatasetImpl::MakeEmptyDataset() {
+    auto result = std::make_shared<DatasetImpl>();
+    result->Dim(0)->NumElements(1);
+    return result;
+}
+
+template <typename T>
+static inline T*
+new_element(T*& old_dest, uint64_t old_count, uint64_t new_total) {
+    T* dest = new T[new_total];
+    if (old_dest != nullptr) {
+        memcpy(dest, old_dest, old_count * sizeof(T));
+    }
+    delete[] old_dest;  // Free the old memory if it was allocated with new[]
+    old_dest = nullptr;
+    return dest;
+}
+
+template <typename T>
+static inline T*
+allocator_element(Allocator* allocator, T* old_dest, uint64_t new_size_in_bytes) {
+    if (old_dest != nullptr) {
+        return static_cast<T*>(allocator->Reallocate(old_dest, new_size_in_bytes));
+    }
+    return static_cast<T*>(allocator->Allocate(new_size_in_bytes));
+}
+
+template <typename T>
+static inline T*
+allocate_and_copy(const T* src,
+                  uint64_t count,
+                  Allocator* allocator,
+                  T* old_dest = nullptr,
+                  uint64_t old_count = 0) {
+    if (src == nullptr || count == 0) {
+        return nullptr;
+    }
+    if (old_dest == nullptr && old_count > 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Old destination cannot be null if old count is greater than zero");
+    }
+    if (old_dest && old_count == 0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Old count must be greater than zero if old destination is provided");
+    }
+
+    T* dest;
+    if (allocator != nullptr) {
+        dest = allocator_element<T>(allocator, old_dest, (old_count + count) * sizeof(T));
+    } else {
+        dest = new_element<T>(old_dest, old_count, old_count + count);
+    }
+    memcpy(dest + old_count, src, count * sizeof(T));
+    return dest;
+}
+
+static void
+copy_sparse_vector(const SparseVector& src, SparseVector* dest, Allocator* allocator) {
+    uint64_t len = src.len_;
+    if (allocator != nullptr) {
+        dest->ids_ = static_cast<uint32_t*>(allocator->Allocate(len * sizeof(uint32_t)));
+        dest->vals_ = static_cast<float*>(allocator->Allocate(len * sizeof(float)));
+    } else {
+        dest->ids_ = new uint32_t[len];
+        dest->vals_ = new float[len];
+    }
+    dest->len_ = len;
+    std::memcpy(dest->ids_, src.ids_, len * sizeof(uint32_t));
+    std::memcpy(dest->vals_, src.vals_, len * sizeof(float));
+
+    // Copy optional original token sequence (preserves order & duplicates).
+    dest->token_seq_len_ = src.token_seq_len_;
+    dest->token_sequence_ = nullptr;
+    if (src.token_seq_len_ > 0 && src.token_sequence_ != nullptr) {
+        uint64_t token_len = src.token_seq_len_;
+        if (allocator != nullptr) {
+            dest->token_sequence_ =
+                static_cast<uint32_t*>(allocator->Allocate(token_len * sizeof(uint32_t)));
+        } else {
+            dest->token_sequence_ = new uint32_t[token_len];
+        }
+        std::memcpy(dest->token_sequence_, src.token_sequence_, token_len * sizeof(uint32_t));
+    }
+}
+
+static void
+copy_multi_vector(const MultiVector& src,
+                  MultiVector* dest,
+                  int64_t multi_vector_dim,
+                  Allocator* allocator) {
+    dest->len_ = src.len_;
+    if (src.len_ == 0) {
+        dest->vectors_ = nullptr;
+        return;
+    }
+    uint64_t num_floats = static_cast<uint64_t>(src.len_) * multi_vector_dim;
+    if (allocator != nullptr) {
+        dest->vectors_ = static_cast<float*>(allocator->Allocate(num_floats * sizeof(float)));
+    } else {
+        dest->vectors_ = new float[num_floats];
+    }
+    std::memcpy(dest->vectors_, src.vectors_, num_floats * sizeof(float));
+}
+
+static MultiVector*
+allocate_and_copy_multi_vectors(const MultiVector* src,
+                                uint64_t count,
+                                int64_t multi_vector_dim,
+                                Allocator* allocator,
+                                MultiVector* old_dest = nullptr,
+                                uint64_t old_count = 0) {
+    if (src == nullptr || count == 0) {
+        return old_dest;
+    }
+
+    uint64_t new_total = old_count + count;
+    MultiVector* dest = nullptr;
+
+    if (allocator != nullptr) {
+        dest = allocator_element<MultiVector>(allocator, old_dest, new_total * sizeof(MultiVector));
+    } else {
+        dest = new_element<MultiVector>(old_dest, old_count, new_total);
+    }
+
+    for (uint64_t i = old_count; i < new_total; ++i) {
+        const MultiVector& src_vec = src[i - old_count];
+        copy_multi_vector(src_vec, &dest[i], multi_vector_dim, allocator);
+    }
+    return dest;
+}
+
+static std::string*
+allocate_and_copy_strings(const std::string* src, uint64_t count) {
+    if (src == nullptr) {
+        return nullptr;
+    }
+
+    auto* dest = new std::string[count];
+    for (uint64_t i = 0; i < count; ++i) {
+        dest[i] = src[i];
+    }
+    return dest;
+}
+
+static SparseVector*
+allocate_and_copy_sparse_vectors(const SparseVector* src,
+                                 uint64_t count,
+                                 Allocator* allocator,
+                                 SparseVector* old_dest = nullptr,
+                                 uint64_t old_count = 0) {
+    if (src == nullptr || count == 0) {
+        return old_dest;
+    }
+
+    uint64_t new_total = old_count + count;
+    SparseVector* dest = nullptr;
+
+    if (allocator != nullptr) {
+        dest =
+            allocator_element<SparseVector>(allocator, old_dest, new_total * sizeof(SparseVector));
+    } else {
+        dest = new_element<SparseVector>(old_dest, old_count, new_total);
+    }
+
+    for (uint64_t i = old_count; i < new_total; ++i) {
+        const SparseVector& src_vec = src[i - old_count];
+        copy_sparse_vector(src_vec, &dest[i], allocator);
+    }
+    return dest;
+}
+
+template <typename T>
+static inline void*
+void_ptr(const T* ptr) {
+    return static_cast<void*>(const_cast<T*>(ptr));
+}
+
+template <typename T>
+static inline void*
+void_ptr(T* ptr) {
+    return static_cast<void*>(ptr);
+}
+
+DatasetImpl::~DatasetImpl() {  // NOLINT
+    if (not this->owner_) {
+        return;
+    }
+
+    auto release_uint32_metadata = [this](const uint32_t* vector_counts, auto release) {
+        for (auto iter = this->data_.cbegin(); iter != this->data_.cend(); ++iter) {
+            if (not IsUInt32MetadataKey(iter->first)) {
+                continue;
+            }
+            const auto* stored_values = std::get_if<const uint32_t*>(&iter->second);
+            if (stored_values == nullptr) {
+                continue;
+            }
+            const auto* values = *stored_values;
+            bool already_released = values == nullptr or values == vector_counts;
+            for (auto previous = this->data_.cbegin(); not already_released and previous != iter;
+                 ++previous) {
+                const auto* previous_values = std::get_if<const uint32_t*>(&previous->second);
+                already_released = IsUInt32MetadataKey(previous->first) and
+                                   previous_values != nullptr and *previous_values == values;
+            }
+            if (not already_released) {
+                release(values);
+            }
+        }
+    };
+
+    auto release_int64_metadata = [this](const int64_t* ids, auto release) {
+        for (auto iter = this->data_.cbegin(); iter != this->data_.cend(); ++iter) {
+            if (not IsInt64MetadataKey(iter->first)) {
+                continue;
+            }
+            const auto* stored_values = std::get_if<const int64_t*>(&iter->second);
+            if (stored_values == nullptr) {
+                continue;
+            }
+            const auto* values = *stored_values;
+            bool already_released = values == nullptr or values == ids;
+            for (auto previous = this->data_.cbegin(); not already_released and previous != iter;
+                 ++previous) {
+                const auto* previous_values = std::get_if<const int64_t*>(&previous->second);
+                already_released = IsInt64MetadataKey(previous->first) and
+                                   previous_values != nullptr and *previous_values == values;
+            }
+            if (not already_released) {
+                release(values);
+            }
+        }
+    };
+
+    if (allocator_ != nullptr) {
+        const auto* ids = DatasetImpl::GetIds();
+        allocator_->Deallocate(void_ptr(ids));
+        release_int64_metadata(
+            ids, [this](const int64_t* values) { allocator_->Deallocate(void_ptr(values)); });
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
+        const auto* vector_counts = DatasetImpl::GetVectorCounts();
+        allocator_->Deallocate(void_ptr(vector_counts));
+        release_uint32_metadata(vector_counts, [this](const uint32_t* values) {
+            allocator_->Deallocate(void_ptr(values));
+        });
+        const auto* sparse_vectors = DatasetImpl::GetSparseVectors();
+        if (sparse_vectors != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                if (sparse_vectors[i].ids_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].ids_));
+                }
+                if (sparse_vectors[i].vals_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].vals_));
+                }
+                if (sparse_vectors[i].token_sequence_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(sparse_vectors[i].token_sequence_));
+                }
+            }
+            allocator_->Deallocate(void_ptr(DatasetImpl::GetSparseVectors()));
+        }
+        const MultiVector* multi_vectors = DatasetImpl::GetMultiVectors();
+        if (multi_vectors != nullptr) {
+            for (int64_t i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                if (multi_vectors[i].vectors_ != nullptr) {
+                    allocator_->Deallocate(void_ptr(multi_vectors[i].vectors_));
+                }
+            }
+            allocator_->Deallocate(void_ptr(DatasetImpl::GetMultiVectors()));
+        }
+
+    } else {
+        const auto* ids = DatasetImpl::GetIds();
+        delete[] ids;
+        release_int64_metadata(ids, [](const int64_t* values) { delete[] values; });
+        delete[] DatasetImpl::GetDistances();
+        delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetFloat16Vectors();
+        delete[] DatasetImpl::GetFloat32Vectors();
+        delete[] DatasetImpl::GetExtraInfos();
+        const auto* vector_counts = DatasetImpl::GetVectorCounts();
+        delete[] vector_counts;
+        release_uint32_metadata(vector_counts, [](const uint32_t* values) { delete[] values; });
+
+        if (DatasetImpl::GetSparseVectors() != nullptr) {
+            for (int i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                delete[] DatasetImpl::GetSparseVectors()[i].ids_;
+                delete[] DatasetImpl::GetSparseVectors()[i].vals_;
+                delete[] DatasetImpl::GetSparseVectors()[i].token_sequence_;
+            }
+            delete[] DatasetImpl::GetSparseVectors();
+        }
+
+        if (DatasetImpl::GetMultiVectors() != nullptr) {
+            for (int64_t i = 0; i < DatasetImpl::GetNumElements(); i++) {
+                delete[] DatasetImpl::GetMultiVectors()[i].vectors_;
+            }
+            delete[] DatasetImpl::GetMultiVectors();
+        }
+    }
+    std::unordered_set<const std::string*> released_strings;
+    auto release_strings = [&released_strings](const std::string* values) {
+        if (values != nullptr && released_strings.insert(values).second) {
+            delete[] values;
+        }
+    };
+    for (const auto& [key, value] : this->data_) {
+        if (IsPathsKey(key)) {
+            if (const auto* paths = std::get_if<const std::string*>(&value)) {
+                release_strings(*paths);
+            }
+        } else if (IsStringMetadataKey(key)) {
+            release_strings(std::get<const std::string*>(value));
+        }
+    }
+    for (const auto* paths : retired_paths_) {
+        release_strings(paths);
+    }
+    release_strings(DatasetImpl::GetSourceID());
+    if (DatasetImpl::GetAttributeSets() != nullptr) {
+        const auto* attrsets = DatasetImpl::GetAttributeSets();
+        for (int i = 0; i < DatasetImpl::GetNumElements(); ++i) {
+            for (auto* attr : attrsets[i].attrs_) {
+                delete attr;
+            }
+        }
+        delete[] attrsets;
+    }
+}
+
+DatasetPtr
+DatasetImpl::DeepCopy(Allocator* allocator) const {
+    auto* allocator_ref = allocator != nullptr ? allocator : this->allocator_;
+    auto copy_dataset = std::make_shared<DatasetImpl>();
+    copy_dataset->Owner(true, allocator_ref);
+
+    auto num_elements = this->GetNumElements();
+    auto dim = this->GetDim();
+
+    copy_dataset->NumElements(num_elements);
+    copy_dataset->Dim(dim);
+    if (this->GetIds() != nullptr) {
+        copy_dataset->Ids(allocate_and_copy(this->GetIds(), num_elements, allocator_ref));
+    }
+    if (this->GetDistances() != nullptr) {
+        copy_dataset->Distances(
+            allocate_and_copy(this->GetDistances(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetInt8Vectors() != nullptr) {
+        copy_dataset->Int8Vectors(
+            allocate_and_copy(this->GetInt8Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetFloat32Vectors() != nullptr) {
+        copy_dataset->Float32Vectors(
+            allocate_and_copy(this->GetFloat32Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetFloat16Vectors() != nullptr) {
+        copy_dataset->Float16Vectors(
+            allocate_and_copy(this->GetFloat16Vectors(), num_elements * dim, allocator_ref));
+    }
+
+    if (this->GetVectorCounts() != nullptr) {
+        copy_dataset->VectorCounts(
+            allocate_and_copy(this->GetVectorCounts(), num_elements, allocator_ref));
+    }
+
+    if (this->GetExtraInfoSize() != 0) {
+        copy_dataset->ExtraInfoSize(this->GetExtraInfoSize());
+        copy_dataset->ExtraInfos(allocate_and_copy(
+            this->GetExtraInfos(), num_elements * this->GetExtraInfoSize(), allocator_ref));
+    }
+    if (this->GetSparseVectors() != nullptr) {
+        copy_dataset->SparseVectors(allocate_and_copy_sparse_vectors(
+            this->GetSparseVectors(), num_elements, allocator_ref));
+    }
+    if (this->GetMultiVectors() != nullptr) {
+        int64_t mv_dim = this->GetMultiVectorDim();
+        copy_dataset->MultiVectorDim(mv_dim);
+        copy_dataset->MultiVectors(allocate_and_copy_multi_vectors(
+            this->GetMultiVectors(), num_elements, mv_dim, allocator_ref));
+    }
+    for (const auto& [key, value] : this->data_) {
+        if (not IsPathsKey(key)) {
+            continue;
+        }
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        if (const auto* paths = std::get_if<const std::string*>(&value)) {
+            if (*paths == nullptr) {
+                continue;
+            }
+            auto* copied_paths =
+                allocate_and_copy_strings(*paths, static_cast<uint64_t>(num_elements));
+            if (hierarchy_name.empty()) {
+                copy_dataset->Paths(copied_paths);
+            } else {
+                copy_dataset->Paths(hierarchy_name, copied_paths);
+            }
+        } else {
+            copy_dataset->Paths(hierarchy_name, std::get<MultiPaths>(value));
+        }
+    }
+    for (const auto& [key, value] : this->data_) {
+        const auto* values = std::get_if<const uint32_t*>(&value);
+        if (IsUInt32MetadataKey(key) and values != nullptr and *values != nullptr) {
+            copy_dataset->UInt32Metadata(UInt32MetadataNameFromKey(key),
+                                         allocate_and_copy(*values, num_elements, allocator_ref));
+        }
+    }
+    for (const auto& [key, value] : this->data_) {
+        const auto* values = std::get_if<const int64_t*>(&value);
+        if (IsInt64MetadataKey(key) and values != nullptr and *values != nullptr) {
+            copy_dataset->Int64Metadata(Int64MetadataNameFromKey(key),
+                                        allocate_and_copy(*values, num_elements, allocator_ref));
+        }
+    }
+    for (const auto& [key, value] : this->data_) {
+        const auto* values = std::get_if<const std::string*>(&value);
+        if (IsStringMetadataKey(key) and values != nullptr and *values != nullptr) {
+            copy_dataset->StringMetadata(
+                StringMetadataNameFromKey(key),
+                allocate_and_copy_strings(*values, static_cast<uint64_t>(num_elements)));
+        }
+    }
+
+    if (this->GetSourceID() != nullptr) {
+        auto* source_ids = new std::string[num_elements];
+        copy_dataset->SourceID(source_ids);
+        for (int i = 0; i < num_elements; ++i) {
+            source_ids[i] = this->GetSourceID()[i];
+        }
+    }
+    if (this->GetAttributeSets() != nullptr) {
+        const auto* attrsets = this->GetAttributeSets();
+        auto* attrsets_copy = new AttributeSet[num_elements];
+        copy_dataset->AttributeSets(attrsets_copy);
+
+        for (int i = 0; i < num_elements; ++i) {
+            attrsets_copy[i].attrs_.reserve(attrsets[i].attrs_.size());
+            for (const auto& attr : attrsets[i].attrs_) {
+                attrsets_copy[i].attrs_.emplace_back(attr->DeepCopy());
+            }
+        }
+    }
+
+    return copy_dataset;
+}
+
+#define APPEND_DATA(KEY, TYPE, SETTER_FUNC, MULTIPLIER)                                          \
+    if (auto iter = this->data_.find(KEY); iter != this->data_.end()) {                          \
+        if (other->Get##SETTER_FUNC() == nullptr) {                                              \
+            throw VsagException(ErrorType::INVALID_ARGUMENT,                                     \
+                                "Cannot append dataset without " #KEY " to dataset with " #KEY); \
+        }                                                                                        \
+        auto ptr = const_cast<TYPE>(std::get<const TYPE>(iter->second));                         \
+        this->SETTER_FUNC(allocate_and_copy(other->Get##SETTER_FUNC(),                           \
+                                            new_num_elements * (MULTIPLIER),                     \
+                                            this->allocator_,                                    \
+                                            ptr,                                                 \
+                                            old_num_elements * (MULTIPLIER)));                   \
+    }
+
+DatasetPtr
+DatasetImpl::Append(const DatasetPtr& other) {
+    if (!owner_) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "Cannot append to a non-owner dataset");
+    }
+    if (this->GetDim() != other->GetDim()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets with different dimensions");
+    }
+    if (other->GetExtraInfoSize() != this->GetExtraInfoSize()) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append datasets with different extra info sizes");
+    }
+
+    auto old_num_elements = this->GetNumElements();
+    auto new_num_elements = other->GetNumElements();
+    auto dim = this->GetDim();
+
+    // check paths
+    const auto dataset_has_paths = [](const DatasetPtr& dataset,
+                                      const std::string& hierarchy_name) {
+        if (const auto impl = std::dynamic_pointer_cast<DatasetImpl>(dataset)) {
+            return impl->HasPaths(hierarchy_name);
+        }
+        if (dataset->GetPaths(hierarchy_name) != nullptr) {
+            return true;
+        }
+        if (dataset->GetNumElements() <= 0) {
+            return false;
+        }
+        uint64_t path_count = 0;
+        return GetDatasetPaths(*dataset, hierarchy_name, 0, path_count) != nullptr;
+    };
+    std::vector<std::string> path_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsPathsKey(key)) {
+            continue;
+        }
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        if (not HasPaths(hierarchy_name)) {
+            continue;
+        }
+        if (not dataset_has_paths(other, hierarchy_name)) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without paths for hierarchy '",
+                                hierarchy_name,
+                                "' to dataset with paths for that hierarchy");
+        }
+        path_keys.push_back(key);
+    }
+    auto other_impl = std::dynamic_pointer_cast<DatasetImpl>(other);
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsPathsKey(key)) {
+                continue;
+            }
+            const auto hierarchy_name =
+                key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+            if (not other_impl->HasPaths(hierarchy_name)) {
+                continue;
+            }
+            if (not HasPaths(hierarchy_name)) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with paths for hierarchy '",
+                                    hierarchy_name,
+                                    "' to dataset without paths for that hierarchy");
+            }
+        }
+    }
+
+    std::vector<std::string> string_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsStringMetadataKey(key) || std::get<const std::string*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = StringMetadataNameFromKey(key);
+        if (other->GetStringMetadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without string metadata " + name);
+        }
+        string_metadata_keys.push_back(key);
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsStringMetadataKey(key) || std::get<const std::string*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = StringMetadataNameFromKey(key);
+            if (this->GetStringMetadata(name) == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with string metadata " + name +
+                                        " to dataset without it");
+            }
+        }
+    }
+
+    std::vector<std::string> uint32_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = UInt32MetadataNameFromKey(key);
+        if (other->GetUInt32Metadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without uint32 metadata " + name);
+        }
+        uint32_metadata_keys.push_back(key);
+    }
+
+    std::vector<std::string> int64_metadata_keys;
+    for (const auto& [key, value] : this->data_) {
+        if (not IsInt64MetadataKey(key) || std::get<const int64_t*>(value) == nullptr) {
+            continue;
+        }
+        const auto name = Int64MetadataNameFromKey(key);
+        if (other->GetInt64Metadata(name) == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append dataset without int64 metadata " + name);
+        }
+        int64_metadata_keys.push_back(key);
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsInt64MetadataKey(key) || std::get<const int64_t*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = Int64MetadataNameFromKey(key);
+            if (this->GetInt64Metadata(name) == nullptr) {
+                throw VsagException(
+                    ErrorType::INVALID_ARGUMENT,
+                    "Cannot append dataset with int64 metadata " + name + " to dataset without it");
+            }
+        }
+    }
+    if (other_impl != nullptr) {
+        for (const auto& [key, value] : other_impl->data_) {
+            if (not IsUInt32MetadataKey(key) || std::get<const uint32_t*>(value) == nullptr) {
+                continue;
+            }
+            const auto name = UInt32MetadataNameFromKey(key);
+            if (this->GetUInt32Metadata(name) == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append dataset with uint32 metadata " + name +
+                                        " to dataset without it");
+            }
+        }
+    }
+
+    // check sparse-vectors
+    if (this->data_.find(SPARSE_VECTORS) != this->data_.end() &&
+        other->GetSparseVectors() == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Cannot append dataset without sparse vectors to dataset with sparse vectors");
+    }
+
+    // check multi-vectors
+    if (this->data_.find(MULTI_VECTORS) != this->data_.end()) {
+        if (other->GetMultiVectors() == nullptr) {
+            throw VsagException(
+                ErrorType::INVALID_ARGUMENT,
+                "Cannot append dataset without multi vectors to dataset with multi vectors");
+        }
+        int64_t mv_dim = this->GetMultiVectorDim();
+        if (mv_dim <= 0 || other->GetMultiVectorDim() != mv_dim) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Cannot append datasets with different multi vector dimensions");
+        }
+    }
+
+    // check attribute-sets
+    if (this->data_.find(ATTRIBUTE_SETS) != this->data_.end() &&
+        other->GetAttributeSets() == nullptr) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            "Cannot append dataset without attribute sets to dataset with attribute sets");
+    }
+
+    // check source-id
+    if (this->data_.find(SOURCE_ID) != this->data_.end() && other->GetSourceID() == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "Cannot append dataset without source id to dataset with source id");
+    }
+
+    // Pointer-backed Dataset fields may alias. Detach uint32 metadata before reallocating any
+    // aliased array so each appended field can receive its own tail without a double reallocation.
+    std::unordered_set<const uint32_t*> seen_uint32_metadata;
+    const auto* vector_counts = this->GetVectorCounts();
+    for (const auto& key : uint32_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto* values = std::get<const uint32_t*>(iter->second);
+        const bool aliases_metadata = not seen_uint32_metadata.insert(values).second;
+        if (values == vector_counts or aliases_metadata) {
+            iter->second = allocate_and_copy(values, old_num_elements, this->allocator_);
+        }
+    }
+
+    std::unordered_set<const int64_t*> seen_int64_metadata;
+    const auto* ids = this->GetIds();
+    for (const auto& key : int64_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto* values = std::get<const int64_t*>(iter->second);
+        const bool aliases_metadata = not seen_int64_metadata.insert(values).second;
+        if (values == ids or aliases_metadata) {
+            iter->second = allocate_and_copy(values, old_num_elements, this->allocator_);
+        }
+    }
+
+    // append contiguous arrays via realloc-and-copy
+    APPEND_DATA(IDS, int64_t*, Ids, 1);
+    APPEND_DATA(DISTS, float*, Distances, dim);
+    APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
+    APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
+    APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
+    APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);
+    for (const auto& key : uint32_metadata_keys) {
+        auto iter = this->data_.find(key);
+        auto* values = const_cast<uint32_t*>(std::get<const uint32_t*>(iter->second));
+        const auto name = UInt32MetadataNameFromKey(key);
+        this->UInt32Metadata(name,
+                             allocate_and_copy(other->GetUInt32Metadata(name),
+                                               new_num_elements,
+                                               this->allocator_,
+                                               values,
+                                               old_num_elements));
+    }
+    for (const auto& key : int64_metadata_keys) {
+        auto iter = this->data_.find(key);
+        auto* values = const_cast<int64_t*>(std::get<const int64_t*>(iter->second));
+        const auto name = Int64MetadataNameFromKey(key);
+        this->Int64Metadata(name,
+                            allocate_and_copy(other->GetInt64Metadata(name),
+                                              new_num_elements,
+                                              this->allocator_,
+                                              values,
+                                              old_num_elements));
+    }
+    if (this->GetExtraInfoSize() != 0) {
+        APPEND_DATA(EXTRA_INFOS, char*, ExtraInfos, this->GetExtraInfoSize());
+    }
+
+    // Paths, string metadata, and source IDs may alias the same pointer-backed string array.
+    // Keep replaced arrays alive until every string-backed field has been copied.
+    std::unordered_set<const std::string*> replaced_strings;
+    auto append_strings = [&](const std::string* current_values, const std::string* other_values) {
+        auto* values_copy = new std::string[old_num_elements + new_num_elements];
+        for (int64_t i = 0; i < old_num_elements; ++i) {
+            values_copy[i] = current_values[i];
+        }
+        for (int64_t i = 0; i < new_num_elements; ++i) {
+            values_copy[old_num_elements + i] = other_values[i];
+        }
+        replaced_strings.insert(current_values);
+        return values_copy;
+    };
+
+    // append paths
+    auto append_legacy_paths = [&](const std::string* current_paths,
+                                   const std::string* other_paths) {
+        auto paths_copy = std::make_unique<std::string[]>(old_num_elements + new_num_elements);
+        for (int64_t i = 0; i < old_num_elements; ++i) {
+            paths_copy[i] = current_paths[i];
+        }
+        for (int64_t i = 0; i < new_num_elements; ++i) {
+            paths_copy[old_num_elements + i] = other_paths[i];
+        }
+        return paths_copy;
+    };
+
+    const auto append_path_rows = [](const Dataset& dataset,
+                                     const std::string& hierarchy_name,
+                                     int64_t count,
+                                     MultiPaths& result) {
+        for (uint64_t i = 0; i < static_cast<uint64_t>(count); ++i) {
+            uint64_t path_count = 0;
+            const auto* paths = GetDatasetPaths(dataset, hierarchy_name, i, path_count);
+            if (paths == nullptr) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "Cannot append a dataset without the required hierarchy paths");
+            }
+            if (path_count == 0) {
+                result.emplace_back();
+            } else {
+                result.emplace_back(paths, paths + path_count);
+            }
+        }
+    };
+
+    struct PendingPathAppend {
+        std::string key;
+        std::unique_ptr<std::string[]> legacy_paths;
+        MultiPaths multi_paths;
+        const std::string* replaced_paths{nullptr};
+    };
+    std::vector<PendingPathAppend> pending_paths;
+    pending_paths.reserve(path_keys.size());
+    for (const auto& key : path_keys) {
+        auto iter = this->data_.find(key);
+        if (iter == this->data_.end()) {
+            continue;
+        }
+        const auto hierarchy_name =
+            key == DATASET_PATHS ? std::string{} : HierarchyNameFromPathsKey(key);
+        const auto* current_legacy = std::get_if<const std::string*>(&iter->second);
+        const auto* other_legacy = other->GetPaths(hierarchy_name);
+        PendingPathAppend pending;
+        pending.key = key;
+        pending.replaced_paths = current_legacy == nullptr ? nullptr : *current_legacy;
+        if (current_legacy != nullptr && other_legacy != nullptr) {
+            pending.legacy_paths = append_legacy_paths(*current_legacy, other_legacy);
+            pending_paths.push_back(std::move(pending));
+            continue;
+        }
+
+        pending.multi_paths.reserve(static_cast<uint64_t>(old_num_elements + new_num_elements));
+        append_path_rows(*this, hierarchy_name, old_num_elements, pending.multi_paths);
+        append_path_rows(*other, hierarchy_name, new_num_elements, pending.multi_paths);
+        pending_paths.push_back(std::move(pending));
+    }
+
+    replaced_strings.reserve(pending_paths.size() + string_metadata_keys.size() + 1);
+    for (const auto& pending : pending_paths) {
+        if (pending.replaced_paths != nullptr) {
+            replaced_strings.insert(pending.replaced_paths);
+        }
+    }
+    for (auto& pending : pending_paths) {
+        auto iter = data_.find(pending.key);
+        if (pending.legacy_paths != nullptr) {
+            iter->second = static_cast<const std::string*>(pending.legacy_paths.release());
+        } else {
+            iter->second = std::move(pending.multi_paths);
+        }
+    }
+    for (const auto& key : string_metadata_keys) {
+        auto iter = this->data_.find(key);
+        const auto name = StringMetadataNameFromKey(key);
+        this->StringMetadata(name,
+                             append_strings(std::get<const std::string*>(iter->second),
+                                            other->GetStringMetadata(name)));
+    }
+
+    // append source-id
+    if (auto iter = this->data_.find(SOURCE_ID); iter != this->data_.end()) {
+        auto* ptr = const_cast<std::string*>(std::get<const std::string*>(iter->second));
+        this->SourceID(append_strings(ptr, other->GetSourceID()));
+    }
+    retired_paths_.erase(std::remove_if(retired_paths_.begin(),
+                                        retired_paths_.end(),
+                                        [&replaced_strings](const std::string* paths) {
+                                            return replaced_strings.count(paths) != 0;
+                                        }),
+                         retired_paths_.end());
+    // Only deallocation happens here; pointer iteration order does not affect results.
+    // NOLINTNEXTLINE(bugprone-nondeterministic-pointer-iteration-order)
+    for (const auto* values : replaced_strings) {
+        delete[] values;
+    }
+
+    // append sparse-vectors
+    if (auto iter = this->data_.find(SPARSE_VECTORS); iter != this->data_.end()) {
+        auto* ptr = const_cast<SparseVector*>(std::get<const SparseVector*>(iter->second));
+        this->SparseVectors(allocate_and_copy_sparse_vectors(
+            other->GetSparseVectors(), new_num_elements, this->allocator_, ptr, old_num_elements));
+    }
+
+    // append multi-vectors
+    if (auto iter = this->data_.find(MULTI_VECTORS); iter != this->data_.end()) {
+        int64_t mv_dim = this->GetMultiVectorDim();
+        auto* ptr = const_cast<MultiVector*>(std::get<const MultiVector*>(iter->second));
+        this->MultiVectors(allocate_and_copy_multi_vectors(other->GetMultiVectors(),
+                                                           new_num_elements,
+                                                           mv_dim,
+                                                           this->allocator_,
+                                                           ptr,
+                                                           old_num_elements));
+    }
+
+    // append attribute-sets
+    if (auto iter = this->data_.find(ATTRIBUTE_SETS); iter != this->data_.end()) {
+        auto* ptr = const_cast<AttributeSet*>(std::get<const AttributeSet*>(iter->second));
+        auto* attrsets_copy = new AttributeSet[new_num_elements + old_num_elements];
+        this->AttributeSets(attrsets_copy);
+        for (int i = 0; i < old_num_elements; ++i) {
+            attrsets_copy[i].attrs_.swap(ptr[i].attrs_);
+        }
+        delete[] ptr;
+        ptr = nullptr;
+        const auto* other_attribute_sets = other->GetAttributeSets();
+        for (int i = 0; i < new_num_elements; ++i) {
+            attrsets_copy[old_num_elements + i].attrs_.reserve(
+                other_attribute_sets[i].attrs_.size());
+            for (const auto& attr : other_attribute_sets[i].attrs_) {
+                attrsets_copy[old_num_elements + i].attrs_.emplace_back(attr->DeepCopy());
+            }
+        }
+    }
+
+    // update element count only after all copies succeed (exception safety)
+    this->NumElements(old_num_elements + new_num_elements);
+
+    return shared_from_this();
+}
+
+std::vector<std::string>
+DatasetImpl::GetStatistics(const std::vector<std::string>& stat_keys) const {
+    auto json = JsonType::Parse(this->GetStatistics());
+    std::vector<std::string> result;
+    for (const auto& key : stat_keys) {
+        if (json.Contains(key)) {
+            result.emplace_back(json[key].Dump());
+        } else {
+            result.emplace_back("");
+        }
+    }
+    return result;
+}
+
+};  // namespace vsag

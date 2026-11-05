@@ -1,0 +1,239 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include "vsag/constants.h"
+
+namespace vsag {
+// Index Type
+const char* const INDEX_TYPE_HGRAPH = "hgraph";
+const char* const INDEX_TYPE_IVF = "ivf";
+const char* const INDEX_TYPE_BRUTE_FORCE = "brute_force";
+const char* const INDEX_TYPE_GNO_IMI = "gno_imi";
+const char* const INDEX_TYPE_PYRAMID = "pyramid";
+
+const char* const TYPE_KEY = "type";
+const char* const USE_REORDER_KEY = "use_reorder";
+const char* const REORDER_SOURCE_KEY = "reorder_source";
+const char* const USE_QUANTIZATION = "use_quantization";
+const char* const EXTRA_INFO_KEY = "extra_info";
+const char* const USE_ATTRIBUTE_FILTER_KEY = "use_attribute_filter";
+const char* const BUILD_THREAD_COUNT_KEY = "build_thread_count";
+const char* const LABEL_REMAP_TYPE_KEY = "label_remap_type";
+const char* const BASE_CODES_KEY = "base_codes";
+const char* const PRECISE_CODES_KEY = "precise_codes";
+const char* const PRECISE_CODES_LAYOUT_KEY = "precise_codes_layout";
+const char* const PRECISE_CODES_LAYOUT_VALUE_FLAT = "flat";
+const char* const PRECISE_CODES_LAYOUT_VALUE_BUCKET = "bucket";
+const char* const STORE_RAW_VECTOR_KEY = "store_raw_vector";
+const char* const RAW_VECTOR_KEY = "raw_vector";
+const char* const ATTR_HAS_BUCKETS_KEY = "has_buckets";
+const char* const ATTR_PARAMS_KEY = "attr_params";
+
+// Parameter key for hgraph
+const char* const HGRAPH_USE_ELP_OPTIMIZER_KEY = "use_elp_optimizer";
+const char* const HGRAPH_IGNORE_REORDER_KEY = "ignore_reorder";
+const char* const HGRAPH_BUILD_BY_BASE_QUANTIZATION_KEY = "build_by_base";
+const char* const HGRAPH_RABITQ_FUSED_DATACELL_KEY = "rabitq_fused_datacell";
+const char* const HGRAPH_USE_REVERSE_EDGES_KEY = "use_reverse_edges";
+const char* const HGRAPH_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const HGRAPH_MCI_KEY = "mci";
+const char* const HGRAPH_MCI_SEED_COUNT_KEY = "mci_seed_count";
+const char* const HGRAPH_MCI_KNNG_PATH_KEY = "mci_knng_path";
+const char* const HGRAPH_MCI_INCREMENTAL_JOIN_RATIO_THRESHOLD_KEY =
+    "mci_incremental_join_ratio_threshold";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MIN_KEY = "mci_incremental_degree_min";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_N_DIVISOR_KEY = "mci_incremental_degree_n_divisor";
+const char* const HGRAPH_MCI_INCREMENTAL_DEGREE_MCS_DIVISOR_KEY =
+    "mci_incremental_degree_mcs_divisor";
+const char* const HGRAPH_MCI_INCREMENTAL_CLIQUE_MAX_KEY = "mci_incremental_clique_max";
+const char* const PYRAMID_PERSIST_SOURCE_ID_KEY = "persist_source_id";
+const char* const PYRAMID_STORE_PATHS_KEY = "store_paths";
+const char* const HGRAPH_MCI_DELETE_CLIQUE_SIZE_THRESHOLD_KEY = "mci_delete_clique_size_threshold";
+const char* const HGRAPH_MCI_DELETE_NODE_MCT_THRESHOLD_KEY = "mci_delete_node_mct_threshold";
+const char* const LABEL_REMAP_TYPE_VALUE_ROBIN = "robin";
+const char* const LABEL_REMAP_TYPE_VALUE_PG = "pg";
+const char* const GRAPH_KEY = "graph";
+const char* const ALPHA_KEY = "alpha";
+
+// IO param key
+const char* const IO_PARAMS_KEY = "io_params";
+const char* const SUPPLEMENT_IO_PARAMS_KEY = "supplement_io_params";
+const char* const IO_TYPE_VALUE_MEMORY_IO = "memory_io";
+const char* const IO_TYPE_VALUE_BUFFER_IO = "buffer_io";
+const char* const IO_TYPE_VALUE_MMAP_IO = "mmap_io";
+const char* const IO_TYPE_VALUE_READER_IO = "reader_io";
+const char* const IO_TYPE_VALUE_USER_DEFINED_IO = "user_defined_io";
+const char* const IO_TYPE_VALUE_ASYNC_IO = "async_io";
+const char* const IO_TYPE_VALUE_URING_IO = "uring_io";
+const char* const IO_TYPE_VALUE_BLOCK_MEMORY_IO = "block_memory_io";
+const char* const READ_CACHE_TOTAL_CACHE_SIZE_KEY = "total_cache_size";
+const char* const READ_CACHE_ENABLED_KEY = "enable_read_cache";
+const char* const IO_PREFETCH_HINT_KEY = "enable_prefetch_hint";
+const char* const IO_USER_DEFINED_IO_KEY = "user_defined_io";
+const char* const BLOCK_IO_BLOCK_SIZE_KEY = "block_size";
+
+// IO param for file
+const char* const IO_FILE_PATH_KEY = "file_path";
+const char* const IO_DIRECT_READ_KEY = "direct_read";
+const char* const DEFAULT_FILE_PATH_VALUE = "./default_file_path";
+
+// quantization params key
+const char* const QUANTIZATION_PARAMS_KEY = "quantization_params";
+// quantization type
+const char* const QUANTIZATION_TYPE_VALUE_SQ8 = "sq8";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4_LOCAL = "sq4_local";
+const char* const QUANTIZATION_TYPE_VALUE_SQ8_LOCAL = "sq8_local";
+const char* const QUANTIZATION_TYPE_VALUE_SQ8_UNIFORM = "sq8_uniform";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4 = "sq4";
+const char* const QUANTIZATION_TYPE_VALUE_SQ4_UNIFORM = "sq4_uniform";
+const char* const QUANTIZATION_TYPE_VALUE_FP32 = "fp32";
+const char* const QUANTIZATION_TYPE_VALUE_FP16 = "fp16";
+const char* const QUANTIZATION_TYPE_VALUE_BF16 = "bf16";
+const char* const QUANTIZATION_TYPE_VALUE_INT8 = "int8";
+const char* const QUANTIZATION_TYPE_VALUE_PQ = "pq";
+const char* const QUANTIZATION_TYPE_VALUE_PQFS = "pqfs";
+const char* const QUANTIZATION_TYPE_VALUE_RABITQ = "rabitq";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE = "sparse";
+const char* const QUANTIZATION_TYPE_VALUE_SPARSE_FP16 = "sparse_fp16";
+const char* const QUANTIZATION_TYPE_VALUE_TQ = "tq";
+
+// vector transformer type
+const char* const TRANSFORMER_TYPE_VALUE_PCA = "pca";
+const char* const TRANSFORMER_TYPE_VALUE_ROM = "rom";
+const char* const TRANSFORMER_TYPE_VALUE_FHT = "fht";
+const char* const TRANSFORMER_TYPE_VALUE_MRLE = "mrle";
+const char* const TRANSFORMER_TYPE_VALUE_RESIDUAL = "residual";
+const char* const TRANSFORMER_TYPE_VALUE_NORMALIZE = "normalize";
+
+// vector transformer param
+const char* const INPUT_DIM_KEY = "input_dim";
+const char* const PCA_DIM_KEY = "pca_dim";
+const char* const MRLE_DIM_KEY = "mrle_dim";
+const char* const USE_FHT_KEY = "use_fht";
+
+// quantization param
+const char* const TQ_CHAIN_KEY = "tq_chain";
+const char* const RABITQ_QUANTIZATION_VERSION_KEY = "rabitq_version";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_QUERY_KEY = "rabitq_bits_per_dim_query";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_BASE_KEY = "rabitq_bits_per_dim_base";
+const char* const RABITQ_QUANTIZATION_BITS_PER_DIM_FILTER_KEY = "rabitq_bits_per_dim_filter";
+const char* const RABITQ_QUANTIZATION_ERROR_RATE_KEY = "rabitq_error_rate";
+const char* const FAST_ENCODE_RABITQ_KEY = "fast_encode_rabitq";
+const char* const FAST_ENCODE_RABITQ_ROUNDS_KEY = "fast_encode_rabitq_rounds";
+const char* const SQ4_UNIFORM_QUANTIZATION_TRUNC_RATE_KEY = "sq4_uniform_trunc_rate";
+const char* const PRODUCT_QUANTIZATION_DIM_KEY = "pq_dim";
+const char* const PRODUCT_QUANTIZATION_BITS_KEY = "pq_bits";
+
+// sparse index param
+const char* const SPARSE_NEED_SORT = "need_sort";
+const char* const SPARSE_QUERY_PRUNE_RATIO = "query_prune_ratio";
+const char* const SPARSE_DOC_PRUNE_RATIO = "doc_prune_ratio";
+const char* const SPARSE_TERM_PRUNE_RATIO = "term_prune_ratio";
+const char* const SPARSE_TERM_RETAIN_THRESHOLD = "term_retain_threshold";
+const char* const SPARSE_FILTER_CALLBACK_LIMIT = "filter_callback_limit";
+const char* const SPARSE_TERM_ID_LIMIT = "term_id_limit";
+const char* const SPARSE_WINDOW_SIZE = "window_size";
+const char* const SPARSE_DESERIALIZE_WITHOUT_FOOTER = "deserialize_without_footer";
+const char* const SPARSE_DESERIALIZE_WITHOUT_BUFFER = "deserialize_without_buffer";
+const char* const SPARSE_AVG_DOC_TERM_LENGTH = "avg_doc_term_length";
+const char* const SPARSE_REMAP_TERM_IDS = "remap_term_ids";
+const char* const SPARSE_IMMUTABLE = "immutable";
+
+// graph param value
+const char* const GRAPH_PARAM_MAX_DEGREE_KEY = "max_degree";
+const char* const GRAPH_PARAM_INIT_MAX_CAPACITY_KEY = "init_capacity";
+const char* const EF_CONSTRUCTION_KEY = "ef_construction";
+
+const char* const GRAPH_TYPE_KEY = "graph_type";
+const char* const GRAPH_TYPE_VALUE_ODESCENT = "odescent";
+const char* const GRAPH_TYPE_VALUE_PIPNN = "pipnn";
+const char* const GRAPH_TYPE_VALUE_NSW = "nsw";
+
+const char* const GRAPH_STORAGE_TYPE_KEY = "graph_storage_type";
+const char* const GRAPH_STORAGE_TYPE_VALUE_COMPRESSED = "compressed";
+const char* const GRAPH_STORAGE_TYPE_VALUE_FLAT = "flat";
+
+// bucket params for IVF index
+const char* const BUCKET_PARAMS_KEY = "buckets_params";
+const char* const BUCKET_PER_DATA_KEY = "buckets_per_data";
+const char* const BUCKETS_COUNT_KEY = "buckets_count";
+const char* const BUCKET_USE_RESIDUAL_KEY = "use_residual";
+
+const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
+const char* const IVF_TRAIN_TYPE_RANDOM = "random";
+const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
+
+const char* const TRAIN_SAMPLE_COUNT_KEY =
+    "train_sample_count";  // used after v0.18 for both Hgraph and IVF
+const char* const IVF_PARTITION_STRATEGY_PARAMS_KEY = "partition_strategy";
+const char* const IVF_PARTITION_STRATEGY_TYPE_KEY = "partition_strategy_type";
+const char* const IVF_PARTITION_STRATEGY_TYPE_NEAREST = "ivf";
+const char* const IVF_PARTITION_STRATEGY_TYPE_GNO_IMI = "gno_imi";
+const char* const IVF_ROUTE_MAX_DEGREE_KEY = "route_max_degree";
+const char* const IVF_ROUTE_EF_CONSTRUCTION_KEY = "route_ef_construction";
+const char* const IVF_USE_ROUTE_GRAPH_KEY = "use_route_graph";
+const char* const IVF_ENABLE_GPU_BUILD_KEY = "enable_gpu_build";
+const char* const IVF_GPU_DEVICE_ID_KEY = "gpu_device_id";
+const char* const IVF_GPU_MEMORY_BUDGET_KEY = "gpu_memory_budget";
+const char* const IVF_GPU_MIN_WORK_THRESHOLD_KEY = "gpu_min_work_threshold";
+const char* const IVF_KMEANS_ITER_COUNT_KEY = "kmeans_iter_count";
+
+const char* const GNO_IMI_FIRST_ORDER_BUCKETS_COUNT_KEY = "first_order_buckets_count";
+const char* const GNO_IMI_SECOND_ORDER_BUCKETS_COUNT_KEY = "second_order_buckets_count";
+
+const char* const GNO_IMI_SEARCH_PARAM_FIRST_ORDER_SCAN_RATIO = "first_order_scan_ratio";
+const char* const FLATTEN_DATA_CELL = "flatten_data_cell";
+const char* const RABITQ_SPLIT_DATA_CELL = "rabitq_split_data_cell";
+const char* const SPARSE_VECTOR_DATA_CELL = "sparse_vector_data_cell";
+const char* const MULTI_VECTOR_DATA_CELL = "multi_vector_data_cell";
+
+const char* const MULTI_VECTOR_CODES = "multi_vector";
+
+// for pyramid index
+const char* const NO_BUILD_LEVELS = "no_build_levels";
+const char* const INDEX_MIN_SIZE = "index_min_size";
+
+const char* const GRAPH_SUPPORT_REMOVE = "support_remove";
+const char* const REMOVE_FLAG_BIT = "remove_flag_bit";
+const char* const HOLD_MOLDS = "hold_molds";
+const char* const SUPPORT_DUPLICATE = "support_duplicate";
+const char* const DEDUPLICATE_STORAGE = "deduplicate_storage";
+const char* const DUPLICATE_DISTANCE_THRESHOLD = "duplicate_distance_threshold";
+const char* const SUPPORT_FORCE_REMOVE = "support_force_remove";
+const char* const SUPPORT_AUTOTUNE = "support_autotune";
+
+const char* const DATACELL_OFFSETS = "datacell_offsets";
+const char* const DATACELL_SIZES = "datacell_sizes";
+const char* const BASIC_INFO = "basic_info";
+
+const char* const CODES_TYPE_KEY = "codes_type";
+const char* const FLATTEN_CODES = "flatten";
+const char* const RABITQ_SPLIT_CODES = "rabitq_split";
+const char* const SPARSE_CODES = "sparse";
+
+const char* const IVF_SEARCH_PARAM_SCAN_BUCKETS_COUNT = "scan_buckets_count";
+const char* const IVF_SEARCH_PARAM_DISABLE_BUCKET_SCAN = "disable_bucket_scan";
+const char* const SEARCH_PARAM_FACTOR = "factor";
+const char* const SEARCH_PARAM_ENABLE_REORDER = "enable_reorder";
+const char* const SEARCH_PARALLELISM = "parallelism";
+const char* const SEARCH_MAX_TIME_COST_MS = "timeout_ms";
+const char* const SPARSE_N_CANDIDATE = "n_candidate";
+
+const char* const GRAPH_BUILD_THRESHOLD_KEY = "graph_build_threshold";
+const char* const IVF_SEARCH_PARAM_EF_SEARCH = "ef_search";
+
+}  // namespace vsag

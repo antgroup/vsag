@@ -1,0 +1,78 @@
+
+# Copyright 2024-present the vsag project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+set (eval_srcs
+    case/eval_case.cpp
+    case/search_eval_case.cpp
+    case/build_eval_case.cpp
+    exporter/exporter.cpp
+    exporter/formatter.cpp
+    monitor/monitor.cpp
+    monitor/latency_monitor.cpp
+    monitor/recall_monitor.cpp
+    monitor/memory_peak_monitor.cpp
+    monitor/duration_monitor.cpp
+    monitor/http_server_monitor.cpp
+    eval_config.cpp
+    eval_dataset.cpp
+    evaluator.cpp
+    eval_job.cpp)
+
+add_library (vsag_eval_common INTERFACE)
+target_compile_options (vsag_eval_common INTERFACE -fopenmp)
+target_link_options (vsag_eval_common INTERFACE -fopenmp)
+target_link_libraries (vsag_eval_common INTERFACE
+    pthread
+    yaml-cpp
+    argparse::argparse
+    tabulate
+    vsag_httplib
+    vsag_src_common)
+if (TARGET vsag_hdf5_headers)
+    target_link_libraries (vsag_eval_common INTERFACE vsag_hdf5_headers)
+endif ()
+
+add_library (eval_obj OBJECT ${eval_srcs})
+target_link_libraries (eval_obj PRIVATE vsag_eval_common)
+add_dependencies (eval_obj hdf5 yaml-cpp tabulate)
+
+add_executable (eval_performance main.cpp)
+target_link_libraries (eval_performance PRIVATE
+    eval_obj
+    simd
+    vsag
+    vsag_eval_common
+    ${HDF5_CPP_STATIC_LIBRARY}
+    ${HDF5_C_STATIC_LIBRARY}
+    z dl)
+add_dependencies (eval_performance hdf5)
+
+if (ENABLE_TESTS)
+    add_executable (eval_dataset_test
+        eval_dataset_test.cpp)
+    target_include_directories (eval_dataset_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries (eval_dataset_test PRIVATE
+        Catch2::Catch2WithMain
+        eval_obj
+        vsag
+        simd
+        vsag_eval_common
+        ${HDF5_CPP_STATIC_LIBRARY}
+        ${HDF5_C_STATIC_LIBRARY}
+        z dl)
+    add_dependencies (eval_dataset_test hdf5 Catch2)
+endif ()

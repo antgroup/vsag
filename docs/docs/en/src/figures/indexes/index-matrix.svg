@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 520"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title>VSAG 1.0 index matrix</title>
+  <desc>
+    Pyramid and LazyHGraph are composite or adaptive indexes. The five core index families are
+    BruteForce, HGraph, IVF, SINDI, and SIMQ.
+  </desc>
+
+  <style>
+    .title { fill: #1f2937; font-size: 22px; font-weight: 700; }
+    .subtitle { fill: #64748b; font-size: 13px; }
+    .group { fill: #fff7ed; stroke: #f97316; stroke-width: 2; }
+    .group-label { fill: #c2410c; font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+    .card { fill: #ffffff; stroke: #fb923c; stroke-width: 2; }
+    .core-card { fill: #ffffff; stroke: #e2e8f0; stroke-width: 2; }
+    .accent { fill: #f97316; }
+    .name { fill: #1f2937; font-size: 17px; font-weight: 700; }
+    .kind { fill: #c2410c; font-size: 12px; font-weight: 600; }
+    .detail { fill: #64748b; font-size: 12px; }
+  </style>
+
+  <rect width="1000" height="520" fill="#ffffff"/>
+  <text class="title" x="40" y="36">VSAG 1.0 index matrix</text>
+  <text class="subtitle" x="40" y="58">
+    Two composite or adaptive indexes, plus five core retrieval families
+  </text>
+
+  <rect class="group" x="40" y="82" width="920" height="154" rx="14"/>
+  <text class="group-label" x="60" y="108">COMPOSITE / ADAPTIVE INDEXES</text>
+
+  <g transform="translate(80,126)">
+    <rect class="card" width="380" height="82" rx="10"/>
+    <text class="name" x="24" y="31">Pyramid</text>
+    <text class="kind" x="24" y="52">PATH-PARTITIONED</text>
+    <text class="detail" x="170" y="32">Multi-tenant and hierarchical retrieval</text>
+    <text class="detail" x="170" y="52">Named independent path trees</text>
+  </g>
+
+  <g transform="translate(540,126)">
+    <rect class="card" width="380" height="82" rx="10"/>
+    <text class="name" x="24" y="31">LazyHGraph</text>
+    <text class="kind" x="24" y="52">ADAPTIVE</text>
+    <text class="detail" x="170" y="32">Starts with exact BruteForce</text>
+    <text class="detail" x="170" y="52">Transitions to HGraph at a threshold</text>
+  </g>
+
+  <text class="group-label" x="40" y="274">CORE INDEX FAMILIES</text>
+
+  <g transform="translate(40,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">BruteForce</text>
+    <text class="kind" x="18" y="68">EXACT</text>
+    <text class="detail" x="18" y="100">Dense vectors</text>
+    <text class="detail" x="18" y="122">Multi-vector mode</text>
+    <text class="detail" x="18" y="154">Full scan baseline</text>
+  </g>
+
+  <g transform="translate(228,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">HGraph</text>
+    <text class="kind" x="18" y="68">GRAPH</text>
+    <text class="detail" x="18" y="100">Dense vectors</text>
+    <text class="detail" x="18" y="122">High-recall ANN</text>
+    <text class="detail" x="18" y="154">Memory + disk</text>
+  </g>
+
+  <g transform="translate(416,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">IVF</text>
+    <text class="kind" x="18" y="68">SPACE-PARTITIONED</text>
+    <text class="detail" x="18" y="100">Dense vectors</text>
+    <text class="detail" x="18" y="122">Scalable buckets</text>
+    <text class="detail" x="18" y="154">Batch + large top-k</text>
+  </g>
+
+  <g transform="translate(604,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">SINDI</text>
+    <text class="kind" x="18" y="68">SPARSE</text>
+    <text class="detail" x="18" y="100">BM25-style</text>
+    <text class="detail" x="18" y="122">Learned sparse</text>
+    <text class="detail" x="18" y="154">Inverted lists</text>
+  </g>
+
+  <g transform="translate(792,292)">
+    <rect class="core-card" width="168" height="184" rx="10"/>
+    <rect class="accent" width="168" height="8" rx="4"/>
+    <text class="name" x="18" y="44">SIMQ</text>
+    <text class="kind" x="18" y="68">MULTI-VECTOR</text>
+    <text class="detail" x="18" y="100">Token vectors</text>
+    <text class="detail" x="18" y="122">Document retrieval</text>
+    <text class="detail" x="18" y="154">Late interaction</text>
+  </g>
+</svg>

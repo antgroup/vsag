@@ -1,0 +1,1065 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#pragma once
+
+#include <atomic>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <random>
+#include <shared_mutex>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+
+#include "../inner_index_interface.h"
+#include "algorithm/build_cache.h"
+#include "common.h"
+#include "datacell/attribute_inverted_interface.h"
+#include "datacell/clique_datacell.h"
+#include "datacell/code_slot_flatten_adapter.h"
+#include "datacell/code_slot_map.h"
+#include "datacell/flatten_interface.h"
+#include "datacell/graph_interface.h"
+#include "datacell/sparse_graph_datacell_parameter.h"
+#include "hgraph_parameter.h"
+#include "impl/basic_optimizer.h"
+#include "impl/conjugate_graph.h"
+#include "impl/heap/distance_heap.h"
+#include "impl/reorder/flatten_reorder.h"
+#include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/mci_searcher.h"
+#include "impl/searcher/parallel_searcher.h"
+#include "index_common_param.h"
+#include "index_feature_list.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
+#include "typing.h"
+#include "utils/lock_strategy.h"
+#include "utils/util_functions.h"
+#include "utils/visited_list.h"
+#include "vsag/index.h"
+#include "vsag/index_features.h"
+
+namespace vsag {
+
+class ChunkedManifest;
+struct ComponentManifestEntry;
+class FlattenOptimizedBuildInterface;
+class HGraphRaBitQFusedDataCell;
+class HGraphRaBitQSearcher;
+class HGraphOptimizedBuildSession;
+class IteratorFilterContext;
+class RaBitQSplitDataCellInterface;
+
+/**
+ * @brief HGraph: hierarchical navigable graph index.
+ *
+ * Multi-layer NSW graph with bottom-level graph + optional upper route graphs.
+ * Supports quantized codes, reorder, attribute filtering, cache warm-start,
+ * force remove, and iterative search. Introduced since v0.12.
+ */
+class HGraph : public InnerIndexInterface {
+public:
+    static ParamPtr
+    CheckAndMappingExternalParam(const JsonType& external_param,
+                                 const IndexCommonParam& common_param);
+
+    friend class HGraphAnalyzer;
+    friend class HGraphOptimizedBuildSession;
+
+public:
+    HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
+
+    HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
+
+    ~HGraph() override = default;
+
+    std::vector<int64_t>
+    Add(const DatasetPtr& data) override;
+
+    std::string
+    AnalyzeIndexBySearch(const SearchRequest& request) override;
+
+    std::vector<int64_t>
+    Build(const DatasetPtr& data) override;
+
+    bool
+    Tune(const std::string& parameters, bool disable_future_tuning) override;
+
+    float
+    CalcDistanceById(const float* query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    DatasetPtr
+    CalcDistancesById(const float* query,
+                      const int64_t* ids,
+                      int64_t count,
+                      bool calculate_precise_distance = true,
+                      int64_t topk = -1) const override;
+
+    float
+    CalcDistanceById(const DatasetPtr& query,
+                     int64_t id,
+                     bool calculate_precise_distance = true) const override;
+
+    void
+    Deserialize(StreamReader& reader) override;
+
+    InnerIndexPtr
+    ExportModel(const IndexCommonParam& param) const override;
+
+    InnerIndexPtr
+    Clone(const IndexCommonParam& param) override;
+
+    uint64_t
+    EstimateMemory(uint64_t num_elements) const override;
+
+    void
+    GetAttributeSetByInnerId(InnerIdType inner_id, AttributeSet* attr) const override;
+
+    void
+    GetCodeByInnerId(InnerIdType inner_id, uint8_t* data) const override;
+
+    std::unordered_map<std::string, uint64_t>
+    GetMemoryUsageDetail() const override;
+
+    std::pair<int64_t, int64_t>
+    GetMinAndMaxId() const override;
+
+    [[nodiscard]] std::string
+    GetName() const override {
+        return INDEX_TYPE_HGRAPH;
+    }
+
+    int64_t
+    GetNumElements() const override {
+        return static_cast<int64_t>(this->total_count_) - delete_count_;
+    }
+
+    int64_t
+    GetNumberRemoved() const override {
+        return delete_count_;
+    }
+
+    [[nodiscard]] std::pair<InnerIdType, CodeSlotIdType>
+    GetCodeStorageCounts() const {
+        if (this->code_slot_map_ == nullptr) {
+            auto count = static_cast<InnerIdType>(this->total_count_.load());
+            return {count, count};
+        }
+        return {this->code_slot_map_->PublishedLogicalCount(),
+                this->code_slot_map_->PhysicalCount()};
+    }
+
+    std::string
+    GetStats() const override;
+
+    void
+    GetVectorByInnerId(InnerIdType inner_id, float* data) const override;
+
+    IndexType
+    GetIndexType() const override {
+        return IndexType::HGRAPH;
+    }
+
+    void
+    InitFeatures() override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator) const override;
+
+    [[nodiscard]] DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter,
+              Allocator* allocator,
+              IteratorContext*& iter_ctx,
+              bool is_last_filter) const override;
+
+    [[nodiscard]] InnerIndexPtr
+    Fork(const IndexCommonParam& param) override {
+        return std::make_shared<HGraph>(this->create_param_ptr_, param);
+    }
+
+    void
+    Merge(const std::vector<MergeUnit>& merge_units) override;
+
+    [[nodiscard]] DatasetPtr
+    RangeSearch(const DatasetPtr& query,
+                float radius,
+                const std::string& parameters,
+                const FilterPtr& filter,
+                int64_t limited_size = -1) const override;
+
+    [[nodiscard]] DatasetPtr
+    SearchWithRequest(const SearchRequest& request) const override;
+
+    uint32_t
+    Remove(const std::vector<int64_t>& ids, RemoveMode mode = RemoveMode::MARK_REMOVE) override;
+
+    uint32_t
+    Feedback(const DatasetPtr& query,
+             int64_t k,
+             const std::string& parameters,
+             int64_t global_optimum_tag_id = std::numeric_limits<int64_t>::max()) override;
+
+    uint32_t
+    Pretrain(const std::vector<int64_t>& base_tag_ids,
+             uint32_t k,
+             const std::string& parameters) override;
+
+    void
+    Serialize(StreamWriter& writer) const override;
+
+    void
+    Serialize(SerializeWriter& writer, uint64_t chunk_size) const override;
+
+    void
+    ParallelDeserialize(DeserializeReader& reader) override;
+
+    /// Set the number of threads used during Build().
+    void
+    SetBuildThreadsCount(uint64_t count) {
+        this->build_thread_count_ = count;
+        this->thread_pool_->SetPoolSize(count);
+    }
+
+    void
+    SetImmutable() override;
+
+    void
+    ExportCache(std::ostream& out_stream) const override;
+
+    void
+    ImportCache(std::istream& in_stream) override;
+
+    void
+    SetIO(const std::shared_ptr<Reader> reader) override;
+
+    void
+    SetPreciseCodesIO(const std::shared_ptr<Reader>& reader);
+
+    void
+    Train(const DatasetPtr& base) override;
+
+    bool
+    UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update = false) override;
+
+    bool
+    UpdateId(int64_t old_id, int64_t new_id) override;
+
+    void
+    UpdateAttribute(int64_t id, const AttributeSet& new_attrs) override;
+
+    bool
+    UpdateExtraInfo(const DatasetPtr& new_base) override;
+
+    void
+    UpdateAttribute(int64_t id,
+                    const AttributeSet& new_attrs,
+                    const AttributeSet& origin_attrs) override;
+
+    /// Map hgraph JSON parameters (legacy helper for external param mapping).
+    static JsonType
+    map_hgraph_param(const JsonType& hgraph_json);
+
+    /**
+     * @brief Extract a pointer to the data vector at the given index.
+     *
+     * Dispatches on data_type_ to the correct typed getter on the dataset
+     * and offsets by `index * dim_`. Returns nullptr if the underlying
+     * pointer is absent.
+     */
+    const void*
+    get_data(const DatasetPtr& dataset, int64_t index = 0) const {
+        CHECK_ARGUMENT(index >= 0, "query index must be non-negative");
+        CHECK_ARGUMENT(
+            data_type_ == DataTypes::DATA_TYPE_SPARSE ||
+                (dim_ == 0 || (dim_ > 0 && index <= std::numeric_limits<int64_t>::max() / dim_)),
+            "query offset exceeds int64_t range");
+        if (data_type_ == DataTypes::DATA_TYPE_FLOAT) {
+            auto* ptr = dataset->GetFloat32Vectors();
+            return ptr ? ptr + index * dim_ : nullptr;
+        } else if (data_type_ == DataTypes::DATA_TYPE_INT8) {
+            auto* ptr = dataset->GetInt8Vectors();
+            return ptr ? ptr + index * dim_ : nullptr;
+        } else if (data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                   data_type_ == DataTypes::DATA_TYPE_BF16) {
+            auto* ptr = dataset->GetFloat16Vectors();
+            return ptr ? ptr + index * dim_ : nullptr;
+        } else if (data_type_ == DataTypes::DATA_TYPE_SPARSE) {
+            auto* ptr = dataset->GetSparseVectors();
+            return ptr ? ptr + index : nullptr;
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid data_type in HGraph");
+    }
+
+    /// Sample a random level from the exponential distribution for a new node.
+    int
+    get_random_level() {
+        std::uniform_real_distribution<double> distribution(0.0, 1.0);
+        double r = -log(distribution(level_generator_)) * mult_;
+        return static_cast<int>(r);
+    }
+
+    /**
+     * @brief Allocate a contiguous block of fresh internal IDs.
+     *
+     * IDs are derived from "total_count_" but "total_count_" is intentionally
+     * NOT advanced inside this helper. The caller is responsible for:
+     *   1. Ensuring storage capacity covers the returned range (via resize()).
+     *   2. Publishing the new range by incrementing total_count_ once insertion
+     *      and capacity expansion have both succeeded.
+     *
+     * Thread-safety: the caller must hold add_mutex_ for the entire span of
+     * "call get_unique_inner_ids -> resize -> increment total_count_". Concurrent
+     * search threads read total_count_ under global_mutex_ and assume the
+     * underlying storage is sized to at least total_count_; never publish IDs
+     * before the resize completes.
+     */
+    Vector<InnerIdType>
+    get_unique_inner_ids(InnerIdType count) {
+        Vector<InnerIdType> ret(count, this->allocator_);
+        if (ret.size() != count) {
+            throw VsagException(ErrorType::NO_ENOUGH_MEMORY, "allocate memory failed");
+        }
+        auto next_id = static_cast<InnerIdType>(this->total_count_.load());
+        for (InnerIdType i = 0; i < count; ++i) {
+            ret[i] = next_id++;
+        }
+        return ret;
+    }
+
+    /// Build all graphs (bottom + route) via ODescent in batch mode.
+    std::vector<int64_t>
+    build_by_odescent(const DatasetPtr& data);
+
+    /// Write codes for inner_id into the persistent flatten storage.
+    void
+    insert_persistent_codes(const void* data, InnerIdType inner_id);
+
+    /// Write codes when the caller already protects storage capacity.
+    void
+    insert_persistent_codes_unlocked(const void* data, InnerIdType inner_id);
+
+    void
+    insert_fused_optimized_build_codes(const void* data, InnerIdType inner_id);
+
+    /// Write codes to a physical code slot when deduplicated storage is enabled.
+    void
+    insert_persistent_codes_to_slot(const void* data, CodeSlotIdType code_slot_id);
+
+    void
+    sync_fused_node_codes(InnerIdType inner_id, const void* data);
+
+    void
+    restore_fused_codec();
+
+    /// Ensure physical code storage can hold required_capacity physical slots.
+    void
+    ensure_physical_code_capacity(CodeSlotIdType required_capacity);
+
+    /// Ensure physical code storage while global_mutex_ unique lock is already held.
+    void
+    ensure_physical_code_capacity_unlocked(CodeSlotIdType required_capacity);
+
+    /// Grow internal storage to at least new_size capacity.
+    void
+    resize(uint64_t new_size);
+
+    /// Create a single route (upper-layer) graph from the hierarchical params.
+    GraphInterfacePtr
+    generate_one_route_graph();
+
+    // Keep legacy RaBitQ candidates compact while allowing fused direct search to preserve hints.
+    // Only the buffer selected by search_one_graph allocates element storage.
+    struct RaBitQSearchCandidateBuffers {
+        explicit RaBitQSearchCandidateBuffers(Allocator* allocator)
+            : generic(allocator), fused(allocator) {
+        }
+
+        void
+        Reset() {
+            generic.clear();
+            fused.clear();
+            fused_search_used = false;
+        }
+
+        DistanceRecordVector generic;
+        RaBitQCandidateVector fused;
+        bool fused_search_used{false};
+    };
+
+    /// Search a single graph layer, returning a candidate distance heap.
+    /// @param ctx  may be nullptr during add (non-query) scenarios.
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    search_one_graph(const void* query,
+                     const GraphInterfacePtr& graph,
+                     const FlattenInterfacePtr& flatten,
+                     InnerSearchParam& inner_search_param,
+                     const VisitedListPtr& vt,
+                     QueryContext* ctx,
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+                     bool* fused_search_finalized = nullptr) const;
+
+    /// Overload that accepts an IteratorFilterContext for iterative search.
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    search_one_graph(const void* query,
+                     const GraphInterfacePtr& graph,
+                     const FlattenInterfacePtr& flatten,
+                     InnerSearchParam& inner_search_param,
+                     IteratorFilterContext* iter_ctx,
+                     // ctx can be nullptr in adding scenario
+                     QueryContext* ctx,
+                     RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr) const;
+
+private:
+    float
+    calc_native_distance_by_id(const void* native_query,
+                               int64_t id,
+                               bool calculate_precise_distance) const;
+
+    void
+    check_fused_mutation_supported(std::string_view operation) const;
+
+    std::vector<int64_t>
+    add_impl(const DatasetPtr& data);
+
+    [[nodiscard]] std::shared_lock<std::shared_mutex>
+    acquire_global_read_lock() const {
+        if (not this->physical_code_resize_pending_.load(std::memory_order_acquire)) {
+            return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+        }
+        std::scoped_lock resize_lock(this->physical_code_resize_mutex_);
+        return std::shared_lock<std::shared_mutex>(this->global_mutex_);
+    }
+
+    MetadataPtr
+    collect_streaming_header() const override;
+
+    void
+    serialize_streaming_body(StreamWriter& writer) const override;
+
+    void
+    deserialize_streaming_body(StreamReader& reader, const MetadataPtr& metadata) override;
+
+    void
+    load_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters& parameters) override;
+
+    void
+    read_streaming_body(StreamReader& reader,
+                        const MetadataPtr& metadata,
+                        const LoadParameters* load_parameters = nullptr);
+
+    void
+    deserialize_label_info_streaming(StreamReader& reader) const;
+
+    DatasetPtr
+    sample_train_dataset(const DatasetPtr& base) const;
+
+    void
+    train_codes_with_dataset(const DatasetPtr& train_data);
+
+    struct AddContext {
+        bool first_empty_add{false};
+        bool use_dedup_storage{false};
+        bool need_temporary_sq8_build_data{false};
+        bool use_parallel_add{false};
+        DatasetPtr train_data{nullptr};
+        FlattenInterfacePtr graph_read_codes{nullptr};
+    };
+
+    struct AddRow {
+        int64_t input_idx{0};
+        InnerIdType inner_id{0};
+        int level{-1};
+    };
+
+    struct AddBatch {
+        explicit AddBatch(Allocator* allocator) : rows(allocator) {
+        }
+
+        Vector<AddRow> rows;
+        std::vector<int64_t> failed_ids;
+    };
+
+    std::optional<std::vector<int64_t>>
+    try_optimized_build(const DatasetPtr& data);
+
+    [[nodiscard]] bool
+    need_temporary_sq8_build_data_for_add() const;
+
+    void
+    prepare_build_codes(const DatasetPtr& data, const Vector<AddRow>& rows);
+
+    [[nodiscard]] bool
+    should_insert_codes_before_probe(bool use_dedup_storage) const;
+
+    ComputerInterfacePtr
+    make_build_computer(const void* query, InnerIdType inner_id) const;
+
+    DistHeapPtr
+    search_graph_for_build(const void* query,
+                           const GraphInterfacePtr& graph,
+                           const FlattenInterfacePtr& flatten,
+                           InnerSearchParam& inner_search_param,
+                           const ComputerInterfacePtr& computer) const;
+
+    struct GraphAddProbeResult {
+        DistHeapPtr neighbors{nullptr};
+        int64_t duplicate_id{-1};
+    };
+
+    void
+    validate_add_data(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const float* data, uint64_t count) const;
+
+    void
+    validate_fused_encoding_data(const float* data, uint64_t count) const;
+
+    AddContext
+    prepare_add_context(const DatasetPtr& data);
+
+    AddBatch
+    prepare_add_batch(const DatasetPtr& data);
+
+    void
+    prepare_graph_read_codes(const DatasetPtr& data, AddContext& context);
+
+    void
+    prepare_temporary_graph_read_codes(const DatasetPtr& data,
+                                       const AddContext& context,
+                                       const AddBatch& batch);
+
+    void
+    insert_add_batch(const DatasetPtr& data, const AddContext& context, const AddBatch& batch);
+
+    [[nodiscard]] bool
+    graph_read_codes_is_temporary(const AddContext& context) const;
+
+    bool
+    insert_one_logical_point(const void* data, const AddRow& row, const AddContext& context);
+
+    void
+    prepare_codes_before_probe_if_needed(const void* data,
+                                         InnerIdType inner_id,
+                                         const AddContext& context);
+
+    void
+    publish_duplicate_storage_if_needed(InnerIdType group_id,
+                                        InnerIdType duplicate_id,
+                                        const AddContext& context);
+
+    void
+    publish_duplicate_to_tracker(InnerIdType group_id, InnerIdType duplicate_id);
+
+    void
+    publish_unique_storage_if_needed(const void* data,
+                                     InnerIdType inner_id,
+                                     const AddContext& context);
+
+    void
+    publish_unique_storage_if_needed(const void* data,
+                                     InnerIdType inner_id,
+                                     const AddContext& context,
+                                     std::shared_lock<std::shared_mutex>& read_lock);
+
+    [[nodiscard]] bool
+    unique_add_needs_structure_update(int level) const;
+
+    void
+    ensure_route_graphs_for_level(int level);
+
+    void
+    publish_unique_under_shared_global_lock(const void* data,
+                                            int level,
+                                            InnerIdType inner_id,
+                                            InnerSearchParam& param,
+                                            const GraphAddProbeResult& probe,
+                                            const AddContext& context,
+                                            std::shared_lock<std::shared_mutex>& read_lock);
+
+    void
+    publish_unique_under_unique_global_lock(const void* data,
+                                            int level,
+                                            InnerIdType inner_id,
+                                            InnerSearchParam& param,
+                                            const GraphAddProbeResult& probe,
+                                            const AddContext& context);
+
+    GraphAddProbeResult
+    probe_graph_for_add(const void* data,
+                        int level,
+                        InnerIdType inner_id,
+                        InnerSearchParam& param,
+                        const FlattenInterfacePtr& flatten_codes) const;
+
+    bool
+    publish_duplicate_if_found(const GraphAddProbeResult& probe,
+                               InnerIdType inner_id,
+                               const AddContext& context);
+
+    void
+    publish_unique_to_graphs(const void* data,
+                             int level,
+                             InnerIdType inner_id,
+                             InnerSearchParam& param,
+                             const GraphAddProbeResult& probe,
+                             const AddContext& context);
+
+    void
+    publish_unique_to_bottom_graph(InnerIdType inner_id,
+                                   const DistHeapPtr& neighbors,
+                                   const FlattenInterfacePtr& flatten_codes);
+
+    void
+    publish_unique_to_route_graphs(const void* data,
+                                   int level,
+                                   InnerIdType inner_id,
+                                   InnerSearchParam& param,
+                                   const FlattenInterfacePtr& flatten_codes);
+
+    // since v0.15: serialize basic index metadata to JSON.
+    JsonType
+    serialize_basic_info() const;
+
+    /// Restore basic index metadata from JSON.
+    void
+    deserialize_basic_info(const JsonType& jsonify_basic_info);
+
+    /// Write label (external id) mappings to stream.
+    void
+    serialize_label_info(StreamWriter& writer) const;
+
+    /// shared post-deserialization steps (dedup validation, memory accounting)
+    void
+    finish_deserialize();
+
+    /// validate and publish the logical state derived from the code-slot map
+    void
+    validate_and_publish_dedup_state(uint64_t serialized_total_count);
+
+    /// publish the physical code capacity after the code components are ready
+    void
+    publish_physical_code_capacity();
+
+    /// initialize runtime capacity shared by search and subsequent mutations
+    void
+    initialize_deserialized_runtime_state();
+
+    /// restore basic info and duplicate-format flags from the footer
+    /// metadata and return the serialized total count; shared by
+    /// Deserialize(StreamReader&) and the parallel deserialization paths
+    uint64_t
+    apply_footer_metadata(const MetadataPtr& metadata);
+
+    /// Restore a whole component whose Deserialize seeks inside its own payload
+    /// (see requires_seekable_payload). The frame is buffered first, so the
+    /// component gets a seekable reader and the frame stays exactly consumed
+    /// even though the component's own cursor does not reach the end.
+    void
+    deserialize_seekable_whole_component(DeserializeReader& reader,
+                                         const ComponentManifestEntry& comp,
+                                         bool compressed);
+
+    /// dispatch a whole component of the chunked manifest to its sequential
+    /// Deserialize by name.
+    ///
+    /// Not internally synchronized. The manifest path dispatches each whole
+    /// component as one pool task, so distinct components run concurrently:
+    /// every branch must touch only index members that no other branch
+    /// touches. Adding a branch that reads or writes shared state (a counter,
+    /// a capacity field) requires either moving that state out of here or
+    /// serializing the component on the calling thread.
+    void
+    deserialize_whole_component(const std::string& name, StreamReader& reader);
+
+    /// parallel body load driven by the manifest recorded in the footer
+    void
+    parallel_deserialize_manifest(DeserializeReader& reader,
+                                  ThreadPool& pool,
+                                  const ChunkedManifest& chunked_manifest);
+
+    /// parallel load of an uncompressed body without a recorded manifest:
+    /// probe the component extents sequentially, then fill io data in parallel
+    void
+    parallel_deserialize_probe(DeserializeReader& reader, ThreadPool& pool, uint64_t body_end);
+
+    /// Read label (external id) mappings from stream.
+    void
+    deserialize_label_info(StreamReader& reader) const;
+
+    /// Legacy serialize for version [0.12.*, 0.14.*].
+    void
+    serialize_basic_info_v0_14(StreamWriter& writer) const;
+
+    /// Legacy deserialize for version [0.12.*, 0.14.*].
+    void
+    deserialize_basic_info_v0_14(StreamReader& reader);
+
+    /// Force-remove a single label: physically delete from all graphs.
+    uint32_t
+    force_remove_one(int64_t label);
+
+    /// Scan all graphs to find a new entry point after the current one is removed.
+    void
+    find_new_entry_point();
+
+    /// Force-remove a single inner_id from a specific graph layer.
+    void
+    graph_force_remove_one(const InnerIdType& inner_id,
+                           const FlattenInterfacePtr& flatten,
+                           const GraphInterfacePtr& graph);
+
+    /// Move data at inner_id `from` to `to`, updating all references.
+    void
+    move_id(InnerIdType from, InnerIdType to);
+
+    /// Compact internal storage after deletions.
+    void
+    shrink_to_fit();
+
+    /// Flat brute-force search used when the index is too small or graph is unavailable.
+    template <InnerSearchMode mode = InnerSearchMode::KNN_SEARCH>
+    DistHeapPtr
+    brute_force_search(const void* query,
+                       const FilterPtr& filter,
+                       int64_t topk,
+                       float radius,
+                       QueryContext* ctx,
+                       const std::optional<float>& threshold = std::nullopt) const;
+
+    DatasetPtr
+    search_range_with_request(const SearchRequest& request,
+                              const HGraphSearchParameters& params,
+                              const FilterPtr& filter,
+                              QueryContext& ctx) const;
+
+private:
+    /// Reorder the candidate heap using precise codes, updating in-place.
+    void
+    reorder(const void* query,
+            const FlattenInterfacePtr& flatten,
+            DistHeapPtr& candidate_heap,
+            int64_t k,
+            IteratorFilterContext* iter_ctx,
+            QueryContext& ctx,
+            const RaBitQSearchCandidateBuffers* rabitq_candidates = nullptr,
+            const std::optional<float>& distance_threshold = std::nullopt) const;
+
+    /// Run ELP (Edge-Link Pruning) optimizer on the bottom graph.
+    void
+    elp_optimize();
+
+    /// Initialize raw_vector_ from the given parameter if needed.
+    void
+    check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_param,
+                              const IndexCommonParam& common_param,
+                              bool is_create_new = true);
+
+    /// Initialize reorder if enabled.
+    void
+    init_resize_bit_and_reorder();
+
+    /// Compute memory usage breakdown and cache the result.
+    void
+    cal_memory_usage();
+
+    /// True when reorder uses a separate high-precision flatten (not base codes).
+    [[nodiscard]] bool
+    has_precise_reorder() const {
+        return use_reorder_ and not reorder_by_base_;
+    }
+
+    /// True when force-remove is enabled.
+    [[nodiscard]] bool
+    support_force_remove() const {
+        return support_force_remove_;
+    }
+
+    /// True when duplicate logical ids share physical vector storage slots.
+    [[nodiscard]] bool
+    using_dedup_storage() const {
+        return support_duplicate_ and deduplicate_storage_;
+    }
+
+    /// Return the flatten used for reorder (base or high-precision).
+    [[nodiscard]] FlattenInterfacePtr
+    get_reorder_codes() const {
+        return reorder_by_base_ ? basic_flatten_codes_ : high_precise_codes_;
+    }
+
+    /// Return the best available flatten for precise distance in MCI and other internal
+    /// search paths.
+    /// Here, "precise" means the best available precision and does not guarantee raw FP32 data.
+    [[nodiscard]] FlattenInterfacePtr
+    get_precise_codes() const {
+        if (create_new_raw_vector_ and raw_vector_ != nullptr) {
+            return raw_vector_;
+        }
+        return has_precise_reorder() ? high_precise_codes_ : basic_flatten_codes_;
+    }
+
+    /// Populate the neighbor cache from the index state.
+    void
+    fullfill_cache() const;
+
+    // ---- Build-with-cache acceleration path ----
+    // The build flow is automatically taken by Build() when ImportCache() has
+    // populated cache_ before. Steps:
+    //   (1) warm_start: seed each new node's neighbors from the cached
+    //       neighbors keyed by source_id, classify nodes into hit/missed.
+    //   (2) refine hit nodes (use_self_as_entry=true), then missed nodes
+    //       (use_self_as_entry=false). Each refine round is two-phase:
+    //       parallel search+select then serial writeback, plus a sharded
+    //       reverse-edge install with distance-reuse and O(M) dedup.
+    //   (3) build route graphs via ODescent over the sampled level ids.
+    bool
+    has_loaded_cache() const {
+        return this->cache_ != nullptr && not this->cache_->neighbors_.empty();
+    }
+
+    /// Build from imported cache: warm-start, refine, and rebuild route graphs.
+    std::vector<int64_t>
+    build_with_cache(const DatasetPtr& data);
+
+    /// Internal scratch state shared across the 6 phases of build_with_cache.
+    /// Each phase reads/writes a well-defined subset; threading this through
+    /// a single struct keeps phase signatures small (1 ref instead of 8 outs)
+    /// and makes the data flow explicit at a glance.
+    struct BuildCachePlan {
+        Vector<int64_t> valid_indices;                // input indices that pass filter
+        Vector<InnerIdType> inner_ids;                // allocated inner ids per valid input
+        Vector<Vector<InnerIdType>> route_graph_ids;  // ids assigned to each route graph level
+        std::vector<InnerIdType> inserted_inner_ids;  // all successfully inserted ids
+        std::unordered_map<InnerIdType, uint32_t> inner_id_to_input_idx;  // inner_id -> input index
+        std::unordered_map<std::string, InnerIdType>
+            source_id_to_new_inner;           // source_id -> inner_id
+        std::vector<int64_t> failed_ids;      // ids that failed insertion
+        std::vector<InnerIdType> hit_ids;     // nodes with cache hit (warm-started)
+        std::vector<InnerIdType> missed_ids;  // nodes without cache hit
+
+        BuildCachePlan(Allocator* allocator)
+            : valid_indices(allocator), inner_ids(allocator), route_graph_ids(allocator) {
+        }
+    };
+
+    /// Phase 1: collect valid input indices (serial).
+    void
+    cache_collect_valid_indices(const DatasetPtr& data, BuildCachePlan& plan);
+
+    /// Phase 2: set up metadata (ids, route graph assignment) (serial).
+    void
+    cache_setup_metadata_serial(const DatasetPtr& data, BuildCachePlan& plan);
+
+    /// Phase 3: encode all codes in parallel.
+    void
+    cache_encode_codes_parallel(const DatasetPtr& data, BuildCachePlan& plan);
+
+    /// Phase 4: warm-start neighbors from cache, classify nodes as hit/missed.
+    void
+    cache_warm_start_and_classify(BuildCachePlan& plan);
+
+    /// Phase 5: refine hit and missed nodes via two-phase parallel refine.
+    void
+    cache_run_refine_two_phase(const DatasetPtr& data, BuildCachePlan& plan);
+
+    /// Phase 6: rebuild route (upper-layer) graphs via ODescent.
+    void
+    cache_rebuild_route_graphs(BuildCachePlan& plan);
+
+    /// Collect refine candidates for a single node via graph search.
+    DistHeapPtr
+    collect_refine_candidates(const DatasetPtr& data,
+                              InnerIdType inner_id,
+                              uint32_t input_idx,
+                              const FlattenInterfacePtr& flatten_codes,
+                              uint32_t refine_ef,
+                              bool use_self_as_entry) const;
+
+    /// Select refined neighbors and their distances for a single node.
+    void
+    select_refine_neighbors_with_distances(const DatasetPtr& data,
+                                           InnerIdType inner_id,
+                                           uint32_t input_idx,
+                                           const FlattenInterfacePtr& flatten_codes,
+                                           uint32_t refine_ef,
+                                           bool use_self_as_entry,
+                                           Vector<InnerIdType>& out_neighbors,
+                                           Vector<float>& out_distances) const;
+
+    /// Refine a batch of nodes in two phases: parallel search+select, then serial writeback.
+    void
+    refine_nodes_two_phase(const DatasetPtr& data,
+                           const std::vector<InnerIdType>& ids_to_refine,
+                           std::string_view phase_name,
+                           uint32_t rounds,
+                           uint32_t refine_ef,
+                           bool use_self_as_entry,
+                           const FlattenInterfacePtr& flatten_codes,
+                           const std::unordered_map<InnerIdType, uint32_t>& inner_id_to_input_idx);
+
+    struct MCIHybridSearchResult {
+        MCIHybridSearchResult(const HGraphSearchParameters& params, const FilterPtr& filter);
+
+        [[nodiscard]] JsonType
+        MakeStatistics(const SearchStatistics& stats) const;
+
+        DistHeapPtr result{nullptr};
+        float valid_ratio{1.0F};
+        float threshold{0.0F};
+        float seed_ratio{0.0F};
+        std::string route{"disabled"};
+        uint64_t seed_count{0};
+        bool used_precise_float_csr{false};
+    };
+
+    [[nodiscard]] MCIHybridSearchResult
+    try_mci_search(const SearchRequest& request,
+                   const HGraphSearchParameters& params,
+                   const FilterPtr& inner_filter,
+                   const void* query,
+                   const InnerSearchParam& search_param,
+                   QueryContext* ctx) const;
+
+    void
+    build_mci_clique_index(const void* vectors = nullptr);
+
+    void
+    incremental_update_mci_clique(InnerIdType new_inner_id, const void* vector);
+
+    [[nodiscard]] Vector<InnerIdType>
+    find_mci_knn_for_new_node(InnerIdType new_inner_id, const void* vector) const;
+
+    [[nodiscard]] Vector<InnerIdType>
+    search_mci_knn(InnerIdType query_inner_id, const void* vector, uint64_t visible_total) const;
+
+    bool
+    try_join_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+    void
+    build_incremental_mci_clique(InnerIdType new_inner_id, const Vector<InnerIdType>& knn_ids);
+
+private:
+    FlattenInterfacePtr basic_flatten_codes_{nullptr};  // coarse/quantized codes for graph search
+    std::shared_ptr<FlattenOptimizedBuildInterface> optimized_build_codes_{nullptr};
+    FlattenInterfacePtr high_precise_codes_{nullptr};  // precise codes for reorder (optional)
+    std::shared_ptr<CodeSlotMap> code_slot_map_{nullptr};
+
+    Vector<GraphInterfacePtr> route_graphs_;   // upper-layer route graphs
+    GraphInterfacePtr bottom_graph_{nullptr};  // base-level graph (all vectors)
+    std::shared_ptr<HGraphRaBitQFusedDataCell> rabitq_fused_datacell_{nullptr};
+    std::shared_ptr<RaBitQSplitDataCellInterface> rabitq_split_codes_{nullptr};
+    std::shared_ptr<HGraphRaBitQSearcher> rabitq_fused_searcher_{nullptr};
+    SparseGraphDatacellParamPtr hierarchical_datacell_param_{nullptr};  // params for route graphs
+
+    bool use_elp_optimizer_{false};  // enable ELP edge-link pruning
+    bool ignore_reorder_{false};     // skip reorder even if configured
+    bool build_by_base_{false};      // build graph using base (not quantized) codes
+    bool reorder_by_base_{false};    // use base codes for reorder (no separate precise)
+
+    BasicSearcherPtr searcher_;              // single-thread graph searcher
+    MCISearcherPtr mci_searcher_;            // companion MCI clique searcher
+    ParallelSearcherPtr parallel_searcher_;  // multi-thread graph searcher
+
+    std::default_random_engine level_generator_{
+        2021};          // random number generator for level sampling
+    double mult_{1.0};  // level multiplier (1/ln(max_degree))
+
+    InnerIdType entry_point_id_{INVALID_ENTRY_POINT};  // top-level entry point
+
+    ODescentParameterPtr odescent_param_{nullptr};  // ODescent build parameters
+    std::string graph_type_{GRAPH_TYPE_VALUE_NSW};  // graph algorithm type
+
+    CliqueDataCellPtr mci_cliques_{nullptr};  // companion MCI clique datacell
+    HGraphMCIParameters mci_parameters_{};
+
+    uint64_t ef_construct_{400};  // expansion factor during graph construction
+    float alpha_{1.0};            // Relative Neighborhood Graph pruning coefficient
+
+    std::shared_ptr<VisitedListPool> pool_{nullptr};  // pool of visited-lists for search
+
+    mutable std::shared_mutex global_mutex_;            // guards total_count_, entry_point_id_
+    mutable std::shared_mutex persistent_codes_mutex_;  // pins flatten storage during MCI search
+    mutable std::mutex mci_build_mutex_;                // serializes full MCI reconstruction
+    mutable std::mutex mci_add_mutex_;                  // serializes MCI-enabled Add calls
+    mutable MutexArrayPtr neighbors_mutex_;             // per-node locks for neighbor lists
+    mutable std::shared_mutex add_mutex_;               // serializes Add() operations
+    mutable std::shared_mutex force_remove_mutex_;      // serializes force-remove operations
+    // Single-flights physical code growth before taking the global writer lock.
+    mutable std::mutex physical_code_resize_mutex_;
+    std::atomic<bool> physical_code_resize_pending_{false};
+
+    std::atomic<InnerIdType> max_capacity_{0};               // allocated storage capacity
+    std::atomic<CodeSlotIdType> physical_code_capacity_{0};  // physical flatten slot capacity
+
+    uint64_t resize_increase_count_bit_{
+        DEFAULT_RESIZE_INCREASE_COUNT_BIT};  // log2(resize batch size)
+
+    std::atomic<int64_t> delete_count_{0};  // number of force-removed vectors
+
+    std::shared_ptr<Optimizer<BasicSearcher>> optimizer_;  // search parameter optimizer
+
+    bool create_new_raw_vector_{false};        // whether a separate raw vector exists
+    FlattenInterfacePtr raw_vector_{nullptr};  // raw float vectors (for distance calc)
+
+    ReorderInterfacePtr reorder_{nullptr};  // reorder helper
+
+    bool use_old_serial_format_{false};  // true when deserialized from legacy format
+
+    bool support_duplicate_{false};     // allow duplicate external ids
+    bool deduplicate_storage_{false};   // share duplicate vector storage slots
+    bool support_force_remove_{false};  // enable physical deletion
+    bool use_conjugate_graph_{false};   // enable graph-enhancement feedback
+    std::shared_ptr<ConjugateGraph> conjugate_graph_{nullptr};
+    // guards conjugate_graph_ against concurrent search paths. During a
+    // parallel restore exactly one component task acquires it (the conjugate
+    // graph handler); before adding another acquirer there, read the INVARIANT
+    // in hgraph_parallel_deserialize.cpp — two restore tasks holding component
+    // locks while waiting on this one would deadlock.
+    mutable std::shared_mutex conjugate_graph_mutex_;
+    float duplicate_distance_threshold_{0.0F};  // distance threshold for duplicate detection
+
+    bool persist_source_id_{false};  // whether to persist source_id in serialization
+
+    std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
+
+    float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
+    uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit
+    uint64_t build_cache_missed_nodes_{0};  // number of nodes without cache hit
+};
+}  // namespace vsag

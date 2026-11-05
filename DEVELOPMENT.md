@@ -1,0 +1,236 @@
+# VSAG Developer Guide
+
+Welcome to the developer guide for VSAG! This guide is designed to provide both new and experienced contributors with a comprehensive resource for understanding the project's codebase, development processes, and best practices.
+
+Whether you're an open-source enthusiast looking to make your first contribution or a seasoned developer seeking insights into the project's architecture, the guide aims to streamline your onboarding process and empower you to contribute effectively.
+
+Let's dive in and explore how you can become an integral part of our vibrant open-source community!
+
+## Development Environment
+
+There are two ways to build and develop the VSAG project now.
+
+### Use Docker(recommended)
+
+![Docker Pulls](https://img.shields.io/docker/pulls/vsaglib/vsag)
+![Docker Image Size](https://img.shields.io/docker/image-size/vsaglib/vsag)
+
+```bash
+docker pull vsaglib/vsag:ubuntu
+```
+
+### or Install Development Requirements
+
+- Operating System:
+  - Ubuntu 20.04 or later
+  - or CentOS 7 or later
+  - or macOS 14 or later (arm64, C++ build path)
+- Compiler:
+  - GCC version 9.4.0 or later
+  - or Clang version 13.0.0 or later
+- Build Tools: 
+  - CMake version 3.18.0 or later
+  - Ninja (preferred when available; Unix Makefiles remain the compatibility fallback)
+  - clang-tidy version 20 EXACTLY (not higher, not lower - required for consistent lint diagnostics)
+  - clang-format version 20 EXACTLY (not higher, not lower - required for consistent formatting)
+- Additional Dependencies:
+  - Linux: gfortran, python 3.6+, OpenMP, libaio, curl
+  - macOS: Xcode Command Line Tools, Homebrew
+
+```bash
+# auto-detect the local OS / distro
+$ ./scripts/deps/install_deps.sh
+
+# optional: call the platform-specific script directly
+$ ./scripts/deps/install_deps_ubuntu.sh
+$ ./scripts/deps/install_deps_centos.sh
+$ ./scripts/deps/install_deps_macos.sh
+```
+
+## VSAG Build Tool
+VSAG uses CMake to compile, package, and install the library through the commands below. The Makefile prefers Ninja when a usable installation is available and otherwise falls back to Unix Makefiles. Set `CMAKE_GENERATOR` explicitly to use another supported generator; explicit values always take precedence.
+```bash
+Usage: make <target>
+
+Targets:
+help:                    ## Show the help.
+##
+## ================ development ================
+debug:                   ## Build vsag with debug options.
+dev:                     ## Build full developer configuration.
+test:                    ## Build and run unit tests.
+test-module:             ## Build and run one unit-test module. Usage: make test-module MODULE=datacell
+asan:                    ## Build with AddressSanitizer option.
+test_asan: asan          ## Run unit tests with AddressSanitizer option.
+tsan:                    ## Build with ThreadSanitizer option.
+test_tsan: tsan          ## Run unit tests with ThreadSanitizer option.
+clean:                   ## Clear build/ directory.
+##
+## ================ integration ================
+fmt:                     ## Format codes.
+cov:                     ## Build unit tests with code coverage enabled.
+lint:                    ## Check coding styles defined in `.clang-tidy`.
+fix-lint:                ## Fix coding style issues in-place via clang-apply-replacements (destructive).
+test_parallel:           ## Run all tests parallel (used in CI).
+test_asan_parallel: asan ## Run unit tests parallel with AddressSanitizer option.
+test_tsan_parallel: tsan ## Run unit tests parallel with ThreadSanitizer option.
+##
+## ================ distribution ================
+release:                 ## Build reproducible release/package output (ccache off by default).
+release-perf:            ## Build optimized output for iteration/benchmarks (ccache on by default).
+run-dist-tests:          ## Run distribution tests.
+dist-pre-cxx11-abi:      ## Build vsag with distribution options (pre C++11 ABI).
+dist-cxx11-abi:          ## Build vsag with distribution options (C++11 ABI).
+dist-libcxx:             ## Build vsag using libc++.
+pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
+pyvsag-all:              ## Build wheels for all supported versions.
+clean-release:           ## Clear build-release/ directory.
+clean-release-perf:      ## Clear build-release-perf/ directory.
+install:                 ## Build and install the release version of vsag.
+```
+
+Build target behavior:
+
+- `make debug` builds the default minimal configuration. It does not enable tests, examples, tools, or Python bindings unless they are explicitly turned on.
+- `make dev` builds the full developer configuration with tests, examples, tools, and Python bindings enabled.
+- `make test`, `make asan`, `make tsan`, and the related parallel test targets automatically enable tests.
+- `make test-module MODULE=<name>` builds and runs one unit-test subsystem without building the other unit-test modules. `CASE=<filter>` applies the usual Catch2 runtime filter; run `make test` for full validation.
+- `make release` is the reproducible release/package path. It uses the minimal configuration, Release optimization semantics, and disables ccache by default. Enable optional components explicitly when needed, for example `make release VSAG_ENABLE_TOOLS=ON`.
+- `make release-perf` uses the same Release optimization semantics and minimal configuration in `build-release-perf/`, but enables ccache by default for iterative development and benchmarking.
+- Override either cache default explicitly with `VSAG_ENABLE_CCACHE=ON` or `VSAG_ENABLE_CCACHE=OFF`.
+- Linux and macOS use the same dependency-script plus `make` entry points for the core C++ build. Use `./scripts/deps/install_deps.sh` first, then run the usual `make` target. The current macOS validation scope is `make debug`, `make release`, and `make test` on arm64; Python wheel packaging remains Linux-focused.
+
+## CMake Build Options
+
+VSAG provides several CMake options to customize the build:
+
+### BLAS Library Options
+
+- **`ENABLE_INTEL_MKL`** (default: `OFF`)
+  - Enable Intel MKL as the BLAS backend (x86_64 platforms only)
+  - When disabled, OpenBLAS is used instead
+  - MKL resolution uses `MKL_PATH`, `OMP_PATH`, and `MKL_INCLUDE_PATH` as CMake cache
+    overrides when the libraries are not installed in standard locations
+
+### System Third-Party Dependencies
+
+VSAG can reuse third-party libraries already provided by the host system or by a parent CMake
+project instead of always building bundled copies.
+
+- **`VSAG_USE_SYSTEM_DEPS`** (default: `AUTO`)
+  - `AUTO` — use a system / pre-existing copy when one is found, fall back to the bundled
+    build otherwise.
+  - `ON` — require a system copy of every supported dependency; fail configuration if any
+    of them is missing.
+  - `OFF` — always build bundled copies, ignoring system packages.
+
+- **`VSAG_USE_SYSTEM_<DEP>`** (default: empty — inherit `VSAG_USE_SYSTEM_DEPS`)
+  - Per-dependency override. Set to `AUTO`, `ON`, or `OFF` to override the global policy
+    for a single dependency.
+
+**Currently supported dependencies for system reuse:** `OPENBLAS`.
+
+Additional dependencies will be enabled in follow-up changes.
+
+#### OpenBLAS
+
+When `VSAG_USE_SYSTEM_OPENBLAS=ON` (or inherited via `VSAG_USE_SYSTEM_DEPS=ON`), VSAG
+looks for OpenBLAS in the following order and stops at the first hit:
+
+1. an `OpenBLAS::OpenBLAS` target already defined by a parent project,
+2. `find_package(OpenBLAS CONFIG)`,
+3. a manual search for `libopenblas` plus `cblas.h` / `lapacke.h` under common system
+   prefixes, including Homebrew's OpenBLAS prefixes on macOS.
+
+Example:
+
+```bash
+# Install OpenBLAS on Ubuntu/Debian
+sudo apt-get install libopenblas-dev liblapacke-dev
+
+# Install OpenBLAS on macOS
+brew install openblas
+
+# Build with system OpenBLAS
+cmake -DVSAG_USE_SYSTEM_OPENBLAS=ON -DENABLE_INTEL_MKL=OFF -B build
+cmake --build build
+```
+
+The legacy switch **`USE_SYSTEM_OPENBLAS`** (default: `OFF`) is kept as a deprecated
+alias. When `VSAG_USE_SYSTEM_OPENBLAS` is empty, setting `USE_SYSTEM_OPENBLAS=ON`
+preserves its previous "try system, fall back to bundled" behaviour (equivalent to
+`VSAG_USE_SYSTEM_OPENBLAS=AUTO` — it does **not** hard-require a system copy). Prefer
+the new option in new scripts.
+
+### Third-Party Source Overrides
+
+VSAG downloads its third-party libraries at configure/build time. Each downloaded
+dependency honors a pin-qualified `VSAG_THIRDPARTY_<LIB>_<PIN_SUFFIX>` **environment
+variable** that, when set, is tried before the upstream URL and project mirror. The
+unversioned variable remains as a deprecated compatibility fallback. The value may
+be a local filesystem path or URL, making this the primary mechanism for offline,
+air-gapped, or internal-mirror builds.
+
+- **`VSAG_THIRDPARTY_OPENBLAS_0_3_34`** (representative `main` example)
+  - Override the OpenBLAS source archive URL/path used by `ExternalProject_Add`
+  - Useful for offline builds, local mirrors, or pre-downloaded archives
+
+The full list of pinned variables, suffix rules, usage examples, and exact archives to mirror are
+documented in the [Offline / Air-gapped Builds](docs/docs/en/src/development/offline_build.md)
+guide. The note next to each `URL_HASH` in `extern/<lib>/<lib>.cmake` is the
+source of truth for the exact upstream URL and expected checksum.
+
+### Other Build Options
+
+- **`ENABLE_TESTS`** (default: `OFF`)
+  - Build unit tests and functional tests
+
+- **`ENABLE_EXAMPLES`** (default: `OFF`)
+  - Build C++ example programs under `examples/cpp/`
+
+- **`ENABLE_TOOLS`** (default: `OFF`)
+  - Build tools under `tools/`
+
+- **`ENABLE_PYBINDS`** (default: `OFF`)
+  - Build the `_pyvsag` Python extension module
+
+- **`ENABLE_CUDA`** (default: `OFF`)
+  - Build the optional CUDA backend. Requires CUDA 11.8 or later, with `nvcc` on
+    `PATH` or `CMAKE_CUDA_COMPILER` set. With the option off a stub exporting the
+    same symbols is compiled instead, so callers link unconditionally and decide at
+    runtime.
+  - The CUDA host pass uses `CMAKE_CXX_COMPILER`. If nvcc rejects that compiler,
+    point `CMAKE_CUDA_HOST_COMPILER` at one it accepts.
+  - `VSAG_CUDA_ARCHITECTURES` is a `;`-separated CMake list, default
+    `75-real;80-real;86-real;89-real;90` (Turing through Hopper). Older devices
+    such as Volta need CUDA 12 or earlier and an explicit list, e.g.
+    `-DVSAG_CUDA_ARCHITECTURES="70-real;75-real;80"`.
+
+For a complete list of build options, see the `option()` directives in `cmake/VSAGOptions.cmake`.
+
+## Project Structure
+- `cmake/`: cmake util functions
+- `docker/`: the dockerfile to build develop and ci image
+- `docs/`: the design documents
+- `examples/`: cpp and python example codes
+- `extern/`: third-party libraries
+- `include/`: export header files
+- `python/`: the pyvsag package and setup tools
+- `python_bindings/`: the python bindings
+- `scripts/`: useful scripts
+- `src/`: the source codes and unit tests
+- `tests/`: the functional tests
+- `tools/`: the tools
+
+## C++ standard and compiler validation
+
+Full VSAG CPU implementation targets require C++20; installed public headers and the `vsag::vsag` target support C++17 clients. CUDA translation units, Node.js bindings, and standalone Lite stay on C++17. Linux development uses GCC 13 as the primary compiler and Clang 20 as the second compiler. Use separate build directories:
+
+```bash
+make test DEBUG_BUILD_DIR=build_gcc13 EXTRA_DEFINED="-DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13"
+make test DEBUG_BUILD_DIR=build_clang20 EXTRA_DEFINED="-DCMAKE_C_COMPILER=clang-20 -DCMAKE_CXX_COMPILER=clang++-20"
+```
+
+The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and LLVM 20 (using apt.llvm.org if needed). Other distributions need a matching toolchain prepared manually. Compiler requirements concern source builds, not the glibc baseline of prebuilt packages. Existing manylinux release baselines and both libstdc++ ABI choices are preserved. Installing a package does not require a C++20 client compiler.
+
+Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.

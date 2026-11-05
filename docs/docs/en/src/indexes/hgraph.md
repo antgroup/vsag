@@ -1,0 +1,514 @@
+# HGraph
+
+HGraph is VSAG's flagship **graph-based** index. It builds a hierarchical proximity graph
+and offers a rich set of quantization options, a unified
+build-parameter schema (`index_param`), and first-class support for reordering,
+incremental updates, deletion, and ELP-based runtime tuning.
+
+For most dense-vector workloads (text / image / multimodal embeddings, 64–4096 dims,
+from a few thousand up to hundreds of millions of points), HGraph is the recommended
+default.
+
+- Source: `src/algorithm/hgraph.{h,cpp}`
+- Example: [`examples/cpp/103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp)
+
+## How it works
+
+1. **Graph construction.** Vectors are organised in a layered proximity graph; upper
+   layers act as navigation aids, the bottom layer connects every data point to its
+   nearest neighbours within a `max_degree` budget. The construction algorithm can be
+   NSW-style insertion (`graph_type: "nsw"`, the default), ODescent
+   (`graph_type: "odescent"`), or PiPNN (`graph_type: "pipnn"`).
+2. **Quantization.** The base storage is compressed with a configurable quantizer
+   (`base_quantization_type` — `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`,
+   `pq`, `pqfs`, `rabitq`, `tq`). Optionally, a second high-precision copy is kept
+   (`use_reorder: true` with `precise_quantization_type`) and used to re-rank the
+   candidates returned by the coarse search.
+3. **Search.** Greedy beam search traverses the graph top-down, expanding the current
+   frontier up to `ef_search` candidates. When reordering is enabled, the final list is
+   re-scored against the precise representation.
+
+## Quick start
+
+```cpp
+#include <vsag/vsag.h>
+
+std::string params = R"({
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "sq8",
+        "max_degree": 32,
+        "ef_construction": 400
+    }
+})";
+auto index = vsag::Factory::CreateIndex("hgraph", params).value();
+
+// Build.
+auto base = vsag::Dataset::Make();
+base->NumElements(n)->Dim(128)->Ids(ids)->Float32Vectors(data)->Owner(false);
+index->Build(base);
+
+// Search.
+auto query = vsag::Dataset::Make();
+query->NumElements(1)->Dim(128)->Float32Vectors(q)->Owner(false);
+auto result = index->KnnSearch(
+    query, /*topk=*/10, R"({"hgraph": {"ef_search": 100}})").value();
+```
+
+## Disk read-cache example
+
+[`406_feature_read_cache.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/406_feature_read_cache.cpp)
+uses 1,000 64-dimensional vectors, in-memory SQ8 base codes, and disk-backed FP32
+precise codes (`async_io`) for query reranking. It sets `build_by_base: true` so
+graph construction reads the in-memory base codes, avoiding repeated disk-cache
+refills during this small usage example. This changes the graph construction
+quantization; it is not a recall benchmark or an example of precise-code graph
+construction.
+
+Read caching remains enabled with a 131,072-byte budget (one 128-KiB page).
+The 256,000-byte FP32 payload spans two pages. The example serializes to a
+`BinarySet`, restores a new index, and checks the restored count, top-10 result
+shape, ID range, and finite distances. Run it with a writable file path in a
+fresh working directory. Writes and durability behavior are unchanged.
+Focused AsyncIO tests cover one-page eviction/refill, write invalidation, and
+invalid reads; the HGraph read-cache functional test retains precise-code graph
+construction coverage.
+
+## Build parameters
+
+Build-time parameters live under `index_param`. The table below highlights the keys
+most users need; the exhaustive list is in [Index Parameters](../resources/index_parameters.md).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `base_quantization_type` | string | — (required) | `fp32`, `fp16`, `bf16`, `sq8`, `sq8_local`, `sq4_local`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq` — see the [Quantization chapter](../quantization/) for per-quantizer details |
+| `max_degree` | int | `64` | Maximum out-degree per graph node |
+| `ef_construction` | int | `400` | Candidate list size during build (higher = better recall, slower build) |
+| `alpha` | float | `1.0` | Final robust-pruning factor; PiPNN requires a finite value at least `1.0`. |
+| `graph_type` | string | `"nsw"` | Graph algorithm: `nsw`, `odescent`, or `pipnn` |
+| `pipnn_max_leaf_size` | int | `1024` | Maximum partition leaf size. Larger leaves increase candidate coverage and leaf distance work. |
+| `pipnn_min_leaf_size` | int | `64` | Target used when merging undersized leaves. |
+| `pipnn_leader_sample_rate` | float | `0.005` | Fraction sampled as partition leaders; each partition uses at least `2` and at most `1000` leaders, bounded by its point count. |
+| `pipnn_fanout` | int[] | `[10, 2]` | Number of nearest leader partitions joined at each listed partition level; deeper levels use `1`. |
+| `pipnn_leaf_neighbor_count` | int | `5` | Nearest candidates contributed per point in each leaf. This is the primary PiPNN quality/build-work knob; leaves smaller than `pipnn_min_leaf_size` use at least `4`. |
+| `pipnn_hash_plane_count` | int | `12` | Direction-hash bits, in `[1, 15]`; `max_degree <= 2^pipnn_hash_plane_count`. |
+| `pipnn_reservoir_size` | int | `64` | Candidate slots retained per point before final pruning; effective capacity is at least `max_degree`. |
+| `pipnn_adaptive_pruning` | bool | `false` | Experimental per-point alpha adjustment in PiPNN final pruning; L2 only. |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | Alpha adjustment step; finite, non-negative, `alpha - 2*step > 0`, and `alpha + 3*step` finite when enabled. |
+| `use_reverse_edges` | bool | `false` | Track incoming neighbors for O(1) reverse-edge lookup. Roughly doubles edge storage and is unsupported with `graph_storage_type: "compressed"`. |
+| `label_remap_type` | string | `"pg"` | Label-to-inner-ID map implementation: `"pg"` or `"robin"`. Keep the same value when restoring or combining compatible indexes. |
+| `use_reorder` | bool | `false` | Keep a high-precision copy and re-rank after the coarse search |
+| `reorder_source` | string | `"precise"` | Reorder from `"precise"` codes or directly from `"base"` codes. RaBitQ x+y split, including `tq_chain: "mrle, rabitq"`, sets `"base"` automatically. |
+| `precise_quantization_type` | string | `"fp32"` | Quantizer used for reordering (takes effect only with `use_reorder: true`) |
+| `base_pq_dim` | int | `1` | Number of PQ subspaces. When using `pq` / `pqfs`, set this explicitly instead of relying on the default. |
+| `mrle_dim` | int | `0` | Output dimension for an MRLE transform in `tq_chain`; allowed range `[0, dim]`, where `0` means the input dimension. |
+| `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder; set to `false` for the previous exact encoder. |
+| `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ coordinate-refinement rounds, in `[1, 32]`. |
+| `rabitq_fused_datacell` | bool | `false` | Fuse the bottom HGraph node and RaBitQ split codes into one in-memory record. Requires L2/IP, flat in-memory graph storage, RaBitQ x+y split codes with x in `[1, 4]`, and the other constraints described in [RaBitQ x+y split](../quantization/rabitq_split.md). |
+| `train_sample_count` | int | `65536` | Maximum number of vectors sampled for quantizer training; must be at least `512` when set explicitly. |
+| `build_thread_count` | int | `100` | Threads used to parallelise build |
+| `support_duplicate` | bool | `false` | Group duplicate vectors while retaining their individual labels |
+| `deduplicate_storage` | bool | `false` | Share vector storage between duplicates; requires `support_duplicate: true` |
+| `duplicate_distance_threshold` | float | `0.0` | Duplicate-detection distance threshold. When greater than `0`, deduplicate by the nearest candidate distance; when `0`, compare codes with the nearest candidate first, then check the remaining returned build candidates until a match is found |
+| `support_remove` | bool | `false` | Enable graph delete-tracking metadata used by mark-remove recovery paths |
+| `support_force_remove` | bool | `false` | Enable `RemoveMode::FORCE_REMOVE` and its extra synchronization on the built index |
+| `store_raw_vector` | bool | `false` | Keep the raw vector in addition to the quantized copy (useful for `cosine`) |
+| `use_elp_optimizer` | bool | `false` | Auto-tune search parameters after build |
+| `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Storage backend (`memory_io`, `block_memory_io`, `buffer_io`, `async_io`, `uring_io`, `mmap_io`) |
+| `base_file_path` / `precise_file_path` | string | — | File path; required when the corresponding `*_io_type` is disk-backed (`buffer_io`, `async_io`, `uring_io`, `mmap_io`) |
+| `base_direct_read` / `precise_direct_read` | bool | `false` | With `uring_io`, open the corresponding file using direct IO instead of the page cache. |
+| `hgraph_init_capacity` | int | `100` | Initial capacity hint (doesn't cap the final size) |
+| `persist_source_id` | bool | `false` | Persist source-ID metadata during serialization so a restored index can later export a reusable build cache. |
+| `use_conjugate_graph` | bool | `false` | Enable `Feedback`/`Pretrain` graph enhancement; see [Graph Index Enhancement](../advanced/enhance_graph.md). |
+| `resize_increase_count_bit` | int | `10` | `log2` of the slot-growth batch. Valid range is `1` to `31`; `1` grows in 2-slot batches and `10` in 1,024-slot batches. Smaller values reduce preallocation but can increase reallocations. |
+
+`sq8_local` and `sq4_local` support float32 L2/IP/cosine base and precise stores (including RaBitQ + local SQ4/SQ8 reranking). See [layout, numeric limits and Tune compatibility](../quantization/sq.md#local-sq4--sq8-float32-l2-ip-and-cosine).
+
+`use_reverse_edges` is intended for workloads that need fast incoming-neighbor inspection, graph
+analysis, or future graph-maintenance algorithms. It is disabled by default because maintaining
+the reverse adjacency approximately doubles edge storage.
+
+`label_remap_type` changes the internal label map, not user-visible IDs. `"pg"` is the default;
+`"robin"` selects the alternate robin-map implementation. Benchmark the target ID distribution
+before changing it.
+
+### PiPNN build boundary
+
+Set `graph_type: "pipnn"` to use [PiPNN](https://arxiv.org/abs/2602.21247) for the initial,
+full `Build`. The PiPNN builder accepts dense `float32` input with `metric_type` set to `"l2"`,
+`"ip"`, or `"cosine"`. It builds the bottom graph from the original build vectors, then reuses
+HGraph's route layers, storage, search, filtering, reordering, incremental `Add`, removal, and
+serialization paths. The persistent base storage may use a supported quantizer such as `sq8`,
+including RaBitQ with SQ8 reorder. Cache-assisted build is not supported with PiPNN.
+The `pipnn_*` parameters in the table above tune this builder;
+`ef_construction` does not. The existing `alpha` parameter controls PiPNN's final robust pruning.
+
+`build_thread_count` parallelizes vector preparation, partitioning, candidate generation, and
+final pruning. Keep `OPENBLAS_NUM_THREADS=1` when benchmarking so BLAS threads do not obscure
+builder scaling. The reproducible `tools/eval/pipnn_parallel.yaml` workload compares NSW,
+ODescent, and PiPNN at a matched Recall@10 target on SIFT1M and query-validates every graph.
+
+
+### Experimental PiPNN adaptive alpha
+
+Set `pipnn_adaptive_pruning: true` under `index_param` to apply [PR #2933](https://github.com/antgroup/vsag/pull/2933)'s per-node count-based schedule to the final PiPNN reservoir pruning. This opt-in experiment supports L2 and affects the initial batch `Build` only. It leaves partitioning, leaf neighbors, relative hashes, reservoir contents, incremental `Add`, and ODescent route-layer construction unchanged.
+
+For target degree K, scan the existing ordered reservoir at the configured `alpha`, yielding accepted A and scanned rejects B. Unscanned tail candidates do not count toward B. With a nonzero step, if `0 < |A| < K`, keep A and retry B with alpha increased by 1, 2, or 3 steps for `K/|A| <= 1.5`, `(1.5, 3]`, or `> 3`. If `|A| = K`, clear A and rescan the complete original reservoir, including the tail, with alpha decreased by 2, 1, or 0 steps for `|B|/K < 2.5`, `[2.5, 5)`, or `>= 5`. If the tightened pass is short, keep its accepted neighbors and retry its new rejects at the original alpha. Rejected neighbors are never appended unconditionally.
+
+The strict rejection rule remains `alpha * d(selected, candidate) < d(source, candidate)`. PiPNN retains its BF16 source-distance cache, FP32 pairwise squared-L2 calculations, and `(distance, source-ID gap, ID)` order. Unlike the NSW selector's disabled fast path, PiPNN already prunes short reservoirs, so zero adjustment step reproduces its original single-pass adjacency. Greedy selection and the degree cap mean recall need not improve monotonically with alpha.
+
+The policy and step are serialized. Loading an enabled index requires matching policy, base alpha, and step. Missing fields mean disabled. The disabled path preserves legacy behavior. This is experimental: compare build cost and query throughput at matched recall.
+
+### Deduplicating vector storage
+
+Set both `support_duplicate: true` and `deduplicate_storage: true` to let duplicate
+vectors share one physical code slot while retaining their individual labels. This option
+supports dense-vector HGraph indexes using `graph_type: "nsw"` or `"pipnn"`;
+`graph_type: "odescent"` is not supported.
+
+For PiPNN, initial `Build` groups byte-identical FP32 input rows and encodes each
+representative once. All labels, attributes, and extra information remain independent.
+This also works with adaptive alpha. `duplicate_distance_threshold` does not affect
+PiPNN batch grouping; later incremental `Add` retains its existing threshold/code-based
+duplicate detection. Quantizer training still uses the original training sample.
+
+The following operations and configurations are not supported while storage deduplication
+is enabled:
+
+- force removal (`support_force_remove: true`);
+- cache-assisted build after `ImportCache()`;
+- `Merge`;
+- legacy v0.14 serialization.
+
+`UpdateVector` is supported only for IDs whose vector storage is not shared with another
+duplicate-group member.
+
+Current serialization and streaming serialization are supported.
+
+## Supported input data types
+
+The `dtype` field in the top-level build config selects how `Dataset` interprets the raw vector
+bytes. HGraph supports four input types; the `dtype` value, the corresponding `Dataset` setter,
+and the example demonstrating each combination are summarised below.
+
+| `dtype`     | Element type | `Dataset` setter         | Example                                                                                                |
+|-------------|--------------|--------------------------|--------------------------------------------------------------------------------------------------------|
+| `float32`   | `float`      | `Float32Vectors`         | [`103_index_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/103_index_hgraph.cpp) |
+| `int8`      | `int8_t`     | `Int8Vectors`            | [`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp) |
+| `float16`   | `uint16_t` (IEEE 754 binary16, bit-pattern packed) | `Float16Vectors` | [`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp) |
+| `bfloat16`  | `uint16_t` (Brain Float, bit-pattern packed) | `Float16Vectors` (shared with FP16) | adapt `321_index_fp16_hgraph.cpp` per the notes below                                                  |
+
+The `dim` value is the logical vector dimensionality (number of elements), not the byte length, so
+the same `dim` is reused across all four data types.
+
+### `int8` input
+
+Quantized `int8` vectors are passed directly via `Int8Vectors`:
+
+```cpp
+std::vector<int8_t> data(num_vectors * dim);  // populate with int8 elements
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Int8Vectors(data.data())->Owner(false);
+```
+
+Build config (note `dtype: "int8"`):
+
+```json
+{
+    "dtype": "int8",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+Queries use the same `Int8Vectors` setter and the same `dtype`. A runnable example is
+[`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp).
+
+### `float16` / `bfloat16` input
+
+FP16 and BF16 vectors are both passed through `Float16Vectors`, which takes a `const uint16_t*`
+that points at the 16-bit storage of each element. Conversion from `float` is up to the caller;
+inside the VSAG source tree there are convenience helpers (`vsag::generic::FloatToFP16` in
+[`src/simd/fp16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/fp16_simd.h)
+and `vsag::generic::FloatToBF16` in
+[`src/simd/bf16_simd.h`](https://github.com/antgroup/vsag/blob/main/src/simd/bf16_simd.h)),
+but these are **internal headers** that are not installed under `include/vsag/`. Application code
+linking against an installed VSAG library should provide its own conversion (for example, copy
+the small helper, use `_cvtss_sh` / F16C intrinsics, or any FP16 library of choice). The snippet
+below uses the in-tree helper for brevity:
+
+```cpp
+// The fp16/bf16 helpers below live in src/simd/ and are not part of the public
+// installed headers. Replace with your own float -> uint16_t conversion when
+// linking against an installed VSAG.
+#include "simd/fp16_simd.h"  // FloatToFP16 (for BF16, use simd/bf16_simd.h / FloatToBF16)
+
+std::vector<uint16_t> data(num_vectors * dim);
+for (size_t i = 0; i < data.size(); ++i) {
+    data[i] = vsag::generic::FloatToFP16(some_float_source());
+}
+auto base = vsag::Dataset::Make();
+base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
+    ->Float16Vectors(data.data())->Owner(false);
+```
+
+Build config:
+
+```json
+{
+    "dtype": "float16",
+    "metric_type": "l2",
+    "dim": 128,
+    "index_param": {
+        "base_quantization_type": "pq",
+        "max_degree": 26,
+        "ef_construction": 100,
+        "alpha": 1.2
+    }
+}
+```
+
+To switch the example to BF16, change `dtype` to `"bfloat16"` and replace `FloatToFP16` with
+`FloatToBF16`; the `Float16Vectors` setter and the rest of the build/search flow stay the same.
+A runnable FP16 example is
+[`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp).
+
+> **Note.** The header comment at the top of `321_index_fp16_hgraph.cpp` currently mentions a
+> `BFloat16Vectors()` setter, but no such setter exists — `Float16Vectors` is the single entry
+> point for both FP16 and BF16. Use it for both `dtype: "float16"` and `dtype: "bfloat16"`.
+
+### Choosing an input type
+
+- Pick `float32` when accuracy matters most and memory budget allows; this is the default.
+- Pick `float16` / `bfloat16` to halve the input storage. FP16 has a smaller exponent range; BF16
+  has fewer mantissa bits but the same exponent range as FP32, which is often preferable for
+  embedding-style vectors.
+- Pick `int8` when your data is already integer-quantised (e.g. produced by an upstream quantiser
+  or by a model with int8 outputs). With `int8` input you typically still combine a coarse
+  quantizer such as `pq` / `sq8` for the in-index storage.
+
+The chosen `dtype` only constrains the **input** representation. The on-disk / in-memory storage is
+still controlled by `base_quantization_type` (and optionally `precise_quantization_type` when
+`use_reorder: true`), so e.g. `dtype: "float16"` + `base_quantization_type: "sq8"` is valid.
+
+## Experimental adaptive pruning
+
+See [algorithm details, examples and related work](adaptive_pruning.md).
+
+Parameters are flat fields under `index_param` and `adaptive_pruning` is a boolean; the former
+experimental nested object and the removed `fill_rejected` option are rejected. Indexes created
+with that experimental schema must be rebuilt.
+
+`index_param.adaptive_pruning` enables a multi-pass L2 neighbor selector for NSW bottom-layer
+**new-node forward edges**. It is disabled by default. Ordinary `Build`, parallel insertion,
+`Add`, and the NSW optimized build path (including RaBitQ split/fused) use this selector.
+Set `adaptive_pruning_apply_to_reverse: true` to also prune full bottom-layer reverse neighbor lists adaptively.
+A reverse list with free slots still appends the new edge directly. When full, the existing
+neighbor is the selection center and its old neighbors plus the new node form the candidates;
+the same alpha/step policy applies under the existing neighbor lock. Upper layers and
+update/refinement operations retain their fixed-alpha policy. Enabled ODescent, imported-cache
+builds, inner product/cosine, and `adaptive_pruning_apply_to_upper: true` remain unsupported.
+
+The following fields belong inside `index_param`. This is a GIST reference experiment,
+not a dimension-dependent default or a claim of improved performance:
+
+```json
+{
+    "alpha": 1.06,
+    "graph_type": "nsw",
+    "adaptive_pruning": true,
+    "adaptive_pruning_adjust_step": 0.06,
+    "adaptive_pruning_apply_to_reverse": false,
+    "adaptive_pruning_apply_to_upper": false
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `adaptive_pruning` | `false` | Enable the adaptive selector |
+| `adaptive_pruning_adjust_step` | `0.06` | Alpha adjustment step, delta |
+| `adaptive_pruning_apply_to_reverse` | `false` | Also use adaptive pruning for full bottom-layer reverse lists; requires `adaptive_pruning: true` |
+| `adaptive_pruning_apply_to_upper` | `false` | Reserved; `true` is unsupported when enabled |
+
+The existing `alpha` is the baseline. Enabled mode requires finite alpha and delta,
+nonnegative delta, positive `alpha - 2*delta`, and finite `alpha + 3*delta`.
+Distances must be finite nonnegative L2 values from the existing build distance provider;
+this setting does not change the build quantizer.
+
+Candidates are sorted by `(distance, internal ID)`, deduplicated, and stripped of self edges.
+A candidate c is rejected if any selected s satisfies `alpha * d(s,c) < d(center,c)`.
+The first pass stops at the graph's actual maximum degree K, retaining the unscanned tail.
+
+- If accepted A is below K, keep A and rescan rejects with `alpha + k*delta`.
+  Choose k=3 for `K/|A| > 3`, k=2 for `1.5 < K/|A| <= 3`, otherwise k=1.
+  Remaining rejected candidates are not appended.
+- If A reaches K, clear it and rescan the full sorted candidate list with `alpha - k*delta`.
+  Choose k=0 for `|B|/K >= 5`, k=1 for `2.5 <= |B|/K < 5`, otherwise k=2,
+  where B contains first-pass rejects. If still below K, rescan the new rejects at baseline
+  alpha. This branch never fills unconditionally.
+- With zero delta, use one baseline pass without filling. This differs from disabled
+  mode, whose original shortcut for fewer than K candidates is preserved.
+
+The selector holds only per-call scratch data and exposes optional per-call statistics for
+tests and profiling; it does not collect global counters or change graph locking.
+Serialized indexes retain the configuration. Reload using the same enabled state and, when
+enabled, the same alpha, delta and scope settings; mismatches fail compatibility checks.
+Indexes written before this option existed default to disabled mode.
+
+## Search parameters
+
+Search-time parameters live under the `hgraph` sub-object:
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `ef_search` | int64 | — (required) | Positive search-frontier size. Any value up to `INT64_MAX` is accepted; there is no `topk`-relative upper bound. Larger values increase recall, latency, and frontier memory. |
+| `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
+| `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
+| `brute_force_threshold` | float | `0.0` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; the default `0.0` disables the feature and preserves legacy behavior. |
+| `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
+| `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
+| `enable_reorder` | bool | `true` | Whether to re-rank coarse candidates against the precise codes. Set to `false` to skip reordering and return the approximate results directly. Use `use_reorder: true` in `index_param` to store the precise codes needed for reordering. |
+| `factor` | float | `0.0` | Reorder-candidate amplification factor. When `> 1.0`, the reorder-candidate pool is capped at `k * factor` (but never below `max(ef_search, k)`); the default `0.0` preserves the existing behaviour with `ef_search` candidates. |
+| `parallelism` | int | `1` | Number of parallel workers for a single HGraph search. Values `<= 0` are reset to `1` during parsing; parallel execution requires a configured executor, otherwise the search falls back to sequential execution. |
+| `timeout_ms` | int | unlimited | Per-query wall-clock timeout in milliseconds. The timer starts after routing; once exceeded, the search returns the current frontier. Best-effort only — it does not preempt a distance-computation batch. |
+| `use_extra_info_filter` | bool | `false` | Create the query filter from extra-info rather than plain label membership. Requires matching extra-info columns at build time. |
+| `use_conjugate_graph_search` | bool | `true` | Search enhancement pass. When `use_conjugate_graph: true` was set at build time, the search expands results through the conjugate graph for potentially higher recall; set to `false` to skip it. Only takes effect when a conjugate graph was built. |
+
+```cpp
+auto result = index->KnnSearch(
+    query, topk, R"({"hgraph": {"ef_search": 200}})").value();
+```
+
+### Brute-force fallback under highly selective filters (`brute_force_threshold`)
+
+Graph traversal is the right strategy when most candidates pass the filter — the
+graph quickly reaches the neighborhood of the query. As filter selectivity
+increases (only a tiny fraction of vectors survive), the beam has to expand far
+more nodes just to fill `ef_search` with **valid** candidates, and recall drops.
+At some point an exhaustive scan over the surviving ids is both faster *and*
+exact.
+
+`brute_force_threshold` lets HGraph make that switch automatically on a
+per-query basis:
+
+```cpp
+// When the active filter keeps ≤ 1% of ids, run an exact scan instead.
+auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
+
+- The fallback only fires when **all** of the following hold:
+    - `brute_force_threshold > 0.0`, **and**
+    - a filter is supplied, **and**
+    - `filter->ValidRatio() <= brute_force_threshold`.
+- The accuracy of `Filter::ValidRatio()` matters — it is the user-supplied hint
+  the dispatcher checks against the threshold. See
+  [Filtered Search](../advanced/filtered_search.md) for the API contract.
+- The scan iterates every valid inner id and computes distances in batches of
+  64 using the most precise flatten storage available (raw vectors if
+  `store_raw_vector` was set, otherwise the high-precision reorder codes when
+  `use_reorder=true`, otherwise the base quantized codes).
+- Because the scan already uses precise codes when present, the post-search
+  reorder pass is **skipped** for queries that took the brute-force branch.
+- Applies to `KnnSearch` (the non-iterator overload, which is what
+  `SearchWithRequest` and the standard `KnnSearch(query, k, params, filter)`
+  call) and to `RangeSearch`. It does **not** apply to the iterator-style
+  `KnnSearch(..., IteratorContext*&, ...)`, because a single sweep cannot be
+  paged across multiple iterator calls.
+
+Picking a value:
+
+- Leave at `0.0` (default) for unfiltered or weakly filtered workloads.
+- For highly selective filters, `0.01–0.05` is a reasonable starting point.
+  Setting it higher than that effectively turns the index into a brute-force
+  scanner whenever a filter is present.
+- The cost of the brute-force scan is roughly `O(N × dim)` where `N` is the
+  total number of indexed vectors (regardless of selectivity, because every id
+  is visited to check `CheckValid`). The benefit grows when graph search would
+  otherwise need a much larger `ef_search` to recover recall.
+
+See
+[`322_feature_hgraph_brute_force_threshold.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/322_feature_hgraph_brute_force_threshold.cpp)
+for a runnable brute-force fallback example.
+
+### Filter Skip Strategy (skip_ratio and skip_strategy)
+
+When searching with a filter, HGraph needs to frequently call Filter::CheckValid() during graph traversal to verify whether each candidate point is valid. This check can be expensive (especially for complex filter logic). skip_ratio and skip_strategy provide a probabilistic optimization: they skip some filter checks to speed up the search, but may reduce recall.
+
+#### How It Works
+
+This is a probabilistic optimization strategy: we don't know in advance which points are valid, so we decide probabilistically whether to visit each point.
+
+- skip_ratio (default 0.2): Controls the aggressiveness of skipping filter checks. skip_ratio=0.2 means skip 20% of candidate checks and only check 80%. Higher values skip more, making search faster but potentially reducing recall.
+- skip_strategy (default "deterministic_accumulative"): Determines how skipping is distributed:
+  - "random": Random skipping. Each point is visited independently with probability `visit_ratio = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)`, so roughly a `1 - skip_ratio` fraction of invalid points are skipped.
+  - "deterministic_accumulative": Deterministic cumulative skipping. Emits visit decisions at fixed intervals so that the long-run visit ratio matches the target `visit_ratio`, with lower variance than the random strategy.
+
+The specific formula:
+- Let valid_ratio be the filter's global validity rate (from Filter::ValidRatio())
+- Probability of visiting each point = valid_ratio + (1 - valid_ratio) * (1 - skip_ratio)
+- In expectation, this targets skipping about skip_ratio of invalid candidate checks when Filter::ValidRatio() is accurate
+
+#### Usage Examples
+
+```cpp
+// Conservative setting: skip 10% of invalid candidate checks, suitable for high-recall
+// scenarios where latency is less critical
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.1}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// Use random strategy
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.2, "skip_strategy": "random"}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+
+// Aggressive skipping: skip 50% of invalid candidate checks for lower latency
+auto params = R"({"hgraph": {"ef_search": 200, "skip_ratio": 0.5}})";
+auto result = index->KnnSearch(query, topk, params, my_filter).value();
+```
+
+#### Choosing Values
+
+- Default 0.2: Suitable for most scenarios, balancing performance and recall.
+- 0.1 or lower: Conservative setting, suitable for scenarios with high recall requirements where latency is less critical.
+- 0.5 or higher: Aggressive skipping, suitable for latency-sensitive scenarios where recall degradation is acceptable (e.g., real-time recommendation systems).
+- 0.0: Don't skip any points, equivalent to disabling this optimization (all points will be checked).
+
+Important notes:
+- Only applies to searches with filters. These parameters are ignored when no filter is present.
+- Performance optimization works better when Filter::ValidRatio() is accurately estimated.
+- Can be used together with brute_force_threshold: when the filter is very strict (ValidRatio is very small), brute_force_threshold will trigger brute-force fallback; otherwise, graph traversal + skip optimization is used.
+
+## When to use HGraph
+
+- Dense float vectors with dimensions roughly between 64 and 4096.
+- Latency-sensitive queries where high recall matters.
+- Mixed workloads with incremental insertion (optionally force removal via `support_force_remove`).
+- Memory-constrained deployments that benefit from `sq8` / `sq4_uniform` / `pq` — often
+  in combination with `use_reorder` to recover recall.
+
+For repeated daily or snapshot builds with stable source identifiers, see
+[HGraph Build Cache](../advanced/build_cache.md). It documents `Dataset::SourceID`,
+`ExportCache`/`ImportCache`, `persist_source_id`, and cache hit-rate diagnostics.
+
+If your workload is partition-heavy (coarse-grained buckets scanned per query) or
+strongly I/O-bound on a SSD, compare against [IVF](ivf.md) before committing to HGraph.
+
+## See also
+
+- [Creating an Index](../guide/create_index.md)
+- [Graph Enhancement](../advanced/enhance_graph.md)
+- [Optimizer (Tune)](../advanced/optimizer.md)
+- [Serialization](../advanced/serialization.md)
+

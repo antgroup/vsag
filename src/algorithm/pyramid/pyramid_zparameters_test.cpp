@@ -1,0 +1,1099 @@
+
+// Copyright 2024-present the vsag project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#include "pyramid_zparameters.h"
+
+#include <fmt/ranges.h>
+
+#include <cmath>
+#include <limits>
+#include <nlohmann/json.hpp>
+
+#include "impl/allocator/safe_allocator.h"
+#include "index_common_param.h"
+#include "parameter_test.h"
+#include "pyramid.h"
+#include "unittest.h"
+#include "vsag_exception.h"
+
+struct PyramidDefaultParam {
+    int max_degree = 32;
+    float alpha = 1.3f;
+    int ef_construction = 400;
+    bool use_reorder = true;
+    std::string base_quantization_type = "fp32";
+    std::vector<int> no_build_levels = {0, 1, 2};
+    std::string base_io_type = "memory_io";
+    std::string graph_type = "odescent";
+    std::string graph_storage_type = "compressed";
+    int build_thread_count = 8;
+    std::string precise_quantization_type = "fp32";
+    int base_pq_dim = 0;
+    std::string base_file_path = "base_path";
+    std::string precise_io_type = "block_memory_io";
+    std::string precise_file_path = "precise_path";
+    uint32_t index_min_size = 1000;
+    bool support_duplicate = false;
+};
+
+std::string
+generate_pyramid(const PyramidDefaultParam& param) {
+    static constexpr auto param_str = R"(
+        {{
+            "base_codes": {{
+                "codes_type": "flatten",
+                "io_params": {{
+                    "file_path": "{}",
+                    "type": "{}"
+                }},
+                "quantization_params": {{
+                    "hold_molds": false,
+                    "nbits": 8,
+                    "pca_dim": 0,
+                    "pq_dim": {},
+                    "rabitq_bits_per_dim_query": 32,
+                    "sq4_uniform_trunc_rate": 0.05,
+                    "tq_chain": "",
+                    "type": "{}"
+                }}
+            }},
+            "build_thread_count": {},
+            "ef_construction": {},
+            "graph": {{
+                "alpha": {},
+                "build_block_size": 10000,
+                "graph_iter_turn": 30,
+                "graph_storage_type": "{}",
+                "graph_type": "{}",
+                "init_capacity": 100,
+                "io_params": {{
+                    "file_path": "./default_file_path",
+                    "type": "block_memory_io"
+                }},
+                "max_degree": {},
+                "min_in_degree": 1,
+                "neighbor_sample_rate": 0.2,
+                "remove_flag_bit": 8,
+                "support_remove": false
+            }},
+            "no_build_levels": [{}],
+            "precise_codes": {{
+                "codes_type": "flatten",
+                "io_params": {{
+                    "file_path": "{}",
+                    "type": "{}"
+                }},
+                "quantization_params": {{
+                    "hold_molds": false,
+                    "pca_dim": 0,
+                    "pq_dim": 1,
+                    "sq4_uniform_trunc_rate": 0.05,
+                    "type": "{}"
+                }}
+            }},
+            "type": "pyramid",
+            "use_reorder": {},
+            "index_min_size": {},
+            "support_duplicate": {}
+        }}
+    )";
+    return fmt::format(param_str,
+                       param.base_file_path,
+                       param.base_io_type,
+                       param.base_pq_dim,
+                       param.base_quantization_type,
+                       param.build_thread_count,
+                       param.ef_construction,
+                       param.alpha,
+                       param.graph_storage_type,
+                       param.graph_type,
+                       param.max_degree,
+                       fmt::join(param.no_build_levels, ","),
+                       param.precise_file_path,
+                       param.precise_io_type,
+                       param.precise_quantization_type,
+                       param.use_reorder,
+                       param.index_min_size,
+                       param.support_duplicate);
+}
+
+TEST_CASE("Pyramid Parameters Test", "[ut][PyramidParameters]") {
+    PyramidDefaultParam index_param;
+    auto param_str = generate_pyramid(index_param);
+    vsag::JsonType param_json = vsag::JsonType::Parse(param_str);
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+    vsag::ParameterTest::TestToJson(param);
+}
+
+TEST_CASE("Pyramid accepts PiPNN as a batch graph builder", "[ut][PyramidParameters][pipnn]") {
+    PyramidDefaultParam index_param;
+    index_param.graph_type = vsag::GRAPH_TYPE_VALUE_PIPNN;
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    REQUIRE_NOTHROW(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+    REQUIRE(param->graph_type == vsag::GRAPH_TYPE_VALUE_PIPNN);
+    REQUIRE(param->odescent_param != nullptr);
+
+    index_param.graph_type = "unknown";
+    REQUIRE_THROWS(param->FromJson(vsag::JsonType::Parse(generate_pyramid(index_param))));
+}
+
+TEST_CASE("Pyramid exposes PiPNN build parameters", "[ut][PyramidParameters][pipnn]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "pipnn_max_leaf_size": 256,
+        "pipnn_min_leaf_size": 32,
+        "pipnn_leader_sample_rate": 0.02,
+        "pipnn_fanout": [5, 3, 1],
+        "pipnn_leaf_neighbor_count": 6,
+        "pipnn_hash_plane_count": 6,
+        "pipnn_reservoir_size": 80
+    })");
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+    auto param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+    REQUIRE(param != nullptr);
+    REQUIRE(param->pipnn_param.max_leaf_size == 256);
+    REQUIRE(param->pipnn_param.min_leaf_size == 32);
+    REQUIRE(param->pipnn_param.leader_sample_rate == 0.02F);
+    REQUIRE(param->pipnn_param.fanout == std::vector<uint64_t>{5, 3, 1});
+    REQUIRE(param->pipnn_param.leaf_neighbor_count == 6);
+    REQUIRE(param->pipnn_param.hash_plane_count == 6);
+    REQUIRE(param->pipnn_param.reservoir_size == 80);
+
+    const auto serialized = param->ToJson();
+    const auto restored_graph_json = serialized[vsag::GRAPH_KEY];
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_MAX_LEAF_SIZE].GetUint64() == 256);
+    REQUIRE(restored_graph_json[vsag::PIPNN_PARAMETER_RESERVOIR_SIZE].GetUint64() == 80);
+}
+
+std::shared_ptr<vsag::PyramidParameters>
+ParsePyramidWithHierarchies(const nlohmann::json& hierarchies) {
+    PyramidDefaultParam index_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(index_param));
+    *param_json["hierarchies"].GetInnerJson() = hierarchies;
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+    return param;
+}
+
+TEST_CASE("Pyramid persist_source_id parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+    REQUIRE_FALSE(param->persist_source_id);
+
+    param_json["persist_source_id"].SetBool(true);
+    param->FromJson(param_json);
+    REQUIRE(param->persist_source_id);
+    REQUIRE(param->ToJson()["persist_source_id"].GetBool());
+}
+
+TEST_CASE("Pyramid store_paths parameter", "[ut][PyramidParameters]") {
+    PyramidDefaultParam default_param;
+    auto param_json = vsag::JsonType::Parse(generate_pyramid(default_param));
+    auto param = std::make_shared<vsag::PyramidParameters>();
+    param->FromJson(param_json);
+
+    REQUIRE_FALSE(param->store_paths);
+    REQUIRE_FALSE(param->ToJson()["store_paths"].GetBool());
+
+    param_json["store_paths"].SetBool(true);
+    param->FromJson(param_json);
+
+    REQUIRE(param->store_paths);
+    REQUIRE(param->ToJson()["store_paths"].GetBool());
+}
+
+TEST_CASE("Pyramid Hierarchy Parameters Test", "[ut][PyramidParameters][hierarchy]") {
+    SECTION("parse string and object hierarchy definitions") {
+        auto param = ParsePyramidWithHierarchies(
+            nlohmann::json::array({"site", {{"name", "taxonomy"}, {"no_build_levels", {2, 0}}}}));
+
+        REQUIRE(param->has_hierarchies);
+        REQUIRE(param->hierarchies.size() == 2);
+        REQUIRE(param->hierarchies[0].name == "site");
+        REQUIRE(param->hierarchies[0].no_build_levels == std::vector<int32_t>{0, 1, 2});
+        REQUIRE(param->hierarchies[1].name == "taxonomy");
+        REQUIRE(param->hierarchies[1].no_build_levels == std::vector<int32_t>{0, 2});
+
+        auto output = param->ToJson();
+        const auto* hierarchies_json = output["hierarchies"].GetInnerJson();
+        REQUIRE(hierarchies_json->size() == 2);
+        REQUIRE((*hierarchies_json)[0]["name"] == "site");
+        REQUIRE((*hierarchies_json)[1]["name"] == "taxonomy");
+        REQUIRE((*hierarchies_json)[1]["no_build_levels"] == nlohmann::json::array({0, 2}));
+    }
+
+    SECTION("per-hierarchy build params override top-level") {
+        auto param = ParsePyramidWithHierarchies(nlohmann::json::array(
+            {{{"name", "site"}, {"max_degree", 128}, {"alpha", 1.5}},
+             {{"name", "cat"}, {"ef_construction", 800}, {"index_min_size", 50}}}));
+
+        REQUIRE(param->hierarchies.size() == 2);
+        // "site" overrides max_degree and alpha, inherits the rest from top-level
+        REQUIRE(param->hierarchies[0].max_degree == 128);
+        REQUIRE(param->hierarchies[0].alpha == 1.5F);
+        REQUIRE(param->hierarchies[0].ef_construction == param->ef_construction);
+        REQUIRE(param->hierarchies[0].index_min_size == param->index_min_size);
+        REQUIRE(param->hierarchies[0].no_build_levels == param->no_build_levels);
+        // "cat" overrides ef_construction and index_min_size, inherits the rest
+        REQUIRE(param->hierarchies[1].ef_construction == 800);
+        REQUIRE(param->hierarchies[1].index_min_size == 50);
+        REQUIRE(param->hierarchies[1].max_degree == param->max_degree);
+        REQUIRE(param->hierarchies[1].alpha == param->alpha);
+
+        // ToJson roundtrip preserves per-hierarchy params
+        auto output = param->ToJson();
+        const auto* h_json = output["hierarchies"].GetInnerJson();
+        REQUIRE((*h_json)[0]["max_degree"] == 128);
+        REQUIRE((*h_json)[0]["alpha"] == 1.5F);
+        REQUIRE((*h_json)[1]["ef_construction"] == 800);
+        REQUIRE((*h_json)[1]["index_min_size"] == 50);
+    }
+
+    SECTION("string shorthand inherits all top-level build params") {
+        auto param = ParsePyramidWithHierarchies(nlohmann::json::array({"onlyone"}));
+
+        REQUIRE(param->hierarchies.size() == 1);
+        REQUIRE(param->hierarchies[0].name == "onlyone");
+        REQUIRE(param->hierarchies[0].no_build_levels == param->no_build_levels);
+        REQUIRE(param->hierarchies[0].max_degree == param->max_degree);
+        REQUIRE(param->hierarchies[0].ef_construction == param->ef_construction);
+        REQUIRE(param->hierarchies[0].alpha == param->alpha);
+        REQUIRE(param->hierarchies[0].index_min_size == param->index_min_size);
+    }
+
+    SECTION("invalid hierarchy definitions are rejected") {
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(nlohmann::json::array()));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(nlohmann::json::array({""})));
+        REQUIRE_THROWS(
+            ParsePyramidWithHierarchies(nlohmann::json::array({"site", {{"name", "site"}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(nlohmann::json::array({{{"name", ""}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"no_build_levels", 1}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {-1}}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"max_degree", 0}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"ef_construction", -1}}})));
+        REQUIRE_THROWS(
+            ParsePyramidWithHierarchies(nlohmann::json::array({{{"name", "site"}, {"alpha", 0}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"index_min_size", -1}}})));
+        REQUIRE_THROWS(ParsePyramidWithHierarchies(nlohmann::json::array({{{"foo", "site"}}})));
+        REQUIRE_THROWS_AS(ParsePyramidWithHierarchies(nlohmann::json::array({1})),
+                          vsag::VsagException);
+        REQUIRE_THROWS_AS(ParsePyramidWithHierarchies(nlohmann::json::array({true})),
+                          vsag::VsagException);
+        REQUIRE_THROWS_AS(ParsePyramidWithHierarchies(nlohmann::json::array({nullptr})),
+                          vsag::VsagException);
+    }
+}
+
+#define TEST_COMPATIBILITY_CASE(section_name, param_member, val1, val2, expect_compatible) \
+    SECTION(section_name) {                                                                \
+        PyramidDefaultParam param1;                                                        \
+        PyramidDefaultParam param2;                                                        \
+        param1.param_member = val1;                                                        \
+        param2.param_member = val2;                                                        \
+        auto param_str1 = generate_pyramid(param1);                                        \
+        auto param_str2 = generate_pyramid(param2);                                        \
+        auto pyramid_param1 = std::make_shared<vsag::PyramidParameters>();                 \
+        auto pyramid_param2 = std::make_shared<vsag::PyramidParameters>();                 \
+        pyramid_param1->FromString(param_str1);                                            \
+        pyramid_param2->FromString(param_str2);                                            \
+        if (expect_compatible) {                                                           \
+            REQUIRE(pyramid_param1->CheckCompatibility(pyramid_param2));                   \
+        } else {                                                                           \
+            REQUIRE_FALSE(pyramid_param1->CheckCompatibility(pyramid_param2));             \
+        }                                                                                  \
+    }
+
+TEST_CASE("Pyramid Parameters CheckCompatibility", "[ut][PyramidParameter][CheckCompatibility]") {
+    SECTION("wrong parameter type") {
+        PyramidDefaultParam default_param;
+        auto param_str = generate_pyramid(default_param);
+        auto param = std::make_shared<vsag::PyramidParameters>();
+        param->FromString(param_str);
+        REQUIRE(param->CheckCompatibility(param));
+        REQUIRE_FALSE(param->CheckCompatibility(std::make_shared<vsag::EmptyParameter>()));
+    }
+    TEST_COMPATIBILITY_CASE("different graph max_degree", max_degree, 18, 24, false);
+    TEST_COMPATIBILITY_CASE("different graph alpha", alpha, 1.0f, 1.5f, true);
+    TEST_COMPATIBILITY_CASE("different ef_construction", ef_construction, 150, 200, true)
+    TEST_COMPATIBILITY_CASE(
+        "different base codes quantization type", base_quantization_type, "fp32", "fp16", false);
+    std::vector<int> build_levels1 = {0, 1, 2};
+    std::vector<int> build_levels2 = {0, 1, 4};
+    std::vector<int> build_levels3 = {1, 2, 0};
+    TEST_COMPATIBILITY_CASE(
+        "different not build levels", no_build_levels, build_levels1, build_levels2, false);
+    TEST_COMPATIBILITY_CASE(
+        "same no build levels", no_build_levels, build_levels1, build_levels3, true);
+    TEST_COMPATIBILITY_CASE(
+        "different base io type", base_io_type, "memory_io", "block_memory_io", true);
+
+    TEST_COMPATIBILITY_CASE("different graph type", graph_type, "odescent", "nsw", true);
+    SECTION("root graph storage matters only for multi-layer roots") {
+        PyramidDefaultParam flat_param;
+        PyramidDefaultParam compressed_param;
+        flat_param.graph_storage_type = "flat";
+        compressed_param.graph_storage_type = "compressed";
+        auto flat = std::make_shared<vsag::PyramidParameters>();
+        auto compressed = std::make_shared<vsag::PyramidParameters>();
+        flat->FromString(generate_pyramid(flat_param));
+        compressed->FromString(generate_pyramid(compressed_param));
+
+        REQUIRE(flat->CheckCompatibility(compressed));
+        flat->root_graph_type = vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+        compressed->root_graph_type = vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER;
+        REQUIRE_FALSE(flat->CheckCompatibility(compressed));
+    }
+    TEST_COMPATIBILITY_CASE("different build thread count", build_thread_count, 4, 8, true);
+    TEST_COMPATIBILITY_CASE(
+        "different precise quantization type", precise_quantization_type, "fp32", "fp16", false);
+    TEST_COMPATIBILITY_CASE("different index min size", index_min_size, 500, 1500, false);
+    TEST_COMPATIBILITY_CASE("different support duplicate", support_duplicate, false, true, false);
+
+    SECTION("different store_paths") {
+        PyramidDefaultParam default_param;
+        auto param1 = std::make_shared<vsag::PyramidParameters>();
+        auto param2 = std::make_shared<vsag::PyramidParameters>();
+        param1->FromString(generate_pyramid(default_param));
+        param2->FromString(generate_pyramid(default_param));
+        param2->store_paths = true;
+
+        REQUIRE_FALSE(param1->CheckCompatibility(param2));
+        REQUIRE_FALSE(param2->CheckCompatibility(param1));
+    }
+
+    SECTION("same hierarchies in different order") {
+        auto param1 = ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0, 1}}},
+                                   {{"name", "taxonomy"}, {"no_build_levels", {2}}}}));
+        auto param2 = ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "taxonomy"}, {"no_build_levels", {2}}},
+                                   {{"name", "site"}, {"no_build_levels", {1, 0}}}}));
+
+        REQUIRE(param1->CheckCompatibility(param2));
+    }
+
+    SECTION("different hierarchy no_build_levels") {
+        auto param1 = ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {0}}}}));
+        auto param2 = ParsePyramidWithHierarchies(
+            nlohmann::json::array({{{"name", "site"}, {"no_build_levels", {1}}}}));
+
+        REQUIRE_FALSE(param1->CheckCompatibility(param2));
+    }
+
+    SECTION("different hierarchy names") {
+        auto param1 = ParsePyramidWithHierarchies(nlohmann::json::array({"site"}));
+        auto param2 = ParsePyramidWithHierarchies(nlohmann::json::array({"taxonomy"}));
+
+        REQUIRE_FALSE(param1->CheckCompatibility(param2));
+    }
+
+    SECTION("legacy and explicit hierarchy modes are incompatible") {
+        PyramidDefaultParam default_param;
+        auto legacy_param = std::make_shared<vsag::PyramidParameters>();
+        legacy_param->FromString(generate_pyramid(default_param));
+        auto hierarchy_param = ParsePyramidWithHierarchies(nlohmann::json::array({"site"}));
+
+        REQUIRE_FALSE(legacy_param->CheckCompatibility(hierarchy_param));
+        REQUIRE_FALSE(hierarchy_param->CheckCompatibility(legacy_param));
+    }
+}
+
+TEST_CASE("Pyramid Search Hierarchy Parameters Test",
+          "[ut][PyramidParameters][hierarchy][search]") {
+    SECTION("single hierarchy selector") {
+        auto search_param = vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["taxonomy"]}})");
+
+        REQUIRE(search_param.HasHierarchySelector());
+        REQUIRE(search_param.hierarchies == std::vector<std::string>{"taxonomy"});
+        REQUIRE(search_param.hierarchy_op == vsag::PyramidSearchParameters::HierarchyOp::SINGLE);
+    }
+
+    SECTION("multi hierarchy intersection selector") {
+        auto search_param = vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site","taxonomy"],)"
+            R"("hierarchy_op":"intersection"}})");
+
+        REQUIRE(search_param.HasHierarchySelector());
+        REQUIRE(search_param.hierarchies == std::vector<std::string>{"site", "taxonomy"});
+        REQUIRE(search_param.hierarchy_op != vsag::PyramidSearchParameters::HierarchyOp::SINGLE);
+        REQUIRE(search_param.hierarchy_op ==
+                vsag::PyramidSearchParameters::HierarchyOp::INTERSECTION);
+    }
+
+    SECTION("multi hierarchy union selector") {
+        auto search_param = vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site","date"],)"
+            R"("hierarchy_op":"union"}})");
+
+        REQUIRE(search_param.hierarchies == std::vector<std::string>{"site", "date"});
+        REQUIRE(search_param.hierarchy_op != vsag::PyramidSearchParameters::HierarchyOp::SINGLE);
+        REQUIRE(search_param.hierarchy_op == vsag::PyramidSearchParameters::HierarchyOp::UNION);
+    }
+
+    SECTION("no hierarchies field (legacy mode)") {
+        auto search_param =
+            vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":100}})");
+
+        REQUIRE_FALSE(search_param.HasHierarchySelector());
+        REQUIRE(search_param.hierarchies.empty());
+        REQUIRE(search_param.hierarchy_op == vsag::PyramidSearchParameters::HierarchyOp::SINGLE);
+    }
+
+    SECTION("invalid hierarchy search parameters are rejected") {
+        // empty hierarchy name
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":[""]}})"));
+        // empty array
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":[]}})"));
+        // multiple hierarchies without hierarchy_op
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site","taxonomy"]}})"));
+        // duplicate names
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site","site"],)"
+            R"("hierarchy_op":"union"}})"));
+        // invalid hierarchy_op value
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site","taxonomy"],)"
+            R"("hierarchy_op":"minus"}})"));
+        // hierarchy_op with single hierarchy
+        REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+            R"({"pyramid":{"ef_search":100,"hierarchies":["site"],)"
+            R"("hierarchy_op":"union"}})"));
+    }
+}
+
+TEST_CASE("Pyramid maps external parameters", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "base_io_type": "memory_io",
+        "precise_quantization_type": "fp32",
+        "precise_io_type": "block_memory_io",
+        "graph_storage_type": "compressed",
+        "graph_type": "odescent",
+        "max_degree": 32,
+        "alpha": 1.2,
+        "build_thread_count": 1,
+        "ef_construction": 100,
+        "index_min_size": 0,
+        "support_duplicate": true,
+        "persist_source_id": true,
+        "store_paths": true,
+        "hierarchies": [
+            "site",
+            {"name": "taxonomy", "no_build_levels": [0, 2]}
+        ],
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto pyramid_param = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(pyramid_param);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->support_duplicate);
+    REQUIRE(typed_param->persist_source_id);
+    REQUIRE(typed_param->store_paths);
+    REQUIRE(typed_param->graph_param->support_duplicate_);
+    REQUIRE(typed_param->has_hierarchies);
+    REQUIRE(typed_param->hierarchies.size() == 2);
+    REQUIRE(typed_param->hierarchies[0].name == "site");
+    REQUIRE(typed_param->hierarchies[1].name == "taxonomy");
+    REQUIRE(typed_param->hierarchies[1].no_build_levels == std::vector<int32_t>{0, 2});
+}
+
+TEST_CASE("Pyramid maps fast RaBitQ to base and precise quantizers", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 4,
+        "fast_encode_rabitq": false,
+        "fast_encode_rabitq_rounds": 11,
+        "hierarchies": ["site"],
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->base_codes_param != nullptr);
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto precise_json = typed_param->precise_codes_param->ToJson();
+    REQUIRE_FALSE(base_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(base_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 11);
+    REQUIRE_FALSE(precise_json["quantization_params"]["fast_encode_rabitq"].GetBool());
+    REQUIRE(precise_json["quantization_params"]["fast_encode_rabitq_rounds"].GetInt() == 11);
+}
+
+TEST_CASE("Pyramid maps RaBitQ x+y split params", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "base_io_type": "block_memory_io",
+        "base_file_path": "/tmp/vsag_pyramid_rabitq_split_base",
+        "base_supplement_io_type": "async_io",
+        "base_supplement_file_path": "/tmp/vsag_pyramid_rabitq_split_supplement",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->use_reorder);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+    REQUIRE(typed_param->precise_codes_param == nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["io_params"]["type"].GetString() == std::string("block_memory_io"));
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter != nullptr);
+    REQUIRE(typed_param->base_codes_param->supplement_io_parameter->GetTypeName() ==
+            std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["type"].GetString() == std::string("async_io"));
+    REQUIRE(base_json["supplement_io_params"]["file_path"].GetString() ==
+            std::string("/tmp/vsag_pyramid_rabitq_split_supplement"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() == std::string("split"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+}
+
+TEST_CASE("Pyramid maps MRLE RaBitQ split to base reorder", "[ut][PyramidParameters][MRLE]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 64,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "hierarchies": ["site"],
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->reorder_source == std::string("base"));
+    REQUIRE(typed_param->precise_codes_param == nullptr);
+    REQUIRE_FALSE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param == nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("rabitq_split"));
+    REQUIRE(base_json["quantization_params"]["type"].GetString() == std::string("tq"));
+    REQUIRE(base_json["quantization_params"]["tq_chain"].GetString() == std::string("mrle,rabitq"));
+    REQUIRE(base_json["quantization_params"]["mrle_dim"].GetInt() == 64);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_filter"].GetInt() == 3);
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 8);
+}
+
+TEST_CASE("Pyramid maps explicit raw-vector storage for MRLE RaBitQ split",
+          "[ut][PyramidParameters][MRLE]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, rabitq",
+        "mrle_dim": 64,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true,
+        "store_raw_vector": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
+    const auto raw_json = typed_param->raw_vector_param->ToJson();
+    REQUIRE(raw_json["quantization_params"]["type"].GetString() == std::string("fp32"));
+}
+
+TEST_CASE("Pyramid retains vectors for TQ without precise decode source",
+          "[ut][PyramidParameters][TQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "tq",
+        "tq_chain": "mrle, fp32",
+        "mrle_dim": 64,
+        "use_reorder": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->store_raw_vector);
+    REQUIRE(typed_param->raw_vector_param != nullptr);
+}
+
+TEST_CASE("Pyramid rejects invalid RaBitQ split params", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto wrong_query_bits = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "rabitq_bits_per_dim_query": 4,
+        "use_reorder": true
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(wrong_query_bits, common_param));
+
+    auto non_string_quantization_type = vsag::JsonType::Parse(R"({
+        "base_quantization_type": true,
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": true
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(non_string_quantization_type, common_param));
+
+    auto disabled_reorder = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "rabitq",
+        "rabitq_bits_per_dim_base": 3,
+        "rabitq_bits_per_dim_precise": 5,
+        "use_reorder": false
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(disabled_reorder, common_param));
+}
+
+TEST_CASE("Pyramid maps RaBitQ without y bits to standard RaBitQ", "[ut][PyramidParameters]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "rabitq",
+        "precise_quantization_type": "fp32",
+        "rabitq_bits_per_dim_base": 3,
+        "use_reorder": true
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::PyramidParameters>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    REQUIRE(typed_param->reorder_source == std::string("precise"));
+    REQUIRE(typed_param->precise_codes_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    REQUIRE(base_json["codes_type"].GetString() == std::string("flatten"));
+    REQUIRE(base_json["quantization_params"]["rabitq_version"].GetString() ==
+            std::string("standard"));
+    REQUIRE(base_json["quantization_params"]["rabitq_bits_per_dim_base"].GetInt() == 3);
+}
+
+TEST_CASE("Pyramid parses RaBitQ split search parameters", "[ut][PyramidParameters]") {
+    auto default_params = vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100
+        }
+    })");
+    REQUIRE_FALSE(default_params.has_rabitq_one_bit_search);
+    REQUIRE_FALSE(default_params.rabitq_one_bit_search);
+
+    auto explicit_params = vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100,
+            "rabitq_one_bit_search": false,
+            "rabitq_error_rate": 2.5
+        }
+    })");
+    REQUIRE(explicit_params.has_rabitq_one_bit_search);
+    REQUIRE_FALSE(explicit_params.rabitq_one_bit_search);
+    REQUIRE(std::abs(explicit_params.rabitq_error_rate - 2.5F) < 1e-5F);
+
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(R"({
+        "pyramid": {
+            "ef_search": 100,
+            "rabitq_error_rate": 0.0
+        }
+    })"));
+}
+
+TEST_CASE("Pyramid parses hops limit search parameter", "[ut][PyramidParameters]") {
+    auto default_params =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":100}})");
+    REQUIRE(default_params.hops_limit == std::numeric_limits<uint32_t>::max());
+
+    auto explicit_params = vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":200}})");
+    REQUIRE(explicit_params.hops_limit == 200);
+
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":-1}})"));
+    REQUIRE_THROWS(vsag::PyramidSearchParameters::FromJson(
+        R"({"pyramid":{"ef_search":100,"hops_limit":4294967296}})"));
+}
+
+TEST_CASE("Pyramid validates root graph type and hierarchy overrides", "[ut][PyramidParameters]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "hierarchies": [
+            {"name": "single"},
+            {"name": "multi", "root_graph_type": "multi_layer", "no_build_levels": []}
+        ]
+    })");
+    auto mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->root_graph_storage_type ==
+            vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_FLAT);
+    REQUIRE(mapped->hierarchies[0].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE(mapped->hierarchies[1].root_graph_type == vsag::PYRAMID_ROOT_GRAPH_TYPE_MULTI_LAYER);
+
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString(vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+    mapped = std::dynamic_pointer_cast<vsag::PyramidParameters>(
+        vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    REQUIRE(mapped->root_graph_storage_type ==
+            vsag::GraphStorageTypes::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+    REQUIRE(mapped->ToJson()[vsag::GRAPH_KEY][vsag::GRAPH_STORAGE_TYPE_KEY].GetString() ==
+            vsag::GRAPH_STORAGE_TYPE_VALUE_COMPRESSED);
+
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString("unknown");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+    external[vsag::PYRAMID_GRAPH_STORAGE_TYPE].SetString(vsag::GRAPH_STORAGE_TYPE_VALUE_FLAT);
+
+    external[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString("unknown");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(external, common_param));
+
+    auto unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "multi_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(unbuilt_root, common_param));
+
+    auto default_unbuilt_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "no_build_levels": [0]
+    })");
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(default_unbuilt_root, common_param));
+
+    auto explicit_hierarchy_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "hierarchies": [
+            {
+                "name": "site",
+                "root_graph_type": "single_layer",
+                "no_build_levels": [0]
+            }
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(explicit_hierarchy_root, common_param));
+
+    auto inherited_explicit_root = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "root_graph_type": "single_layer",
+        "no_build_levels": [0],
+        "hierarchies": ["site"]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(inherited_explicit_root, common_param));
+
+    auto odescent_multi_layer = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "odescent",
+        "root_graph_type": "multi_layer",
+        "max_degree": 8,
+        "ef_construction": 17
+    })");
+    REQUIRE_THROWS(vsag::Pyramid::CheckAndMappingExternalParam(odescent_multi_layer, common_param));
+
+    odescent_multi_layer[vsag::PYRAMID_ROOT_GRAPH_TYPE].SetString(
+        vsag::PYRAMID_ROOT_GRAPH_TYPE_SINGLE_LAYER);
+    REQUIRE_NOTHROW(
+        vsag::Pyramid::CheckAndMappingExternalParam(odescent_multi_layer, common_param));
+
+    auto odescent_hierarchy_multi_layer = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "odescent",
+        "root_graph_type": "single_layer",
+        "hierarchies": [
+            {"name": "site", "root_graph_type": "multi_layer"}
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(odescent_hierarchy_multi_layer, common_param));
+
+    auto invalid_hierarchy_degree = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "max_degree": 8,
+        "hierarchies": [
+            {"name": "site", "root_graph_type": "multi_layer", "max_degree": 1}
+        ]
+    })");
+    REQUIRE_THROWS(
+        vsag::Pyramid::CheckAndMappingExternalParam(invalid_hierarchy_degree, common_param));
+}
+
+TEST_CASE("Pyramid PiPNN rejects non-dense input representations", "[ut][pipnn][pyramid]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common_param.repr_ = vsag::RecordRepr::MULTI_VECTOR;
+    common_param.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    const auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "fp32",
+        "graph_type": "pipnn",
+        "max_degree": 32,
+        "ef_construction": 64
+    })");
+    const auto mapped = vsag::Pyramid::CheckAndMappingExternalParam(external, common_param);
+
+    REQUIRE_THROWS(std::make_shared<vsag::Pyramid>(mapped, common_param));
+}
+
+TEST_CASE("Pyramid validates explicit factor", "[ut][PyramidParameters]") {
+    auto absent = vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20}})");
+    REQUIRE(absent.topk_factor == 0.0F);
+
+    auto present =
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1.5}})");
+    REQUIRE(std::abs(present.topk_factor - 1.5F) < 1e-6F);
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":0}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":-1}})"));
+    REQUIRE_THROWS(
+        vsag::PyramidSearchParameters::FromJson(R"({"pyramid":{"ef_search":20,"factor":1e100}})"));
+}
+
+TEST_CASE("Pyramid adaptive pruning legacy parameters and compatibility",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    auto legacy = vsag::JsonType::Parse(generate_pyramid(PyramidDefaultParam{}));
+    auto source = std::make_shared<vsag::PyramidParameters>();
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(source->ToJson());
+    CHECK(source->CheckCompatibility(restored));
+    restored->alpha = 1.5F;
+    restored->adaptive_pruning.adjust_step = 0.03F;
+    CHECK(source->CheckCompatibility(restored));
+    restored->adaptive_pruning.enabled = true;
+    CHECK_FALSE(source->CheckCompatibility(restored));
+
+    legacy["adaptive_pruning"].SetBool(true);
+    legacy["adaptive_pruning_adjust_step"].SetFloat(0.06F);
+    legacy["adaptive_pruning_apply_to_reverse"].SetBool(true);
+    source->FromJson(legacy);
+    vsag::ParameterTest::TestToJson(source);
+    CHECK(source->ToJson()["adaptive_pruning"].GetBool());
+    CHECK(source->ToJson()["adaptive_pruning_apply_to_reverse"].GetBool());
+    CHECK_FALSE(source->ToJson().Contains("fill_rejected"));
+    restored->FromJson(source->ToJson());
+    REQUIRE(source->CheckCompatibility(restored));
+    const auto field = GENERATE(std::string("alpha"),
+                                std::string("adjust_step"),
+                                std::string("apply_to_reverse"),
+                                std::string("apply_to_upper"));
+    CAPTURE(field);
+    if (field == "alpha") {
+        restored->alpha += 0.06F;
+    } else if (field == "adjust_step") {
+        restored->adaptive_pruning.adjust_step = 0.03F;
+    } else if (field == "apply_to_reverse") {
+        restored->adaptive_pruning.apply_to_reverse = false;
+    } else {
+        restored->adaptive_pruning.apply_to_upper = true;
+    }
+    CHECK_FALSE(source->CheckCompatibility(restored));
+    CHECK_FALSE(restored->CheckCompatibility(source));
+    legacy.Erase("adaptive_pruning");
+    source->FromJson(legacy);
+    CHECK_FALSE(source->adaptive_pruning.enabled);
+}
+
+TEST_CASE("Pyramid adaptive pruning validates graph metric and hierarchy alpha",
+          "[ut][PyramidParameters][adaptive_pruning]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 4;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto external = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"nsw", "alpha":1.06,
+        "adaptive_pruning":true,"adaptive_pruning_adjust_step":0.06,
+        "hierarchies":[{"name":"a","alpha":1.2},{"name":"b","alpha":1.06}]
+    })");
+    auto make_index = [&]() {
+        auto param = vsag::Pyramid::CheckAndMappingExternalParam(external, common);
+        return std::make_shared<vsag::Pyramid>(param, common);
+    };
+    REQUIRE_NOTHROW(make_index());
+    SECTION("obsolete nested policy") {
+        external["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
+    }
+    SECTION("removed fill option") {
+        const auto* key = GENERATE("fill_rejected", "adaptive_pruning_fill_rejected");
+        external[key].SetBool(false);
+    }
+    SECTION("unsupported graph") {
+        external["graph_type"].SetString("odescent");
+    }
+    SECTION("unsupported metric") {
+        common.metric_ =
+            GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
+    }
+    SECTION("unsupported routing scope") {
+        external["adaptive_pruning_apply_to_upper"].SetBool(true);
+    }
+    SECTION("invalid step") {
+        external["adaptive_pruning_adjust_step"].SetFloat(0.6F);
+    }
+    SECTION("invalid hierarchy alpha") {
+        (*external["hierarchies"].GetInnerJson())[1]["alpha"] = 0.1F;
+    }
+    REQUIRE_THROWS(make_index());
+}
+
+TEST_CASE("Pyramid PiPNN adaptive policy maps validates and restores",
+          "[ut][PyramidParameters][pipnn][pyramid_pipnn_adaptive]") {
+    vsag::IndexCommonParam common;
+    common.dim_ = 32;
+    common.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    common.metric_ = vsag::MetricType::METRIC_TYPE_L2SQR;
+    common.allocator_ = vsag::SafeAllocator::FactoryDefaultAllocator();
+    auto config = vsag::JsonType::Parse(R"({
+        "base_quantization_type":"fp32", "graph_type":"pipnn", "max_degree":32,
+        "alpha":1.2, "pipnn_adaptive_pruning":true,
+        "pipnn_adaptive_pruning_adjust_step":0.06
+    })");
+    const auto parse = [&](const vsag::JsonType& external) {
+        return std::dynamic_pointer_cast<vsag::PyramidParameters>(
+            vsag::Pyramid::CheckAndMappingExternalParam(external, common));
+    };
+    const auto source = parse(config);
+    REQUIRE(source->pipnn_param.adaptive_pruning);
+    REQUIRE(source->pipnn_param.adaptive_pruning_adjust_step == 0.06F);
+    auto restored = std::make_shared<vsag::PyramidParameters>();
+    restored->FromJson(source->ToJson());
+    REQUIRE(source->CheckCompatibility(restored));
+    REQUIRE(restored->CheckCompatibility(source));
+
+    SECTION("enabled policy must match on restore") {
+        const auto* field =
+            GENERATE("pipnn_adaptive_pruning", "pipnn_adaptive_pruning_adjust_step", "alpha");
+        if (std::string(field) == "pipnn_adaptive_pruning") {
+            config[field].SetBool(false);
+        } else {
+            config[field].SetFloat(std::string(field) == "alpha" ? 1.3F : 0.05F);
+        }
+        auto other = parse(config);
+        REQUIRE_FALSE(source->CheckCompatibility(other));
+        REQUIRE_FALSE(other->CheckCompatibility(source));
+    }
+    SECTION("legacy fields and reused parameter objects reset to disabled") {
+        auto legacy = source->ToJson();
+        legacy[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning");
+        legacy[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning_adjust_step");
+        restored->FromJson(legacy);
+        REQUIRE_FALSE(restored->pipnn_param.adaptive_pruning);
+        REQUIRE(restored->pipnn_param.adaptive_pruning_adjust_step == 0.06F);
+        auto nsw = source->ToJson();
+        nsw[vsag::GRAPH_KEY][vsag::GRAPH_TYPE_KEY].SetString("nsw");
+        nsw[vsag::GRAPH_KEY].Erase("pipnn_adaptive_pruning");
+        restored->FromJson(nsw);
+        REQUIRE_FALSE(restored->pipnn_param.adaptive_pruning);
+    }
+    SECTION("disabled policy ignores unused step on restore") {
+        config["pipnn_adaptive_pruning"].SetBool(false);
+        auto disabled = parse(config);
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.03F);
+        REQUIRE(disabled->CheckCompatibility(parse(config)));
+    }
+    SECTION("invalid steps use the shared PiPNN validation") {
+        const float step = GENERATE(-0.01F,
+                                    0.6F,
+                                    std::numeric_limits<float>::infinity(),
+                                    std::numeric_limits<float>::quiet_NaN());
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(step);
+        REQUIRE_THROWS(parse(config));
+    }
+    SECTION("non-PiPNN graphs reject an enabled PiPNN policy") {
+        config["graph_type"].SetString(GENERATE("nsw", "odescent"));
+        REQUIRE_THROWS(parse(config));
+    }
+    SECTION("non-L2 metrics fail at index creation") {
+        common.metric_ =
+            GENERATE(vsag::MetricType::METRIC_TYPE_IP, vsag::MetricType::METRIC_TYPE_COSINE);
+        REQUIRE_THROWS(std::make_shared<vsag::Pyramid>(source, common));
+        config["pipnn_adaptive_pruning"].SetBool(false);
+        REQUIRE_NOTHROW(std::make_shared<vsag::Pyramid>(parse(config), common));
+    }
+    SECTION("each hierarchy validates its own alpha") {
+        *config["hierarchies"].GetInnerJson() =
+            nlohmann::json::array({{{"name", "site"}, {"alpha", 1.0}}});
+        config["pipnn_adaptive_pruning_adjust_step"].SetFloat(0.51F);
+        REQUIRE_THROWS(parse(config));
+    }
+}

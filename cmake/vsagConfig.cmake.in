@@ -1,0 +1,18 @@
+@PACKAGE_INIT@
+
+# vsagConfig.cmake — entry point for `find_package(vsag CONFIG REQUIRED)`.
+#
+# Usage:
+#
+#   find_package(vsag CONFIG REQUIRED)
+#   target_link_libraries(my_app PRIVATE vsag::vsag)
+#
+# Imported targets:
+#   vsag::vsag — the shared library (recommended for consumption).
+#
+# vsag's public headers in <vsag/*.h> only depend on the C++ standard library,
+# so no transitive find_dependency() calls are required here.
+
+include ("${CMAKE_CURRENT_LIST_DIR}/vsagTargets.cmake")
+
+check_required_components (vsag)

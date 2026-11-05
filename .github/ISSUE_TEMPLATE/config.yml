@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: VSAG Documentation
+    url: https://vsag.io/docs
+    about: Index parameters, best practices, performance references, and tool guides.
+  - name: GitHub Discussions
+    url: https://github.com/antgroup/vsag/discussions
+    about: Ask usage questions or share ideas with the community.
+  - name: WeChat Group
+    url: https://github.com/antgroup/vsag/blob/main/docs/weixin-qr.jpg
+    about: Join the VSAG WeChat group for real-time discussion (Chinese).

@@ -1,0 +1,39 @@
+# 贡献者列表
+
+以下是 VSAG 项目的贡献者（更新于 2026-08-21），按照第一次贡献的时间排序：
+
+- 2024-07-26 Xiangyu Wang ([wxyucs](https://github.com/wxyucs/)) from AntGroup
+- 2024-08-21 Jiabao Jin ([inabao](https://github.com/inabao)) from AntGroup
+- 2024-08-30 👑 Haotian Li ([LHT129](https://github.com/LHT129)) from AntGroup
+- 2024-09-04 Xiaoyao Zhong ([ShawnShawnYou](https://github.com/ShawnShawnYou)) from AntGroup
+- 2024-10-23 Jiacai Liu ([jiacai2050](https://github.com/jiacai2050))
+- 2024-10-28 [Coien-rr](https://github.com/Coien-rr)
+- 2024-12-16 Mingyu Yang ([mingyu-hkustgz](https://github.com/mingyu-hkustgz)) from HKUST(GZ)
+- 2025-01-24 [Carrot-77](https://github.com/Carrot-77) from OceanBase
+- 2025-03-05 Deming Chu ([nedchu](https://github.com/nedchu)) from AntGroup
+- 2025-03-25 Liyao Xiong ([lyxiong0](https://github.com/lyxiong0)) from OceanBase
+- 2025-04-15 [skylhd](https://github.com/skylhd) from OceanBase
+- 2025-04-23 azl ([shadowao](https://github.com/shadowao)) from OceanBase
+- 2025-06-10 [dasurax](https://github.com/dasurax) from AntGroup
+- 2025-06-12 L J. Yun ([yulijunzj](https://github.com/yulijunzj)) from AntGroup
+- 2025-06-13 [Danbaiwq](https://github.com/Danbaiwq) from OceanBase
+- 2025-06-17 [jingyueob](https://github.com/jingyueob) from OceanBase
+- 2025-07-28 jac ([jac0626](https://github.com/jac0626))
+- 2025-07-29 mly ([mly5269](https://github.com/mly5269))
+- 2025-08-25 HuMing He ([HeHuMing](https://github.com/HeHuMing))
+- 2025-10-22 [cubicc](https://github.com/cubicc) from ByteDance
+- 2025-10-29 [Roxanne0321](https://github.com/Roxanne0321) from AntGroup
+- 2025-11-12 baoyuan ([misaka0714](https://github.com/misaka0714))
+- 2025-11-20 Zihao Wang ([hhy3](https://github.com/hhy3))
+- 2025-12-19 Xinger ([Ningsir](https://github.com/Ningsir)) from OceanBase
+- 2026-02-05 [stuBirdFly](https://github.com/stuBirdFly) from OceanBase
+- 2026-04-08 Sun Jiayu ([pkusunjy](https://github.com/pkusunjy)) from AntGroup
+- 2026-04-20 wei ([jiaweizone](https://github.com/jiaweizone)) from AntGroup
+- 2026-04-20 [XFMENG17](https://github.com/XFMENG17) from AntGroup
+- 2026-05-07 [liric24](https://github.com/liric24) from AntGroup
+- 2026-05-14 [LightWant](https://github.com/LightWant) from AntGroup
+- 2026-06-09 [mukejane](https://github.com/mukejane)
+- 2026-06-09 Jiangtian Feng ([jfeng18](https://github.com/jfeng18)) from Alibaba
+- 2026-06-29 Wen Huanzhi ([Sia-Sheerland](https://github.com/Sia-Sheerland))
+- 2026-08-04 Siyang Tang ([Hastyshell](https://github.com/Hastyshell)) from Xiaohongshu
+- 2026-08-16 Charles xu ([CharlesXu-HQ](https://github.com/CharlesXu-HQ)) from AntGroup
