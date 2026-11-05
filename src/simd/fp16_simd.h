@@ -36,7 +36,7 @@ namespace vsag {
 
 namespace generic {
 float
-FP16ToFloat(const uint16_t bf16_value);
+FP16ToFloat(const uint16_t fp16_value);
 uint16_t
 FloatToFP16(const float fp32_value);
 }  // namespace generic

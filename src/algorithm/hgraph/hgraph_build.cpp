@@ -37,6 +37,7 @@
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
 #include "impl/searcher/basic_searcher.h"
+#include "impl/searcher/searcher_utils.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "pipnn_storage_build.h"
@@ -1176,7 +1177,7 @@ HGraph::publish_unique_to_graphs(const void* data,
                                  InnerSearchParam& param,
                                  const GraphAddProbeResult& probe,
                                  const AddContext& context) {
-    this->publish_unique_to_bottom_graph(inner_id, probe.neighbors, context.graph_read_codes);
+    this->publish_unique_to_bottom_graph(inner_id, probe, context.graph_read_codes);
     this->publish_unique_to_route_graphs(data, level, inner_id, param, context.graph_read_codes);
 }
 
@@ -1222,6 +1223,12 @@ HGraph::probe_graph_for_add(const void* data,
                 filtered_result->Push(dist, id);
             }
         }
+        if (filtered_result->Empty() and param.ep != inner_id) {
+            // A non-finite query can leave no rankable candidates. Keep a bridge to the
+            // existing graph so publishing this node cannot create a disconnected entry point.
+            filtered_result->Push(std::numeric_limits<float>::max(), param.ep);
+            return GraphAddProbeResult{filtered_result, -1, true};
+        }
         return GraphAddProbeResult{filtered_result, -1};
     }
     return GraphAddProbeResult{};
@@ -1229,8 +1236,44 @@ HGraph::probe_graph_for_add(const void* data,
 
 void
 HGraph::publish_unique_to_bottom_graph(InnerIdType inner_id,
-                                       const DistHeapPtr& neighbors,
+                                       const GraphAddProbeResult& probe,
                                        const FlattenInterfacePtr& flatten_codes) {
+    auto neighbors = probe.neighbors;
+    if (probe.needs_connectivity_bridge) {
+        const auto entry = neighbors->Top().second;
+        Vector<InnerIdType> forward(allocator_);
+        forward.push_back(entry);
+        // A NaN node only needs an outgoing bridge if it becomes the entry point. Feeding
+        // its unordered distances into reverse-edge pruning can disconnect valid nodes.
+        if (is_nan_distance(flatten_codes->ComputePairVectors(inner_id, inner_id))) {
+            bottom_graph_->InsertNeighborsById(inner_id, forward);
+            return;
+        }
+        neighbors = std::make_shared<StandardHeap<true, false>>(allocator_, -1);
+        {
+            LockGuard lock(neighbors_mutex_, entry);
+            Vector<InnerIdType> reverse(allocator_);
+            bottom_graph_->GetNeighbors(entry, reverse);
+            // Another insertion may have published a finite neighbor since this probe.
+            // Reuse those candidates instead of replacing an already useful bridge.
+            for (const auto id : reverse) {
+                const auto distance = flatten_codes->ComputePairVectors(inner_id, id);
+                if (id != inner_id and not is_nan_distance(distance)) {
+                    neighbors->Push(distance, id);
+                }
+            }
+            if (neighbors->Empty()) {
+                bottom_graph_->InsertNeighborsById(inner_id, forward);
+                if (reverse.size() < bottom_graph_->MaximumDegree()) {
+                    reverse.push_back(inner_id);
+                } else {
+                    reverse.back() = inner_id;
+                }
+                bottom_graph_->InsertNeighborsById(entry, reverse);
+                return;
+            }
+        }
+    }
     // No lock on inner_id: it has not been published to the graph yet, so no other thread
     // can reach it (entry_point_id_ is updated only after this returns). Only its own
     // slots are written here; the neighbour locks taken inside mutually_connect_new_element
