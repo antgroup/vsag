@@ -611,7 +611,7 @@ def test_angular_identical_vectors_are_near_duplicates(tmp_path, vector_type):
 
 
 def test_dense_sample_size_is_capped_by_materialized_bytes(tmp_path, monkeypatch):
-    monkeypatch.setattr(profiler_module, "_MAX_ANISOTROPY_BYTES", 64)
+    monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 64)
     path = tmp_path / "bounded_dense_sample.hdf5"
     _write_dense(path, np.arange(24, dtype=np.float32).reshape(6, 4))
     report = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
@@ -624,12 +624,90 @@ def test_dense_sample_size_is_capped_by_materialized_bytes(tmp_path, monkeypatch
         in report["warnings"]
     )
 
-    monkeypatch.setattr(profiler_module, "_MAX_ANISOTROPY_BYTES", 16)
+    monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 16)
     unavailable = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
     assert unavailable["config"]["effective_sample_size"] == 0
     assert unavailable["config"]["effective_pairwise_sample_size"] == 0
     assert unavailable["metrics"]["pairwise_distances"]["sample_size"] == 0
     assert unavailable["metrics"]["anisotropy"]["available"] is False
+
+
+def test_sparse_sample_bytes_budget_stops_retention_and_expansion(
+    tmp_path, monkeypatch
+):
+    # 6 sampled rows x 10 entries retain 128 + 10 * 32 = 448 bytes each; a
+    # 1000-byte budget stops after the second row instead of eagerly holding
+    # all rows and then expanding every one of them into Python dicts.
+    base_ids = np.arange(10, dtype=np.uint32)
+    records = [
+        (
+            base_ids + np.uint32(10 * position),
+            np.linspace(0.1, 1.0, 10, dtype=np.float32),
+        )
+        for position in range(6)
+    ]
+    path = tmp_path / "sparse_sample_bytes_budget.hdf5"
+    _write_sparse(path, records)
+
+    expanded_rows = []
+    real_pairwise = profiler_module._pairwise_sparse
+
+    def tracking_pairwise(pair_records, metric):
+        expanded_rows.append(len(pair_records))
+        return real_pairwise(pair_records, metric)
+
+    monkeypatch.setattr(profiler_module, "_pairwise_sparse", tracking_pairwise)
+    monkeypatch.setattr(profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 1000)
+    report = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
+    metrics = report["metrics"]
+
+    # (a) the over-budget sample is neither fully retained nor expanded.
+    assert expanded_rows == []
+    assert sum(
+        "sample memory budget" in warning for warning in report["warnings"]
+    ) == 1
+    row_bytes = profiler_module._sparse_sample_row_bytes(base_ids)
+    assert row_bytes == 448
+    expected_reason = profiler_module._sparse_sample_budget_reason(
+        row_bytes, 2 * row_bytes, 2
+    )
+    assert expected_reason in report["warnings"]
+
+    # (b) sampled metrics report unavailable with a budget reason, not garbage.
+    for name in (
+        "pairwise_distances",
+        "nearest_neighbor_distances",
+        "anisotropy",
+        "clustering",
+    ):
+        unavailable = metrics[name]
+        assert unavailable["available"] is False
+        assert "sample memory budget" in unavailable["reason"]
+    near = metrics["duplicates"]["near_duplicate"]
+    assert near["available"] is False
+    assert "sample memory budget" in near["reason"]
+
+    # (c) streaming and full-split metrics are all still present.
+    sparsity = metrics["sparsity"]
+    assert sparsity["nnz_available"] is True
+    assert sparsity["nnz_reason"] is None
+    assert sparsity["stored_entries"] == 60
+    assert metrics["norms"]["count"] == 6
+    assert metrics["dimensions"]["dim"] == 60
+    exact = metrics["duplicates"]["exact"]
+    assert exact["unique_vectors"] == 6
+    assert exact["duplicate_vectors"] == 0
+
+    # With the default budget the same file still profiles normally.
+    monkeypatch.setattr(
+        profiler_module, "_SAMPLE_MEMORY_BUDGET_BYTES", 256 * 1024 * 1024
+    )
+    unbounded = profile_dataset(str(path), sample_size=6, pairwise_sample_size=6)
+    unbounded_metrics = unbounded["metrics"]
+    assert unbounded_metrics["pairwise_distances"]["pair_count"] == 15
+    assert unbounded_metrics["anisotropy"]["available"] is True
+    assert len(expanded_rows) == 2
+    assert expanded_rows == [6, 6]
 
 
 def test_dense_nonzero_count_excludes_invalid_entries(tmp_path):

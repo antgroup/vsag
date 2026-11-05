@@ -46,7 +46,17 @@ VALID_METRICS = ("euclidean", "ip", "angular")
 _DEFAULT_DENSE_METRIC = "euclidean"
 _DEFAULT_SPARSE_METRIC = "ip"
 _MAX_ANISOTROPY_DIM = 50000
-_MAX_ANISOTROPY_BYTES = 256 * 1024 * 1024
+# One byte budget shared by every sampled-memory guard: the dense float64
+# sample, the dense expansion of a sparse sample, and the retained sparse
+# sample rows below.  Sparse samples must obey the same budget as dense ones
+# even though their rows carry a variable number of entries.
+_SAMPLE_MEMORY_BUDGET_BYTES = 256 * 1024 * 1024
+# A retained sparse sample keeps one (uint32, float32) copy per row and later
+# expands into one Python dict entry per finite value; estimate both together
+# from nnz with interpreter object overhead so nnz-heavy rows trip the budget
+# before any copy or dict expansion happens instead of exhausting memory.
+_SPARSE_SAMPLE_ENTRY_BYTES = 32
+_SPARSE_SAMPLE_ROW_OVERHEAD_BYTES = 128
 _MAX_SPARSE_STATS_DIMENSION = 10_000_000
 _PCA_SVD_MAX_DIM = 4096
 # Exact norm quantiles/outliers and exact duplicate groups need per-row state.
@@ -279,8 +289,33 @@ def _dense_sample_size(count: int, dim: int, requested: int) -> int:
     dataset_limited = min(int(requested), int(count))
     if dim <= 0:
         return int(dataset_limited)
-    max_rows = _MAX_ANISOTROPY_BYTES // (int(dim) * 8)
+    max_rows = _SAMPLE_MEMORY_BUDGET_BYTES // (int(dim) * 8)
     return int(min(dataset_limited, max_rows))
+
+
+def _sparse_sample_row_bytes(ids: np.ndarray) -> int:
+    """Estimate the bytes one sampled sparse row keeps after retention and
+    after the Python dict expansion performed by :func:`_pairwise_sparse`."""
+    return (
+        _SPARSE_SAMPLE_ROW_OVERHEAD_BYTES + int(ids.size) * _SPARSE_SAMPLE_ENTRY_BYTES
+    )
+
+
+def _sparse_sample_budget_reason(
+    next_row_bytes: int, retained_bytes: int, retained_rows: int
+) -> str:
+    """Return why retention of the sampled sparse rows stopped."""
+    return (
+        "sparse sample limited to %d retained rows: continuing would exceed the "
+        "%d-byte sample memory budget (estimated %d total bytes so far plus the "
+        "pending row); the sampled sparse pairwise and distribution metrics are "
+        "unavailable, while streaming and full-split metrics are still reported"
+        % (
+            retained_rows,
+            _SAMPLE_MEMORY_BUDGET_BYTES,
+            int(retained_bytes) + int(next_row_bytes),
+        )
+    )
 
 
 def _full_split_state_reason(
@@ -531,6 +566,11 @@ def _profile_sparse(
     vectors_with_invalid = 0
     all_zero_vectors = 0
     sample_records: List[Tuple[int, np.ndarray, np.ndarray]] = []
+    # Sample retention is bounded by estimated bytes, not by the row count:
+    # valid sparse files can carry so many entries per vector that the full
+    # row count would exhaust memory before any report is produced.
+    retained_sample_bytes = 0
+    sample_budget_reason: Optional[str] = None
 
     for index, raw_ids, raw_values in dataset.iter_sparse_records(
         max_chunk_bytes=config.max_chunk_bytes
@@ -582,10 +622,21 @@ def _profile_sparse(
                 "<f4", copy=False
             ).tobytes()
             hashes[index] = np.frombuffer(_digest(payload), dtype=np.uint8)
-        if index in sample_set:
-            sample_records.append((index, ids.copy(), values.copy()))
+        if sample_budget_reason is None and index in sample_set:
+            row_bytes = _sparse_sample_row_bytes(ids)
+            if retained_sample_bytes + row_bytes > _SAMPLE_MEMORY_BUDGET_BYTES:
+                sample_budget_reason = _sparse_sample_budget_reason(
+                    row_bytes, retained_sample_bytes, len(sample_records)
+                )
+                warnings.append(sample_budget_reason)
+            else:
+                retained_sample_bytes += row_bytes
+                sample_records.append((index, ids.copy(), values.copy()))
 
-    if len(sample_records) != len(sample_set):
+    if (
+        sample_budget_reason is None
+        and len(sample_records) != len(sample_set)
+    ):
         raise ValueError("sparse sampling failed: not all sampled records were found")
     sample_records.sort(key=lambda item: item[0])
     pair_records = [
@@ -621,20 +672,27 @@ def _profile_sparse(
             reason=dimension_stats_reason,
             dim=int(dim),
         )
-    if any(
-        not bool(np.isfinite(values).all()) for _, _, values in sample_records
-    ):
-        warnings.append(_INVALID_SAMPLE_WARNING)
-    pair_matrix = _pairwise_sparse(pair_records, metric)
-    pair_values = _upper_triangle(pair_matrix)
-    duplicate_pair_values = pair_values
-    duplicate_metric = metric
-    if metric == "ip":
-        duplicate_pair_values = _upper_triangle(
-            _pairwise_sparse(pair_records, "euclidean")
-        )
-        duplicate_metric = "euclidean"
-    sample_matrix = _sparse_sample_to_dense(sample_records, dim)
+    if sample_budget_reason is None:
+        if any(
+            not bool(np.isfinite(values).all()) for _, _, values in sample_records
+        ):
+            warnings.append(_INVALID_SAMPLE_WARNING)
+        pair_matrix = _pairwise_sparse(pair_records, metric)
+        pair_values = _upper_triangle(pair_matrix)
+        duplicate_pair_values = pair_values
+        duplicate_metric = metric
+        if metric == "ip":
+            duplicate_pair_values = _upper_triangle(
+                _pairwise_sparse(pair_records, "euclidean")
+            )
+            duplicate_metric = "euclidean"
+        sample_matrix = _sparse_sample_to_dense(sample_records, dim)
+    else:
+        pair_matrix = np.zeros((0, 0), dtype=np.float64)
+        pair_values = np.empty(0, dtype=np.float64)
+        duplicate_pair_values = pair_values
+        duplicate_metric = metric
+        sample_matrix = None
 
     metrics: Dict[str, Any] = {
         "invalid_values": _invalid_metric(
@@ -662,6 +720,7 @@ def _profile_sparse(
             duplicate_metric,
             int(pair_matrix.shape[0]),
             duplicates_reason,
+            near_unavailable_reason=sample_budget_reason,
         ),
     }
     metrics.update(
@@ -674,6 +733,7 @@ def _profile_sparse(
             rng=rng,
             warnings=warnings,
             sparse_pairwise=True,
+            unavailable_reason=sample_budget_reason,
         )
     )
     return metrics
@@ -1058,6 +1118,7 @@ def _duplicates_metric(
     near_metric: str,
     near_sample_size: int,
     unavailable_reason: Optional[str] = None,
+    near_unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     if hashes is None:
         exact = {
@@ -1107,7 +1168,7 @@ def _duplicates_metric(
             "indicator covers the bounded pairwise sample"
         )
     near = _near_duplicate_summary(
-        pair_values, epsilon, near_metric, near_sample_size
+        pair_values, epsilon, near_metric, near_sample_size, near_unavailable_reason
     )
     return metric_entry(
         DEFINITIONS["duplicates"],
@@ -1120,12 +1181,16 @@ def _duplicates_metric(
 
 
 def _near_duplicate_summary(
-    pair_values: np.ndarray, epsilon: float, metric: str, sample_size: int
+    pair_values: np.ndarray,
+    epsilon: float,
+    metric: str,
+    sample_size: int,
+    unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     if pair_values.size == 0:
         return {
             "available": False,
-            "reason": "fewer than two sampled vectors",
+            "reason": unavailable_reason or "fewer than two sampled vectors",
             "scope": "sample",
             "sample_size": int(sample_size),
             "pair_count": 0,
@@ -1170,9 +1235,26 @@ def _sampled_metrics(
     rng: np.random.Generator,
     warnings: List[str],
     sparse_pairwise: bool = False,
+    unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     sample_size = int(pair_matrix.shape[0])
     pair_count = int(pair_values.size)
+    if unavailable_reason is not None:
+        return {
+            name: metric_entry(
+                DEFINITIONS[name],
+                "sample",
+                sample_size,
+                available=False,
+                reason=unavailable_reason,
+            )
+            for name in (
+                "pairwise_distances",
+                "nearest_neighbor_distances",
+                "anisotropy",
+                "clustering",
+            )
+        }
     pairwise = metric_entry(
         DEFINITIONS["pairwise_distances"],
         "sample",
@@ -1482,7 +1564,7 @@ def _sparse_sample_to_dense(
     if dim <= 0 or not records:
         return None
     rows = len(records)
-    if rows * dim * 8 > _MAX_ANISOTROPY_BYTES or dim > _MAX_ANISOTROPY_DIM:
+    if rows * dim * 8 > _SAMPLE_MEMORY_BUDGET_BYTES or dim > _MAX_ANISOTROPY_DIM:
         return None
     matrix = np.zeros((rows, dim), dtype=np.float64)
     for position, (_, ids, values) in enumerate(records):

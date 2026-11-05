@@ -1512,10 +1512,11 @@
       "all_zero_vectors": 1,
       "cells": 10496,
       "count": 82,
-      "definition": "Count and fraction of exactly-zero entries; for sparse vectors this also reports non-zero entries per vector and density = nnz / (count * dim).",
+      "definition": "Count and fraction of finite exactly-zero entries; non-zero values and density count finite non-zero entries, while NaN/Inf values are reported separately in invalid_values. For sparse vectors this also reports non-zero entries per vector and density = nnz / (count * dim).",
       "density": 0.050495426829268296,
       "dim": 128,
       "explicit_zero_entries": 0,
+      "nnz_available": true,
       "nnz_histogram": {
         "bin_count": 20,
         "bins": [
@@ -1578,6 +1579,7 @@
         "p99": 11.0,
         "std": 2.3746379541825693
       },
+      "nnz_reason": null,
       "non_zero_values": 530,
       "representation": "sparse",
       "sample_size": null,
