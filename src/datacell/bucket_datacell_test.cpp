@@ -130,6 +130,16 @@ private:
     float centroid_scale_{1.0F};
 };
 
+class DualRouteFixedCentroidPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    [[nodiscard]] bool
+    HasDistinctBuildAssignment() const override {
+        return true;
+    }
+};
+
 class BuildAssignedPartitionStrategy : public FixedCentroidPartitionStrategy {
 public:
     using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
@@ -977,12 +987,14 @@ TEST_CASE("BucketDataCell residual training preserves the PQ sample prefix",
     common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
     auto bucket = BucketInterface::MakeInstance(param, common_param);
     // The sole centroid is 50, so alternating rows have residuals -50 and +50.
-    // Both Build and nearest routing agree. Fixed-stride sampling used to select
-    // only even rows, filling PQ's 65,536-row prefix with just the -50 residual.
-    auto strategy = std::make_shared<FixedCentroidPartitionStrategy>(
+    // Both Build and nearest routing agree, leaving nearest_samples at zero.
+    // Fixed-stride sampling used to select only even rows, filling PQ's
+    // 65,536-row prefix with just the -50 residual.
+    auto strategy = std::make_shared<DualRouteFixedCentroidPartitionStrategy>(
         common_param, bucket_count, /*centroid_scale=*/5000.0F);
     bucket->SetStrategy(strategy);
     bucket->Train(vectors.data(), count);
+    REQUIRE(strategy->GetClassifyRequestCount() == 2);
     bucket->InsertVector(vectors.data() + count - 1, 0, count - 1);
     bucket->Package();
 

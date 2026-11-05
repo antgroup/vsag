@@ -56,6 +56,10 @@
 
 namespace {
 
+// Keep the numeric threshold in the en/zh IVF documentation in sync as well.
+static_assert(vsag::KMeansCluster::THRESHOLD_FOR_HGRAPH == 10000ULL,
+              "Update the en/zh IVF documentation for the new HGraph threshold");
+
 /// Allocator that tracks currently-live bytes and records the peak, so the
 /// benchmark can report trainer memory without process-level instrumentation.
 class RecordingAllocator : public vsag::Allocator {
@@ -368,9 +372,10 @@ parse(const int argc,
             return false;
         }
     }
-    if (k >= 10000) {
+    if (k >= vsag::KMeansCluster::THRESHOLD_FOR_HGRAPH) {
         // KMeansCluster switches to non-deterministic parallel HGraph assignment here.
-        std::printf("--k must be less than 10000 for reproducible HGraph-free assignment\n");
+        std::printf("--k must be less than %llu for reproducible HGraph-free assignment\n",
+                    static_cast<unsigned long long>(vsag::KMeansCluster::THRESHOLD_FOR_HGRAPH));
         return false;
     }
     return k > 0 and n > 0 and dim > 0 and iter > 0 and (k <= n);
