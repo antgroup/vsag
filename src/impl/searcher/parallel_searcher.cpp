@@ -310,7 +310,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             }
         }
 
-        while (num_points.load(std::memory_order_relaxed) < count_no_visited) {
+        // Pair with the workers' release updates before reading their distance buffers or
+        // reusing the ID buffer for the next expansion.
+        while (num_points.load(std::memory_order_acquire) < count_no_visited) {
             if (offset >= count_no_visited) {
                 continue;
             }
