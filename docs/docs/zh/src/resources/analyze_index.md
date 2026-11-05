@@ -434,7 +434,8 @@ SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int6
 C++ 工具将报告写入 stdout，并将库的警告与错误保留在 stderr。
 
 当序列化索引只内嵌 `index_param` 时，`analyze_index` 也可以在不提供 `--build_parameter` 的情况下
-加载；缺失的 metadata 字段会尽可能使用 analyzer 默认值补齐。
+加载；缺失的 metadata 字段会尽可能使用 analyzer 默认值补齐。对于缺少 `basic_info.metric` 的旧版
+BruteForce/WARP 文件，analyzer 会回退到 `l2`，并在报告的 `warnings` 数组中记录此次回退。
 
 ## 典型使用场景
 

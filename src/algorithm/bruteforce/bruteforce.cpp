@@ -27,6 +27,7 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "bruteforce_analyzer.h"
 #include "datacell/attribute_inverted_interface.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
@@ -50,9 +51,6 @@
 #include "utils/util_functions.h"
 #include "vsag/resource.h"
 namespace vsag {
-
-IndexPtr
-CreateBruteForceIndexForAnalyzer(JsonType build_param);
 
 namespace {
 
@@ -1291,8 +1289,7 @@ MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
             continue;
         }
         if (internal_param_keys.count(key) == 0) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                fmt::format("invalid config param: {}", key));
+            logger::warn("ignoring unrecognized serialized BruteForce parameter '{}'", key);
         }
     }
 
@@ -1305,9 +1302,8 @@ MakeAnalyzerBruteForceParameter(const JsonType& serialized_param,
 
 }  // namespace
 
-// This is a trusted C++-only entry point for IndexAnalyzer. Keeping it separate from
-// CheckAndMappingExternalParam prevents public Factory/pyvsag JSON from enabling the internal
-// parameter mapping bypass.
+// Keeping this trusted entry point separate from CheckAndMappingExternalParam prevents public
+// Factory/pyvsag JSON from enabling the internal parameter mapping bypass.
 IndexPtr
 CreateBruteForceIndexForAnalyzer(JsonType build_param) {
     auto resource = std::make_shared<Resource>();
