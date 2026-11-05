@@ -2060,9 +2060,10 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
         } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
         } else if (key == "base_enable_read_cache") {
-            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY]["enable_read_cache"].SetJson(value);
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
         } else if (key == "base_cache_total_size") {
-            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY]["total_cache_size"].SetJson(value);
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
         } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
                    key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
                    key == "rerank_k" || key == "quantization_type" ||
