@@ -119,6 +119,19 @@ public:
     }
 };
 
+// The routing leaves the second vector without a bucket.
+class RoutelessVectorPartitionStrategy : public FixedCentroidPartitionStrategy {
+public:
+    using FixedCentroidPartitionStrategy::FixedCentroidPartitionStrategy;
+
+    Vector<BucketIdType>
+    ClassifyDatasForTrain(const void*, int64_t count) override {
+        Vector<BucketIdType> buckets(count, 0, allocator_);
+        buckets[1] = -1;
+        return buckets;
+    }
+};
+
 class TrackingReader : public Reader {
 public:
     explicit TrackingReader(std::shared_ptr<std::string> data) : data_(std::move(data)) {
@@ -902,13 +915,64 @@ TEST_CASE("Residual training rows cover every bucket of a vector", "[ut][BucketD
         TwoTrainBucketsPartitionStrategy strategy(common_param, 2);
         REQUIRE(strategy.ResidualsForTrain(vectors.data(), count, residuals) == count + 2);
         REQUIRE(residuals.size() == (count + 2) * dim);
+        auto has_row = [&](uint64_t vector, BucketIdType bucket) {
+            strategy.GetCentroid(bucket, centroid);
+            for (uint64_t row = 0; row < count + 2; ++row) {
+                bool same = true;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    same = same and
+                           residuals[row * dim + d] == vectors[vector * dim + d] - centroid[d];
+                }
+                if (same) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        for (uint64_t i = 0; i < count; ++i) {
+            REQUIRE(has_row(i, 0));
+        }
+        REQUIRE(has_row(1, 1));
+        REQUIRE(has_row(3, 1));
+    }
+
+    SECTION("the input may be the output") {
+        FixedCentroidPartitionStrategy one_bucket(common_param, 2);
+        residuals.assign(vectors.begin(), vectors.end());
+        REQUIRE(one_bucket.ResidualsForTrain(residuals.data(), count, residuals) == count);
+        for (uint64_t i = 0; i < count; ++i) {
+            require_row(one_bucket, i, i, 0);
+        }
+
+        TwoTrainBucketsPartitionStrategy two_buckets(common_param, 2);
+        Vector<float> expected(allocator.get());
+        REQUIRE(two_buckets.ResidualsForTrain(vectors.data(), count, expected) == count + 2);
+        residuals.assign(vectors.begin(), vectors.end());
+        REQUIRE(two_buckets.ResidualsForTrain(residuals.data(), count, residuals) == count + 2);
+        REQUIRE(residuals == expected);
+    }
+
+    SECTION("every prefix of the rows holds both kinds, from the whole batch") {
+        // Zero vectors, so that a row tells its bucket.
+        constexpr int64_t many = 3000;
+        std::vector<float> zeros(many * dim, 0.0F);
+        TwoTrainBucketsPartitionStrategy strategy(common_param, 2);
+        REQUIRE(strategy.ResidualsForTrain(zeros.data(), many, residuals) == many + many / 2);
+        strategy.GetCentroid(1, centroid);
+        uint64_t second = 0;
+        constexpr uint64_t prefix = many;
+        for (uint64_t row = 0; row < prefix; ++row) {
+            second += residuals[row * dim] == -centroid[0] ? 1 : 0;
+        }
+        REQUIRE(second > prefix / 4);
+        REQUIRE(second < prefix / 2);
+    }
+
+    SECTION("a vector without a bucket adds no row") {
+        RoutelessVectorPartitionStrategy strategy(common_param, 2);
+        REQUIRE(strategy.ResidualsForTrain(vectors.data(), count, residuals) == count - 1);
         require_row(strategy, 0, 0, 0);
-        require_row(strategy, 1, 1, 0);
-        require_row(strategy, 2, 1, 1);
-        require_row(strategy, 3, 2, 0);
-        require_row(strategy, 4, 3, 0);
-        require_row(strategy, 5, 3, 1);
-        require_row(strategy, 6, 4, 0);
+        require_row(strategy, 1, 2, 0);
     }
 
     SECTION("no vectors, no rows") {
