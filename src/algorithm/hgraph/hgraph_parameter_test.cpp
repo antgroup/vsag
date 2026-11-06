@@ -1355,3 +1355,26 @@ TEST_CASE("HGraph flat adaptive parameters map and reject obsolete options",
     json["adaptive_pruning"].SetJson(vsag::JsonType::Parse(R"({"enabled":true})"));
     CHECK_THROWS(vsag::HGraph::CheckAndMappingExternalParam(json, common));
 }
+
+TEST_CASE("HGraph maps SAQ parameters", "[ut][HGraphParameter][SAQ]") {
+    auto param = vsag::JsonType::Parse(R"({
+        "base_quantization_type": "saq",
+        "saq_avg_bits": 3.5,
+        "saq_segment_count": 2,
+        "saq_random_rotation": false
+    })");
+
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 128;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+    auto mapped = vsag::HGraph::CheckAndMappingExternalParam(param, common_param);
+    auto typed_param = std::dynamic_pointer_cast<vsag::HGraphParameter>(mapped);
+
+    REQUIRE(typed_param != nullptr);
+    const auto base_json = typed_param->base_codes_param->ToJson();
+    const auto quantization = base_json["quantization_params"];
+    REQUIRE(quantization["type"].GetString() == std::string("saq"));
+    REQUIRE(quantization["saq_avg_bits"].GetFloat() == 3.5F);
+    REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
+    REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
+}

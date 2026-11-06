@@ -272,7 +272,9 @@ Thrive together in VSAG community with users and developers from all around the 
   - **Efficient Graph Merging and Reuse**: Reuse existing graph structures during index merging and parameter tuning to reduce construction costs.
 
 - **Advanced Quantization**
-  - **SAQ Quantization**: Introduce code adjustment and dimension segmentation for improved quantization efficiency and accuracy.
+  - **SAQ (Segmented Code Adjustment Quantization)**: Trained segmentation, dynamic bit
+    allocation, and code adjustment for low-bit dense-vector storage. See the
+    [SAQ guide](./docs/docs/en/src/quantization/saq.md).
   - **Multi-Centroid Residual RaBitQ**: Improve compression quality by quantizing residuals around multiple centroids.
   - **Efficient Scalar Quantization**: Optimize local SQ4/SQ8 computation and reduce redundant storage between search and reranking.
 
