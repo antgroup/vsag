@@ -38,7 +38,7 @@ across languages. Use the numbered examples for new code.
 | [`103_index_hgraph.py`](103_index_hgraph.py) | HGraph | VSAG's headline in-memory graph index; start here. |
 | [`105_index_brute_force.py`](105_index_brute_force.py) | BruteForce | Exact reference for recall calibration. |
 | [`106_index_ivf.py`](106_index_ivf.py) | IVF | Inverted file, tuned for large-`k` / batch queries. |
-| [`109_index_sindi.py`](109_index_sindi.py) | SINDI | Sparse vector index (text / inverted retrieval). |
+| [`109_index_sindi.py`](109_index_sindi.py) | SINDI | Sparse vector index (text / inverted retrieval); converts readable term-weight mappings to CSR. |
 | [`110_index_sindi_sq8_dmq_reorder.py`](110_index_sindi_sq8_dmq_reorder.py) | SINDI SQ8 + DMQ8 | Sparse vectors with SQ8 quantization + DMQ reranking. |
 
 ## Where to go next

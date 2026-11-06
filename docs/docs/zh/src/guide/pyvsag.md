@@ -116,6 +116,69 @@ removed = index.remove(candidate_ids)
 
 Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(query, ids)` 仍返回一维 `Float32Array`。query 必须为 `Float32Array`，ID 必须为 `BigInt64Array`，其他数组类型抛出 `TypeError`；实际 query 长度通过 C++ Dataset API 校验，底层操作失败时抛出包含 C++ 信息的 `Error`。缺失 ID 仍返回 `-1`，不属于操作失败。
 
+## 稀疏词权重辅助函数
+
+`pyvsag.sparse` 提供了把人类可读的 `{词: 权重}` 映射转换为 SINDI 等稀疏索引所需的 CSR 数组的辅助函数。它们只依赖 NumPy，不引入新的运行时依赖。
+
+| 辅助函数 | 返回值 | 说明 |
+| --- | --- | --- |
+| `build_term_vocabulary(documents)` | `dict[str, int]` | 对所有唯一词条按字典序排序并从 `0` 开始编号，因此词表不受字典插入顺序或文档顺序影响，ID 始终落在 `uint32` 范围内。空映射会引发 `ValueError`（SINDI 无法存储空行）。 |
+| `TermVocabulary(vocabulary)` | 可复用的映射 | 包装 `build_term_vocabulary` 的结果并只校验一次 ID。同一份词表需要转换大量查询时传入它而不是原始字典，查询转换的耗时便只与查询词条数相关，而不再随词表大小增长。 |
+| `term_weights_to_csr(documents, vocabulary)` | `(index_pointers, indices, values)` | 返回 `uint32` / `uint32` / `float32` 数组，可直接传给 `index.build(...)` 和 `index.knn_search(...)`。每行按词条 ID 排序。**空映射被拒绝**（引发 `ValueError`），因为 SINDI::add 在添加时会静默丢弃空文档，而 SINDI::KnnSearch 排斥空查询。**词表中的 ID 必须唯一**——重复 ID 会引发 `ValueError`。 |
+
+两个函数都接受任意可迭代的映射序列，因此文档和查询可以复用同一份词表。查询中出现词表之外的词条会抛出 `KeyError`；非字符串词条、非整数 ID、超出 `uint32` 范围的 ID、非有限权重以及无法用 `float32` 表示的权重都会被显式拒绝，不会被静默截断。
+
+```python
+import json
+import numpy as np
+import pyvsag
+
+from pyvsag.sparse import TermVocabulary, build_term_vocabulary, term_weights_to_csr
+
+documents = [
+    {"vector": 1.0, "search": 0.8, "guide": 0.6},
+    {"sparse": 1.0, "retrieval": 0.9, "sindi": 0.8},
+    {"vector": 1.0, "database": 0.7, "index": 0.9},
+]
+ids = np.arange(len(documents), dtype=np.int64)
+
+vocabulary = build_term_vocabulary(documents)
+index_pointers, indices, values = term_weights_to_csr(documents, vocabulary)
+
+index_params = json.dumps({
+    "dtype": "sparse",
+    "dim": max(len(document) for document in documents),
+    "metric_type": "ip",
+    "index_param": {"term_id_limit": len(vocabulary), "window_size": 10000},
+})
+index = pyvsag.Index("sindi", index_params)
+index.build(
+    index_pointers=index_pointers,
+    indices=indices,
+    values=values,
+    ids=ids,
+)
+
+# 复用词表只校验一次；之后每次查询转换只处理查询本身的词条，
+# 不再扫描整个词表。
+query_vocabulary = TermVocabulary(vocabulary)
+
+query = {"vector": 1.0, "search": 0.8}
+query_pointers, query_indices, query_values = term_weights_to_csr(
+    [query], query_vocabulary
+)
+result_ids, result_distances = index.knn_search(
+    query_pointers,
+    query_indices,
+    query_values,
+    2,
+    json.dumps({"sindi": {"n_candidate": 3}}),
+)
+```
+
+注意 `dim` 表示单个向量中非零词条数的最大值，而不是词表大小；`term_id_limit` 必须覆盖最大词条 ID 加一。完整可运行示例见
+[`examples/python/109_index_sindi.py`](https://github.com/antgroup/vsag/blob/main/examples/python/109_index_sindi.py)。
+
 ## 与 C++ 库的关系
 
 `pyvsag` 绑定的是同一份核心 C++ 实现，行为和性能特征与 C++ 版本保持一致。因此：
