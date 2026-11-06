@@ -179,3 +179,45 @@ TEST_CASE("ParallelSearcher traverses through a non-finite-distance bridge",
     }
     REQUIRE(found_target);
 }
+
+TEST_CASE("ParallelSearcher publishes legacy statistics", "[ut][ParallelSearcher][statistics]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.dim_ = 1;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto quantizer_param =
+        QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({"type":"fp32"})"));
+    auto io_param = IOParameter::GetIOParameterByJson(JsonType::Parse(R"({"type":"memory_io"})"));
+    auto flatten = std::make_shared<
+        FlattenDataCell<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, FixedLayout<MemoryIO>>>(
+        quantizer_param, io_param, common);
+    const std::vector<float> vectors{1.0F, 2.0F};
+    std::vector<InnerIdType> ids{0, 1};
+    flatten->Train(vectors.data(), ids.size());
+    flatten->BatchInsertVector(vectors.data(), ids.size(), ids.data());
+    auto graph =
+        std::make_shared<MockGraphDataCell>(std::vector<std::vector<InnerIdType>>{{1}, {0}});
+    auto pool = std::make_shared<VisitedListPool>(1, allocator.get(), ids.size(), allocator.get());
+    InnerSearchParam param;
+    param.ep = 0;
+    param.ef = 2;
+    param.topk = 2;
+    param.parallel_search_thread_count = GENERATE(1, 2);
+    SearchStatistics stats;
+    QueryContext context;
+    context.stats = &stats;
+    float query = 0.0F;
+    auto visited = pool->TakeOne();
+    auto result = ParallelSearcher(common, SafeThreadPool::FactoryDefaultThreadPool())
+                      .Search(graph, flatten, visited, &query, param, LabelTablePtr{}, &context);
+    pool->ReturnOne(visited);
+    REQUIRE(result->Size() == 2);
+    CHECK(stats.dist_cmp.load() == 1);
+    CHECK(stats.hops.load() == 2);
+    CHECK(stats.distance_evaluations.load() == 2);
+    CHECK(stats
+              .distance_evaluations_by_phase[static_cast<uint64_t>(
+                  DistanceEvaluationPhase::APPROXIMATE)]
+              .load() == 2);
+}
