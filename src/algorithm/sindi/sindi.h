@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <chrono>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -175,6 +176,14 @@ public:
     SetImmutable() override;
 
 private:
+    DatasetPtr
+    knn_search_impl(const DatasetPtr& query,
+                    int64_t k,
+                    const std::string& parameters,
+                    const FilterPtr& filter,
+                    Allocator* allocator,
+                    std::chrono::steady_clock::time_point entered) const;
+
     static constexpr float K_TERM_LISTS_HEAP_INSERT_PRUNE_THRESHOLD = 0.1F;
 
     /**

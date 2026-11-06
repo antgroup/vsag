@@ -759,7 +759,17 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  const std::string& parameters,
                  const FilterPtr& filter,
                  vsag::Allocator* allocator) const {
-    const auto entered = SindiParallelState::Clock::now();
+    return knn_search_impl(
+        query, k, parameters, filter, allocator, SindiParallelState::Clock::now());
+}
+
+DatasetPtr
+SINDI::knn_search_impl(const DatasetPtr& query,
+                       int64_t k,
+                       const std::string& parameters,
+                       const FilterPtr& filter,
+                       Allocator* allocator,
+                       std::chrono::steady_clock::time_point entered) const {
     std::shared_lock rlock(this->global_mutex_);
 
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -1206,6 +1216,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
 DatasetPtr
 SINDI::SearchWithRequest(const SearchRequest& request) const {
+    const auto entered = SindiParallelState::Clock::now();
     std::shared_lock rlock(this->global_mutex_);
 
     CHECK_ARGUMENT(request.query_ != nullptr, "query should not be null");
@@ -1223,11 +1234,12 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH and request.expected_labels_.empty(),
                        "SINDI parallel search does not support Range or reasoning");
         rlock.unlock();
-        return KnnSearch(request.query_,
-                         request.topk_,
-                         request.params_str_,
-                         request.enable_filter_ ? request.filter_ : nullptr,
-                         select_query_allocator(request.search_allocator_, this->allocator_));
+        return knn_search_impl(request.query_,
+                               request.topk_,
+                               request.params_str_,
+                               request.enable_filter_ ? request.filter_ : nullptr,
+                               select_query_allocator(request.search_allocator_, this->allocator_),
+                               entered);
     }
 
     Allocator* allocator = select_query_allocator(request.search_allocator_, this->allocator_);

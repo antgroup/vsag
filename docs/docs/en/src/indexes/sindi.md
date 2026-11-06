@@ -268,6 +268,9 @@ The partition count is capped by `floor(total_capacity / topk)`, so each local h
 
 For example, omitting `n_candidate` uses N=topk. With the default ratio 2, even P4/P8/P16 is limited to at most two partitions and two active slots (fewer if windows or resources are limited). With topk=100, n_candidate=500 and ratio=2, the capacity is 1000 and at most ten partitions are available, allowing P4/P8 when resources permit. P is an upper bound; requesting more slots does not automatically increase the candidate budget. To make more partitions available, explicitly increase N or the ratio and evaluate the result quality and additional work. These partition counts differ from the earlier benchmark build; historical P4/P8 performance figures are not a benchmark of the current revision.
 
+
+Parallel KNN through either entry point retains the original invocation start, including time waiting for the structural index lock. Delegation from `SearchWithRequest` does not reset the timeout. Parallel candidate-insertion loops poll the shared stop condition, including when remaining scores cannot trigger another filter callback; the final permitted callback result is processed before stopping. Uncancellable insertion keeps the original specialized loops.
+
 ### Parallel candidate quality and tuning
 
 Parallel search changes candidate selection as well as execution. A serial query uses one global candidate heap; parallel queries distribute `ceil(parallel_n_candidate_ratio * N)` capacity over fixed partitions, then merge to N candidates before the same reranking stage. A concentrated group of good candidates can exceed one partition quota. Approximate-distance ties can also select different documents whose reranked distances differ. Setting `query_prune_ratio=0` removes query-term pruning but does not remove partition quotas, build-time pruning or quantization; it is not a guarantee of identical serial and parallel results.

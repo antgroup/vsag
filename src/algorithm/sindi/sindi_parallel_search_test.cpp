@@ -481,6 +481,7 @@ TEST_CASE("SINDI callback permits never exceed the invocation budget", "[ut][SIN
 }
 
 TEST_CASE("SINDI final callback stops before another callback is needed", "[ut][SINDIParallel]") {
+    const float prune = GENERATE(0.0F, 0.2F);
     CandidateDiagnosisData data(2);
     for (uint64_t i = 0; i < data.values.size(); ++i) {
         data.values[i] = {static_cast<float>(16 - i), 1.0F};
@@ -489,12 +490,16 @@ TEST_CASE("SINDI final callback stops before another callback is needed", "[ut][
     auto index = data.Build(0);
     auto query = Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
     auto filter = std::make_shared<IndependentFilters>();
-    const auto result =
-        index->KnnSearch(query,
-                         1,
-                         R"({"sindi":{"window_parallelism":4,"parallel_n_candidate_ratio":1,
-            "n_candidate":1,"query_prune_ratio":0,"filter_callback_limit":1}})",
-                         filter);
+    const auto result = index->KnnSearch(query,
+                                         1,
+                                         nlohmann::json{{"sindi",
+                                                         {{"window_parallelism", 4},
+                                                          {"parallel_n_candidate_ratio", 1},
+                                                          {"n_candidate", 1},
+                                                          {"query_prune_ratio", prune},
+                                                          {"filter_callback_limit", 1}}}}
+                                             .dump(),
+                                         filter);
     REQUIRE(result->GetDim() == 1);
     REQUIRE(result->GetIds()[0] == 100);
     REQUIRE(filter->probe->calls == 1);
