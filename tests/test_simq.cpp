@@ -58,13 +58,13 @@
 #include <vector>
 
 #include "algorithm/simq/simq.h"
-#include "io/common/io_parameter.h"
 #include "algorithm/simq/simq_utils.h"
 #include "allocator/memory_record_allocator.h"
 #include "framework/test_dataset.h"
 #include "framework/test_dataset_pool.h"
 #include "impl/thread_pool/default_thread_pool.h"
 #include "index/index_impl.h"
+#include "io/common/io_parameter.h"
 #include "test_index.h"
 #include "vsag/dataset.h"
 #include "vsag/engine.h"
