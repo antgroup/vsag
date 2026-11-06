@@ -58,6 +58,7 @@
 #include <vector>
 
 #include "algorithm/simq/simq.h"
+#include "io/common/io_parameter.h"
 #include "algorithm/simq/simq_utils.h"
 #include "allocator/memory_record_allocator.h"
 #include "framework/test_dataset.h"
@@ -1662,6 +1663,20 @@ TEST_CASE("SIMQ ReadCache with async_io survives serialize round-trip",
     auto index = r1.value();
     auto build_result = index->Build(ds.base_dataset);
     REQUIRE(build_result.has_value());
+
+    // Verify cache config was actually parsed (not silently ignored)
+    IndexCommonParam common_param;
+    common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    common_param.metric_ = MetricType::METRIC_TYPE_IP;
+    common_param.dim_ = SIMQ_DIM;
+    auto index_param_only = JsonType::Parse(build_param);
+    auto mapped = std::dynamic_pointer_cast<SIMQParameter>(
+        SIMQ::CheckAndMappingExternalParam(index_param_only["index_param"], common_param));
+    REQUIRE(mapped != nullptr);
+    REQUIRE(mapped->base_codes_param != nullptr);
+    REQUIRE(mapped->base_codes_param->io_parameter != nullptr);
+    REQUIRE(mapped->base_codes_param->io_parameter->enable_read_cache_);
+    REQUIRE(mapped->base_codes_param->io_parameter->read_cache_total_size_ == uint64_t{1048576});
 
     // Search with original index
     float recall_orig = 0.0f;
