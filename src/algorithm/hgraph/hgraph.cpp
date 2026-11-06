@@ -124,9 +124,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
-            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+             common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+             common_param.data_type_ != DataTypes::DATA_TYPE_BF16)) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "HGraph PiPNN only supports dense float32 indexes");
+                                "HGraph PiPNN only supports dense floating-point indexes");
         }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
@@ -986,13 +988,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -1006,9 +1008,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

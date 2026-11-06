@@ -155,9 +155,18 @@ IVF::Train(const DatasetPtr& data) {
     }
 
     int64_t total_elements = data->GetNumElements();
+    if (total_elements > 0 and data->GetFloat32Vectors() == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "IVF requires float32 vectors for non-empty datasets");
+    }
     int64_t dim = data->GetDim();
-    DatasetPtr train_data =
-        vsag::sample_train_data(data, total_elements, dim, train_sample_count_, allocator_);
+    DatasetPtr train_data = vsag::sample_train_data(data,
+                                                    total_elements,
+                                                    dim,
+                                                    train_sample_count_,
+                                                    allocator_,
+                                                    std::nullopt,
+                                                    common_param_.data_type_);
     int64_t sample_count = train_data->GetNumElements();
 
     partition_strategy_->Train(train_data);
@@ -182,6 +191,10 @@ IVF::add(const DatasetPtr& base, bool try_optimized_build) {
     // TODO(LHT): duplicate
     if (not partition_strategy_->is_trained_) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "ivf index add without train error");
+    }
+    if (base->GetNumElements() > 0 and base->GetFloat32Vectors() == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "IVF requires float32 vectors for non-empty datasets");
     }
     this->bucket_->Unpack();
     if (precise_bucket_ != nullptr) {
