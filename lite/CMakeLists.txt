@@ -9,6 +9,7 @@ get_filename_component(VSAG_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 option(ENABLE_TESTS "Build Lite tests with the repository's Catch2" OFF)
 option(ENABLE_COVERAGE "Instrument Lite sources for gcov" OFF)
 option(ENABLE_RABITQ_LITE_BACKEND "Enable the optional 8-bit RaBitQ graph backend" OFF)
+option(ENABLE_BENCHMARKS "Build optional reproducible Lite acceptance tools" OFF)
 
 set(VSAG_LITE_SOURCES
     "${VSAG_ROOT}/src/lite/index.cpp"
@@ -140,6 +141,21 @@ if(ENABLE_TESTS)
 endif()
 
 include(GNUInstallDirs)
+if(ENABLE_BENCHMARKS)
+    foreach(benchmark main dataset_main mixed_cpu_acceptance query_fixed_snapshot)
+        set(benchmark_target lite_acceptance_${benchmark})
+        if(benchmark STREQUAL "main")
+            set(benchmark_target lite_benchmark)
+        elseif(benchmark STREQUAL "dataset_main")
+            set(benchmark_target lite_dataset_benchmark)
+        endif()
+        add_executable(${benchmark_target} "benchmark/${benchmark}.cpp")
+        target_link_libraries(${benchmark_target} PRIVATE vsag::lite)
+        target_include_directories(${benchmark_target} PRIVATE "${VSAG_ROOT}/src")
+        target_compile_options(${benchmark_target} PRIVATE -Wall -Wextra -Wpedantic)
+    endforeach()
+endif()
+
 install(TARGETS vsag_lite EXPORT vsag-lite-config
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR})
 install(TARGETS vsag_lite_static ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
