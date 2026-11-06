@@ -125,8 +125,13 @@ run_build() {
     pip install "${LATEST_WHEEL}" --force-reinstall
     echo "   - Running tests..."
     pip install numpy pytest
-    cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log || (cat test-output.log && exit 1)
-    cd ../..
+    # Keep the repository working directory for cleanup, and do not let tee
+    # turn a failing pytest run into a successful wheel build.
+    (
+      set -o pipefail
+      cd tests/python
+      python -m pytest . -v --tb=short 2>&1 | tee test-output.log
+    )
   fi
 
   cleanup
