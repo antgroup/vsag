@@ -1,0 +1,33 @@
+# Model weights are NEVER committed to this repository.
+#
+# EmbeddingGemma 2 weights (~3 GB) are redistributed under the Gemma terms of
+# use, not this repository's license. Use scripts/fetch_weights.py to symlink
+# a locally provisioned checkpoint into weights/.
+weights/
+
+# Defense in depth: even if someone copies weights elsewhere in the tree,
+# these patterns keep large model artifacts out of git.
+*.safetensors
+*.safetensors.index.json
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.partial
+model.safetensors.parts/
+
+# Local outputs: vector indexes, embedding caches, benchmark artifacts.
+output/
+*.npy
+*.npz
+*.faiss
+
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
