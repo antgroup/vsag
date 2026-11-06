@@ -312,6 +312,11 @@ public:
                        const TestDatasetPtr& dataset);
 
     static void
+    TestEstimateBuildMemory(const std::string& index_name,
+                            const std::string& build_param,
+                            const TestDatasetPtr& dataset);
+
+    static void
     TestGetMemoryUsage(const std::string& index_name,
                        const std::string& build_param,
                        const TestDatasetPtr& dataset);

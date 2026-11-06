@@ -99,7 +99,7 @@ auto result = index->KnnSearch(
 | `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `rabitq_fused_datacell` | bool | `false` | 将底层 HGraph 节点与 RaBitQ split 编码融合到一条内存记录中；要求 L2/IP、flat 内存图、x 在 `[1, 4]` 的 RaBitQ x+y split 编码，并满足 [RaBitQ x+y split](../quantization/rabitq_split.md) 中的其他约束 |
 | `train_sample_count` | int | `65536` | 量化器训练的最大采样向量数；显式配置时最小为 `512` |
-| `build_thread_count` | int | `100` | 构建阶段并发线程数 |
+| `build_thread_count` | int | `1` | 构建阶段并发线程数，同时限制 NSW 插入的未完成任务数 |
 | `support_duplicate` | bool | `false` | 合并重复向量的图节点，并保留各自的标签 |
 | `deduplicate_storage` | bool | `false` | 让重复向量共享存储；需同时设置 `support_duplicate: true` |
 | `duplicate_distance_threshold` | float | `0.0` | 重复判定距离阈值。大于 `0` 时按最近候选的距离判重；等于 `0` 时先比较最近候选的编码，不匹配则继续检查构建搜索返回的其余候选，直到找到匹配 |
@@ -116,6 +116,10 @@ auto result = index->KnnSearch(
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
 `sq8_local` 和 `sq4_local` 支持 float32 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
+
+对于 NSW 图插入，即使 `Resource` 提供了更大的线程池，`build_thread_count` 仍会限制未完成的图插入和探测任务数。
+默认值 `1` 因此会让外部线程池上的图插入阶段串行执行；如需更多并发图插入，请显式调大该参数。编码准备阶段可能使用不同的并发度。
+`EstimateBuildMemory` 使用相同的上限计算每个 worker 的构图探测临时内存。
 
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
 存储约翻倍，因此默认关闭。

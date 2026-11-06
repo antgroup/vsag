@@ -27,7 +27,9 @@
 #include "analyzer/hgraph_analyzer.h"
 #include "attr/argparse.h"
 #include "common.h"
+#include "datacell/extra_info_datacell_parameter.h"
 #include "datacell/flatten_interface.h"
+#include "datacell/graph_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
 #include "datacell/rabitq_split_datacell.h"
 #include "datacell/sparse_graph_datacell.h"
@@ -41,6 +43,7 @@
 #include "impl/reorder/flatten_reorder.h"
 #include "impl/searcher/hgraph_rabitq_searcher.h"
 #include "index/index_impl.h"
+#include "io/memory_block_io/memory_block_io_parameter.h"
 #include "io/reader_io/reader_io_parameter.h"
 #include "io/user_defined_io/user_defined_io_parameter.h"
 #include "typing.h"
@@ -437,6 +440,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
                 create_new_raw_vector_ = false;
             }
         }
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_ESTIMATE_BUILD_MEMORY,
+                                              this->can_estimate_build_memory());
     }
     return true;
 }
@@ -444,7 +449,8 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
 uint64_t
 HGraph::EstimateMemory(uint64_t num_elements) const {
     uint64_t estimate_memory = 0;
-    auto block_size = Options::Instance().block_size_limit();
+    const auto block_size =
+        MemoryBlockIOParameter::NearestPowerOfTwo(Options::Instance().block_size_limit());
     auto element_count =
         next_multiple_of_power_of_two(num_elements, this->resize_increase_count_bit_);
 
@@ -453,31 +459,79 @@ HGraph::EstimateMemory(uint64_t num_elements) const {
             std::ceil(static_cast<double>(memory) / static_cast<double>(block_size)) *
             static_cast<double>(block_size));
     };
+    auto retained_store_memory = [&](uint64_t memory, const IOParamPtr& io_parameter) {
+        if (io_parameter != nullptr and io_parameter->Kind() == IOKind::MEMORY) {
+            // MemoryIO allocates exactly the requested contiguous byte range. Only blocked
+            // backends retain a final partially used block beyond the logical store size.
+            return memory;
+        }
+        const auto block_io = std::dynamic_pointer_cast<MemoryBlockIOParameter>(io_parameter);
+        const auto allocation_block_size = block_io == nullptr ? block_size : block_io->block_size_;
+        return block_memory_ceil(memory, allocation_block_size);
+    };
+    auto flatten_io = [](const FlattenInterfaceParamPtr& param) -> IOParamPtr {
+        return param == nullptr ? nullptr : param->io_parameter;
+    };
+    const auto hgraph_param = std::dynamic_pointer_cast<HGraphParameter>(this->create_param_ptr_);
+    const auto graph_param =
+        hgraph_param == nullptr
+            ? GraphDataCellParamPtr{}
+            : std::dynamic_pointer_cast<GraphDataCellParameter>(hgraph_param->bottom_graph_param);
+    const auto graph_io = graph_param == nullptr ? IOParamPtr{} : graph_param->io_parameter_;
 
     if (this->rabitq_fused_datacell_ != nullptr) {
-        const auto fused_memory = this->rabitq_fused_datacell_->RecordSize() * element_count;
-        estimate_memory += block_memory_ceil(fused_memory, block_size);
+        // AlignedBlockLayout captures its block size at construction and keeps every record
+        // within a block, so use its actual block count rather than rounding packed records
+        // with the current global option.
+        estimate_memory += this->rabitq_fused_datacell_->EstimateMemory(element_count);
     } else {
         if (this->basic_flatten_codes_->InMemory()) {
             auto base_memory = this->basic_flatten_codes_->code_size_ * element_count;
-            estimate_memory += block_memory_ceil(base_memory, block_size);
+            const auto base_io =
+                hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->base_codes_param);
+            estimate_memory += retained_store_memory(base_memory, base_io);
         }
         if (bottom_graph_->InMemory()) {
             auto bottom_graph_memory =
                 (this->bottom_graph_->maximum_degree_ + 1) * sizeof(InnerIdType) * element_count;
-            estimate_memory += block_memory_ceil(bottom_graph_memory, block_size);
+            estimate_memory += retained_store_memory(bottom_graph_memory, graph_io);
         }
+    }
+
+    if (this->basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_SQ8) {
+        // ScalarQuantizer owns lower_bound_ and diff_ as default-heap std::vector<float>s.
+        // They live for the quantizer's lifetime but are invisible to the index allocator.
+        estimate_memory += 2 * static_cast<uint64_t>(this->dim_) * sizeof(float);
     }
 
     if (has_precise_reorder() && this->high_precise_codes_->InMemory() &&
         not this->ignore_reorder_) {
         auto precise_memory = this->high_precise_codes_->code_size_ * element_count;
-        estimate_memory += block_memory_ceil(precise_memory, block_size);
+        const auto precise_io =
+            hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->precise_codes_param);
+        estimate_memory += retained_store_memory(precise_memory, precise_io);
+    }
+
+    if (this->create_new_raw_vector_ and this->raw_vector_ != nullptr and
+        this->raw_vector_->InMemory()) {
+        // A separate raw-vector store (e.g. sq8 base codes with store_raw_vector) retains a
+        // full fp32 row per element next to the base codes; resize() grows it and
+        // insert_persistent_codes_unlocked() populates it during the build. When the base or
+        // precise codes already hold the raw vectors, raw_vector_ aliases them and
+        // create_new_raw_vector_ stays false, so nothing is counted twice.
+        auto raw_vector_memory = this->raw_vector_->code_size_ * element_count;
+        const auto raw_io =
+            hgraph_param == nullptr ? IOParamPtr{} : flatten_io(hgraph_param->raw_vector_param);
+        estimate_memory += retained_store_memory(raw_vector_memory, raw_io);
     }
 
     if (extra_info_size_ > 0 && this->extra_infos_ != nullptr && this->extra_infos_->InMemory()) {
         auto extra_info_memory = this->extra_infos_->ExtraInfoSize() * element_count;
-        estimate_memory += block_memory_ceil(extra_info_memory, block_size);
+        const auto extra_info_io =
+            hgraph_param == nullptr || hgraph_param->extra_info_param == nullptr
+                ? IOParamPtr{}
+                : hgraph_param->extra_info_param->io_parameter;
+        estimate_memory += retained_store_memory(extra_info_memory, extra_info_io);
     }
 
     auto label_map_memory =
@@ -942,6 +996,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
 
     if (basic_flatten_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = basic_flatten_codes_;
+        create_new_raw_vector_ = false;
         has_raw_vector_ = true;
         return;
     }
@@ -949,6 +1004,7 @@ HGraph::check_and_init_raw_vector(const FlattenInterfaceParamPtr& raw_vector_par
     if (high_precise_codes_ != nullptr and
         high_precise_codes_->GetQuantizerName() == QUANTIZATION_TYPE_VALUE_FP32) {
         raw_vector_ = high_precise_codes_;
+        create_new_raw_vector_ = false;
         has_raw_vector_ = true;
         return;
     }
