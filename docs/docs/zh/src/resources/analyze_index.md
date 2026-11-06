@@ -348,10 +348,10 @@ pyvsag-analyze-index \
 | `hgraph`、`lazy_hgraph` | 支持 | 支持 | 图健康度指标通过 `GetStats()` 输出。 |
 | `ivf` | 支持 | 支持 | 开启 reorder 时包含量化相关字段。 |
 | `pyramid` | 支持 | 支持（仅 KNN） | 命令行无法表达按路径限定的查询；请使用 C++ 接口设置路径。 |
-| `sindi` | 支持 | 支持 | 稀疏索引；召回与偏差指标需要 `base_path`/`groundtruth_path`。 |
-| `sindi_v2` | 支持 | 支持 | 稀疏索引；动态分析输出基线计数和查询耗时，索引专属质量指标标记为 skipped；不适用 SINDI 的召回/偏差流程。 |
+| `sindi` | 支持 | 支持 | 稀疏索引；支持多行 query 集；召回与偏差指标需要 `base_path`/`groundtruth_path`。 |
+| `sindi_v2` | 支持 | 支持 | 稀疏索引；动态分析要求单行 query（`nrow = 1`），输出基线计数和查询耗时，索引专属质量指标标记为 skipped；不适用 SINDI 的召回/偏差流程。 |
 | `simq` | 支持 | 支持（无指标） | 使用内积的 dense float32 多向量索引。当前动态分析不消费请求并返回 `{}`；`base_path` 与 `groundtruth_path` 不会生成召回、偏差或其他 query 指标。 |
-| `brute_force` | 支持 | 支持 | 精确搜索基线。 |
+| `brute_force` | 支持 | 支持 | 精确搜索基线；动态搜索要求单行 dense query（`rows = 1`）。 |
 | `warp` | 支持 | 不支持 | 文件式接口只能加载 dense float32 或 sparse query，无法提供 WARP 所需的 multi-vector query。动态分析请通过 C++ 接口传入 multi-vector query 数据集。 |
 
 序列化索引输入：由 `Index::Serialize(std::ostream&)` / `pyvsag.Index.save()` 生成、包含 VSAG
@@ -360,12 +360,14 @@ footer metadata 的文件。缺少 metadata 或由不兼容 VSAG 版本写入的
 
 查询数据集输入：
 
-- Dense：`uint32 rows, uint32 cols, float32 data[rows * cols]`；作为 analyzer query 输入时
-  `rows` 必须为 `1`。
+- Dense：`uint32 rows, uint32 cols, float32 data[rows * cols]`。HGraph、IVF、Pyramid，以及当前
+  后端为 HGraph 的 LazyHGraph 等支持批处理的 analyzer 会在一次动态分析中保留并处理所有行。
+  BruteForce，以及当前后端为 BruteForce 的 LazyHGraph，动态搜索要求 `rows = 1`。
 - Sparse CSR：`int64 nrow, int64 ncol, int64 nnz`，随后是 `int64 indptr[nrow + 1]`、
-  `int32 indices[nnz]` 与 `float32 data[nnz]`；作为 analyzer query 输入时 `nrow` 必须为 `1`。
+  `int32 indices[nnz]` 与 `float32 data[nnz]`。SINDI 会在一次动态分析中保留并处理所有行；
+  SINDI_V2 要求 `nrow = 1`。
 - SINDI 真值集：`.dev.gt` 布局——`uint32 query_count, uint32 topk`，随后是展开后的
-  `int32 ids` 与 `float32 distances`。
+  `int32 ids` 与 `float32 distances`。真值集的 `query_count` 必须与 query 行数一致才能使用。
 
 ### 从源码构建 C++ 工具
 
@@ -387,7 +389,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **是** | 待分析的 VSAG 索引文件路径。 |
 | `--build_parameter` | `-bp` | 否 | 加载索引时使用的构建参数（JSON）。默认使用索引文件内嵌的原始参数。 |
-| `--query_path` | `-qp` | 否 | 单行查询向量数据集的文件路径；多行 dense 与 sparse query 文件会被拒绝。该路径不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
+| `--query_path` | `-qp` | 否 | 查询向量数据集的文件路径。支持批处理的 analyzer 接受多行输入；BruteForce（包括 LazyHGraph 的 BruteForce 阶段）要求单行 dense query，SINDI_V2 要求单行 sparse query。该路径不是 Pyramid hierarchy 路径元数据。如果未提供，则只进行静态分析。 |
 | `--query_data_type` | | 否 | 查询数据类型：`auto`、`dense` 或 `sparse`。`auto` 会对 SINDI 使用 sparse 加载。 |
 | `--base_path` | | 否 | SINDI 分析可选的 sparse CSR 原始 base 数据集路径。 |
 | `--groundtruth_path` | | 否 | SINDI 可选的 `.dev.gt` 真值集路径；提供后直接复用。 |

@@ -368,10 +368,10 @@ limitations of the file-based query interfaces:
 | `hgraph`, `lazy_hgraph` | Yes | Yes | Graph health metrics are reported through `GetStats()`. |
 | `ivf` | Yes | Yes | Quantization fields appear when reorder is enabled. |
 | `pyramid` | Yes | Yes (KNN only) | Path-scoped queries cannot be expressed through the CLI; use the C++ API to attach paths. |
-| `sindi` | Yes | Yes | Sparse index; pass `base_path`/`groundtruth_path` for recall and bias metrics. |
-| `sindi_v2` | Yes | Yes | Sparse index; dynamic analysis reports baseline counts and query latency, with index-specific quality metrics skipped. The SINDI recall/bias workflow does not apply. |
+| `sindi` | Yes | Yes | Sparse index; accepts multi-row query sets. Pass `base_path`/`groundtruth_path` for recall and bias metrics. |
+| `sindi_v2` | Yes | Yes | Sparse index; dynamic analysis requires exactly one query row (`nrow = 1`), reports baseline counts and query latency, and skips index-specific quality metrics. The SINDI recall/bias workflow does not apply. |
 | `simq` | Yes | Yes (no metrics) | Dense float32 multi-vector index using inner product. Dynamic analysis currently returns `{}` without consuming the request; `base_path` and `groundtruth_path` do not produce recall, bias, or other query metrics. |
-| `brute_force` | Yes | Yes | Exact-search baseline. |
+| `brute_force` | Yes | Yes | Exact-search baseline; dynamic search requires one dense query row (`rows = 1`). |
 | `warp` | Yes | No | The file interfaces load only dense float32 or sparse queries, not the multi-vector queries required by WARP. Use the C++ API with a multi-vector query dataset for dynamic analysis. |
 
 Serialized index input: a file produced by `Index::Serialize(std::ostream&)` /
@@ -381,12 +381,16 @@ partial data.
 
 Query dataset inputs:
 
-- Dense: `uint32 rows, uint32 cols, float32 data[rows * cols]`; `rows` must be `1` for analyzer
-  query input.
+- Dense: `uint32 rows, uint32 cols, float32 data[rows * cols]`. Batch-capable analyzers, including
+  HGraph, IVF, Pyramid, and LazyHGraph with an active HGraph backend, preserve and process all rows
+  in one dynamic analysis. BruteForce, and LazyHGraph with an active BruteForce backend, require
+  `rows = 1` for dynamic search.
 - Sparse CSR: `int64 nrow, int64 ncol, int64 nnz`, followed by `int64 indptr[nrow + 1]`,
-  `int32 indices[nnz]` and `float32 data[nnz]`; `nrow` must be `1` for analyzer query input.
+  `int32 indices[nnz]` and `float32 data[nnz]`. SINDI preserves and processes all rows in one
+  dynamic analysis; SINDI_V2 requires `nrow = 1`.
 - SINDI ground truth: `.dev.gt` layout — `uint32 query_count, uint32 topk`, followed by
-  flattened `int32 ids` and `float32 distances`.
+  flattened `int32 ids` and `float32 distances`. `query_count` must match the number of query rows
+  for the ground truth to be used.
 
 ### Building the C++ tool from source
 
@@ -408,7 +412,7 @@ cmake --build build-release -j
 | --- | --- | --- | --- |
 | `--index_path` | `-i` | **Yes** | Path to the serialized VSAG index file. |
 | `--build_parameter` | `-bp` | No | Build parameters (JSON) used when reloading the index. Defaults to the parameters embedded in the index file. |
-| `--query_path` | `-qp` | No | Binary single-row query vector dataset path. Multi-row dense and sparse query files are rejected. This is not Pyramid hierarchy-path metadata. If omitted, only static analysis is performed. |
+| `--query_path` | `-qp` | No | Binary query vector dataset path. Batch-capable analyzers accept multiple rows; BruteForce (including LazyHGraph's BruteForce phase) requires one dense query row, and SINDI_V2 requires one sparse query row. This is not Pyramid hierarchy-path metadata. If omitted, only static analysis is performed. |
 | `--query_data_type` | | No | Query dataset type: `auto`, `dense`, or `sparse`. `auto` uses sparse loading for SINDI. |
 | `--base_path` | | No | Optional sparse CSR base dataset for SINDI analysis and ground-truth generation. |
 | `--groundtruth_path` | | No | Optional SINDI `.dev.gt` ground-truth file. If present, it is reused. |

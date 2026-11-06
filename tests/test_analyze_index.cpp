@@ -40,6 +40,19 @@ constexpr const char* kIndexParam = R"({
     }
 })";
 
+constexpr const char* kHGraphIndexParam = R"({
+    "type": "hgraph",
+    "dtype": "float32",
+    "metric_type": "l2",
+    "dim": 4,
+    "index_param": {
+        "base_quantization_type": "fp32",
+        "max_degree": 8,
+        "ef_construction": 16,
+        "build_thread_count": 1
+    }
+})";
+
 constexpr const char* kCosineIndexParam = R"({
     "type": "brute_force",
     "dtype": "float32",
@@ -126,8 +139,10 @@ MakeVectors() {
 }
 
 std::string
-BuildAndSaveIndex(const std::string& index_path, const std::string& index_param = kIndexParam) {
-    auto index = vsag::Factory::CreateIndex("brute_force", index_param);
+BuildAndSaveIndex(const std::string& index_path,
+                  const std::string& index_param = kIndexParam,
+                  const std::string& index_name = "brute_force") {
+    auto index = vsag::Factory::CreateIndex(index_name, index_param);
     REQUIRE(index.has_value());
 
     auto vectors = MakeVectors();
@@ -138,6 +153,35 @@ BuildAndSaveIndex(const std::string& index_path, const std::string& index_param 
 
     auto base = vsag::Dataset::Make();
     base->NumElements(kNumElements)->Dim(kDim)->Float32Vectors(vectors.data())->Ids(ids.data());
+    REQUIRE(index.value()->Build(base).has_value());
+
+    std::ofstream stream(index_path, std::ios::binary | std::ios::out);
+    REQUIRE(stream.is_open());
+    REQUIRE(index.value()->Serialize(stream).has_value());
+    stream.close();
+    return index_path;
+}
+
+std::string
+BuildAndSaveSparseIndex(const std::string& index_path) {
+    auto index = vsag::Factory::CreateIndex("sindi", kSindiIndexParam);
+    REQUIRE(index.has_value());
+
+    constexpr int64_t num_elements = 2;
+    std::vector<uint32_t> term_ids{0, 1};
+    std::vector<float> values(num_elements, 1.0F);
+    std::vector<vsag::SparseVector> vectors(num_elements);
+    std::vector<int64_t> ids{0, 1};
+    for (int64_t i = 0; i < num_elements; ++i) {
+        vectors[static_cast<uint64_t>(i)] = {1, term_ids.data() + i, values.data() + i};
+    }
+
+    auto base = vsag::Dataset::Make();
+    base->NumElements(num_elements)
+        ->Dim(128)
+        ->SparseVectors(vectors.data())
+        ->Ids(ids.data())
+        ->Owner(false);
     REQUIRE(index.value()->Build(base).has_value());
 
     std::ofstream stream(index_path, std::ios::binary | std::ios::out);
@@ -254,6 +298,22 @@ WriteSparseQueryFile(const std::string& query_path, int64_t rows) {
                  static_cast<std::streamsize>(indices.size() * sizeof(int32_t)));
     stream.write(reinterpret_cast<const char*>(values.data()),
                  static_cast<std::streamsize>(values.size() * sizeof(float)));
+    stream.close();
+}
+
+void
+WriteGroundTruthFile(const std::string& groundtruth_path) {
+    std::ofstream stream(groundtruth_path, std::ios::binary | std::ios::out);
+    REQUIRE(stream.is_open());
+    const std::vector<uint32_t> header{2, 1};
+    const std::vector<int32_t> ids{0, 1};
+    const std::vector<float> distances{0.0F, 0.0F};
+    stream.write(reinterpret_cast<const char*>(header.data()),
+                 static_cast<std::streamsize>(header.size() * sizeof(uint32_t)));
+    stream.write(reinterpret_cast<const char*>(ids.data()),
+                 static_cast<std::streamsize>(ids.size() * sizeof(int32_t)));
+    stream.write(reinterpret_cast<const char*>(distances.data()),
+                 static_cast<std::streamsize>(distances.size() * sizeof(float)));
     stream.close();
 }
 
@@ -512,23 +572,30 @@ TEST_CASE("AnalyzeIndex runs dynamic analysis when a query file is provided", "[
     REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
-TEST_CASE("AnalyzeIndex rejects multi-row dense query files", "[analyze_index]") {
+TEST_CASE("AnalyzeIndex accepts multi-row dense query files on HGraph", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_multi_row_query");
-    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", kHGraphIndexParam, "hgraph");
     const std::string query_path = temp_dir.path + "queries.bin";
     WriteDenseQueryFile(query_path, 2, kDim);
 
     vsag::IndexAnalysisOptions options;
     options.index_path = index_path;
+    options.build_parameter = kHGraphIndexParam;
     options.query_path = query_path;
     options.query_data_type = "dense";
+    options.search_parameter = R"({"hgraph":{"ef_search":16}})";
+    options.topk = 2;
 
-    REQUIRE_THROWS_WITH(
-        vsag::AnalyzeIndex(options),
-        Catch::Matchers::ContainsSubstring("must contain exactly one query vector (rows=1)"));
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["name"].GetString() == "hgraph");
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+    REQUIRE(report["dynamic_analysis"]["results"]["recall_query"].GetFloat() == 1.0F);
 }
 
-TEST_CASE("AnalyzeIndex rejects multi-row sparse query files", "[analyze_index]") {
+TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_multi_row_sparse_query");
     const std::string index_path =
         SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi", kSindiIndexParam);
@@ -542,9 +609,55 @@ TEST_CASE("AnalyzeIndex rejects multi-row sparse query files", "[analyze_index]"
     options.query_data_type = "sparse";
     options.topk = 2;
 
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+}
+
+TEST_CASE("AnalyzeIndex aligns SINDI ground truth with every query row", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_multi_row_groundtruth");
+    const std::string index_path = BuildAndSaveSparseIndex(temp_dir.path + "index.vsag");
+    const std::string query_path = temp_dir.path + "queries.bin";
+    const std::string groundtruth_path = temp_dir.path + "groundtruth.dev.gt";
+    WriteSparseQueryFile(query_path, 2);
+    WriteGroundTruthFile(groundtruth_path);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiIndexParam;
+    options.query_path = query_path;
+    options.query_data_type = "sparse";
+    options.groundtruth_path = groundtruth_path;
+    options.search_parameter =
+        R"({"sindi":{"n_candidate":1,"query_prune_ratio":0.0,"term_prune_ratio":0.0}})";
+    options.topk = 1;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
+    REQUIRE(report["dynamic_analysis"]["results"]["recall_query"].GetFloat() == 1.0F);
+}
+
+TEST_CASE("AnalyzeIndex rejects multi-row sparse queries for SINDI V2", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_multi_row_sindi_v2");
+    const std::string index_path =
+        SaveEmptyIndex(temp_dir.path + "index.vsag", "sindi_v2", kSindiV2IndexParam);
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteSparseQueryFile(query_path, 2);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.build_parameter = kSindiV2IndexParam;
+    options.query_path = query_path;
+    options.query_data_type = "sparse";
+    options.topk = 2;
+
     REQUIRE_THROWS_WITH(
         vsag::AnalyzeIndex(options),
-        Catch::Matchers::ContainsSubstring("must contain exactly one query row (nrow=1)"));
+        Catch::Matchers::ContainsSubstring(
+            "index type 'sindi_v2' requires exactly one query row for dynamic analysis, got 2"));
 }
 
 TEST_CASE("AnalyzeIndex explicitly skips search for an empty SINDI", "[analyze_index]") {
