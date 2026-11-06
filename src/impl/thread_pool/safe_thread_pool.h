@@ -17,6 +17,7 @@
 
 #include "default_thread_pool.h"
 #include "impl/logger/logger.h"
+#include "ring_buffer_thread_pool.h"
 #include "utils/pointer_define.h"
 
 namespace vsag {
@@ -27,7 +28,7 @@ public:
     static std::shared_ptr<SafeThreadPool>
     FactoryDefaultThreadPool() {
         return std::make_shared<SafeThreadPool>(
-            new DefaultThreadPool(Options::Instance().num_threads_building()), true);
+            new RingBufferThreadPool(Options::Instance().num_threads_building()), true);
     }
 
 public:
@@ -95,6 +96,9 @@ public:
                 return true;
             }
         }
+        if (const auto* identity = dynamic_cast<const RingBufferThreadPool*>(pool)) {
+            return identity->IsCurrentThread();
+        }
         if (const auto* identity = dynamic_cast<const DefaultThreadPool*>(pool)) {
             return identity->IsCurrentThread();
         }
@@ -114,6 +118,9 @@ public:
         // Even if some workers are idle now, the pool reserves none for this query.
         // Concurrent nested queries could occupy them all before submit/join finishes;
         // execute same-pool queries inline rather than relying on transient spare capacity.
+        if (const auto* identity = dynamic_cast<const RingBufferThreadPool*>(pool_)) {
+            return identity->IsCurrentThread();
+        }
         if (const auto* identity = dynamic_cast<const DefaultThreadPool*>(pool_)) {
             return identity->IsCurrentThread();
         }
