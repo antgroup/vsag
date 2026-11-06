@@ -39,19 +39,23 @@ using namespace vsag;
 
 TEST_CASE("SINDI fixed partitions conserve capacity independently of slots",
           "[ut][SINDIParallel]") {
-    const auto plan = SindiParallelPlan::Make(37, 500, 2.0);
+    const auto plan = SindiParallelPlan::Make(37, 500, 2.0, 20);
     REQUIRE(plan.boundaries.front() == 0);
     REQUIRE(plan.boundaries.back() == 37);
     REQUIRE(plan.quotas.size() == 16);
     REQUIRE(std::accumulate(plan.quotas.begin(), plan.quotas.end(), uint64_t{0}) == 1000);
     REQUIRE(plan.quotas[0] == 63);
     REQUIRE(plan.quotas[15] == 62);
-    REQUIRE(SindiParallelPlan::Make(0, 500, 1).quotas.empty());
-    REQUIRE(SindiParallelPlan::Make(1, 500, 1).quotas[0] == 500);
-    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, std::numeric_limits<double>::infinity()));
-    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, std::numeric_limits<double>::quiet_NaN()));
-    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, 1e100));
-    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, 0.9));
+    REQUIRE(SindiParallelPlan::Make(0, 500, 1, 100).quotas.empty());
+    REQUIRE(SindiParallelPlan::Make(1, 500, 1, 100).quotas[0] == 500);
+    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, std::numeric_limits<double>::infinity(), 100));
+    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, std::numeric_limits<double>::quiet_NaN(), 100));
+    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, 1e100, 100));
+    REQUIRE_THROWS(SindiParallelPlan::Make(1, 500, 0.9, 100));
+    REQUIRE_THROWS(SindiParallelPlan::Make(4, 8, 2, 0));
+    REQUIRE_THROWS(SindiParallelPlan::Make(4, 8, 2, 9));
+    REQUIRE(SindiParallelPlan::Make(37, 10, 2, 10).quotas.size() == 2);
+    REQUIRE(SindiParallelPlan::Make(37, 500, 2, 100).quotas.size() == 10);
 }
 
 namespace {
@@ -661,7 +665,7 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
             CAPTURE(value);
             REQUIRE(setenv("VSAG_SINDI_MAX_CANDIDATES", value, 1) == 0);
             try {
-                (void)SindiParallelPlan::Make(4, 1, 1);
+                (void)SindiParallelPlan::Make(4, 1, 1, 1);
                 FAIL("invalid deployment capacity was accepted");
             } catch (const VsagException& error) {
                 REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
@@ -670,9 +674,9 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
             }
         }
         REQUIRE(setenv("VSAG_SINDI_MAX_CANDIDATES", "1024", 1) == 0);
-        REQUIRE(SindiParallelPlan::Make(4, 8, 2).capacity == 16);
+        REQUIRE(SindiParallelPlan::Make(4, 8, 2, 2).capacity == 16);
         REQUIRE(unsetenv("VSAG_SINDI_MAX_CANDIDATES") == 0);
-        REQUIRE(SindiParallelPlan::Make(4, 8, 2).capacity == 16);
+        REQUIRE(SindiParallelPlan::Make(4, 8, 2, 2).capacity == 16);
         return;
     }
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
