@@ -188,10 +188,13 @@ candidate_results(const DatasetPtr& result) {
 }
 
 void
-require_partition_diagnosis(const DatasetPtr& result, uint64_t capacity, uint32_t workers) {
+require_partition_diagnosis(const DatasetPtr& result,
+                            uint64_t capacity,
+                            uint32_t workers,
+                            uint64_t partitions = 4) {
     const auto stats = nlohmann::json::parse(result->GetStatistics());
     REQUIRE(stats["sindi_candidate_capacity"] == capacity);
-    REQUIRE(stats["sindi_partitions"] == 4);
+    REQUIRE(stats["sindi_partitions"] == partitions);
     REQUIRE(stats["sindi_windows_processed"] == 4);
     REQUIRE(stats["sindi_execution_complete"] == true);
     const auto granted = stats["sindi_granted_slots"].get<uint32_t>();
@@ -201,7 +204,7 @@ require_partition_diagnosis(const DatasetPtr& result, uint64_t capacity, uint32_
         // Prepared resources with no background workers still exercise partitions.
         // Explicit P1 would instead exercise the original serial algorithm.
         REQUIRE(granted == 1);
-    } else if (stats["sindi_cpu_slots"].get<uint32_t>() > 1) {
+    } else if (partitions > 1 and stats["sindi_cpu_slots"].get<uint32_t>() > 1) {
         REQUIRE(granted > 1);
     }
 }
@@ -218,10 +221,6 @@ TEST_CASE("SINDI unpruned candidate concentration explains quota differences",
     // in the first partition. These expectations follow directly from 1-dot.
     const std::vector<std::pair<int64_t, float>> exact{
         {100, -15}, {101, -14}, {102, -13}, {103, -12}};
-    const std::vector<std::pair<int64_t, float>> ratio_one{
-        {100, -15}, {104, -11}, {108, -7}, {112, -3}};
-    const std::vector<std::pair<int64_t, float>> ratio_two{
-        {100, -15}, {101, -14}, {104, -11}, {105, -10}};
     for (uint32_t workers : {0U, 3U}) {
         CAPTURE(workers);
         auto index = data.Build(workers);
@@ -229,18 +228,16 @@ TEST_CASE("SINDI unpruned candidate concentration explains quota differences",
         REQUIRE(candidate_results(serial) == exact);
         REQUIRE(candidate_results(data.Search(*index, 1, 4, 4, 0, 4)) == exact);
 
-        // Characterize the current allocation policy, not acceptance of a
-        // serial-compatibility deviation: R=1/2 admits only 1/2 winners locally.
+        // Small total budgets reduce partitions so every local heap retains TopK.
         auto limited_one = data.Search(*index, 4, 4, 1, 0, 4);
         auto limited_two = data.Search(*index, 4, 4, 2, 0, 4);
-        REQUIRE(candidate_results(limited_one) == ratio_one);
-        REQUIRE(candidate_results(limited_two) == ratio_two);
-        require_partition_diagnosis(limited_one, 4, workers);
-        require_partition_diagnosis(limited_two, 8, workers);
-        REQUIRE(candidate_results(data.Search(*index, 8, 4, 2, 0, 4)) == ratio_two);
+        REQUIRE(candidate_results(limited_one) == exact);
+        REQUIRE(candidate_results(limited_two) == exact);
+        require_partition_diagnosis(limited_one, 4, workers, 1);
+        require_partition_diagnosis(limited_two, 8, workers, 2);
+        REQUIRE(candidate_results(data.Search(*index, 8, 4, 2, 0, 4)) == exact);
 
-        // Either knob can remove this particular quota loss. Neither outcome
-        // establishes a universal default or a latency recommendation.
+        // A larger budget permits more partitions while retaining these winners.
         auto larger_ratio = data.Search(*index, 4, 4, 4, 0, 4);
         auto more_candidates = data.Search(*index, 4, 8, 2, 0, 4);
         REQUIRE(candidate_results(larger_ratio) == exact);
@@ -336,7 +333,7 @@ TEST_CASE("SINDI parallel search preserves filtering and deterministic ties",
         REQUIRE(ids == expected);
         auto stats = nlohmann::json::parse(result->GetStatistics());
         REQUIRE(stats["sindi_candidate_capacity"] == 64);
-        REQUIRE(stats["sindi_partitions"] == 16);
+        REQUIRE(stats["sindi_partitions"] == 8);
         REQUIRE(stats["sindi_granted_slots"].get<uint32_t>() <= slots);
         REQUIRE(stats["sindi_execution_complete"] == true);
         REQUIRE(stats["sindi_windows_processed"] == 20);
@@ -833,3 +830,52 @@ TEST_CASE("SINDI resource contract is checked in fresh processes", "[ut][SINDIPa
     }
 }
 #endif
+
+TEST_CASE("SINDI concentrated matches retain TopK with omitted candidate count",
+          "[ut][SINDIParallel][SINDIConcentratedTopK]") {
+    CandidateDiagnosisData data(1);
+    data.query_values[0] = 1;
+    for (uint32_t i = 12; i < 16; ++i) {
+        data.values[i][0] = static_cast<float>(i);
+    }
+    for (uint32_t workers : {0U, 3U}) {
+        auto index = data.Build(workers);
+        auto query =
+            Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
+        const auto serial =
+            index->KnnSearch(query, 4, R"({"sindi":{"query_prune_ratio":0}})", nullptr);
+        for (uint32_t slots : {2U, 4U, 8U}) {
+            const auto params = nlohmann::json{
+                {"sindi", {{"window_parallelism", slots}, {"query_prune_ratio", 0}}}};
+            const auto parallel = index->KnnSearch(query, 4, params.dump(), nullptr);
+            REQUIRE(parallel->GetDim() == 4);
+            REQUIRE(candidate_results(parallel) == candidate_results(serial));
+            const auto stats = nlohmann::json::parse(parallel->GetStatistics());
+            REQUIRE(stats["sindi_execution_complete"] == true);
+            REQUIRE(stats["sindi_stop_reason"] == "none");
+            REQUIRE(stats["sindi_candidate_capacity"] == 8);
+            REQUIRE(stats["sindi_partitions"] == 2);
+        }
+    }
+}
+
+TEST_CASE("SINDI range entry points omit KNN CPU diagnostics", "[ut][SINDIParallel]") {
+    CandidateDiagnosisData data(1);
+    for (auto& value : data.values) value[0] = 1;
+    auto index = data.Build(0);
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
+    SearchRequest request;
+    request.query_ = query;
+    request.mode_ = SearchMode::RANGE_SEARCH;
+    request.radius_ = 1;
+    request.params_str_ = R"({"sindi":{"profile_cpu":true}})";
+    const auto direct = index->RangeSearch(query, request.radius_, request.params_str_, nullptr);
+    const auto via_request = index->SearchWithRequest(request);
+    REQUIRE(direct->GetDim() > 0);
+    REQUIRE(candidate_results(via_request) == candidate_results(direct));
+    for (const auto& result : {direct, via_request}) {
+        const auto stats = nlohmann::json::parse(result->GetStatistics());
+        REQUIRE_FALSE(stats.contains("sindi_cpu_time_enabled"));
+        REQUIRE_FALSE(stats.contains("sindi_strategy"));
+    }
+}

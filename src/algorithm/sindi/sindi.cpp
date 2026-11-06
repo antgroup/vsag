@@ -1234,11 +1234,12 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     SearchStatistics statistics;
     auto* statistics_ptr = &statistics;
     SindiCpuTime caller_cpu;
-    SindiCpuTimer cpu_timer(search_param.profile_cpu, caller_cpu);
+    const bool profile_cpu = search_param.profile_cpu and not is_range;
+    SindiCpuTimer cpu_timer(profile_cpu, caller_cpu);
     const auto annotate = [&](const DatasetPtr& result) {
         cpu_timer.Stop();
-        result->Statistics(SindiExecutionStatistics(
-            statistics.ToJson(), nullptr, caller_cpu, search_param.profile_cpu));
+        result->Statistics(
+            SindiExecutionStatistics(statistics.ToJson(), nullptr, caller_cpu, profile_cpu));
     };
 
     InnerSearchParam inner_param;

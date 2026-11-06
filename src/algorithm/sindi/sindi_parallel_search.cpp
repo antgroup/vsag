@@ -171,10 +171,10 @@ SindiExecutionStatistics(JsonType json,
 }
 
 SindiParallelPlan
-SindiParallelPlan::Make(uint64_t windows, uint64_t candidates, double ratio) {
+SindiParallelPlan::Make(uint64_t windows, uint64_t candidates, double ratio, uint64_t topk) {
     uint64_t ratio_bits = 0;
     std::memcpy(&ratio_bits, &ratio, sizeof(ratio_bits));
-    CHECK_ARGUMENT(candidates > 0 and ratio >= 1.0 and
+    CHECK_ARGUMENT(topk > 0 and candidates >= topk and ratio >= 1.0 and
                        (ratio_bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL,
                    "invalid parallel candidate capacity");
     const auto maximum = resource_limit("VSAG_SINDI_MAX_CANDIDATES", 1048576);
@@ -186,7 +186,9 @@ SindiParallelPlan::Make(uint64_t windows, uint64_t candidates, double ratio) {
     plan.candidates = candidates;
     plan.capacity = static_cast<uint64_t>(std::ceil(ratio * double(candidates)));
     CHECK_ARGUMENT(plan.capacity <= maximum, "parallel candidate capacity exceeds limit");
-    const auto groups = std::min({uint64_t{16}, windows, candidates});
+    // Keep each local heap large enough for TopK without exceeding the total budget.
+    // Otherwise concentrated matches can underfill even a completed search.
+    const auto groups = std::min({uint64_t{16}, windows, plan.capacity / topk});
     plan.boundaries.push_back(0);
     for (uint64_t i = 0; i < groups; ++i) {
         plan.boundaries.push_back(windows / groups * (i + 1) +
@@ -231,7 +233,8 @@ void
 SearchSindiPartitions(const SindiPartitionSearchRequest& request,
                       SindiParallelState& state,
                       MaxHeap& output) {
-    state.plan = SindiParallelPlan::Make(request.windows.size(), request.search.ef, state.ratio);
+    state.plan = SindiParallelPlan::Make(
+        request.windows.size(), request.search.ef, state.ratio, request.search.topk);
     const uint64_t groups = state.plan.quotas.size();
     if (groups == 0) {
         return;
