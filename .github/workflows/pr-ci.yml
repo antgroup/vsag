@@ -72,7 +72,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.0-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -87,7 +87,7 @@ jobs:
           key: build-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
       - name: Make Asan
         # PR CI runs against the pre-installed system OpenBLAS shipped in the
-        # ci-x86-openblas image to keep iteration latency low. The
+        # ci-v1.0-openblas image to keep iteration latency low. The
         # build-from-source OpenBLAS path is exercised by the daily x86 ASan
         # job in daily_test.yml.
         run: export CMAKE_GENERATOR="Ninja" CMAKE_EXPORT_COMPILE_COMMANDS=ON EXTRA_DEFINED="-DUSE_SYSTEM_OPENBLAS=ON"; make asan VSAG_ENABLE_EXAMPLES=ON VSAG_ENABLE_TOOLS=ON
@@ -208,7 +208,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.0-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -244,7 +244,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.0-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -280,7 +280,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.0-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -313,7 +313,7 @@ jobs:
     if: needs.changes.outputs.cpp == 'true'
     runs-on: ubuntu-22.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.0-openblas
       volumes:
         - /opt:/useless
     steps:
