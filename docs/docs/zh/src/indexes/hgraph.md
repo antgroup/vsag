@@ -302,6 +302,9 @@ auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
+单查询 KNN 的非空结果支持通过 `GetSearchMetrics()` 获取统计快照。
+`GetStatistics()` 在首次调用时生成原有 JSON 格式，并缓存它以供后续读取。
+
 ### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
 
 图搜索在大多数候选都能通过过滤时是最优策略——图遍历能很快进入查询邻域。但是当
