@@ -119,6 +119,13 @@ public:
                       InnerIdType* out_offsets) override;
 
     void
+    AppendVectorsToBucket(BucketIdType bucket_id,
+                          const void* const* vectors,
+                          const InnerIdType* inner_ids,
+                          InnerIdType count,
+                          InnerIdType* out_offsets) override;
+
+    void
     InsertVectorWithOffset(const void* vector,
                            BucketIdType bucket_id,
                            InnerIdType inner_id,
@@ -286,6 +293,25 @@ private:
     inline void
     encode_vector(const void* vector, BucketIdType bucket_id, uint8_t* codes, float& res_score);
 
+    // Encodes vectors[0, count) for bucket_id into codes, ENCODE_BATCH_ROWS vectors per
+    // EncodeBatch call. Each code and residual score equals what encode_vector produces for
+    // that vector. residual_scores may be null when the bucket keeps no residual bias.
+    inline void
+    encode_vectors(const void* const* vectors,
+                   BucketIdType bucket_id,
+                   uint64_t count,
+                   uint8_t* codes,
+                   float* residual_scores);
+
+    // Appends count encoded vectors to bucket_id with a single storage write.
+    inline void
+    append_codes(BucketIdType bucket_id,
+                 const uint8_t* codes,
+                 const float* residual_scores,
+                 const InnerIdType* inner_ids,
+                 uint64_t count,
+                 InnerIdType* out_offsets);
+
     inline void
     check_valid_bucket_capacity(uint64_t next_size, bool need_resize);
 
@@ -323,6 +349,10 @@ private:
 
     // Zero-fill holes in chunks to keep the temporary buffer bounded while avoiding tiny writes.
     static constexpr uint64_t ZERO_FILL_BLOCK_ENTRIES = 1024;
+
+    // Vectors converted to float input per EncodeBatch call in encode_vectors. Bounds that
+    // scratch buffer however many vectors a run or BatchInsertVector hands over.
+    static constexpr uint64_t ENCODE_BATCH_ROWS = 256;
 };
 
 template <typename QuantTmpl, typename IOTmpl>
@@ -682,6 +712,157 @@ BucketDataCell<QuantTmpl, IOTmpl>::encode_vector(const void* vector,
 
 template <typename QuantTmpl, typename IOTmpl>
 void
+BucketDataCell<QuantTmpl, IOTmpl>::encode_vectors(const void* const* vectors,
+                                                  BucketIdType bucket_id,
+                                                  uint64_t count,
+                                                  uint8_t* codes,
+                                                  float* residual_scores) {
+    const auto dim = static_cast<uint64_t>(this->quantizer_->GetDim());
+    // A quantizer whose dimension differs from the input (RaBitQ with PCA) would read the
+    // batch with a different row stride, so it keeps the per-vector path.
+    if (dim != input_dim_) {
+        for (uint64_t i = 0; i < count; ++i) {
+            float residual_score = 0.0F;
+            encode_vector(vectors[i],
+                          bucket_id,
+                          codes + i * static_cast<uint64_t>(code_size_),
+                          residual_score);
+            if (residual_scores != nullptr) {
+                residual_scores[i] = residual_score;
+            }
+        }
+        return;
+    }
+
+    const uint64_t block_rows = std::min(count, ENCODE_BATCH_ROWS);
+    Vector<float> batch(block_rows * dim, this->allocator_);
+    Vector<float> centroid(this->allocator_);
+    Vector<float> normalized(this->allocator_);
+    if (use_residual_) {
+        centroid.resize(dim);
+        strategy_->GetCentroid(bucket_id, centroid);
+        if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+            normalized.resize(dim);
+        }
+    }
+    for (uint64_t begin = 0; begin < count; begin += block_rows) {
+        const uint64_t rows = std::min(block_rows, count - begin);
+        for (uint64_t i = 0; i < rows; ++i) {
+            const auto* vector = static_cast<const float*>(vectors[begin + i]);
+            float* row = batch.data() + i * dim;
+            if (not use_residual_) {
+                std::copy_n(vector, dim, row);
+                continue;
+            }
+            if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                Normalize(vector, normalized.data(), dim);
+                vector = normalized.data();
+            }
+            FP32Sub(vector, centroid.data(), row, dim);
+        }
+        this->quantizer_->EncodeBatch(
+            batch.data(), codes + begin * static_cast<uint64_t>(code_size_), rows);
+    }
+
+    if (residual_scores == nullptr) {
+        return;
+    }
+    const float centroid_norm_sqr = FP32ComputeIP(centroid.data(), centroid.data(), dim);
+    Vector<float> decoded(dim, this->allocator_);
+    for (uint64_t i = 0; i < count; ++i) {
+        // encode_vector decodes into a zeroed buffer and keeps it when DecodeOne is unsupported.
+        std::fill(decoded.begin(), decoded.end(), 0.0F);
+        this->quantizer_->DecodeOne(codes + i * static_cast<uint64_t>(code_size_), decoded.data());
+        residual_scores[i] =
+            -2 * FP32ComputeIP(centroid.data(), decoded.data(), dim) - centroid_norm_sqr;
+    }
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::append_codes(BucketIdType bucket_id,
+                                                const uint8_t* codes,
+                                                const float* residual_scores,
+                                                const InnerIdType* inner_ids,
+                                                uint64_t count,
+                                                InnerIdType* out_offsets) {
+    std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
+    const auto append_begin = static_cast<uint64_t>(this->bucket_sizes_[bucket_id]);
+    if (count > static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max()) - append_begin) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+    }
+    const auto next_size = append_begin + count;
+    if (next_size > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(code_size_)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
+    }
+    check_valid_bucket_capacity(next_size, this->inner_ids_[bucket_id].size() < next_size);
+    this->datas_[bucket_id].Write(codes,
+                                  count * static_cast<uint64_t>(code_size_),
+                                  append_begin * static_cast<uint64_t>(code_size_));
+    if (this->inner_ids_[bucket_id].size() < next_size) {
+        this->inner_ids_[bucket_id].resize(next_size, EMPTY_INNER_ID);
+    }
+    if (residual_scores != nullptr and this->residual_bias_[bucket_id].size() < next_size) {
+        this->residual_bias_[bucket_id].resize(next_size, 0.0F);
+    }
+    for (uint64_t i = 0; i < count; ++i) {
+        const auto offset = append_begin + i;
+        this->inner_ids_[bucket_id][offset] = inner_ids[i];
+        if (residual_scores != nullptr) {
+            this->residual_bias_[bucket_id][offset] = residual_scores[i];
+        }
+        out_offsets[i] = static_cast<InnerIdType>(offset);
+    }
+    this->bucket_sizes_[bucket_id] = static_cast<InnerIdType>(next_size);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
+BucketDataCell<QuantTmpl, IOTmpl>::AppendVectorsToBucket(BucketIdType bucket_id,
+                                                         const void* const* vectors,
+                                                         const InnerIdType* inner_ids,
+                                                         InnerIdType count,
+                                                         InnerIdType* out_offsets) {
+    if (count == 0) {
+        return;
+    }
+    if (vectors == nullptr or inner_ids == nullptr or out_offsets == nullptr) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "bucket append requires non-null inputs and output");
+    }
+    check_valid_bucket_id(bucket_id);
+    if (code_size_ == 0 or (use_residual_ and strategy_ == nullptr)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid bucket append size");
+    }
+    const auto append_count = static_cast<uint64_t>(count);
+    for (uint64_t i = 0; i < append_count; ++i) {
+        if (vectors[i] == nullptr) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "bucket append vector is null");
+        }
+        if (inner_ids[i] == EMPTY_INNER_ID) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid inner id for bucket");
+        }
+    }
+    const auto max_allocation_size = static_cast<uint64_t>(std::numeric_limits<size_t>::max());
+    if (append_count > max_allocation_size / static_cast<uint64_t>(code_size_) or
+        append_count > max_allocation_size / sizeof(float) / std::max<uint64_t>(input_dim_, 1)) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid bucket append size");
+    }
+
+    const auto code_bytes = append_count * static_cast<uint64_t>(code_size_);
+    ByteBuffer codes(code_bytes, this->allocator_);
+    std::fill_n(codes.data, code_bytes, 0);
+    Vector<float> residual_scores(this->allocator_);
+    if (use_residual_ and metric_ == MetricType::METRIC_TYPE_L2SQR) {
+        residual_scores.resize(append_count);
+    }
+    float* residual_ptr = residual_scores.empty() ? nullptr : residual_scores.data();
+    encode_vectors(vectors, bucket_id, append_count, codes.data, residual_ptr);
+    append_codes(bucket_id, codes.data, residual_ptr, inner_ids, append_count, out_offsets);
+}
+
+template <typename QuantTmpl, typename IOTmpl>
+void
 BucketDataCell<QuantTmpl, IOTmpl>::check_valid_bucket_capacity(uint64_t next_size,
                                                                bool need_resize) {
     if (need_resize && (next_size > MAX_BUCKET_ENTRIES ||
@@ -708,6 +889,8 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVector(const void* vector,
     InnerIdType offset_id;
     float res_score = 0.0F;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
+    // Quantizers may leave padding bytes unwritten; store zeros there, not heap leftovers.
+    std::fill_n(codes.data, code_size_, 0);
     encode_vector(vector, bucket_id, codes.data, res_score);
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
@@ -790,6 +973,9 @@ BucketDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
     }
 
     const auto* float_vectors = static_cast<const float*>(vectors);
+    Vector<const void*> group_vectors(this->allocator_);
+    Vector<InnerIdType> group_inner_ids(this->allocator_);
+    Vector<InnerIdType> group_offsets(this->allocator_);
     for (uint64_t bucket_id = 0; bucket_id < bucket_count; ++bucket_id) {
         const auto bucket_insert_count = bucket_counts[bucket_id];
         if (bucket_insert_count == 0) {
@@ -800,56 +986,22 @@ BucketDataCell<QuantTmpl, IOTmpl>::BatchInsertVector(const void* vectors,
         }
 
         const auto group_begin = bucket_begins[bucket_id];
-        ByteBuffer codes(bucket_insert_count * static_cast<uint64_t>(code_size_), this->allocator_);
-        Vector<float> residual_scores(this->allocator_);
-        if (use_residual_ and metric_ == MetricType::METRIC_TYPE_L2SQR) {
-            residual_scores.resize(bucket_insert_count);
-        }
+        group_vectors.resize(bucket_insert_count);
+        group_inner_ids.resize(bucket_insert_count);
+        group_offsets.resize(bucket_insert_count);
         for (uint64_t local_index = 0; local_index < bucket_insert_count; ++local_index) {
-            const auto position = group_begin + local_index;
-            const auto input_index = order[position];
-            float residual_score = 0.0F;
-            encode_vector(float_vectors + input_index * input_dim_,
-                          static_cast<BucketIdType>(bucket_id),
-                          codes.data + local_index * static_cast<uint64_t>(code_size_),
-                          residual_score);
-            if (not residual_scores.empty()) {
-                residual_scores[local_index] = residual_score;
-            }
+            const auto input_index = order[group_begin + local_index];
+            group_vectors[local_index] = float_vectors + input_index * input_dim_;
+            group_inner_ids[local_index] = inner_ids[input_index];
         }
-
-        std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
-        const auto append_begin = static_cast<uint64_t>(this->bucket_sizes_[bucket_id]);
-        if (bucket_insert_count >
-            static_cast<uint64_t>(std::numeric_limits<InnerIdType>::max()) - append_begin) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
-        }
-        const auto next_size = append_begin + bucket_insert_count;
-        if (next_size > std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(code_size_)) {
-            throw VsagException(ErrorType::INVALID_ARGUMENT, "invalid offset id for bucket");
-        }
-        check_valid_bucket_capacity(next_size, this->inner_ids_[bucket_id].size() < next_size);
-        this->datas_[bucket_id].Write(codes.data,
-                                      bucket_insert_count * static_cast<uint64_t>(code_size_),
-                                      append_begin * static_cast<uint64_t>(code_size_));
-        if (this->inner_ids_[bucket_id].size() < next_size) {
-            this->inner_ids_[bucket_id].resize(next_size, EMPTY_INNER_ID);
-        }
-        if (not residual_scores.empty() and this->residual_bias_[bucket_id].size() < next_size) {
-            this->residual_bias_[bucket_id].resize(next_size, 0.0F);
-        }
+        this->AppendVectorsToBucket(static_cast<BucketIdType>(bucket_id),
+                                    group_vectors.data(),
+                                    group_inner_ids.data(),
+                                    static_cast<InnerIdType>(bucket_insert_count),
+                                    group_offsets.data());
         for (uint64_t local_index = 0; local_index < bucket_insert_count; ++local_index) {
-            const auto position = group_begin + local_index;
-            const auto input_index = order[position];
-            const auto offset = append_begin + local_index;
-            this->inner_ids_[bucket_id][offset] = inner_ids[input_index];
-            if (not residual_scores.empty()) {
-                this->residual_bias_[bucket_id][offset] = residual_scores[local_index];
-            }
-            out_offsets[input_index] = static_cast<InnerIdType>(offset);
+            out_offsets[order[group_begin + local_index]] = group_offsets[local_index];
         }
-        this->bucket_sizes_[bucket_id] =
-            static_cast<InnerIdType>(append_begin + bucket_insert_count);
     }
 }
 
@@ -876,6 +1028,7 @@ BucketDataCell<QuantTmpl, IOTmpl>::InsertVectorWithOffset(const void* vector,
 
     float res_score = 0.0F;
     ByteBuffer codes(static_cast<uint64_t>(code_size_), this->allocator_);
+    std::fill_n(codes.data, code_size_, 0);
     encode_vector(vector, bucket_id, codes.data, res_score);
     {
         std::unique_lock lock(this->bucket_mutexes_[bucket_id]);
