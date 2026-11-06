@@ -56,7 +56,7 @@ make_scalar_unpack_table() {
     return table;
 }
 
-constexpr auto kScalarUnpackTable = make_scalar_unpack_table();
+constexpr auto SCALAR_UNPACK_TABLE = make_scalar_unpack_table();
 
 uint64_t&
 fast_scan_fallback_random_state() {
@@ -1260,7 +1260,7 @@ RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar
     for (; d + 8 <= this->dim_; d += 8) {
         uint64_t packed_lanes = 0;
         for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
-            const auto& entry = kScalarUnpackTable[stored_planes[bit][d >> 3]];
+            const auto& entry = SCALAR_UNPACK_TABLE[stored_planes[bit][d >> 3]];
             uint64_t expanded = 0;
             // Each byte is 0 or 1, so shifting cannot carry into an adjacent lane. Byte copies
             // preserve dimension order on either endianness and avoid unaligned/aliasing loads.
