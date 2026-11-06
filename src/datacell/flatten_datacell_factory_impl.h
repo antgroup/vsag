@@ -17,6 +17,7 @@
 #include "flatten_datacell.h"
 #include "inner_string_params.h"
 #include "io/io_headers.h"
+#include "quantization/binary_quantizer.h"
 #include "quantization/int8_quantizer.h"
 #include "quantization/quantizer_adapter.h"
 #include "quantization/quantizer_headers.h"
@@ -25,6 +26,32 @@
 #include "rabitq_split_datacell_factory.h"
 
 namespace vsag {
+
+template <typename IOTmpl>
+class BinaryFlattenDataCell final : public FlattenDataCell<BinaryQuantizer, FixedLayout<IOTmpl>> {
+public:
+    using Base = FlattenDataCell<BinaryQuantizer, FixedLayout<IOTmpl>>;
+    using Base::Base;
+
+    void
+    BatchInsertVector(const void* vectors, InnerIdType count, InnerIdType* idx_vec) override {
+        if (idx_vec != nullptr) {
+            bool ids_are_contiguous = count > 0;
+            for (InnerIdType i = 1; i < count and ids_are_contiguous; ++i) {
+                ids_are_contiguous = idx_vec[i] == idx_vec[0] + i;
+            }
+            if (not ids_are_contiguous) {
+                const auto packed_dim = this->quantizer_->GetCodeSize();
+                const auto* data = static_cast<const uint8_t*>(vectors);
+                for (InnerIdType i = 0; i < count; ++i) {
+                    this->InsertVector(data + static_cast<uint64_t>(i) * packed_dim, idx_vec[i]);
+                }
+                return;
+            }
+        }
+        Base::BatchInsertVector(vectors, count, idx_vec);
+    }
+};
 
 template <typename QuantTmpl, typename IOTmpl>
 FlattenInterfacePtr
@@ -56,6 +83,19 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                             const IndexCommonParam& common_param) {
     const std::string quantization_string = param->quantizer_parameter->GetTypeName();
 
+    if constexpr (metric == MetricType::METRIC_TYPE_HAMMING) {
+        if (common_param.data_type_ != DataTypes::DATA_TYPE_BINARY ||
+            quantization_string != QUANTIZATION_TYPE_VALUE_BINARY) {
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                "Hamming distance requires binary dtype and binary quantization");
+        }
+        if (param->name == FLATTEN_DATA_CELL) {
+            return std::make_shared<BinaryFlattenDataCell<IOTmpl>>(
+                param->quantizer_parameter, param->io_parameter, common_param);
+        }
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("Unknown flatten interface name: {}", param->name));
+    } else {
     if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
         if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
             return MakeFlattenDataCellInstance<INT8Quantizer<metric>, IOTmpl>(param, common_param);
@@ -168,6 +208,7 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
 
     throw VsagException(ErrorType::INVALID_ARGUMENT,
                         fmt::format("Unsupported quantization type: {}", actual_quantization));
+    }
 }
 
 template <MetricType metric>

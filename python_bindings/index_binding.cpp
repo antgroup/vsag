@@ -21,6 +21,7 @@
 
 #include "binding.h"
 #include "fmt/format.h"
+#include "storage/serialization.h"
 #include "vsag/constants.h"
 #include "vsag/dataset.h"
 #include "vsag/vsag.h"
@@ -32,7 +33,7 @@ to_int64(uint64_t value) {
     return static_cast<int64_t>(value);
 }
 
-enum class DenseVectorKind { FLOAT32, FLOAT16, BFLOAT16, UNSUPPORTED };
+enum class DenseVectorKind { FLOAT32, FLOAT16, BFLOAT16, BINARY, UNSUPPORTED };
 
 DenseVectorKind
 parse_dense_vector_kind(const std::string& parameters) {
@@ -52,6 +53,9 @@ parse_dense_vector_kind(const std::string& parameters) {
     if (dtype_name == vsag::DATATYPE_BFLOAT16) {
         return DenseVectorKind::BFLOAT16;
     }
+    if (dtype_name == vsag::DATATYPE_BINARY) {
+        return DenseVectorKind::BINARY;
+    }
     return DenseVectorKind::UNSUPPORTED;
 }
 
@@ -64,6 +68,8 @@ expected_numpy_dtype(DenseVectorKind kind) {
             return "numpy.float16";
         case DenseVectorKind::BFLOAT16:
             return "numpy.uint16 (raw bfloat16 bits)";
+        case DenseVectorKind::BINARY:
+            return "numpy.uint8 (bit-packed binary vectors)";
         case DenseVectorKind::UNSUPPORTED:
             return "unsupported";
     }
@@ -79,6 +85,8 @@ expected_numpy_dtype_name(DenseVectorKind kind) {
             return "float16";
         case DenseVectorKind::BFLOAT16:
             return "uint16";
+        case DenseVectorKind::BINARY:
+            return "uint8";
         case DenseVectorKind::UNSUPPORTED:
             return "";
     }
@@ -86,14 +94,22 @@ expected_numpy_dtype_name(DenseVectorKind kind) {
 }
 
 void
-validate_dense_index_kind(DenseVectorKind kind, const char* operation_name) {
+validate_dense_index_kind(DenseVectorKind kind,
+                          const char* operation_name,
+                          bool allow_unsupported = false) {
     if (kind == DenseVectorKind::UNSUPPORTED) {
+        if (allow_unsupported) {
+            // Unsupported (sparse) indexes reject dense queries inside C++, which the
+            // binding surfaces as RuntimeError; do not short-circuit with ValueError.
+            return;
+        }
         throw std::invalid_argument(
-            fmt::format("{} only supports indexes with dtype in [{}, {}, {}]",
+            fmt::format("{} only supports indexes with dtype in [{}, {}, {}, {}]",
                         operation_name,
                         vsag::DATATYPE_FLOAT32,
                         vsag::DATATYPE_FLOAT16,
-                        vsag::DATATYPE_BFLOAT16));
+                        vsag::DATATYPE_BFLOAT16,
+                        vsag::DATATYPE_BINARY));
     }
 }
 
@@ -170,6 +186,10 @@ set_dense_vectors(const vsag::DatasetPtr& dataset,
                   DenseVectorKind kind) {
     if (kind == DenseVectorKind::FLOAT32) {
         dataset->Float32Vectors(static_cast<const float*>(buf.ptr));
+        return;
+    }
+    if (kind == DenseVectorKind::BINARY) {
+        dataset->BinaryVectors(static_cast<const uint8_t*>(buf.ptr));
         return;
     }
     dataset->Float16Vectors(static_cast<const uint16_t*>(buf.ptr));
@@ -267,13 +287,23 @@ public:
             }
         }
         dense_vector_kind_ = parse_dense_vector_kind(parameters);
+        if (dense_vector_kind_ == DenseVectorKind::BINARY) {
+            const auto json = nlohmann::json::parse(parameters);
+            dim_ = json.at(vsag::PARAMETER_DIM).get<uint64_t>();
+        }
     }
 
     void
     Build(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
         validate_dense_index_kind(dense_vector_kind_, "build");
-        auto buf =
-            validate_dense_array(vectors, dense_vector_kind_, "vectors", num_elements * dim, dim);
+        if (dense_vector_kind_ == DenseVectorKind::BINARY && dim != dim_) {
+            throw std::invalid_argument(
+                fmt::format("dim ({}) must equal the index dimension ({})", dim, dim_));
+        }
+        const uint64_t input_dim =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim + 7U) / 8U : dim;
+        auto buf = validate_dense_array(
+            vectors, dense_vector_kind_, "vectors", num_elements * input_dim, input_dim);
         validate_ids(ids, num_elements);
 
         auto dataset = vsag::Dataset::Make();
@@ -319,10 +349,15 @@ public:
     py::object
     KnnSearch(py::array vector, uint64_t k, std::string& parameters) {
         validate_dense_index_kind(dense_vector_kind_, "knn_search");
-        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector");
+        const uint64_t query_size =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim_ + 7U) / 8U : 0;
+        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector", query_size);
 
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        const uint64_t query_dim = dense_vector_kind_ == DenseVectorKind::BINARY
+                                       ? dim_
+                                       : static_cast<uint64_t>(buf.shape[0]);
+        query->NumElements(1)->Dim(to_int64(query_dim))->Owner(false);
         set_dense_vectors(query, buf, dense_vector_kind_);
 
         uint64_t ids_shape[1]{k};
@@ -355,9 +390,14 @@ public:
     py::tuple
     KnnSearchWithStatistics(const py::array& vector, uint64_t k, const std::string& parameters) {
         validate_dense_index_kind(dense_vector_kind_, "knn_search_with_statistics");
-        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector");
+        const uint64_t query_size =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim_ + 7U) / 8U : 0;
+        auto buf = validate_dense_array(vector, dense_vector_kind_, "vector", query_size);
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        const uint64_t query_dim = dense_vector_kind_ == DenseVectorKind::BINARY
+                                       ? dim_
+                                       : static_cast<uint64_t>(buf.shape[0]);
+        query->NumElements(1)->Dim(to_int64(query_dim))->Owner(false);
         set_dense_vectors(query, buf, dense_vector_kind_);
         uint64_t ids_shape[1]{k};
         uint64_t ids_strides[1]{sizeof(int64_t)};
@@ -457,10 +497,15 @@ public:
     py::object
     RangeSearch(py::array point, float threshold, std::string& parameters) {
         validate_dense_index_kind(dense_vector_kind_, "range_search");
-        auto buf = validate_dense_array(point, dense_vector_kind_, "point");
+        const uint64_t query_size =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim_ + 7U) / 8U : 0;
+        auto buf = validate_dense_array(point, dense_vector_kind_, "point", query_size);
 
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        const uint64_t query_dim = dense_vector_kind_ == DenseVectorKind::BINARY
+                                       ? dim_
+                                       : static_cast<uint64_t>(buf.shape[0]);
+        query->NumElements(1)->Dim(to_int64(query_dim))->Owner(false);
         set_dense_vectors(query, buf, dense_vector_kind_);
 
         py::array_t<int64_t> labels;
@@ -487,9 +532,14 @@ public:
                               float threshold,
                               const std::string& parameters) {
         validate_dense_index_kind(dense_vector_kind_, "range_search_with_statistics");
-        auto buf = validate_dense_array(point, dense_vector_kind_, "point");
+        const uint64_t query_size =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim_ + 7U) / 8U : 0;
+        auto buf = validate_dense_array(point, dense_vector_kind_, "point", query_size);
         auto query = vsag::Dataset::Make();
-        query->NumElements(1)->Dim(to_int64(static_cast<uint64_t>(buf.shape[0])))->Owner(false);
+        const uint64_t query_dim = dense_vector_kind_ == DenseVectorKind::BINARY
+                                       ? dim_
+                                       : static_cast<uint64_t>(buf.shape[0]);
+        query->NumElements(1)->Dim(to_int64(query_dim))->Owner(false);
         set_dense_vectors(query, buf, dense_vector_kind_);
 
         auto result = index_->RangeSearch(query, threshold, parameters);
@@ -537,8 +587,14 @@ public:
     void
     Add(py::array vectors, py::array_t<int64_t> ids, uint64_t num_elements, uint64_t dim) {
         validate_dense_index_kind(dense_vector_kind_, "add");
-        auto buf =
-            validate_dense_array(vectors, dense_vector_kind_, "vectors", num_elements * dim, dim);
+        if (dense_vector_kind_ == DenseVectorKind::BINARY && dim != dim_) {
+            throw std::invalid_argument(
+                fmt::format("dim ({}) must equal the index dimension ({})", dim, dim_));
+        }
+        const uint64_t input_dim =
+            dense_vector_kind_ == DenseVectorKind::BINARY ? (dim + 7U) / 8U : dim;
+        auto buf = validate_dense_array(
+            vectors, dense_vector_kind_, "vectors", num_elements * input_dim, input_dim);
         validate_ids(ids, num_elements);
 
         auto dataset = vsag::Dataset::Make();
@@ -570,9 +626,28 @@ public:
     }
 
     py::array_t<float>
-    CalcDistancesById(const py::array_t<float, py::array::c_style | py::array::forcecast>& query,
+    CalcDistancesById(const py::array& query,
                       const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& ids) {
-        auto buf_query = query.request();
+        // Unsupported (sparse) indexes keep the legacy RuntimeError contract here.
+        validate_dense_index_kind(dense_vector_kind_,
+                                  "calc_distances_by_id",
+                                  /*allow_unsupported=*/true);
+        const bool is_binary = dense_vector_kind_ == DenseVectorKind::BINARY;
+        py::array validated_query = query;
+        if (not is_binary) {
+            using FloatQuery = py::array_t<float, py::array::c_style | py::array::forcecast>;
+            auto converted = FloatQuery::ensure(query);
+            if (not converted) {
+                throw std::invalid_argument("query must be convertible to a float32 array");
+            }
+            validated_query = converted;
+        }
+        const uint64_t query_size = is_binary ? (dim_ + 7U) / 8U : 0;
+        auto buf_query =
+            validate_dense_array(validated_query,
+                                 is_binary ? DenseVectorKind::BINARY : DenseVectorKind::FLOAT32,
+                                 "query",
+                                 query_size);
         auto buf_ids = ids.request();
 
         if (buf_query.ndim != 1 || buf_ids.ndim != 1) {
@@ -589,10 +664,12 @@ public:
         auto dist_view = distances.mutable_unchecked<1>();
 
         auto dataset = vsag::Dataset::Make();
-        dataset->Owner(false)
-            ->NumElements(1)
-            ->Dim(buf_query.shape[0])
-            ->Float32Vectors(query.data());
+        dataset->Owner(false)->NumElements(1)->Dim(is_binary ? dim_ : buf_query.shape[0]);
+        if (is_binary) {
+            dataset->BinaryVectors(static_cast<const uint8_t*>(buf_query.ptr));
+        } else {
+            dataset->Float32Vectors(static_cast<const float*>(buf_query.ptr));
+        }
         auto result = index_->CalcDistancesById(dataset, ids.data(), count);
         if (!result.has_value()) {
             throw std::runtime_error(
@@ -608,7 +685,7 @@ public:
     }
 
     py::array_t<float>
-    CalDistanceById(const py::array_t<float, py::array::c_style | py::array::forcecast>& query,
+    CalDistanceById(const py::array& query,
                     const py::array_t<int64_t, py::array::c_style | py::array::forcecast>& ids) {
         return this->CalcDistancesById(query, ids);
     }
@@ -623,12 +700,33 @@ public:
     void
     Load(const std::string& filename) {
         std::ifstream file(filename, std::ios::binary);
-        index_->Deserialize(file);
+        auto result = index_->Deserialize(file);
+        if (not result.has_value()) {
+            file.close();
+            throw std::runtime_error(fmt::format("load failed: {}", result.error().message));
+        }
+        if (dense_vector_kind_ == DenseVectorKind::BINARY) {
+            file.clear();
+            file.seekg(0);
+            vsag::IOStreamReader reader(file);
+            auto footer = vsag::Footer::Parse(reader);
+            if (footer == nullptr) {
+                file.close();
+                throw std::runtime_error("load failed: serialized binary index has no footer");
+            }
+            const auto basic_info = footer->GetMetadata()->Get("basic_info");
+            if (not basic_info.Contains(vsag::PARAMETER_DIM)) {
+                file.close();
+                throw std::runtime_error("load failed: serialized binary index has no dimension");
+            }
+            dim_ = static_cast<uint64_t>(basic_info[vsag::PARAMETER_DIM].GetInt());
+        }
         file.close();
     }
 
 private:
     DenseVectorKind dense_vector_kind_{DenseVectorKind::FLOAT32};
+    uint64_t dim_{0};
     std::shared_ptr<vsag::Index> index_;
 };
 
@@ -647,6 +745,7 @@ bind_index(py::module_& module) {
         - float32 indexes accept numpy.float32 vectors
         - float16 indexes accept numpy.float16 vectors
         - bfloat16 indexes accept numpy.uint16 arrays containing raw bfloat16 bits
+        - binary indexes accept numpy.uint8 arrays containing ceil(dim / 8) packed bytes per vector
     )pbdoc")
         .def(py::init<const std::string&, const std::string&>(),
              py::arg("name"),
@@ -898,16 +997,17 @@ bind_index(py::module_& module) {
          Calculate distances between a query vector and vectors specified by IDs.
 
          Args:
-             query (numpy.ndarray): 1D array of float32 values representing the query vector
+             query (numpy.ndarray): 1D float32 query, or packed uint8 bytes for binary indexes
              ids (numpy.ndarray): 1D array of int64 IDs to calculate distances for
 
          Returns:
              numpy.ndarray: 1D float32 distances in ID order; missing IDs produce -1.
 
          Notes:
-             Query length must match the index dimension. Strided inputs are copied
-             to contiguous arrays. C++ operation failures raise RuntimeError rather
-             than returning missing-ID sentinels. Only one dense query is accepted.
+             Query length must match the index dimension (ceil(dim / 8) bytes for binary).
+             Strided non-binary inputs are copied to contiguous arrays. C++ operation failures
+             raise RuntimeError rather than returning missing-ID sentinels. Only one dense query
+             is accepted.
          )pbdoc")
         .def("cal_distance_by_id",
              &Index::CalDistanceById,

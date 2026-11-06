@@ -127,7 +127,7 @@ BruteForce::Train(const DatasetPtr& data) {
     if (is_multi_vector_) {
         this->train_multi_vector(data);
     } else {
-        this->inner_codes_->Train(data->GetFloat32Vectors(), data->GetNumElements());
+        this->inner_codes_->Train(this->get_data(data, 0), data->GetNumElements());
     }
 }
 
@@ -225,7 +225,7 @@ BruteForce::Add(const DatasetPtr& data) {
     auto base_dim = data->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(data->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(this->get_data(data, 0) != nullptr, "base.vectors is nullptr");
 
     {
         std::lock_guard lock(this->add_mutex_);
@@ -253,7 +253,6 @@ BruteForce::Add(const DatasetPtr& data) {
     std::vector<std::future<std::optional<int64_t>>> futures;
     const auto total = data->GetNumElements();
     const auto* labels = data->GetIds();
-    const auto* vectors = data->GetFloat32Vectors();
     const auto* attrs = data->GetAttributeSets();
     const auto* extra_info = data->GetExtraInfos();
     const auto extra_info_size = data->GetExtraInfoSize();
@@ -274,14 +273,14 @@ BruteForce::Add(const DatasetPtr& data) {
         const auto* ei_ptr = extra_info == nullptr ? nullptr : extra_info + j * extra_info_size;
         if (this->thread_pool_ != nullptr) {
             auto future = this->thread_pool_->GeneralEnqueue(add_func,
-                                                             vectors + j * dim_,
+                                                             static_cast<const float*>(this->get_data(data, j)),
                                                              label,
                                                              attrs == nullptr ? nullptr : attrs + j,
                                                              ei_ptr);
             futures.emplace_back(std::move(future));
         } else {
             if (auto add_res = add_func(
-                    vectors + j * dim_, label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
+                    static_cast<const float*>(this->get_data(data, j)), label, attrs == nullptr ? nullptr : attrs + j, ei_ptr);
                 add_res.has_value()) {
                 failed_ids.emplace_back(add_res.value());
             }
@@ -697,13 +696,27 @@ BruteForce::make_search_computer(const DatasetPtr& query) const {
         CHECK_ARGUMENT(query_multi_vectors != nullptr, "query.multi_vectors is nullptr");
         return this->inner_codes_->FactoryComputer(&query_multi_vectors[0]);
     }
-    return this->inner_codes_->FactoryComputer(query->GetFloat32Vectors());
+    if (data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        CHECK_ARGUMENT(query != nullptr, "query must not be null");
+        this->validate_search_query(query);
+        CHECK_ARGUMENT(query->GetBinaryVectors() != nullptr, "query must contain binary vectors");
+    }
+    return this->inner_codes_->FactoryComputer(this->get_data(query, 0));
 }
 
 float
 BruteForce::CalcDistanceById(const DatasetPtr& query,
                              int64_t id,
                              bool calculate_precise_distance) const {
+    if (not is_multi_vector_ and data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        CHECK_ARGUMENT(query != nullptr, "distance query must not be null");
+        CHECK_ARGUMENT(query->GetNumElements() == 1, "single-ID distance requires one query");
+        CHECK_ARGUMENT(query->GetDim() == dim_, "distance query dimension mismatch");
+        const auto* vectors = query->GetBinaryVectors();
+        CHECK_ARGUMENT(vectors != nullptr, "distance query must contain binary vectors");
+        return this->CalcDistanceById(
+            reinterpret_cast<const float*>(vectors), id, calculate_precise_distance);
+    }
     if (not is_multi_vector_) {
         return InnerIndexInterface::CalcDistanceById(query, id, calculate_precise_distance);
     }
@@ -1151,7 +1164,7 @@ BruteForce::InitFeatures() {
         }
     } else {
         if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
-            name != QUANTIZATION_TYPE_VALUE_FP16) {
+            name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_BINARY) {
             this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
         } else {
             this->index_feature_list_->SetFeatures(
@@ -1161,8 +1174,9 @@ BruteForce::InitFeatures() {
                  IndexFeature::SUPPORT_BATCH_CALC_DISTANCE_BY_ID,
                  IndexFeature::SUPPORT_RANGE_SEARCH_WITH_ID_FILTER});
         }
-        if (name == QUANTIZATION_TYPE_VALUE_FP32 and
-            (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds())) {
+        if (name == QUANTIZATION_TYPE_VALUE_BINARY or
+            (name == QUANTIZATION_TYPE_VALUE_FP32 and
+             (metric_ != MetricType::METRIC_TYPE_COSINE || this->inner_codes_->HoldMolds()))) {
             this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
         }
     }
@@ -1254,6 +1268,9 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     bool is_warp = external_param.Contains(WARP_MODE_MARKER);
 
     if (is_warp) {
+        CHECK_ARGUMENT(common_param.data_type_ != DataTypes::DATA_TYPE_BINARY,
+                       "WARP does not support binary datatype");
+
         // Remove the marker key before mapping (it would cause "invalid config param" error)
         JsonType warp_external_param = external_param;
         warp_external_param.Erase(WARP_MODE_MARKER);
@@ -1292,6 +1309,16 @@ BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
     }
 
     auto inner_json = build_default_brute_force_param(external_param, false);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        if (not external_param.Contains(BRUTE_FORCE_BASE_QUANTIZATION_TYPE)) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+        if (not external_param.Contains(BRUTE_FORCE_PRECISE_QUANTIZATION_TYPE)) {
+            inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetString(
+                QUANTIZATION_TYPE_VALUE_BINARY);
+        }
+    }
     for (const auto& [key, value] : external_param.GetInnerJson()->items()) {
         (void)value;
         auto field = external_param[key];
@@ -1412,14 +1439,14 @@ BruteForce::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_upda
     auto base_dim = new_base->GetDim();
     CHECK_ARGUMENT(base_dim == dim_,
                    fmt::format("base.dim({}) must be equal to index.dim({})", base_dim, dim_));
-    CHECK_ARGUMENT(new_base->GetFloat32Vectors() != nullptr, "base.float_vector is nullptr");
+    CHECK_ARGUMENT(this->get_data(new_base, 0) != nullptr, "base.vectors is nullptr");
 
     std::shared_lock add_lock(this->add_mutex_, std::defer_lock);
     std::shared_lock label_lock(this->label_lookup_mutex_, std::defer_lock);
     std::lock(add_lock, label_lock);
     std::unique_lock global_lock(this->global_mutex_);
     InnerIdType inner_id = this->label_table_->GetIdByLabel(id);
-    return this->inner_codes_->UpdateVector(new_base->GetFloat32Vectors(), inner_id);
+    return this->inner_codes_->UpdateVector(this->get_data(new_base, 0), inner_id);
 }
 
 void

@@ -205,6 +205,9 @@ get_vectors(DataTypes type,
     } else if (type == DataTypes::DATA_TYPE_FP16 || type == DataTypes::DATA_TYPE_BF16) {
         *vectors_ptr = (void*)base->GetFloat16Vectors();
         *data_size_ptr = dim * sizeof(uint16_t);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        *vectors_ptr = (void*)base->GetBinaryVectors();
+        *data_size_ptr = (dim + 7) / 8;
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("no support for this type: {}", (int)type));
@@ -226,6 +229,11 @@ set_dataset(DataTypes type,
             ->Dim(dim)
             ->Owner(false)
             ->NumElements(num_element);
+    } else if (type == DataTypes::DATA_TYPE_BINARY) {
+        base->BinaryVectors((uint8_t*)vectors_ptr)
+            ->Dim(dim)
+            ->Owner(false)
+            ->NumElements(num_element);
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
                             fmt::format("no support for this type: {}", (int)type));
@@ -237,6 +245,7 @@ sample_train_data(const vsag::DatasetPtr& data,
                   int64_t total_elements,
                   int64_t dim,
                   int64_t train_sample_count,
+                  DataTypes data_type,
                   Allocator* allocator,
                   std::optional<uint64_t> random_seed) {
     const int64_t min_train_size = 512;
@@ -258,7 +267,7 @@ sample_train_data(const vsag::DatasetPtr& data,
         safe_allocator = owned_allocator.get();
     }
 
-    vsag::Vector<float> sampled_data_buffer(safe_allocator);
+    vsag::Vector<uint8_t> sampled_data_buffer(safe_allocator);
     vsag::Vector<int64_t> sampled_ids(safe_allocator);
     vsag::Vector<int64_t> sampled_indices(safe_allocator);
     sampled_indices.reserve(sample_count);
@@ -275,22 +284,31 @@ sample_train_data(const vsag::DatasetPtr& data,
             sampled_indices[j] = i;
         }
     }
-    sampled_data_buffer.resize(sample_count * dim);
-    const auto* original_data = data->GetFloat32Vectors();
+    const bool is_binary = data_type == DataTypes::DATA_TYPE_BINARY;
+    const auto bytes_per_vector =
+        static_cast<uint64_t>(is_binary ? (dim + 7) / 8 : dim * sizeof(float));
+    sampled_data_buffer.resize(static_cast<uint64_t>(sample_count) * bytes_per_vector);
+    const auto* original_data = is_binary
+                                    ? data->GetBinaryVectors()
+                                    : reinterpret_cast<const uint8_t*>(data->GetFloat32Vectors());
     for (int64_t i = 0; i < sample_count; ++i) {
-        std::copy(original_data + sampled_indices[i] * dim,
-                  original_data + (sampled_indices[i] + 1) * dim,
-                  sampled_data_buffer.data() + i * dim);
+        const auto source_offset = static_cast<uint64_t>(sampled_indices[i]) * bytes_per_vector;
+        const auto destination_offset = static_cast<uint64_t>(i) * bytes_per_vector;
+        std::copy(original_data + source_offset,
+                  original_data + source_offset + bytes_per_vector,
+                  sampled_data_buffer.data() + destination_offset);
     }
-    auto* new_data_buffer =
-        static_cast<float*>(safe_allocator->Allocate(sample_count * dim * sizeof(float)));
+    auto* new_data_buffer = static_cast<uint8_t*>(
+        safe_allocator->Allocate(static_cast<uint64_t>(sample_count) * bytes_per_vector));
     std::copy(sampled_data_buffer.begin(), sampled_data_buffer.end(), new_data_buffer);
 
     auto sampled_dataset = std::make_shared<DatasetImpl>();
-    sampled_dataset->NumElements(sample_count)
-        ->Dim(dim)
-        ->Float32Vectors(new_data_buffer)
-        ->Owner(true, safe_allocator);
+    sampled_dataset->NumElements(sample_count)->Dim(dim)->Owner(true, safe_allocator);
+    if (is_binary) {
+        sampled_dataset->BinaryVectors(new_data_buffer);
+    } else {
+        sampled_dataset->Float32Vectors(reinterpret_cast<float*>(new_data_buffer));
+    }
     if (data->GetIds() != nullptr) {
         sampled_ids.reserve(sample_count);
         const auto* original_ids = data->GetIds();

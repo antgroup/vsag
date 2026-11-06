@@ -37,17 +37,20 @@ fill_datatype(IndexCommonParam& result, const JsonType& datatype_obj) {
         result.data_type_ = DataTypes::DATA_TYPE_BF16;
     } else if (datatype == DATATYPE_INT8) {
         result.data_type_ = DataTypes::DATA_TYPE_INT8;
+    } else if (datatype == DATATYPE_BINARY) {
+        result.data_type_ = DataTypes::DATA_TYPE_BINARY;
     } else if (datatype == DATATYPE_SPARSE) {
         result.data_type_ = DataTypes::DATA_TYPE_SPARSE;
     } else {
         throw VsagException(
             ErrorType::INVALID_ARGUMENT,
-            fmt::format("parameters[{}] must be one of [{}, {}, {}, {}, {}], now is {}",
+            fmt::format("parameters[{}] must be one of [{}, {}, {}, {}, {}, {}], now is {}",
                         PARAMETER_DTYPE,
                         DATATYPE_FLOAT32,
                         DATATYPE_FLOAT16,
                         DATATYPE_BFLOAT16,
                         DATATYPE_INT8,
+                        DATATYPE_BINARY,
                         DATATYPE_SPARSE,
                         datatype));
     }
@@ -86,13 +89,16 @@ fill_metrictype(IndexCommonParam& result, const JsonType& metric_obj) {
         result.metric_ = MetricType::METRIC_TYPE_IP;
     } else if (metric == METRIC_COSINE) {
         result.metric_ = MetricType::METRIC_TYPE_COSINE;
+    } else if (metric == METRIC_HAMMING) {
+        result.metric_ = MetricType::METRIC_TYPE_HAMMING;
     } else {
         throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("parameters[{}] must in [{}, {}, {}], now is {}",
+                            fmt::format("parameters[{}] must in [{}, {}, {}, {}], now is {}",
                                         PARAMETER_METRIC_TYPE,
                                         METRIC_L2,
                                         METRIC_IP,
                                         METRIC_COSINE,
+                                        METRIC_HAMMING,
                                         metric));
     }
 }
@@ -149,6 +155,10 @@ IndexCommonParam::CheckAndCreate(JsonType& params, const std::shared_ptr<Resourc
     CHECK_ARGUMENT(params.Contains(PARAMETER_METRIC_TYPE),
                    fmt::format("parameters must contains {}", PARAMETER_METRIC_TYPE));
     fill_metrictype(result, params[PARAMETER_METRIC_TYPE]);
+    const bool is_binary = result.data_type_ == DataTypes::DATA_TYPE_BINARY;
+    const bool is_hamming = result.metric_ == MetricType::METRIC_TYPE_HAMMING;
+    CHECK_ARGUMENT(is_binary == is_hamming,
+                   "binary dtype and hamming metric_type must be used together");
 
     // Check and Fill Dim
     if (params.Contains(PARAMETER_DIM)) {

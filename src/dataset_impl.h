@@ -40,6 +40,7 @@ class DatasetImpl : public Dataset, public SearchMetricsDatasetAccessor {
                              const float*,
                              const char*,
                              const int8_t*,
+                             const uint8_t*,
                              const uint16_t*,
                              const int64_t*,
                              const std::string*,
@@ -161,6 +162,20 @@ public:
             return std::get<const int8_t*>(iter->second);
         }
 
+        return nullptr;
+    }
+
+    DatasetPtr
+    BinaryVectors(const uint8_t* vectors) override {
+        this->data_[BINARY_VECTORS] = vectors;
+        return shared_from_this();
+    }
+
+    const uint8_t*
+    GetBinaryVectors() const override {
+        if (auto iter = this->data_.find(BINARY_VECTORS); iter != this->data_.end()) {
+            return std::get<const uint8_t*>(iter->second);
+        }
         return nullptr;
     }
 
