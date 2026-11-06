@@ -344,7 +344,7 @@ public:
     TrimUnusedSlots(uint64_t valid_count);
 
     int64_t
-    GetTotalCount() {
+    GetTotalCount() const {
         return total_count_;
     }
 

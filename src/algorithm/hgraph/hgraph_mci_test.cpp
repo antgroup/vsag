@@ -3854,3 +3854,64 @@ TEST_CASE("HGraph MCI parallel incremental add keeps full coverage",
         }
     }
 }
+
+TEST_CASE("HGraph prepared attribute and bitset predicates bypass ID-only MCI fast paths",
+          "[ut][hgraph][mci][prepared_filter]") {
+    constexpr int64_t dim = 4;
+    constexpr int64_t count = 400;
+    const bool bitmap = GENERATE(false, true);
+    const auto mode =
+        GENERATE(std::string("attribute"), std::string("bitset"), std::string("both"));
+    auto params = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    params["index_param"]["use_attribute_filter"].SetBool(true);
+    params["index_param"]["graph_type"].SetString("nsw");
+    auto made = vsag::Factory::CreateIndex("hgraph", params.Dump());
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(count * dim);
+    std::vector<vsag::AttributeSet> attrs(count);
+    std::vector<vsag::AttributeValue<int32_t>> values(count);
+    for (int64_t id = 0; id < count; ++id) {
+        vectors[id * dim] = static_cast<float>(id);
+        values[id].name_ = "allowed";
+        values[id].GetValue().push_back(id < 12 ? 1 : 0);
+        attrs[id].attrs_.push_back(&values[id]);
+    }
+    auto data = make_dataset(ids, vectors, 0, count, dim);
+    data->AttributeSets(attrs.data());
+    REQUIRE(index->Build(data).has_value());
+    auto query = vsag::Dataset::Make()->NumElements(1)->Dim(dim)->Owner(false)->Float32Vectors(
+        vectors.data() + 19 * dim);
+    std::vector<int64_t> valid_ids(20);
+    std::iota(valid_ids.begin(), valid_ids.end(), 0);
+    auto filter = std::make_shared<RangeBitmapFilter>(0, count, 20, valid_ids, bitmap);
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = 5;
+    request.filter_ = filter;
+    request.enable_filter_ = true;
+    request.params_str_ =
+        R"({"hgraph":{"ef_search":400,"use_mci":true,"mci_seed_ratio":20,"hgraph_valid_ratio_threshold":1,"brute_force_threshold":0.02}})";
+    auto control = index->SearchWithRequest(request);
+    REQUIRE(control.has_value());
+    REQUIRE(control.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    request.enable_attribute_filter_ = mode != "bitset";
+    request.attribute_filter_str_ = "allowed = 1";
+    request.enable_bitset_filter_ = mode != "attribute";
+    auto excluded = vsag::Bitset::Make();
+    for (int64_t id = 11; id < 20; ++id) {
+        excluded->Set(id);
+    }
+    request.bitset_filter_ = excluded;
+    auto found = index->SearchWithRequest(request);
+    REQUIRE(found.has_value());
+    auto result = found.value();
+    REQUIRE(result->GetDim() == 5);
+    CHECK(result->GetStatistics({"mci_hybrid_route"})[0] != R"("mci")");
+    CHECK(result->GetStatistics({"mci_hybrid_route"})[0] != R"("brute_force")");
+    for (int64_t i = 0; i < result->GetDim(); ++i) {
+        CHECK(result->GetIds()[i] < (request.enable_bitset_filter_ ? 11 : 12));
+    }
+}

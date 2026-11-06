@@ -69,6 +69,39 @@ FastBitset::Count() {
 }
 
 void
+FastBitset::GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const {
+    (void)this->TryGetSetBits(limit, std::numeric_limits<uint64_t>::max(), ids);
+}
+
+bool
+FastBitset::TryGetSetBits(uint64_t limit, uint64_t max_ids, Vector<InnerIdType>& ids) const {
+    ids.clear();
+    const auto word_bits = [this, limit](uint64_t word) {
+        uint64_t bits = word < size_ ? data_[word] : get_fill_bit() ? FILL_ONE : 0;
+        const auto remaining = limit - word * 64;
+        if (remaining < 64) {
+            bits &= (uint64_t{1} << remaining) - 1;
+        }
+        return bits;
+    };
+    uint64_t matches = 0;
+    for (uint64_t word = 0; word < (limit + 63) / 64; ++word) {
+        matches += static_cast<uint64_t>(__builtin_popcountll(word_bits(word)));
+        if (matches > max_ids) {
+            return false;
+        }
+    }
+    for (uint64_t word = 0; word < (limit + 63) / 64; ++word) {
+        uint64_t bits = word_bits(word);
+        while (bits != 0) {
+            ids.push_back(static_cast<InnerIdType>(word * 64 + __builtin_ctzll(bits)));
+            bits &= bits - 1;
+        }
+    }
+    return true;
+}
+
+void
 FastBitset::Or(const ComputableBitset& another) {
     const auto* fast_another = static_cast<const FastBitset*>(&another);
     if (fast_another == nullptr) {
