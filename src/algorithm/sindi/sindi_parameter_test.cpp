@@ -530,6 +530,13 @@ TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIPa
 TEST_CASE("SINDI defaults candidate capacity to twice the final budget", "[ut][SINDIParameter]") {
     SINDISearchParameter parameter;
     REQUIRE(parameter.parallel_n_candidate_ratio == 2.0);
+    parameter.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+    // Library default is zero: the search uses max(n_candidate, topk).
+    // Embedding applications may explicitly configure a larger candidate pool.
+    REQUIRE(parameter.n_candidate == 0);
+    SINDISearchParameter library_default;
+    library_default.FromJson(parameter.ToJson());
+    REQUIRE(library_default.n_candidate == 0);
     for (auto slots : {1, 4}) {
         auto json = JsonType::Parse(R"({"sindi":{"n_candidate":100}})");
         json[INDEX_SINDI]["window_parallelism"].SetInt(slots);

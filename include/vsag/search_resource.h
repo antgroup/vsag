@@ -22,6 +22,8 @@ struct SearchResourceOptions {
  * Construction confirms worker startup; failure publishes no partially ready context.
  * Keep this object alive while an Engine borrows it. Indices retain the shared query
  * context. Ordinary Resource users do not implicitly acquire query resources.
+ * Each independent group has its own synchronous startup cost and worker limit;
+ * reuse the sharing constructor to avoid multiplying pools across index groups.
  */
 class SearchResource : public Resource {
 public:

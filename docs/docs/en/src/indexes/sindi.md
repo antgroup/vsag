@@ -255,7 +255,7 @@ Search-time parameters live under the `sindi` sub-object:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `n_candidate` | int | `500` | Approximate candidate pool size. The effective size is `N = max(n_candidate, topk)`. Increasing N can retain more candidates for reranking at additional cost; it does not guarantee exact recall or serial/parallel equivalence. |
+| `n_candidate` | int | `0` | Approximate candidate budget; the effective size is `N = max(n_candidate, topk)`. Omitted or zero therefore uses topk, not 500. Set a larger budget explicitly to retain more candidates for reranking at additional cost; exact recall or serial/parallel equality is not guaranteed. |
 | `window_parallelism` | int | `1` | Maximum execution slots, including the caller (`1` to `16`). Omitted or `1` uses the original serial candidate heap. Greater values select the fixed-partition approximate executor, supported for immutable in-memory KNN only. Actual slots may be reduced by resource admission without changing the candidate plan. |
 | `parallel_n_candidate_ratio` | number | `2` | Finite value ≥1. Total local heap capacity is `ceil(ratio × max(n_candidate, topk))`; capacity is distributed over fixed logical partitions independently of the execution slot count. Larger capacity retains more candidates at additional cost; it does not guarantee the serial candidate set or a particular recall. Validated but unapplied in serial mode. |
 | `profile_cpu` | bool | `false` | Diagnostic only, for serial and parallel KNN. Measures calling-thread CPU after parameter parsing and before statistics serialization, plus background window-worker CPU. Disabled requests do not read thread CPU clocks. |
@@ -286,6 +286,8 @@ An explicitly shared query resource bounds additional workers using CPU affinity
 CPU admission resolves the process membership and cgroup mounts, and takes the minimum readable quota across its visible ancestors (v1 or v2). Pool limits are a startup snapshot, not a service-wide CPU limiter or dynamic resize policy.
 
 Parallel result statistics include `sindi_requested_slots`, `sindi_granted_slots`, `sindi_filter_slots` (the initial filter-lease capacity), `sindi_cpu_slots`, `sindi_worker_limit`, `sindi_partitions`, `sindi_candidate_capacity`, `sindi_n_candidate`, `sindi_windows_processed`, `sindi_execution_complete` and `sindi_stop_reason`. The existing `complete` field describes distance-counter coverage and is false when approximate work is untracked; it does not mean that the window plan failed to finish. Deadline and worker failures still fail the search after all workers drain. Deadline polling is cooperative at window boundaries and every 32 filter callbacks; the callback permit limit is checked on every callback.
+
+A successful parallel result reports `sindi_stop_reason=none` or `callback_limit`. Deadline and worker errors return no result Dataset; their internal stop state is not a promise of returned failure statistics. In contrast, the original serial timeout path can return partial results with `is_timeout=true`. Parallel deadline failures use `ErrorType::INTERNAL_ERROR` with a deadline message, after joining workers. `VSAG_SINDI_MAX_CANDIDATES` must contain unsigned decimal digits and fit a positive uint32.
 
 With `profile_cpu:true`, `sindi_cpu_time_enabled` and `sindi_cpu_time_complete` describe availability; `sindi_search_cpu_us` sums caller and background-worker CPU and `sindi_worker_cpu_us` reports the background part. CPU values are omitted if unavailable. They exclude caller-side SQL/filter preparation, statistics serialization and the final threshold-result wrapper, and are not whole SQL request CPU costs. Keep the same profiling setting in a serial/parallel comparison and measure service CPU separately.
 
@@ -403,3 +405,6 @@ Diagnostics report serial strategy, requested slots, granted=1 and
 `sindi_resources_ready=false`. Serial fallback results should be compared with
 explicit P1, not assumed identical to the prepared parallel candidate plan.
 Serial requests need no preparation. VSAG does not read VecBase online policy JSON.
+
+
+Each independent SearchResource synchronously creates its own worker group during construction. Hosts with several index groups should set `max_background_workers` explicitly and reuse a shared SearchResource where appropriate; VSAG does not enforce a process-wide thread budget across independent groups.

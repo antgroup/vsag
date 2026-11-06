@@ -100,7 +100,7 @@ struct SindiParallelState {
 
 struct SindiCpuTime;
 std::string
-SindiExecutionStatistics(std::string summary,
+SindiExecutionStatistics(JsonType summary,
                          const SindiParallelState* parallel,
                          const SindiCpuTime& caller_cpu,
                          bool profile_cpu,
