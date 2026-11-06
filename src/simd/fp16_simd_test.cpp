@@ -15,8 +15,11 @@
 
 #include "fp16_simd.h"
 
+#include <bit>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <catch2/catch_all.hpp>
+#include <cmath>
+#include <limits>
 
 #include "simd_status.h"
 #include "unittest.h"
@@ -45,6 +48,36 @@ TEST_CASE("Encode & Decode FP16", "[ut][simd]") {
         float decode_fp32 = generic::FP16ToFloat(fp16);
         REQUIRE(std::abs(decode_fp32 - item) < 1);
     }
+}
+
+TEST_CASE("FP16 conversion preserves non-finite values", "[ut][simd][nonfinite]") {
+    const auto sign = GENERATE(1.0F, -1.0F);
+    const auto infinity = std::copysign(std::numeric_limits<float>::infinity(), sign);
+    const auto infinity_code = generic::FloatToFP16(infinity);
+    REQUIRE((infinity_code & 0x7FFFU) == 0x7C00U);
+    REQUIRE(std::isinf(generic::FP16ToFloat(infinity_code)));
+    REQUIRE(std::signbit(generic::FP16ToFloat(infinity_code)) == std::signbit(infinity));
+
+    const auto nan_payload = GENERATE(0x7FC00000U, 0x7F800001U);
+    const auto nan = std::bit_cast<float>(nan_payload | (sign < 0 ? 0x80000000U : 0U));
+    const auto nan_code = generic::FloatToFP16(nan);
+    REQUIRE((nan_code & 0x7C00U) == 0x7C00U);
+    REQUIRE((nan_code & 0x03FFU) != 0);
+    REQUIRE(std::isnan(generic::FP16ToFloat(nan_code)));
+    REQUIRE(std::signbit(generic::FP16ToFloat(nan_code)) == std::signbit(nan));
+}
+
+TEST_CASE("FP16 distance kernels preserve NaN across SIMD tails", "[ut][simd][nonfinite]") {
+    const auto dim = GENERATE(1, 7, 16, 17, 64);
+    std::vector<uint16_t> query(dim, 0x3C00U);
+    std::vector<uint16_t> codes(dim, 0x3C00U);
+    codes.back() = generic::FloatToFP16(std::numeric_limits<float>::quiet_NaN());
+    const auto* query_bytes = reinterpret_cast<const uint8_t*>(query.data());
+    const auto* code_bytes = reinterpret_cast<const uint8_t*>(codes.data());
+    REQUIRE(std::isnan(generic::FP16ComputeIP(query_bytes, code_bytes, dim)));
+    REQUIRE(std::isnan(generic::FP16ComputeL2Sqr(query_bytes, code_bytes, dim)));
+    REQUIRE(std::isnan(FP16ComputeIP(query_bytes, code_bytes, dim)));
+    REQUIRE(std::isnan(FP16ComputeL2Sqr(query_bytes, code_bytes, dim)));
 }
 
 #define TEST_ACCURACY(Func)                                                           \

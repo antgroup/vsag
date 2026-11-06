@@ -30,15 +30,15 @@ namespace vsag::generic {
 
 float
 L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    auto* pVect1 = (float*)pVect1v;
-    auto* pVect2 = (float*)pVect2v;
+    auto* p_vect1 = (float*)pVect1v;
+    auto* p_vect2 = (float*)pVect2v;
     uint64_t qty = *((uint64_t*)qty_ptr);
 
-    float res = 0.0f;
+    float res = 0.0F;
     for (uint64_t i = 0; i < qty; i++) {
-        float t = *pVect1 - *pVect2;
-        pVect1++;
-        pVect2++;
+        float t = *p_vect1 - *p_vect2;
+        p_vect1++;
+        p_vect2++;
         res += t * t;
     }
     return res;
@@ -56,20 +56,20 @@ InnerProduct(const void* pVect1, const void* pVect2, const void* qty_ptr) {
 
 float
 InnerProductDistance(const void* pVect1, const void* pVect2, const void* qty_ptr) {
-    return 1.0f - InnerProduct(pVect1, pVect2, qty_ptr);
+    return 1.0F - InnerProduct(pVect1, pVect2, qty_ptr);
 }
 
 float
 INT8L2Sqr(const void* pVect1v, const void* pVect2v, const void* qty_ptr) {
-    auto* pVect1 = (int8_t*)pVect1v;
-    auto* pVect2 = (int8_t*)pVect2v;
+    auto* p_vect1 = (int8_t*)pVect1v;
+    auto* p_vect2 = (int8_t*)pVect2v;
     uint64_t qty = *((uint64_t*)qty_ptr);
 
-    float res = 0.0f;
+    float res = 0.0F;
     for (uint64_t i = 0; i < qty; ++i) {
-        float t = static_cast<float>(*pVect1 - *pVect2);
-        pVect1++;
-        pVect2++;
+        auto t = static_cast<float>(*p_vect1 - *p_vect2);
+        p_vect1++;
+        p_vect2++;
         res += t * t;
     }
 
@@ -214,6 +214,10 @@ FP16ToFloat(const uint16_t fp16_value) {
     int32_t exp = ((fp16_value >> 10) & 0x1F) - 15;
     uint32_t mantissa = (fp16_value & 0x3FF) << 13;
     FP32Struct fp32;
+    if ((fp16_value & 0x7C00U) == 0x7C00U) {
+        fp32.int_value = (sign << 31) | 0x7F800000U | mantissa;
+        return fp32.float_value;
+    }
     fp32.int_value = (sign << 31) | ((exp + 127) << 23) | mantissa;
     return fp32.float_value;
 }
@@ -223,9 +227,17 @@ FloatToFP16(const float fp32_value) {
     FP32Struct fp32;
     fp32.float_value = fp32_value;
     uint16_t sign = (fp32.int_value >> 31) & 0x1;
-    int32_t exp = ((fp32.int_value >> 23) & 0xFF) - 127;
+    int32_t exp = static_cast<int32_t>((fp32.int_value >> 23) & 0xFF) - 127;
     uint32_t mantissa = fp32.int_value & 0x007FFFFF;
 
+    // Keep IEEE specials distinct from the finite values handled by the clamping below.
+    if (exp == 128) {
+        auto payload = mantissa >> 13;
+        if (mantissa != 0 and payload == 0) {
+            payload = 1;
+        }
+        return (sign << 15) | 0x7C00U | payload;
+    }
     if (exp > 15) {
         exp = 15;
     } else if (exp < -14) {
@@ -322,47 +334,47 @@ SQ8SparseAccumulate(float* RESTRICT dists,
 
 namespace {
 float
-SQ4ScalarIP(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
+sq4_scalar_ip(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
     float result = 0;
     for (uint64_t i = 0; i < dim; ++i) {
-        uint8_t nibble = (i & 1) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
-        result += q[i] * (nibble * (1.0f / 15.0f) * d[i] + lb[i]);
+        uint8_t nibble = ((i & 1) != 0U) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
+        result += q[i] * (static_cast<float>(nibble) * (1.0F / 15.0F) * d[i] + lb[i]);
     }
     return result;
 }
 float
-SQ4ScalarL2(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
+sq4_scalar_l2(const float* q, const uint8_t* c, const float* lb, const float* d, uint64_t dim) {
     float result = 0;
     for (uint64_t i = 0; i < dim; ++i) {
-        uint8_t nibble = (i & 1) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
-        float v = nibble * (1.0f / 15.0f) * d[i] + lb[i];
+        uint8_t nibble = ((i & 1) != 0U) ? (c[i >> 1] >> 4) : (c[i >> 1] & 0x0f);
+        float v = static_cast<float>(nibble) * (1.0F / 15.0F) * d[i] + lb[i];
         float diff = q[i] - v;
         result += diff * diff;
     }
     return result;
 }
 float
-SQ4ScalarCodesIP(
+sq4_scalar_codes_ip(
     const uint8_t* c1, const uint8_t* c2, const float* lb, const float* d, uint64_t dim) {
     float result = 0;
     for (uint64_t i = 0; i < dim; ++i) {
-        uint8_t n1 = (i & 1) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
-        uint8_t n2 = (i & 1) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
-        float v1 = n1 * (1.0f / 15.0f) * d[i] + lb[i];
-        float v2 = n2 * (1.0f / 15.0f) * d[i] + lb[i];
+        uint8_t n1 = ((i & 1) != 0U) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
+        uint8_t n2 = ((i & 1) != 0U) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
+        float v1 = static_cast<float>(n1) * (1.0F / 15.0F) * d[i] + lb[i];
+        float v2 = static_cast<float>(n2) * (1.0F / 15.0F) * d[i] + lb[i];
         result += v1 * v2;
     }
     return result;
 }
 float
-SQ4ScalarCodesL2(
+sq4_scalar_codes_l2(
     const uint8_t* c1, const uint8_t* c2, const float* lb, const float* d, uint64_t dim) {
     float result = 0;
     for (uint64_t i = 0; i < dim; ++i) {
-        uint8_t n1 = (i & 1) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
-        uint8_t n2 = (i & 1) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
-        float v1 = n1 * (1.0f / 15.0f) * d[i] + lb[i];
-        float v2 = n2 * (1.0f / 15.0f) * d[i] + lb[i];
+        uint8_t n1 = ((i & 1) != 0U) ? (c1[i >> 1] >> 4) : (c1[i >> 1] & 0x0f);
+        uint8_t n2 = ((i & 1) != 0U) ? (c2[i >> 1] >> 4) : (c2[i >> 1] & 0x0f);
+        float v1 = static_cast<float>(n1) * (1.0F / 15.0F) * d[i] + lb[i];
+        float v2 = static_cast<float>(n2) * (1.0F / 15.0F) * d[i] + lb[i];
         float diff = v1 - v2;
         result += diff * diff;
     }
@@ -377,7 +389,7 @@ SQ4ComputeIP(const float* RESTRICT query,
              const float* RESTRICT diff,
              uint64_t dim) {
     return simd::SQ4ComputeIPImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
-        query, codes, lower_bound, diff, dim, &SQ4ScalarIP);
+        query, codes, lower_bound, diff, dim, &sq4_scalar_ip);
 }
 
 float
@@ -387,7 +399,7 @@ SQ4ComputeL2Sqr(const float* RESTRICT query,
                 const float* RESTRICT diff,
                 uint64_t dim) {
     return simd::SQ4ComputeL2SqrImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
-        query, codes, lower_bound, diff, dim, &SQ4ScalarL2);
+        query, codes, lower_bound, diff, dim, &sq4_scalar_l2);
 }
 
 float
@@ -397,7 +409,7 @@ SQ4ComputeCodesIP(const uint8_t* RESTRICT codes1,
                   const float* RESTRICT diff,
                   uint64_t dim) {
     return simd::SQ4ComputeCodesIPImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
-        codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesIP);
+        codes1, codes2, lower_bound, diff, dim, &sq4_scalar_codes_ip);
 }
 
 float
@@ -407,7 +419,7 @@ SQ4ComputeCodesL2Sqr(const uint8_t* RESTRICT codes1,
                      const float* RESTRICT diff,
                      uint64_t dim) {
     return simd::SQ4ComputeCodesL2SqrImpl<simd::SQ4Traits<simd::GenericSQ4Tag>>(
-        codes1, codes2, lower_bound, diff, dim, &SQ4ScalarCodesL2);
+        codes1, codes2, lower_bound, diff, dim, &sq4_scalar_codes_l2);
 }
 
 float
@@ -417,15 +429,15 @@ SQ4UniformComputeCodesIP(const uint8_t* RESTRICT codes1,
     int32_t result = 0;
 
     for (uint64_t d = 0; d < dim; d += 2) {
-        float x_lo = codes1[d >> 1] & 0x0f;
-        float x_hi = (codes1[d >> 1] & 0xf0) >> 4;
-        float y_lo = codes2[d >> 1] & 0x0f;
-        float y_hi = (codes2[d >> 1] & 0xf0) >> 4;
+        auto x_lo = static_cast<float>(codes1[d >> 1] & 0x0f);
+        auto x_hi = static_cast<float>((codes1[d >> 1] & 0xf0) >> 4);
+        auto y_lo = static_cast<float>(codes2[d >> 1] & 0x0f);
+        auto y_hi = static_cast<float>((codes2[d >> 1] & 0xf0) >> 4);
 
-        result += (x_lo * y_lo + x_hi * y_hi);
+        result = static_cast<int32_t>(static_cast<float>(result) + (x_lo * y_lo + x_hi * y_hi));
     }
 
-    return result;
+    return static_cast<float>(result);
 }
 
 float
@@ -454,17 +466,18 @@ SQ8UniformComputeCodesIPBatch(const uint8_t* RESTRICT query,
 float
 RaBitQFloatBinaryIP(const float* vector, const uint8_t* bits, uint64_t dim, float inv_sqrt_d) {
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
-    float result = 0.0f;
+    float result = 0.0F;
 
-    float neg = 0, pos = 0;
+    float neg = 0;
+    float pos = 0;
     if (inv_sqrt_d > 1e-3) {
         pos = inv_sqrt_d;
         neg = -inv_sqrt_d;
     } else {
-        pos = 1.0f;
+        pos = 1.0F;
         neg = 0;
     }
 
@@ -498,7 +511,7 @@ RaBitQFloatBinaryIPBatch4(const float* vector,
     const float neg = inv_sqrt_d > 1e-3F ? -inv_sqrt_d : 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_id = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         const float value = vector[d];
         results[0] += ((bits1[byte_id] & bit_mask) != 0U ? pos : neg) * value;
         results[1] += ((bits2[byte_id] & bit_mask) != 0U ? pos : neg) * value;
@@ -530,7 +543,7 @@ RaBitQFloatThreeBitIPBatch4(const float* vector,
         1U << (reorder_bits + 2), 1U << (reorder_bits + 1), 1U << reorder_bits};
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         const float value = vector[d];
         for (uint32_t i = 0; i < 4; ++i) {
             uint32_t code = 0;
@@ -557,7 +570,7 @@ RaBitQFloatTwoBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t d
     float result = 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         float weight = (plane0[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
         weight += (plane1[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
         result += vector[d] * weight;
@@ -587,7 +600,7 @@ RaBitQFloatTwoBitCenteredIPBatch4(const float* vector,
         bits1 + plane_bytes, bits2 + plane_bytes, bits3 + plane_bytes, bits4 + plane_bytes};
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         const float value = vector[d];
         for (uint32_t i = 0; i < 4; ++i) {
             float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
@@ -610,7 +623,7 @@ RaBitQFloatThreeBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t
     float result = 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         float weight = (plane0[byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
         weight += (plane1[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
         weight += (plane2[byte_idx] & bit_mask) != 0U ? 0.5F : -0.5F;
@@ -645,7 +658,7 @@ RaBitQFloatThreeBitCenteredIPBatch4(const float* vector,
                                 bits4 + 2 * plane_bytes};
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         const float value = vector[d];
         for (uint32_t i = 0; i < 4; ++i) {
             float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
@@ -670,7 +683,7 @@ RaBitQFloatFourBitCenteredIP(const float* vector, const uint8_t* bits, uint64_t 
     float result = 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         float weight = (plane0[byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
         weight += (plane1[byte_idx] & bit_mask) != 0U ? 2.0F : -2.0F;
         weight += (plane2[byte_idx] & bit_mask) != 0U ? 1.0F : -1.0F;
@@ -710,7 +723,7 @@ RaBitQFloatFourBitCenteredIPBatch4(const float* vector,
                                 bits4 + 3 * plane_bytes};
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         const float value = vector[d];
         for (uint32_t i = 0; i < 4; ++i) {
             float weight = (plane0[i][byte_idx] & bit_mask) != 0U ? 4.0F : -4.0F;
@@ -820,16 +833,16 @@ RaBitQFloatSplitCodeIP(const float* vector,
                        uint64_t dim,
                        uint32_t supplement_bits) {
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
     const uint64_t plane_bytes = (dim + 7) / 8;
     const uint32_t one_bit_weight = 1U << supplement_bits;
-    float result = 0.0f;
+    float result = 0.0F;
 
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const uint8_t bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
         uint32_t code = (one_bit_code[byte_idx] & bit_mask) != 0 ? one_bit_weight : 0U;
         for (uint32_t bit = 0; bit < supplement_bits; ++bit) {
             const auto* plane = supplement_code + static_cast<uint64_t>(bit) * plane_bytes;
@@ -914,10 +927,10 @@ RaBitQFloatExCode7IP(const float* vector, const uint8_t* compact_code, uint64_t 
 float
 RaBitQFloatSQIP(const float* vector, const uint8_t* codes, uint64_t dim) {
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
-    float result = 0.0f;
+    float result = 0.0F;
     for (uint64_t d = 0; d < dim; ++d) {
         result += float(codes[d]) * vector[d];
     }
@@ -955,8 +968,8 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
         code_sum == nullptr or not RaBitQExCode7SupportedDim(dim)) {
         return false;
     }
-    constexpr uint64_t kLegacyBlockSize = 56;
-    constexpr uint64_t kLegacyLowDimensionCount = 48;
+    constexpr uint64_t k_legacy_block_size = 56;
+    constexpr uint64_t k_legacy_low_dimension_count = 48;
     uint64_t sum = 0;
     uint64_t sum_sq = 0;
     const bool want_sq_sum = code_sq_sum != nullptr;
@@ -965,13 +978,13 @@ RaBitQExCode7ToBytes(const uint8_t* one_bit_code,
         const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
         const uint32_t filter_code = ((one_bit_code[byte_idx] & bit_mask) != 0U) ? 1U : 0U;
         const uint64_t lane = d & 63U;
-        const auto* block = supplement_code + (d >> 6U) * kLegacyBlockSize;
+        const auto* block = supplement_code + (d >> 6U) * k_legacy_block_size;
         const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
         uint32_t low = 0;
-        if (lane < kLegacyLowDimensionCount) {
+        if (lane < k_legacy_low_dimension_count) {
             low = block[lane] & 0x3FU;
         } else {
-            const uint64_t packed_lane = lane - kLegacyLowDimensionCount;
+            const uint64_t packed_lane = lane - k_legacy_low_dimension_count;
             low = ((block[packed_lane] >> 6U) & 0x3U) |
                   (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
                   (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
@@ -1004,28 +1017,28 @@ RaBitQExCode7ToVector(const uint8_t* one_bit_code,
     }
     // HNSW-compatible codec: one filter bit plane plus a 7-bit supplement packed in 56-byte
     // blocks, one block per 64 dimensions.
-    constexpr uint64_t kLegacyBlockSize = 56;
-    constexpr uint64_t kLegacyLowDimensionCount = 48;
-    constexpr uint32_t kSupplementBits = 7;
+    constexpr uint64_t k_legacy_block_size = 56;
+    constexpr uint64_t k_legacy_low_dimension_count = 48;
+    constexpr uint32_t k_supplement_bits = 7;
     for (uint64_t d = 0; d < dim; ++d) {
         const uint64_t byte_idx = d >> 3U;
         const auto bit_mask = static_cast<uint8_t>(1U << (d & 7U));
         const uint32_t filter_code = ((one_bit_code[byte_idx] & bit_mask) != 0U) ? 1U : 0U;
 
         const uint64_t lane = d & 63U;
-        const auto* block = supplement_code + (d >> 6U) * kLegacyBlockSize;
+        const auto* block = supplement_code + (d >> 6U) * k_legacy_block_size;
         const uint32_t top = (block[48U + (lane & 7U)] >> (lane >> 3U)) & 1U;
         uint32_t low = 0;
-        if (lane < kLegacyLowDimensionCount) {
+        if (lane < k_legacy_low_dimension_count) {
             low = block[lane] & 0x3FU;
         } else {
-            const uint64_t packed_lane = lane - kLegacyLowDimensionCount;
+            const uint64_t packed_lane = lane - k_legacy_low_dimension_count;
             low = ((block[packed_lane] >> 6U) & 0x3U) |
                   (((block[16U + packed_lane] >> 6U) & 0x3U) << 2U) |
                   (((block[32U + packed_lane] >> 6U) & 0x3U) << 4U);
         }
         const uint32_t supplement = low | (top << 6U);
-        const uint32_t full_code = (filter_code << kSupplementBits) | supplement;
+        const uint32_t full_code = (filter_code << k_supplement_bits) | supplement;
 
         const float value =
             centroid[d] + residual_scale * (static_cast<float>(full_code) - full_center);
@@ -1137,7 +1150,7 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     // note that this func requiere the redident part in codes and bits is 0
     // e.g., suppose dim = 10, then the value of bit pos = 11 to 15 should be 0
     if (dim == 0) {
-        return 0.0f;
+        return 0.0F;
     }
 
     uint32_t result = 0;
@@ -1146,9 +1159,8 @@ RaBitQSQ4UBinaryIP(const uint8_t* codes, const uint8_t* bits, uint64_t dim) {
     uint64_t remainder = num_bytes % 8;
 
     for (uint64_t bit_pos = 0; bit_pos < 4; ++bit_pos) {
-        const uint64_t* codes_block =
-            reinterpret_cast<const uint64_t*>(codes + bit_pos * num_bytes);
-        const uint64_t* bits_block = reinterpret_cast<const uint64_t*>(bits);
+        const auto* codes_block = reinterpret_cast<const uint64_t*>(codes + bit_pos * num_bytes);
+        const auto* bits_block = reinterpret_cast<const uint64_t*>(bits);
 
         for (uint64_t i = 0; i < num_blocks; ++i) {
             uint64_t bitwise_and = codes_block[i] & bits_block[i];
@@ -1259,11 +1271,15 @@ PQFastScanLookUp32(const uint8_t* RESTRICT lookup_table,
         codes += 16;
         for (uint64_t j = 0; j < 16; j++) {
             if (j % 2 == 0) {
-                result[j / 2] += static_cast<uint32_t>(dict[code[j] & 0x0F]);
-                result[16 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
+                result[j / 2] = static_cast<int32_t>(result[j / 2] +
+                                                     static_cast<uint32_t>(dict[code[j] & 0x0F]));
+                result[16 + j / 2] = static_cast<int32_t>(
+                    result[16 + j / 2] + static_cast<uint32_t>(dict[(code[j] >> 4)]));
             } else {
-                result[8 + j / 2] += static_cast<uint32_t>(dict[code[j] & 0x0F]);
-                result[24 + j / 2] += static_cast<uint32_t>(dict[(code[j] >> 4)]);
+                result[8 + j / 2] = static_cast<int32_t>(
+                    result[8 + j / 2] + static_cast<uint32_t>(dict[code[j] & 0x0F]));
+                result[24 + j / 2] = static_cast<int32_t>(
+                    result[24 + j / 2] + static_cast<uint32_t>(dict[(code[j] >> 4)]));
             }
         }
     }
@@ -1378,7 +1394,7 @@ RaBitQFastScan32ResidualPostprocess(const int32_t* accumulators,
         }
         float lookup_sum = 0.0F;
         for (uint32_t plane = 0; plane < filter_bits; ++plane) {
-            const float weight = static_cast<float>(1U << (filter_bits - plane - 1));
+            const auto weight = static_cast<float>(1U << (filter_bits - plane - 1));
             lookup_sum +=
                 weight * (delta * static_cast<float>(accumulators[plane * 32 + i]) + sum_vl);
         }
@@ -1460,7 +1476,7 @@ FHTRotate(float* data, uint64_t dim_) {
     uint64_t n = dim_;
     uint64_t step = 1;
     while (step < n) {
-        generic::RotateOp(data, 0, dim_, step);
+        generic::RotateOp(data, 0, static_cast<int>(dim_), static_cast<int>(step));
         step *= 2;
     }
 }

@@ -455,8 +455,10 @@ TEST_CASE("RaBitQ FastScan32 residual postprocess SIMD parity", "[ut][simd]") {
     }
 }
 
+// Lookup accumulates into the output, so every benchmark invocation needs a fresh sum.
 #define BENCHMARK_SIMD_COMPUTE(Simd, Comp)                                               \
     BENCHMARK_ADVANCED(#Simd #Comp) {                                                    \
+        std::fill(gt.begin(), gt.end(), 0);                                              \
         for (int i = 0; i < count; ++i) {                                                \
             Simd::Comp(lut.data() + i * dim, codes.data() + i * dim, pq_dim, gt.data()); \
         }                                                                                \

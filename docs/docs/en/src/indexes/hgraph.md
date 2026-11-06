@@ -389,6 +389,10 @@ auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
 
+### NaN and infinite distances
+
+NaN distances are excluded from search results, while graph traversal can still visit those nodes as connectivity bridges. Unbounded KNN permits `+Inf` and `-Inf` distances, consistently with FP32 storage: for inner product, a positive infinite dot product produces a distance of `-Inf` and can rank first. A finite KNN distance threshold excludes infinite distances before bounded selection. FP16 encoding preserves IEEE NaN and infinity rather than clamping them to finite values. Arithmetic or cosine normalization on infinite components can produce NaN, which follows the same exclusion rule.
+
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 
 Graph traversal is the right strategy when most candidates pass the filter — the

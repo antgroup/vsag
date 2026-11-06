@@ -659,6 +659,7 @@ private:
     struct GraphAddProbeResult {
         DistHeapPtr neighbors{nullptr};
         int64_t duplicate_id{-1};
+        bool needs_connectivity_bridge{false};
     };
 
     void
@@ -762,7 +763,7 @@ private:
 
     void
     publish_unique_to_bottom_graph(InnerIdType inner_id,
-                                   const DistHeapPtr& neighbors,
+                                   const GraphAddProbeResult& probe,
                                    const FlattenInterfacePtr& flatten_codes);
 
     void
