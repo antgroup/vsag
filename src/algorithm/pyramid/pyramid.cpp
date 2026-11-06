@@ -38,6 +38,7 @@
 #include "impl/distance_provider_for_graph.h"
 #include "impl/graph_build_helper.h"
 #include "impl/heap/standard_heap.h"
+#include "impl/logger/logger.h"
 #include "impl/odescent/odescent_graph_builder.h"
 #include "impl/pipnn/pipnn_graph_builder.h"
 #include "impl/pruning_strategy.h"
@@ -661,6 +662,12 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
         }
     }
     const auto data_num = static_cast<int64_t>(input_indices.size());
+    {
+        logger::info("[pyramid_build] phase=preprocess nodes={} deduped={} pipnn={}",
+                     input_count,
+                     data_num,
+                     (graph_type_ == GRAPH_TYPE_VALUE_PIPNN));
+    }
 
     // A datacell's initial logical capacity may not have physical backing yet. As in
     // prepare_add_batch(), parallel writes are safe only after Resize actually grows each store.
@@ -745,9 +752,23 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
             }
         }
     }
+    {
+        logger::info("[pyramid_build] phase=storage_encode nodes={} parallel={}",
+                     data_num,
+                     (thread_pool_ != nullptr && build_thread_count_ > 1));
+    }
     auto codes = construction_codes();
     // Scalar RaBitQ codes already provide symmetric SIMD distances; do not create SQ8 copies.
     const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
+
+    {
+        logger::info(
+            "[pyramid_build] phase=graph_build builder={} nodes={} hierarchies={} parallel={}",
+            (graph_type_ == GRAPH_TYPE_VALUE_PIPNN ? "pipnn" : "odescent"),
+            data_num,
+            hierarchies_.size(),
+            (thread_pool_ != nullptr && build_thread_count_ > 1));
+    }
 
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
         // PiPNN is restricted to float32 dense input by the constructor, so the
@@ -758,7 +779,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
             rows.emplace_back(static_cast<const float*>(
                 element_ptr(build_vectors == nullptr ? data_vectors : build_vectors, input_index)));
         }
+        uint64_t hierarchy_index = 0;
         for (const auto& [hname, hierarchy] : hierarchies_) {
+            auto pipnn_phase_start = std::chrono::steady_clock::now();
             auto pipnn_parameter = pipnn_param_;
             pipnn_parameter.alpha = hierarchy->alpha;
             PiPNNGraphBuilder pipnn_builder(pipnn_parameter,
@@ -784,6 +807,13 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                     pipnn_builder.Build(graph, ids, node_rows);
                 };
             hierarchy->root->Build(build_graph);
+            logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} duration={}ms",
+                         hierarchy_index + 1,
+                         hierarchies_.size(),
+                         std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - pipnn_phase_start)
+                             .count());
+            ++hierarchy_index;
 
             auto& root = *hierarchy->root;
             if (root.has_routing()) {
@@ -847,6 +877,9 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
             submit_exception = std::current_exception();
         }
         drain_futures(futures, submit_exception);
+        logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} (parallel)",
+                     hierarchies_.size(),
+                     hierarchies_.size());
     } else {
         ODescent graph_builder(std::make_shared<ODescentParameter>(*odescent_param_),
                                codes,
@@ -855,9 +888,21 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                                true,
                                build_vectors,
                                data_num);
+        uint64_t hi = 0;
         for (const auto& [hname, h_ptr] : hierarchies_) {
+            auto od_phase_start = std::chrono::steady_clock::now();
             h_ptr->root->Build(graph_builder);
+            logger::info("[pyramid_build] phase=graph_build hierarchy={}/{} duration={}ms",
+                         hi + 1,
+                         hierarchies_.size(),
+                         std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - od_phase_start)
+                             .count());
+            ++hi;
         }
+    }
+    {
+        logger::info("[pyramid_build] phase=graph_build_complete");
     }
     cur_element_count_ = data_num;
     return failed_ids;
@@ -2383,6 +2428,8 @@ Pyramid::Build(const DatasetPtr& base) {
                    "adaptive_pruning does not yet support building from imported cache; disable "
                    "adaptive_pruning or build without importing a cache");
     const auto data_num = base->GetNumElements();
+    const auto build_begin = std::chrono::steady_clock::now();
+    logger::info("[pyramid_build] build starting nodes={}", data_num);
     if (graph_type_ == GRAPH_TYPE_VALUE_NSW && has_loaded_cache() &&
         base->GetSourceID() != nullptr) {
         UnorderedSet<std::string> source_ids(allocator_);
@@ -2404,7 +2451,14 @@ Pyramid::Build(const DatasetPtr& base) {
             const uint64_t matched =
                 cache_->CountMatchedSourceIds(source_id_data, static_cast<uint64_t>(data_num));
             if (matched * 100 >= static_cast<uint64_t>(data_num) * minimum_cache_hit_percent) {
-                return build_with_cache(base);
+                auto cache_result = build_with_cache(base);
+                const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::steady_clock::now() - build_begin)
+                                          .count();
+                logger::info("[pyramid_build] build completed nodes={} duration={}ms (cached)",
+                             data_num,
+                             total_ms);
+                return cache_result;
             }
             logger::info(
                 "[pyramid_build_cache] source-id overlap below {}%; falling back to cold build",
@@ -2438,6 +2492,10 @@ Pyramid::Build(const DatasetPtr& base) {
     // All build workers must be drained before releasing their temporary scalar codes;
     // the session destructor aborts the build if this commit is not reached.
     optimized_build.Commit();
+    const auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                              std::chrono::steady_clock::now() - build_begin)
+                              .count();
+    logger::info("[pyramid_build] build completed nodes={} duration={}ms", data_num, total_ms);
     return result;
 }
 
