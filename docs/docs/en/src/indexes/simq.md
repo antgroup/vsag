@@ -98,6 +98,8 @@ SIMQ-specific build parameters live under `index_param`. The common fields
 |-----------|------|---------|-------------|
 | `dim` | int | — (required) | Dimension of each token vector. |
 | `base_io_type` | string | `"async_io"` | Storage backend for reranking multi-vector data. |
+| `base_enable_read_cache` | bool | `false` | Enable LRU page cache for disk IO backends (`async_io`, `uring_io`, `buffer_io`). Ignored by `memory_io`, `block_memory_io`, `mmap_io` (those use `NoCache`). |
+| `base_cache_total_size` | int | `268435456` (256 MiB) | Total cache size in bytes when `base_enable_read_cache` is `true`. Allocated per index. |
 | `base_file_path` | string | `"./default_file_path"` | File path for disk-backed IO types. |
 | `init_cluster_ratio` | float | `0.2` | Fraction of tokens sampled as initial cluster centers. |
 | `max_cluster_size` | int | `64` | Maximum token vectors per cluster before split. |
