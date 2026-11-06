@@ -15,13 +15,45 @@
 
 #include "parallel_searcher.h"
 
+#include <future>
 #include <set>
 #include <vector>
 
+#include "impl/thread_pool/ring_buffer_thread_pool.h"
 #include "searcher_test.h"
 #include "unittest.h"
 
 using namespace vsag;
+
+namespace {
+
+class InlineSearchThreadPool : public ThreadPool {
+public:
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        ++submissions;
+        std::packaged_task<void()> packaged_task(std::move(task));
+        auto result = packaged_task.get_future();
+        packaged_task();
+        return result;
+    }
+
+    void
+    WaitUntilEmpty() override {
+    }
+
+    void
+    SetQueueSizeLimit(std::uint64_t) override {
+    }
+
+    void
+    SetPoolSize(std::uint64_t) override {
+    }
+
+    uint64_t submissions{0};
+};
+
+}  // namespace
 
 TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][ParallelSearcher]") {
     constexpr uint32_t base_size = 200;
@@ -80,6 +112,43 @@ TEST_CASE("ParallelSearcher matches BasicSearcher on a generic graph", "[ut][Par
 
     for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
         REQUIRE(run_search(parallel, graph) == run_search(basic, graph));
+    }
+
+    SECTION("same-pool worker queries do not submit polling helpers inline") {
+        search_param.parallel_search_thread_count = 2;
+        for (const uint64_t workers : {1, 2}) {
+            auto raw_pool = std::make_shared<RingBufferThreadPool>(workers);
+            auto safe_pool = std::make_shared<SafeThreadPool>(raw_pool);
+            auto nested_searcher = std::make_shared<ParallelSearcher>(common, safe_pool);
+            for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
+                const auto expected = run_search(basic, graph);
+                std::set<std::pair<float, InnerIdType>> actual;
+                bool requires_inline = false;
+                // Submit directly through the underlying pool: SafeThreadPool must detect
+                // native worker identity without relying on its own enqueue wrapper.
+                auto query = raw_pool->Enqueue([&]() {
+                    requires_inline = safe_pool->RequiresInlineExecution();
+                    actual = run_search(nested_searcher, graph);
+                });
+                // The external test runner supplies the deadlock timeout. Always join this
+                // future before any captured fixture data can leave scope.
+                query.get();
+                REQUIRE(requires_inline);
+                REQUIRE(actual == expected);
+            }
+        }
+    }
+
+    SECTION("an unknown synchronous executor does not receive polling helpers") {
+        search_param.parallel_search_thread_count = 2;
+        auto inline_pool = std::make_shared<InlineSearchThreadPool>();
+        auto safe_pool = std::make_shared<SafeThreadPool>(inline_pool);
+        auto inline_searcher = std::make_shared<ParallelSearcher>(common, safe_pool);
+        REQUIRE(safe_pool->RequiresInlineExecution());
+        for (const auto& graph : {MakeRingGraph(base_size, 8), MakeIrregularGraph(base_size)}) {
+            REQUIRE(run_search(inline_searcher, graph) == run_search(basic, graph));
+        }
+        REQUIRE(inline_pool->submissions == 0);
     }
 
     SECTION("a missing executor is valid only for serial search") {
