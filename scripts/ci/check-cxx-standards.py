@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Audit actual Full VSAG compile commands, including optional CUDA/Node targets."""
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -15,7 +16,7 @@ def main():
         if not source.is_absolute():
             source = Path(entry["directory"]) / source
         source = source.resolve()
-        relative = source.relative_to(root) if root in source.parents else None
+        relative = Path(os.path.relpath(source, root)) if root in source.parents else None
         if relative is None:
             continue
         if relative.parts[0] == "src":

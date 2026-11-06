@@ -183,11 +183,11 @@ The image upgrade can land on main ahead of the C++20 migration. Copy the follow
 - `docker/Dockerfile.aarch64.base`
 - `scripts/deps/install_toolchain_ubuntu.sh`
 - `.github/workflows/update-ci-image.yml`
-- `.github/workflows/performance.yml` (use a virtual environment with the CI image Python)
+- the `performance` profile in `.github/workflows/daily_test.yml` (use a virtual environment with the CI image Python)
 
 These changes build independently of the CMake, source, formatter configuration and release-package changes in the toolchain PR. The existing x86 MKL/OpenBLAS and aarch64 OpenBLAS Dockerfiles inherit the upgraded bases without edits. The manylinux `Dockerfile.dist_*` changes belong to the toolchain/release migration and are not required for this image-only PR.
 
-The image workflow watches both the Dockerfiles and the shared installer. PR events build the complete image chains without pushing; merging the image PR triggers the existing push workflow to publish the tags. After publication, obtain the digest for `ghcr.io/antgroup/vsag:ci-x86-openblas`, verify GCC/G++ 13 and clang-format/clang-tidy 20 in that image, and commit that exact digest to `.github/ci-routing.json` on canonical main. Preserve the existing routing switch unless intentionally changing routing policy. The toolchain PR then needs a new run or **Re-run all jobs** to read the new main configuration and use the new image; rerunning only failed jobs can retain the old image selection.
+The image workflow watches both the Dockerfiles and the shared installer. PR events build the complete image chains without pushing; merging the image PR triggers the existing push workflow to publish the tags. After publication, obtain the `linux/amd64` manifest digest from the `ghcr.io/antgroup/vsag:ci-main-openblas` index, verify GCC/G++ 13 and clang-format/clang-tidy 20 in that image, and commit that exact digest to `.github/ci-routing.json` on canonical main. Preserve the existing routing switch unless intentionally changing routing policy. The toolchain PR then needs a new run or **Re-run all jobs** to read the new main configuration and use the new image; rerunning only failed jobs can retain the old image selection.
 
 ## Main-target PR check scope
 
@@ -236,7 +236,7 @@ failed diff operations conservatively select heavy checks and full lint.
 | Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
-Format and existing path-selected docs/image publishing workflows remain separate.
+Format and path-selected documentation checks use `main-ci.yml`; image publishing remains separate.
 CircleCI's duplicate main build is removed; its version branch filters and PR
 classifier remain. Full X86 ASan still covers the MKL image in daily, and the
 existing daily path retains bundled OpenBLAS coverage. CircleCI's generic debug
@@ -271,3 +271,168 @@ same relevant revision before using daily evidence for release readiness.
 Validate with `python3 -m unittest tests/scripts/test_main_ci.py` and the existing
 workflow helper suites. No production runner configuration or trusted digest
 change is part of this migration.
+
+## Consolidated checks and event isolation
+
+Code checks are grouped by `pr-ci.yml` (PR CI) and `main-ci.yml` (Branch CI).
+PR CI has exactly six top-level jobs: Select CI route, CI Routing Tests, Select
+checks, Community, Team and PR CI Gate. Docs, SIMD Coverage and Lite live inside
+Community, which denotes hosted resources and still runs for Team-routed PRs.
+They execute once and do not extend the internal Team concurrency lock.
+Metadata validation lives in `pr-issue-link.yml` (PR Metadata), and manual entry
+points live in `manual-checks.yml` (Manual Checks). Body/title and label edits
+only trigger PR Metadata, never an empty PR CI run. PR CI listens only to
+opened, reopened and synchronize events. After changing the target branch,
+push a new commit (an empty commit is sufficient) to validate the new base;
+do not rely on a successful Gate from the previous target branch.
+Job names are short and fixed; only Lite includes its matrix mode.
+
+| Check | Automatic selection | Manual entry |
+| --- | --- | --- |
+| Format | Push to main or `0.*`, except documentation-only changes | Manual Checks: format |
+| Docs | PR opened/reopened/synchronize against any branch, or main push; original path filters | Manual Checks: docs |
+| Issue Link | PR opened/edited/reopened/synchronize/labeled/unlabeled targeting main or `0.*` | None |
+| SIMD Coverage | PR opened/reopened/synchronize targeting main; original path filters | None |
+| Lite | PR opened/reopened/synchronize targeting main or `0.*`; original path filters | Manual Checks: lite |
+| Core PR CI | PR opened/reopened/synchronize targeting main or `0.*` | Manual Checks: full-pr |
+| Main integration | Non-deleted main pushes | Manual Checks: full-branch |
+
+Docs, Format and Lite command steps are shared composite actions under
+`.github/actions/check-{docs,format,lite}/`, reused by automatic and manual jobs.
+These actions do not add workflow entries. Matrix modes remain visible per job.
+
+Full manual checks call the existing PR/Branch workflows, with an explicitly
+manual caller job prefix. Manual-only docs/format/Lite do not call the core
+workflows, so they cannot publish skipped automatic gate/build checks. Code
+workflows no longer expose selective workflow_dispatch inputs. The manual wrapper
+keeps read-only permissions; full-pr routes to Community, as before.
+
+The required names `PR CI Gate` and `Format Check` remain unchanged.
+Gate requires successful selection and Community execution, plus routing tests
+and Team when applicable. Community's Shared Checks Result verifies that each
+selected Docs/SIMD/Lite job (including the complete Lite matrix) succeeded;
+only unselected checks may be skipped. Failure, cancellation or unexpected skips
+fail the result and therefore Gate. On other PR target branches, only the
+original docs scope runs through Community with core checks disabled; Gate
+checks that intended route explicitly. Metadata remains independently enforced
+by Mergify; it does not rerun code checks. Other names
+include `Community / Docs`, `Branch Docs`, `Community / SIMD Coverage`,
+`Issue Link` and `Community / Lite <mode>`.
+
+SIMD Coverage still compares clean base/head coverage with the same test filter,
+seed and thresholds. It builds only `unittests_simd` and its dependencies using
+`scripts/coverage/simd_coverage.mk`, with a CI-only CMake overlay that also includes
+the Local SQ reference tests tagged `[simd]` outside `src/simd/` and preserves
+the aggregate executable's normal library initialization/ISA diagnostics. The overlay applies
+to both revisions, including bases that predate this helper. Ordinary `make cov`
+and local module builds are unchanged. Adding `[simd]` tests outside the module
+requires updating the coverage inventory guard and verifying aggregate/module
+inventory and SIMD line-coverage equivalence.
+
+Branch Docs is distinct from PR Docs. The 2026-11-02 ruleset audit found main
+requires DCO, Mergify Merge Protections and PR CI Gate; version rulesets include
+Format Check. Mergify checks issue links directly from labels/body. Recheck
+protections before merge if they change.
+
+Issue Link uses a PR/head lock before reading live body/labels, and rejects a
+closed PR or changed head. PR code concurrency is set before path selection;
+heavy downstream jobs have no cancellation groups. Branch commits run
+independently. Branch deletions skip selection before checkout. A failed path
+selector causes the required Format Check to fail explicitly, rather than skip.
+
+The selector preserves original path scopes using the complete Git diff,
+including deletions and renames. PR comparisons use merge-base; push comparisons
+use before/after, and new branches use the oldest pushed commit's parent.
+Unavailable ranges fail visibly. Original check commands, images, matrices,
+timeouts and artifacts remain unchanged. Existing full version workflows remain
+unchanged. The retired label workflow is deleted; its script/manifest remain.
+
+This stage leaves 23 workflow YAML files versus the original 27: four old code
+entries and Label configuration are removed, Issue Link stays separate, and one
+manual entry is added. It prioritizes reliable event isolation over removing the
+last two entries. Team/Community remain reusable workflows.
+
+Changing pr-ci.yml changes the trusted Team caller digest. Review and authorize
+its final digest via the private operations process before Team admission. This
+PR does not change production admission, runner configuration or protections.
+
+Validation: the checks-policy, main-policy, routing, Team and SIMD helper suites,
+Lite collector fixtures, documentation checks and actionlint. The SIMD fixtures
+require Linux timeout. Local tests do not establish actual PR/branch runtime
+success.
+
+### Check identity on metadata and out-of-scope events
+
+PR CI does not subscribe to edited: a metadata-only run of the same workflow
+can obscure the full run in the PR merge widget. Target-branch changes require
+a subsequent push; this is a maintainer procedure, not an automatically enforced
+retarget guard. Re-running an old run is not a substitute for validating the new
+base. A one-element naming matrix produces PR CI Gate for maintained targets
+and Docs Gate for other targets. The gate shell verifies its context matches
+the selected core scope. Metadata never publishes a successful code Gate.
+
+Branch formatting/docs use the same always-instantiated context pattern. Deleted
+branches and successful out-of-scope selection publish Format Check Not Required
+or Branch Docs Not Required, never an automatic validation name. Selected checks
+retain Format Check / Branch Docs; selection failures fail the applicable check.
+The no-op identity jobs use hosted runners briefly and run no checkout/check steps.
+
+Manual PR grants actions: read at that calling job only, alongside contents/read
+and pull-requests/read, because nested reusable workflows cannot increase their
+caller's token permissions even when the Team branch will be skipped.
+
+## Workflow entry layout
+
+The Actions entries are PR CI, Branch CI, Daily CI, Release, Maintenance, CI Images,
+Manual Checks, and PR Metadata. Team CI and Community CI remain reusable groups
+under PR CI; their standalone Actions pages do not own independent run history.
+Common hosted execution steps live under `.github/actions/`; entry workflows own
+job runners, dependencies, selection and permissions. No workflow generator is needed.
+
+- PR CI retains the required `PR CI Gate` name. PR Metadata alone handles body/label
+  edits. Retargeting a PR still requires pushing a new commit before code validation.
+- Branch CI retains a separate run for each main commit. Main uses platform smoke,
+  Python x86, TSan and selected lint; version branches retain their full standalone
+  scopes, including Coverage and compatibility. SIMD path checks are also here.
+- Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
+  lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
+  selected jobs appear inside that manual run, not a separately dispatched run.
+- Daily CI defaults to a manually selected `regression` profile. Full regression
+  scheduling remains disabled. The pre-existing weekday performance and weekly
+  build-performance schedules select only their respective profiles; they do not
+  start full regression. No nightly compiler-cache scheduling is changed here.
+- Maintenance preserves docs-only push filtering for docs synchronization and
+  main-push contributor updates. It never executes on PR events.
+- Release consolidates release creation, Wheels and old-version indexes. The
+  existing Release workflow is disabled in repository settings and must stay so
+  until publication is separately authorized. Manual toolchain checks remain
+  available through Manual Checks without enabling publication.
+
+All new shared actions must be reviewed together with their callers. Moving a
+command into a composite action does not change the contributor-side validation
+requirements. For toolchain checks of historical commits, load the shared action
+from the workflow's immutable source before checking out the requested target.
+
+After merge, verify the intended runs before disabling retired workflow entries.
+First check references on maintained version branches as well: GitHub workflow
+state is repository-wide, so disabling an old entry while a version branch still
+uses it would suppress that branch's checks. Keep historical run records unless
+separate deletion is explicitly requested. A smaller workflow directory does not
+by itself remove historical entries from the Actions sidebar.
+
+### Performance profile source and concurrency
+
+The Daily CI `performance` profile runs only in the canonical repository's main
+context (scheduled, manual, or a reusable call from a main push). Like
+`build-performance`, it accepts `inputs.ref` only as `main` or a full commit SHA
+reachable from fetched upstream main. Both profiles share the same inline ref
+validator through a YAML anchor; validation precedes dependency installation and
+execution, and the actual commit is recorded in the job summary. Notification
+credentials are scoped to the runtime profile's report step.
+
+Each runtime-performance run/attempt has its own concurrency group with
+`cancel-in-progress: false`; a manual invocation cannot cancel a scheduled run.
+Runs can execute concurrently if GitHub-hosted capacity permits. This does not
+change the Team pool or enable full daily regression scheduling.
+
+See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.

@@ -239,7 +239,7 @@ class TeamWorkflowTest(unittest.TestCase):
         self.assertIn('cancel-in-progress: false', team)
         self.assertIn('uses: ./.github/workflows/pr-ci-team.yml', team)
         self.assertNotIn('concurrency:', TEAM)
-        self.assertIn("group: pr-ci-${{ github.event.pull_request.number || github.sha }}", CALLER)
+        self.assertIn("group: pr-ci-${{ github.event.pull_request.number || github.ref }}", CALLER)
         self.assertIn('      runner:\n        type: string\n        default: vsag-linux-x64', TEAM)
 
     def test_build_publishes_fresh_identity_and_refuses_to_overwrite(self):

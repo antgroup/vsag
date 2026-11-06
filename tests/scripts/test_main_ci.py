@@ -98,31 +98,28 @@ class MainPolicyTest(unittest.TestCase):
             for name in data[kind]: self.assertIn('"' + name + '"', source)
         for name in data["examples"]: self.assertTrue((ROOT / "examples/cpp" / (name + ".cpp")).is_file())
 
-    def test_daily_stays_unscheduled_and_calls_full_regressions(self):
+    def test_daily_full_regression_remains_manual(self):
         text = (ROOT / ".github/workflows/daily_test.yml").read_text()
-        self.assertNotRegex(text, r"(?m)^  schedule:")
-        self.assertNotIn("ref: main", text)
-        for name in ("asan_build_and_test", "python_build_and_test", "lint", "coverage", "check_compatibility"):
-            self.assertIn(f"uses: ./.github/workflows/{name}.yml", text)
-        self.assertIn("full-examples: true", text)
-        self.assertIn("daily_test_x86-${{ github.run_id }}", text)
-        self.assertNotIn("cancel-in-progress: true", text)
+        self.assertIn("github.event_name != 'schedule'", text)
+        for profile in ('full-platform', 'full-python', 'full-lint', 'full-coverage', 'full-compatibility'):
+            self.assertIn('  ' + profile + '-', text)
+        self.assertNotRegex(text, r"(?m)^    - cron: [\"']0 14 ")
 
-    def test_main_uses_only_light_contract_and_no_cancellation(self):
+    def test_main_uses_only_light_contract_and_no_branch_wide_cancellation(self):
         text = (ROOT / ".github/workflows/main-ci.yml").read_text()
-        self.assertIn("branches: [main]", text)
-        self.assertIn("smoke: true", text)
-        self.assertIn("x86-only: true", text)
+        self.assertRegex(text, r"(?s)push:.*?branches:.*?main.*?0\.\*")
+        self.assertNotIn('\nconcurrency:', text)
+        self.assertIn("inputs-smoke:", text)
+        self.assertIn("python-build-python-wheel-aarch64:", text)
+        self.assertIn("needs.entry-scope.outputs.profile == 'full-branch'", text)
         self.assertIn("github.event.before", text)
-        self.assertNotIn("cancel-in-progress:", text)
-        self.assertIn("if: always()", text)
-        self.assertNotIn("workflows/coverage.yml", text)
 
     def test_actual_macos_shell_selects_exactly_one_scope(self):
         import textwrap
         from tests.scripts.test_build_benchmark_workflow import job, step
-        workflow = (ROOT / ".github/workflows/asan_build_and_test.yml").read_text()
-        shell = textwrap.dedent(step(job(workflow, "test_asan_macos_arm64"), "Do Asan Test In ${{ matrix.test_type }}").split("run: |\n", 1)[1]).replace("${{ matrix.test_type }}", "unittests")
+        from tests.scripts.test_dependency_workflows import job_text
+        workflow = ROOT / ".github/workflows/main-ci.yml"
+        shell = textwrap.dedent(step(job_text(workflow, "platforms-test-asan-macos-arm64"), "Do Asan Test In ${{ matrix.test_type }}").split("run: |\n", 1)[1]).replace("${{ matrix.test_type }}", "unittests")
         with tempfile.TemporaryDirectory() as tmp:
             p = Path(tmp, "scripts/testing"); p.mkdir(parents=True)
             script = p / "test_parallel_by_name.sh"; script.write_text("#!/bin/sh\necho FULL\n"); script.chmod(0o755)
@@ -132,23 +129,13 @@ class MainPolicyTest(unittest.TestCase):
                 self.assertEqual("FULL" in out, full)
                 self.assertEqual(out.count("platform_smoke.py"), calls)
 
-    def test_version_and_manual_keep_full_defaults(self):
-        from tests.scripts.test_build_benchmark_workflow import job
-        directory = ROOT / ".github/workflows"
-        for name in ("asan_build_and_test", "python_build_and_test", "lint", "coverage", "check_compatibility", "tsan_build_and_test"):
-            text = (directory / (name + ".yml")).read_text()
-            self.assertIn('branches: [ "0.*" ]', text)
-            self.assertIn('workflow_dispatch:', text)
-            self.assertIn('workflow_call:', text)
-        text = (directory / "asan_build_and_test.yml").read_text()
-        self.assertIn("default: false", text)
-        self.assertIn("!inputs.smoke", job(text, "build_asan_x86"))
-        self.assertIn('name: Do Asan Test In', job(text, "test_asan_x86"))
-        self.assertIn("default: full", (directory / "lint.yml").read_text())
-        self.assertIn("!inputs.x86-only", (directory / "python_build_and_test.yml").read_text())
-        circle = (ROOT / ".circleci/continue_config.yml").read_text()
-        self.assertIn("- main", circle.split("  main-branch-workflow:")[0])
-        self.assertNotIn("- main", circle.split("  main-branch-workflow:")[1].split("jobs:")[0])
+    def test_version_and_manual_keep_full_profiles(self):
+        branch = (ROOT / ".github/workflows/main-ci.yml").read_text()
+        manual = (ROOT / ".github/workflows/manual-checks.yml").read_text()
+        self.assertIn("needs.entry-scope.outputs.version == 'true'", branch)
+        for profile in ('asan', 'python', 'lint', 'coverage', 'compatibility', 'tsan'):
+            self.assertIn("needs.entry-scope.outputs.profile == '" + profile + "'", branch)
+            self.assertIn(profile, manual)
 
     def test_full_examples_uses_independent_complete_inventory(self):
         m = module("platform_smoke")
@@ -204,13 +191,14 @@ class MainPolicyTest(unittest.TestCase):
 
     def test_suppression_precedes_example_smoke_and_logs_survive(self):
         from tests.scripts.test_build_benchmark_workflow import job
-        text = (ROOT / ".github/workflows/asan_build_and_test.yml").read_text()
-        body = job(text, "test_example_aarch64")
+        from tests.scripts.test_dependency_workflows import job_text
+        workflow = ROOT / ".github/workflows/main-ci.yml"
+        body = job_text(workflow, "platforms-test-example-aarch64")
         self.assertLess(body.index('export LSAN_OPTIONS='), body.index('if [ "$SMOKE"'))
         self.assertIn('suppressions=$RUNNER_TEMP/', body)
-        self.assertIn('if: always() && inputs.smoke', body)
+        self.assertIn('if: always() && fromJSON(', body)
         for name in ("test_asan_aarch64", "test_asan_macos_arm64"):
-            self.assertIn('name: Upload Log\n        if: always()', job(text, name))
+            self.assertIn('name: Upload Log\n        if: always()', job_text(workflow, "platforms-" + name.replace("_", "-")))
         data = json.loads((ROOT / "scripts/ci/platform_smoke.json").read_text())
         self.assertNotIn("Test CPU Info", data["functests"])
         self.assertIn("Factory rejects removed index names", data["functests"])

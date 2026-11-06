@@ -1868,6 +1868,9 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
     FlattenOptimizedBuildContext build_context{finalize_pool, 4};
     REQUIRE(optimized_build->BeginOptimizedBuild(build_context));
     REQUIRE(optimized_build->IsOptimizedBuildActive());
+    auto pairwise_interface = std::dynamic_pointer_cast<FlattenPairwiseDistanceInterface>(flatten);
+    REQUIRE(pairwise_interface != nullptr);
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() == nullptr);
     flatten->ShrinkToFit(0);
     REQUIRE_THROWS(flatten->InsertVector(vectors.data()));
     REQUIRE(flatten->TotalCount() == 0);
@@ -1923,6 +1926,7 @@ TEST_CASE("RaBitQSplitDataCell optimized scalar-code build",
 
     optimized_build->FinalizeOptimizedBuild();
     REQUIRE_FALSE(optimized_build->IsOptimizedBuildActive());
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() != nullptr);
     REQUIRE(std::abs(flatten->ComputePairVectors(0, 2) - build_pair_distance) <= 1e-5F);
     flatten->QueryById(id_dists.data(), 0, build_ids.data(), count, &ctx);
     statistics = JsonType::Parse(stats.Dump());

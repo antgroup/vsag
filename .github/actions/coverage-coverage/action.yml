@@ -1,0 +1,75 @@
+name: coverage-coverage
+description: Shared coverage execution; callers own runners and dependencies.
+inputs:
+  secrets-CODECOV-TOKEN:
+    description: Caller secrets.CODECOV_TOKEN
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Configure Git workspace
+      shell: sh
+      run: ./scripts/ci/configure-git-safe-directory.sh
+    - name: Prepare FetchContent Sources
+      uses: ./.github/actions/prepare-fetchcontent
+      with:
+        include-tests: "true"
+    - name: Cache ExternalProject Archives
+      uses: actions/cache@v4
+      with:
+        path: .ci-downloads
+        key: external-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('extern/**/*.cmake') }}
+        restore-keys: |
+          external-${{ runner.os }}-${{ runner.arch }}-
+    - name: Install lcov
+      shell: sh
+      run: |
+        apt update
+        apt install -y libcapture-tiny-perl libdatetime-perl curl jq
+        git clone https://github.com/linux-test-project/lcov.git
+        cd lcov && git checkout v2.3 && make SHELL=/bin/bash install
+        lcov --version
+    - name: Load Cache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        max-size: "5G"
+        save: ${{ github.event_name != 'pull_request' }}
+        key: build-cov-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
+    - name: Compile with Coverage Flags
+      env:
+        CMAKE_GENERATOR: Ninja
+        EXTRA_DEFINED: -DVSAG_USE_SYSTEM_OPENBLAS=ON
+      shell: sh
+      run: |
+        ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/compile.log make cov
+        ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/instrumentation.log \
+          python3 scripts/coverage/verify_cpp_coverage.py instrumentation build/compile_commands.json
+    - name: Run Test
+      shell: sh
+      run: >-
+        ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/tests.log ./scripts/testing/test_parallel_bg.sh
+    - name: Collect Coverage Info
+      shell: sh
+      run: |
+        ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/collect.log \
+          bash scripts/coverage/collect_cpp_coverage.sh
+        ./scripts/ci/run-with-diagnostics.sh coverage-diagnostics/coverage-head.log \
+          head -n10 coverage/coverage.info
+    - name: Upload Coverage to Codecov
+      uses: codecov/codecov-action@v5
+      with:
+        fail_ci_if_error: true
+        files: coverage/coverage.info
+        disable_search: true
+        flags: cpp
+        token: ${{ inputs.secrets-CODECOV-TOKEN }}
+        verbose: true
+    - name: Upload Coverage Diagnostics
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: coverage-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+        path: coverage-diagnostics/
+        retention-days: 30
+        if-no-files-found: warn

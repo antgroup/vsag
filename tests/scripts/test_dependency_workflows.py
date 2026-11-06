@@ -22,7 +22,29 @@ def job_text(workflow: Path, job_name: str) -> str:
     )
     if match is None:
         raise AssertionError(f"job {job_name} not found in {workflow}")
-    return match.group("body")
+    body = match.group("body")
+    # Inspect the actual shared execution steps as well as the entry job envelope.
+    local = re.search(r"(?m)^      - uses: (\./\.github/actions/[^\n]+)\n(?P<call>(?:        .*\n|\n)*)", body)
+    if local:
+        action = (ROOT / local[1][2:] / 'action.yml').read_text()
+        steps = action.split('  steps:\n', 1)[1]
+        parameters = {}
+        for key, value in re.findall(r"(?m)^          ([\w-]+): (.*)$", local['call']):
+            value = value.strip()
+            if value.startswith('${{') and value.endswith('}}'):
+                parameters[key] = value[3:-2].strip()
+            else:
+                parameters[key] = value
+        for key, value in parameters.items():
+            steps = steps.replace('inputs.' + key, '(' + value + ')')
+        # Normalize trivial matrix substitutions for existing executable-shell tests.
+        steps = re.sub(r'\$\{\{ \((matrix\.[\w-]+)\) \}\}', r'${{ \1 }}', steps)
+        # Tests execute extracted commands under an explicit shell; omit redundant
+        # composite shell declarations from the normalized command view.
+        steps = re.sub(r'(?m)^      shell: (?:bash|sh|bash -e \{0\})\n', '', steps)
+        expanded = ''.join('  ' + line if line.strip() else line for line in steps.splitlines(True))
+        body = body[:local.start()] + expanded + body[local.end():]
+    return body
 
 
 class DependencyWorkflowTest(unittest.TestCase):
@@ -51,7 +73,7 @@ class DependencyWorkflowTest(unittest.TestCase):
         self.assertIn("uses: actions/cache/restore@v4", pr_ci)
         self.assertNotIn("uses: actions/cache@v4", pr_ci)
         self.assertNotIn("uses: actions/cache/save@v4", pr_ci)
-        benchmark = (ROOT / ".github/workflows/build_performance.yml").read_text(encoding="utf-8")
+        benchmark = (ROOT / ".github/workflows/daily_test.yml").read_text(encoding="utf-8")
         self.assertIn("dependency-cache-write-policy restore-only", benchmark)
 
     def test_archive_directory_is_exported_for_the_entire_metrics_job(self) -> None:
@@ -86,8 +108,8 @@ class DependencyWorkflowTest(unittest.TestCase):
 
 
 class TsanCleanupTest(unittest.TestCase):
-    workflow_name = "tsan_build_and_test.yml"
-    job_name = "build_tsan"
+    workflow_name = "main-ci.yml"
+    job_name = "tsan-build-tsan"
 
     def cleanup_script(self, sandbox: Path) -> str:
         workflow = ROOT / ".github/workflows" / self.workflow_name
@@ -209,19 +231,19 @@ class TsanCleanupTest(unittest.TestCase):
 
 
 class SimdBuildCleanupTest(TsanCleanupTest):
-    workflow_name = "asan_with_simd_option.yml"
-    job_name = "build_asan_simd"
+    workflow_name = "main-ci.yml"
+    job_name = "simd-build-asan-simd"
 
 
 class SimdTestCleanupTest(TsanCleanupTest):
-    workflow_name = "asan_with_simd_option.yml"
-    job_name = "test_asan_simd"
+    workflow_name = "main-ci.yml"
+    job_name = "simd-test-asan-simd"
 
 
 class FailurePropagationTest(unittest.TestCase):
     def test_tsan_keeps_vsag_concurrency_and_propagates_sanitizer_failures(self):
         from tests.scripts.test_build_benchmark_workflow import step
-        body = job_text(ROOT / '.github/workflows/tsan_build_and_test.yml', 'test_tsan')
+        body = job_text(ROOT / '.github/workflows/main-ci.yml', 'tsan-test-tsan')
         run = step(body, 'Run TSAN tests')
         self.assertIn('OPENBLAS_NUM_THREADS: "1"', run)
         script = textwrap.dedent(run.split('run: |\n', 1)[1])
@@ -250,8 +272,8 @@ class FailurePropagationTest(unittest.TestCase):
         import textwrap
         from tests.scripts.test_build_benchmark_workflow import step
         jobs = [('pr-ci-community.yml', 'test-python-x86'),
-                ('python_build_and_test.yml', 'test_python_x86'),
-                ('python_build_and_test.yml', 'test_python_aarch64')]
+                ('main-ci.yml', 'python-test-python-x86'),
+                ('main-ci.yml', 'python-test-python-aarch64')]
         for filename, name in jobs:
             body = job_text(ROOT / '.github/workflows' / filename, name)
             run = step(body, 'Run Python Test')
@@ -295,8 +317,8 @@ class FailurePropagationTest(unittest.TestCase):
 
     def test_compatibility_workflows_fail_closed_and_use_private_input_directory(self):
         from tests.scripts.test_build_benchmark_workflow import step
-        for filename in ['pr-ci-community.yml','check_compatibility.yml']:
-            body=job_text(ROOT/'.github/workflows'/filename,'compatibility')
+        for filename in ['pr-ci-community.yml','main-ci.yml']:
+            body=job_text(ROOT/'.github/workflows'/filename,'compatibility-compatibility' if filename == 'main-ci.yml' else 'compatibility')
             download=step(body,'Download Compatibility Indexes from Release')
             self.assertIn('download_compatibility_inputs.py',download)
             self.assertNotIn('||',download)
@@ -409,7 +431,7 @@ class CompatibilityDownloadTest(unittest.TestCase):
 
 class LeanPrChecksTest(unittest.TestCase):
     def test_main_ci_policy_suite(self):
-        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py"], cwd=ROOT, check=True)
+        subprocess.run(["python3", "-m", "unittest", "tests/scripts/test_main_ci.py", "tests/scripts/test_workflow_entries.py"], cwd=ROOT, check=True)
 
     def selected(self, name, *, base="main", event="pull_request", team=False,
                  cpp=False, python=False, cmake=False):
@@ -456,11 +478,14 @@ class LeanPrChecksTest(unittest.TestCase):
         self.assertIn("./scripts/format/check_format.sh", job_text(ROOT / ".github/workflows/pr-ci-team.yml", "checks"))
 
     def test_tsan_push_and_version_triggers_retained(self):
-        text = (ROOT / ".github/workflows/tsan_build_and_test.yml").read_text()
-        self.assertIn('push:\n    branches: [ "0.*" ]', text)
-        self.assertIn("./.github/workflows/tsan_build_and_test.yml", (ROOT / ".github/workflows/main-ci.yml").read_text())
-        self.assertIn('pull_request:\n    branches: [ "0.*" ]', text)
-        self.assertIn('workflow_dispatch:', text)
+        branch = (ROOT / ".github/workflows/main-ci.yml").read_text()
+        manual = (ROOT / ".github/workflows/manual-checks.yml").read_text()
+        community = (ROOT / ".github/workflows/pr-ci-community.yml").read_text()
+        self.assertIn("tsan-build-tsan:", branch)
+        self.assertIn("needs.entry-scope.outputs.version == 'true'", branch)
+        self.assertIn("startsWith(github.base_ref, '0.')", community)
+        self.assertIn("version-tsan-build-tsan:", community)
+        self.assertIn('tsan', manual)
 
     def test_circleci_only_skips_verified_current_main_prs(self):
         import importlib.util

@@ -1,0 +1,24 @@
+name: python-build-and-test-clean-up
+description: Shared clean_up execution; callers own runners and dependencies.
+runs:
+  using: composite
+  steps:
+    - name: Create Empty File
+      shell: bash -e {0}
+      run: touch /tmp/clean_up
+    - name: Overwrite Test Artifact X86
+      uses: actions/upload-artifact@v5
+      with:
+        path: /tmp/clean_up
+        name: wheelhouse_x86-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 1
+        overwrite: 'true'
+    - name: Overwrite Test Artifact Aarch64
+      uses: actions/upload-artifact@v5
+      with:
+        path: /tmp/clean_up
+        name: wheelhouse_aarch64-${{ github.run_id }}
+        compression-level: 1
+        retention-days: 1
+        overwrite: 'true'

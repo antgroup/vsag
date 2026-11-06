@@ -1,12 +1,12 @@
 name: PR CI
 
 on:
-  workflow_dispatch:
+  workflow_call:
   pull_request:
-    branches: ["main", "0.*"]
+    types: [opened, reopened, synchronize]
 
 concurrency:
-  group: pr-ci-${{ github.event.pull_request.number || github.sha }}
+  group: pr-ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   route:
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')))))
     name: Select CI route
     runs-on: ubuntu-24.04
     outputs:
@@ -106,6 +107,7 @@ jobs:
             // END ROUTE POLICY
 
   routing-tests:
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/')))))
     name: CI Routing Tests
     runs-on: ubuntu-24.04
     steps:
@@ -115,10 +117,15 @@ jobs:
       - run: node --test tests/scripts/ci_runner_route.test.cjs
 
   community:
+    if: always() && needs.select-checks.result == 'success' && (needs.route.result == 'success' || needs.route.result == 'skipped')
     name: Community
-    needs: route
+    needs: [route, select-checks]
     uses: ./.github/workflows/pr-ci-community.yml
     with:
+      core: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) }}
+      run-docs: ${{ needs.select-checks.outputs.docs == 'true' }}
+      run-simd: ${{ needs.select-checks.outputs.simd == 'true' }}
+      run-lite: ${{ needs.select-checks.outputs.lite == 'true' }}
       team-linux: ${{ needs.route.outputs.team == 'true' }}
 
   team:
@@ -128,7 +135,7 @@ jobs:
       pull-requests: read
       actions: read
     needs: route
-    if: needs.route.outputs.team == 'true'
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) && needs.route.outputs.team == 'true'
     concurrency:
       group: vsag-team-vm
       queue: max
@@ -137,12 +144,38 @@ jobs:
     with:
       image: ${{ needs.route.outputs.image }}
 
+  select-checks:
+    name: Select checks
+    runs-on: ubuntu-latest
+    outputs:
+      format: ${{ steps.select.outputs.format }}
+      docs: ${{ steps.select.outputs.docs }}
+      issue: ${{ steps.select.outputs.issue }}
+      simd: ${{ steps.select.outputs.simd }}
+      lite: ${{ steps.select.outputs.lite }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select original event and path scopes
+        id: select
+        run: python3 scripts/ci/checks_policy.py
+
   gate:
-    name: PR CI Gate
+    # Always instantiate one named context, including out-of-scope runs.
+    # Keeping expressions in the matrix avoids raw expressions in skipped names.
+    name: ${{ matrix.check }}
+    strategy:
+      matrix:
+        check: ${{ fromJSON((github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) && '["PR CI Gate"]' || '["Docs Gate"]') }}
     if: always()
-    needs: [route, routing-tests, community, team]
+    needs: [route, routing-tests, select-checks, community, team]
     runs-on: ubuntu-24.04
     env:
+      CHECK_CONTEXT: ${{ matrix.check }}
+      SELECTION_RESULT: ${{ needs.select-checks.result }}
+      CORE_SELECTED: ${{ (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && contains(fromJSON('["opened","reopened","synchronize"]'), github.event.action) && (github.base_ref == 'main' || (startsWith(github.base_ref, '0.') && !contains(github.base_ref, '/'))))) }}
       ROUTE_RESULT: ${{ needs.route.result }}
       POLICY_TEST_RESULT: ${{ needs.routing-tests.result }}
       COMMUNITY_RESULT: ${{ needs.community.result }}
@@ -159,8 +192,16 @@ jobs:
           }
           printf 'CI results: route=%s policy=%s community=%s team=%s selected=%s\n' \
             "$ROUTE_RESULT" "$POLICY_TEST_RESULT" "$COMMUNITY_RESULT" "$TEAM_RESULT" "$TEAM_SELECTED"
-          require_result 'Route job' "$ROUTE_RESULT" success
-          require_result 'Routing tests' "$POLICY_TEST_RESULT" success
+          require_result 'Check selection' "$SELECTION_RESULT" success
+          core_expected=skipped
+          context_expected='Docs Gate'
+          if [ "$CORE_SELECTED" = true ]; then
+            core_expected=success
+            context_expected='PR CI Gate'
+          fi
+          require_result 'Gate identity' "$CHECK_CONTEXT" "$context_expected"
+          require_result 'Route job' "$ROUTE_RESULT" "$core_expected"
+          require_result 'Routing tests' "$POLICY_TEST_RESULT" "$core_expected"
           require_result 'Community CI' "$COMMUNITY_RESULT" success
           if [ "$TEAM_SELECTED" = true ]; then
             require_result 'Team CI' "$TEAM_RESULT" success

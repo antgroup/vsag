@@ -376,6 +376,12 @@ public:
     [[nodiscard]] uint64_t
     GetScalarCodeSize() const;
 
+    // Decode a persisted code into the same scalar representation used during Build.
+    uint64_t
+    UnpackScalarCode(const uint8_t* codes, uint8_t* scalar_code) const {
+        return this->unpack_scalar_code(codes, scalar_code);
+    }
+
     bool
     EncodeOneToScalarCode(const float* data, uint8_t* scalar_code, uint64_t& code_sum) const;
 

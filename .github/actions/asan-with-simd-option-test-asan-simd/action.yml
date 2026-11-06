@@ -1,0 +1,29 @@
+name: asan-with-simd-option-test-asan-simd
+description: Shared test_asan_simd execution; callers own runners and dependencies.
+inputs:
+  matrix-simd-key:
+    description: Caller matrix.simd_key
+    required: false
+    default: ''
+  matrix-test-type:
+    description: Caller matrix.test_type
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Clean Env
+      shell: sh
+      run: rm -rf ./build
+    - name: Download Test
+      uses: actions/download-artifact@v5
+      with:
+        name: test-x86-${{ inputs.matrix-simd-key }}-${{ github.run_id }}
+        path: ./build/
+    - name: Do Asan Test In ${{ inputs.matrix-test-type }}
+      shell: sh
+      run: |
+        echo leak:libomp.so > omp.supp
+        export LSAN_OPTIONS=suppressions=omp.supp
+        chmod +x ./build/tests/${{ inputs.matrix-test-type }}
+        ./scripts/testing/test_parallel_by_name.sh ${{ inputs.matrix-test-type }}

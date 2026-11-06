@@ -272,7 +272,13 @@ PyramidParameters::FromJson(const JsonType& json) {
     this->alpha = graph_json[ALPHA_KEY].GetFloat();
     this->max_degree = graph_json[GRAPH_PARAM_MAX_DEGREE_KEY].GetInt();
 
+    this->pipnn_param = PiPNNGraphBuilderParameter{};
     this->graph_type = graph_json[GRAPH_TYPE_KEY].GetString();
+    if (graph_json.Contains(PIPNN_PARAMETER_ADAPTIVE_PRUNING) and
+        graph_json[PIPNN_PARAMETER_ADAPTIVE_PRUNING].GetBool()) {
+        CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
+                       "pipnn_adaptive_pruning requires graph_type=pipnn");
+    }
     CHECK_ARGUMENT(this->graph_type == GRAPH_TYPE_VALUE_NSW or
                        this->graph_type == GRAPH_TYPE_VALUE_ODESCENT or
                        this->graph_type == GRAPH_TYPE_VALUE_PIPNN,
@@ -427,6 +433,12 @@ PyramidParameters::CheckCompatibility(const ParamPtr& other) const {
     }
 
     CHECK_SUB_PARAM(*this, *p, graph_param);
+    CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning);
+    if (pipnn_param.adaptive_pruning) {
+        CHECK_FIELD_EQ(*this, *p, graph_type);
+        CHECK_FIELD_EQ(*this, *p, alpha);
+        CHECK_FIELD_EQ(*this, *p, pipnn_param.adaptive_pruning_adjust_step);
+    }
     CHECK_SUB_PARAM(*this, *p, base_codes_param);
     if (this->has_hierarchies != p->has_hierarchies) {
         logger::error(

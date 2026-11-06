@@ -19,6 +19,24 @@
 #include "vsag/options.h"
 
 namespace vsag {
+namespace {
+thread_local const DefaultThreadPool* current_pool = nullptr;
+
+class PoolThreadScope {
+public:
+    explicit PoolThreadScope(const DefaultThreadPool* pool) : previous_(current_pool) {
+        current_pool = pool;
+    }
+
+    ~PoolThreadScope() {
+        current_pool = previous_;
+    }
+
+private:
+    const DefaultThreadPool* previous_;
+};
+}  // namespace
+
 DefaultThreadPool::DefaultThreadPool(std::uint64_t threads) {
     pool_ = std::make_unique<progschj::ThreadPool>(threads);
     ConfirmThreadPoolWorkers(*this, static_cast<uint32_t>(threads));
@@ -26,7 +44,15 @@ DefaultThreadPool::DefaultThreadPool(std::uint64_t threads) {
 
 std::future<void>
 DefaultThreadPool::Enqueue(std::function<void(void)> task) {
-    return pool_->enqueue(task);
+    return pool_->enqueue([this, task = std::move(task)]() {
+        PoolThreadScope scope(this);
+        task();
+    });
+}
+
+bool
+DefaultThreadPool::IsCurrentThread() const {
+    return current_pool == this;
 }
 
 void

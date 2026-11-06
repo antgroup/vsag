@@ -17,13 +17,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <future>
 #include <limits>
 #include <memory>
+#include <numeric>
 
+#include "allocator/memory_record_allocator.h"
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface.h"
 #include "hgraph_rabitq_fused_datacell.h"
 #include "impl/allocator/safe_allocator.h"
+#include "impl/distance_provider_for_graph.h"
 #include "index_common_param.h"
 #include "io/memory_io/memory_io_parameter.h"
 #include "unittest.h"
@@ -76,6 +80,9 @@ TEST_CASE("RaBitQ split interface queries with filter IP hints", "[ut][RaBitQSpl
     auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
         graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
     split->AttachFusedCodeStorage(graph.get());
+    auto pairwise_interface = std::dynamic_pointer_cast<FlattenPairwiseDistanceInterface>(flatten);
+    REQUIRE(pairwise_interface != nullptr);
+    REQUIRE(pairwise_interface->FactoryPairwiseDistanceComputer() == nullptr);
     flatten->Resize(query_count);
 
     Vector<uint8_t> filter_code(split->OneBitCodeSize(), allocator.get());
@@ -264,6 +271,161 @@ TEST_CASE("RaBitQ fused pair distances match reconstructed vectors",
     // Retraining must refresh the same cache too.
     split->TrainFusedCodec(other_vectors.data(), count, cluster_count);
     check_pairs(flatten, other_vectors.data());
+}
+
+TEST_CASE("RaBitQ split cached pair distances preserve persisted distances",
+          "[ut][RaBitQSplitDataCell][pairwise_cache]") {
+    auto metric = GENERATE(
+        MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP, MetricType::METRIC_TYPE_COSINE);
+    const auto bits = GENERATE(std::make_pair(8, 3), std::make_pair(7, 2), std::make_pair(5, 4));
+    const bool fast = GENERATE(true, false);
+    const uint64_t dim = GENERATE(64, 96);
+    CAPTURE(metric, bits.first, bits.second, fast, dim);
+    constexpr InnerIdType count = 24;
+    auto json = JsonType::Parse(R"({
+        "codes_type":"rabitq_split", "io_params":{"type":"memory_io"},
+        "quantization_params":{"type":"rabitq", "rabitq_version":"split",
+            "rabitq_bits_per_dim_query":32, "rabitq_bits_per_dim_base":8,
+            "rabitq_bits_per_dim_filter":3, "fast_encode_rabitq":true}
+    })");
+    json["quantization_params"]["rabitq_bits_per_dim_base"].SetInt(bits.first);
+    json["quantization_params"]["rabitq_bits_per_dim_filter"].SetInt(bits.second);
+    json["quantization_params"]["fast_encode_rabitq"].SetBool(fast);
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common.dim_ = dim;
+    common.metric_ = metric;
+    auto vectors = fixtures::generate_vectors(count, dim, true, 42);
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    flatten->Train(vectors.data(), count);
+    flatten->Resize(count);
+    flatten->BatchInsertVector(vectors.data(), count);
+    FlattenDistanceProvider pairwise(flatten, nullptr);
+    FlattenIdDistanceProvider by_id(flatten, 0);
+    std::vector<InnerIdType> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> distances(count);
+    SearchStatistics stats;
+    QueryContext ctx{.stats = &stats};
+    by_id.BatchQueryDistance(distances.data(), ids.data(), count, &ctx);
+    for (InnerIdType id = 0; id < count; ++id) {
+        const auto expected = flatten->ComputePairVectors(0, id);
+        REQUIRE(distances[id] == expected);
+        REQUIRE(by_id.QueryDistance(id, &ctx) == expected);
+        REQUIRE(by_id.PairwiseDistance(0, id) == expected);
+        REQUIRE(pairwise.PairwiseDistance(0, id, nullptr) == expected);
+        REQUIRE(pairwise.PairwiseDistance(id, 0, nullptr) == flatten->ComputePairVectors(id, 0));
+    }
+    ctx.track_distance_evaluations = false;
+    by_id.BatchQueryDistance(distances.data(), ids.data(), count, &ctx);
+    auto statistics = JsonType::Parse(stats.Dump());
+    REQUIRE(statistics["distance_evaluations_by_backend"]["rabitq"].GetUint64() == 2 * count);
+
+    // A new operation must observe modified records rather than a previous operation's cache.
+    flatten->Move(1, 0);
+    FlattenIdDistanceProvider fresh(flatten, 0);
+    REQUIRE(fresh.QueryDistance(2) == flatten->ComputePairVectors(0, 2));
+}
+
+TEST_CASE("RaBitQ split pairwise cache reuses reads and bounds its lifetime",
+          "[ut][RaBitQSplitDataCell][pairwise_cache]") {
+    using Split = RaBitQSplitDataCell<MetricType::METRIC_TYPE_IP, MemoryIO>;
+    class CountingSplit : public Split {
+    public:
+        using Split::Split;
+        mutable std::atomic<uint64_t> reads{0};
+        InnerIdType fail_id{std::numeric_limits<InnerIdType>::max()};
+
+        bool
+        GetCodesById(InnerIdType id, uint8_t* codes) const override {
+            reads.fetch_add(1, std::memory_order_relaxed);
+            if (id == fail_id) {
+                return false;
+            }
+            return Split::GetCodesById(id, codes);
+        }
+    };
+    constexpr uint64_t dim = 64;
+    constexpr InnerIdType count = 600;
+    auto recorded = std::make_shared<fixtures::MemoryRecordAllocator>();
+    auto allocator = std::make_shared<SafeAllocator>(recorded);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = dim;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    auto quantizer = QuantizerParameter::GetQuantizerParameterByJson(JsonType::Parse(R"({
+        "type":"rabitq", "rabitq_version":"split", "rabitq_bits_per_dim_query":32,
+        "rabitq_bits_per_dim_base":8, "rabitq_bits_per_dim_filter":3
+    })"));
+    auto flatten =
+        std::make_shared<CountingSplit>(quantizer, std::make_shared<MemoryIOParameter>(), common);
+    auto vectors = fixtures::generate_vectors(count, dim, true, 42);
+    flatten->Train(vectors.data(), 64);
+    flatten->Resize(count);
+    flatten->BatchInsertVector(vectors.data(), count, nullptr);
+    const float expected = flatten->ComputePairVectors(0, 1);
+    const float eviction_expected = flatten->ComputePairVectors(0, 512);
+    flatten->reads = 0;
+    const auto memory_before = recorded->GetCurrentMemory();
+    {
+        FlattenDistanceProvider provider(flatten, nullptr);
+        for (int i = 0; i < 100; ++i) {
+            REQUIRE(provider.PairwiseDistance(0, 1, nullptr) == expected);
+            REQUIRE(provider.PairwiseDistance(1, 0, nullptr) == expected);
+        }
+        REQUIRE(flatten->reads == 2);
+        for (InnerIdType id = 2; id < 512; ++id) {
+            REQUIRE(std::isfinite(provider.PairwiseDistance(id, id, nullptr)));
+        }
+        REQUIRE(flatten->reads == 512);
+        // Fetching 512 evicts 0 while its scalar code is still used by this distance.
+        REQUIRE(provider.PairwiseDistance(0, 512, nullptr) == eviction_expected);
+        REQUIRE(flatten->reads == 513);
+        REQUIRE(provider.PairwiseDistance(0, 1, nullptr) == expected);
+        REQUIRE(flatten->reads == 515);
+        const auto full_cache_memory = recorded->GetCurrentMemory();
+        for (InnerIdType id = 2; id < count; ++id) {
+            REQUIRE(std::isfinite(provider.PairwiseDistance(id, id, nullptr)));
+        }
+        REQUIRE(recorded->GetCurrentMemory() == full_cache_memory);
+    }
+    REQUIRE(recorded->GetCurrentMemory() == memory_before);
+    flatten->reads = 0;
+    {
+        FlattenIdDistanceProvider provider(flatten, 0);
+        for (int i = 0; i < 100; ++i) {
+            REQUIRE(provider.QueryDistance(1) == expected);
+        }
+        REQUIRE(flatten->reads == 2);
+    }
+    REQUIRE(recorded->GetCurrentMemory() == memory_before);
+
+    {
+        FlattenIdDistanceProvider provider(flatten, 0);
+        flatten->fail_id = 1;
+        REQUIRE_THROWS(provider.QueryDistance(1));
+        flatten->fail_id = std::numeric_limits<InnerIdType>::max();
+        REQUIRE(provider.QueryDistance(1) == expected);
+    }
+    REQUIRE(recorded->GetCurrentMemory() == memory_before);
+
+    // Concurrent callers own independent caches while reading the same persisted records.
+    auto worker = [&] {
+        FlattenIdDistanceProvider provider(flatten, 0);
+        for (int i = 0; i < 100; ++i) {
+            if (provider.QueryDistance(1) != expected) {
+                return false;
+            }
+        }
+        return true;
+    };
+    auto first = std::async(std::launch::async, worker);
+    auto second = std::async(std::launch::async, worker);
+    REQUIRE(first.get());
+    REQUIRE(second.get());
+    REQUIRE(recorded->GetCurrentMemory() == memory_before);
 }
 
 }  // namespace vsag

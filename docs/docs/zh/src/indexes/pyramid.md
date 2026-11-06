@@ -134,6 +134,8 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `pipnn_leaf_neighbor_count` | int | `5` | 每个点在每个叶子中贡献的最近候选数，是 PiPNN 主要的质量/构建工作量旋钮；过小叶子至少使用 `4` |
 | `pipnn_hash_plane_count` | int | `12` | 方向 hash 位数，范围 `[1, 15]`；`max_degree` 不能超过 `2` 的该次幂 |
 | `pipnn_reservoir_size` | int | `64` | 最终剪枝前每个点保留的候选槽数；实际容量至少为 `max_degree` |
+| `pipnn_adaptive_pruning` | bool | `false` | 在 L2 批量构图时使用与 HGraph 共享的 PiPNN 动态 alpha 选择器 |
+| `pipnn_adaptive_pruning_adjust_step` | float | `0.06` | PiPNN 选择器的 alpha 调整步长 |
 | `no_build_levels` | int[] | `[]` | 跳过构图的层级（从根节点开始的 0-based 下标） |
 | `use_reorder` | bool | `false` | 是否保留高精度副本用于精排 |
 | `precise_quantization_type` | string | `"fp32"` | 精排使用的量化类型。与 `rabitq_bits_per_dim_precise` 配合设为 `"rabitq"` 时，可启用从 base storage 重排的 RaBitQ x+y split。 |
@@ -158,6 +160,28 @@ PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"c
 `pipnn_*` 参数在整个 Pyramid 索引中共享；hierarchy 对象仍可分别覆盖
 `max_degree` 和 `alpha`，PiPNN 构建该 hierarchy 时会使用这些覆盖值。
 `ef_construction` 不调节 PiPNN。
+
+### PiPNN 动态 alpha 剪枝
+
+在 `index_param` 下设置以下字段，即可启用 HGraph PiPNN 使用的最终候选池剪枝策略：
+
+```json
+{
+    "graph_type": "pipnn",
+    "alpha": 1.2,
+    "pipnn_adaptive_pruning": true,
+    "pipnn_adaptive_pruning_adjust_step": 0.06
+}
+```
+
+该策略要求 `metric_type: "l2"`，作用于所有批量构建的路径图及根节点路由图。
+各 hierarchy 使用自己的有效 `alpha` 和度数上限，动态策略和步长全局共享。
+增量 `Add` 沿用现有 NSW 插入策略。另一个开关 `adaptive_pruning` 控制 NSW，使用 PiPNN 时应保持关闭。
+
+启用时要求 `alpha` 有限且不小于 1，步长有限且非负，`alpha - 2*step > 0`，且
+`alpha + 3*step` 有限。零步长保持固定 alpha 的 PiPNN 选边结果。
+加载已启用策略的索引时，策略、基础 alpha、步长和 hierarchy 配置必须匹配；
+旧索引缺少这些字段时默认关闭。改变已有索引的策略需要重建。
 
 ### RaBitQ split 配置
 

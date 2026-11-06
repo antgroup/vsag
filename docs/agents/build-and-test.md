@@ -35,7 +35,8 @@ Prefer these targets over invoking `cmake` directly so behavior matches CI.
 
 - Recommended: use the published Docker development image
   (`vsaglib/vsag:ubuntu`).
-- Maintained CI images use the `ci-x86-*` and `ci-aarch64-*` tags and are
+- Hosted CI on main uses [`ci-main-*` platform tags](../../docker/README.md)
+  for OpenBLAS (amd64 and arm64) and MKL (amd64). These images are
   published to both `vsaglib/vsag` on Docker Hub and
   `ghcr.io/antgroup/vsag` on GitHub Container Registry.
 - Supported local environments include Ubuntu 20.04+ and CentOS 7+.
@@ -82,3 +83,5 @@ The Ubuntu dependency installer requires Ubuntu 24.04+ and installs GCC 13 and L
 Maintained CI container images use Ubuntu 26.04 with GCC 13 and LLVM 20. Ubuntu 24.04 remains a development and runtime compatibility target. Published packages retain their existing manylinux/glibc baselines; validate their Ubuntu 24.04 runtime compatibility separately from the Ubuntu 26.04 CI build.
 
 TSan CI sets `OPENBLAS_NUM_THREADS=1` because the system OpenBLAS library is not instrumented. This keeps BLAS work on the calling thread while VSAG thread pools and concurrent tests remain enabled; sanitizer failures still fail the job.
+
+See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.
