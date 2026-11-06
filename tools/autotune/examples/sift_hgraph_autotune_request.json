@@ -6,8 +6,8 @@
       "name": "hgraph",
       "create_params": {
         "index_param": {
-          "base_quantization_type": ["fp32","sq8"],
-          "max_degree": [16,32,48],
+          "base_quantization_type": {"$choices": ["fp32", "sq8"]},
+          "max_degree": {"$choices": [16, 32, 48]},
           "ef_construction": 400,
           "build_thread_count": 48
         }
