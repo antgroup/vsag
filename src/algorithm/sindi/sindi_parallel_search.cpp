@@ -127,8 +127,8 @@ SindiExecutionStatistics(JsonType json,
         json["sindi_resources_ready"].SetBool(parallel->resources != nullptr);
         json["sindi_granted_slots"].SetUint64(parallel->granted);
         json["sindi_filter_slots"].SetUint64(parallel->filter_slots);
-        json["sindi_cpu_slots"].SetUint64(parallel->cpu_slots);
-        json["sindi_worker_limit"].SetUint64(parallel->worker_limit);
+        json["sindi_cpu_slots"].SetUint64(parallel->resources ? parallel->resources->slots : 0);
+        json["sindi_worker_limit"].SetUint64(parallel->resources ? parallel->resources->limit : 0);
         json["sindi_partitions"].SetUint64(parallel->plan.quotas.size());
         json["sindi_candidate_capacity"].SetUint64(parallel->plan.capacity);
         json["sindi_n_candidate"].SetUint64(parallel->plan.candidates);
@@ -239,8 +239,6 @@ SearchSindiPartitions(const SindiPartitionSearchRequest& request,
     CHECK_ARGUMENT(state.resources != nullptr,
                    "SINDI partition executor requires prepared resources");
     auto& shared = *state.resources;
-    state.cpu_slots = shared.slots;
-    state.worker_limit = shared.limit;
     Reservation reservation(shared);
     auto maximum = static_cast<uint32_t>(
         std::min({uint64_t(state.requested), groups, uint64_t(state.execution_limit)}));

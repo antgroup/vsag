@@ -556,6 +556,42 @@ TEST_CASE("SINDI CPU statistics cover request and empty remapped queries", "[ut]
         nlohmann::json::parse(original->GetStatistics()).contains("sindi_cpu_time_enabled"));
 }
 
+TEST_CASE("SINDI empty statistics retain prepared resource capacity",
+          "[ut][SINDIParallel][SINDIEmptyResourceCapacity]") {
+    CandidateDiagnosisData data(2);
+    for (uint64_t i = 0; i < data.values.size(); ++i) {
+        data.values[i] = {static_cast<float>(16 - i), 1.0F};
+    }
+    auto index = data.Build(3, true);
+    auto normal = Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
+    const std::string parameters =
+        R"({"sindi":{"window_parallelism":4,"n_candidate":8,"query_prune_ratio":0}})";
+    const auto reference =
+        nlohmann::json::parse(index->KnnSearch(normal, 4, parameters, nullptr)->GetStatistics());
+    REQUIRE(reference["sindi_cpu_slots"].get<uint32_t>() > 0);
+    REQUIRE(reference["sindi_worker_limit"].get<uint32_t>() ==
+            std::min(3U, reference["sindi_cpu_slots"].get<uint32_t>() - 1));
+    uint32_t unknown_term = 3;
+    float value = 1;
+    SparseVector unknown{1, &unknown_term, &value};
+    auto empty = Dataset::Make()->NumElements(1)->SparseVectors(&unknown)->Owner(false);
+    SearchRequest request;
+    request.query_ = empty;
+    request.topk_ = 4;
+    request.params_str_ = parameters;
+    const auto direct = index->KnnSearch(empty, 4, parameters, nullptr);
+    const auto via_request = index->SearchWithRequest(request);
+    for (const auto& result : {direct, via_request}) {
+        REQUIRE(result->GetDim() == 0);
+        const auto stats = nlohmann::json::parse(result->GetStatistics());
+        REQUIRE(stats["sindi_resources_ready"] == true);
+        REQUIRE(stats["sindi_cpu_slots"] == reference["sindi_cpu_slots"]);
+        REQUIRE(stats["sindi_worker_limit"] == reference["sindi_worker_limit"]);
+        REQUIRE(stats["sindi_granted_slots"] == 0);
+        REQUIRE(stats["sindi_windows_processed"] == 0);
+    }
+}
+
 TEST_CASE("SINDI CPU timers are opt in and stop once", "[ut][SINDIParallel]") {
     SindiCpuTime disabled;
     {
