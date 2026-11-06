@@ -26,6 +26,56 @@ def job_text(workflow: Path, job_name: str) -> str:
 
 
 class DependencyWorkflowTest(unittest.TestCase):
+    def test_release_pr_checks_include_the_1_1_base_branch(self) -> None:
+        for name in ("pr-ci.yml", "tsan_build_and_test.yml", "pr-simd-coverage.yml", "pr-issue-link.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text()
+            with self.subTest(workflow=name):
+                trigger = re.search(r"(?m)^  pull_request:\n((?:    [^\n]*\n)+)", workflow)
+                self.assertIsNotNone(trigger)
+                branches = re.search(r"(?m)^    branches:([^\n]*(?:\n      - [^\n]+)*)", trigger[1])
+                self.assertIsNotNone(branches)
+                self.assertIn('"1.1"', branches[1])
+
+    def test_release_push_checks_include_the_1_1_branch(self) -> None:
+        for name in (
+            "asan_build_and_test.yml", "tsan_build_and_test.yml",
+            "lint.yml", "coverage.yml", "check_compatibility.yml",
+            "asan_with_simd_option.yml", "format.yml", "python_build_and_test.yml",
+        ):
+            workflow = (ROOT / ".github/workflows" / name).read_text()
+            with self.subTest(workflow=name):
+                trigger = re.search(r"(?m)^  push:\n((?:    [^\n]*\n)+)", workflow)
+                self.assertIsNotNone(trigger)
+                branches = re.search(r"(?m)^    branches:([^\n]+)", trigger[1])
+                self.assertIsNotNone(branches)
+                self.assertIn('"1.1"', branches[1])
+
+    def test_daily_build_and_test_use_the_same_event_commit(self) -> None:
+        workflow = ROOT / ".github/workflows/daily_test.yml"
+        jobs = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):$", workflow.read_text())
+        checkouts = 0
+        for name in jobs:
+            body = job_text(workflow, name)
+            for checkout in re.finditer(
+                r"(?ms)^      - uses: actions/checkout@[^\n]+\n"
+                r"(?P<options>.*?)(?=^      - |\Z)", body
+            ):
+                checkouts += 1
+                with self.subTest(job=name):
+                    self.assertRegex(
+                        checkout["options"],
+                        r"(?m)^          ref: \$\{\{ github\.sha \}\}\s*$",
+                    )
+        self.assertEqual(checkouts, 8, "Cover all ASan, SIMD and TSan checkouts")
+
+    def test_consumers_do_not_pull_shared_architecture_tags(self) -> None:
+        legacy_tag = r"(?:vsaglib/vsag|ghcr\.io/antgroup/vsag):ci-(?:x86|aarch64)-"
+        for workflow in (ROOT / ".github/workflows").glob("*.y*ml"):
+            if workflow.name == "update-ci-image.yml":
+                continue  # The native image builds use local architecture aliases.
+            with self.subTest(workflow=workflow.name):
+                self.assertNotRegex(workflow.read_text(), legacy_tag)
+
     def test_metrics_helpers_preserve_dedicated_coverage_checks(self) -> None:
         workflow = ROOT / ".github/workflows/pr-ci.yml"
         coverage = job_text(workflow, "coverage-config")

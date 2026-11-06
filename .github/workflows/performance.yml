@@ -13,7 +13,7 @@ jobs:
       group: performance-${{ github.event.pull_request.number }}
       cancel-in-progress: true
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
     env:
       PERF_DINGDING_ACCESS_TOKEN: ${{ secrets.PERF_DINGDING_ACCESS_TOKEN }}
       PERF_DINGDING_SERCRET: ${{ secrets.PERF_DINGDING_SERCRET }}

@@ -2,11 +2,11 @@ name: Tsan Build & Test Parallel
 
 on:
   push:
-    branches: [ "main", "0.*" ]
+    branches: [ "main", "0.*", "1.1" ]
     paths-ignore:
       - 'docs/**'
   pull_request:
-    branches: [ "main", "0.*" ]
+    branches: [ "main", "0.*", "1.1" ]
   workflow_dispatch:
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -103,7 +103,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-v1.1-openblas
     steps:
       - uses: actions/checkout@v4
       - name: Clean Env
