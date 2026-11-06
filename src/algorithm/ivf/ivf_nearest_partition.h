@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <mutex>
 #include <optional>
 
 #include "algorithm/inner_index_interface.h"
@@ -95,6 +96,13 @@ private:
     std::optional<Vector<BucketIdType>>
     classify_datas_on_device(const void* datas, int64_t count, BucketIdType buckets_per_data) const;
 
+    std::optional<Vector<BucketIdType>>
+    classify_search_on_device(const void* datas,
+                              int64_t count,
+                              BucketIdType buckets_per_data,
+                              int64_t min_batch,
+                              QueryContext* ctx) const;
+
 private:
     bool use_route_graph_{true};
 
@@ -105,6 +113,8 @@ private:
     //     normalized during training)
     Vector<float> centroids_{allocator_};
     Vector<float> norms_{allocator_};
+    mutable Vector<float> gpu_route_centroids_{allocator_};
+    mutable std::mutex gpu_route_centroids_mutex_;
 
     // Copied common param, used to lazily create the routing HGraph when a route-graph-layout
     // index is deserialized by a reader configured with use_route_graph=false.

@@ -470,16 +470,8 @@ TEST_CASE("IVF Nearest Partition GPU Build Fallback Test", "[ut][IVFNearestParti
     const auto centroids = GatherCentroids(*partition, bucket_count, dim, allocator.get());
     RequireSameRouting(centroids, vectors, data_count, dim, on_device, on_host, false, true);
 
-    // Search never reaches the device, whatever the flag says: it routes one
-    // query at a time, which is the shape the graph and scan paths are for.
-    //
-    // Comparing buckets would not show that, because the device would name the
-    // same ones. What only the host path does is count its distance
-    // evaluations, so a run that came back with routing statistics is a run that
-    // stayed on the host.
-    //
-    // One bucket per query, which is the shape the device pass accepts; asking
-    // for several is refused for its own reasons and would prove nothing here.
+    // The build flag alone does not opt search into the device path. A single
+    // query stays on the host and still reports routing statistics.
     InnerSearchParam search_param;
     search_param.scan_bucket_size = 1;
     SearchStatistics stats;
@@ -490,6 +482,21 @@ TEST_CASE("IVF Nearest Partition GPU Build Fallback Test", "[ut][IVFNearestParti
     REQUIRE(searched.size() == search_param.scan_bucket_size);
     REQUIRE(searched[0] == on_host[0]);
     REQUIRE(stats.dist_cmp.load() > 0);
+
+    // Search has a separate opt-in and batch threshold. A batch below the
+    // threshold must keep the same host result, while an eligible batch must
+    // preserve nearest-centroid routing whether CUDA runs or falls back.
+    search_param.enable_gpu_search = true;
+    search_param.gpu_min_batch = data_count + 1;
+    const auto below_threshold =
+        partition->ClassifyDatasForSearch(vectors.data(), data_count, search_param, nullptr);
+    REQUIRE(below_threshold == on_host);
+
+    search_param.gpu_min_batch = 1;
+    const auto gpu_searched =
+        partition->ClassifyDatasForSearch(vectors.data(), data_count, search_param, nullptr);
+    REQUIRE(gpu_searched.size() == on_host.size());
+    RequireSameRouting(centroids, vectors, data_count, dim, gpu_searched, on_host, false, true);
 }
 
 TEST_CASE("IVF Nearest Partition GPU Build Leaves Inner Product On The Host",
@@ -520,6 +527,13 @@ TEST_CASE("IVF Nearest Partition GPU Build Leaves Inner Product On The Host",
     param->enable_gpu_build = true;
     param->gpu_min_work_threshold = 1;
     REQUIRE(partition->ClassifyDatas(vectors.data(), data_count, 1, nullptr) == on_host);
+
+    InnerSearchParam search_param;
+    search_param.scan_bucket_size = 1;
+    search_param.enable_gpu_search = true;
+    search_param.gpu_min_batch = 1;
+    REQUIRE(partition->ClassifyDatasForSearch(vectors.data(), data_count, search_param, nullptr) ==
+            on_host);
 }
 
 TEST_CASE("IVF Nearest Partition GPU Build Route Graph Layout Test", "[ut][IVFNearestPartition]") {
