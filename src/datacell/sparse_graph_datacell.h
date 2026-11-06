@@ -95,6 +95,14 @@ public:
     ShrinkToFit(InnerIdType capacity) override {
     }
 
+protected:
+    [[nodiscard]] bool
+    uses_dense_capacity() const override {
+        // ShrinkToFit leaves historical capacity (and possibly empty removed rows) intact.
+        // No sparse storage allocation is sized by this metadata high-water mark.
+        return false;
+    }
+
 private:
     uint32_t code_line_size_{0};
     Allocator* const allocator_{nullptr};

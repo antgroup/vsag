@@ -17,11 +17,84 @@
 
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <nlohmann/json.hpp>
+#include <sstream>
 
 #include "impl/allocator/safe_allocator.h"
 #include "storage/stream_reader.h"
 #include "unittest.h"
+
+TEST_CASE("ConjugateGraph forward-only deserialization", "[ut][ConjugateGraph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::ConjugateGraph source(allocator.get());
+    const bool empty = GENERATE(false, true);
+    if (not empty) {
+        REQUIRE(source.AddNeighbor(1, 2).value());
+        REQUIRE(source.AddNeighbor(1, 3).value());
+        REQUIRE(source.AddNeighbor(4, 5).value());
+    }
+    std::ostringstream output;
+    REQUIRE(source.Serialize(output).has_value());
+    const auto payload = output.str();
+    std::ostringstream streaming_output;
+    vsag::IOStreamWriter writer(streaming_output);
+    source.Serialize(writer);
+    REQUIRE(streaming_output.str() == payload);
+    // Start at a nonzero offset and leave a suffix to verify exact payload consumption.
+    std::istringstream input("prefix" + payload + "suffix");
+    vsag::ForwardStreamReader reader(input);
+    char marker[6];
+    reader.Read(marker, sizeof(marker));
+    vsag::ConjugateGraph restored(allocator.get());
+    REQUIRE(restored.Deserialize(reader).has_value());
+    REQUIRE(reader.GetCursor() == sizeof(marker) + payload.size());
+    REQUIRE(restored.GetMemoryUsage() == source.GetMemoryUsage());
+    if (not empty) {
+        REQUIRE_FALSE(restored.AddNeighbor(1, 2).value());
+        REQUIRE_FALSE(restored.AddNeighbor(1, 3).value());
+        REQUIRE_FALSE(restored.AddNeighbor(4, 5).value());
+    }
+    reader.Read(marker, sizeof(marker));
+    REQUIRE(std::string(marker, sizeof(marker)) == "suffix");
+}
+
+TEST_CASE("ConjugateGraph rejects malformed forward-only payloads", "[ut][ConjugateGraph]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    vsag::ConjugateGraph source(allocator.get());
+    REQUIRE(source.AddNeighbor(1, 2).value());
+    std::ostringstream output;
+    REQUIRE(source.Serialize(output).has_value());
+    auto payload = output.str();
+    auto expected_error = vsag::ErrorType::INVALID_BINARY;
+    SECTION("header smaller than minimum payload") {
+        uint32_t size = vsag::FOOTER_SIZE + 1;
+        std::memcpy(payload.data(), &size, sizeof(size));
+    }
+    SECTION("entry header overlaps footer") {
+        uint32_t size = vsag::FOOTER_SIZE + sizeof(uint32_t) + 1;
+        std::memcpy(payload.data(), &size, sizeof(size));
+    }
+    SECTION("neighbor count overflows payload") {
+        uint64_t count = std::numeric_limits<uint64_t>::max();
+        std::memcpy(payload.data() + sizeof(uint32_t) + sizeof(int64_t), &count, sizeof(count));
+    }
+    SECTION("truncated footer") {
+        payload.pop_back();
+        expected_error = vsag::ErrorType::READ_ERROR;
+    }
+    SECTION("invalid footer") {
+        uint32_t size = vsag::FOOTER_SIZE;
+        std::memcpy(payload.data() + payload.size() - vsag::FOOTER_SIZE, &size, sizeof(size));
+    }
+    std::istringstream input(payload);
+    vsag::ForwardStreamReader reader(input);
+    vsag::ConjugateGraph restored(allocator.get());
+    const auto result = restored.Deserialize(reader);
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == expected_error);
+    REQUIRE(restored.GetMemoryUsage() == sizeof(uint32_t) + vsag::FOOTER_SIZE);
+}
 
 TEST_CASE("ConjugateGraph Build, Add and Memory Usage", "[ut][ConjugateGraph]") {
     auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();

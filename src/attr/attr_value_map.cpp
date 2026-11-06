@@ -89,9 +89,11 @@ deserialize_map(StreamReader& reader,
     for (uint64_t i = 0; i < size; ++i) {
         T key;
         StreamReader::ReadObj(reader, key);
-        auto* manager = new MultiBitsetManager(allocator, 1, type);
+        auto manager = std::make_unique<MultiBitsetManager>(allocator, 1, type);
         manager->Deserialize(reader);
-        map[key] = manager;
+        auto& slot = map[key];
+        delete slot;
+        slot = manager.release();
     }
 }
 
@@ -110,9 +112,11 @@ AttrValueMap::Deserialize(StreamReader& reader) {
     for (uint64_t i = 0; i < size; ++i) {
         std::string key;
         key = StreamReader::ReadString(reader);
-        auto* manager = new MultiBitsetManager(allocator_, 1, bitset_type_);
+        auto manager = std::make_unique<MultiBitsetManager>(allocator_, 1, bitset_type_);
         manager->Deserialize(reader);
-        string_to_bitset_[key] = manager;
+        auto& slot = string_to_bitset_[key];
+        delete slot;
+        slot = manager.release();
     }
 }
 
