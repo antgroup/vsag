@@ -19,6 +19,7 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <future>
 #include <map>
 #include <set>
 #include <sstream>
@@ -33,6 +34,7 @@
 #include "storage/serialization_template_test.h"
 #include "storage/streaming_serialization_test_utils.h"
 #include "unittest.h"
+#include "vsag_exception.h"
 using namespace vsag;
 
 namespace {
@@ -70,6 +72,11 @@ namespace vsag {
 
 class SINDITestAccess {
 public:
+    static std::unique_lock<std::shared_mutex>
+    LockStructure(SINDI& index) {
+        return std::unique_lock<std::shared_mutex>(index.global_mutex_);
+    }
+
     static bool
     UseTermListsHeapInsert(const SINDI& index,
                            const SINDISearchParameter& search_param,
@@ -2855,4 +2862,54 @@ TEST_CASE("SINDI validates terms before document pruning", "[ut][SINDI]") {
             REQUIRE(index.GetNumElements() == 0);
         }
     }
+}
+
+TEST_CASE("SINDI parallel deadlines include structural lock wait at both entry points",
+          "[ut][SINDI][SINDILockDeadline]") {
+    const bool request_api = GENERATE(false, true);
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.search_resources_ = std::make_shared<SearchExecutionContext>(0);
+    auto parameters = std::make_shared<SINDIParameter>();
+    parameters->immutable = true;
+    parameters->window_size = 4;
+    parameters->term_id_limit = 4;
+    SINDI index(parameters, common);
+    uint32_t term = 1;
+    float value = 1;
+    int64_t label = 42;
+    SparseVector vector{1, &term, &value};
+    auto data = Dataset::Make()->NumElements(1)->SparseVectors(&vector)->Ids(&label)->Owner(false);
+    REQUIRE(index.Build(data).empty());
+    SearchRequest request;
+    request.query_ = data;
+    request.topk_ = 1;
+    request.params_str_ = R"({"sindi":{"window_parallelism":4,"timeout_ms":10000}})";
+    const auto search = [&] {
+        return request_api ? index.SearchWithRequest(request)
+                           : index.KnnSearch(data, 1, request.params_str_, nullptr);
+    };
+    REQUIRE(search()->GetDim() == 1);
+    request.params_str_ = R"({"sindi":{"window_parallelism":4,"timeout_ms":10}})";
+    auto lock = SINDITestAccess::LockStructure(index);
+    std::promise<void> started;
+    auto pending = std::async(std::launch::async, [&]() -> std::optional<Error> {
+        started.set_value();
+        try {
+            search();
+            return std::nullopt;
+        } catch (const VsagException& error) {
+            return error.error_;
+        }
+    });
+    started.get_future().wait();
+    const auto waiting = pending.wait_for(std::chrono::milliseconds(100));
+    lock.unlock();  // Always release before assertions/future destruction.
+    REQUIRE(waiting == std::future_status::timeout);
+    const auto error = pending.get();
+    REQUIRE(error.has_value());
+    REQUIRE(error->type == ErrorType::INTERNAL_ERROR);
+    REQUIRE(error->message.find("deadline") != std::string::npos);
 }

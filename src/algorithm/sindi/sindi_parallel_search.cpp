@@ -311,6 +311,12 @@ SearchSindiPartitions(const SindiPartitionSearchRequest& request,
                 auto& part = partitions[shard];
                 auto param = request.search;
                 param.ef = part.capacity;
+                param.scan_cancelled = [&state, checks = uint32_t{0}]() mutable {
+                    // Callback stop is exact; amortize deadline clock reads.
+                    return (++checks % 32 == 0) ? state.Stopped()
+                                                : state.stop.load(std::memory_order_relaxed) !=
+                                                      SindiParallelState::Stop::NONE;
+                };
                 param.is_inner_id_allowed = slot.filter;
                 const auto end = std::min(part.end, part.cursor + 4);
                 while (part.cursor < end and not state.Stopped()) {

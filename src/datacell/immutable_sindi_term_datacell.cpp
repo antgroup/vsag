@@ -381,7 +381,7 @@ ImmutableSindiTermDataCell::QueryWindow(float* dists,
     computer->ResetTerm();
 }
 
-template <InnerSearchMode mode, InnerSearchType type>
+template <InnerSearchMode mode, InnerSearchType type, bool cancellable>
 bool
 ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
                                                  const ImmutableSINDIWindow& window,
@@ -392,6 +392,11 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
                                                  uint32_t offset_id,
                                                  SparseEvaluationTracker* candidate_tracker,
                                                  const uint64_t* filter_callback_remaining) const {
+    if constexpr (cancellable) {
+        if (param.scan_cancelled()) {
+            return true;
+        }
+    }
     const auto n_candidate = static_cast<uint32_t>(param.ef);
     const auto radius = param.radius;
     const auto range_search_limit_size = param.range_search_limit_size;
@@ -404,6 +409,12 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
         }
     }
     for (const auto& mapped_term : mapped_terms) {
+        if constexpr (cancellable) {
+            if (param.scan_cancelled()) {
+                return true;
+            }
+        }
+
         const auto begin = window.offsets[mapped_term.first];
         const auto count =
             computer->GetTermScanCount(window.offsets[mapped_term.first + 1] - begin);
@@ -422,6 +433,11 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
                                                             param.distance_threshold,
                                                             param.enable_reorder,
                                                             param.reasoning_ctx);
+                if constexpr (cancellable) {
+                    if (param.scan_cancelled()) {
+                        return true;
+                    }
+                }
                 if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                     if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                         return true;
@@ -451,6 +467,11 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
                                          param.distance_threshold,
                                          param.enable_reorder,
                                          param.reasoning_ctx);
+            if constexpr (cancellable) {
+                if (param.scan_cancelled()) {
+                    return true;
+                }
+            }
             if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                 if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                     return true;
@@ -461,7 +482,7 @@ ImmutableSindiTermDataCell::insert_heap_by_terms(float* dists,
     return false;
 }
 
-template <InnerSearchMode mode, InnerSearchType type>
+template <InnerSearchMode mode, InnerSearchType type, bool cancellable>
 bool
 ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
                                                  uint32_t dists_size,
@@ -469,6 +490,11 @@ ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
                                                  const InnerSearchParam& param,
                                                  uint32_t offset_id,
                                                  const uint64_t* filter_callback_remaining) const {
+    if constexpr (cancellable) {
+        if (param.scan_cancelled()) {
+            return true;
+        }
+    }
     const auto n_candidate = static_cast<uint32_t>(param.ef);
     const auto radius = param.radius;
     const auto range_search_limit_size = param.range_search_limit_size;
@@ -493,6 +519,11 @@ ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
                                                         param.distance_threshold,
                                                         param.enable_reorder,
                                                         param.reasoning_ctx);
+            if constexpr (cancellable) {
+                if (param.scan_cancelled()) {
+                    return true;
+                }
+            }
             if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
                 if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                     return true;
@@ -518,6 +549,11 @@ ImmutableSindiTermDataCell::insert_heap_by_dists(float* dists,
                                      param.distance_threshold,
                                      param.enable_reorder,
                                      param.reasoning_ctx);
+        if constexpr (cancellable) {
+            if (param.scan_cancelled()) {
+                return true;
+            }
+        }
         if constexpr (type == InnerSearchType::WITH_FILTER_LIMIT) {
             if (filter_callback_remaining != nullptr and *filter_callback_remaining == 0) {
                 return true;
@@ -545,6 +581,31 @@ ImmutableSindiTermDataCell::InsertHeapByWindow(float* dists,
     if (mode == InnerSearchMode::RANGE_SEARCH) {
         query_context.candidate_tracker.BeginWindow(window_size_);
         candidate_tracker = &query_context.candidate_tracker;
+    }
+    if (mode == InnerSearchMode::KNN_SEARCH and param.scan_cancelled) {
+        if (with_filter) {
+            return insert_heap_by_terms<InnerSearchMode::KNN_SEARCH,
+                                        InnerSearchType::WITH_FILTER_LIMIT,
+                                        true>(dists,
+                                              window,
+                                              computer,
+                                              mapped_terms,
+                                              heap,
+                                              param,
+                                              offset_id,
+                                              candidate_tracker,
+                                              filter_callback_remaining);
+        }
+        return insert_heap_by_terms<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE, true>(
+            dists,
+            window,
+            computer,
+            mapped_terms,
+            heap,
+            param,
+            offset_id,
+            candidate_tracker,
+            filter_callback_remaining);
     }
     if (mode == InnerSearchMode::KNN_SEARCH && with_filter) {
         if (filter_callback_remaining != nullptr) {
@@ -599,6 +660,16 @@ ImmutableSindiTermDataCell::InsertHeapByDists(float* dists,
                                               InnerSearchMode mode,
                                               bool with_filter,
                                               const uint64_t* filter_callback_remaining) const {
+    if (mode == InnerSearchMode::KNN_SEARCH and param.scan_cancelled) {
+        if (with_filter) {
+            return insert_heap_by_dists<InnerSearchMode::KNN_SEARCH,
+                                        InnerSearchType::WITH_FILTER_LIMIT,
+                                        true>(
+                dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+        }
+        return insert_heap_by_dists<InnerSearchMode::KNN_SEARCH, InnerSearchType::PURE, true>(
+            dists, dists_size, heap, param, offset_id, filter_callback_remaining);
+    }
     if (mode == InnerSearchMode::KNN_SEARCH && with_filter) {
         if (filter_callback_remaining != nullptr) {
             return this->insert_heap_by_dists<InnerSearchMode::KNN_SEARCH,
