@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression checks for TSAN disk cleanup and runner runtime preservation."""
+"""Regression checks for release images, source alignment and runner cleanup."""
 
 from pathlib import Path
 import os
@@ -23,6 +23,52 @@ def job_text(workflow: Path, job_name: str) -> str:
     if match is None:
         raise AssertionError(f"job {job_name} not found in {workflow}")
     return match.group("body")
+
+
+class ReleaseImageWorkflowTest(unittest.TestCase):
+    def test_issue_link_check_includes_the_1_0_base_branch(self) -> None:
+        workflow = (ROOT / ".github/workflows/pr-issue-link.yml").read_text()
+        trigger = re.search(r"(?m)^  pull_request:\n((?:    [^\n]*\n)+)", workflow)
+        self.assertIsNotNone(trigger)
+        branches = re.search(
+            r"(?m)^    branches:\n((?:      - [^\n]+\n)+)", trigger[1]
+        )
+        self.assertIsNotNone(branches)
+        self.assertIn('      - "1.0"\n', branches[1])
+
+    def test_workflow_consumers_use_release_line_images(self) -> None:
+        consumers = 0
+        for workflow in (ROOT / ".github/workflows").glob("*.y*ml"):
+            if workflow.name == "update-ci-image.yml":
+                continue  # Native builds intentionally use local architecture aliases.
+            for image in re.findall(
+                r"(?m)^\s+image:\s+(vsaglib/vsag:[^\s]+)", workflow.read_text()
+            ):
+                consumers += 1
+                with self.subTest(workflow=workflow.name, image=image):
+                    self.assertIn(image, (
+                        "vsaglib/vsag:ci-v1.0-base",
+                        "vsaglib/vsag:ci-v1.0-openblas",
+                        "vsaglib/vsag:ci-v1.0-mkl",
+                    ))
+        self.assertGreater(consumers, 0)
+
+    def test_daily_build_and_test_use_the_same_event_commit(self) -> None:
+        workflow = ROOT / ".github/workflows/daily_test.yml"
+        jobs = re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):$", workflow.read_text())
+        checkouts = 0
+        for name in jobs:
+            for checkout in re.finditer(
+                r"(?ms)^      - uses: actions/checkout@[^\n]+\n"
+                r"(?P<options>.*?)(?=^      - |\Z)", job_text(workflow, name)
+            ):
+                checkouts += 1
+                with self.subTest(job=name):
+                    self.assertRegex(
+                        checkout["options"],
+                        r"(?m)^          ref: \$\{\{ github\.sha \}\}\s*$",
+                    )
+        self.assertEqual(checkouts, 8, "Cover all ASan, SIMD and TSan checkouts")
 
 
 class TsanCleanupTest(unittest.TestCase):
