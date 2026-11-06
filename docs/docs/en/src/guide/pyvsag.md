@@ -114,6 +114,22 @@ propagating underlying operation failures.
 
 The Node.js equivalents `calcDistancesById(query, ids)` and legacy `calDistanceById(query, ids)` retain their 1D `Float32Array` result. They require exactly `Float32Array` queries and `BigInt64Array` IDs (other array kinds throw `TypeError`), validate the actual query length through the C++ Dataset API, and throw `Error` with the C++ message on operation failure. Missing IDs still produce `-1`; they are not operation failures.
 
+## LangChain Integration
+
+LangChain support is an optional extra and is not installed by `pip install pyvsag`:
+
+```bash
+pip install "pyvsag[langchain]"
+```
+
+```python
+from pyvsag.langchain import VSAGVectorStore
+```
+
+See [LangChain Integration](langchain.md) for usage, score semantics, and
+limitations. It requires Python 3.9+ (a LangChain requirement) and
+`langchain-core>=0.3.77,<2`.
+
 ## Relationship with the C++ Library
 
 `pyvsag` wraps the same `vsag::Index` API as C++ and shares the underlying index binaries. You can

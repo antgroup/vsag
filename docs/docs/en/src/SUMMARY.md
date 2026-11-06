@@ -10,6 +10,7 @@
 - [Search Statistics](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
+- [LangChain Integration](guide/langchain.md)
 
 # Indexes
 
