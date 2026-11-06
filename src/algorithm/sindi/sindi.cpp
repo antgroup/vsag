@@ -860,7 +860,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
         if (parallel) {
-            parallel->plan = SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio);
+            parallel->plan =
+                SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio, inner_param.topk);
         }
         annotate(result);
         return result;
@@ -881,7 +882,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
             if (parallel) {
-                parallel->plan = SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio);
+                parallel->plan =
+                    SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio, inner_param.topk);
             }
             annotate(result);
             return result;
