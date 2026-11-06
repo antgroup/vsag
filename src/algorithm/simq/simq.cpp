@@ -395,7 +395,7 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
 
     cluster_centers_ = init_centers;
     for (int cid : init_centers) {
-        clusters_[cid].assign(1, {static_cast<InnerIdType>(cid), 0.0F});
+        clusters_[cid] = {{static_cast<InnerIdType>(cid), 0.0F}};
         vec_to_cluster_[cid] = cid;
     }
 
