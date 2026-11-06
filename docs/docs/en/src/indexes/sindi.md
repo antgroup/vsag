@@ -264,6 +264,8 @@ Search-time parameters live under the `sindi` sub-object:
 | `term_prune_ratio` | float | `0.0` | Fraction of the lowest-value postings skipped from each term list (`[0.0, 1.0)`). |
 | `term_retain_threshold` | uint64 | `0` | Maximum postings for one term across all windows. A value of `0` disables this limit; positive values allow each non-empty window posting list to scan at most `max(1, floor(threshold / window_count))` postings. |
 
+The partition count is capped by `floor(total_capacity / topk)`, so each local heap can retain at least TopK candidates without exceeding the total budget. A small candidate budget can therefore reduce useful execution slots.
+
 ### Parallel candidate quality and tuning
 
 Parallel search changes candidate selection as well as execution. A serial query uses one global candidate heap; parallel queries distribute `ceil(parallel_n_candidate_ratio * N)` capacity over fixed partitions, then merge to N candidates before the same reranking stage. A concentrated group of good candidates can exceed one partition quota. Approximate-distance ties can also select different documents whose reranked distances differ. Setting `query_prune_ratio=0` removes query-term pruning but does not remove partition quotas, build-time pruning or quantization; it is not a guarantee of identical serial and parallel results.
@@ -388,7 +390,6 @@ is not physically reclaimed.
 The index creation parameters also accept `term_prune_ratio` (float in `[0, 1)`, default `0`) and `term_retain_threshold` (non-negative integer, default `0`). Both default to disabled. During `Build`, each term's postings in each window are sorted by stored weight and permanently trimmed to the smaller of `floor(posting_count * (1 - term_prune_ratio))` and `floor(term_retain_threshold / window_count)`; a zero threshold imposes no cap, and non-empty lists retain at least one posting. Mutable and immutable builds support FP32, FP16 and SQ8. Rerank vectors and document labels are preserved. Search-time pruning operates on the retained postings; it cannot restore removed postings. Subsequent `Add` calls do not apply build-time pruning.
 
 For example, set `"term_prune_ratio": 0.2, "term_retain_threshold": 0` inside the index's build parameters to remove the lowest-weight 20% of each posting list per window.
-
 
 ### Search resource preparation
 
