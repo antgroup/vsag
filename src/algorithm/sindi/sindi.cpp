@@ -846,19 +846,15 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto* statistics_ptr = &statistics;
     const auto annotate = [&](const DatasetPtr& result) {
         if (parallel and SindiParallelState::Clock::now() >= parallel->deadline) {
-            throw std::runtime_error("SINDI deadline exceeded before result publication");
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "SINDI deadline exceeded before result publication");
         }
         cpu_timer.Stop();
-        if (statistics_ptr == nullptr) {
-            return;
-        }
-        auto summary = statistics.Dump();
-        summary = SindiExecutionStatistics(std::move(summary),
-                                           parallel.get(),
-                                           caller_cpu,
-                                           search_param.profile_cpu,
-                                           requested_slots);
-        result->Statistics(summary);
+        result->Statistics(SindiExecutionStatistics(statistics.ToJson(),
+                                                    parallel.get(),
+                                                    caller_cpu,
+                                                    search_param.profile_cpu,
+                                                    requested_slots));
     };
     const auto metadata_route = metadata_filter_.Classify(query, window_size_);
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
@@ -884,9 +880,10 @@ SINDI::KnnSearch(const DatasetPtr& query,
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
-            if (statistics_ptr != nullptr) {
-                result->Statistics(statistics.Dump());
+            if (parallel) {
+                parallel->plan = SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio);
             }
+            annotate(result);
             return result;
         }
     }
@@ -1051,7 +1048,8 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         auto rerank_computer = rerank_datacell->FactoryComputer(&rerank_query);
         for (auto i = 0; i < candidate_size; i++) {
             if (parallel != nullptr and SindiParallelState::Clock::now() >= parallel->deadline) {
-                throw std::runtime_error("SINDI deadline exceeded during rerank");
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "SINDI deadline exceeded during rerank");
             }
             auto inner_id = heap.top().second;
             float high_precise_distance = 0.0F;
@@ -1235,6 +1233,13 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     SearchStatistics statistics;
     auto* statistics_ptr = &statistics;
+    SindiCpuTime caller_cpu;
+    SindiCpuTimer cpu_timer(search_param.profile_cpu, caller_cpu);
+    const auto annotate = [&](const DatasetPtr& result) {
+        cpu_timer.Stop();
+        result->Statistics(SindiExecutionStatistics(
+            statistics.ToJson(), nullptr, caller_cpu, search_param.profile_cpu));
+    };
 
     InnerSearchParam inner_param;
     const bool filter_enabled = request.enable_filter_ and request.filter_ != nullptr;
@@ -1286,9 +1291,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                          : metadata_filter_.Classify(request.query_, window_size_);
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
-        if (statistics_ptr != nullptr) {
-            result->Statistics(statistics.Dump());
-        }
+        annotate(result);
         this->AttachReasoningReport(result, reasoning_ctx.get());
         return result;
     }
@@ -1301,9 +1304,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
-            if (statistics_ptr != nullptr) {
-                result->Statistics(statistics.Dump());
-            }
+            annotate(result);
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
         }
@@ -1344,9 +1345,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                          metadata_route);
     }
 
-    if (statistics_ptr != nullptr) {
-        result->Statistics(statistics.Dump());
-    }
+    annotate(result);
     this->AttachReasoningReport(result, reasoning_ctx.get());
     return result;
 }

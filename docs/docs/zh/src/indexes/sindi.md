@@ -229,7 +229,7 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `n_candidate` | int | `500` | 近似候选池大小，有效值为 `N = max(n_candidate, topk)`。增大 N 可为精排保留更多候选，同时增加计算量；不保证精确召回或串并行结果完全一致。 |
+| `n_candidate` | int | `0` | 近似候选预算，有效大小为 `N = max(n_candidate, topk)`。省略或设为 0 时使用 topk，而不是 500；较大的候选池须显式配置，可增加进入精排的候选及计算成本，不保证精确召回或串并行结果完全一致。 |
 | `window_parallelism` | int | `1` | 含调用线程的执行槽位数上限，取值 `1` 至 `16`。省略或为 1 使用原串行候选堆；大于 1 启用固定分区近似执行器，首版只支持 immutable 内存 KNN。资源准入可降低实际槽位数，候选计划保持不变。 |
 | `parallel_n_candidate_ratio` | number | `2` | 有限且 ≥1。所有局部堆的总容量为 `ceil(倍率 × max(n_candidate, topk))`，独立于执行槽位数分配到固定逻辑分区。增大容量允许保留更多候选并增加成本，不保证保留串行候选集或特定召回率；串行模式只校验该值，不应用它。 |
 | `profile_cpu` | bool | `false` | 串行和并行 KNN 的诊断选项。采集调用线程参数解析后至统计序列化前的 CPU 时间，并累加后台 window worker 的 CPU 时间；关闭时不读取线程 CPU 时钟。 |
@@ -260,6 +260,8 @@ posting，较宽的范围也会选择更多 window。在启用时间的索引上
 CPU 准入根据进程的 cgroup membership 和挂载信息定位 v1/v2 层级，取可见祖先中可读取 CPU 配额的最小值。查询池配置是初始化快照，不是整个服务的 CPU 限流或动态扩缩容策略。
 
 并行结果统计提供 `sindi_requested_slots`、`sindi_granted_slots`、`sindi_filter_slots`（首次 Filter 租约容量）、`sindi_cpu_slots`、`sindi_worker_limit`、`sindi_partitions`、`sindi_candidate_capacity`、`sindi_n_candidate`、`sindi_windows_processed`、`sindi_execution_complete` 和 `sindi_stop_reason`。既有 `complete` 表示距离计数覆盖是否完整，存在未计数的近似计算时为 false，不表示窗口计划没有执行完。deadline 和 worker 异常仍在回收所有任务后返回错误；deadline 在窗口边界和每 32 次 Filter 回调协作检查，callback permit 上限逐回调精确检查。
+
+成功的并行结果中，`sindi_stop_reason` 为 `none` 或 `callback_limit`。deadline 和 worker 错误不返回结果 Dataset，因此不能依赖结果统计读取失败时的内部 stop 状态。原串行超时路径仍可返回部分结果并设置 `is_timeout=true`；并行 deadline 在回收 worker 后以 `ErrorType::INTERNAL_ERROR` 和包含 deadline 的消息返回错误。`VSAG_SINDI_MAX_CANDIDATES` 仅接受无符号十进制数字，且须落在正 uint32 范围。
 
 显式设置 `profile_cpu:true` 时，`sindi_cpu_time_enabled`、`sindi_cpu_time_complete` 表示采样启用和可用状态；`sindi_search_cpu_us` 为调用线程与后台 worker CPU 时间之和，`sindi_worker_cpu_us` 为后台部分，不可用时省略数值。这些值不含 VSAG 之前的 SQL/Filter 准备、统计序列化和最终阈值结果包装，不代表整条 SQL 的 CPU 成本。串行和并行对照应采用相同采样设置，服务级 CPU 另行监控。
 
@@ -357,3 +359,6 @@ Engine 借用期间必须保留 Resource；索引持有共享查询资源组，�
 候选计划。独立Filter提供者为该串行调用租用一个evaluator。诊断标记serial、原请求P、
 granted=1和`sindi_resources_ready=false`。降级结果以显式P1为对照，不保证与已准备
 资源后的并行候选计划相同。串行请求无需准备；VSAG不读取VecBase在线配置。
+
+
+每个独立 SearchResource 在构造期间同步创建自己的 worker 组。存在多个索引组的宿主应显式设置 `max_background_workers`，并按需复用共享 SearchResource；VSAG 不跨独立资源组实施进程级线程总预算。

@@ -4,6 +4,7 @@
 #include "sindi_parallel_search.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
@@ -12,8 +13,6 @@
 #include <future>
 #include <limits>
 #include <mutex>
-#include <nlohmann/json.hpp>
-#include <stdexcept>
 
 #include "impl/allocator/safe_allocator.h"
 #include "impl/searcher/search_execution_context.h"
@@ -29,11 +28,11 @@ resource_limit(const char* name, uint64_t fallback) {
     if (value == nullptr) {
         return fallback;
     }
-    uint64_t used = 0;
-    const std::string text(value);
-    const auto parsed = std::stoull(text, &used);
-    CHECK_ARGUMENT(not text.empty() and text.front() != '-' and used == text.size(),
-                   std::string("invalid ") + name);
+    uint64_t parsed = 0;
+    const auto* end = value + std::strlen(value);
+    const auto result = std::from_chars(value, end, parsed);
+    CHECK_ARGUMENT(result.ec == std::errc{} and result.ptr == end,
+                   std::string("invalid ") + name + ": expected unsigned decimal digits");
     return parsed;
 }
 
@@ -63,7 +62,17 @@ public:
         const bool stopped = (++checks_ % 32 == 0) ? state_.Stopped()
                                                    : state_.stop.load(std::memory_order_relaxed) !=
                                                          SindiParallelState::Stop::NONE;
-        return not stopped and state_.ReserveCallback() and delegate_->CheckValid(id);
+        if (stopped or not state_.ReserveCallback()) {
+            return false;
+        }
+        const auto allowed = delegate_->CheckValid(id);
+        // Keep the last permitted result, then stop even if no later score
+        // would cause another filter callback to be attempted.
+        if (state_.callback_limit != 0 and
+            state_.callbacks.load(std::memory_order_relaxed) >= state_.callback_limit) {
+            state_.RequestStop(SindiParallelState::Stop::CALLBACK_LIMIT);
+        }
+        return allowed;
     }
 
 private:
@@ -104,61 +113,61 @@ struct Slot {
 }  // namespace
 
 std::string
-SindiExecutionStatistics(std::string summary,
+SindiExecutionStatistics(JsonType json,
                          const SindiParallelState* parallel,
                          const SindiCpuTime& caller_cpu,
                          bool profile_cpu,
                          uint32_t requested_slots) {
     if (not parallel and not profile_cpu and requested_slots <= 1) {
-        return summary;
+        return json.Dump();
     }
-    auto json = nlohmann::json::parse(summary);
     if (parallel) {
-        json["sindi_strategy"] = "accel_v1";
-        json["sindi_requested_slots"] = parallel->requested;
-        json["sindi_resources_ready"] = parallel->resources != nullptr;
-        json["sindi_granted_slots"] = parallel->granted;
-        json["sindi_filter_slots"] = parallel->filter_slots;
-        json["sindi_cpu_slots"] = parallel->cpu_slots;
-        json["sindi_worker_limit"] = parallel->worker_limit;
-        json["sindi_partitions"] = parallel->plan.quotas.size();
-        json["sindi_candidate_capacity"] = parallel->plan.capacity;
-        json["sindi_n_candidate"] = parallel->plan.candidates;
-        json["sindi_windows_processed"] = parallel->completed_windows.load();
-        json["sindi_execution_complete"] = parallel->stop.load() == SindiParallelState::Stop::NONE;
+        json["sindi_strategy"].SetString("accel_v1");
+        json["sindi_requested_slots"].SetUint64(parallel->requested);
+        json["sindi_resources_ready"].SetBool(parallel->resources != nullptr);
+        json["sindi_granted_slots"].SetUint64(parallel->granted);
+        json["sindi_filter_slots"].SetUint64(parallel->filter_slots);
+        json["sindi_cpu_slots"].SetUint64(parallel->cpu_slots);
+        json["sindi_worker_limit"].SetUint64(parallel->worker_limit);
+        json["sindi_partitions"].SetUint64(parallel->plan.quotas.size());
+        json["sindi_candidate_capacity"].SetUint64(parallel->plan.capacity);
+        json["sindi_n_candidate"].SetUint64(parallel->plan.candidates);
+        json["sindi_windows_processed"].SetUint64(parallel->completed_windows.load());
+        json["sindi_execution_complete"].SetBool(parallel->stop.load() ==
+                                                 SindiParallelState::Stop::NONE);
         switch (parallel->stop.load()) {
             case SindiParallelState::Stop::NONE:
-                json["sindi_stop_reason"] = "none";
+                json["sindi_stop_reason"].SetString("none");
                 break;
             case SindiParallelState::Stop::CALLBACK_LIMIT:
-                json["sindi_stop_reason"] = "callback_limit";
+                json["sindi_stop_reason"].SetString("callback_limit");
                 break;
             case SindiParallelState::Stop::DEADLINE:
-                json["sindi_stop_reason"] = "deadline";
+                json["sindi_stop_reason"].SetString("deadline");
                 break;
             case SindiParallelState::Stop::ERROR:
-                json["sindi_stop_reason"] = "error";
+                json["sindi_stop_reason"].SetString("error");
                 break;
         }
     } else {
-        json["sindi_strategy"] = "serial";
+        json["sindi_strategy"].SetString("serial");
         if (requested_slots > 1) {
-            json["sindi_requested_slots"] = requested_slots;
-            json["sindi_granted_slots"] = 1;
-            json["sindi_resources_ready"] = false;
-            json["sindi_worker_limit"] = 0;
+            json["sindi_requested_slots"].SetUint64(requested_slots);
+            json["sindi_granted_slots"].SetUint64(1);
+            json["sindi_resources_ready"].SetBool(false);
+            json["sindi_worker_limit"].SetUint64(0);
         }
     }
     const bool cpu_complete =
         profile_cpu and caller_cpu.available and (not parallel or parallel->worker_cpu_available);
-    json["sindi_cpu_time_enabled"] = profile_cpu;
-    json["sindi_cpu_time_complete"] = cpu_complete;
+    json["sindi_cpu_time_enabled"].SetBool(profile_cpu);
+    json["sindi_cpu_time_complete"].SetBool(cpu_complete);
     if (cpu_complete) {
         const auto worker_ns = parallel ? parallel->worker_cpu_ns : 0;
-        json["sindi_search_cpu_us"] = double(caller_cpu.nanoseconds + worker_ns) / 1000;
-        json["sindi_worker_cpu_us"] = double(worker_ns) / 1000;
+        json["sindi_search_cpu_us"].SetDouble(double(caller_cpu.nanoseconds + worker_ns) / 1000);
+        json["sindi_worker_cpu_us"].SetDouble(double(worker_ns) / 1000);
     }
-    return json.dump();
+    return json.Dump();
 }
 
 SindiParallelPlan
@@ -383,7 +392,8 @@ SearchSindiPartitions(const SindiPartitionSearchRequest& request,
         }
     }
     if (SindiParallelState::Clock::now() >= state.deadline) {
-        throw std::runtime_error("SINDI parallel search deadline exceeded after drain");
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "SINDI parallel search deadline exceeded after drain");
     }
     SindiCandidateHeap merged(CompareByFirst{true}, Vector<SindiCandidate>(request.allocator));
     for (auto& part : partitions) {

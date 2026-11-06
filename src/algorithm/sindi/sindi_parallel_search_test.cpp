@@ -33,6 +33,7 @@ extern char** environ;
 #include "sindi_cpu_timer.h"
 #include "unittest.h"
 #include "vsag/engine.h"
+#include "vsag_exception.h"
 
 using namespace vsag;
 
@@ -125,13 +126,14 @@ struct CandidateDiagnosisData {
     }
 
     std::unique_ptr<SINDI>
-    Build(uint32_t workers) {
+    Build(uint32_t workers, bool remap = false) {
         IndexCommonParam common;
         common.allocator_ = allocator;
         common.metric_ = MetricType::METRIC_TYPE_IP;
         common.search_resources_ = std::make_shared<SearchExecutionContext>(workers);
         auto params = std::make_shared<SINDIParameter>();
         params->immutable = true;
+        params->remap_term_ids = remap;
         params->term_id_limit = 4;
         params->window_size = 4;
         params->doc_prune_ratio = 0;
@@ -477,6 +479,83 @@ TEST_CASE("SINDI callback permits never exceed the invocation budget", "[ut][SIN
     REQUIRE(expired.stop.load() == SindiParallelState::Stop::DEADLINE);
 }
 
+TEST_CASE("SINDI final callback stops before another callback is needed", "[ut][SINDIParallel]") {
+    CandidateDiagnosisData data(2);
+    for (uint64_t i = 0; i < data.values.size(); ++i) {
+        data.values[i] = {static_cast<float>(16 - i), 1.0F};
+    }
+    // A ready, single-slot executor makes callback consumption deterministic.
+    auto index = data.Build(0);
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
+    auto filter = std::make_shared<IndependentFilters>();
+    const auto result =
+        index->KnnSearch(query,
+                         1,
+                         R"({"sindi":{"window_parallelism":4,"parallel_n_candidate_ratio":1,
+            "n_candidate":1,"query_prune_ratio":0,"filter_callback_limit":1}})",
+                         filter);
+    REQUIRE(result->GetDim() == 1);
+    REQUIRE(result->GetIds()[0] == 100);
+    REQUIRE(filter->probe->calls == 1);
+    REQUIRE(filter->probe->live == 0);
+    const auto stats = nlohmann::json::parse(result->GetStatistics());
+    REQUIRE(stats["sindi_stop_reason"] == "callback_limit");
+    REQUIRE(stats["sindi_execution_complete"] == false);
+    REQUIRE(stats["sindi_windows_processed"] == 1);
+}
+
+TEST_CASE("SINDI CPU statistics cover request and empty remapped queries", "[ut][SINDIParallel]") {
+    CandidateDiagnosisData data(2);
+    for (uint64_t i = 0; i < data.values.size(); ++i) {
+        data.values[i] = {static_cast<float>(16 - i), 1.0F};
+    }
+    auto index = data.Build(0, true);
+    uint32_t unknown_term = 3;
+    float unknown_value = 1;
+    SparseVector unknown{1, &unknown_term, &unknown_value};
+    auto normal = Dataset::Make()->NumElements(1)->SparseVectors(&data.query_vector)->Owner(false);
+    auto empty = Dataset::Make()->NumElements(1)->SparseVectors(&unknown)->Owner(false);
+    for (uint32_t slots : {1U, 4U}) {
+        auto parameters = nlohmann::json{{"sindi",
+                                          {{"window_parallelism", slots},
+                                           {"n_candidate", 8},
+                                           {"query_prune_ratio", 0},
+                                           {"profile_cpu", true}}}};
+        for (const auto& query : {normal, empty}) {
+            SearchRequest request;
+            request.query_ = query;
+            request.topk_ = 4;
+            request.params_str_ = parameters.dump();
+            const auto direct = index->KnnSearch(query, 4, request.params_str_, nullptr);
+            const auto via_request = index->SearchWithRequest(request);
+            REQUIRE(candidate_results(via_request) == candidate_results(direct));
+            REQUIRE(via_request->GetDim() == (query == empty ? 0 : 4));
+            for (const auto& result : {direct, via_request}) {
+                const auto stats = nlohmann::json::parse(result->GetStatistics());
+                REQUIRE(stats["sindi_cpu_time_enabled"] == true);
+                REQUIRE(stats["sindi_strategy"] == (slots == 1 ? "serial" : "accel_v1"));
+#ifdef __linux__
+                REQUIRE(stats["sindi_cpu_time_complete"] == true);
+                REQUIRE(stats["sindi_search_cpu_us"].get<double>() >= 0);
+                REQUIRE(stats["sindi_worker_cpu_us"] == 0);
+#endif
+                if (slots > 1) {
+                    REQUIRE(stats["sindi_resources_ready"] == true);
+                    REQUIRE(stats["sindi_candidate_capacity"] == 16);
+                }
+            }
+        }
+    }
+    SearchRequest serial;
+    serial.query_ = normal;
+    serial.topk_ = 4;
+    serial.params_str_ = R"({"sindi":{"n_candidate":8}})";
+    const auto original = index->SearchWithRequest(serial);
+    REQUIRE(original->GetDim() == 4);
+    REQUIRE_FALSE(
+        nlohmann::json::parse(original->GetStatistics()).contains("sindi_cpu_time_enabled"));
+}
+
 TEST_CASE("SINDI CPU timers are opt in and stop once", "[ut][SINDIParallel]") {
     SindiCpuTime disabled;
     {
@@ -542,6 +621,27 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
     REQUIRE(mode != nullptr);
     const bool zero = std::string(mode) == "zero";
     REQUIRE(setenv("VSAG_SINDI_MAX_CANDIDATES", "1024", 1) == 0);
+    if (std::string(mode) == "limits") {
+        // This child owns its environment; failures cannot contaminate other cases.
+        for (const auto* value :
+             {"", "abc", "-1", "+1", " 1", "1x", "0", "4294967296", "18446744073709551616"}) {
+            CAPTURE(value);
+            REQUIRE(setenv("VSAG_SINDI_MAX_CANDIDATES", value, 1) == 0);
+            try {
+                (void)SindiParallelPlan::Make(4, 1, 1);
+                FAIL("invalid deployment capacity was accepted");
+            } catch (const VsagException& error) {
+                REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+                REQUIRE(std::string(error.what()).find("VSAG_SINDI_MAX_CANDIDATES") !=
+                        std::string::npos);
+            }
+        }
+        REQUIRE(setenv("VSAG_SINDI_MAX_CANDIDATES", "1024", 1) == 0);
+        REQUIRE(SindiParallelPlan::Make(4, 8, 2).capacity == 16);
+        REQUIRE(unsetenv("VSAG_SINDI_MAX_CANDIDATES") == 0);
+        REQUIRE(SindiParallelPlan::Make(4, 8, 2).capacity == 16);
+        return;
+    }
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     IndexCommonParam common;
     common.allocator_ = allocator;
@@ -674,7 +774,7 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
 }
 
 TEST_CASE("SINDI resource contract is checked in fresh processes", "[ut][SINDIParallel]") {
-    for (const std::string mode : {"zero", "workers"}) {
+    for (const std::string mode : {"zero", "workers", "limits"}) {
         std::vector<std::string> environment;
         for (char** entry = environ; *entry != nullptr; ++entry) {
             const std::string value(*entry);
