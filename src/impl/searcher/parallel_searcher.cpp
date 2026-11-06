@@ -217,7 +217,16 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
     candidate_set->Push(traversal_priority(dist), ep);
     vl->Set(ep);
 
-    auto num_threads = inner_search_param.parallel_search_thread_count - 1;
+    // Helpers consume queues populated only after submission returns. They cannot run
+    // inline on a same-pool worker (or an unknown external executor), so keep all
+    // distance work on the calling query in that case.
+    auto num_threads = pool != nullptr && pool->RequiresInlineExecution()
+                           ? 0
+                           : inner_search_param.parallel_search_thread_count - 1;
+    if (num_threads == 0 and inner_search_param.parallel_search_thread_count > 1 and
+        ctx != nullptr and ctx->stats != nullptr) {
+        ctx->stats->parallel_search_fallback_count.fetch_add(1, std::memory_order_relaxed);
+    }
 
     using SearchTask = std::tuple<float*, float*, InnerIdType*, uint64_t>;
     std::vector<SPSCQueue<SearchTask, 1024>> queues(num_threads);

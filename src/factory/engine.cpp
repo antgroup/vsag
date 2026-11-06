@@ -19,6 +19,7 @@
 
 #include "common.h"
 #include "impl/allocator/default_allocator.h"
+#include "impl/thread_pool/ring_buffer_thread_pool.h"
 #include "impl/thread_pool/safe_thread_pool.h"
 #include "index_common_param.h"
 #include "index_creators.h"
@@ -88,7 +89,7 @@ Engine::CreateThreadPool(uint32_t num_threads) {
                               "failed to create thread pool: invalid number of threads:",
                               std::to_string(num_threads));
     }
-    return std::make_shared<DefaultThreadPool>(num_threads);
+    return std::make_shared<RingBufferThreadPool>(num_threads);
 }
 
 }  // namespace vsag

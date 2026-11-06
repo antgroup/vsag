@@ -65,6 +65,24 @@ public:
 A ready-made pool can be created with
 [`Engine::CreateThreadPool`](factory_engine.md#static-resource-helpers).
 
+The built-in pool uses a 4096-slot ring with a FIFO overflow queue that grows as needed.
+Its default limit is 100000 **pending** tasks; running tasks do not count toward that limit.
+`SetQueueSizeLimit(limit)` honors the requested logical limit independently of ring capacity;
+zero selects one. Lowering the limit does not discard queued tasks. External submissions block
+when the queue is at the limit, and wake when space becomes available or the limit increases.
+
+This limit counts tasks, not bytes. Storage includes the fixed ring, overflow deque entries,
+callables and their captured objects, packaged tasks/future shared states, and running tasks.
+Captured data can be arbitrarily large, so no byte bound follows from a task-count limit.
+`UINT64_MAX` effectively disables pending-queue backpressure for practical workloads; overflow
+storage may exhaust memory before that limit is reached. Choose a finite limit for your memory
+budget; allocation failures can still be reported by `Enqueue`.
+
+Submissions from a worker of the same built-in pool execute inline to avoid waiting on its own
+queue. Worker-side `WaitUntilEmpty()` and `SetPoolSize()` calls are rejected. For external callers,
+`WaitUntilEmpty()` waits for queued and running work, but is not a barrier against concurrent new
+submissions. Keep the pool alive until all external callers have stopped using it.
+
 ## `Resource`
 
 Declared in `vsag/resource.h`. A `Resource` bundles an [`Allocator`](#allocator) and a

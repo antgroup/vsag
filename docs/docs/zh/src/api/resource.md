@@ -64,6 +64,19 @@ public:
 
 现成的线程池可通过 [`Engine::CreateThreadPool`](factory_engine.md#静态资源辅助方法) 创建。
 
+内置线程池使用 4096 槽位 ring，并按需扩展 FIFO 溢出队列。默认上限为 100000 个**待领取**任务，
+执行中的任务不计入该上限。`SetQueueSizeLimit(limit)` 的逻辑限额独立于 ring 容量，零转换为一。
+降低限额不会丢弃已排队任务；队列达到限额时，外部提交者阻塞，直到有空位或上限提高。
+
+该限额是任务数而非字节数。内存还包括固定 ring、溢出 deque 条目、可调用对象及其捕获数据、
+packaged task/future 共享状态和执行中的任务。捕获数据大小不受限，因此任务数限额不能给出内存字节上限。
+`UINT64_MAX` 对实际负载等效于禁用待领取队列背压，溢出存储可能在达到限额前耗尽内存。
+请按内存预算选择有限限额；`Enqueue` 仍可能报告分配失败。
+
+同一内置线程池的工作线程再次提交任务时会内联执行，避免等待自身队列；工作线程调用
+`WaitUntilEmpty()` 或 `SetPoolSize()` 会被拒绝。外部调用者的 `WaitUntilEmpty()` 等待排队和执行中的任务，
+但它不是针对并发新提交的屏障。所有外部调用者停止使用线程池后才能销毁它。
+
 ## `Resource`
 
 声明于 `vsag/resource.h`。`Resource` 把一个 [`Allocator`](#allocator) 与一个
