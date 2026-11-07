@@ -66,8 +66,8 @@ struct BalancedKMeansOptions {
     double tolerance{0.0};
 
     /// Tolerance of the final auction phase as a fraction of the typical cost gap
-    /// between a vector's closest clusters. A completed assignment is optimal for its
-    /// centroids within `count` times that tolerance.
+    /// between a vector's closest clusters, in (0, 1]. A completed assignment is
+    /// optimal for its centroids within `count` times that tolerance.
     double epsilon_ratio{1e-4};
 
     /// Scales the work one assignment may spend (bids and re-scored vectors, counted,

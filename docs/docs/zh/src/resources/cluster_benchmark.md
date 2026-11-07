@@ -46,7 +46,7 @@ VSAG_ENABLE_TOOLS=ON make release
 | `--algorithms` | `kmeans,balanced_kmeans` | 要运行的训练方式 |
 | `--candidates` | `16` | `balanced_kmeans`：每条向量记住的簇数 |
 | `--init` | `random` | `balanced_kmeans`：初始化方式，`random` 或 `kmeans++` |
-| `--epsilon` | `1e-4` | `balanced_kmeans`：拍卖容差，相对代价差 |
+| `--epsilon` | `1e-4` | `balanced_kmeans`：拍卖容差，相对代价差，取值 (0, 1] |
 | `--work-budget` | `1` | `balanced_kmeans`：每次分配工作量上限的倍数；`inf` 永不切换到两级分解，`0` 总是切换 |
 | `--spread` | `4` | 偏斜数据：混合分量中心所在立方体的半宽（噪声为 0.25） |
 | `--duplicates` | `0.05` | 偏斜数据：重复 8 条热点向量之一的行所占比例 |
