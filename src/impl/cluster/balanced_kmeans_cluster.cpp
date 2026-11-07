@@ -607,7 +607,7 @@ epsilon_floor(const CandidateTable& table, const Vector<double>& prices) {
     for (const auto price : prices) {
         magnitude = std::max(magnitude, std::abs(price));
     }
-    return std::max(magnitude, 1.0) * EPSILON_FLOOR_RATIO;
+    return magnitude * EPSILON_FLOOR_RATIO;
 }
 
 /// The most bids and re-scored vectors one assignment may spend.
@@ -1128,9 +1128,13 @@ solve_assignment(const CostModel& model,
                       prices,
                       stats)) {
         // Only price differences matter; keeping the smallest at 0 stops them drifting.
+        // The bounds hold cost + price, so they move along for the next solve on this table.
         const double lowest = *std::min_element(prices.begin(), prices.end());
         for (auto& price : prices) {
             price -= lowest;
+        }
+        for (auto& bound : table.bounds) {
+            bound -= lowest;
         }
         return true;
     }
