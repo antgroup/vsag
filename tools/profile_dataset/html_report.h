@@ -20,10 +20,11 @@
 
 namespace vsag::dataset_profile {
 
-/// Content-Security-Policy of the report: no network fetches of any kind are allowed.
-constexpr const char* HTML_CONTENT_SECURITY_POLICY =
-    "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; "
-    "img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'";
+/// Content-Security-Policy of the report: no network fetches of any kind, and the only script
+/// allowed to run is the report's own inline script, pinned by its SHA-256 hash. Inline event
+/// handlers are therefore blocked even if markup were injected.
+std::string
+html_content_security_policy();
 
 /// Renders the JSON report as one self-contained HTML page: inline CSS, inline SVG charts and
 /// a small inline script, no external resources. Every chart states its metric key,

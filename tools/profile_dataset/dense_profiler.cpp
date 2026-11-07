@@ -165,7 +165,8 @@ DenseSplitProfiler::DenseSplitProfiler(SplitContext context)
 }
 
 void
-DenseSplitProfiler::Run(const DenseQuerySet* cross_queries) {
+DenseSplitProfiler::Run(const DenseQuerySet* cross_queries, RowDistanceProbe* probe) {
+    probe_ = probe;
     prepare_sample();
     first_pass();
     second_pass(cross_queries);
@@ -178,7 +179,7 @@ DenseSplitProfiler::prepare_sample() {
     DeterministicRng rng(derive_seed(options_.seed, "sample/" + context_.name));
     plan_.rows = sample_without_replacement(rows_, options_.sample_size, rng);
     sample_data_.assign(plan_.rows.size() * dim_, 0.0F);
-    row_norms_.assign(rows_, 0.0F);
+    row_norms_.assign(rows_, 0.0);
     row_nonzeros_.assign(rows_, 0);
     row_valid_.assign(rows_, 0);
     full_duplicates_ =
@@ -199,7 +200,7 @@ DenseSplitProfiler::first_pass() {
     const uint64_t dim = dim_;
     const bool full_duplicates = full_duplicates_;
     std::vector<uint8_t>& row_valid = row_valid_;
-    std::vector<float>& row_norms = row_norms_;
+    std::vector<double>& row_norms = row_norms_;
     std::vector<uint32_t>& row_nonzeros = row_nonzeros_;
     std::vector<uint64_t>& hash_high = hash_high_;
     std::vector<uint64_t>& hash_low = hash_low_;
@@ -253,8 +254,8 @@ DenseSplitProfiler::first_pass() {
                     words[d] = canonical_bits(value);
                 }
                 row_valid[global_row] = valid ? 1 : 0;
-                row_norms[global_row] = valid ? static_cast<float>(std::sqrt(norm))
-                                              : std::numeric_limits<float>::quiet_NaN();
+                row_norms[global_row] =
+                    valid ? std::sqrt(norm) : std::numeric_limits<double>::quiet_NaN();
                 row_nonzeros[global_row] = nonzeros;
                 if (full_duplicates) {
                     hash_words(words.data(), dim, hash_high[global_row], hash_low[global_row]);
@@ -588,7 +589,7 @@ DenseSplitProfiler::first_pass() {
     for (const uint64_t position : order) {
         const uint64_t row = plan_.rows[position];
         const bool usable =
-            row_valid_[row] != 0 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0F);
+            row_valid_[row] != 0 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0);
         if (usable) {
             plan_.analysis_order.push_back(position);
         }
@@ -723,6 +724,17 @@ DenseSplitProfiler::second_pass(const DenseQuerySet* cross_queries) {
         }
         if (cross.Size() > 0) {
             cross_search.Scan(buffer.data(), norms.data(), valid.data(), begin, count);
+        }
+        if (probe_ != nullptr && cross.Size() > 0) {
+            auto it = std::lower_bound(probe_->rows.begin(), probe_->rows.end(), begin);
+            for (; it != probe_->rows.end() && *it < begin + count; ++it) {
+                const auto entry = static_cast<uint64_t>(it - probe_->rows.begin());
+                const uint64_t r = *it - begin;
+                if (valid[r] != 0) {
+                    probe_->distances[entry] = dense_metric_distance(
+                        cross, probe_->queries[entry], buffer.data() + r * dim_, norms[r], metric);
+                }
+            }
         }
     }
     uint64_t total_outliers = 0;

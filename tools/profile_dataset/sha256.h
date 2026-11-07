@@ -14,13 +14,23 @@
 
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <string>
 
 namespace vsag::dataset_profile {
 
-/// Lowercase hex SHA-256 (FIPS 180-4) of a byte string. Used for the report digest and for
-/// auditing AI request payloads; it is not used for any security decision.
+/// SHA-256 (FIPS 180-4) digest of a byte string. Used for the report digest, for auditing AI
+/// request payloads and for the Content-Security-Policy hash of the report's inline script.
+std::array<uint8_t, 32>
+sha256_digest(const std::string& data);
+
+/// Lowercase hex of sha256_digest().
 std::string
 sha256_hex(const std::string& data);
+
+/// Standard base64 (RFC 4648, padded) of sha256_digest(), the form CSP script hashes use.
+std::string
+sha256_base64(const std::string& data);
 
 }  // namespace vsag::dataset_profile

@@ -157,6 +157,24 @@ DenseKnnSearch::GeometricDistances() const {
     return result;
 }
 
+double
+dense_metric_distance(
+    const DenseQuerySet& queries, uint64_t q, const float* row, double row_norm, Metric metric) {
+    const float* query = queries.vectors.data() + q * queries.dim;
+    if (metric == Metric::L2) {
+        return l2_sqr(query, row, queries.dim);
+    }
+    if (metric == Metric::IP) {
+        double ip = 0.0;
+        double l2 = 0.0;
+        inner_product_and_l2_sqr(query, row, queries.dim, ip, l2);
+        return 1.0 - ip;
+    }
+    const double denominator = queries.norms[q] * row_norm;
+    const double ip = inner_product(query, row, queries.dim);
+    return 1.0 - ip / denominator;
+}
+
 SparseKnnSearch::SparseKnnSearch(const SparseQuerySet& queries, Metric metric, uint64_t k)
     : queries_(queries), metric_(metric), k_(k) {
     std::unordered_map<uint32_t, uint32_t> slots;
@@ -190,32 +208,52 @@ SparseKnnSearch::SparseKnnSearch(const SparseQuerySet& queries, Metric metric, u
     const auto threads = static_cast<uint64_t>(std::max(1, omp_get_max_threads()));
     thread_heaps_.assign(threads, std::vector<TopK>(queries.Size(), TopK(k)));
     overlap_counts_.assign(queries.Size() * threads, 0);
+    disjoint_rows_.assign(queries.Size(), {});
+    if (k > 0) {
+        for (uint64_t q = 0; q < queries.Size(); ++q) {
+            open_queries_.push_back(static_cast<uint32_t>(q));
+        }
+    }
+    thread_disjoint_.assign(threads, {});
 }
 
 void
-SparseKnnSearch::Scan(const SparseBatch& batch, const std::vector<double>& row_norms) {
+SparseKnnSearch::Scan(const SparseBatch& batch,
+                      const std::vector<double>& row_norms,
+                      const std::vector<uint8_t>& valid) {
     const SparseQuerySet& queries = queries_;
     const Metric metric = metric_;
+    const uint64_t k = k_;
     const std::vector<uint32_t>& term_ids = term_ids_;
     const std::vector<std::vector<std::pair<uint32_t, float>>>& postings = postings_;
+    const std::vector<uint32_t>& open_queries = open_queries_;
     std::vector<std::vector<TopK>>& thread_heaps = thread_heaps_;
     std::vector<uint64_t>& overlap_counts = overlap_counts_;
+    std::vector<std::vector<std::vector<uint64_t>>>& thread_disjoint = thread_disjoint_;
     const uint64_t query_count = queries.Size();
     const auto rows = static_cast<int64_t>(batch.Rows());
     const auto threads = static_cast<int>(thread_heaps.size());
-    // Heaps and counters are per thread; results are merged in a total order afterwards.
+    for (auto& lists : thread_disjoint) {
+        lists.assign(open_queries.size(), {});
+    }
+    // Heaps, counters and disjoint-row lists are per thread; results are merged in a total
+    // order afterwards.
     // clang-format off
 #pragma omp parallel num_threads(threads) default(none) \
-    shared(queries, metric, term_ids, postings, thread_heaps, overlap_counts, query_count, rows, \
-           batch, row_norms)
+    shared(queries, metric, k, term_ids, postings, open_queries, thread_heaps, overlap_counts, \
+           thread_disjoint, query_count, rows, batch, row_norms, valid)
     // clang-format on
     {
         const auto thread = static_cast<uint64_t>(omp_get_thread_num());
         std::vector<double> scores(query_count, 0.0);
         std::vector<uint8_t> touched_flags(query_count, 0);
         std::vector<uint32_t> touched;
+        std::vector<std::vector<uint64_t>>& disjoint = thread_disjoint[thread];
 #pragma omp for schedule(static)
         for (int64_t r = 0; r < rows; ++r) {
+            if (valid[r] == 0) {
+                continue;
+            }
             const uint64_t row = batch.first_row + static_cast<uint64_t>(r);
             touched.clear();
             const uint64_t begin = batch.offsets[r];
@@ -239,6 +277,23 @@ SparseKnnSearch::Scan(const SparseBatch& batch, const std::vector<double>& row_n
                     scores[query] += static_cast<double>(query_value) * row_value;
                 }
             }
+            // This row shares no term with the untouched open queries: distance exactly 1.
+            // Each list is a bounded max-heap, so it keeps the k smallest rows in any order.
+            for (uint64_t i = 0; i < open_queries.size(); ++i) {
+                const uint32_t query = open_queries[i];
+                if (touched_flags[query] != 0 || queries.self_rows[query] == row) {
+                    continue;
+                }
+                std::vector<uint64_t>& heap = disjoint[i];
+                if (heap.size() < k) {
+                    heap.push_back(row);
+                    std::push_heap(heap.begin(), heap.end());
+                } else if (row < heap.front()) {
+                    std::pop_heap(heap.begin(), heap.end());
+                    heap.back() = row;
+                    std::push_heap(heap.begin(), heap.end());
+                }
+            }
             for (const uint32_t query : touched) {
                 if (queries.self_rows[query] != row) {
                     double distance = 1.0 - scores[query];
@@ -254,22 +309,55 @@ SparseKnnSearch::Scan(const SparseBatch& batch, const std::vector<double>& row_n
             }
         }
     }
+    merge_disjoint_rows();
+}
+
+void
+SparseKnnSearch::merge_disjoint_rows() {
+    std::vector<uint32_t> still_open;
+    for (uint64_t i = 0; i < open_queries_.size(); ++i) {
+        const uint32_t query = open_queries_[i];
+        std::vector<uint64_t>& rows = disjoint_rows_[query];
+        for (const auto& lists : thread_disjoint_) {
+            rows.insert(rows.end(), lists[i].begin(), lists[i].end());
+        }
+        std::sort(rows.begin(), rows.end());
+        rows.resize(std::min<uint64_t>(rows.size(), k_));
+        if (rows.size() < k_) {
+            still_open.push_back(query);
+        }
+    }
+    open_queries_ = std::move(still_open);
 }
 
 std::vector<std::vector<Neighbor>>
-SparseKnnSearch::MetricNeighbors() const {
+SparseKnnSearch::MetricNeighbors(std::vector<std::vector<uint8_t>>* shares_term) const {
     std::vector<std::vector<Neighbor>> result(queries_.Size());
+    if (shares_term != nullptr) {
+        shares_term->assign(queries_.Size(), {});
+    }
     for (uint64_t q = 0; q < queries_.Size(); ++q) {
         TopK merged(k_);
         for (const auto& heaps : thread_heaps_) {
             merged.Merge(heaps[q]);
+        }
+        for (const uint64_t row : disjoint_rows_[q]) {
+            merged.Push(1.0, row);
         }
         result[q] = merged.Sorted();
         while (result[q].size() < k_) {
             result[q].push_back(Neighbor{1.0, NO_ROW});
         }
         std::sort(result[q].begin(), result[q].end(), neighbor_less);
-        result[q].resize(k_);
+        if (shares_term != nullptr) {
+            const std::vector<uint64_t>& disjoint = disjoint_rows_[q];
+            for (const auto& neighbor : result[q]) {
+                const bool shared =
+                    neighbor.index != NO_ROW &&
+                    !std::binary_search(disjoint.begin(), disjoint.end(), neighbor.index);
+                (*shares_term)[q].push_back(shared ? 1 : 0);
+            }
+        }
     }
     return result;
 }

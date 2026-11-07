@@ -70,10 +70,10 @@ thresholds.
 | Are `l2`, `ip` and `cosine` interchangeable? | Unit-norm ratio, norm CV | Normalized rows rank identically under all three; spread norms make `ip` a MIPS problem |
 | Does the data waste memory? | Exact duplicates (full), near duplicates (k-NN), constant dimensions, sparsity | Duplicates crowd top-k results and graph edges |
 | How hard is nearest-neighbor search? | Relative contrast, LID (MLE), TwoNN, distance concentration, hubness | He, Kumar and Chang, ICML 2012; Levina and Bickel, NeurIPS 2004; Facco et al., Sci. Rep. 2017; Aumuller and Ceccarello, 2019 (LID and ANN difficulty); Radovanovic et al., JMLR 2010 (hubness) |
-| Which quantizer and transform fit? | Per-dimension ranges, 6-sigma outliers, kurtosis, PCA spectrum, simulated recall of fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform | Mirrors `ScalarQuantizationTrainer`: per-dimension truncated bounds (rate 0.001 for 8 bit, 0.05 for 4 bit), global min/max for `sq8_uniform`, narrowest truncated bounds for `sq4_uniform`, floor encoding |
+| Which quantizer and transform fit? | Per-dimension ranges, 6-sigma outliers, kurtosis, PCA spectrum, simulated recall of fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform | Mirrors `ScalarQuantizationTrainer`: per-dimension truncated bounds (rate 0.001 for 8 bit, 0.05 for 4 bit), global min/max for `sq8_uniform`, narrowest truncated bounds for `sq4_uniform`, floor encoding with the 0.999 clamp; queries encoded for fp16/bf16 and the uniform quantizers, uniform ip/cosine scores from code products plus stored sums, code sizes with metadata and alignment |
 | Will IVF-like partitions balance? | k-means size CV, largest/mean size, silhouette | Coarse proxy; IVF uses many more buckets |
 | Do queries look like the base? | Norm KS, standardized mean shift, out-of-distribution ratio, 2-D projection overlay | Out-of-distribution queries need tuning on real queries |
-| Is the ground truth trustworthy? | Id and tie-tolerant distance recall against recomputed neighbors, distance convention | Wrong ground truth silently corrupts every recall number |
+| Is the ground truth trustworthy? | Id recall against recomputed neighbors; distance recall and distance convention from the recomputed distances of the stored ids | Wrong ground truth silently corrupts every recall number |
 | Sparse/SINDI sizing | `max_term_id` (for `term_id_limit`), id density (`remap_term_ids`), document frequency and Zipf/Gini, retained terms under SINDI's `doc_prune_ratio` mass rule, postings per query | Inverted-list lengths dominate SINDI work |
 
 Distances follow VSAG conventions (`l2` squared, `ip` as `1 - <x, y>`, `cosine` as
@@ -124,7 +124,7 @@ library, so reports from different math libraries or architectures can differ in
 
 | Stage | Time | Memory |
 | --- | --- | --- |
-| Pass 1 | `O(N * D)` | 9 bytes per dense row (norm, non-zero count, validity), 16 bytes per row of duplicate hashes (24 while grouping; budgeted by `--duplicate-memory-mb`), one I/O chunk |
+| Pass 1 | `O(N * D)` | 13 bytes per dense row (norm, non-zero count, validity), 16 bytes per row of duplicate hashes (24 while grouping; budgeted by `--duplicate-memory-mb`), one I/O chunk |
 | Pass 2 | `O(N * D)` plus `O(N * D * Q)` for exact k-NN (`Q` = own plus cross queries) | `O(Q * k)` neighbor lists, one I/O chunk |
 | Pairwise distances | `O(P * D)` | `O(P)` |
 | Hubness | `O(H^2 * D)` | `O(H * k)` |
@@ -171,9 +171,10 @@ TwoNN only to about 5.0.
 - **Determinism and bounds**: identical digests across threads, chunk sizes and runs; seed changes
   only sampled sections; a 100,000-row profile with configured sample sizes stays below 2 GB
   peak memory (an all-pairs matrix would need 80 GB).
-- **HTML**: Content-Security-Policy present, no external `src`/`href`/`@import`/`url()`, exactly
-  two script elements, escaped file names and model output, and every chart card carries its
-  metric key, definition, scope and population or sample size.
+- **HTML**: Content-Security-Policy present with the script hash pinned, no external
+  `src`/`href`/`@import`/`url()`, exactly two script elements, escaped file names, split names and
+  model output, and every chart card carries its metric key, definition, scope and population or
+  sample size.
 - **AI layer**: requests contain no canary values, file name, per-row arrays or credentials;
   the key appears only in the header and never in reports, stdout or stderr; schema violations,
   unknown evidence keys, overclaiming and malformed envelopes are rejected; unreachable providers,
@@ -184,6 +185,10 @@ TwoNN only to about 5.0.
   metrics with NumPy. On the dense fixture (both splits), Fashion-MNIST, SIFT1M and GloVe all
   checks pass: sampled rows identical, k-NN distance quantiles, LID and TwoNN equal to about
   10 significant digits, per-dimension means and standard deviations within 1e-11 relative.
+- **Quantizers against VSAG itself**: `tools/profile_dataset/validate_quantization.py` indexes
+  the same sampled base rows with pyvsag's `brute_force` index for every simulated quantizer and
+  compares recall@k with the report. On SIFT1M, GloVe and Fashion-MNIST, all 18 recall values
+  (six quantizers each) equal those of pyvsag 0.18.5.
 - **CI**: the test binary runs in the community and team pipelines next to the other tool tests,
   including the AddressSanitizer build.
 
