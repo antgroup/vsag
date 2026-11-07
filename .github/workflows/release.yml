@@ -349,7 +349,7 @@ jobs:
           CIBW_ARCHS: ${{ matrix.arch }}
           CIBW_BUILD: ${{ matrix.cibw-build-id }}
           CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
-          CIBW_TEST_COMMAND: pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py
+          CIBW_TEST_COMMAND: pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py && python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke
       - uses: actions/upload-artifact@v5
         with:
           name: wheels-${{ matrix.python-version }}-${{ matrix.arch }}
@@ -381,6 +381,7 @@ jobs:
           CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: |
             pip install numpy pytest && \
+            python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke && \
             echo "=== Running VSAG Python Tests ===" && \
             python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
             if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \
@@ -425,6 +426,7 @@ jobs:
           CIBW_ENVIRONMENT: ${{ matrix.arch == 'x86_64' && 'VSAG_OPENBLAS_TARGET=GENERIC' || '' }}
           CIBW_TEST_COMMAND: |
             pip install numpy pytest && \
+            python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke && \
             echo "=== Running VSAG Python Tests ===" && \
             python -m pytest /project/tests/python -v --tb=short 2>&1 | tee /tmp/test-output.log && \
             if grep -q "FAILED\|ERROR" /tmp/test-output.log; then \

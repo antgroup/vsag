@@ -471,3 +471,109 @@ TEST_CASE("GetDataByIds does not schedule empty work", "[ut][InnerIndexInterface
     REQUIRE_THROWS_AS(unsupported->GetDataByIdsWithFlag(nullptr, 0, DATA_FLAG_FLOAT32_VECTOR),
                       VsagException);
 }
+
+class QueryRecordingInnerIndex : public EmptyInnerIndex {
+public:
+    using EmptyInnerIndex::EmptyInnerIndex;
+
+    DatasetPtr
+    KnnSearch(const DatasetPtr& query,
+              int64_t k,
+              const std::string& parameters,
+              const FilterPtr& filter) const override {
+        queries.push_back(query);
+        return Dataset::Make()->Dim(k);
+    }
+
+    int64_t
+    GetNumElements() const override {
+        return 10;
+    }
+
+    mutable std::vector<DatasetPtr> queries;
+};
+
+TEST_CASE("Baseline analyzer searches a query batch one row at a time",
+          "[ut][InnerIndexInterface][analyzer]") {
+    constexpr int64_t rows = 3;
+    constexpr int64_t dim = 2;
+    constexpr int64_t topk = 4;
+    IndexCommonParam common_param;
+    common_param.dim_ = dim;
+    common_param.allocator_ = SafeAllocator::FactoryDefaultAllocator();
+    common_param.metric_ = MetricType::METRIC_TYPE_L2SQR;
+    auto index = std::make_shared<QueryRecordingInnerIndex>(std::make_shared<InnerIndexParameter>(),
+                                                            common_param);
+    const auto make_batch = [&](int64_t count) {
+        return Dataset::Make()->NumElements(count)->Dim(dim)->Owner(false);
+    };
+    const auto analyze = [&](const DatasetPtr& batch) {
+        index->queries.clear();
+        SearchRequest request;
+        request.query_ = batch;
+        request.topk_ = topk;
+        request.params_str_ = "{}";
+        return JsonType::Parse(index->AnalyzeIndexBySearch(request));
+    };
+    // Row r must be searched on its own and start at data + r * stride.
+    const auto require_rows =
+        [&](const DatasetPtr& batch, const auto& row_data, const auto* data, int64_t stride) {
+            const auto stats = analyze(batch);
+            REQUIRE(stats["result_count"].GetInt() == rows * topk);
+            REQUIRE(index->queries.size() == static_cast<uint64_t>(rows));
+            for (int64_t row = 0; row < rows; ++row) {
+                const auto& query = index->queries[row];
+                REQUIRE(query->GetNumElements() == 1);
+                REQUIRE(query->GetDim() == dim);
+                REQUIRE(row_data(query) == data + row * stride);
+            }
+        };
+
+    const auto size = static_cast<uint64_t>(rows * dim);
+    std::vector<float> float32_vectors(size, 0.5F);
+    std::vector<int8_t> int8_vectors(size, 1);
+    std::vector<uint16_t> float16_vectors(size, 1);
+    std::vector<SparseVector> sparse_vectors(rows);
+    std::vector<MultiVector> multi_vectors(rows);
+    require_rows(
+        make_batch(rows)->Float32Vectors(float32_vectors.data()),
+        [](const DatasetPtr& query) { return query->GetFloat32Vectors(); },
+        float32_vectors.data(),
+        dim);
+    require_rows(
+        make_batch(rows)->Int8Vectors(int8_vectors.data()),
+        [](const DatasetPtr& query) { return query->GetInt8Vectors(); },
+        int8_vectors.data(),
+        dim);
+    require_rows(
+        make_batch(rows)->Float16Vectors(float16_vectors.data()),
+        [](const DatasetPtr& query) { return query->GetFloat16Vectors(); },
+        float16_vectors.data(),
+        dim);
+    require_rows(
+        make_batch(rows)->SparseVectors(sparse_vectors.data()),
+        [](const DatasetPtr& query) { return query->GetSparseVectors(); },
+        sparse_vectors.data(),
+        1);
+    require_rows(
+        make_batch(rows)->MultiVectors(multi_vectors.data())->MultiVectorDim(8),
+        [](const DatasetPtr& query) { return query->GetMultiVectors(); },
+        multi_vectors.data(),
+        1);
+    REQUIRE(index->queries.back()->GetMultiVectorDim() == 8);
+
+    // A single query is searched as given.
+    auto single = make_batch(1)->Float32Vectors(float32_vectors.data());
+    const auto stats = analyze(single);
+    REQUIRE(stats["result_count"].GetInt() == topk);
+    REQUIRE(index->queries.size() == 1);
+    REQUIRE(index->queries[0].get() == single.get());
+
+    // A batch without vector data cannot be split into rows.
+    try {
+        analyze(make_batch(rows));
+        FAIL("a query batch without vectors must be rejected");
+    } catch (const VsagException& error) {
+        REQUIRE(error.error_.type == ErrorType::INVALID_ARGUMENT);
+    }
+}

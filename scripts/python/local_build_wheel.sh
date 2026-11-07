@@ -103,12 +103,12 @@ run_build() {
     if $use_uvx; then
       CIBW_BUILD="${cibw_build_pattern}" \
       CIBW_ARCHS="${ARCH}" \
-      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py" \
+      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py && python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke" \
       uvx --python 3.12 --from "cibuildwheel==${cibw_version}" cibuildwheel --platform linux --output-dir wheelhouse python
     else
       CIBW_BUILD="${cibw_build_pattern}" \
       CIBW_ARCHS="${ARCH}" \
-      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py" \
+      CIBW_TEST_COMMAND="pip install numpy pytest && ls -alF /project/ && python /project/tests/python/run_test.py && python -I /project/tests/python/analyze_index_smoke.py all /tmp/pyvsag-analyze-index-smoke" \
       cibuildwheel --platform linux --output-dir wheelhouse python
     fi
   else 
@@ -127,6 +127,8 @@ run_build() {
     pip install numpy pytest
     cd tests/python && python -m pytest . -v --tb=short 2>&1 | tee test-output.log || (cat test-output.log && exit 1)
     cd ../..
+    echo "   - Running the analyze_index smoke test in clean environments..."
+    bash ./scripts/python/wheel_smoke_test.sh wheelhouse python
   fi
 
   cleanup

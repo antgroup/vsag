@@ -18,4 +18,5 @@ PYBIND11_MODULE(_pyvsag, module) {
     module.doc() = "VSAG (Vector Search Algorithm Group) Python binding module";
     bind_logging(module);
     bind_index(module);
+    bind_analysis(module);
 }

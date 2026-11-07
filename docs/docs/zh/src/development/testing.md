@@ -117,6 +117,11 @@ make pyvsag PY_VERSION=3.10
 cd tests/python && pytest -q
 ```
 
+`scripts/python/wheel_smoke_test.sh WHEELHOUSE [PYTHON]` 会基于构建好的 wheel，在只安装了该 wheel
+的全新虚拟环境中检查 `pyvsag.analyze_index()` 与 `pyvsag-analyze-index`；Docker 可用时，还会在
+`python:<version>-slim` 容器（没有 NumPy、CMake 与编译器）中再检查一次。`make pyvsag` 与 wheel 相关的
+CI 任务都会运行它。
+
 ## 统计 testcase 预算与耗时
 
 `scripts/testing/test_budget_report.py` 只读取已保存的测试列表、结果和成本记录，不运行测试；

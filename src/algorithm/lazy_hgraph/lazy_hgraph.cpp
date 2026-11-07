@@ -27,6 +27,7 @@
 #include "index_common_param.h"
 #include "index_feature_list.h"
 #include "inner_string_params.h"
+#include "lazy_hgraph_format.h"
 #include "storage/stream_reader.h"
 #include "storage/stream_writer.h"
 #include "vsag/constants.h"
@@ -46,9 +47,6 @@ namespace {
 
 const char* const LAZY_HGRAPH_TRANSITION_THRESHOLD = "transition_threshold";
 const char* const LAZY_HGRAPH_HGRAPH = "hgraph";
-
-constexpr uint64_t LAZY_HGRAPH_MAGIC = 0x4C415A5948475246ULL;  // "LAZYHGRF"
-constexpr uint64_t LAZY_HGRAPH_VERSION = 1;
 
 void
 reject_flat_param(const JsonType& external_param, const char* key) {
