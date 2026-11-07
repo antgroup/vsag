@@ -21,6 +21,7 @@
 #include <cmath>
 #include <ctime>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 
@@ -68,8 +69,8 @@ issues_json(const std::vector<std::string>& issues) {
 }
 
 std::vector<double>
-sorted_doubles(const std::vector<float>& values) {
-    std::vector<double> result(values.begin(), values.end());
+sorted_doubles(const std::vector<double>& values) {
+    std::vector<double> result = values;
     std::sort(result.begin(), result.end());
     return result;
 }
@@ -104,40 +105,90 @@ query_sample_json(uint64_t population, uint64_t used) {
                     {"subset", "first knn_queries valid sampled test rows"}};
 }
 
-/// Compares stored ground truth with the exact neighbors recomputed for sampled queries.
+/// Stored ground truth of the sampled queries. It is read before the base split is scanned, so
+/// that pass 2 can recompute the distance of every stored neighbor id (`probe`).
+struct GroundTruthCheck {
+    /// Columns read per stored row.
+    uint64_t k{0};
+    /// Checked query rows and their positions in the cross query set.
+    std::vector<uint64_t> rows;
+    std::vector<uint64_t> positions;
+    /// rows.size() x k stored ids and distances.
+    std::vector<int64_t> neighbors;
+    std::vector<float> distances;
+    /// Pairs (cross query, stored id) sorted by id, and the matrix entry of each pair.
+    RowDistanceProbe probe;
+    std::vector<uint64_t> probe_entries;
+};
+
+GroundTruthCheck
+prepare_ground_truth_check(const DatasetInfo& info,
+                           const std::vector<uint64_t>& query_rows,
+                           uint64_t knn_k) {
+    GroundTruthCheck check;
+    check.k = std::min<uint64_t>(info.ground_truth_k, knn_k);
+    for (uint64_t i = 0; i < query_rows.size(); ++i) {
+        if (query_rows[i] < info.ground_truth_rows) {
+            check.rows.push_back(query_rows[i]);
+            check.positions.push_back(i);
+        }
+    }
+    if (check.rows.empty() || check.k == 0) {
+        return check;
+    }
+    read_ground_truth_rows(info.path, check.rows, check.k, check.neighbors, check.distances);
+    std::vector<std::pair<uint64_t, uint64_t>> pairs;
+    for (uint64_t entry = 0; entry < check.neighbors.size(); ++entry) {
+        if (check.neighbors[entry] >= 0) {
+            pairs.emplace_back(static_cast<uint64_t>(check.neighbors[entry]), entry);
+        }
+    }
+    std::sort(pairs.begin(), pairs.end());
+    for (const auto& [row, entry] : pairs) {
+        check.probe.rows.push_back(row);
+        check.probe.queries.push_back(check.positions[entry / check.k]);
+        check.probe_entries.push_back(entry);
+    }
+    check.probe.distances.assign(pairs.size(), std::numeric_limits<double>::quiet_NaN());
+    return check;
+}
+
+/// Compares stored ground truth with the exact neighbors recomputed for sampled queries. The
+/// distance of each stored id is recomputed too, so stored distances are never trusted to
+/// belong to the stored ids.
 JsonType
 ground_truth_report(const DatasetInfo& info,
-                    const std::vector<uint64_t>& query_rows,
+                    const GroundTruthCheck& check,
                     const std::vector<std::vector<Neighbor>>& computed,
                     Metric metric,
                     uint64_t train_rows) {
-    const uint64_t k =
-        std::min<uint64_t>(info.ground_truth_k, computed.empty() ? 0 : computed.front().size());
-    std::vector<uint64_t> rows;
-    std::vector<uint64_t> positions;
-    for (uint64_t i = 0; i < query_rows.size() && i < computed.size(); ++i) {
-        if (query_rows[i] < info.ground_truth_rows) {
-            rows.push_back(query_rows[i]);
-            positions.push_back(i);
-        }
-    }
+    const uint64_t k = std::min<uint64_t>(check.k, computed.empty() ? 0 : computed.front().size());
     JsonType report = JsonType{
         {"scope", "sample"},
         {"definition",
          "Stored /neighbors and /distances of sampled queries compared with exact neighbors "
-         "recomputed under the profiled metric. distance_recall_at_k tolerates ties."},
+         "recomputed under the profiled metric. The distance of every stored id is recomputed: "
+         "distance_recall_at_k counts stored ids within the exact k-th distance (so ties are "
+         "tolerated), and the convention errors compare stored distances with those recomputed "
+         "distances."},
         {"stored_queries", info.ground_truth_rows},
         {"stored_k", info.ground_truth_k},
-        {"checked_queries", rows.size()},
+        {"checked_queries", check.rows.size()},
         {"compared_k", k}};
-    report["sample"] = query_sample_json(info.ground_truth_rows, rows.size());
-    if (rows.empty() || k == 0) {
+    report["sample"] = query_sample_json(info.ground_truth_rows, check.rows.size());
+    if (check.rows.empty() || k == 0) {
         report["status"] = "not_checked";
         return report;
     }
-    std::vector<int64_t> neighbors;
-    std::vector<float> distances;
-    read_ground_truth_rows(info.path, rows, k, neighbors, distances);
+    const std::vector<uint64_t>& rows = check.rows;
+    const std::vector<int64_t>& neighbors = check.neighbors;
+    const std::vector<float>& distances = check.distances;
+    // Recomputed metric distance per stored entry; NaN for ids outside the split and for rows
+    // excluded from distance metrics.
+    std::vector<double> recomputed(neighbors.size(), std::numeric_limits<double>::quiet_NaN());
+    for (uint64_t p = 0; p < check.probe_entries.size(); ++p) {
+        recomputed[check.probe_entries[p]] = check.probe.distances[p];
+    }
 
     // Candidate conventions for the stored distances, expressed through the VSAG distance m.
     struct Convention {
@@ -154,20 +205,23 @@ ground_truth_report(const DatasetInfo& info,
                        {"similarity", [](double m) { return 1.0 - m; }},
                        {"negative similarity", [](double m) { return m - 1.0; }}};
     }
+    const uint64_t stride = check.k;
     std::vector<double> convention_error(conventions.size(), 0.0);
+    uint64_t recomputed_entries = 0;
     double id_recall = 0.0;
     double distance_recall = 0.0;
     uint64_t out_of_range = 0;
     uint64_t unsorted_rows = 0;
     for (uint64_t i = 0; i < rows.size(); ++i) {
-        const auto& exact = computed[positions[i]];
-        std::vector<int64_t> stored(neighbors.begin() + static_cast<int64_t>(i * k),
-                                    neighbors.begin() + static_cast<int64_t>((i + 1) * k));
+        const auto& exact = computed[check.positions[i]];
+        const auto first = static_cast<int64_t>(i * stride);
+        std::vector<int64_t> stored(neighbors.begin() + first,
+                                    neighbors.begin() + first + static_cast<int64_t>(k));
         for (const int64_t id : stored) {
             out_of_range += (id < 0 || static_cast<uint64_t>(id) >= train_rows) ? 1 : 0;
         }
         for (uint64_t j = 1; j < k; ++j) {
-            if (distances[i * k + j] < distances[i * k + j - 1]) {
+            if (distances[i * stride + j] < distances[i * stride + j - 1]) {
                 ++unsorted_rows;
                 break;
             }
@@ -187,48 +241,50 @@ ground_truth_report(const DatasetInfo& info,
                               stored_sorted.end(),
                               std::back_inserter(common));
         id_recall += static_cast<double>(common.size()) / static_cast<double>(k);
-        for (uint64_t c = 0; c < conventions.size(); ++c) {
-            double error = 0.0;
-            for (uint64_t j = 0; j < k; ++j) {
-                const double expected = conventions[c].from_metric(exact[j].distance);
-                const double stored_distance = distances[i * k + j];
-                error += std::abs(stored_distance - expected) /
-                         std::max(1e-6, std::abs(expected) + std::abs(stored_distance));
-            }
-            convention_error[c] += error / static_cast<double>(k);
-        }
-    }
-    const uint64_t best =
-        static_cast<uint64_t>(std::min_element(convention_error.begin(), convention_error.end()) -
-                              convention_error.begin());
-    // Distance-based recall under the best convention: stored neighbors whose stored distance
-    // is within the recomputed k-th distance count as correct, which absorbs tie ordering.
-    for (uint64_t i = 0; i < rows.size(); ++i) {
-        const auto& exact = computed[positions[i]];
-        const double kth = conventions[best].from_metric(exact[k - 1].distance);
-        const bool ascending = std::string(conventions[best].name) != "similarity";
+        // A stored id is correct when its recomputed distance is within the exact k-th
+        // distance, which absorbs the order of ties.
+        const double kth = exact[k - 1].distance;
+        const double tolerance = 1e-5 * std::max(1.0, std::abs(kth));
         uint64_t within = 0;
         for (uint64_t j = 0; j < k; ++j) {
-            const double stored_distance = distances[i * k + j];
-            const double tolerance = 1e-5 * std::max(1.0, std::abs(kth));
-            within += (ascending ? stored_distance <= kth + tolerance
-                                 : stored_distance >= kth - tolerance)
-                          ? 1
-                          : 0;
+            const double actual = recomputed[i * stride + j];
+            if (!std::isfinite(actual)) {
+                continue;
+            }
+            within += actual <= kth + tolerance ? 1 : 0;
+            ++recomputed_entries;
+            const double stored_distance = distances[i * stride + j];
+            for (uint64_t c = 0; c < conventions.size(); ++c) {
+                const double expected = conventions[c].from_metric(actual);
+                convention_error[c] +=
+                    std::abs(stored_distance - expected) /
+                    std::max(1e-6, std::abs(expected) + std::abs(stored_distance));
+            }
         }
         distance_recall += static_cast<double>(within) / static_cast<double>(k);
     }
     const auto checked = static_cast<double>(rows.size());
-    JsonType errors = JsonType::object();
-    for (uint64_t c = 0; c < conventions.size(); ++c) {
-        errors[conventions[c].name] = convention_error[c] / checked;
-    }
     report["status"] = "checked";
     report["id_recall_at_k"] = id_recall / checked;
     report["distance_recall_at_k"] = distance_recall / checked;
-    report["best_matching_distance_convention"] = conventions[best].name;
-    report["best_convention_mean_relative_error"] = convention_error[best] / checked;
-    report["convention_mean_relative_errors"] = errors;
+    report["recomputed_stored_ids"] = recomputed_entries;
+    if (recomputed_entries > 0) {
+        const uint64_t best = static_cast<uint64_t>(
+            std::min_element(convention_error.begin(), convention_error.end()) -
+            convention_error.begin());
+        const auto entries = static_cast<double>(recomputed_entries);
+        JsonType errors = JsonType::object();
+        for (uint64_t c = 0; c < conventions.size(); ++c) {
+            errors[conventions[c].name] = convention_error[c] / entries;
+        }
+        report["best_matching_distance_convention"] = conventions[best].name;
+        report["best_convention_mean_relative_error"] = convention_error[best] / entries;
+        report["convention_mean_relative_errors"] = errors;
+    } else {
+        report["best_matching_distance_convention"] = nullptr;
+        report["best_convention_mean_relative_error"] = nullptr;
+        report["convention_mean_relative_errors"] = nullptr;
+    }
     report["out_of_range_ids"] = out_of_range;
     report["rows_with_unsorted_distances"] = unsorted_rows;
     return report;
@@ -455,6 +511,9 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
         return context;
     };
 
+    const bool check_truth = both && knn && options.Enabled(SECTION_GROUND_TRUTH) &&
+                             info.has_neighbors && info.has_distances;
+    GroundTruthCheck truth;
     if (info.kind == VectorKind::DENSE) {
         std::unique_ptr<DenseSplitProfiler> test;
         std::unique_ptr<DenseSplitProfiler> train;
@@ -465,10 +524,16 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
             if (profile_train && knn) {
                 cross = test->MakeQuerySet(options.knn_queries);
             }
+            if (check_truth) {
+                truth =
+                    prepare_ground_truth_check(info,
+                                               test->AnalysisRowIds(options.knn_queries),
+                                               std::min<uint64_t>(options.knn_k, info.train.rows));
+            }
         }
         if (profile_train) {
             train = std::make_unique<DenseSplitProfiler>(make_context("train"));
-            train->Run(cross.Size() > 0 ? &cross : nullptr);
+            train->Run(cross.Size() > 0 ? &cross : nullptr, check_truth ? &truth.probe : nullptr);
             report["splits"]["train"] = train->Json();
         }
         if (test) {
@@ -548,14 +613,9 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                     {"points", coordinates}};
             }
             report["cross_split"] = cross_json;
-            if (options.Enabled(SECTION_GROUND_TRUTH) && knn && info.has_neighbors &&
-                info.has_distances) {
-                report["ground_truth"] =
-                    ground_truth_report(info,
-                                        test->AnalysisRowIds(options.knn_queries),
-                                        train->CrossNeighbors(),
-                                        metric,
-                                        info.train.rows);
+            if (check_truth) {
+                report["ground_truth"] = ground_truth_report(
+                    info, truth, train->CrossNeighbors(), metric, info.train.rows);
             }
         }
         if (options.Enabled(SECTION_QUANTIZATION) && profile_train &&
@@ -615,10 +675,16 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
             if (profile_train && knn) {
                 cross = test->MakeQuerySet(options.knn_queries);
             }
+            if (check_truth) {
+                // The train record count may only be known after its scan; the report trims
+                // the comparison to the k actually searched.
+                truth = prepare_ground_truth_check(
+                    info, test->AnalysisRowIds(options.knn_queries), options.knn_k);
+            }
         }
         if (profile_train) {
             train = std::make_unique<SparseSplitProfiler>(make_context("train"));
-            train->Run(cross.Size() > 0 ? &cross : nullptr);
+            train->Run(cross.Size() > 0 ? &cross : nullptr, check_truth ? &truth.probe : nullptr);
             report["splits"]["train"] = train->Json();
         }
         if (test) {
@@ -687,14 +753,12 @@ profile_dataset(const ProfileOptions& options, const ProgressFn& progress) {
                              {"threshold", threshold}};
             }
             report["cross_split"] = cross_json;
-            if (options.Enabled(SECTION_GROUND_TRUTH) && knn && info.has_neighbors &&
-                info.has_distances) {
-                report["ground_truth"] =
-                    ground_truth_report(info,
-                                        test->AnalysisRowIds(options.knn_queries),
-                                        train->CrossNeighbors(),
-                                        metric,
-                                        train->Json()["rows"].get<uint64_t>());
+            if (check_truth) {
+                report["ground_truth"] = ground_truth_report(info,
+                                                             truth,
+                                                             train->CrossNeighbors(),
+                                                             metric,
+                                                             train->Json()["rows"].get<uint64_t>());
             }
         }
     }

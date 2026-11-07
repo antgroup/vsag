@@ -106,6 +106,12 @@ private:
     std::vector<TopK> euclidean_heaps_;
 };
 
+/// Metric distance from query `q` to one row, computed with the kernels of
+/// DenseKnnSearch::Scan, so the same pair always gives a bit-identical distance.
+double
+dense_metric_distance(
+    const DenseQuerySet& queries, uint64_t q, const float* row, double row_norm, Metric metric);
+
 /// Sparse query rows (ids ascending per row) with L2 norms.
 struct SparseQuerySet {
     std::vector<uint64_t> offsets{0};
@@ -121,23 +127,34 @@ struct SparseQuerySet {
 };
 
 /// Exact k-NN for sparse ip/cosine through an inverted index over the query terms. Rows that
-/// share no term with a query have inner product 0; missing neighbors are therefore padded
-/// with that exact distance (1 for both ip and cosine).
+/// share no term with a query have inner product 0, so their distance is exactly 1 for both ip
+/// and cosine. The smallest k such row ids are kept per query and compete with the rows that
+/// share a term, which can lie beyond distance 1 when weights are negative.
 class SparseKnnSearch {
 public:
     SparseKnnSearch(const SparseQuerySet& queries, Metric metric, uint64_t k);
 
+    /// Scans consecutive rows; batches must arrive in ascending row order. Rows with
+    /// valid[r] == 0 are ignored (non-finite values, or zero rows under cosine).
     void
-    Scan(const SparseBatch& batch, const std::vector<double>& row_norms);
+    Scan(const SparseBatch& batch,
+         const std::vector<double>& row_norms,
+         const std::vector<uint8_t>& valid);
 
+    /// Ascending exact neighbors per query. If `shares_term` is given, it receives 1 for each
+    /// neighbor that shares at least one term with the query and 0 otherwise. Lists are padded
+    /// with {1, NO_ROW} only when fewer than k valid rows exist.
     [[nodiscard]] std::vector<std::vector<Neighbor>>
-    MetricNeighbors() const;
+    MetricNeighbors(std::vector<std::vector<uint8_t>>* shares_term = nullptr) const;
 
     /// Queries with fewer than k rows sharing at least one term.
     [[nodiscard]] uint64_t
     QueriesWithFewOverlaps() const;
 
 private:
+    void
+    merge_disjoint_rows();
+
     const SparseQuerySet& queries_;
     Metric metric_;
     uint64_t k_;
@@ -145,6 +162,13 @@ private:
     std::vector<uint32_t> term_ids_;
     std::vector<std::vector<TopK>> thread_heaps_;
     std::vector<uint64_t> overlap_counts_;
+    /// Per query, the smallest ids (at most k, ascending) of scanned valid rows that share no
+    /// term with it.
+    std::vector<std::vector<uint64_t>> disjoint_rows_;
+    /// Queries that still have fewer than k disjoint rows; later rows can only fill these.
+    std::vector<uint32_t> open_queries_;
+    /// Per thread and open query, a max-heap of the smallest disjoint rows of the current batch.
+    std::vector<std::vector<std::vector<uint64_t>>> thread_disjoint_;
 };
 
 /// Levina-Bickel maximum-likelihood local intrinsic dimensionality from ascending neighbor

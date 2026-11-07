@@ -14,6 +14,7 @@
 
 #include "sha256.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 
@@ -88,8 +89,8 @@ compress(std::array<uint32_t, 8>& state, const uint8_t* block) {
 
 }  // namespace
 
-std::string
-sha256_hex(const std::string& data) {
+std::array<uint8_t, 32>
+sha256_digest(const std::string& data) {
     std::array<uint32_t, 8> state = {0x6a09e667,
                                      0xbb67ae85,
                                      0x3c6ef372,
@@ -119,15 +120,44 @@ sha256_hex(const std::string& data) {
     if (tail_size == 128) {
         compress(state, tail.data() + 64);
     }
+    std::array<uint8_t, 32> digest{};
+    for (uint64_t i = 0; i < state.size(); ++i) {
+        for (uint64_t b = 0; b < 4; ++b) {
+            digest[i * 4 + b] = static_cast<uint8_t>(state[i] >> (24U - 8U * b));
+        }
+    }
+    return digest;
+}
+
+std::string
+sha256_hex(const std::string& data) {
     static constexpr char hex_digits[] = "0123456789abcdef";
     std::string hex;
     hex.reserve(64);
-    for (const uint32_t word : state) {
-        for (int shift = 28; shift >= 0; shift -= 4) {
-            hex.push_back(hex_digits[(word >> static_cast<uint32_t>(shift)) & 0xFU]);
-        }
+    for (const uint8_t byte : sha256_digest(data)) {
+        hex.push_back(hex_digits[byte >> 4U]);
+        hex.push_back(hex_digits[byte & 0xFU]);
     }
     return hex;
+}
+
+std::string
+sha256_base64(const std::string& data) {
+    static constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const std::array<uint8_t, 32> digest = sha256_digest(data);
+    std::string encoded;
+    encoded.reserve(44);
+    for (uint64_t i = 0; i < digest.size(); i += 3) {
+        const uint64_t available = std::min<uint64_t>(3, digest.size() - i);
+        uint32_t group = static_cast<uint32_t>(digest[i]) << 16U;
+        group |= available > 1 ? static_cast<uint32_t>(digest[i + 1]) << 8U : 0U;
+        group |= available > 2 ? static_cast<uint32_t>(digest[i + 2]) : 0U;
+        for (uint64_t c = 0; c < 4; ++c) {
+            encoded.push_back(c <= available ? alphabet[(group >> (18U - 6U * c)) & 0x3FU] : '=');
+        }
+    }
+    return encoded;
 }
 
 }  // namespace vsag::dataset_profile

@@ -15,6 +15,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "profile_types.h"
@@ -31,12 +32,23 @@ truncated_bounds(const std::vector<float>& data,
                  std::vector<float>& lower,
                  std::vector<float>& upper);
 
-/// Simulates VSAG's fp16, bf16, sq8, sq4, sq8_uniform and sq4_uniform codes on a sampled base
-/// and measures recall@k of the decoded distances against exact distances, plus the mean
+/// ClampScalarQuantizationDelta: NaN and negative deltas become 0, deltas above 0.999 become 1.
+float
+clamp_scalar_delta(float delta);
+
+/// Bytes per stored vector of a VSAG quantizer ("fp16", "bf16", "sq8", "sq4", "sq8_uniform",
+/// "sq4_uniform") under a metric: the code payload plus the norm/sum metadata of the uniform
+/// quantizers, aligned as in their constructors.
+uint64_t
+quantizer_code_bytes(const std::string& name, uint64_t dim, Metric metric);
+
+/// Simulates VSAG's fp16, bf16, sq8, sq4, sq8_uniform and sq4_uniform quantizers on a sampled
+/// base and measures recall@k of their distances against exact distances, plus the mean
 /// relative reconstruction error. Ranges follow ScalarQuantizationTrainer (per-dimension
 /// truncated bounds for sq8/sq4, global min/max for sq8_uniform, the narrowest truncated
-/// bounds for sq4_uniform) and codes use the same floor-based encoding. Queries stay fp32
-/// for fp16/bf16/sq8/sq4 and are encoded for the uniform quantizers, as in VSAG.
+/// bounds for sq4_uniform) and codes use the same floor-based encoding and clamp. As in VSAG,
+/// queries stay fp32 for sq8/sq4 and are encoded for fp16/bf16 and the uniform quantizers,
+/// whose ip/cosine scores combine code products with the stored sums of the original values.
 /// This is a model of the quantizers, not a call into them; validate with eval_performance.
 JsonType
 simulate_quantization(const std::vector<float>& base,

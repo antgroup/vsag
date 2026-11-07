@@ -101,7 +101,8 @@ SparseSplitProfiler::SparseSplitProfiler(SplitContext context)
 }
 
 void
-SparseSplitProfiler::Run(const SparseQuerySet* cross_queries) {
+SparseSplitProfiler::Run(const SparseQuerySet* cross_queries, RowDistanceProbe* probe) {
+    probe_ = probe;
     prepare_sample();
     first_pass();
     second_pass(cross_queries);
@@ -121,7 +122,7 @@ SparseSplitProfiler::prepare_sample() {
     plan_.population = rows_;
     DeterministicRng rng(derive_seed(options_.seed, "sample/" + context_.name));
     plan_.rows = sample_without_replacement(rows_, options_.sample_size, rng);
-    row_norms_.assign(rows_, 0.0F);
+    row_norms_.assign(rows_, 0.0);
     row_valid_.assign(rows_, 0);
     full_duplicates_ = options_.Enabled(SECTION_DUPLICATES) &&
                        rows_ * 24 <= options_.duplicate_memory_mb * 1024ULL * 1024ULL;
@@ -136,7 +137,6 @@ SparseSplitProfiler::first_pass() {
     const auto start = std::chrono::steady_clock::now();
     SparseSplitReader reader(
         context_.info->path, context_.name, options_.chunk_mb * 1024ULL * 1024ULL);
-    std::unordered_map<uint32_t, uint64_t> overflow_terms;
     std::vector<SparseBatch> batches(BLOCKS_PER_CHUNK);
     std::vector<double> nonzeros;
     nonzeros.reserve(rows_);
@@ -148,18 +148,26 @@ SparseSplitProfiler::first_pass() {
     uint64_t parsed_rows = 0;
     const bool full_duplicates = full_duplicates_;
     std::vector<uint8_t>& row_valid = row_valid_;
-    std::vector<float>& row_norms = row_norms_;
+    std::vector<double>& row_norms = row_norms_;
     std::vector<uint64_t>& hash_high = hash_high_;
     std::vector<uint64_t>& hash_low = hash_low_;
     bool more = true;
     while (more) {
         uint64_t loaded = 0;
+        uint64_t loaded_rows = 0;
         while (loaded < BLOCKS_PER_CHUNK && reader.NextBatch(BLOCK_ROWS, batches[loaded])) {
+            loaded_rows += batches[loaded].Rows();
             ++loaded;
         }
         more = loaded == BLOCKS_PER_CHUNK;
         if (loaded == 0) {
             break;
+        }
+        // Per-row arrays are sized from the offsets; never index them past the declared count.
+        if (loaded_rows > rows_ - parsed_rows) {
+            throw ProfileError("sparse dataset '/" + context_.name +
+                               "' has more records than its offsets declare (" +
+                               std::to_string(rows_) + ")");
         }
         std::vector<SparseBlockPartial> partials(loaded);
         const auto signed_loaded = static_cast<int64_t>(loaded);
@@ -207,8 +215,7 @@ SparseSplitProfiler::first_pass() {
                     partial.zero_values += value == 0.0F ? 1 : 0;
                 }
                 row_valid[row] = valid ? 1 : 0;
-                row_norms[row] = valid ? static_cast<float>(std::sqrt(norm))
-                                       : std::numeric_limits<float>::quiet_NaN();
+                row_norms[row] = valid ? std::sqrt(norm) : std::numeric_limits<double>::quiet_NaN();
                 partial.invalid_rows += valid ? 0 : 1;
                 partial.empty_rows += begin == end ? 1 : 0;
                 if (full_duplicates) {
@@ -280,7 +287,7 @@ SparseSplitProfiler::first_pass() {
                         }
                         ++term_frequency_[id];
                     } else {
-                        ++overflow_terms[id];
+                        ++overflow_terms_[id];
                     }
                 }
             }
@@ -321,7 +328,7 @@ SparseSplitProfiler::first_pass() {
     for (const uint64_t position : order) {
         const uint64_t row = plan_.rows[position];
         const bool usable =
-            row_valid_[row] != 0 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0F);
+            row_valid_[row] != 0 && (context_.metric != Metric::COSINE || row_norms_[row] > 0.0);
         if (!usable) {
             continue;
         }
@@ -343,7 +350,7 @@ SparseSplitProfiler::first_pass() {
     for (uint64_t r = 0; r < rows_; ++r) {
         if (row_valid_[r] != 0) {
             norms.push_back(row_norms_[r]);
-            unit_norm += std::abs(row_norms_[r] - 1.0F) <= 1e-3F ? 1 : 0;
+            unit_norm += std::abs(row_norms_[r] - 1.0) <= 1e-3 ? 1 : 0;
         }
     }
     sorted_norms_.assign(norms.begin(), norms.end());
@@ -420,7 +427,7 @@ SparseSplitProfiler::first_pass() {
             frequencies.emplace_back(term_frequency_[id], static_cast<uint32_t>(id));
         }
     }
-    for (const auto& [id, frequency] : overflow_terms) {
+    for (const auto& [id, frequency] : overflow_terms_) {
         frequencies.emplace_back(frequency, id);
     }
     std::sort(frequencies.begin(), frequencies.end(), [](const auto& a, const auto& b) {
@@ -564,7 +571,11 @@ SparseSplitProfiler::AnalysisRowIds(uint64_t count) const {
 
 uint64_t
 SparseSplitProfiler::DocumentFrequency(uint32_t term) const {
-    return term < term_frequency_.size() ? term_frequency_[term] : 0;
+    if (term < term_frequency_.size()) {
+        return term_frequency_[term];
+    }
+    const auto it = overflow_terms_.find(term);
+    return it == overflow_terms_.end() ? 0 : it->second;
 }
 
 void
@@ -585,6 +596,7 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
         context_.info->path, context_.name, options_.chunk_mb * 1024ULL * 1024ULL);
     SparseBatch batch;
     std::vector<double> norms;
+    std::vector<uint8_t> valid;
     while (reader.NextBatch(BLOCK_ROWS, batch)) {
         for (const float value : batch.values) {
             if (is_finite_value(value)) {
@@ -592,14 +604,44 @@ SparseSplitProfiler::second_pass(const SparseQuerySet* cross_queries) {
             }
         }
         norms.resize(batch.Rows());
+        valid.resize(batch.Rows());
         for (uint64_t r = 0; r < batch.Rows(); ++r) {
             norms[r] = row_norm(batch, r);
+            // Pass 1 validated the record count, so these row ids are in range.
+            valid[r] = row_valid_[batch.first_row + r] != 0 &&
+                               (context_.metric != Metric::COSINE || norms[r] > 0.0)
+                           ? 1
+                           : 0;
         }
         if (self_queries.Size() > 0) {
-            self_search.Scan(batch, norms);
+            self_search.Scan(batch, norms, valid);
         }
         if (cross.Size() > 0) {
-            cross_search.Scan(batch, norms);
+            cross_search.Scan(batch, norms, valid);
+        }
+        if (probe_ != nullptr && cross.Size() > 0) {
+            // Same products in the same (ascending id) order as SparseKnnSearch.
+            auto it = std::lower_bound(probe_->rows.begin(), probe_->rows.end(), batch.first_row);
+            for (; it != probe_->rows.end() && *it < batch.first_row + batch.Rows(); ++it) {
+                const auto entry = static_cast<uint64_t>(it - probe_->rows.begin());
+                const uint64_t r = *it - batch.first_row;
+                const uint64_t q = probe_->queries[entry];
+                if (valid[r] == 0) {
+                    continue;
+                }
+                const double dot = sparse_dot(cross.ids.data() + cross.offsets[q],
+                                              cross.values.data() + cross.offsets[q],
+                                              cross.offsets[q + 1] - cross.offsets[q],
+                                              batch.ids.data() + batch.offsets[r],
+                                              batch.values.data() + batch.offsets[r],
+                                              batch.offsets[r + 1] - batch.offsets[r]);
+                double distance = 1.0 - dot;
+                if (context_.metric == Metric::COSINE) {
+                    const double denominator = cross.norms[q] * norms[r];
+                    distance = denominator > 0.0 ? 1.0 - dot / denominator : 1.0;
+                }
+                probe_->distances[entry] = distance;
+            }
         }
     }
     json_["values"]["histogram"] = histogram.ToJson();
@@ -739,12 +781,17 @@ SparseSplitProfiler::finalize() {
         batch.ids = hub_queries.ids;
         batch.values = hub_queries.values;
         batch.offsets = hub_queries.offsets;
-        hub_search.Scan(batch, hub_queries.norms);
+        // Sampled rows are valid (and non-zero under cosine) by construction.
+        hub_search.Scan(batch, hub_queries.norms, std::vector<uint8_t>(hub_rows, 1));
+        std::vector<std::vector<uint8_t>> shares_term;
+        const auto hub_neighbors = hub_search.MetricNeighbors(&shares_term);
         std::vector<double> occurrences(hub_rows, 0.0);
-        for (const auto& neighbors : hub_search.MetricNeighbors()) {
-            for (const auto& neighbor : neighbors) {
-                if (neighbor.index != NO_ROW) {
-                    occurrences[neighbor.index] += 1.0;
+        for (uint64_t q = 0; q < hub_neighbors.size(); ++q) {
+            // Rows without a shared term all tie at distance 1; counting them would reward
+            // low row ids, so only neighbors sharing a term count.
+            for (uint64_t j = 0; j < hub_neighbors[q].size(); ++j) {
+                if (shares_term[q][j] != 0) {
+                    occurrences[hub_neighbors[q][j].index] += 1.0;
                 }
             }
         }

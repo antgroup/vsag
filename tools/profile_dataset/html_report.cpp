@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "dataset_profiler.h"
+#include "sha256.h"
 #include "svg_chart.h"
 
 namespace vsag::dataset_profile {
@@ -186,7 +187,7 @@ public:
         const std::string file = input.value("file_name", "");
         page << R"(<!doctype html><html lang="en"><head><meta charset="utf-8">)"
              << R"(<meta http-equiv="Content-Security-Policy" content=")"
-             << HTML_CONTENT_SECURITY_POLICY << "\">"
+             << html_content_security_policy() << "\">"
              << R"(<meta name="viewport" content="width=device-width, initial-scale=1">)"
              << R"(<meta name="generator" content="VSAG profile_dataset">)"
              << "<title>Dataset profile: " << escape_html(file) << "</title><style>" << STYLE
@@ -206,7 +207,8 @@ public:
                                 : "")
              << "</code> &middot; this page loads no external resources</div></header><nav>";
         for (const auto& [id, label] : tabs) {
-            page << "<button data-tab=\"" << id << "\">" << escape_html(label) << "</button>";
+            page << "<button data-tab=\"" << escape_html(id) << "\">" << escape_html(label)
+                 << "</button>";
         }
         page << "</nav>" << body.str();
         // JSON may only contain <, > and & inside strings, where \u escapes are equivalent. Escaping
@@ -1066,6 +1068,13 @@ private:
 };
 
 }  // namespace
+
+std::string
+html_content_security_policy() {
+    return std::string("default-src 'none'; style-src 'unsafe-inline'; script-src 'sha256-") +
+           sha256_base64(SCRIPT) +
+           "'; img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'";
+}
 
 std::string
 render_html_report(const JsonType& report) {

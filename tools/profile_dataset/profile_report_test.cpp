@@ -18,8 +18,10 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
+#include <cmath>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <regex>
 #include <sstream>
 
@@ -27,6 +29,7 @@
 #include "html_report.h"
 #include "profile_cli.h"
 #include "profile_dataset_test_utils.h"
+#include "sha256.h"
 
 using namespace vsag::dataset_profile;
 using namespace vsag::dataset_profile::testing;
@@ -331,6 +334,117 @@ TEST_CASE("Sparse profile reports term statistics, pruning and ground truth", "[
     REQUIRE_THROWS_WITH(profile_dataset(options, nullptr), ContainsSubstring("ip and cosine"));
 }
 
+TEST_CASE("Sparse record counts must match the declared offsets", "[profile][report]") {
+    TempDir dir;
+    const std::vector<SparseRecord> records = {
+        SparseRecord{{1, 4}, {0.5F, 0.25F}}, SparseRecord{{2}, {1.0F}}, SparseRecord{{3}, {2.0F}}};
+    std::vector<uint64_t> offsets;
+    const auto bytes = encode_sparse(records, &offsets);
+    auto write = [&](const std::string& path, const std::vector<uint64_t>& declared) {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", bytes, H5::PredType::NATIVE_INT8);
+        write_vector(file, "train_offsets", declared, H5::PredType::NATIVE_UINT64);
+    };
+    // The offsets declare one record while the stream holds three: per-row arrays are sized
+    // from the offsets, so the extra records must be rejected before they are written.
+    const auto extra = dir.File("extra_records.hdf5");
+    write(extra, {offsets[0], offsets[1]});
+    REQUIRE_THROWS_WITH(profile_dataset(small_options(extra), nullptr),
+                        ContainsSubstring("more records than its offsets declare (1)"));
+    std::vector<uint64_t> too_many = offsets;
+    too_many.push_back(offsets.back());
+    too_many.push_back(offsets.back());
+    const auto missing = dir.File("missing_records.hdf5");
+    write(missing, too_many);
+    REQUIRE_THROWS_WITH(profile_dataset(small_options(missing), nullptr),
+                        ContainsSubstring("has 3 records but its offsets declare 5"));
+}
+
+TEST_CASE("Term ids above 2^26 keep their document frequency across splits", "[profile][report]") {
+    TempDir dir;
+    const uint32_t large = 1U << 26U;
+    const std::vector<SparseRecord> train(40, SparseRecord{{5, large}, {1.0F, 0.5F}});
+    const std::vector<SparseRecord> test(8, SparseRecord{{large}, {1.0F}});
+    const auto path = dir.File("large_terms.hdf5");
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", encode_sparse(train, nullptr), H5::PredType::NATIVE_INT8);
+        write_vector(file, "test", encode_sparse(test, nullptr), H5::PredType::NATIVE_INT8);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(report["splits"]["train"]["terms"]["max_term_id"] == large);
+    CHECK(at(report, "cross_split.query_term_coverage.value") == 1.0);
+    CHECK(at(report, "cross_split.postings_per_query.summary.p50") == 40.0);
+}
+
+TEST_CASE("Finite rows whose norm exceeds the float range keep their norm", "[profile][report]") {
+    TempDir dir;
+    const float big = std::numeric_limits<float>::max();
+    const uint64_t rows = 64;
+    const uint64_t dim = 4;
+    std::vector<float> data(rows * dim);
+    DeterministicRng rng(3);
+    for (auto& value : data) {
+        value = static_cast<float>(rng.UniformDouble());
+    }
+    data[5 * dim] = big;
+    data[5 * dim + 1] = big;
+    const auto dense = dir.File("huge_norm_dense.hdf5");
+    {
+        H5::H5File file(dense, H5F_ACC_TRUNC);
+        write_string_attribute(file, "distance", "euclidean");
+        write_matrix(file, "train", data, rows, dim, H5::PredType::NATIVE_FLOAT);
+    }
+    std::vector<SparseRecord> records(30, SparseRecord{{1}, {0.5F}});
+    records.push_back(SparseRecord{{2, 3}, {big, big}});
+    const auto sparse = dir.File("huge_norm_sparse.hdf5");
+    {
+        H5::H5File file(sparse, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_string_attribute(file, "distance", "ip");
+        write_vector(file, "train", encode_sparse(records, nullptr), H5::PredType::NATIVE_INT8);
+    }
+    for (const auto& [path, count] :
+         std::vector<std::pair<std::string, uint64_t>>{{dense, rows}, {sparse, records.size()}}) {
+        INFO(path);
+        const JsonType report = profile_dataset(small_options(path), nullptr);
+        const JsonType& summary = report["splits"]["train"]["norms"]["summary"];
+        CHECK(summary["count"] == count);
+        CHECK(summary["max"].get<double>() > static_cast<double>(big));
+    }
+}
+
+TEST_CASE("Ground truth whose ids do not match its distances is reported", "[profile][report]") {
+    TempDir dir;
+    const auto path = dir.File("wrong_ids.hdf5");
+    make_dense_fixture(path);
+    // Move every stored id to a row of another cluster but keep the stored distances, which
+    // are still the true neighbor distances.
+    {
+        H5::H5File file(path, H5F_ACC_RDWR);
+        H5::DataSet dataset = file.openDataSet("neighbors");
+        std::vector<int64_t> ids(100ULL * 10ULL);
+        dataset.read(ids.data(), H5::PredType::NATIVE_INT64);
+        for (auto& id : ids) {
+            id = (id + 1501) % 3000;
+        }
+        dataset.write(ids.data(), H5::PredType::NATIVE_INT64);
+    }
+    const JsonType report = profile_dataset(small_options(path), nullptr);
+    CHECK(at(report, "ground_truth.id_recall_at_k").get<double>() < 0.05);
+    CHECK(at(report, "ground_truth.distance_recall_at_k").get<double>() < 0.05);
+    CHECK(at(report, "ground_truth.best_convention_mean_relative_error").get<double>() > 0.1);
+    bool mismatch = false;
+    for (const auto& signal : report["signals"]) {
+        mismatch = mismatch || signal["id"] == "ground_truth.mismatch";
+    }
+    CHECK(mismatch);
+}
+
 TEST_CASE("Tiny and degenerate splits produce valid reports", "[profile][report]") {
     TempDir dir;
     for (const uint64_t rows : {1ULL, 2ULL, 5ULL}) {
@@ -419,6 +533,22 @@ TEST_CASE("HTML report is self-contained, labeled and escaped", "[profile][html]
     CHECK(count_occurrences(html, "<script") == 2);
     CHECK(count_occurrences(html, "</script>") == 2);
     CHECK_THAT(html, ContainsSubstring("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt;"));
+    // Only the report's own script may run: the policy pins its hash and allows no inline
+    // handlers.
+    const std::string open_tag = "<script>";
+    const auto script_begin = html.rfind(open_tag) + open_tag.size();
+    const std::string script =
+        html.substr(script_begin, html.find("</script>", script_begin) - script_begin);
+    CHECK_THAT(html, ContainsSubstring("script-src 'sha256-" + sha256_base64(script) + "'"));
+    const std::string policy = html_content_security_policy();
+    CHECK_THAT(policy, ContainsSubstring("style-src 'unsafe-inline'"));
+    CHECK(count_occurrences(policy, "unsafe-inline") == 1);
+    // Split names of a saved profile are escaped wherever they appear.
+    JsonType hostile = report;
+    hostile["splits"]["train\"><img src=x onerror=alert(1)>"] = report["splits"]["train"];
+    const std::string escaped = render_html_report(hostile);
+    CHECK(escaped.find("<img") == std::string::npos);
+    CHECK_THAT(escaped, ContainsSubstring("&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"));
     // Every chart card states its metric key, definition and scope (full split or sample).
     const std::string marker = "<figure class=\"card\"";
     uint64_t cards = 0;
@@ -468,6 +598,18 @@ TEST_CASE("CLI writes reports, re-renders saved profiles and rejects bad input",
     REQUIRE(cli({"--from-profile", json, "--html", html_again, "-q"}) == EXIT_OK);
     CHECK_THAT(read_text(html_again),
                ContainsSubstring(report["determinism"]["metrics_sha256"].get<std::string>()));
+    // Saved profiles may only name the train and test splits.
+    JsonType hostile = report;
+    hostile["splits"]["x\"><img src=x onerror=alert(1)>"] = report["splits"]["train"];
+    const auto hostile_json = dir.File("hostile.json");
+    {
+        std::ofstream file(hostile_json);
+        file << hostile.dump();
+    }
+    CHECK(cli({"--from-profile", hostile_json, "--html", dir.File("hostile.html"), "-q"},
+              &out,
+              &err) == EXIT_FAILURE_INPUT);
+    CHECK_THAT(err, ContainsSubstring("unsupported split name"));
 
     const auto no_html_json = dir.File("no_html.json");
     REQUIRE(cli({"-d",

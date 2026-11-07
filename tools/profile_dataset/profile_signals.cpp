@@ -447,13 +447,14 @@ derive_signals(const JsonType& report) {
               "norm KS > 0.1 or out-of-distribution ratio > 0.1");
     }
     if (s.Number("ground_truth.distance_recall_at_k", value) && value < 0.99) {
-        s.Add("ground_truth.mismatch",
-              "critical",
-              "Stored ground truth agrees with recomputed exact neighbors for only " +
-                  percent(value) + " of entries under the " + metric +
-                  " metric; recall measured against it would be wrong.",
-              {"ground_truth.distance_recall_at_k", "ground_truth.id_recall_at_k", "config.metric"},
-              "ground_truth.distance_recall_at_k < 0.99");
+        s.Add(
+            "ground_truth.mismatch",
+            "critical",
+            "Only " + percent(value) +
+                " of stored neighbor ids lie within the exact k-th distance recomputed under the " +
+                metric + " metric; recall measured against this ground truth would be wrong.",
+            {"ground_truth.distance_recall_at_k", "ground_truth.id_recall_at_k", "config.metric"},
+            "ground_truth.distance_recall_at_k < 0.99");
     }
     if (s.Number("ground_truth.best_convention_mean_relative_error", value) && value > 1e-3) {
         s.Add("ground_truth.distance_convention",

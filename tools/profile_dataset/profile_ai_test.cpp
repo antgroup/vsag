@@ -386,6 +386,21 @@ TEST_CASE("Provider failures degrade to warnings and never leak the key", "[prof
     CHECK_THAT(section["message"].get<std::string>(), ContainsSubstring("HTTP 401"));
     CHECK(section.dump().find(TEST_KEY) == std::string::npos);
 
+    // A key echoed across the 300-byte truncation boundary must not survive in part either.
+    const std::string key_prefix = std::string(TEST_KEY).substr(0, 12);
+    MockTransport cut_body;
+    cut_body.responses = {HttpResponse{401, std::string(280, 'x') + TEST_KEY, ""}};
+    section = run_ai_analysis(dense_report(), options, cut_body, warnings);
+    CHECK(section["status"] == "failed");
+    CHECK(section.dump().find(key_prefix) == std::string::npos);
+    CHECK_THAT(section["message"].get<std::string>(), ContainsSubstring("[REDACTED]"));
+    MockTransport cut_error;
+    cut_error.responses = {HttpResponse{0, "", std::string(280, 'y') + TEST_KEY}};
+    section = run_ai_analysis(dense_report(), options, cut_error, warnings);
+    CHECK(section["status"] == "failed");
+    CHECK(section.dump().find(key_prefix) == std::string::npos);
+    CHECK(warnings.str().find(key_prefix) == std::string::npos);
+
     MockTransport garbage;
     garbage.responses = {HttpResponse{200, "<html>gateway</html>", ""}};
     CHECK(run_ai_analysis(dense_report(), options, garbage, warnings)["status"] ==

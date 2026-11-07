@@ -678,6 +678,10 @@ run_ai_analysis(const JsonType& report,
                 options.retry_delay_seconds * static_cast<double>(attempts)));
         }
         section["attempts"] = attempts;
+        // Redact before anything is truncated, parsed or reported: a key cut by truncation would
+        // no longer match and could leak in part.
+        response.error = redact(response.error, key);
+        response.body = redact(response.body, key);
         if (!response.error.empty()) {
             throw ProfileError("provider unreachable: " + truncate(response.error, MAX_ERROR_TEXT));
         }

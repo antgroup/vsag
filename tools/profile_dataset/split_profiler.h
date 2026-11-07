@@ -17,6 +17,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "hdf5_source.h"
@@ -47,6 +48,16 @@ struct SamplePlan {
     std::vector<uint64_t> analysis_order;
 };
 
+/// Metric distances from cross queries to chosen rows of the scanned split, computed during
+/// pass 2 with the k-NN kernels. The ground-truth check uses it to recompute the distances of
+/// stored neighbor ids. `rows` must be ascending; `distances` keeps NaN for rows that do not
+/// exist or are excluded from distance metrics (non-finite values, zero rows under cosine).
+struct RowDistanceProbe {
+    std::vector<uint64_t> rows;
+    std::vector<uint64_t> queries;
+    std::vector<double> distances;
+};
+
 JsonType
 sample_json(const SamplePlan& plan, uint64_t used, const std::string& subset);
 
@@ -66,9 +77,10 @@ class DenseSplitProfiler {
 public:
     explicit DenseSplitProfiler(SplitContext context);
 
-    /// `cross_queries` (may be null) are searched against this split in pass 2.
+    /// `cross_queries` (may be null) are searched against this split in pass 2. `probe` (may be
+    /// null) receives distances from those queries to its rows.
     void
-    Run(const DenseQuerySet* cross_queries);
+    Run(const DenseQuerySet* cross_queries, RowDistanceProbe* probe = nullptr);
 
     [[nodiscard]] const JsonType&
     Json() const {
@@ -83,7 +95,7 @@ public:
     [[nodiscard]] std::vector<uint64_t>
     AnalysisRowIds(uint64_t count) const;
 
-    [[nodiscard]] const std::vector<float>&
+    [[nodiscard]] const std::vector<double>&
     SortedNorms() const {
         return sorted_norms_;
     }
@@ -152,9 +164,11 @@ private:
     uint64_t chunk_rows_{0};
     SamplePlan plan_;
     JsonType json_;
+    RowDistanceProbe* probe_{nullptr};
 
     std::vector<float> sample_data_;
-    std::vector<float> row_norms_;
+    /// Row norms in double precision: a finite float32 row can have a norm above FLT_MAX.
+    std::vector<double> row_norms_;
     std::vector<uint32_t> row_nonzeros_;
     std::vector<uint8_t> row_valid_;
     bool full_duplicates_{false};
@@ -163,7 +177,7 @@ private:
 
     std::vector<double> dim_mean_;
     std::vector<double> dim_std_;
-    std::vector<float> sorted_norms_;
+    std::vector<double> sorted_norms_;
     double global_min_{0.0};
     double global_max_{0.0};
     /// Value-histogram range chosen from the sample (see robust_range()).
@@ -186,8 +200,9 @@ class SparseSplitProfiler {
 public:
     explicit SparseSplitProfiler(SplitContext context);
 
+    /// See DenseSplitProfiler::Run.
     void
-    Run(const SparseQuerySet* cross_queries);
+    Run(const SparseQuerySet* cross_queries, RowDistanceProbe* probe = nullptr);
 
     [[nodiscard]] const JsonType&
     Json() const {
@@ -200,7 +215,7 @@ public:
     [[nodiscard]] std::vector<uint64_t>
     AnalysisRowIds(uint64_t count) const;
 
-    [[nodiscard]] const std::vector<float>&
+    [[nodiscard]] const std::vector<double>&
     SortedNorms() const {
         return sorted_norms_;
     }
@@ -242,15 +257,20 @@ private:
     uint64_t rows_{0};
     SamplePlan plan_;
     JsonType json_;
+    RowDistanceProbe* probe_{nullptr};
 
     SparseQuerySet sample_;
-    std::vector<float> row_norms_;
+    /// Row norms in double precision: a finite float32 record can have a norm above FLT_MAX.
+    std::vector<double> row_norms_;
     std::vector<uint8_t> row_valid_;
     std::vector<uint64_t> hash_high_;
     std::vector<uint64_t> hash_low_;
     bool full_duplicates_{false};
+    /// Document frequencies of term ids below 2^26, indexed by id.
     std::vector<uint64_t> term_frequency_;
-    std::vector<float> sorted_norms_;
+    /// Document frequencies of larger term ids.
+    std::unordered_map<uint32_t, uint64_t> overflow_terms_;
+    std::vector<double> sorted_norms_;
     std::vector<double> sorted_nonzeros_;
     double value_min_{0.0};
     double value_max_{0.0};

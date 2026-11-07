@@ -128,8 +128,12 @@ encode_sparse(const std::vector<SparseRecord>& records, std::vector<uint64_t>* o
         const uint64_t start = bytes.size();
         bytes.resize(start + 4 + 8ULL * length);
         std::memcpy(bytes.data() + start, &length, 4);
-        std::memcpy(bytes.data() + start + 4, record.ids.data(), 4ULL * length);
-        std::memcpy(bytes.data() + start + 4 + 4ULL * length, record.values.data(), 4ULL * length);
+        // An empty record has no id or value storage; memcpy must not see a null pointer.
+        if (length > 0) {
+            std::memcpy(bytes.data() + start + 4, record.ids.data(), 4ULL * length);
+            std::memcpy(
+                bytes.data() + start + 4 + 4ULL * length, record.values.data(), 4ULL * length);
+        }
         if (offsets != nullptr) {
             offsets->push_back(bytes.size());
         }

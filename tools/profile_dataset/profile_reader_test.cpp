@@ -133,6 +133,26 @@ TEST_CASE("Sparse records are parsed identically for any chunk size", "[profile]
     CHECK(count_sparse_rows(path, "train", 2048) == fixture.train.size());
 }
 
+TEST_CASE("Empty sparse records parse as empty rows, also as the first record",
+          "[profile][reader]") {
+    TempDir dir;
+    const auto path = dir.File("empty_first.hdf5");
+    const std::vector<SparseRecord> records = {
+        SparseRecord{}, SparseRecord{{3}, {1.0F}}, SparseRecord{}};
+    {
+        H5::H5File file(path, H5F_ACC_TRUNC);
+        write_string_attribute(file, "type", "sparse");
+        write_vector(file, "train", encode_sparse(records, nullptr), H5::PredType::NATIVE_INT8);
+    }
+    SparseSplitReader reader(path, "train", 1024);
+    SparseBatch batch;
+    REQUIRE(reader.NextBatch(16, batch));
+    REQUIRE(batch.Rows() == 3);
+    CHECK(batch.offsets == std::vector<uint64_t>({0, 0, 1, 1}));
+    CHECK(batch.ids == std::vector<uint32_t>({3}));
+    CHECK_FALSE(reader.NextBatch(16, batch));
+}
+
 TEST_CASE("Unsorted and repeated sparse ids are sorted and counted", "[profile][reader]") {
     TempDir dir;
     const auto path = dir.File("unsorted.hdf5");
