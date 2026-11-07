@@ -30,7 +30,7 @@ VSAG_ENABLE_TOOLS=ON make release
 | 布局 | 判定方式 | 分析的数据 |
 | --- | --- | --- |
 | 稠密 | `type` 属性为 `dense` 或缺失 | `/train` 与 `/test`，形状为 `(N, D)`。`float32` 与 `int8` 与 `eval_performance` 一致；`uint8`、`float64` 和更宽的整数类型可以读取，但会被标记。 |
-| 稀疏 | `type` 属性为 `sparse` | `/train` 与 `/test` 字节流，记录格式为 `uint32 len, uint32 ids[len], float32 vals[len]`；存在 `/train_offsets`、`/test_offsets` 时会使用它们。 |
+| 稀疏 | `type` 属性为 `sparse` | `/train` 与 `/test` 字节流，记录格式为 `uint32 len, uint32 ids[len], float32 vals[len]`；存在 `/train_offsets`、`/test_offsets` 时由它们确定记录数，字节流中的记录多于或少于该数目时报错。 |
 | 多向量 | `type` 属性为 `multi_vector` | 暂不支持，工具会给出明确错误并退出。 |
 
 `/neighbors`、`/distances`（真值）以及 `/train_labels`、`/test_labels`、`/valid_ratios` 都是可选的；存在时也会被检查。
@@ -139,7 +139,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `pca` | 样本 | 样本协方差谱：解释方差（前 32 个）、累计曲线、解释 50/80/90/95/99% 方差所需主成分数、有效秩、参与比；维度超过 `--pca-max-dim` 时跳过 | 是否适合在 `tq_chain` 中加入 `pca` |
 | `clustering` | 样本 | k-means（k-means++ 初始化）：排序后的簇大小、大小变异系数、最大簇与平均簇之比、归一化熵、轮廓系数 | 粗粒度分区是否均衡，例如 IVF 分桶 |
 | `projection` | 样本 | 采样行的二维 PCA 坐标及其所属簇 | 仅用于 HTML 散点图，永远不会发送给 AI 服务 |
-| `quantization` | 样本 | 模拟 `fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`：相对精确检索的 recall@k、平均相对重建误差、编码大小。取值范围与向下取整编码遵循 `ScalarQuantizationTrainer` | 哪些编码需要 `use_reorder`；属于模型估计，需用 `eval_performance` 确认 |
+| `quantization` | 样本 | 模拟 `fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`：相对精确检索的 recall@k、平均相对重建误差、编码大小（含元数据与对齐）。取值范围、向下取整编码与 0.999 上限截断遵循 `ScalarQuantizationTrainer` 与各量化器；与 VSAG 一致，fp16/bf16 与 uniform 量化器也会编码查询，uniform 量化器在 ip/cosine 下的得分使用存储的原始值之和 | 哪些编码需要 `use_reorder`；属于模型估计，需用 `eval_performance` 确认 |
 
 ### 稀疏划分
 
@@ -151,7 +151,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `terms` | 全量 | 不同词项数、`max_term_id`、`min_term_id_limit`（SINDI 的 `term_id_limit` 至少应为该值）、term id 密度、倒排条目总数、文档频率摘要与 log10 直方图、Zipf 指数、Gini 系数、前 1% 词项的倒排占比、最高频词项，以及 `doc_prune_retained_term_fraction`：在 SINDI 质量规则下 `doc_prune_ratio` 取 0.1/0.2/0.3/0.5 时平均保留的词项比例 |
 | `duplicates` | 全量 | id 与取值完全相同的记录 |
 | `pairwise_distances` | 样本 | 随机采样点对的度量距离与余弦相似度；没有共同词项的点对比例 |
-| `nearest_neighbors` | 样本对全量 | 基于采样查询倒排索引的精确 k-NN；无共同词项的记录距离为 1；重叠记录少于 k 个的查询数 |
+| `nearest_neighbors` | 样本对全量 | 基于采样查询倒排索引的精确 k-NN；无共同词项的记录距离恰为 1，按行号进入 k-NN 列表（排在内积为负的记录之前）；含非有限值的记录被排除；重叠记录少于 k 个的查询数 |
 | `hubness` | 样本 | 与稠密数据相同 |
 
 ### 跨划分、真值与标签
@@ -162,7 +162,7 @@ wget http://ann-benchmarks.com/fashion-mnist-784-euclidean.hdf5 -O /tmp/data/fas
 | `cross_split.standardized_mean_shift` | 全量 | 每个维度的 \|mean_test - mean_train\| / std_train（稠密） |
 | `cross_split.out_of_distribution_ratio` | 样本 | 到 train 最近距离超过 train 行自身最近邻距离第 95 百分位的采样查询比例 |
 | `cross_split.query_term_coverage`、`postings_per_query`、`nonzeros_ks_statistic` | 样本 / 全量 | 仅稀疏数据：查询词项在 train 中出现的比例、穷举倒排扫描需要访问的条目数、条目数分布的 KS 统计量 |
-| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、容忍并列的距离召回率、最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行 |
+| `ground_truth` | 样本 | 采样查询的 `/neighbors`、`/distances` 与重新计算的精确近邻对比：id 召回率、距离召回率（重新计算距离后落在精确第 k 近邻距离之内的存储 id 比例，因此容忍并列）、存储距离与存储 id 重新计算的距离之间最匹配的距离约定（`euclidean` 为 `sqrt(L2Sqr)` 还是平方；`ip`/`angular` 为 `1 - 相似度` 还是相似度本身）、越界 id、未排序的行 |
 | `labels` | 全量 | 标签数量、最大标签占比、归一化熵、每个查询的过滤选择率、标签在底库中不存在的查询数、`valid_ratios` 摘要 |
 
 ### 基于规则的观察结论
@@ -180,13 +180,13 @@ recall@k 低于 0.95、查询分布偏移（范数 KS > 0.1 或分布外比例 >
 - 全量统计按固定的 4096 行分块计算，并按块顺序合并；k-NN 列表使用严格的（距离，行号）全序；k-means 和特征分解串行、双精度执行。
   该目标以 `-fno-fast-math -ffp-contract=off` 编译，并通过位模式识别 NaN/Inf。因此结果与 `--threads`、`--chunk-mb` 无关，
   可以用 `determinism.metrics_sha256` 验证。
-- 内存有界：每行保存一个范数、一个非零元计数和一个有效标志（稠密数据为 9 字节），外加 16 字节的重复检测哈希（分组时为 24 字节，受
+- 内存有界：每行保存一个范数、一个非零元计数和一个有效标志（稠密数据为 13 字节），外加 16 字节的重复检测哈希（分组时为 24 字节，受
   `--duplicate-memory-mb` 限制）。采样类计算受选项约束：样本为 `sample_size x dim` 个浮点数，k-NN 状态为 `knn_queries x k`，样本内分析最多使用
   `sample_size` 行。工具从不为完整划分构建 `N x N` 的两两矩阵，完整划分只被流式读取两遍。
 
 ## HTML 报告
 
-HTML 报告是单个文件，包含内联 CSS、内联 SVG 图表和少量内联脚本。其内容安全策略（`default-src 'none'`）禁止任何网络请求，因此可以直接从磁盘打开，
+HTML 报告是单个文件，包含内联 CSS、内联 SVG 图表和少量内联脚本。其内容安全策略（`default-src 'none'`）禁止任何网络请求，并且只允许页面自身的脚本运行（以其 SHA-256 哈希固定），因此可以直接从磁盘打开，
 不会访问任何服务。报告包括：
 
 - 总览：关键指标与基于规则的观察结论；

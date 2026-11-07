@@ -408,10 +408,13 @@ SparseSplitReader::NextBatch(uint64_t max_rows, SparseBatch& batch) {
         const char* payload = buffer_.data() + buffer_begin_ + RECORD_HEADER_BYTES;
         scratch_ids_.resize(length);
         scratch_values_.resize(length);
-        std::memcpy(scratch_ids_.data(), payload, sizeof(uint32_t) * length);
-        std::memcpy(scratch_values_.data(),
-                    payload + sizeof(uint32_t) * static_cast<uint64_t>(length),
-                    sizeof(float) * length);
+        // An empty first record leaves the scratch buffers without storage (null data()).
+        if (length > 0) {
+            std::memcpy(scratch_ids_.data(), payload, sizeof(uint32_t) * length);
+            std::memcpy(scratch_values_.data(),
+                        payload + sizeof(uint32_t) * static_cast<uint64_t>(length),
+                        sizeof(float) * length);
+        }
         bool ascending = true;
         for (uint32_t i = 1; i < length; ++i) {
             if (scratch_ids_[i] <= scratch_ids_[i - 1]) {

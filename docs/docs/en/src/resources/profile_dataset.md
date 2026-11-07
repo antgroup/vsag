@@ -34,7 +34,7 @@ The tool reads the [HDF5 dataset format](dataset_format.md) used by VSAG's evalu
 | Layout | Selected by | Profiled data |
 | --- | --- | --- |
 | Dense | `type` attribute `dense` or missing | `/train` and `/test` as `(N, D)` matrices. `float32` and `int8` match `eval_performance`; `uint8`, `float64` and wider integers are read and flagged. |
-| Sparse | `type` attribute `sparse` | `/train` and `/test` byte streams of `uint32 len, uint32 ids[len], float32 vals[len]` records; `/train_offsets` and `/test_offsets` are used when present. |
+| Sparse | `type` attribute `sparse` | `/train` and `/test` byte streams of `uint32 len, uint32 ids[len], float32 vals[len]` records; `/train_offsets` and `/test_offsets`, when present, give the record count; a stream with more or fewer records is rejected. |
 | Multi-vector | `type` attribute `multi_vector` | Not supported; the tool exits with a clear error. |
 
 `/neighbors` and `/distances` (ground truth) and `/train_labels`, `/test_labels` and
@@ -153,7 +153,7 @@ Euclidean distance, or chord distance between normalized rows for `cosine`.
 | `pca` | sample | Sample covariance spectrum: explained variance (top 32), cumulative curve, components for 50/80/90/95/99% variance, effective rank, participation ratio; skipped above `--pca-max-dim` | Candidates for a `pca` stage in a `tq_chain` |
 | `clustering` | sample | k-means (k-means++ seeding): sorted sizes, size CV, largest over mean size, normalized entropy, silhouette | Coarse partition balance, for example IVF buckets |
 | `projection` | sample | 2-D PCA coordinates of sampled rows with their cluster | HTML scatter plot only; never sent to an AI provider |
-| `quantization` | sample | Simulated `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`: recall@k against exact search, mean relative reconstruction error, code size. Ranges and floor encoding follow `ScalarQuantizationTrainer` | Which codes need `use_reorder`; a model to confirm with `eval_performance` |
+| `quantization` | sample | Simulated `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`: recall@k against exact search, mean relative reconstruction error, code size including metadata and alignment. Ranges, floor encoding and the 0.999 clamp follow `ScalarQuantizationTrainer` and the quantizers; as in VSAG, queries are encoded for fp16/bf16 and the uniform quantizers, whose ip/cosine scores use the stored sums of the original values | Which codes need `use_reorder`; a model to confirm with `eval_performance` |
 
 ### Sparse splits
 
@@ -165,7 +165,7 @@ Euclidean distance, or chord distance between normalized rows for `cosine`.
 | `terms` | full | Distinct terms, `max_term_id`, `min_term_id_limit` (SINDI `term_id_limit` must be at least this), term-id density, postings, document-frequency summary and log10 histogram, Zipf exponent, Gini, posting share of the top 1% terms, most frequent terms, and `doc_prune_retained_term_fraction`: the mean share of terms SINDI keeps for `doc_prune_ratio` 0.1/0.2/0.3/0.5 under its mass rule |
 | `duplicates` | full | Identical records (ids and values) |
 | `pairwise_distances` | sample | Metric distance and cosine similarity of random sampled pairs; share of pairs without a shared term |
-| `nearest_neighbors` | sample vs full | Exact k-NN through an inverted index over the sampled queries; records sharing no term have distance 1; queries with fewer than k overlapping records |
+| `nearest_neighbors` | sample vs full | Exact k-NN through an inverted index over the sampled queries; records sharing no term have distance exactly 1 and take their place in the k-NN lists by row id (above records with a negative inner product); records with non-finite values are excluded; queries with fewer than k overlapping records |
 | `hubness` | sample | As for dense data |
 
 ### Cross-split, ground truth and labels
@@ -176,7 +176,7 @@ Euclidean distance, or chord distance between normalized rows for `cosine`.
 | `cross_split.standardized_mean_shift` | full | Per-dimension \|mean_test - mean_train\| / std_train (dense) |
 | `cross_split.out_of_distribution_ratio` | sample | Share of sampled queries whose nearest-train distance exceeds the 95th percentile of train rows' own nearest-neighbor distances |
 | `cross_split.query_term_coverage`, `postings_per_query`, `nonzeros_ks_statistic` | sample / full | Sparse only: query terms present in train, postings an exhaustive inverted-index scan touches, KS of entry counts |
-| `ground_truth` | sample | Stored `/neighbors` and `/distances` of sampled queries against recomputed exact neighbors: id recall, tie-tolerant distance recall, the best matching distance convention (`sqrt(L2Sqr)` versus squared for `euclidean`; `1 - similarity` versus similarity for `ip`/`angular`), out-of-range ids, unsorted rows |
+| `ground_truth` | sample | Stored `/neighbors` and `/distances` of sampled queries against recomputed exact neighbors: id recall, distance recall (stored ids whose recomputed distance is within the exact k-th distance, so ties are tolerated), the distance convention that best matches the stored distances to the recomputed distances of the stored ids (`sqrt(L2Sqr)` versus squared for `euclidean`; `1 - similarity` versus similarity for `ip`/`angular`), out-of-range ids, unsorted rows |
 | `labels` | full | Label counts, largest label share, normalized entropy, per-query filter selectivity, queries whose label no base row carries, `valid_ratios` summary |
 
 ### Rule-based observations
@@ -203,7 +203,7 @@ the AI output is checked against.
   and classifies NaN/Inf from bit patterns. Results therefore do not depend on `--threads` or
   `--chunk-mb`, which is checked by `determinism.metrics_sha256`.
 - Memory is bounded: per row the tool keeps a norm, a non-zero count and a validity flag
-  (9 bytes for dense data) plus 16 bytes of duplicate hashes (24 while grouping, limited by
+  (13 bytes for dense data) plus 16 bytes of duplicate hashes (24 while grouping, limited by
   `--duplicate-memory-mb`). Sample-based work is bounded by the options: the sample is
   `sample_size x dim` floats, the k-NN state is `knn_queries x k`, and within-sample analyses
   use at most `sample_size` rows. No all-pairs `N x N` matrix is ever built for a split; the
@@ -212,8 +212,9 @@ the AI output is checked against.
 ## HTML report
 
 The HTML report is one file with inline CSS, inline SVG charts and a small inline script. Its
-Content-Security-Policy (`default-src 'none'`) prevents any network request, so it opens from
-disk without contacting a service. It contains:
+Content-Security-Policy (`default-src 'none'`) prevents any network request and lets only the
+page's own script run (pinned by its SHA-256 hash), so it opens from disk without contacting a
+service. It contains:
 
 - an overview with headline numbers and the rule-based observations;
 - one tab per split; dense and sparse splits use different charts (norms, values,

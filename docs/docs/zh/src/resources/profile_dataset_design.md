@@ -58,10 +58,10 @@ JSON 报告：input、config、splits、cross_split、ground_truth、labels、
 | `l2`、`ip`、`cosine` 能否互换？ | 单位范数比例、范数变异系数 | 归一化后三者排序一致；范数分散时 `ip` 变成 MIPS 问题 |
 | 数据是否浪费内存？ | 精确重复（全量）、近似重复（k-NN）、常数维度、稀疏度 | 重复项占据 top-k 结果和图的边 |
 | 近邻检索有多难？ | 相对对比度、LID（MLE）、TwoNN、距离集中度、枢纽度 | He、Kumar、Chang，ICML 2012；Levina、Bickel，NeurIPS 2004；Facco 等，Sci. Rep. 2017；Aumuller、Ceccarello，2019（LID 与 ANN 难度）；Radovanovic 等，JMLR 2010（枢纽度） |
-| 适合哪种量化与变换？ | 逐维范围、6-sigma 离群值、峰度、PCA 谱、模拟 fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform 的召回率 | 复现 `ScalarQuantizationTrainer`：逐维截断边界（8 位截断率 0.001，4 位 0.05），`sq8_uniform` 用全局 min/max，`sq4_uniform` 用最窄的截断边界，向下取整编码 |
+| 适合哪种量化与变换？ | 逐维范围、6-sigma 离群值、峰度、PCA 谱、模拟 fp16/bf16/sq8/sq4/sq8_uniform/sq4_uniform 的召回率 | 复现 `ScalarQuantizationTrainer`：逐维截断边界（8 位截断率 0.001，4 位 0.05），`sq8_uniform` 用全局 min/max，`sq4_uniform` 用最窄的截断边界，向下取整编码并按 0.999 截断；fp16/bf16 与 uniform 量化器也编码查询，uniform 的 ip/cosine 得分由编码乘积加存储的原始值之和得到，编码大小包含元数据与对齐 |
 | 类 IVF 分区是否均衡？ | k-means 簇大小变异系数、最大/平均簇大小、轮廓系数 | 粗略代理；IVF 实际使用的分桶数多得多 |
 | 查询是否与底库相似？ | 范数 KS、标准化均值偏移、分布外比例、二维投影叠加 | 分布外查询需要用真实查询调参 |
-| 真值是否可信？ | 与重新计算近邻对比的 id 召回率与容忍并列的距离召回率、距离约定 | 错误的真值会悄无声息地污染所有召回率数字 |
+| 真值是否可信？ | 与重新计算近邻对比的 id 召回率；基于存储 id 重新计算距离得到的距离召回率与距离约定 | 错误的真值会悄无声息地污染所有召回率数字 |
 | 稀疏 / SINDI 参数 | `max_term_id`（决定 `term_id_limit`）、id 密度（`remap_term_ids`）、文档频率与 Zipf/Gini、SINDI `doc_prune_ratio` 质量规则下保留的词项、每个查询的倒排条目数 | 倒排链长度主导 SINDI 的计算量 |
 
 距离遵循 VSAG 约定（`l2` 为平方、`ip` 为 `1 - <x, y>`、`cosine` 为 `1 - cos`）。需要度量空间的估计量（LID、TwoNN、相对对比度、近似重复）
@@ -98,7 +98,7 @@ JSON 报告：input、config、splits、cross_split、ground_truth、labels、
 
 | 阶段 | 时间 | 内存 |
 | --- | --- | --- |
-| 第 1 遍 | `O(N * D)` | 稠密数据每行 9 字节（范数、非零计数、有效标志），每行 16 字节重复哈希（分组时 24 字节，受 `--duplicate-memory-mb` 约束），一个 I/O 块 |
+| 第 1 遍 | `O(N * D)` | 稠密数据每行 13 字节（范数、非零计数、有效标志），每行 16 字节重复哈希（分组时 24 字节，受 `--duplicate-memory-mb` 约束），一个 I/O 块 |
 | 第 2 遍 | `O(N * D)`，精确 k-NN 额外 `O(N * D * Q)`（`Q` 为本划分与跨划分查询数之和） | `O(Q * k)` 近邻列表，一个 I/O 块 |
 | 两两距离 | `O(P * D)` | `O(P)` |
 | 枢纽度 | `O(H^2 * D)` | `O(H * k)` |
@@ -132,7 +132,7 @@ JSON 报告：input、config、splits、cross_split、ground_truth、labels、
   未知类型、非 HDF5 文件。
 - **确定性与有界性**：不同线程数、块大小和多次运行得到相同摘要；修改种子只改变采样部分；按配置采样的 10 万行画像峰值内存低于 2 GB
   （两两矩阵需要 80 GB）。
-- **HTML**：存在内容安全策略，没有外部 `src`/`href`/`@import`/`url()`，恰好两个 script 元素，文件名与模型输出均被转义，每张图表都带有指标字段、定义、
+- **HTML**：存在内容安全策略且固定了脚本哈希，没有外部 `src`/`href`/`@import`/`url()`，恰好两个 script 元素，文件名、划分名与模型输出均被转义，每张图表都带有指标字段、定义、
   范围以及总体或样本大小。
 - **AI 层**：请求中不含哨兵值、文件名、逐行数组或认证信息；密钥只出现在请求头中，从不出现在报告、stdout 或 stderr 中；拒绝违反结构、
   引用未知证据、过度承诺以及格式错误的回复；服务不可达、HTTP 401、429/503 重试、dry run，以及针对本地模拟服务的端到端运行（以及停止服务后的再次运行）
@@ -140,6 +140,8 @@ JSON 报告：input、config、splits、cross_split、ground_truth、labels、
 - **独立参考实现**：`tools/profile_dataset/validate_profile.py` 用 Python 复现采样，选出相同的行，并用 NumPy 重新计算全量指标与基于精确 k-NN 的指标。
   在稠密测试数据（两个划分）、Fashion-MNIST、SIFT1M 和 GloVe 上全部检查通过：采样行完全一致，k-NN 距离分位数、LID 和 TwoNN 约 10 位有效数字一致，
   逐维均值与标准差的相对差异在 1e-11 以内。
+- **与 VSAG 本身对照量化器**：`tools/profile_dataset/validate_quantization.py` 用 pyvsag 的 `brute_force` 索引对相同的采样基向量逐个构建模拟的量化器，
+  并把 recall@k 与报告比较。在 SIFT1M、GloVe 和 Fashion-MNIST 上，全部 18 个召回率（每个数据集 6 种量化器）都与 pyvsag 0.18.5 的结果相同。
 - **CI**：测试程序与其他工具测试一起在社区与团队流水线中运行，包括 AddressSanitizer 构建。
 
 ## 8. 隐私边界

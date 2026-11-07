@@ -95,6 +95,17 @@ read_report(const std::string& path) {
         throw ProfileError("profile " + path + " is not a " + std::string(REPORT_SCHEMA) +
                            " v1 report");
     }
+    // Split names become element ids in the HTML report; the schema only knows these two.
+    const auto splits = report.find("splits");
+    if (splits == report.end() || !splits->is_object()) {
+        throw ProfileError("profile " + path + " has no splits object");
+    }
+    for (const auto& item : splits->items()) {
+        if (item.key() != "train" && item.key() != "test") {
+            throw ProfileError("profile " + path + " has an unsupported split name; expected " +
+                               "train or test");
+        }
+    }
     return report;
 }
 

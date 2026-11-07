@@ -226,6 +226,9 @@ TEST_CASE("SHA-256 matches FIPS 180-4 test vectors", "[profile][sha256]") {
           "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1");
     CHECK(sha256_hex(std::string(1000, 'a')) ==
           "41edece42d63e8d9bf515a9ba6932e1c20cbc9f5a5d134645adb5db1b9737ea3");
+    // The base64 form used by Content-Security-Policy hashes.
+    CHECK(sha256_base64("") == "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=");
+    CHECK(sha256_base64("abc") == "ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=");
 }
 
 TEST_CASE("Distance kernels follow VSAG conventions", "[profile][math]") {
@@ -375,8 +378,10 @@ TEST_CASE("Dense k-NN search is exact for every metric and any block split", "[p
     }
 }
 
-TEST_CASE("Sparse k-NN search matches brute force and pads with zero-overlap distance",
-          "[profile][knn]") {
+TEST_CASE(
+    "Sparse k-NN search matches brute force for any batch split, including rows without "
+    "shared terms",
+    "[profile][knn]") {
     SparseQuerySet base;
     DeterministicRng rng(5);
     const uint64_t rows = 300;
@@ -413,10 +418,40 @@ TEST_CASE("Sparse k-NN search matches brute force and pads with zero-overlap dis
     batch.ids = base.ids;
     batch.values = base.values;
     batch.offsets = base.offsets;
+    const std::vector<uint8_t> all_valid(rows, 1);
     for (const Metric metric : {Metric::IP, Metric::COSINE}) {
         SparseKnnSearch search(queries, metric, 6);
-        search.Scan(batch, base.norms);
-        const auto neighbors = search.MetricNeighbors();
+        search.Scan(batch, base.norms, all_valid);
+        std::vector<std::vector<uint8_t>> shares_term;
+        const auto neighbors = search.MetricNeighbors(&shares_term);
+        // The same rows scanned in three batches give identical lists.
+        SparseKnnSearch batched(queries, metric, 6);
+        for (const auto& [first, last] :
+             std::vector<std::pair<uint64_t, uint64_t>>{{0, 1}, {1, 117}, {117, rows}}) {
+            SparseBatch part;
+            part.Clear();
+            part.first_row = first;
+            for (uint64_t r = first; r < last; ++r) {
+                part.ids.insert(part.ids.end(),
+                                base.ids.begin() + static_cast<int64_t>(base.offsets[r]),
+                                base.ids.begin() + static_cast<int64_t>(base.offsets[r + 1]));
+                part.values.insert(part.values.end(),
+                                   base.values.begin() + static_cast<int64_t>(base.offsets[r]),
+                                   base.values.begin() + static_cast<int64_t>(base.offsets[r + 1]));
+                part.offsets.push_back(part.ids.size());
+            }
+            const std::vector<double> part_norms(base.norms.begin() + static_cast<int64_t>(first),
+                                                 base.norms.begin() + static_cast<int64_t>(last));
+            batched.Scan(part, part_norms, std::vector<uint8_t>(last - first, 1));
+        }
+        const auto batched_neighbors = batched.MetricNeighbors();
+        for (uint64_t q = 0; q < queries.Size(); ++q) {
+            REQUIRE(batched_neighbors[q].size() == neighbors[q].size());
+            for (uint64_t j = 0; j < neighbors[q].size(); ++j) {
+                CHECK(batched_neighbors[q][j].index == neighbors[q][j].index);
+                CHECK(batched_neighbors[q][j].distance == neighbors[q][j].distance);
+            }
+        }
         for (uint64_t q = 0; q < 2; ++q) {
             std::vector<std::pair<double, uint64_t>> brute;
             for (uint64_t r = 0; r < rows; ++r) {
@@ -442,11 +477,74 @@ TEST_CASE("Sparse k-NN search matches brute force and pads with zero-overlap dis
                 CHECK(neighbors[q][j].distance == Approx(brute[j].first).epsilon(1e-9));
             }
         }
+        CHECK(shares_term[0][0] == 1);
+        // Query 2 shares no term with any row: every row is at distance exactly 1, so the
+        // exact neighbors are the lowest row ids.
         REQUIRE(neighbors[2].size() == 6);
-        CHECK(neighbors[2][0].distance == 1.0);
-        CHECK(neighbors[2][0].index == NO_ROW);
+        for (uint64_t j = 0; j < 6; ++j) {
+            CHECK(neighbors[2][j].distance == 1.0);
+            CHECK(neighbors[2][j].index == j);
+            CHECK(shares_term[2][j] == 0);
+        }
         CHECK(search.QueriesWithFewOverlaps() >= 1);
     }
+}
+
+TEST_CASE(
+    "Sparse k-NN ranks rows without shared terms above negative overlaps and skips "
+    "invalid rows",
+    "[profile][knn]") {
+    // Query {0: 1}. Rows: {0: -1}, {0: -2}, {1: 1}, {0: 5, 7: NaN} (invalid) and {3: NaN}
+    // (invalid, no shared term). Under ip their distances are 2, 3, exactly 1, and excluded.
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    SparseQuerySet query;
+    query.ids = {0};
+    query.values = {1.0F};
+    query.offsets = {0, 1};
+    query.norms = {1.0};
+    query.self_rows = {NO_ROW};
+    SparseBatch batch;
+    batch.Clear();
+    batch.ids = {0, 0, 1, 0, 7, 3};
+    batch.values = {-1.0F, -2.0F, 1.0F, 5.0F, nan, nan};
+    batch.offsets = {0, 1, 2, 3, 5, 6};
+    const std::vector<double> norms = {1.0, 2.0, 1.0, std::nan(""), std::nan("")};
+    const std::vector<uint8_t> valid = {1, 1, 1, 0, 0};
+
+    SparseKnnSearch ip(query, Metric::IP, 2);
+    ip.Scan(batch, norms, valid);
+    std::vector<std::vector<uint8_t>> shares_term;
+    auto neighbors = ip.MetricNeighbors(&shares_term);
+    REQUIRE(neighbors[0].size() == 2);
+    CHECK(neighbors[0][0].index == 2);
+    CHECK(neighbors[0][0].distance == 1.0);
+    CHECK(shares_term[0][0] == 0);
+    CHECK(neighbors[0][1].index == 0);
+    CHECK(neighbors[0][1].distance == 2.0);
+    CHECK(shares_term[0][1] == 1);
+
+    // Under cosine rows 0 and 1 tie at distance 2; the lower row id comes first.
+    SparseKnnSearch cosine(query, Metric::COSINE, 3);
+    cosine.Scan(batch, norms, valid);
+    neighbors = cosine.MetricNeighbors();
+    REQUIRE(neighbors[0].size() == 3);
+    CHECK(neighbors[0][0].index == 2);
+    CHECK(neighbors[0][1].index == 0);
+    CHECK(neighbors[0][2].index == 1);
+    CHECK(neighbors[0][2].distance == 2.0);
+
+    // With k above the number of valid rows, the invalid rows still never appear.
+    SparseKnnSearch padded(query, Metric::IP, 4);
+    padded.Scan(batch, norms, valid);
+    neighbors = padded.MetricNeighbors();
+    REQUIRE(neighbors[0].size() == 4);
+    uint64_t missing = 0;
+    for (const auto& neighbor : neighbors[0]) {
+        CHECK(neighbor.index != 3);
+        CHECK(neighbor.index != 4);
+        missing += neighbor.index == NO_ROW ? 1 : 0;
+    }
+    CHECK(missing == 1);
 }
 
 TEST_CASE("Intrinsic dimensionality estimators recover the dimension of a subspace",
@@ -605,5 +703,31 @@ TEST_CASE("Quantization simulation mirrors VSAG range rules", "[profile][quantiz
     CHECK(result["schemes"]["sq4"]["mean_relative_reconstruction_error"].get<double>() >
           result["schemes"]["sq8"]["mean_relative_reconstruction_error"].get<double>());
     CHECK(result["schemes"]["sq8_uniform"]["encodes_query"] == true);
-    CHECK(result["schemes"]["sq8"]["code_bytes_per_vector"] == 16.0);
+    CHECK(result["schemes"]["fp16"]["encodes_query"] == true);
+    CHECK(result["schemes"]["sq8"]["encodes_query"] == false);
+    CHECK(result["schemes"]["sq8"]["code_bytes_per_vector"] == 16);
+    // Stored sizes follow the quantizers' layouts: payload, metadata and alignment.
+    CHECK(result["schemes"]["sq8_uniform"]["code_bytes_per_vector"] == 24);
+    CHECK(quantizer_code_bytes("sq8_uniform", 16, Metric::IP) == 20);
+    CHECK(quantizer_code_bytes("sq8_uniform", 13, Metric::COSINE) == 20);
+    CHECK(quantizer_code_bytes("sq4_uniform", 16, Metric::L2) == 16);
+    CHECK(quantizer_code_bytes("sq4_uniform", 16, Metric::IP) == 16);
+    CHECK(quantizer_code_bytes("sq4_uniform", 16, Metric::COSINE) == 32);
+    CHECK(quantizer_code_bytes("sq4", 15, Metric::L2) == 8);
+    CHECK(quantizer_code_bytes("bf16", 16, Metric::L2) == 32);
+    // ClampScalarQuantizationDelta.
+    CHECK(clamp_scalar_delta(0.9995F) == 1.0F);
+    CHECK(clamp_scalar_delta(0.999F) == 0.999F);
+    CHECK(clamp_scalar_delta(-0.5F) == 0.0F);
+    CHECK(clamp_scalar_delta(std::numeric_limits<float>::quiet_NaN()) == 0.0F);
+    // Uniform ip scores use the stored sums of the original values. Under sq4_uniform's range
+    // [2, 10] every row below encodes to the same codes, and VSAG ranks the row with the
+    // largest sum (row 2) first, while the exact nearest row is row 0.
+    const std::vector<float> ip_base = {0.0F, 10.0F, 1.0F, 11.0F, 2.0F, 12.0F};
+    const std::vector<float> ip_query = {-1.0F, 0.9F};
+    const JsonType ip = simulate_quantization(ip_base, 3, ip_query, 1, 2, Metric::IP, 1);
+    CHECK(ip["sq4_uniform_bounds"][0] == 2.0);
+    CHECK(ip["sq4_uniform_bounds"][1] == 10.0);
+    CHECK(ip["schemes"]["sq4_uniform"]["recall_at_k"] == 0.0);
+    CHECK(ip["schemes"]["fp16"]["recall_at_k"] == 1.0);
 }
