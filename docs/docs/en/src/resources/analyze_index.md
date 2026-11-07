@@ -465,8 +465,12 @@ errors on stderr.
 
 When a serialized index only embeds `index_param`, `analyze_index` can still reload it without
 `--build_parameter`; missing metadata fields are filled with analyzer defaults where possible.
-For legacy BruteForce/WARP files without `basic_info.metric`, the analyzer falls back to `l2` and
-records the fallback in the report's `warnings` array.
+For legacy internal BruteForce files without `basic_info.metric`, the analyzer reads the metric
+stored in the serialized quantizer and, when it differs from the provisional default, reconstructs
+the index with that metric before running static or dynamic analysis. The recovery is recorded in
+the report's `warnings` array; no `l2` guess is used for query processing. Legacy WARP metadata
+retains the `l2` fallback, while the file-based interface remains static-only for WARP. An explicit
+`--build_parameter` with `metric_type` bypasses legacy metric recovery.
 
 ## Typical Use Cases
 
