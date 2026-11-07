@@ -99,6 +99,7 @@
 - [HDF5 Dataset Format](resources/dataset_format.md)
 - [Index Analysis Tool](resources/analyze_index.md)
 - [Compatibility Check Tool](resources/check_compatibility.md)
+- [Dataset Feature Visualization Tool](resources/dataset_profiler.md)
 
 # Resources
 
