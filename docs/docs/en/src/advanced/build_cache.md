@@ -120,3 +120,52 @@ HGraph statistics.
 
 API signatures are listed under [Index Cache](../api/index_class.md#cache-build-acceleration), and
 the source-ID dataset field is documented on the [Dataset](../api/dataset.md) page.
+
+### PiPNN reservoir cache
+
+HGraph and Pyramid also support `ExportCache` / `ImportCache` with `graph_type: "pipnn"`.
+Use the same API sequence as NSW: build with unique, nonempty `Dataset::SourceID` values,
+export the cache, import it into a fresh index, and build the next snapshot. Pyramid matches
+caches separately by hierarchy name and node path; routing overlays are rebuilt normally.
+
+PiPNN exports a versioned reservoir snapshot containing stable source IDs, 64-bit fingerprints
+of the original FP32 input, candidate IDs and BF16 distance keys, plus the final adjacency and its source-distance keys. Input order and numeric labels
+may change. Removed or modified candidates are discarded; new/modified sources and rows with
+too few surviving candidates compute their leaf neighbors again. Reusable rows skip leaf Top-K;
+missing rows use rectangular GEMM and update both candidate reservoirs. Untouched valid adjacency
+is reused directly. Changed rows can reuse a fixed-alpha pruning certificate; other rows are
+pruned again. Cached reservoirs are materialized lazily when an incoming candidate needs them.
+Partitioning runs on the current data. This is approximate incremental construction: it does not
+promise the same graph or Recall as a cold build. Measure Recall and QPS on the target workload.
+
+Dimensions, metric, maximum degree, random projection signature and all PiPNN policy parameters must match. Missing/ambiguous
+source IDs, incompatible policies, and legacy caches without a reservoir snapshot use cold
+PiPNN construction. Fewer than 80% eligible rows in a graph also triggers graph-level cold fallback.
+Duplicate-group graphs (`support_duplicate: true`) also use cold construction;
+their grouped reservoirs are not exported in this version. Existing fused-storage cache API
+restrictions still apply. Adaptive PiPNN pruning can reuse reservoirs when its policy matches;
+all adaptive rows are pruned again because their thresholds depend on candidate counts. Fingerprints detect accidental content changes, not adversarial
+collisions. Keep cache files within the same trusted boundary as index files.
+
+The snapshot remains in memory after `Build` and consumes additional space proportional to the
+number of points times `reservoir_size`. Large snapshot buffers use the index's supplied allocator.
+`GetMemoryUsage()` includes retained snapshot capacity, and `GetMemoryUsageDetail()` exposes it as
+`pipnn_build_cache`, including snapshots loaded by `ImportCache`. The component counts snapshot
+objects, buffer capacities and string heap capacity; allocator metadata and process RSS are different
+measurement scopes. Export captures the last PiPNN batch-build snapshot;
+later mutations do not regenerate reservoirs. Normal index serialization does not retain these
+reservoirs, even with `persist_source_id: true`: export the cache separately after construction.
+A restored index without a retained reservoir exports legacy graph seeds and cold-builds PiPNN.
+NSW-only caches retain their existing binary encoding. Readers predating this feature cannot read
+the versioned PiPNN payload. Unsupported versions, invalid offsets/targets and truncated payloads
+are rejected without replacing a previously imported cache. Adjacency must reference its own candidate
+row with matching distance keys; self-edges and duplicate graph targets are rejected on import.
+
+`GetStats()` reports actual reused rows as `build_cache_hit_nodes` and their fraction as
+`build_cache_hit_rate`. Pyramid additionally counts reuse per graph in `build_cache_hit_memberships`;
+a vector reused in several graphs counts once in the node total. Recomputed graphs contribute
+membership misses. `build_cache_restored_edges` counts directly restored graph edges, not reservoir
+candidates; PiPNN graph reuse is reported separately as `pipnn_build.reused_graph_rows`, including
+`pipnn_build.certificate_rows`. These are per-graph row counts in Pyramid. The transient
+`pipnn_build.phase_seconds` object reports prepare, cache matching, partitioning, leaf calculation
+and merge, graph writing and cache capture. It excludes index training, routing and stream I/O.

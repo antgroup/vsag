@@ -15,6 +15,8 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "json_wrapper.h"
@@ -26,6 +28,7 @@ namespace vsag {
 
 class Allocator;
 class SafeThreadPool;
+struct PiPNNBuildCache;
 DEFINE_POINTER(GraphInterface);
 
 /** Internal PiPNN policy shared by indexes that use the batch graph builder. */
@@ -73,7 +76,10 @@ public:
     void
     Build(const GraphInterfacePtr& graph,
           const Vector<InnerIdType>& ids_sequence,
-          const Vector<const float*>& rows) const;
+          const Vector<const float*>& rows,
+          const std::vector<std::string>* source_ids = nullptr,
+          const PiPNNBuildCache* imported_cache = nullptr,
+          std::shared_ptr<PiPNNBuildCache>* exported_cache = nullptr) const;
 
 private:
     PiPNNGraphBuilderParameter parameter_;

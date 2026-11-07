@@ -173,6 +173,35 @@ PyramidBuildCache::GetGraphCache(const std::string& hierarchy_name,
     return it->second.get();
 }
 
+JsonType
+PyramidBuildCache::GetPiPNNBuildStats() const {
+    PiPNNBuildCache aggregate(allocator_);
+    for (const auto& [key, graph] : graph_caches_) {
+        if (graph->pipnn == nullptr) {
+            continue;
+        }
+        const auto& snapshot = *graph->pipnn;
+        aggregate.reused_rows += snapshot.reused_rows;
+        aggregate.reused_graph_rows += snapshot.reused_graph_rows;
+        aggregate.certificate_rows += snapshot.certificate_rows;
+        for (uint64_t phase = 0; phase < aggregate.phase_seconds.size(); ++phase) {
+            aggregate.phase_seconds[phase] += snapshot.phase_seconds[phase];
+        }
+    }
+    return aggregate.GetBuildStats();
+}
+
+uint64_t
+PyramidBuildCache::GetPiPNNMemoryUsage() const {
+    uint64_t memory = 0;
+    for (const auto& [key, graph] : graph_caches_) {
+        if (graph != nullptr and graph->pipnn != nullptr) {
+            memory += graph->pipnn->GetMemoryUsage();
+        }
+    }
+    return memory;
+}
+
 uint64_t
 PyramidBuildCache::CountMatchedSourceIds(const std::string* source_ids, uint64_t count) const {
     UnorderedSet<std::string> cached_source_ids(allocator_);

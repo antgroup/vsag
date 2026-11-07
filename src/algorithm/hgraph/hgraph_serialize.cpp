@@ -1422,6 +1422,7 @@ HGraph::restore_fused_codec() {
 std::unordered_map<std::string, uint64_t>
 HGraph::GetMemoryUsageDetail() const {
     std::unordered_map<std::string, uint64_t> memory_usage;
+    memory_usage["pipnn_build_cache"] = pipnn_cache_memory_.load(std::memory_order_acquire);
     memory_usage["neighbors_mutex"] = this->neighbors_mutex_->GetMemoryUsage();
     memory_usage["pool"] = this->pool_->GetMemoryUsage();
     memory_usage["label_table"] = this->label_table_->GetMemoryUsage();
