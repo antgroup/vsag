@@ -354,8 +354,8 @@ TEST_CASE("AnalyzeIndex loads legacy brute-force metadata without metric", "[ana
     REQUIRE(report["index"]["metric"].GetString() == "l2");
     REQUIRE_FALSE(report["index"]["metadata_complete"].GetBool());
     REQUIRE(report["warnings"].Dump().find(
-                "serialized index metadata is missing 'metric'; using analyzer default 'l2'") !=
-            std::string::npos);
+                "serialized index metadata is missing 'metric'; recovered 'l2' from serialized "
+                "BruteForce data") != std::string::npos);
 }
 
 TEST_CASE("AnalyzeIndex tolerates unknown serialized brute-force parameters", "[analyze_index]") {
@@ -500,6 +500,32 @@ TEST_CASE("AnalyzeIndex restores cosine for raw-vector brute-force reload", "[an
     REQUIRE(report["dynamic_analysis"]["results"].IsObject());
 }
 
+TEST_CASE("AnalyzeIndex recovers legacy cosine before brute-force queries", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_legacy_cosine_raw_vector");
+    vsag::JsonType build_param = vsag::JsonType::Parse(kCosineIndexParam);
+    build_param["index_param"]["store_raw_vector"].SetBool(true);
+    const std::string index_path =
+        BuildAndSaveIndex(temp_dir.path + "index.vsag", build_param.Dump());
+    RemoveMetricFromFooter(index_path);
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteDenseQueryFile(query_path, 1, kDim);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.query_path = query_path;
+    options.topk = 2;
+
+    auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
+
+    REQUIRE(report["index"]["metric"].GetString() == "cosine");
+    REQUIRE_FALSE(report["index"]["metadata_complete"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"].IsObject());
+    REQUIRE(report["warnings"].Dump().find(
+                "serialized index metadata is missing 'metric'; recovered 'cosine' from serialized "
+                "BruteForce data") != std::string::npos);
+}
+
 TEST_CASE("AnalyzeIndex does not inject precise IO parameters into WARP", "[analyze_index]") {
     fixtures::TempDir temp_dir("analyze_index_warp_external_param");
     const std::string index_path =
@@ -612,6 +638,8 @@ TEST_CASE("AnalyzeIndex accepts multi-row sparse query files", "[analyze_index]"
     auto report = vsag::JsonType::Parse(vsag::AnalyzeIndex(options).Dump());
 
     REQUIRE(report["static_analysis"]["supported"].GetBool());
+    REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["skipped"]["search"].GetString() ==
+            "index is empty");
     REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
 }
 
@@ -638,6 +666,24 @@ TEST_CASE("AnalyzeIndex aligns SINDI ground truth with every query row", "[analy
     REQUIRE(report["static_analysis"]["supported"].GetBool());
     REQUIRE(report["dynamic_analysis"]["results"]["_analysis"]["sample_count"].GetInt() == 2);
     REQUIRE(report["dynamic_analysis"]["results"]["recall_query"].GetFloat() == 1.0F);
+}
+
+TEST_CASE("AnalyzeIndex rejects multi-row dense queries for BruteForce", "[analyze_index]") {
+    fixtures::TempDir temp_dir("analyze_index_multi_row_brute_force");
+    const std::string index_path = BuildAndSaveIndex(temp_dir.path + "index.vsag");
+    const std::string query_path = temp_dir.path + "queries.bin";
+    WriteDenseQueryFile(query_path, 2, kDim);
+
+    vsag::IndexAnalysisOptions options;
+    options.index_path = index_path;
+    options.query_path = query_path;
+    options.query_data_type = "dense";
+    options.topk = 2;
+
+    REQUIRE_THROWS_WITH(
+        vsag::AnalyzeIndex(options),
+        Catch::Matchers::ContainsSubstring(
+            "index type 'brute_force' requires exactly one query row for dynamic analysis, got 2"));
 }
 
 TEST_CASE("AnalyzeIndex rejects multi-row sparse queries for SINDI V2", "[analyze_index]") {

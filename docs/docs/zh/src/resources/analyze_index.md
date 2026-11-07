@@ -437,8 +437,11 @@ SINDI 的 query/base 数据使用 CSR sparse 二进制布局：`int64 nrow, int6
 C++ 工具将报告写入 stdout，并将库的警告与错误保留在 stderr。
 
 当序列化索引只内嵌 `index_param` 时，`analyze_index` 也可以在不提供 `--build_parameter` 的情况下
-加载；缺失的 metadata 字段会尽可能使用 analyzer 默认值补齐。对于缺少 `basic_info.metric` 的旧版
-BruteForce/WARP 文件，analyzer 会回退到 `l2`，并在报告的 `warnings` 数组中记录此次回退。
+加载；缺失的 metadata 字段会尽可能使用 analyzer 默认值补齐。对于缺少 `basic_info.metric` 的旧版内部
+BruteForce 文件，analyzer 会读取序列化 quantizer 中保存的距离度量；如果它与临时默认值不同，则先使用该
+度量重建索引，再执行静态或动态分析。报告的 `warnings` 数组会记录此次恢复，查询处理不会使用猜测的
+`l2`。旧版 WARP metadata 仍回退到 `l2`，文件式接口对 WARP 仍仅支持静态分析。显式提供包含
+`metric_type` 的 `--build_parameter` 时，不执行旧版距离度量恢复。
 
 ## 典型使用场景
 

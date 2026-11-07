@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "json_types.h"
+#include "metric_type.h"
 #include "vsag/index.h"
 
 namespace vsag {
@@ -30,5 +31,12 @@ __attribute__((visibility("hidden")))
 IndexPtr
 CreateBruteForceIndexForAnalyzer(JsonType build_param,
                                  std::vector<std::string>* ignored_param_keys = nullptr);
+
+// Read the quantizer metric after the trusted analyzer index has been deserialized.
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((visibility("hidden")))
+#endif
+MetricType
+GetBruteForceMetricForAnalyzer(const IndexPtr& index);
 
 }  // namespace vsag

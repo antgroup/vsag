@@ -1320,6 +1320,21 @@ CreateBruteForceIndexForAnalyzer(JsonType build_param,
     return std::make_shared<IndexImpl<BruteForce>>(inner_index, common_param);
 }
 
+MetricType
+GetBruteForceMetricForAnalyzer(const IndexPtr& index) {
+    auto analyzer_index = std::dynamic_pointer_cast<IndexImpl<BruteForce>>(index);
+    if (analyzer_index == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "analyzer index is not an internal BruteForce index");
+    }
+    auto brute_force = std::dynamic_pointer_cast<BruteForce>(analyzer_index->GetInnerIndex());
+    if (brute_force == nullptr) {
+        throw VsagException(ErrorType::INTERNAL_ERROR,
+                            "analyzer index does not contain a BruteForce backend");
+    }
+    return brute_force->GetMetricType();
+}
+
 ParamPtr
 BruteForce::CheckAndMappingExternalParam(const JsonType& external_param,
                                          const IndexCommonParam& common_param) {

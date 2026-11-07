@@ -609,11 +609,15 @@ private:
             metric_type_ = (index_name_ == INDEX_SINDI or index_name_ == INDEX_SINDI_V2)
                                ? MetricType::METRIC_TYPE_IP
                                : MetricType::METRIC_TYPE_L2SQR;
-            warnings_.emplace_back(fmt::format(
-                "serialized index metadata is missing 'metric'; using analyzer default '{}' for "
-                "index type '{}'",
-                MetricTypeToString(metric_type_),
-                index_name_));
+            const bool recover_brute_force_metric =
+                index_name_ == INDEX_BRUTE_FORCE and index_param_.Contains(BASE_CODES_KEY);
+            if (not recover_brute_force_metric) {
+                warnings_.emplace_back(fmt::format(
+                    "serialized index metadata is missing 'metric'; using analyzer default '{}' "
+                    "for index type '{}'",
+                    MetricTypeToString(metric_type_),
+                    index_name_));
+            }
         }
     }
 
@@ -646,13 +650,34 @@ private:
             index_param_.Contains(BASE_CODES_KEY)) {
             build_param[INDEX_PARAM].SetJson(PrepareInternalBruteForceParam(index_param_));
             std::vector<std::string> ignored_param_keys;
+            const bool recover_metric =
+                index_name_ == INDEX_BRUTE_FORCE and not basic_info_.Contains("metric");
             auto analyzer_index =
                 CreateBruteForceIndexForAnalyzer(build_param, &ignored_param_keys);
+            this->Deserialize(analyzer_index, stream);
+            if (recover_metric) {
+                const auto serialized_metric = GetBruteForceMetricForAnalyzer(analyzer_index);
+                if (serialized_metric != metric_type_) {
+                    // Quantizer behavior is selected by a compile-time metric. Rebuild with the
+                    // metric stored in the stream instead of querying through the provisional L2
+                    // quantizer, whose query buffer may not match the restored code size.
+                    metric_type_ = serialized_metric;
+                    build_param["metric_type"].SetString(MetricTypeToString(metric_type_));
+                    ignored_param_keys.clear();
+                    analyzer_index =
+                        CreateBruteForceIndexForAnalyzer(build_param, &ignored_param_keys);
+                    auto reload = OpenBinaryFile(options_.index_path, "index file");
+                    this->Deserialize(analyzer_index, reload);
+                }
+                warnings_.emplace_back(fmt::format(
+                    "serialized index metadata is missing 'metric'; recovered '{}' from serialized "
+                    "BruteForce data",
+                    MetricTypeToString(serialized_metric)));
+            }
             for (const auto& key : ignored_param_keys) {
                 warnings_.emplace_back(
                     fmt::format("ignored serialized BruteForce parameter '{}'", key));
             }
-            this->Deserialize(analyzer_index, stream);
             return;
         }
 
@@ -810,7 +835,8 @@ private:
 
         std::string analysis;
         try {
-            if (index_name_ == INDEX_SINDI_V2 and query->GetNumElements() != 1) {
+            if ((index_name_ == INDEX_BRUTE_FORCE or index_name_ == INDEX_SINDI_V2) and
+                query->GetNumElements() != 1) {
                 throw std::runtime_error(fmt::format(
                     "index type '{}' requires exactly one query row for dynamic analysis, got {}",
                     index_name_,
