@@ -47,7 +47,7 @@ VSAG_ENABLE_TOOLS=ON make release
 | `--algorithms` | `kmeans,balanced_kmeans` | Trainers to run |
 | `--candidates` | `16` | `balanced_kmeans`: clusters remembered per vector |
 | `--init` | `random` | `balanced_kmeans`: seeding, `random` or `kmeans++` |
-| `--epsilon` | `1e-4` | `balanced_kmeans`: auction tolerance relative to the cost gap |
+| `--epsilon` | `1e-4` | `balanced_kmeans`: auction tolerance relative to the cost gap, in (0, 1] |
 | `--work-budget` | `1` | `balanced_kmeans`: scale of the per-assignment work bound; `inf` never switches to the two-level path, `0` always does |
 | `--spread` | `4` | Skewed data: half-width of the box holding the mixture centers (the noise is 0.25) |
 | `--duplicates` | `0.05` | Skewed data: fraction of rows that repeat one of eight hot vectors |

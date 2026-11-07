@@ -1257,8 +1257,11 @@ BalancedKMeansCluster::Run(uint32_t k,
     if (options.iterations <= 0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "iterations must be positive");
     }
-    if (not std::isfinite(options.epsilon_ratio) or options.epsilon_ratio <= 0.0) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT, "epsilon_ratio must be positive");
+    // Above 1 the final tolerance exceeds the gap it is measured against, and a large
+    // ratio would make the derived tolerances, and with them the prices, infinite.
+    if (not std::isfinite(options.epsilon_ratio) or options.epsilon_ratio <= 0.0 or
+        options.epsilon_ratio > 1.0) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT, "epsilon_ratio must be in (0, 1]");
     }
     if (not std::isfinite(options.tolerance) or options.tolerance < 0.0) {
         throw VsagException(ErrorType::INVALID_ARGUMENT, "tolerance must not be negative");

@@ -346,15 +346,34 @@ print_table(const std::vector<Report>& reports) {
     }
 }
 
+/// `value` as a JSON string: quotes and backslashes escaped, control characters as
+/// \uXXXX, so any file name gives a valid report.
+std::string
+json_string(const std::string& value) {
+    std::string out = "\"";
+    for (const char c : value) {
+        const auto byte = static_cast<unsigned char>(c);
+        if (c == '"' or c == '\\') {
+            out += '\\';
+            out += c;
+        } else if (byte < 0x20) {
+            out += fmt::format("\\u{:04x}", byte);
+        } else {
+            out += c;
+        }
+    }
+    return out + "\"";
+}
+
 void
 write_json(const std::vector<Report>& reports, const std::string& path) {
     std::ofstream out(path);
     out << "[\n";
     for (uint64_t i = 0; i < reports.size(); ++i) {
         const auto& r = reports[i];
-        out << std::setprecision(10) << "  {\"dataset\": \"" << r.dataset << "\", \"algorithm\": \""
-            << r.algorithm << "\", \"count\": " << r.count << ", \"dim\": " << r.dim
-            << ", \"k\": " << r.k << ", \"min_size\": " << r.min_size
+        out << std::setprecision(10) << "  {\"dataset\": " << json_string(r.dataset)
+            << ", \"algorithm\": " << json_string(r.algorithm) << ", \"count\": " << r.count
+            << ", \"dim\": " << r.dim << ", \"k\": " << r.k << ", \"min_size\": " << r.min_size
             << ", \"max_size\": " << r.max_size << ", \"mean_size\": " << r.mean_size
             << ", \"stddev\": " << r.stddev << ", \"cv\": " << r.stddev / r.mean_size
             << ", \"loss\": " << r.loss << ", \"seconds\": " << r.seconds

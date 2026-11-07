@@ -1086,6 +1086,16 @@ TEST_CASE("BalancedKMeans rejects invalid arguments", "[ut][BalancedKMeansCluste
     bad = options;
     bad.epsilon_ratio = std::numeric_limits<double>::quiet_NaN();
     require_invalid_argument([&] { cluster.Run(4, datas.data(), count, bad); });
+    // Finite but large enough that the tolerances derived from it overflow.
+    bad = options;
+    bad.epsilon_ratio = 1e308;
+    require_invalid_argument([&] { cluster.Run(4, datas.data(), count, bad); });
+    bad = options;
+    bad.epsilon_ratio = 1.5;
+    require_invalid_argument([&] { cluster.Run(4, datas.data(), count, bad); });
+    auto coarse = options;
+    coarse.epsilon_ratio = 1.0;
+    require_balanced(cluster.Run(4, datas.data(), count, coarse), count, 4);
     bad = options;
     bad.tolerance = -1.0;
     require_invalid_argument([&] { cluster.Run(4, datas.data(), count, bad); });
