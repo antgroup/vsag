@@ -180,6 +180,7 @@ const char* const BUCKET_USE_RESIDUAL_KEY = "use_residual";
 const char* const IVF_TRAIN_TYPE_KEY = "ivf_train_type";
 const char* const IVF_TRAIN_TYPE_RANDOM = "random";
 const char* const IVF_TRAIN_TYPE_KMEANS = "kmeans";
+const char* const IVF_TRAIN_TYPE_BALANCED_KMEANS = "balanced_kmeans";
 
 const char* const TRAIN_SAMPLE_COUNT_KEY =
     "train_sample_count";  // used after v0.18 for both Hgraph and IVF

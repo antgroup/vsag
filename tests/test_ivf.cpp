@@ -23,6 +23,8 @@
 #include <limits>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <numeric>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <thread>
@@ -4428,4 +4430,118 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         REQUIRE(reloaded_result.has_value());
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
     }
+}
+
+TEST_CASE("IVF balanced_kmeans builds balanced buckets", "[ft][ivf][balanced_kmeans][pr]") {
+    // Issue #2870: with ivf_train_type "balanced_kmeans" both the centroid
+    // training and the initial bucket assignment of a Build are
+    // capacity-constrained. On a dataset whose vectors pile onto one point,
+    // plain k-means would leave a bucket holding nearly everything, while the
+    // balanced trainer must spread them so every bucket size is floor(n/k) or
+    // ceil(n/k).
+    const int64_t dim = 16;
+    const int64_t count = 1200;
+    const int buckets_count = 10;
+
+    const std::string build_param = fmt::format(R"({{
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": {},
+        "index_param": {{
+            "buckets_count": {},
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "ivf",
+            "ivf_train_type": "balanced_kmeans",
+            "kmeans_iter_count": 10
+        }}
+    }})",
+                                                dim,
+                                                buckets_count);
+    auto index = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(index.has_value());
+
+    // 1000 exact duplicates of one vector plus 200 spread-out vectors: the
+    // pathological skew the feature exists for.
+    std::vector<float> vectors(static_cast<size_t>(count) * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::mt19937 gen(2870);
+    std::uniform_real_distribution<float> coord(-50.0F, 50.0F);
+    for (int64_t i = 1000; i < count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[static_cast<size_t>(i) * dim + d] = coord(gen);
+        }
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    REQUIRE(index.value()->Build(base).has_value());
+
+    const auto stats = vsag::JsonType::Parse(index.value()->GetStats());
+    const float min_bucket = stats["bucket_num"]["min"].GetFloat();
+    const float max_bucket = stats["bucket_num"]["max"].GetFloat();
+    CAPTURE(min_bucket, max_bucket);
+    // n divides by k exactly here, so every bucket must hold n / k = 120.
+    REQUIRE(max_bucket - min_bucket <= 1.0F);
+    REQUIRE(min_bucket > 0.0F);
+
+    // Search works and a serialize round trip preserves the answers.
+    auto query = vsag::Dataset::Make();
+    std::vector<float> query_vector(static_cast<size_t>(dim), 0.0F);
+    query->NumElements(1)->Dim(dim)->Float32Vectors(query_vector.data())->Owner(false);
+    const std::string search_param = R"({"ivf":{"scan_buckets_count":10}})";
+    auto result = index.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == 10);
+    std::vector<int64_t> found(result.value()->GetIds(),
+                               result.value()->GetIds() + result.value()->GetDim());
+
+    std::stringstream stream;
+    REQUIRE(index.value()->Serialize(stream).has_value());
+    auto reloaded = vsag::Factory::CreateIndex("ivf", build_param);
+    REQUIRE(reloaded.has_value());
+    REQUIRE(reloaded.value()->Deserialize(stream).has_value());
+    auto reloaded_result = reloaded.value()->KnnSearch(query, 10, search_param);
+    REQUIRE(reloaded_result.has_value());
+    std::vector<int64_t> found_after(
+        reloaded_result.value()->GetIds(),
+        reloaded_result.value()->GetIds() + reloaded_result.value()->GetDim());
+    REQUIRE(found_after == found);
+}
+
+TEST_CASE("IVF rejects unknown trainers and unbalanced combinations",
+          "[ft][ivf][balanced_kmeans][pr]") {
+    const std::string unknown_train = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "index_param": {
+            "buckets_count": 4,
+            "base_quantization_type": "fp32",
+            "ivf_train_type": "kmeanss"
+        }
+    })";
+    auto index = vsag::Factory::CreateIndex("ivf", unknown_train);
+    REQUIRE_FALSE(index.has_value());
+    REQUIRE(index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+
+    // GNO-IMI trains plain k-means at both levels; balanced_kmeans belongs to
+    // the single-level strategy.
+    const std::string gno_imi_balanced = R"({
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 8,
+        "index_param": {
+            "buckets_count": 4,
+            "base_quantization_type": "fp32",
+            "partition_strategy_type": "gno_imi",
+            "ivf_train_type": "balanced_kmeans"
+        }
+    })";
+    auto gno_index = vsag::Factory::CreateIndex("ivf", gno_imi_balanced);
+    REQUIRE_FALSE(gno_index.has_value());
+    REQUIRE(gno_index.error().type == vsag::ErrorType::INVALID_ARGUMENT);
 }
