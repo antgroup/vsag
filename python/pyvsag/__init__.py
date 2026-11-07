@@ -19,8 +19,35 @@ import sys
 _cur_file_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(_cur_file_dir)
 
+
+def _is_analyze_index_cli_invocation():
+    executable = os.path.basename(sys.argv[0]).lower() if sys.argv else ""
+    if executable.startswith("pyvsag-analyze-index"):
+        return True
+
+    command = list(getattr(sys, "orig_argv", ()))
+    if not command and sys.argv[:1] == ["-m"] and sys.platform.startswith("linux"):
+        # sys.orig_argv is unavailable before Python 3.10. This fallback keeps `python -m`
+        # working on the older Python versions supported by the manylinux wheels.
+        try:
+            with open("/proc/self/cmdline", "rb") as stream:
+                command = stream.read().decode("utf-8", "replace").split("\0")
+        except OSError:
+            command = []
+    return any(
+        command[index] == "-m" and command[index + 1] == "pyvsag.analyze_index_cli"
+        for index in range(len(command) - 1)
+    )
+
+
+# Package initialization precedes `python -m pyvsag.analyze_index_cli`, so the CLI-only
+# suppression must be selected before the native import. Ordinary library imports are untouched.
+if _is_analyze_index_cli_invocation():
+    os.environ["VSAG_SUPPRESS_INIT_BANNER"] = "1"
+
 from _pyvsag import *
 from ._version import __version__
+from .analyzer import ANALYSIS_SCHEMA_VERSION, analyze_index
 
 import _pyvsag
 __doc__ = _pyvsag.__doc__

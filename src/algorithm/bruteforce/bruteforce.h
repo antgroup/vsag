@@ -87,6 +87,11 @@ public:
         return is_multi_vector_ ? INDEX_WARP : INDEX_BRUTE_FORCE;
     }
 
+    [[nodiscard]] MetricType
+    GetMetricType() {
+        return this->inner_codes_->GetMetricType();
+    }
+
     [[nodiscard]] int64_t
     GetNumElements() const override {
         auto deleted = static_cast<int64_t>(this->delete_count_.load());

@@ -13,6 +13,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.cibuildwheel]
 skip = ["*-musllinux*", "*i686*", "pp*"]
+test-requires = ["numpy", "pytest"]
+test-command = "python {project}/scripts/python/smoke_test_wheel.py"
 before-build = '''
                 bash scripts/deps/install_deps_centos.sh 
               '''
