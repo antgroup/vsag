@@ -465,6 +465,37 @@ TEST_CASE("BalancedKMeans Assign moves extra seats to where they save cost",
     REQUIRE(cluster.stats_.fallback_assignments == 5);
 }
 
+TEST_CASE("BalancedKMeans Assign stays optimal for the sizes the extra seats leave",
+          "[ut][BalancedKMeansCluster]") {
+    // Nine vectors in four clusters give one cluster an extra seat. Moving that seat runs
+    // a second auction on the same table, after the prices of the first one were lowered
+    // to start at 0. Bounds left behind stood above the clusters they stand for, and the
+    // vector at 0.18 kept the cluster at 0.003, at twice the optimal cost.
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+    constexpr uint64_t count = 9;
+    constexpr uint32_t k = 4;
+    const std::vector<float> centroids{0.719365299F, 0.700690866F, 0.00317038782F, 0.137208119F};
+    const std::vector<float> datas{-0.0306687076F,
+                                   -0.0720028207F,
+                                   0.13741006F,
+                                   0.750014365F,
+                                   0.180416405F,
+                                   0.589845061F,
+                                   0.0658915862F,
+                                   0.705233872F,
+                                   0.659428537F};
+    const auto metric = vsag::BalancedAssignMetric::L2SQR;
+    vsag::BalancedKMeansCluster cluster(1, allocator.get());
+    double mean_cost = 0.0;
+    const auto labels =
+        cluster.Assign(centroids.data(), k, datas.data(), count, metric, 3, &mean_cost);
+    const auto sizes = require_balanced(labels, count, k);
+    REQUIRE(cluster.stats_.fallback_assignments == 0);
+    const auto cost = direct_cost(metric, datas, centroids, 1);
+    const double optimum = optimal_assignment_cost(cost, count, sizes);
+    REQUIRE(mean_cost * static_cast<double>(count) <= optimum + auction_tolerance(cost, count, k));
+}
+
 TEST_CASE("BalancedKMeans Assign gives each vector its own cluster when k > count",
           "[ut][BalancedKMeansCluster]") {
     const auto [count, k, candidates, seed] =
@@ -583,6 +614,58 @@ TEST_CASE("BalancedKMeans keeps small L2 distances far from the origin",
         auto labels = moved.Run(k, shifted.data(), count, options, &moved_err);
         require_balanced(labels, count, k);
         REQUIRE(std::abs(moved_err - plain_err) < 0.05 * plain_err);
+    }
+}
+
+TEST_CASE("BalancedKMeans keeps its accuracy on tiny distances", "[ut][BalancedKMeansCluster]") {
+    auto allocator = vsag::SafeAllocator::FactoryDefaultAllocator();
+
+    SECTION("Assign") {
+        // The costs are about 1e-16. A floor of 1e-12 on epsilon put the first bid above
+        // all of them and stopped after one phase, at 1.16e-16 instead of 3.6e-17.
+        const std::vector<float> centroids{0.0F, 1e-8F};
+        const std::vector<float> datas{4e-9F, 0.0F};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        auto labels =
+            cluster.Assign(centroids.data(), 2, datas.data(), 2, vsag::BalancedAssignMetric::L2SQR);
+        REQUIRE(labels[0] == 1);
+        REQUIRE(labels[1] == 0);
+    }
+
+    SECTION("Run") {
+        // Scaling the data by 1e-6 scales its costs by 1e-12 and leaves its clustering.
+        constexpr uint64_t dim = 4;
+        constexpr uint64_t count = 2000;
+        constexpr uint32_t k = 20;
+        constexpr float scale = 1e-6F;
+        auto datas = uniform_vectors(count, dim, 131);
+        auto scaled = datas;
+        for (auto& value : scaled) {
+            value *= scale;
+        }
+        vsag::BalancedKMeansOptions options;
+        options.random_seed = 137;
+        options.iterations = 10;
+        vsag::BalancedKMeansCluster plain(static_cast<int32_t>(dim), allocator.get());
+        vsag::BalancedKMeansCluster tiny(static_cast<int32_t>(dim), allocator.get());
+        double plain_err = -1.0;
+        double tiny_err = -1.0;
+        plain.Run(k, datas.data(), count, options, &plain_err);
+        auto labels = tiny.Run(k, scaled.data(), count, options, &tiny_err);
+        require_balanced(labels, count, k);
+        const double restored = tiny_err / (static_cast<double>(scale) * scale);
+        REQUIRE(std::abs(restored - plain_err) < 0.05 * plain_err);
+    }
+
+    SECTION("all costs are zero") {
+        // Nothing sets a scale here: the auction still needs a positive epsilon to end.
+        const std::vector<float> centroids{0.0F, 0.0F};
+        const std::vector<float> datas{0.0F, 0.0F, 0.0F, 0.0F};
+        vsag::BalancedKMeansCluster cluster(1, allocator.get());
+        auto labels =
+            cluster.Assign(centroids.data(), 2, datas.data(), 4, vsag::BalancedAssignMetric::L2SQR);
+        require_balanced(labels, 4, 2);
+        REQUIRE(cluster.stats_.fallback_assignments == 0);
     }
 }
 
