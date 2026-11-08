@@ -53,6 +53,8 @@ class HGraphFGIM {
 
 public:
     // Algorithm 5. Input rows are not modified; output rows remain distance-sorted.
+    // Refinement and reconstruction each allocate N * dimension floats for vector work.
+    // Their vector buffers have separate lifetimes; graph storage adds to peak memory.
     static FGIMKnnGraph
     KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
                  const FGIMKnnGraph& graph,
@@ -60,6 +62,7 @@ public:
                  uint64_t* distance_evaluations = nullptr);
 
     // Destination storage must satisfy the same float32/L2/fp32 constraints as sources.
+    // The destination bottom graph must be writable; ReaderIO storage is rejected.
     // Destination vectors and labels must already occupy the merged internal ID space.
     // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
     static void
@@ -83,6 +86,9 @@ private:
     // Shared checks also apply to an empty destination.
     static void
     ValidateStorage(const HGraph& index);
+
+    static void
+    ValidateWritableGraph(const HGraph& destination);
 
     static void
     ValidateKnnGraph(const FGIMKnnGraph& graph, uint64_t k, uint64_t expected_count);
