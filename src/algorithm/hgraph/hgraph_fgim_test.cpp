@@ -24,7 +24,13 @@
 #include <tuple>
 
 #include "algorithm/hgraph/hgraph.h"
+#include "datacell/compressed_graph_datacell_parameter.h"
+#include "datacell/graph_datacell_parameter.h"
+#include "framework/test_reader.h"
 #include "impl/allocator/safe_allocator.h"
+#include "io/reader_io/reader_io_parameter.h"
+#include "storage/stream_reader.h"
+#include "storage/stream_writer.h"
 #include "unittest.h"
 #include "vsag/dataset.h"
 
@@ -164,6 +170,50 @@ public:
         const auto public_stats = JsonType::Parse(public_result->GetStatistics());
         REQUIRE(stats.distance_evaluations.load() ==
                 public_stats["distance_evaluations"].GetUint64());
+    }
+    void
+    UseReaderBottom(HGraph& destination, const IndexCommonParam& common) {
+        const auto size = destination.bottom_graph_->CalcSerializeSize();
+        Binary binary{std::shared_ptr<int8_t[]>(new int8_t[size]), size};
+        BufferStreamWriter writer(reinterpret_cast<char*>(binary.data.get()));
+        destination.bottom_graph_->Serialize(writer);
+        auto data_reader = std::make_shared<fixtures::TestReader>(binary);
+        auto io = std::make_shared<ReaderIOParameter>();
+        io->reader = data_reader;
+        const auto parameters =
+            std::dynamic_pointer_cast<HGraphParameter>(destination.create_param_ptr_);
+        REQUIRE(parameters != nullptr);
+        const auto original =
+            std::dynamic_pointer_cast<GraphDataCellParameter>(parameters->bottom_graph_param);
+        REQUIRE(original != nullptr);
+        auto parameter = std::make_shared<GraphDataCellParameter>(*original);
+        parameter->io_parameter_ = io;
+        auto graph = GraphInterface::MakeInstance(parameter, common);
+        ReadFuncStreamReader reader(
+            [data_reader](uint64_t offset, uint64_t length, void* data) {
+                data_reader->Read(offset, length, data);
+            },
+            0,
+            size);
+        graph->Deserialize(reader);
+        destination.bottom_graph_ = graph;
+        destination.mark_memory_usage_dirty();
+    }
+
+    void
+    UseCompressedBottom(HGraph& destination, const IndexCommonParam& common) {
+        auto parameter = std::make_shared<CompressedGraphDatacellParameter>();
+        parameter->max_degree_ = destination.bottom_graph_->MaximumDegree();
+        auto graph = GraphInterface::MakeInstance(parameter, common);
+        graph->Resize(destination.GetNumElements());
+        graph->SetTotalCount(destination.GetNumElements());
+        destination.bottom_graph_ = graph;
+        destination.mark_memory_usage_dirty();
+    }
+
+    uint64_t
+    BottomMemory(const HGraph& destination) {
+        return destination.bottom_graph_->GetMemoryUsage();
     }
 };
 
@@ -942,6 +992,38 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(result[3].size() == 1);
     REQUIRE(result[3][0].id == 2);
     REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing rejects read-only graph storage",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(4, 0, true);
+    const auto original = Capture(*destination);
+    UseReaderBottom(*destination, common);
+    REQUIRE(Capture(*destination).neighbors == original.neighbors);
+    const FGIMKnnGraph graph(4);
+    REQUIRE_THROWS_AS(HGraphFGIM::WriteBottomGraph(*destination, graph, 1), VsagException);
+    const auto after = Capture(*destination);
+    REQUIRE(after.neighbors == original.neighbors);
+    REQUIRE(after.labels == original.labels);
+    REQUIRE(after.vectors == original.vectors);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing invalidates compressed graph memory accounting",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(4, 0, true);
+    UseCompressedBottom(*destination, common);
+    const auto before = destination->GetMemoryUsage();
+    const auto bottom_before = BottomMemory(*destination);
+    const FGIMKnnGraph graph{{{1, 0}}, {{2, 0}}, {{3, 0}}, {{0, 0}}};
+    HGraphFGIM::WriteBottomGraph(*destination, graph, 1);
+    const auto bottom_after = BottomMemory(*destination);
+    REQUIRE(bottom_after > bottom_before);
+    REQUIRE(destination->GetMemoryUsage() == before + bottom_after - bottom_before);
+    HGraphFGIM::WriteBottomGraph(*destination, FGIMKnnGraph(4), 1);
+    REQUIRE(BottomMemory(*destination) == bottom_before);
+    REQUIRE(destination->GetMemoryUsage() == before);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
