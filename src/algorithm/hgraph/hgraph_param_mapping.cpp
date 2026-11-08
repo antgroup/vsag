@@ -346,7 +346,8 @@ HGraph::map_hgraph_param(const JsonType& hgraph_json) {
             inner_json[PARAMETER_USE_CONJUGATE_GRAPH].SetJson(value);
         } else if (key == HGRAPH_LABEL_REMAP_TYPE) {
             inner_json[LABEL_REMAP_TYPE_KEY].SetJson(value);
-        } else if (key == HGRAPH_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
+        } else if (key == "merge_strategy" || key == "fgim_refinement_iterations" ||
+                   key == HGRAPH_ADAPTIVE_PRUNING || key == "adaptive_pruning_adjust_step" ||
                    key == "adaptive_pruning_apply_to_reverse" ||
                    key == "adaptive_pruning_apply_to_upper" ||
                    key == "adaptive_pruning_fill_rejected" || key == "fill_rejected" ||

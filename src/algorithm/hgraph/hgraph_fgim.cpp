@@ -649,6 +649,7 @@ HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
     CHECK_ARGUMENT(
         destination.ef_construct_ <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
         "FGIM upper construction width exceeds the search limit");
+    destination.mark_memory_usage_dirty();
     destination.route_graphs_.clear();
     destination.entry_point_id_ = 0;
     // Match the native HGraph seed, independent of earlier destination Build/Add calls.
@@ -714,6 +715,7 @@ HGraphFGIM::Merge(HGraph& destination,
         CHECK_ARGUMENT(valid_condition_6, "FGIM cannot merge a destination into itself");
         sources.push_back(source.get());
     }
+    ValidateWritableGraph(destination);
     const auto k = destination.bottom_graph_->MaximumDegree();
     const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
     // Source storage was checked above. The empty destination shares the same constraints.
@@ -789,6 +791,7 @@ HGraphFGIM::Merge(HGraph& destination,
 
     // All source-dependent graph work finishes before mutating a non-empty destination.
     // resize acquires global_mutex_ itself; add_mutex_ still excludes concurrent insertion.
+    // Queries between these lock scopes still see the old valid index; no new IDs are published.
     global_lock.unlock();
     destination.resize(offsets.back());
     global_lock.lock();
@@ -806,10 +809,12 @@ HGraphFGIM::Merge(HGraph& destination,
         }
     }
     destination.total_count_.store(offsets.back());
+    // Queries remain excluded by global_lock while the rebuilt links are installed.
     if (statistics != nullptr) {
         statistics->storage_seconds = lap();
     }
     WriteBottomGraph(destination, graph, k);
+    destination.PublishThroughTotalCount();
     if (statistics != nullptr) {
         statistics->bottom_write_seconds = lap();
     }

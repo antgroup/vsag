@@ -247,6 +247,21 @@ public:
         destination.mark_memory_usage_dirty();
     }
 
+    void
+    ClearUpper(HGraph& destination) {
+        destination.route_graphs_.clear();
+        destination.mark_memory_usage_dirty();
+    }
+
+    uint64_t
+    UpperMemory(const HGraph& destination) {
+        uint64_t total = 0;
+        for (const auto& graph : destination.route_graphs_) {
+            total += graph->GetMemoryUsage();
+        }
+        return total;
+    }
+
     uint64_t
     BottomMemory(const HGraph& destination) {
         return destination.bottom_graph_->GetMemoryUsage();
@@ -1078,6 +1093,7 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     const auto merged = public_destination->Merge(units);
     REQUIRE(merged.has_value());
     REQUIRE(destination->GetNumElements() == expected.labels.size());
+    REQUIRE(destination->PublishedCount() == expected.labels.size());
     const auto after = Capture(*destination);
     REQUIRE(after.labels == expected.labels);
     REQUIRE(after.vectors == expected.vectors);
@@ -1132,12 +1148,28 @@ TEST_CASE_METHOD(HGraphFGIMTest,
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM upper rebuilding invalidates graph memory accounting",
+                 "[ut][hgraph][fgim]") {
+    auto destination = MakeSource(128, 0);
+    ClearUpper(*destination);
+    const auto before = destination->GetMemoryUsage();
+    REQUIRE(UpperMemory(*destination) == 0);
+    HGraphFGIM::RebuildUpperLayers(*destination);
+    const auto upper_after = UpperMemory(*destination);
+    REQUIRE(upper_after > 0);
+    REQUIRE(destination->GetMemoryUsage() == before + upper_after);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
                  "FGIM public Merge rejects invalid inputs before changing destination",
                  "[ut][hgraph][fgim]") {
     auto destination = std::shared_ptr<HGraph>(MakeSource(5, 0, false, "fp32", false, false, true));
     auto public_destination = std::make_shared<IndexImpl<HGraph>>(destination, common);
     auto source = std::shared_ptr<HGraph>(MakeSource(5, 1));
     std::vector<MergeUnit> units{{std::make_shared<IndexImpl<HGraph>>(source, common), nullptr}};
+    SECTION("read-only destination graph") {
+        UseReaderBottom(*destination, common);
+    }
     SECTION("label collision") {
         units[0].id_map_func = [](LabelType) { return std::make_tuple(true, 1000); };
     }
