@@ -21,9 +21,11 @@
 #include <memory>
 #include <unordered_set>
 
+#include "datacell/graph_datacell.h"
 #include "hgraph.h"
 #include "impl/query_computer_pool.h"
 #include "index/index_impl.h"
+#include "io/reader_io/reader_io.h"
 #include "simd/fp32_simd.h"
 #include "vsag/constants.h"
 
@@ -344,7 +346,8 @@ HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
                    "FGIM refinement vector size overflow");
     // Decode once, not for every candidate pair. Reuse the FP32 storage distance kernel.
     Vector<float> vectors(source_graphs.front()->allocator_);
-    vectors.resize(graph.size() * dimension);
+    const uint64_t vector_count = graph.size() * dimension;
+    vectors.resize(vector_count);
     // Every source is non-empty, so its index fits the validated merged ID range.
     Vector<InnerIdType> source_ids(graph.size(), source_graphs.front()->allocator_);
     for (uint64_t i = 0; i < source_graphs.size(); ++i) {
@@ -520,7 +523,8 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
     CHECK_ARGUMENT(graph.size() <= std::numeric_limits<uint64_t>::max() / dimension,
                    "FGIM reconstruction vector size overflow");
     Vector<float> vectors(source_graphs.front()->allocator_);
-    vectors.resize(graph.size() * dimension);
+    const uint64_t vector_count = graph.size() * dimension;
+    vectors.resize(vector_count);
     for (uint64_t i = 0; i < source_graphs.size(); ++i) {
         for (InnerIdType u = 0; u < source_graphs[i]->GetNumElements(); ++u) {
             source_graphs[i]->GetVectorByInnerId(
@@ -591,8 +595,17 @@ HGraphFGIM::KnnGraphToPG(const Vector<const HGraph*>& source_graphs,
 }
 
 void
+HGraphFGIM::ValidateWritableGraph(const HGraph& destination) {
+    CHECK_ARGUMENT(
+        destination.bottom_graph_ != nullptr && std::dynamic_pointer_cast<GraphDataCell<ReaderIO>>(
+                                                    destination.bottom_graph_) == nullptr,
+        "FGIM requires writable destination graph storage");
+}
+
+void
 HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k) {
     ValidateStorage(destination);
+    ValidateWritableGraph(destination);
     ValidateKnnGraph(graph, k, destination.GetNumElements());
     const bool valid_condition_2 = destination.bottom_graph_ != nullptr &&
                                    destination.bottom_graph_->MaximumDegree() >= k &&
@@ -606,6 +619,8 @@ HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uin
     CHECK_ARGUMENT(valid_condition_3, "FGIM destination storage is not prepared");
     Vector<InnerIdType> neighbors(destination.allocator_);
     neighbors.reserve(k);
+    // A later write may throw after changing some rows.
+    destination.mark_memory_usage_dirty();
     for (InnerIdType u = 0; u < graph.size(); ++u) {
         neighbors.clear();
         for (const auto& edge : graph[u]) {
@@ -634,6 +649,7 @@ HGraphFGIM::RebuildUpperLayers(HGraph& destination) {
     CHECK_ARGUMENT(
         destination.ef_construct_ <= static_cast<uint64_t>(std::numeric_limits<int64_t>::max()),
         "FGIM upper construction width exceeds the search limit");
+    destination.mark_memory_usage_dirty();
     destination.route_graphs_.clear();
     destination.entry_point_id_ = 0;
     // Match the native HGraph seed, independent of earlier destination Build/Add calls.
@@ -699,6 +715,7 @@ HGraphFGIM::Merge(HGraph& destination,
         CHECK_ARGUMENT(valid_condition_6, "FGIM cannot merge a destination into itself");
         sources.push_back(source.get());
     }
+    ValidateWritableGraph(destination);
     const auto k = destination.bottom_graph_->MaximumDegree();
     const auto offsets = ValidateSourcesAndGetOffsets(sources, k);
     // Source storage was checked above. The empty destination shares the same constraints.
@@ -774,6 +791,7 @@ HGraphFGIM::Merge(HGraph& destination,
 
     // All source-dependent graph work finishes before mutating a non-empty destination.
     // resize acquires global_mutex_ itself; add_mutex_ still excludes concurrent insertion.
+    // Queries between these lock scopes still see the old valid index; no new IDs are published.
     global_lock.unlock();
     destination.resize(offsets.back());
     global_lock.lock();
@@ -792,11 +810,11 @@ HGraphFGIM::Merge(HGraph& destination,
     }
     destination.total_count_.store(offsets.back());
     // Queries remain excluded by global_lock while the rebuilt links are installed.
-    destination.PublishThroughTotalCount();
     if (statistics != nullptr) {
         statistics->storage_seconds = lap();
     }
     WriteBottomGraph(destination, graph, k);
+    destination.PublishThroughTotalCount();
     if (statistics != nullptr) {
         statistics->bottom_write_seconds = lap();
     }
