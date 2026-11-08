@@ -606,7 +606,8 @@ void
 HGraphFGIM::WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k) {
     ValidateStorage(destination);
     ValidateWritableGraph(destination);
-    ValidateKnnGraph(graph, k, destination.GetNumElements());
+    // Merge prepares the full storage range before publishing the new nodes.
+    ValidateKnnGraph(graph, k, destination.total_count_.load());
     const bool valid_condition_2 = destination.bottom_graph_ != nullptr &&
                                    destination.bottom_graph_->MaximumDegree() >= k &&
                                    destination.bottom_graph_->MaxCapacity() >= graph.size();

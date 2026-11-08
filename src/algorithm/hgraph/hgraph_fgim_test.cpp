@@ -208,6 +208,11 @@ public:
         return result;
     }
     void
+    SetPublishedCount(HGraph& destination, InnerIdType count) {
+        destination.published_count_.store(count);
+    }
+
+    void
     UseReaderBottom(HGraph& destination, const IndexCommonParam& common) {
         const auto size = destination.bottom_graph_->CalcSerializeSize();
         Binary binary{std::shared_ptr<int8_t[]>(new int8_t[size]), size};
@@ -1237,6 +1242,7 @@ TEST_CASE_METHOD(HGraphFGIMTest,
         expected_labels.end(), source_before.labels.begin(), source_before.labels.end());
     REQUIRE(Capture(*destination).labels == expected_labels);
     REQUIRE(destination->GetNumElements() == 10);
+    REQUIRE(destination->PublishedCount() == 10);
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
@@ -1305,6 +1311,29 @@ TEST_CASE_METHOD(HGraphFGIMTest,
     REQUIRE(result[3].size() == 1);
     REQUIRE(result[3][0].id == 2);
     REQUIRE(input[0].size() == 2);
+}
+
+TEST_CASE_METHOD(HGraphFGIMTest,
+                 "FGIM bottom writing accepts prepared nodes before publication",
+                 "[ut][hgraph][fgim]") {
+    const InnerIdType published_count = GENERATE(0, 2);
+    auto destination = MakeSource(4, 0, true);
+    const auto before = Capture(*destination);
+    SetPublishedCount(*destination, published_count);
+    REQUIRE(destination->GetNumElements() == published_count);
+    const FGIMKnnGraph graph{{{1, 0}}, {{2, 0}}, {{3, 0}}, {{0, 0}}};
+    REQUIRE_NOTHROW(HGraphFGIM::WriteBottomGraph(*destination, graph, 1));
+    REQUIRE(destination->PublishedCount() == published_count);
+    REQUIRE(destination->GetNumElements() == published_count);
+    destination->PublishThroughTotalCount();
+    REQUIRE(destination->GetNumElements() == 4);
+    const auto after = Capture(*destination);
+    REQUIRE(after.labels == before.labels);
+    REQUIRE(after.vectors == before.vectors);
+    for (uint64_t u = 0; u < graph.size(); ++u) {
+        REQUIRE(after.neighbors[u].size() == 1);
+        REQUIRE(after.neighbors[u][0] == graph[u][0].id);
+    }
 }
 
 TEST_CASE_METHOD(HGraphFGIMTest,
