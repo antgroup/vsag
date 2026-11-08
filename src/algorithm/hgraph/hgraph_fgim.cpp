@@ -344,7 +344,8 @@ HGraphFGIM::RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
                    "FGIM refinement vector size overflow");
     // Decode once, not for every candidate pair. Reuse the FP32 storage distance kernel.
     Vector<float> vectors(source_graphs.front()->allocator_);
-    vectors.resize(graph.size() * dimension);
+    const uint64_t vector_count = graph.size() * dimension;
+    vectors.resize(vector_count);
     // Every source is non-empty, so its index fits the validated merged ID range.
     Vector<InnerIdType> source_ids(graph.size(), source_graphs.front()->allocator_);
     for (uint64_t i = 0; i < source_graphs.size(); ++i) {

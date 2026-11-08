@@ -54,6 +54,8 @@ class HGraphFGIM {
 public:
     // Paper Algorithm 3: bounded persistent lists, unbounded temporary reverse candidates.
     // Each stage validates its inputs so it can also be called independently.
+    // max_iterations is a work budget, not a convergence guarantee.
+    // Statistics report completed iterations, including when the budget is exhausted.
     // A zero iteration budget validates the graph but leaves it unchanged.
     static FGIMRefinementStatistics
     RefineKnnGraph(const Vector<const HGraph*>& source_graphs,
