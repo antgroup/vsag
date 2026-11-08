@@ -89,6 +89,7 @@ public:
     // Destination storage must satisfy the same float32/L2/fp32 constraints as sources.
     // The destination bottom graph must be writable; ReaderIO storage is rejected.
     // Destination vectors and labels must already occupy the merged internal ID space.
+    // The prepared total_count_ may exceed the currently published node count.
     // The bottom graph must have MaximumDegree() >= k and capacity for every merged node.
     static void
     WriteBottomGraph(HGraph& destination, const FGIMKnnGraph& graph, uint64_t k);
