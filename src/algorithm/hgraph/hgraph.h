@@ -1355,6 +1355,7 @@ private:
     bool persist_source_id_{false};  // whether to persist source_id in serialization
 
     std::unique_ptr<BuildCache> cache_{nullptr};  // neighbor cache for warm-start build
+    std::atomic<uint64_t> pipnn_cache_memory_{0};
 
     float build_cache_hit_rate_{-1.0F};     // cache hit rate from last cache-based build
     uint64_t build_cache_hit_nodes_{0};     // number of nodes with cache hit

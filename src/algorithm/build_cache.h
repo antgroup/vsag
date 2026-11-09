@@ -17,6 +17,7 @@
 #include <memory>
 #include <string>
 
+#include "impl/pipnn/pipnn_build_cache.h"
 #include "storage/serialization.h"
 #include "typing.h"
 #include "vsag/allocator.h"
@@ -43,6 +44,8 @@ public:
 
 public:
     Allocator* const allocator_;
+
+    std::shared_ptr<PiPNNBuildCache> pipnn;
 
     // mapping from inner_id to source_id string
     Vector<std::string> source_ids_;

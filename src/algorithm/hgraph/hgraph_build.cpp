@@ -167,11 +167,7 @@ HGraph::Build(const DatasetPtr& data) {
     this->build_cache_missed_nodes_ = 0;
     std::vector<int64_t> ret;
     const bool using_build_cache = this->has_loaded_cache();
-    if (using_build_cache and graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            "HGraph PiPNN does not support build_with_cache");
-    }
-    if (using_build_cache) {
+    if (using_build_cache and graph_type_ != GRAPH_TYPE_VALUE_PIPNN) {
         CHECK_ARGUMENT(
             not adaptive_pruning_.enabled,
             "adaptive_pruning does not yet support building from imported cache; disable "
@@ -456,7 +452,39 @@ HGraph::build_by_batch_graph(const DatasetPtr& data, bool use_pipnn) {
                                         this->allocator_,
                                         this->thread_pool_.get(),
                                         this->build_thread_count_);
-        pipnn_builder.Build(bottom_graph_, inner_ids, pipnn_vectors);
+        std::vector<std::string> pipnn_sources;
+        if (source_id != nullptr) {
+            pipnn_sources.reserve(valid_indices.size());
+            for (const auto index : valid_indices) {
+                pipnn_sources.emplace_back(source_id[index]);
+            }
+        }
+        const auto imported_snapshot = cache_->pipnn;
+        auto refresh_cache_memory = [&]() {
+            pipnn_cache_memory_.store(
+                cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                std::memory_order_release);
+            mark_memory_usage_dirty();
+        };
+        try {
+            pipnn_builder.Build(bottom_graph_,
+                                inner_ids,
+                                pipnn_vectors,
+                                source_id == nullptr ? nullptr : &pipnn_sources,
+                                imported_snapshot.get(),
+                                &cache_->pipnn);
+        } catch (...) {
+            refresh_cache_memory();
+            throw;
+        }
+        refresh_cache_memory();
+        if (imported_snapshot != nullptr) {
+            build_cache_hit_nodes_ = cache_->pipnn == nullptr ? 0 : cache_->pipnn->reused_rows;
+            build_cache_missed_nodes_ = inner_ids.size() - build_cache_hit_nodes_;
+            build_cache_hit_rate_ = inner_ids.empty() ? 0.0F
+                                                      : static_cast<float>(build_cache_hit_nodes_) /
+                                                            static_cast<float>(inner_ids.size());
+        }
         if (this->using_dedup_storage() and not defer_persistent_codes) {
             materialize_storage();
         }
@@ -1589,6 +1617,9 @@ HGraph::ImportCache(std::istream& in_stream) {
     this->check_fused_mutation_supported("ImportCache");
     IOStreamReader reader(in_stream);
     this->cache_->Deserialize(reader);
+    pipnn_cache_memory_.store(cache_->pipnn == nullptr ? 0 : cache_->pipnn->GetMemoryUsage(),
+                              std::memory_order_release);
+    mark_memory_usage_dirty();
 }
 
 void

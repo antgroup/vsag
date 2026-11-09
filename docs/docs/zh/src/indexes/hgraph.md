@@ -467,3 +467,10 @@ auto result = index->KnnSearch(query, topk, params, my_filter).value();
 序列化保存该配置。加载时 adaptive_pruning 必须相同；启用时还要求 alpha、步长和作用范围一致，
 否则兼容性检查失败。没有该字段的旧索引按关闭处理。
 
+
+### PiPNN reservoir 缓存
+
+`graph_type: "pipnn"` 可通过同一缓存 API 导出和导入带版本的 reservoir。
+通过 Source ID 和原始 FP32 内容指纹识别可复用行；不兼容、旧版快照以及重复组图走冷构建。
+Pyramid 按层级名称和节点路径隔离缓存。生命周期、兼容性、内存开销、近似质量和诊断字段见
+[PiPNN reservoir 缓存](../advanced/build_cache.md#pipnn-reservoir-缓存)。
