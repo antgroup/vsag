@@ -11,9 +11,11 @@ from pathlib import Path
 import sys
 
 import daily_plan as dp
+import daily_counts
+import daily_job_report
 
 
-def summarize(results):
+def summarize(results, allow_incomplete=False):
     if not results:
         raise dp.PlanError("No daily results")
     ctx = None
@@ -25,6 +27,7 @@ def summarize(results):
     slowest = []
     weekly = []
     exclusions = []
+    quarantines = []
     architecture_scopes = []
     shard_sets = {}
     seen_metadata = set()
@@ -61,23 +64,30 @@ def summarize(results):
         if metadata_id not in seen_metadata:
             seen_metadata.add(metadata_id)
             label = re.sub(r"-shard[0-9]+$", "", result["lane"]) if plan.get("sharding") else result["lane"]
+            quarantines.extend({"lane": label, **item} for item in plan.get("quarantines", []))
             for exclusion in plan.get("inventory", {}).get("exclusions", []):
                 exclusions.append({"lane": label, **exclusion})
             if plan.get("architecture_scope"):
                 architecture_scopes.append({"lane": label, **plan["architecture_scope"]})
             unknown += plan["unknown_timings"]
-            weekly.append({"lane": label, "core": len(plan["core"]),
-                           "rotation": [len(day) for day in plan["rotation"]]})
+            if not plan.get("extra"):
+                weekly.append({"lane": label, "core": len(plan["core"]),
+                               "rotation": [len(day) for day in plan["rotation"]]})
         records = result["records"]
-        if Counter(r["key"] for r in records) != Counter(expected.keys()):
-            raise dp.PlanError("Missing, duplicate or unexpected execution result")
+        actual_keys = Counter(r["key"] for r in records)
+        if actual_keys != Counter(expected.keys()):
+            missing = Counter(expected.keys()) - actual_keys
+            if not allow_incomplete or actual_keys - Counter(expected.keys()):
+                raise dp.PlanError("Missing, duplicate or unexpected execution result")
+            incomplete.append(result["lane"] + ": missing execution results " + str(list(missing)))
         for record in records:
             seconds = record["seconds"]
             if (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
                     or not math.isfinite(seconds) or seconds < 0):
                 raise dp.PlanError("Invalid elapsed time")
             unit = expected[record["key"]]
-            totals[unit["owner"]] += seconds
+            if not plan.get("extra"):
+                totals[unit["owner"]] += seconds
             if unit.get("mode") == "rotation":
                 env = plan["environment"].lower()
                 architecture = "x86" if env.endswith("/linux/x86_64") else "arm" if env.endswith(("/linux/aarch64", "/linux/arm64")) else None
@@ -92,25 +102,52 @@ def summarize(results):
     for shards in shard_sets.values():
         count = shards[0]["count"]
         if any(s["count"] != count for s in shards) or Counter(s["index"] for s in shards) != Counter(range(count)):
-            raise dp.PlanError("Missing/duplicate/incompatible test shards")
+            if (not allow_incomplete or any(s["count"] != count for s in shards)
+                    or any(v > 1 for v in Counter(s["index"] for s in shards).values())):
+                raise dp.PlanError("Missing/duplicate/incompatible test shards")
+            incomplete.append("Missing test shards: " + str(sorted(set(range(count)) - {s["index"] for s in shards})))
     budgets = dp.policy()["minutes"]
-    return {"source_sha": ctx["source_sha"], "date": ctx["logical_date"], "slot": ctx["slot"],
+    return {"case_counts": daily_counts.count_cases(results), "source_sha": ctx["source_sha"], "date": ctx["logical_date"], "slot": ctx["slot"],
             "seconds": totals, "total_seconds": sum(totals.values()), "budgets_minutes": budgets,
             "expansion_seconds": expansion_seconds,
             "architecture_scopes": architecture_scopes,
+            "quarantines": quarantines,
             "exclusions": exclusions, "failures": failures, "coverage_gaps": incomplete, "unknown_timings": unknown, "weekly": weekly,
             "slowest": sorted(slowest, key=lambda row: -row["seconds"])[:20],
             "status": "failed" if failures or incomplete else "passed"}
 
 
+def extra_markdown(extra):
+    if extra is None:
+        return ["### X86 Extra Coverage — separate quota", "", "No supplemental execution evidence available.", ""]
+    return ["### X86 Extra Coverage — separate quota", "",
+            "| Metric | Value |", "| --- | ---: |",
+            f"| Allocated elapsed quota | {extra['budget_seconds'] / 60:.1f} min |",
+            f"| Planned runner allowance (four parallel jobs) | {4 * extra['budget_seconds'] / 60:.1f} runner-min |",
+            f"| Actual stage elapsed (jobs/setup included) | {extra['wall_seconds'] / 60:.1f} min |",
+            f"| Runner occupancy (sum of four jobs) | {extra['runner_seconds'] / 60:.1f} runner-min |",
+            f"| Test-process consumption | {extra['test_seconds'] / 60:.1f} process-min |",
+            f"| Started configurations | {extra['selected']} |",
+            f"| Passed / failed | {extra['passed']} / {extra['failed']} |",
+            f"| Budget-deferred configurations (not validated) | {extra['deferred']} |", "",
+            "Four x86 shards, two test workers each; original binaries reused, ARM scope unchanged. "
+            "Runner minutes and process minutes are not CPU-core measurements or workflow elapsed time. "
+            "The nine-hour target leaves one hour inside the ten-hour envelope for delays and reporting.", ""]
+
+
 def markdown(report):
     window = dp.policy()["window"]
-    lines = ["# Daily regression", "",
+    warning = (["**Incomplete evidence:** counts describe available verified plans/results only; missing lanes may add cases or change passing cases to failures.", ""]
+               if report.get("incomplete") or report.get("coverage_gaps") else [])
+    lines = ["# Daily regression", "", *warning, *daily_counts.markdown(report.get("case_counts")), "",
              f"Source: `{report['source_sha']}`; date: {report['date']}; slot: {report['slot']}.",
              "", f"Target operating window: **{window['start']}–{window['end']} {window['timezone']} ({window['wall_minutes'] / 60:g} hours)**.",
              f"Execution budget: **{window['execution_minutes'] / 60:g} hours**, with **{window['cleanup_minutes']} minutes** reserved for cleanup and reporting.",
              "Cumulative test execution below is a separate resource-consumption diagnostic.",
              "Compilation, lint, queueing and transfer count toward elapsed time, but not cumulative test consumption.", "",
+             *extra_markdown(report.get("extra_coverage")),
+             *daily_job_report.markdown(report.get("job_reports", [])),
+             "<details><summary>Mandatory test consumption by area (extras excluded)</summary>", "",
              "| Area | Legacy reference (min) | Cumulative actual (min) | Diagnostic |",
              "| --- | ---: | ---: | --- |"]
     for key, budget in report["budgets_minutes"].items():
@@ -119,13 +156,14 @@ def markdown(report):
         state = "🟢" if ratio < .9 else "🟡" if ratio <= 1 else "🔴 above reference"
         lines.append(f"| {key} | {budget} | {actual:.2f} | {state} |")
     lines += ["", f"Cumulative test consumption: **{report['total_seconds'] / 60:.2f} min** (not workflow elapsed time).",
-              f"Correctness/completeness: **{report['status']}**.",
+              "", "</details>", "",
+              f"Selected-check correctness/completeness: **{report['status']}**.",
               f"Unmeasured configuration groups: **{report['unknown_timings']}**.",
               "Unknown estimates are not evidence that the budget will fit.",
               "", "<details><summary>Failures and coverage gaps</summary>", ""]
     lines.extend("- " + x for x in report["failures"] + report["coverage_gaps"])
     lines += ["", "</details>", "", "### Architecture scope", "",
-              "x86 retains complete seven-day rotation. ARM runs per-source core smoke plus "
+              "x86 rotates the effective inventory over seven days, excluding recorded quarantines. ARM runs per-source core smoke plus "
               "approximately 10% of extensions per week; complete matrices require release validation."]
     expansion = report.get("expansion_seconds", {"x86": 0, "arm": 0})
     total = sum(expansion.values())
@@ -138,7 +176,17 @@ def markdown(report):
         lines.append(f"- {scope['lane']}: weekly extensions {scope['weekly_extension']} / "
                      f"{scope['extension_inventory']}; outside this week "
                      f"{scope['release_only_this_week']}. This is not full ARM coverage.")
-    lines += ["", "A single day does not prove full weekly or release coverage.", ""]
+    lines += ["", "A single day does not prove full weekly or release coverage.",
+              "Planned Daily HGraph concurrent stress uses at most 512 rows and a raw dimension cap of 256; RaBitQ retains its 960-dimensional recall floor. "
+              "large-shape stress remains a release obligation.",
+              "Daily Coverage bounds the PR variants of HGraph Duplicate Build, Export Model and Search Over Time to at most 256 rows before cost selection; metrics, dimensions, quantizers, queries, construction threads and assertions remain unchanged. Other lanes retain their workloads.", ""]
+    if report.get("quarantines"):
+        lines += ["### 🟡 Quarantined configurations — not validated", "",
+                  "Passing selected checks does not validate these known exceptions."]
+        for item in report["quarantines"]:
+            lines.append(f"- {item['lane']} / {item['case']} / `{item['key']}`: "
+                         f"{item['reason']} Tracking: {item['tracking']}")
+        lines.append("")
     lines += ["<details><summary>Capability exclusions (not validated in these lanes)</summary>", ""]
     for item in report["exclusions"]:
         lines.append("- " + item["lane"] + " / " + item["test"]["name"] + ": " + item["reason"])
@@ -175,6 +223,8 @@ def main():
     p.add_argument("--collect")
     p.add_argument("--expected-file")
     p.add_argument("--metrics")
+    p.add_argument("--job-reports")
+    p.add_argument("--extra-proposal")
     p.add_argument("--summary", required=True)
     p.add_argument("--json", required=True)
     p.add_argument("--expected-lanes", nargs="*", default=[])
@@ -182,22 +232,38 @@ def main():
     try:
         paths = args.results + ([str(path) for path in Path(args.collect).rglob("daily-result.json")] if args.collect else [])
         results = [dp.load(path) for path in paths]
+        evidence_gaps = []
         if args.expected_file:
-            args.expected_lanes = dp.load(args.expected_file)
+            try:
+                args.expected_lanes = dp.load(args.expected_file)
+            except FileNotFoundError:
+                evidence_gaps.append("Expected-lane manifest missing; completeness is unverified")
         if args.expected_lanes and Counter(r["lane"] for r in results) != Counter(args.expected_lanes):
             actual = Counter(r["lane"] for r in results)
             expected = Counter(args.expected_lanes)
-            raise dp.PlanError("Selected workflow lanes did not all report; missing=" +
-                               str(list((expected - actual).elements())) + "; unexpected=" +
-                               str(list((actual - expected).elements())))
-        report = summarize(results)
+            lane_error = ("Selected workflow lanes did not all report; missing=" +
+                          str(list((expected - actual).elements())) + "; unexpected=" +
+                          str(list((actual - expected).elements())))
+        else:
+            lane_error = None
+        report = summarize(results, allow_incomplete=True)
+        report["coverage_gaps"].extend(evidence_gaps)
+        if lane_error:
+            report["coverage_gaps"].append(lane_error)
+            report["status"] = "failed"
+        report["incomplete"] = bool(report["coverage_gaps"])
         needs = __import__("json").loads(os.environ.get("NEEDS_JSON", "{}"))
         for name, job in needs.items():
             if job.get("result") != "success":
                 report["failures"].append("Workflow dependency " + name + ": " + str(job.get("result")))
                 report["status"] = "failed"
+        metrics = None
         if args.metrics:
-            metrics = dp.load(args.metrics)
+            try:
+                metrics = dp.load(args.metrics)
+            except FileNotFoundError:
+                report["coverage_gaps"].append("Workflow timing evidence missing; ten-hour window is unverified")
+        if metrics is not None:
             import datetime as dt
             start = dt.datetime.fromisoformat(metrics["started_at"].replace("Z", "+00:00"))
             end = dt.datetime.fromisoformat(metrics["observed_at"].replace("Z", "+00:00"))
@@ -209,13 +275,37 @@ def main():
             if elapsed > dp.policy()["window"]["wall_minutes"] * 60:
                 report["failures"].append("Workflow exceeded ten-hour window")
                 report["status"] = "failed"
+        if report["coverage_gaps"]:
+            report["incomplete"] = True
+            report["status"] = "failed"
+        if args.extra_proposal:
+            import daily_extra
+            try:
+                proposal = dp.load(args.extra_proposal)
+                daily_extra.reconcile(proposal, results)
+                report["extra_coverage"] = daily_extra.accounting(proposal, results, report.get("job_metrics", []))
+            except (OSError, ValueError, KeyError) as error:
+                report["coverage_gaps"].append("Supplemental stage: " + str(error))
+                report["incomplete"] = True
+                report["status"] = "failed"
+        if args.job_reports:
+            report["job_reports"] = daily_job_report.load_reports(
+                args.job_reports, report["source_sha"], os.environ.get("GITHUB_RUN_ID"))
+            reported_jobs = {r["job"] for r in report["job_reports"]}
+            missing_reports = sorted(name for name, job in needs.items()
+                                     if job.get("result") == "success" and name not in reported_jobs)
+            if not report["job_reports"] or missing_reports:
+                report["coverage_gaps"].append("Per-job diagnostics are missing: " + str(missing_reports))
+                report["incomplete"] = True
+                report["status"] = "failed"
         dp.write(args.json, report)
-        Path(args.summary).write_text(markdown(report))
+        Path(args.summary).write_text(markdown(report) + "\n")
     except (dp.PlanError, OSError, KeyError, ValueError) as error:
         message = str(error)
-        dp.write(args.json, {"status": "failed", "incomplete": True, "error": message})
+        dp.write(args.json, {"status": "failed", "incomplete": True, "case_counts": None, "error": message})
         Path(args.summary).write_text(
             "# Daily regression: incomplete evidence\n\n"
+            + "\n".join(daily_counts.markdown(None)) + "\n\n" +
             "Validation failed: " + message.replace("\n", " ") + "\n\n"
             "Missing or invalid results are not a pass or zero test cost.\n")
         print("Daily report failed: " + message, file=sys.stderr)

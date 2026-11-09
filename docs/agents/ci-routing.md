@@ -573,3 +573,42 @@ These reports are observations, **not authorization or trusted shared history**.
 They do not automatically replace the planner's existing ID-to-seconds JSON or
 update the production cache publisher. Promotion and scheduling changes require
 separate validation; a digest verifies consistency, not who produced the data.
+
+
+### Daily regression reporting and spare-capacity expansion
+
+Daily regression publishes one final **Daily Summary**. Individual jobs upload
+small diagnostic records instead of ccache Summary panels; PR, Branch and manual
+checks keep their existing panels. The final report distinguishes scoped C++ line
+coverage (90% target) from test/collection/upload success. Missing coverage is
+reported as unmeasured. A green Coverage job alone does not certify the target.
+The README Daily badge is a budget/report link, not a status claim: the same entry
+also contains performance-only profiles, whose green runs must not stand in for a
+complete regression.
+
+Named-case counts deduplicate by source file and exact case name. Configuration
+execution counts retain repeated parameter/platform executions and deduplicate
+sibling shards. Neither number counts assertions; examples, Python and compatibility
+remain separately reported command groups.
+
+After mandatory regression checks succeed, **X86 Extra Coverage** reuses the
+original OpenBLAS binaries in four shards, with two test workers per shard. A
+frozen proposal contains only other days' non-quarantined functional configurations.
+It uses at most four additional hours and stops testing by nine hours from the
+current attempt start, leaving an hour within the ten-hour envelope. Queueing and
+artifact setup consume that allowance. Workers select additional configurations
+while their measured same-case estimate (with margin; conservative fallback for
+unknown cases) fits the remaining quota. They never delay completion just to fill
+time. Original core/rotation selection and ARM scope are unchanged.
+
+The final report separates supplemental wall time, runner-minutes, test-process
+minutes, started/passed/failed configurations and budget-deferred candidates.
+Deferred candidates are **not validated**, never passed; an executed failure or
+missing shard evidence still fails the run. Runner/process minutes are not actual
+CPU-core consumption. The initial cutoff is an operating target, not a guarantee
+against GitHub capacity delays. No separate Weekly full rerun is introduced: the
+seven-day planned union still needs execution evidence, and release-only scope
+remains a separate obligation. Regression scheduling remains disabled pending
+explicit activation and runtime acceptance of this updated flow.
+
+Daily diagnostic identity (source SHA, run ID, attempt, job and job status) is required. Missing identity fails with an explicit diagnostic; optional compiler-cache measurements may be unavailable without failing collection. Full functional inventories must match every configured quarantine exactly; stale or core-targeted rules fail planning instead of silently disappearing.

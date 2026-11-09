@@ -1,0 +1,17 @@
+name: Capture Daily job diagnostics
+description: Preserve local results for the final Summary without publishing a per-job panel.
+runs:
+  using: composite
+  steps:
+    - name: Collect cache and Coverage counters
+      shell: bash
+      run: python3 scripts/testing/daily_job_report.py --output daily-job-report/job-report.json
+    - name: Upload job diagnostic record
+      if: always()
+      uses: actions/upload-artifact@v5
+      with:
+        name: daily-job-${{ github.job }}-${{ strategy.job-index }}-${{ github.run_id }}
+        path: daily-job-report/job-report.json
+        overwrite: true
+        retention-days: 30
+        if-no-files-found: error

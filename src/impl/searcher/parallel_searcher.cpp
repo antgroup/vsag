@@ -310,7 +310,9 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
             }
         }
 
-        while (num_points.load(std::memory_order_relaxed) < count_no_visited) {
+        // Pair with every worker completion release before consuming its distance writes.
+        // A relaxed observation of the count does not publish those buffers on ARM.
+        while (num_points.load(std::memory_order_acquire) < count_no_visited) {
             if (offset >= count_no_visited) {
                 continue;
             }
