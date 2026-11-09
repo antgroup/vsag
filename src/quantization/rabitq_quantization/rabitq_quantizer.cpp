@@ -16,6 +16,7 @@
 #include "rabitq_quantizer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <limits>
@@ -37,6 +38,26 @@
 namespace vsag {
 
 namespace {
+
+struct ScalarUnpackEntry {
+    std::array<uint8_t, 8> lanes{};
+    uint8_t population{0};
+};
+
+constexpr std::array<ScalarUnpackEntry, 256>
+make_scalar_unpack_table() {
+    std::array<ScalarUnpackEntry, 256> table{};
+    for (uint64_t value = 0; value < table.size(); ++value) {
+        for (uint64_t lane = 0; lane < 8; ++lane) {
+            const auto bit = static_cast<uint8_t>((value >> lane) & 1U);
+            table[value].lanes[lane] = bit;
+            table[value].population += bit;
+        }
+    }
+    return table;
+}
+
+constexpr auto SCALAR_UNPACK_TABLE = make_scalar_unpack_table();
 
 uint64_t&
 fast_scan_fallback_random_state() {
@@ -1151,16 +1172,32 @@ RaBitQuantizer<metric>::unpack_scalar_code(const uint8_t* codes, uint8_t* scalar
     memset(scalar_code, 0, GetScalarCodeSize());
     const uint64_t plane_bytes = PlaneBytes();
     const auto* planes = codes + offset_code_;
+    std::array<const uint8_t*, 8> stored_planes{};
+    for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
+        stored_planes[bit] = GetStoredPlane(planes, bit, plane_bytes);
+    }
     uint64_t code_sum = 0;
-    for (uint64_t d = 0; d < this->dim_; ++d) {
+    uint64_t d = 0;
+    for (; d + 8 <= this->dim_; d += 8) {
+        uint64_t packed_lanes = 0;
+        for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
+            const auto& entry = SCALAR_UNPACK_TABLE[stored_planes[bit][d >> 3]];
+            uint64_t expanded = 0;
+            // Each byte is 0 or 1, so shifting cannot carry into an adjacent lane. Byte copies
+            // preserve dimension order on either endianness and avoid unaligned/aliasing loads.
+            memcpy(&expanded, entry.lanes.data(), sizeof(expanded));
+            packed_lanes |= expanded << bit;
+            code_sum += static_cast<uint64_t>(entry.population) << bit;
+        }
+        memcpy(scalar_code + d, &packed_lanes, sizeof(packed_lanes));
+    }
+    for (; d < this->dim_; ++d) {
         const uint64_t byte_idx = d >> 3;
-        const auto bit_mask = static_cast<uint8_t>(1U << (d & 7));
+        const auto bit_shift = static_cast<uint32_t>(d & 7);
         uint8_t value = 0;
         for (uint32_t bit = 0; bit < num_bits_per_dim_base_; ++bit) {
-            const auto* plane = GetStoredPlane(planes, bit, plane_bytes);
-            if ((plane[byte_idx] & bit_mask) != 0) {
-                value |= static_cast<uint8_t>(1U << bit);
-            }
+            value |=
+                static_cast<uint8_t>(((stored_planes[bit][byte_idx] >> bit_shift) & 1U) << bit);
         }
         scalar_code[d] = value;
         code_sum += value;

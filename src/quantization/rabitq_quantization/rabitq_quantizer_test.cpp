@@ -954,6 +954,84 @@ TEST_CASE("RaBitQ Split Code Storage", "[ut][RaBitQuantizer]") {
     }
 }
 
+template <MetricType metric>
+void
+TestScalarUnpackRoundTrip() {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    for (const uint64_t dim : {1, 7, 8, 9, 63, 64, 65, 768, 1024}) {
+        for (uint32_t bits = 1; bits <= 8; ++bits) {
+            for (uint32_t filter = 1; filter <= bits; ++filter) {
+                CAPTURE(dim, bits, filter);
+                RaBitQuantizer<metric> quantizer(dim,
+                                                 0,
+                                                 32,
+                                                 bits,
+                                                 false,
+                                                 false,
+                                                 allocator.get(),
+                                                 RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                                 RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                                 filter);
+                std::vector<uint8_t> expected(quantizer.GetScalarCodeSize(), 0);
+                uint64_t expected_sum = 0;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    expected[d] = static_cast<uint8_t>((37 * d + 19 * filter) & ((1U << bits) - 1));
+                    expected_sum += expected[d];
+                }
+                for (uint64_t i = quantizer.ScalarCodeMetaOffset(); i < expected.size(); ++i) {
+                    expected[i] = static_cast<uint8_t>(29 * i + 11 * filter);
+                }
+                std::vector<uint8_t> packed(quantizer.GetCodeSize());
+                std::vector<uint8_t> actual(expected.size() + 2, 0xA5);
+                quantizer.PackScalarCode(expected.data(), packed.data());
+                REQUIRE(quantizer.UnpackScalarCode(packed.data(), actual.data() + 1) ==
+                        expected_sum);
+                REQUIRE(std::equal(expected.begin(), expected.end(), actual.begin() + 1));
+                REQUIRE(actual.front() == 0xA5);
+                REQUIRE(actual.back() == 0xA5);
+            }
+        }
+    }
+}
+
+TEST_CASE("RaBitQ scalar unpack preserves tails and metadata",
+          "[ut][RaBitQuantizer][scalar_unpack]") {
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_L2SQR>();
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_IP>();
+    TestScalarUnpackRoundTrip<MetricType::METRIC_TYPE_COSINE>();
+}
+
+TEST_CASE("RaBitQ scalar unpack handles every plane byte", "[ut][RaBitQuantizer][scalar_unpack]") {
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    RaBitQuantizer<MetricType::METRIC_TYPE_IP> quantizer(
+        8,
+        0,
+        32,
+        8,
+        false,
+        false,
+        allocator.get(),
+        RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+        RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+        3);
+    for (uint32_t bit = 0; bit < 8; ++bit) {
+        for (uint32_t pattern = 0; pattern < 256; ++pattern) {
+            CAPTURE(bit, pattern);
+            std::vector<uint8_t> expected(quantizer.GetScalarCodeSize(), 0);
+            uint64_t expected_sum = 0;
+            for (uint64_t lane = 0; lane < 8; ++lane) {
+                expected[lane] = static_cast<uint8_t>(((pattern >> lane) & 1U) << bit);
+                expected_sum += expected[lane];
+            }
+            std::vector<uint8_t> packed(quantizer.GetCodeSize());
+            std::vector<uint8_t> actual(expected.size(), 0xFF);
+            quantizer.PackScalarCode(expected.data(), packed.data());
+            REQUIRE(quantizer.UnpackScalarCode(packed.data(), actual.data()) == expected_sum);
+            REQUIRE(actual == expected);
+        }
+    }
+}
+
 TEST_CASE("RaBitQ compact split code round trip", "[ut][RaBitQuantizer]") {
     const std::vector<uint64_t> dims = {1, 7, 8, 63, 64, 65, 960};
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
