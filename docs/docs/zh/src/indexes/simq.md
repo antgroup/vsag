@@ -97,6 +97,8 @@ SIMQ 专属构建参数放在 `index_param` 下。`dim`、`dtype`、`metric_type
 | `dim` | int | —（必填） | 每个 token 向量的维度 |
 | `base_io_type` | string | `"async_io"` | 精排阶段使用的原始多向量数据存储后端 |
 | `base_file_path` | string | `"./default_file_path"` | 磁盘 IO 类型使用的文件路径 |
+| `base_enable_read_cache` | bool | `false` | 启用磁盘 IO 后端的 LRU 页缓存（`async_io`、`uring_io`、`buffer_io`）。`memory_io`、`block_memory_io`、`mmap_io` 会忽略（这些类型使用 `NoCache`）。|
+| `base_cache_total_size` | int | `268435456`（256 MiB）| `base_enable_read_cache` 为 `true` 时的缓存总大小（字节），每个索引独立分配。|
 | `init_cluster_ratio` | float | `0.2` | 初始聚类中心的 token 向量采样比例 |
 | `max_cluster_size` | int | `64` | 单个簇允许的最大 token 向量数 |
 | `split_start_idx` | int | `32` | 簇切分时新簇的起始位置 |
