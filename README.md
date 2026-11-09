@@ -645,6 +645,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/Lss-lmj">
+                    <img src="https://avatars.githubusercontent.com/u/102685785?v=4" width="100" alt="Lss-lmj"/>
+                    <br />
+                    <sub><b>Lss-lmj</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/mingyu-hkustgz">
                     <img src="https://avatars.githubusercontent.com/u/151442761?v=4" width="100" alt="mingyu-hkustgz"/>
                     <br />
@@ -679,6 +686,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
@@ -686,8 +695,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>stuBirdFly</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/wellkilo">
                     <img src="https://avatars.githubusercontent.com/u/150929960?v=4" width="100" alt="wellkilo"/>
