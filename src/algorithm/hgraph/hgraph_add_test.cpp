@@ -1630,6 +1630,9 @@ TEST_CASE("HGraph fused RaBitQ remains mutable after fast build and deserialize"
     std::vector<float> updated_vector(dim, 3.0F);
     std::vector<int64_t> updated_id{ids.front()};
     auto update = MakeFloatDataset(updated_vector, updated_id, dim, 1);
+    // Without force, the fused index first compares the new vector with the neighborhood of the
+    // old one; the comparison must decide (accept or reject) rather than fail.
+    REQUIRE(index->UpdateVector(updated_id.front(), update, false).has_value());
     auto update_result = index->UpdateVector(updated_id.front(), update, true);
     REQUIRE(update_result.has_value());
     REQUIRE(update_result.value());

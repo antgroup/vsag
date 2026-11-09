@@ -49,7 +49,7 @@ auto index = vsag::Factory::CreateIndex("sindi_v2", params).value();
 所有索引在创建时都需要声明以下字段：
 
 - `dtype`：向量数据类型，当前常用为 `"float32"`；部分索引也支持 `"fp16"`、`"bf16"`、`"int8"`；
-- `metric_type`：距离度量方式，支持 `"l2"`、`"ip"`、`"cosine"`；
+- `metric_type`：距离度量方式，支持 `"l2"`、`"ip"`、`"cosine"`、`"hamming"`；`"hamming"` 只能与 `dtype: "binary"`（按位压缩的二进制向量，`dim` 为 bit 数）搭配，详见[二进制向量与 Hamming 距离](binary_vectors.md)；
 - `dim`：向量维度，必须与后续写入的数据一致。
 
 索引特有参数以嵌套对象形式提供，例如 HGraph 在构建期使用 `index_param` 子对象（`hgraph` 保留给 `ef_search` 等查询期参数）。

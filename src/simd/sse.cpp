@@ -28,6 +28,7 @@
 
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
 
@@ -866,6 +867,71 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
         nullptr, a, b, dim);
 #else
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+#if defined(ENABLE_SSE)
+namespace {
+struct HammingSseTag {};
+}  // namespace
+#endif
+
+// This unit is compiled with SSE4.2, which enables POPCNT: every __builtin_popcountll below is a
+// single POPCNT instruction. The dispatcher selects it only when the CPU reports POPCNT.
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+#if defined(ENABLE_SSE)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    uint64_t count0 = 0;
+    uint64_t count1 = 0;
+    uint64_t count2 = 0;
+    uint64_t count3 = 0;
+    uint64_t i = 0;
+    for (; i + 4 * sizeof(uint64_t) <= full_bytes; i += 4 * sizeof(uint64_t)) {
+        uint64_t a[4];
+        uint64_t b[4];
+        std::memcpy(a, x + i, sizeof(a));
+        std::memcpy(b, y + i, sizeof(b));
+        count0 += static_cast<uint64_t>(__builtin_popcountll(a[0] ^ b[0]));
+        count1 += static_cast<uint64_t>(__builtin_popcountll(a[1] ^ b[1]));
+        count2 += static_cast<uint64_t>(__builtin_popcountll(a[2] ^ b[2]));
+        count3 += static_cast<uint64_t>(__builtin_popcountll(a[3] ^ b[3]));
+    }
+    return count0 + count1 + count2 + count3 +
+           simd::HammingScalarRange<HammingSseTag>(x, y, i, dim);
+#else
+    return generic::HammingDistance(x, y, dim);
+#endif
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+#if defined(ENABLE_SSE)
+    results[0] = 0;
+    results[1] = 0;
+    results[2] = 0;
+    results[3] = 0;
+    simd::HammingScalarRangeBatch4<HammingSseTag>(
+        query, codes1, codes2, codes3, codes4, 0, dim, results);
+#else
+    generic::HammingDistanceBatch4(query, codes1, codes2, codes3, codes4, dim, results);
+#endif
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+#if defined(ENABLE_SSE)
+    simd::HammingScanByBatch4<HammingSseTag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
+#else
+    generic::HammingDistanceScan(query, codes, dim, count, dists);
 #endif
 }
 }  // namespace vsag::sse

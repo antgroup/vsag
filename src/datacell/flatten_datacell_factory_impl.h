@@ -96,6 +96,11 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                                         quantization_string));
     }
 
+    CHECK_ARGUMENT(quantization_string != QUANTIZATION_TYPE_VALUE_BINARY,
+                   fmt::format("{} quantization requires dtype {} and metric_type {}",
+                               QUANTIZATION_TYPE_VALUE_BINARY,
+                               DATATYPE_BINARY,
+                               METRIC_HAMMING));
     auto actual_quantization = quantization_string;
     const bool is_transform_quantizer = quantization_string == QUANTIZATION_TYPE_VALUE_TQ;
     if (is_transform_quantizer) {

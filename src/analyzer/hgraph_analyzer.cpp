@@ -17,6 +17,7 @@
 
 #include <cstring>
 
+#include "data_type.h"
 #include "impl/heap/standard_heap.h"
 
 namespace vsag {
@@ -289,8 +290,22 @@ HGraphAnalyzer::calculate_quantization_result(
         }
         const auto* query = sample_datas.data() + static_cast<uint64_t>(i) * dim_;
         float sample_error = 0.0F;
-        auto base_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, false);
-        auto precise_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, true);
+        DatasetPtr base_result = nullptr;
+        DatasetPtr precise_result = nullptr;
+        if (hgraph_->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+            // The float pointer overloads take float32 queries only, so the packed bits at the
+            // start of the scratch row go through a Dataset.
+            auto binary_query = Dataset::Make();
+            binary_query->Dim(dim_)->NumElements(1)->Owner(false)->BinaryVectors(
+                reinterpret_cast<const uint8_t*>(query));
+            base_result = hgraph_->InnerIndexInterface::CalcDistancesById(
+                binary_query, result.data(), actual_topk, false);
+            precise_result = hgraph_->InnerIndexInterface::CalcDistancesById(
+                binary_query, result.data(), actual_topk, true);
+        } else {
+            base_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, false);
+            precise_result = hgraph_->CalcDistancesById(query, result.data(), actual_topk, true);
+        }
         if (base_result == nullptr or precise_result == nullptr) {
             continue;
         }
@@ -352,7 +367,20 @@ HGraphAnalyzer::SetQuery(const DatasetPtr& query) {
     query_sample_ids_.resize(query_sample_size_);
     query_sample_datas_.resize(static_cast<std::vector<float>::size_type>(query_sample_size_) *
                                static_cast<std::vector<float>::size_type>(dim_));
-    if (const float* query_vectors = query->GetFloat32Vectors()) {
+    if (hgraph_->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        // Each packed query goes to the start of its float-sized scratch row, the layout that
+        // GetVectorByInnerId produces for the base samples.
+        const auto* query_vectors = query->GetBinaryVectors();
+        if (query_vectors == nullptr or query->GetDim() != dim_) {
+            logger::error("Query dataset is empty, not binary or of another dimension");
+            return false;
+        }
+        const uint64_t row_bytes = BinaryVectorBytes(static_cast<uint64_t>(dim_));
+        for (uint64_t i = 0; i < query_sample_size_; ++i) {
+            std::memcpy(
+                query_sample_datas_.data() + i * dim_, query_vectors + i * row_bytes, row_bytes);
+        }
+    } else if (const float* query_vectors = query->GetFloat32Vectors()) {
         std::memcpy(query_sample_datas_.data(),
                     query_vectors,
                     static_cast<unsigned long>(query_sample_size_ * dim_) * sizeof(float));
@@ -434,6 +462,9 @@ HGraphAnalyzer::calculate_search_result(const Vector<float>& sample_datas,
             // INT8 Decode writes raw bytes into each sample's float-sized scratch row.
             std::memcpy(int8_query.data(), sample, dim_ * sizeof(int8_t));
             query->Int8Vectors(int8_query.data());
+        } else if (hgraph_->data_type_ == DataTypes::DATA_TYPE_BINARY) {
+            // Binary Decode likewise leaves the packed bits at the start of the scratch row.
+            query->BinaryVectors(reinterpret_cast<const uint8_t*>(sample));
         } else {
             query->Float32Vectors(sample);
         }

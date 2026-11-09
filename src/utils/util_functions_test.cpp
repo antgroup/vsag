@@ -15,6 +15,7 @@
 
 #include "util_functions.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <numeric>
@@ -103,6 +104,25 @@ TEST_CASE("UtilFunctions Basic", "[ut][UtilFunctions]") {
     }
 }
 
+TEST_CASE("get_vectors and set_dataset carry binary rows", "[ut][UtilFunctions]") {
+    const int64_t dim = 13;  // two bytes per row
+    std::vector<uint8_t> bytes = {1, 2, 3, 4, 5, 6};
+    auto base = vsag::Dataset::Make();
+    base->NumElements(3)->Dim(dim)->BinaryVectors(bytes.data())->Owner(false);
+    void* vectors = nullptr;
+    uint64_t row_size = 0;
+    get_vectors(DataTypes::DATA_TYPE_BINARY, dim, base, &vectors, &row_size);
+    REQUIRE(vectors == bytes.data());
+    REQUIRE(row_size == 2);
+
+    auto view = vsag::Dataset::Make();
+    set_dataset(DataTypes::DATA_TYPE_BINARY, dim, view, bytes.data(), 3);
+    REQUIRE(view->GetBinaryVectors() == bytes.data());
+    REQUIRE(view->GetFloat32Vectors() == nullptr);
+    REQUIRE(view->GetDim() == dim);
+    REQUIRE(view->GetNumElements() == 3);
+}
+
 TEST_CASE("sample_train_data honors a fixed random seed", "[ut][UtilFunctions]") {
     constexpr int64_t dim = 3;
     constexpr int64_t count = 2048;
@@ -158,4 +178,89 @@ TEST_CASE("sample_train_data uses all vectors for an unbounded count", "[ut][Uti
 
     REQUIRE(sampled == data);
     REQUIRE(sampled->GetNumElements() == count);
+}
+
+TEST_CASE("sample_train_data keeps the element type of dense rows", "[ut][UtilFunctions]") {
+    // Rows are sampled with their own byte width; binary rows hold ceil(dim / 8) bytes.
+    constexpr int64_t count = 1500;
+    constexpr int64_t sample_count = 600;
+    constexpr int64_t dim = 13;
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 100);
+    auto allocator = std::make_shared<DefaultAllocator>();
+
+    // Every row starts with its own index, so a sampled row can be traced back to its source.
+    auto check_rows = [&](const DatasetPtr& sampled,
+                          const uint8_t* source,
+                          uint64_t row_bytes,
+                          const uint8_t* sampled_rows) {
+        REQUIRE(sampled->GetNumElements() == sample_count);
+        REQUIRE(sampled->GetDim() == dim);
+        for (int64_t i = 0; i < sample_count; ++i) {
+            const auto source_row = sampled->GetIds()[i] - 100;
+            REQUIRE(std::equal(sampled_rows + i * row_bytes,
+                               sampled_rows + (i + 1) * row_bytes,
+                               source + source_row * row_bytes));
+        }
+    };
+
+    SECTION("binary") {
+        const uint64_t row_bytes = (dim + 7) / 8;
+        std::vector<uint8_t> rows(count * row_bytes);
+        for (int64_t i = 0; i < count; ++i) {
+            rows[i * row_bytes] = static_cast<uint8_t>(i);
+            rows[i * row_bytes + 1] = static_cast<uint8_t>(i >> 8);
+        }
+        auto data = Dataset::Make();
+        data->NumElements(count)
+            ->Dim(dim)
+            ->Ids(ids.data())
+            ->BinaryVectors(rows.data())
+            ->Owner(false);
+        auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 7);
+        REQUIRE(sampled->GetFloat32Vectors() == nullptr);
+        REQUIRE(sampled->GetBinaryVectors() != nullptr);
+        check_rows(sampled, rows.data(), row_bytes, sampled->GetBinaryVectors());
+    }
+
+    SECTION("int8") {
+        std::vector<int8_t> rows(count * dim);
+        for (int64_t i = 0; i < count; ++i) {
+            rows[i * dim] = static_cast<int8_t>(i % 127);
+            rows[i * dim + 1] = static_cast<int8_t>(i / 127);
+        }
+        auto data = Dataset::Make();
+        data->NumElements(count)->Dim(dim)->Ids(ids.data())->Int8Vectors(rows.data())->Owner(false);
+        auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 7);
+        REQUIRE(sampled->GetInt8Vectors() != nullptr);
+        check_rows(sampled,
+                   reinterpret_cast<const uint8_t*>(rows.data()),
+                   dim,
+                   reinterpret_cast<const uint8_t*>(sampled->GetInt8Vectors()));
+    }
+
+    SECTION("float16") {
+        std::vector<uint16_t> rows(count * dim);
+        for (int64_t i = 0; i < count; ++i) {
+            rows[i * dim] = static_cast<uint16_t>(i);
+        }
+        auto data = Dataset::Make();
+        data->NumElements(count)
+            ->Dim(dim)
+            ->Ids(ids.data())
+            ->Float16Vectors(rows.data())
+            ->Owner(false);
+        auto sampled = sample_train_data(data, count, dim, sample_count, allocator.get(), 7);
+        REQUIRE(sampled->GetFloat16Vectors() != nullptr);
+        check_rows(sampled,
+                   reinterpret_cast<const uint8_t*>(rows.data()),
+                   dim * sizeof(uint16_t),
+                   reinterpret_cast<const uint8_t*>(sampled->GetFloat16Vectors()));
+    }
+
+    SECTION("datasets without dense vectors are rejected") {
+        auto data = Dataset::Make();
+        data->NumElements(count)->Dim(dim)->Ids(ids.data())->Owner(false);
+        REQUIRE_THROWS(sample_train_data(data, count, dim, sample_count, allocator.get(), 7));
+    }
 }

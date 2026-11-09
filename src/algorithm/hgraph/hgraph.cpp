@@ -971,28 +971,31 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
     void* new_base_vec = nullptr;
     uint64_t data_size = 0;
     get_vectors(data_type_, dim_, new_base, &new_base_vec, &data_size);
+    // Every path below reads data_size bytes from new_base_vec.
+    CHECK_ARGUMENT(new_base->GetDim() == dim_,
+                   "updated vector dimension must match the index dimension");
+    CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
     if (this->rabitq_fused_datacell_ != nullptr) {
-        CHECK_ARGUMENT(new_base->GetDim() == dim_,
-                       "updated vector dimension must match the index dimension");
-        CHECK_ARGUMENT(new_base_vec != nullptr, "updated vector must not be null");
         this->validate_fused_vector_data(static_cast<const float*>(new_base_vec), 1);
     }
     if (not force_update) {
         std::shared_lock label_lock(this->label_lookup_mutex_);
 
+        // The vectors are in the index dtype, so distances go through the native path, which
+        // also serves the non-float32 dtypes.
         float self_dist = 0.0F;
         if (this->rabitq_fused_datacell_ == nullptr) {
             // 1. check whether vectors are same
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -1006,9 +1009,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

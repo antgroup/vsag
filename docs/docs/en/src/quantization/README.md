@@ -98,6 +98,8 @@ base quantizer.
 All quantizers documented here support the three dense metrics
 (`l2` / `ip` / `cosine`). For `cosine`, the index normalizes vectors before
 quantization, so the underlying quantizer never sees the original magnitude.
+[Binary vectors](../guide/binary_vectors.md) with the `hamming` metric use the dedicated `binary`
+quantizer, which stores the packed bits unchanged, and reject the numeric quantizers.
 A few practical notes:
 
 - `pq` / `pqfs` perform their distance lookup tables per subspace; very low

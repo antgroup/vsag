@@ -13,6 +13,9 @@
 // limitations under the License.
 
 #pragma once
+
+#include <cstdint>
+
 #include "vsag/constants.h"
 
 namespace vsag {
@@ -22,7 +25,29 @@ enum class DataTypes {
     DATA_TYPE_FP16 = 2,
     DATA_TYPE_BF16 = 3,
     DATA_TYPE_SPARSE = 4,
+    // Bit-packed binary vectors: dim counts bits, each row holds ceil(dim / 8) bytes.
+    DATA_TYPE_BINARY = 5,
 };
+
+/**
+ * @brief Number of bytes that hold one bit-packed binary vector with `dim` bits.
+ *
+ * Bits are packed MSB-first: logical bit i lives in byte i / 8 under mask 0x80 >> (i % 8), which
+ * is the layout produced by numpy.packbits with its default bitorder="big". When dim is not a
+ * multiple of eight, the low (8 - dim % 8) bits of the last byte are padding.
+ */
+constexpr uint64_t
+BinaryVectorBytes(uint64_t dim) noexcept {
+    return (dim + 7) / 8;
+}
+
+/**
+ * @brief Largest accepted binary dimension.
+ *
+ * Distances are returned as float, which represents every integer up to 2^24 exactly, so every
+ * Hamming distance of a binary index with at most this many bits is an exact integer.
+ */
+constexpr int64_t MAX_BINARY_DIM = int64_t{1} << 24;
 
 constexpr const char*
 ToString(DataTypes t) noexcept {
@@ -37,6 +62,8 @@ ToString(DataTypes t) noexcept {
             return DATATYPE_SPARSE;
         case DataTypes::DATA_TYPE_BF16:
             return DATATYPE_BFLOAT16;
+        case DataTypes::DATA_TYPE_BINARY:
+            return DATATYPE_BINARY;
     }
     return "unknown";
 }

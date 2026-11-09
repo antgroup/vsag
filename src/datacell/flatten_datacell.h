@@ -21,6 +21,7 @@
 #include <cstring>
 #include <limits>
 #include <memory>
+#include <string>
 #include <type_traits>
 
 #include "common.h"
@@ -33,6 +34,8 @@
 #include "utils/timer.h"
 
 namespace vsag {
+
+class BinaryQuantizer;
 /*
 * thread unsafe
 */
@@ -55,6 +58,13 @@ public:
         auto comp = static_cast<Computer<QuantTmpl>*>(computer.get());
         this->query(result_dists, comp, idx, id_count, ctx);
     }
+
+    void
+    QueryRange(float* result_dists,
+               const ComputerInterfacePtr& computer,
+               InnerIdType begin,
+               InnerIdType count,
+               QueryContext* ctx = nullptr) override;
 
     ComputerInterfacePtr
     FactoryComputer(const void* query) override {
@@ -397,6 +407,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::BatchInsertVector(const void* vectors,
             case DataTypes::DATA_TYPE_SPARSE:
                 source_stride = sizeof(SparseVector);
                 break;
+            case DataTypes::DATA_TYPE_BINARY:
+                // dim counts bits; packed rows hold ceil(dim / 8) bytes.
+                source_stride = BinaryVectorBytes(dim);
+                break;
             case DataTypes::DATA_TYPE_FLOAT:
                 break;
         }
@@ -517,6 +531,41 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
     }
     if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
         ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(id_count));
+}
+
+template <typename QuantTmpl, typename LayoutTmpl>
+void
+FlattenDataCell<QuantTmpl, LayoutTmpl>::QueryRange(float* result_dists,
+                                                   const ComputerInterfacePtr& computer,
+                                                   InnerIdType begin,
+                                                   InnerIdType count,
+                                                   QueryContext* ctx) {
+    // Binary codes give exact integer distances whichever kernel computes them, so a contiguous
+    // in-memory range can be scanned in place with the batched kernel. Other quantizers keep the
+    // per-id path, whose results they are tested against.
+    if constexpr (LayoutTmpl::InMemory and std::is_same_v<QuantTmpl, BinaryQuantizer>) {
+        if (count == 0) {
+            return;
+        }
+        const auto total_count = this->TotalCount();
+        if (begin >= total_count or count > total_count - begin) {
+            throw VsagException(
+                ErrorType::READ_ERROR,
+                "invalid internal id range " + std::to_string(begin) + "+" + std::to_string(count));
+        }
+        auto lease = this->layout_->AcquireRange(begin, count);
+        if (not lease) {
+            throw VsagException(ErrorType::READ_ERROR,
+                                "failed to acquire codes for range distance evaluation");
+        }
+        auto* comp = static_cast<Computer<QuantTmpl>*>(computer.get());
+        comp->ScanBatchDists(count, lease.Data(), result_dists);
+        if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations) {
+            ctx->stats->AddDistance(ctx->distance_phase, backend_, static_cast<uint64_t>(count));
+        }
+    } else {
+        FlattenInterface::QueryRange(result_dists, computer, begin, count, ctx);
+    }
 }
 
 template <typename QuantTmpl, typename LayoutTmpl>

@@ -27,8 +27,8 @@ All indexes share the same top-level build fields:
 | Field | Values | Notes |
 |-------|--------|-------|
 | `dim` | positive integer | Vector dimensionality; fixed after build |
-| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` | `sparse` is for SINDI / SINDI_V2 |
-| `metric_type` | `l2` / `ip` / `cosine` | Must match at query time (SINDI / SINDI_V2 are `ip` only) |
+| `dtype` | `float32` / `float16` / `bfloat16` / `int8` / `sparse` / `binary` | `sparse` is for SINDI / SINDI_V2; `binary` is for BruteForce / HGraph |
+| `metric_type` | `l2` / `ip` / `cosine` / `hamming` | Must match at query time (SINDI / SINDI_V2 are `ip` only; `hamming` goes with `binary`) |
 
 Index-specific build parameters live under the `index_param` sub-object; search-time
 parameters live under a sub-object named after the index (e.g. `hgraph`, `ivf`,

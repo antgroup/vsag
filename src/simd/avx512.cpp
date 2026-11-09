@@ -30,6 +30,7 @@
 
 #include "kernels/local_sq_compute.h"
 #include "simd.h"
+#include "simd/kernels/hamming_compute.h"
 #include "sq4_local_simd.h"
 #include "sq8_local_simd.h"
 
@@ -1983,6 +1984,200 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
         nullptr, a, b, dim);
 #else
     return generic::SQ4LocalComputeCodesIP(a, b, dim);
+#endif
+}
+
+#if defined(ENABLE_AVX512)
+namespace {
+struct HammingAvx512Tag {};
+
+// Per-byte population count with a 4-bit lookup table; requires AVX-512BW.
+inline __m512i
+hamming_popcount_epi8(__m512i v) {
+    const __m512i lookup =
+        _mm512_broadcast_i32x4(_mm_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4));
+    const __m512i low_mask = _mm512_set1_epi8(0x0F);
+    const __m512i low = _mm512_and_si512(v, low_mask);
+    const __m512i high = _mm512_and_si512(_mm512_srli_epi16(v, 4), low_mask);
+    return _mm512_add_epi8(_mm512_shuffle_epi8(lookup, low), _mm512_shuffle_epi8(lookup, high));
+}
+
+// Number of set bits of a 64-byte block, as eight 64-bit partial sums.
+inline __m512i
+hamming_count_bits(__m512i diff) {
+    return _mm512_sad_epu8(hamming_popcount_epi8(diff), _mm512_setzero_si512());
+}
+
+// Selects the first `count` bytes of a 64-byte block (count <= 64).
+inline __mmask64
+hamming_byte_mask(uint64_t count) {
+    return count >= 64 ? ~__mmask64{0} : static_cast<__mmask64>((uint64_t{1} << count) - 1U);
+}
+
+// Valid bits of a block that ends with the last `count` bytes of a vector: every byte is 0xFF
+// except the partial last byte, which keeps only its high dim % 8 bits.
+inline __m512i
+hamming_tail_bits(uint64_t count, uint64_t dim) {
+    const __m512i all = _mm512_set1_epi8(static_cast<char>(0xFF));
+    if (dim % 8 == 0) {
+        return all;
+    }
+    const auto last = static_cast<char>(simd::HammingTailMask(dim));
+    return _mm512_mask_set1_epi8(all, __mmask64{1} << (count - 1), last);
+}
+
+// Horizontal sums of four accumulators: element k of the result is the sum of the eight 64-bit
+// lanes of a<k>, which replaces four separate reductions.
+inline __m256i
+hamming_reduce4(__m512i a0, __m512i a1, __m512i a2, __m512i a3) {
+    // Each 128-bit block b of p01 holds [a0[2b] + a0[2b + 1], a1[2b] + a1[2b + 1]].
+    const __m512i p01 =
+        _mm512_add_epi64(_mm512_unpacklo_epi64(a0, a1), _mm512_unpackhi_epi64(a0, a1));
+    const __m512i p23 =
+        _mm512_add_epi64(_mm512_unpacklo_epi64(a2, a3), _mm512_unpackhi_epi64(a2, a3));
+    // The blocks of s hold [a0, a1] over lanes 0-3, [a0, a1] over lanes 4-7, then a2, a3 likewise.
+    const __m512i s = _mm512_add_epi64(_mm512_shuffle_i64x2(p01, p23, _MM_SHUFFLE(2, 0, 2, 0)),
+                                       _mm512_shuffle_i64x2(p01, p23, _MM_SHUFFLE(3, 1, 3, 1)));
+    const __m512i halves = _mm512_shuffle_i64x2(s, s, _MM_SHUFFLE(3, 1, 2, 0));
+    return _mm256_add_epi64(_mm512_castsi512_si256(halves), _mm512_extracti64x4_epi64(halves, 1));
+}
+}  // namespace
+#endif
+
+uint64_t
+HammingDistance(const uint8_t* x, const uint8_t* y, uint64_t dim) {
+#if defined(ENABLE_AVX512)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    const uint64_t total_bytes = (dim + 7) / 8;
+    if (total_bytes < 64) {
+        // Vectors shorter than one block: POPCNT on 64-bit words beats a single masked block,
+        // whose lookup-table count and horizontal reduction are latency-bound here.
+        return simd::HammingScalarRange<HammingAvx512Tag>(x, y, 0, dim);
+    }
+    __m512i acc = _mm512_setzero_si512();
+    uint64_t i = 0;
+    for (; i + 64 <= full_bytes; i += 64) {
+        const __m512i diff = _mm512_xor_si512(_mm512_loadu_si512(x + i), _mm512_loadu_si512(y + i));
+        acc = _mm512_add_epi64(acc, hamming_count_bits(diff));
+    }
+    if (i < total_bytes) {
+        // The remainder, including a partial last byte, is one masked block: masked-out bytes
+        // load as zero and never fault, and the padding bits are cleared before counting.
+        const uint64_t count = total_bytes - i;
+        const __mmask64 mask = hamming_byte_mask(count);
+        const __m512i diff =
+            _mm512_and_si512(_mm512_xor_si512(_mm512_maskz_loadu_epi8(mask, x + i),
+                                              _mm512_maskz_loadu_epi8(mask, y + i)),
+                             hamming_tail_bits(count, dim));
+        acc = _mm512_add_epi64(acc, hamming_count_bits(diff));
+    }
+    return static_cast<uint64_t>(_mm512_reduce_add_epi64(acc));
+#else
+    return avx2::HammingDistance(x, y, dim);
+#endif
+}
+
+void
+HammingDistanceBatch4(const uint8_t* query,
+                      const uint8_t* codes1,
+                      const uint8_t* codes2,
+                      const uint8_t* codes3,
+                      const uint8_t* codes4,
+                      uint64_t dim,
+                      uint64_t* results) {
+#if defined(ENABLE_AVX512)
+    const uint64_t full_bytes = simd::HammingFullBytes(dim);
+    const uint64_t total_bytes = (dim + 7) / 8;
+    if (dim % 64 == 0 and dim <= 128) {
+        // One or two whole 64-bit words per code: scalar POPCNT avoids four vector reductions.
+        results[0] = 0;
+        results[1] = 0;
+        results[2] = 0;
+        results[3] = 0;
+        simd::HammingScalarRangeBatch4<HammingAvx512Tag>(
+            query, codes1, codes2, codes3, codes4, 0, dim, results);
+        return;
+    }
+    __m512i acc1 = _mm512_setzero_si512();
+    __m512i acc2 = _mm512_setzero_si512();
+    __m512i acc3 = _mm512_setzero_si512();
+    __m512i acc4 = _mm512_setzero_si512();
+    uint64_t i = 0;
+    for (; i + 64 <= full_bytes; i += 64) {
+        const __m512i q = _mm512_loadu_si512(query + i);
+        acc1 = _mm512_add_epi64(
+            acc1, hamming_count_bits(_mm512_xor_si512(q, _mm512_loadu_si512(codes1 + i))));
+        acc2 = _mm512_add_epi64(
+            acc2, hamming_count_bits(_mm512_xor_si512(q, _mm512_loadu_si512(codes2 + i))));
+        acc3 = _mm512_add_epi64(
+            acc3, hamming_count_bits(_mm512_xor_si512(q, _mm512_loadu_si512(codes3 + i))));
+        acc4 = _mm512_add_epi64(
+            acc4, hamming_count_bits(_mm512_xor_si512(q, _mm512_loadu_si512(codes4 + i))));
+    }
+    if (i < total_bytes) {
+        const uint64_t count = total_bytes - i;
+        const __mmask64 mask = hamming_byte_mask(count);
+        const __m512i q = _mm512_maskz_loadu_epi8(mask, query + i);
+        const __m512i valid = hamming_tail_bits(count, dim);
+        acc1 = _mm512_add_epi64(
+            acc1,
+            hamming_count_bits(_mm512_and_si512(
+                _mm512_xor_si512(q, _mm512_maskz_loadu_epi8(mask, codes1 + i)), valid)));
+        acc2 = _mm512_add_epi64(
+            acc2,
+            hamming_count_bits(_mm512_and_si512(
+                _mm512_xor_si512(q, _mm512_maskz_loadu_epi8(mask, codes2 + i)), valid)));
+        acc3 = _mm512_add_epi64(
+            acc3,
+            hamming_count_bits(_mm512_and_si512(
+                _mm512_xor_si512(q, _mm512_maskz_loadu_epi8(mask, codes3 + i)), valid)));
+        acc4 = _mm512_add_epi64(
+            acc4,
+            hamming_count_bits(_mm512_and_si512(
+                _mm512_xor_si512(q, _mm512_maskz_loadu_epi8(mask, codes4 + i)), valid)));
+    }
+    _mm256_storeu_si256(reinterpret_cast<__m256i*>(results),
+                        hamming_reduce4(acc1, acc2, acc3, acc4));
+#else
+    avx2::HammingDistanceBatch4(query, codes1, codes2, codes3, codes4, dim, results);
+#endif
+}
+
+void
+HammingDistanceScan(
+    const uint8_t* query, const uint8_t* codes, uint64_t dim, uint64_t count, float* dists) {
+#if defined(ENABLE_AVX512)
+    if (dim % 64 == 0 and dim <= 128) {
+        // One or two whole words per code: the scalar POPCNT path of HammingDistanceBatch4,
+        // inlined so that the four distances stay in registers until they are stored.
+        const uint64_t code_size = dim / 8;
+        uint64_t i = 0;
+        for (; i + 4 <= count; i += 4) {
+            const uint8_t* block = codes + i * code_size;
+            uint64_t results[4] = {0, 0, 0, 0};
+            simd::HammingScalarRangeBatch4<HammingAvx512Tag>(query,
+                                                             block,
+                                                             block + code_size,
+                                                             block + 2 * code_size,
+                                                             block + 3 * code_size,
+                                                             0,
+                                                             dim,
+                                                             results);
+            dists[i] = simd::HammingToFloat(results[0]);
+            dists[i + 1] = simd::HammingToFloat(results[1]);
+            dists[i + 2] = simd::HammingToFloat(results[2]);
+            dists[i + 3] = simd::HammingToFloat(results[3]);
+        }
+        for (; i < count; ++i) {
+            dists[i] = simd::HammingToFloat(
+                simd::HammingScalarRange<HammingAvx512Tag>(query, codes + i * code_size, 0, dim));
+        }
+        return;
+    }
+    simd::HammingScanByBatch4<HammingAvx512Tag>(
+        query, codes, dim, count, dists, HammingDistanceBatch4, HammingDistance);
+#else
+    avx2::HammingDistanceScan(query, codes, dim, count, dists);
 #endif
 }
 }  // namespace vsag::avx512

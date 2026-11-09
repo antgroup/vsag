@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "data_type.h"
 #include "typing.h"
 #include "vsag_exception.h"
 
@@ -46,6 +47,24 @@ Dataset::Paths(const std::string& hierarchy_name, std::vector<std::vector<std::s
                             "This Dataset implementation does not support multiple paths");
     }
     return dataset->Paths(hierarchy_name, std::move(paths));
+}
+
+DatasetPtr
+Dataset::BinaryVectors(const uint8_t* vectors) {
+    auto* dataset = dynamic_cast<DatasetImpl*>(this);
+    if (dataset == nullptr) {
+        throw VsagException(ErrorType::UNSUPPORTED_INDEX_OPERATION,
+                            "This Dataset implementation does not support binary vectors");
+    }
+    return dataset->BinaryVectors(vectors);
+}
+
+const uint8_t*
+Dataset::GetBinaryVectors() const {
+    if (const auto* dataset = dynamic_cast<const DatasetImpl*>(this)) {
+        return dataset->GetBinaryVectors();
+    }
+    return nullptr;
 }
 
 DatasetPtr
@@ -507,6 +526,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
             ids, [this](const int64_t* values) { allocator_->Deallocate(void_ptr(values)); });
         allocator_->Deallocate(void_ptr(DatasetImpl::GetDistances()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetInt8Vectors()));
+        allocator_->Deallocate(void_ptr(DatasetImpl::GetBinaryVectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat16Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetFloat32Vectors()));
         allocator_->Deallocate(void_ptr(DatasetImpl::GetExtraInfos()));
@@ -546,6 +566,7 @@ DatasetImpl::~DatasetImpl() {  // NOLINT
         release_int64_metadata(ids, [](const int64_t* values) { delete[] values; });
         delete[] DatasetImpl::GetDistances();
         delete[] DatasetImpl::GetInt8Vectors();
+        delete[] DatasetImpl::GetBinaryVectors();
         delete[] DatasetImpl::GetFloat16Vectors();
         delete[] DatasetImpl::GetFloat32Vectors();
         delete[] DatasetImpl::GetExtraInfos();
@@ -628,6 +649,13 @@ DatasetImpl::DeepCopy(Allocator* allocator) const {
     if (this->GetFloat16Vectors() != nullptr) {
         copy_dataset->Float16Vectors(
             allocate_and_copy(this->GetFloat16Vectors(), num_elements * dim, allocator_ref));
+    }
+    if (this->GetBinaryVectors() != nullptr) {
+        // Binary rows hold ceil(dim / 8) bytes because dim counts bits.
+        copy_dataset->BinaryVectors(allocate_and_copy(
+            this->GetBinaryVectors(),
+            static_cast<uint64_t>(num_elements) * BinaryVectorBytes(static_cast<uint64_t>(dim)),
+            allocator_ref));
     }
 
     if (this->GetVectorCounts() != nullptr) {
@@ -946,6 +974,10 @@ DatasetImpl::Append(const DatasetPtr& other) {
     APPEND_DATA(INT8_VECTORS, int8_t*, Int8Vectors, dim);
     APPEND_DATA(FLOAT16_VECTORS, uint16_t*, Float16Vectors, dim);
     APPEND_DATA(FLOAT32_VECTORS, float*, Float32Vectors, dim);
+    APPEND_DATA(BINARY_VECTORS,
+                uint8_t*,
+                BinaryVectors,
+                static_cast<int64_t>(BinaryVectorBytes(static_cast<uint64_t>(dim))));
     APPEND_DATA(VECTOR_COUNTS, uint32_t*, VectorCounts, 1);
     for (const auto& key : uint32_metadata_keys) {
         auto iter = this->data_.find(key);

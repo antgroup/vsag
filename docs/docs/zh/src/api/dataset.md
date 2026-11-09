@@ -63,6 +63,7 @@ DatasetPtr DeepCopy(Allocator* allocator = nullptr) const;  // 独立副本
 | `Float32Vectors(const float*)` | `GetFloat32Vectors()` | `float` | `dtype: float32` |
 | `Float16Vectors(const uint16_t*)` | `GetFloat16Vectors()` | `uint16_t` | `dtype: float16` **及** `bfloat16`（原始 16 位负载） |
 | `Int8Vectors(const int8_t*)` | `GetInt8Vectors()` | `int8_t` | `dtype: int8` |
+| `BinaryVectors(const uint8_t*)` | `GetBinaryVectors()` | `uint8_t`，每个向量 `ceil(dim / 8)` 字节，bit 按 MSB-first 打包 | `dtype: binary`（见[二进制向量](../guide/binary_vectors.md)） |
 | `SparseVectors(const SparseVector*)` | `GetSparseVectors()` | [`SparseVector`](#sparsevector) | `dtype: sparse`（SINDI） |
 
 稠密向量按行主序排列：元素 `i` 的维度 `j` 位于 `vectors[i * dim + j]`。

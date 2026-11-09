@@ -156,6 +156,37 @@ build_default_hgraph_inner_param(const JsonType& external_json) {
     return json;
 }
 
+// Binary vectors are stored exactly by the binary quantizer: base, reorder and raw-vector codes
+// all use it, and quantizers that read numeric elements are rejected with an explicit message.
+void
+apply_binary_quantization(const JsonType& external_json, JsonType& inner_json) {
+    for (const char* key : {HGRAPH_BASE_QUANTIZATION_TYPE, HGRAPH_PRECISE_QUANTIZATION_TYPE}) {
+        if (not external_json.Contains(key)) {
+            continue;
+        }
+        const auto& value = external_json[key];
+        const auto name = value.IsString() ? value.GetString() : std::string("<non-string>");
+        CHECK_ARGUMENT(name == QUANTIZATION_TYPE_VALUE_BINARY,
+                       fmt::format("parameters[{}] must be {} when dtype is {}, got {}",
+                                   key,
+                                   QUANTIZATION_TYPE_VALUE_BINARY,
+                                   DATATYPE_BINARY,
+                                   name));
+    }
+    const bool rabitq_fused = external_json.Contains(HGRAPH_RABITQ_FUSED_DATACELL) and
+                              external_json[HGRAPH_RABITQ_FUSED_DATACELL].IsBool() and
+                              external_json[HGRAPH_RABITQ_FUSED_DATACELL].GetBool();
+    CHECK_ARGUMENT(not rabitq_fused,
+                   fmt::format("{} requires RaBitQ codes and does not support dtype {}",
+                               HGRAPH_RABITQ_FUSED_DATACELL,
+                               DATATYPE_BINARY));
+    const auto binary_json =
+        QuantizerParameter::CreateDefault(QUANTIZATION_TYPE_VALUE_BINARY)->ToJson();
+    inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(binary_json);
+    inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY].SetJson(binary_json);
+    inner_json[RAW_VECTOR_KEY][QUANTIZATION_PARAMS_KEY].SetJson(binary_json);
+}
+
 }  // namespace
 
 JsonType
@@ -384,6 +415,9 @@ ParamPtr
 HGraph::CheckAndMappingExternalParam(const JsonType& external_param,
                                      const IndexCommonParam& common_param) {
     auto inner_json = map_hgraph_param(external_param);
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_BINARY) {
+        apply_binary_quantization(external_param, inner_json);
+    }
     if (common_param.data_type_ == DataTypes::DATA_TYPE_SPARSE) {
         inner_json[BASE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);
         inner_json[PRECISE_CODES_KEY][CODES_TYPE_KEY].SetString(SPARSE_CODES);

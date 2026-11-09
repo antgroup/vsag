@@ -16,9 +16,9 @@ Every index accepts these top-level fields at build time. `dtype` and `metric_ty
 | Field | Values | Description |
 |-------|--------|-------------|
 | `dim` | positive integer | Vector dimensionality; cannot change after build |
-| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` | Scalar value type. `sparse` is retained for sparse-index compatibility. |
+| `dtype` | `float32` / `fp16` / `bf16` / `int8` / `sparse` / `binary` | Scalar value type. `sparse` is retained for sparse-index compatibility. `binary` stores bit-packed vectors and `dim` counts bits ([Binary Vectors](../guide/binary_vectors.md)). |
 | `repr` | `dense` / `sparse` / `multi_vector` | Optional data layout. When omitted, VSAG infers `sparse` from `dtype: "sparse"` and otherwise uses `dense`. |
-| `metric_type` | `l2` / `ip` / `cosine` | Distance metric |
+| `metric_type` | `l2` / `ip` / `cosine` / `hamming` | Distance metric; `hamming` and `dtype: binary` require each other |
 
 `dtype` and `repr` describe different properties: `dtype` is the scalar encoding, while `repr`
 is the record layout. `dtype: "sparse"` requires `repr: "sparse"` when `repr` is explicit.

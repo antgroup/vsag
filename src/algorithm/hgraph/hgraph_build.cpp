@@ -1429,7 +1429,7 @@ HGraph::InitFeatures() {
 
     if (name != QUANTIZATION_TYPE_VALUE_FP32 and name != QUANTIZATION_TYPE_VALUE_BF16 and
         name != QUANTIZATION_TYPE_VALUE_FP16 and name != QUANTIZATION_TYPE_VALUE_SQ8_LOCAL and
-        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
+        name != QUANTIZATION_TYPE_VALUE_SQ4_LOCAL and name != QUANTIZATION_TYPE_VALUE_BINARY) {
         this->index_feature_list_->SetFeature(IndexFeature::NEED_TRAIN);
     } else {
         this->index_feature_list_->SetFeatures({
@@ -1468,6 +1468,15 @@ HGraph::InitFeatures() {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_L2);
     } else if (metric_ == MetricType::METRIC_TYPE_COSINE) {
         this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_COSINE);
+    } else if (metric_ == MetricType::METRIC_TYPE_HAMMING) {
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_METRIC_TYPE_HAMMING);
+    }
+
+    if (name == QUANTIZATION_TYPE_VALUE_BINARY) {
+        // Binary codes are the exact input bits, so they double as raw vectors. Tune cannot swap
+        // them for a numeric quantizer, so it is reported as unsupported.
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_GET_RAW_VECTOR_BY_IDS);
+        this->index_feature_list_->SetFeature(IndexFeature::SUPPORT_TUNE, false);
     }
 
     if (this->extra_infos_ != nullptr) {

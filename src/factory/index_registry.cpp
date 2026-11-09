@@ -76,6 +76,21 @@ create_registered_index(const std::string& index_name,
                               "failed to create index(internal): null creator for ",
                               normalized_name);
     }
+    // Binary vectors need exact bit-packed storage and the Hamming kernels, which only the
+    // brute_force and hgraph indexes provide. Every other index rejects them up front.
+    const bool supports_binary =
+        normalized_name == INDEX_BRUTE_FORCE or normalized_name == INDEX_HGRAPH;
+    if (index_common_params.data_type_ == DataTypes::DATA_TYPE_BINARY and not supports_binary) {
+        LOG_ERROR_AND_RETURNS(ErrorType::INVALID_ARGUMENT,
+                              "failed to create index(invalid argument): dtype ",
+                              DATATYPE_BINARY,
+                              " is supported only by ",
+                              INDEX_BRUTE_FORCE,
+                              " and ",
+                              INDEX_HGRAPH,
+                              ", got ",
+                              normalized_name);
+    }
     return creator(parsed_params, index_common_params);
 }
 

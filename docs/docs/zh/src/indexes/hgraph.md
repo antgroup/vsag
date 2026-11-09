@@ -182,6 +182,7 @@ PiPNN 初始 `Build` 按 FP32 原始输入行的字节相等关系分组，每�
 | `int8`      | `int8_t` | `Int8Vectors`            | [`316_index_int8_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/316_index_int8_hgraph.cpp) |
 | `float16`   | `uint16_t`（按 IEEE 754 binary16 位模式打包） | `Float16Vectors` | [`321_index_fp16_hgraph.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/321_index_fp16_hgraph.cpp) |
 | `bfloat16`  | `uint16_t`（按 Brain Float 位模式打包） | `Float16Vectors`（与 FP16 共用） | 在 `321_index_fp16_hgraph.cpp` 基础上按下文调整                                                       |
+| `binary`    | `uint8_t`（按位压缩，每个向量 `ceil(dim / 8)` 字节；需要 `metric_type: hamming`） | `BinaryVectors` | [`115_index_binary_hamming.cpp`](https://github.com/antgroup/vsag/blob/main/examples/cpp/115_index_binary_hamming.cpp)，详见[二进制向量与 Hamming 距离](../guide/binary_vectors.md) |
 
 `dim` 始终表示逻辑维度（元素数量），与字节长度无关，因此四种数据类型下 `dim` 取值相同。
 

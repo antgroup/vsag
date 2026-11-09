@@ -52,7 +52,7 @@ auto result = index->KnnSearch(query, /*topk=*/10, "{}").value();
 
 ## 支持的输入数据类型
 
-当前公开的 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径仅接受 FP32 向量。运行时通过 `Dataset::Float32Vectors` 传入向量；创建索引时 `dtype` 应设为 `"float32"`，不支持 `dtype: "int8"`。
+当前公开的 `Build`、`Add`、`KnnSearch`、`RangeSearch` 与 `UpdateVector` 路径接受 FP32 向量（`dtype: "float32"`，通过 `Dataset::Float32Vectors` 传入），或按位压缩的二进制向量（`dtype: "binary"` 且 `metric_type: "hamming"`，通过 `Dataset::BinaryVectors` 传入）。二进制 BruteForce 索引原样保存 bit，返回精确的 Hamming k-NN 与范围搜索结果，详见[二进制向量与 Hamming 距离](../guide/binary_vectors.md)。不支持 `dtype: "int8"`。
 
 `base_quantization_type` 描述的是索引内部编码和存储，而非输入类型。选择内部 `fp16`、`bf16` 等量化器不会使 API 接受 FP16/BF16 输入。
 

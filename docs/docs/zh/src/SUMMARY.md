@@ -10,6 +10,7 @@
 - [查询统计信息](guide/search_statistics.md)
 - [C API](guide/c_api.md)
 - [pyvsag](guide/pyvsag.md)
+- [二进制向量与 Hamming 距离](guide/binary_vectors.md)
 
 # 索引
 
@@ -94,6 +95,7 @@
 - [优化器](advanced/optimizer.md)
 - [标准环境性能参考](resources/performance.md)
 - [性能评估工具](resources/eval.md)
+- [Hamming kernel 基准测试](resources/hamming_benchmark.md)
 - [AutoTune 工具](resources/autotune.md)
   - [AutoTune V1 CLI JSON 契约](resources/autotune_api_v1.md)
 - [HDF5 数据集格式](resources/dataset_format.md)

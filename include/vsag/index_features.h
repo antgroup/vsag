@@ -90,6 +90,7 @@ enum IndexFeature {
     SUPPORT_CONTINUE_SEARCH_SESSION, /**< Supports owning continuation sessions */
     SUPPORT_GET_STATS,               /**< Supports static index analysis via GetStats */
     SUPPORT_ANALYZE_INDEX_BY_SEARCH, /**< Supports query-based index analysis */
+    SUPPORT_METRIC_TYPE_HAMMING,     /**< Supports the Hamming metric over binary vectors */
 
     INDEX_FEATURE_COUNT /** must be last one */
 };
