@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       heavy: ${{ steps.policy.outputs.heavy }}
+      python: ${{ steps.policy.outputs.python }}
       lint: ${{ steps.policy.outputs.lint }}
       pattern: ${{ steps.policy.outputs.pattern }}
     steps:
@@ -358,6 +359,7 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
           REQUIRED: ${{ (needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')) && '["platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-aarch64"]' || '["platforms-build-asan-x86", "platforms-build-asan-aarch64", "platforms-build-asan-macos-arm64", "platforms-test-asan-x86", "platforms-test-asan-aarch64", "platforms-test-asan-macos-arm64", "platforms-test-example-x86", "platforms-test-example-aarch64"]' }}
         run: python3 scripts/ci/check_job_results.py
+  # Main-push Python is paused until #3295 upgrades packaging; manual/version checks remain.
   python-build-python-wheel-x86:
     name: Python Wheel Build X86
     runs-on: ubuntu-24.04
@@ -373,9 +375,9 @@ jobs:
     needs:
       - entry-scope
       - changes
-    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
+    if: ${{ needs.changes.outputs.python != 'false' && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true) }}
   python-build-python-wheel-aarch64:
-    if: ${{ (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'))) }}
+    if: ${{ needs.changes.outputs.python != 'false' && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'))) }}
     name: Python Wheel Build Aarch64
     runs-on: ubuntu-24.04-arm
     concurrency:
@@ -409,9 +411,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/python-build-and-test-test-python-x86
         id: execute
-    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-build-python-wheel-x86.result == 'success' }}
+    if: ${{ needs.changes.outputs.python != 'false' && ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-build-python-wheel-x86.result == 'success' }}
   python-test-python-aarch64:
-    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')))) && needs.python-build-python-wheel-aarch64.result == 'success' }}
+    if: ${{ needs.changes.outputs.python != 'false' && ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (!(needs.entry-scope.outputs.profile == 'full-branch' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch')))) && needs.python-build-python-wheel-aarch64.result == 'success' }}
     name: Test Python Aarch64
     needs:
       - entry-scope
@@ -444,10 +446,10 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/python-build-and-test-clean-up
         id: execute
-    if: ${{ ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-test-python-x86.result == 'success' && needs.python-test-python-aarch64.result == 'success' }}
+    if: ${{ needs.changes.outputs.python != 'false' && ((!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) && (true)) && needs.python-test-python-x86.result == 'success' && needs.python-test-python-aarch64.result == 'success' }}
   python:
     name: Python result
-    if: ${{ always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) }}
+    if: ${{ needs.changes.outputs.python != 'false' && always() && (!cancelled() && (needs.entry-scope.result == 'success' && (needs.entry-scope.outputs.profile == 'python' || (needs.entry-scope.outputs.profile == 'full-branch' && ((needs.entry-scope.outputs.version == 'true' && needs.entry-scope.outputs.non_docs == 'true') || needs.changes.outputs.heavy == 'true'))))) }}
     needs:
       - entry-scope
       - changes
