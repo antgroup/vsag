@@ -128,7 +128,7 @@ TEST_CASE("FlattenDataCell prefetch stride follows storage type", "[ut][FlattenD
     using Quantizer = FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>;
     FlattenDataCell<Quantizer, FixedLayout<MemoryIO>> memory_cell;
     FlattenDataCell<Quantizer, FailingBatchLayout> file_cell;
-    REQUIRE(memory_cell.prefetch_stride_code_ == 16);
+    REQUIRE(memory_cell.prefetch_stride_code_ == 6);
     REQUIRE(file_cell.prefetch_stride_code_ == 1);
 }
 

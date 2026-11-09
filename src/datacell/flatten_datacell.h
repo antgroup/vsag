@@ -41,7 +41,7 @@ class FlattenDataCell : public FlattenInterface {
 public:
     FlattenDataCell() : layout_(std::make_shared<LayoutTmpl>()) {
         if constexpr (LayoutTmpl::InMemory) {
-            this->prefetch_stride_code_ = 16;
+            this->prefetch_stride_code_ = 6;
         }
     }
 
@@ -304,10 +304,10 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::FlattenDataCell(const QuantizerParamPtr&
     this->common_param_ = common_param;
     this->quantizer_ = std::make_shared<QuantTmpl>(quantization_param, common_param);
     this->code_size_ = quantizer_->GetCodeSize();
-    // Prefetching 16 codes ahead only pays off while each code spans a few cache lines.
+    // Prefetching 6 codes ahead only pays off while each code spans a few cache lines.
     if constexpr (LayoutTmpl::InMemory) {
         if (this->code_size_ <= 256) {
-            this->prefetch_stride_code_ = 16;
+            this->prefetch_stride_code_ = 6;
         }
     }
     this->layout_ = std::make_shared<LayoutTmpl>(this->code_size_, io_param, common_param);
