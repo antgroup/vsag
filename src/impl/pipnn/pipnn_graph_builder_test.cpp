@@ -588,8 +588,10 @@ TEST_CASE("PiPNN pruning scratch does not retain neighbors from another source",
 TEST_CASE("PiPNN small leaf candidates match exhaustive directed selection", "[ut][pipnn]") {
     const auto metric =
         GENERATE(vsag::MetricType::METRIC_TYPE_L2SQR, vsag::MetricType::METRIC_TYPE_IP);
-    const uint64_t count = GENERATE(2, 6, 7, 17, 18, 63, 64, 65, 96, 127, 128, 129);
-    const uint64_t requested = GENERATE(1, 5, 16, 17);
+    // Exercise partial/full 32-candidate prefilter blocks, including the K=5 seed offset.
+    const uint64_t count =
+        GENERATE(2, 6, 7, 17, 18, 31, 32, 33, 36, 37, 38, 63, 64, 65, 96, 127, 128, 129);
+    const uint64_t requested = GENERATE(1, 2, 3, 4, 5, 10, 15, 16, 17);
     const bool coincident = GENERATE(false, true);
     CAPTURE(metric, count, requested, coincident);
     auto common = MakeCommonParam(1, metric);
