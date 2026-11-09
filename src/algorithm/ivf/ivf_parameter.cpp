@@ -192,6 +192,15 @@ IVFSearchParameters::FromJson(const std::string& json_string) {
         }
     }
 
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_ENABLE_GPU_SEARCH)) {
+        obj.enable_gpu_search =
+            params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_ENABLE_GPU_SEARCH].GetBool();
+    }
+    if (params[INDEX_TYPE_IVF].Contains(IVF_SEARCH_PARAM_GPU_MIN_BATCH)) {
+        obj.gpu_min_batch = params[INDEX_TYPE_IVF][IVF_SEARCH_PARAM_GPU_MIN_BATCH].GetInt();
+        CHECK_ARGUMENT(obj.gpu_min_batch > 0, "gpu_min_batch must be positive");
+    }
+
     return obj;
 }
 }  // namespace vsag

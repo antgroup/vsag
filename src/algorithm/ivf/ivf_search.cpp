@@ -31,6 +31,7 @@
 
 #include "attr/argparse.h"
 #include "attr/executor/executor.h"
+#include "datacell/rabitq_split_bucket_datacell.h"
 #include "dataset_impl.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/inner_search_param.h"
@@ -102,6 +103,8 @@ IVF::create_search_param(const std::string& parameters, const FilterPtr& filter)
     param.first_order_scan_ratio = search_param.first_order_scan_ratio;
     param.parallel_search_thread_count = search_param.parallel_search_thread_count;
     param.ef = static_cast<uint64_t>(search_param.ef_search);
+    param.enable_gpu_search = search_param.enable_gpu_search;
+    param.gpu_min_batch = search_param.gpu_min_batch;
     if (search_param.enable_time_record) {
         param.time_cost = std::make_shared<Timer>();
         param.time_cost->SetThreshold(search_param.timeout_ms);
@@ -693,6 +696,70 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         if (not request.bucket_ids_.empty()) {
             base_request.bucket_ids_.clear();
         }
+        std::vector<std::vector<int64_t>> routed_bucket_ids;
+        if (request.bucket_ids_.empty() and param.enable_gpu_search) {
+            auto routed =
+                partition_strategy_->ClassifyDatasForSearch(query_data, num_queries, param, &ctx);
+            const auto buckets_per_query = static_cast<uint64_t>(param.scan_bucket_size);
+            if (routed.size() == static_cast<uint64_t>(num_queries) * buckets_per_query) {
+                routed_bucket_ids.resize(num_queries);
+                for (int64_t query_idx = 0; query_idx < num_queries; ++query_idx) {
+                    const auto offset = static_cast<uint64_t>(query_idx) * buckets_per_query;
+                    routed_bucket_ids[query_idx].assign(routed.data() + offset,
+                                                        routed.data() + offset + buckets_per_query);
+                }
+            }
+        }
+        auto* gpu_bucket = dynamic_cast<RaBitQSplitBucketDataCell*>(this->bucket_.get());
+        const bool gpu_rabitq_eligible =
+            gpu_bucket != nullptr and param.enable_gpu_search and
+            num_queries >= param.gpu_min_batch and not routed_bucket_ids.empty() and
+            filter == nullptr and not request.enable_attribute_filter_ and
+            request.bucket_ids_.empty() and not request.threshold_.has_value() and use_reorder_ and
+            param.enable_reorder and buckets_per_data_ == 1;
+        if (gpu_rabitq_eligible) {
+            const auto nprobe = static_cast<uint32_t>(param.scan_bucket_size);
+            const float requested_candidates = param.factor * static_cast<float>(request.topk_);
+            const bool gpu_candidate_count_valid =
+                request.topk_ <= 64 and
+                requested_candidates >= static_cast<float>(request.topk_) and
+                requested_candidates <= 64.0F;
+            const auto candidate_count =
+                gpu_candidate_count_valid ? static_cast<uint32_t>(requested_candidates) : 0U;
+            std::vector<int32_t> flat_bucket_ids(static_cast<uint64_t>(num_queries) * nprobe);
+            for (int64_t query_idx = 0; query_idx < num_queries; ++query_idx) {
+                std::copy_n(routed_bucket_ids[query_idx].data(),
+                            nprobe,
+                            flat_bucket_ids.data() + static_cast<uint64_t>(query_idx) * nprobe);
+            }
+            std::vector<uint64_t> gpu_inner_ids(total_slots, std::numeric_limits<uint64_t>::max());
+            if (gpu_candidate_count_valid and
+                gpu_bucket->GpuBatchSearch(query_data,
+                                           static_cast<uint64_t>(num_queries),
+                                           flat_bucket_ids.data(),
+                                           nprobe,
+                                           candidate_count,
+                                           static_cast<uint32_t>(request.topk_),
+                                           gpu_inner_ids.data(),
+                                           distances,
+                                           this->gpu_device_id_,
+                                           this->gpu_memory_budget_)) {
+                for (int64_t slot = 0; slot < total_slots; ++slot) {
+                    if (gpu_inner_ids[slot] != std::numeric_limits<uint64_t>::max()) {
+                        ids[slot] = label_table_->GetLabelById(
+                            static_cast<InnerIdType>(gpu_inner_ids[slot]));
+                    }
+                }
+                auto result = Dataset::Make()
+                                  ->NumElements(num_queries)
+                                  ->Dim(request.topk_)
+                                  ->Ids(ids)
+                                  ->Distances(distances)
+                                  ->Owner(true, alloc);
+                result->Statistics(stats.Dump());
+                return result;
+            }
+        }
         auto search_func = [&](int64_t query_idx) -> void {
             auto one_query = Dataset::Make();
             one_query->NumElements(1)
@@ -704,6 +771,8 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
             one_request.query_ = one_query;
             if (not request.bucket_ids_.empty()) {
                 one_request.bucket_ids_ = {request.bucket_ids_[query_idx]};
+            } else if (not routed_bucket_ids.empty()) {
+                one_request.bucket_ids_ = {routed_bucket_ids[query_idx]};
             }
             JsonType json = JsonType::Parse(base_request.params_str_);
             if (json.Contains("ivf")) {
