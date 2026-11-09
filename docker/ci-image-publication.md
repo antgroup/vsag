@@ -1,10 +1,12 @@
 # CI image publication on 1.0
 
-After the first successful publish, verify the platform lists for
-`ci-v1.0-base`, `ci-v1.0-openblas` (amd64 and arm64) and
-`ci-v1.0-mkl` (amd64 only), then switch consumers in a separate PR.
-Until that switch lands, consumers still use the shared legacy tags.
-Avoid Dockerfile changes in this interval.
+Workflow consumers now use the release-line tags published by this workflow:
+`ci-v1.0-base` and `ci-v1.0-openblas` provide native amd64 and arm64 images;
+`ci-v1.0-mkl` is amd64-only. Jobs select the native platform through their
+existing runner architecture. Images are published to Docker Hub at
+`vsaglib/vsag`; consumer workflows no longer use the shared architecture tags.
+Daily build and test jobs use the workflow event SHA so manual 1.0 runs do not
+mix main sources with the release-line toolchain.
 
 Registry maintainers own retention of `ci-v1.0-*-run-<id>-<arch>` tags,
 including leftovers from failed builds. Keep tags for any run that may still
