@@ -4429,3 +4429,184 @@ TEST_CASE("IVF builds with the documented GPU configuration", "[ft][ivf][pr]") {
         REQUIRE(ids_of(reloaded_result.value(), topk) == ids);
     }
 }
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF balanced_kmeans builds balanced buckets",
+                             "[ft][ivf][pr]") {
+    constexpr int64_t dim = 32;
+    constexpr int buckets_count = 37;
+    constexpr int64_t base_count = 1000;  // 37 * 27 + 1
+    const std::string metric = GENERATE("l2", "ip", "cosine");
+    const std::string quantizer = GENERATE("fp32", "sq8");
+    // Trained on a sample or on the whole base; either way the Build assigns every
+    // vector to the trained centroids under exact sizes.
+    const int64_t sample_count = GENERATE(512, 1000);
+    CAPTURE(metric, quantizer, sample_count);
+
+    auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        metric, dim, quantizer, buckets_count, "balanced_kmeans", false, 1, false, 1, sample_count);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    auto dataset = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, base_count, metric);
+    fixtures::TestIndex::TestBuildIndex(index, dataset, true);
+
+    // Every bucket holds floor(n / k) or ceil(n / k) vectors.
+    auto stats = nlohmann::json::parse(index->GetStats());
+    REQUIRE(stats["bucket_count"].get<int64_t>() == buckets_count);
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == base_count / buckets_count);
+    REQUIRE(stats["bucket_num"]["max"].get<float>() == base_count / buckets_count + 1);
+
+    // Every vector is reachable: scanning all buckets matches a brute-force search.
+    const auto search_param = fmt::format(fixtures::search_param_tmp, buckets_count);
+    fixtures::IVFTestIndex::TestGeneral(
+        index, dataset, search_param, quantizer == "fp32" ? 0.99F : 0.9F);
+
+    // The trainer is recorded with the index and kept by a round trip.
+    auto serialized = index->Serialize();
+    REQUIRE(serialized.has_value());
+    auto restored = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(restored->Deserialize(serialized.value()).has_value());
+    auto restored_stats = nlohmann::json::parse(restored->GetStats());
+    REQUIRE(restored_stats["bucket_num"] == stats["bucket_num"]);
+}
+
+TEST_CASE_PERSISTENT_FIXTURE(fixtures::IVFTestIndex,
+                             "IVF balanced_kmeans builds fewer vectors than buckets on a model",
+                             "[ft][ivf][pr]") {
+    constexpr int64_t dim = 16;
+    constexpr int buckets_count = 64;
+    constexpr int64_t batch_count = 32;
+    const auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "fp32", buckets_count, "balanced_kmeans", false, 1, false, 1, 1024);
+    auto train = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, 1024, "l2");
+    auto batch = fixtures::IVFTestIndex::pool.GetDatasetAndCreate(dim, batch_count, "l2");
+    // Fewer vectors than buckets: every vector gets a bucket of its own.
+    auto require_own_buckets = [&](const vsag::IndexPtr& index) {
+        REQUIRE(index->GetNumElements() == batch_count);
+        auto stats = nlohmann::json::parse(index->GetStats());
+        REQUIRE(stats["bucket_num"]["min"].get<float>() == 0);
+        REQUIRE(stats["bucket_num"]["max"].get<float>() == 1);
+    };
+
+    // Trained on many vectors, then built from a small batch.
+    auto trained = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(trained->Train(train->base_).has_value());
+    REQUIRE(trained->Build(batch->base_).has_value());
+    require_own_buckets(trained);
+
+    // A small shard built from an exported model.
+    auto source = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(source->Build(train->base_).has_value());
+    auto model = source->ExportModel();
+    REQUIRE(model.has_value());
+    REQUIRE(model.value()->Build(batch->base_).has_value());
+    require_own_buckets(model.value());
+}
+
+TEST_CASE("IVF balanced_kmeans trains residual codes on the buckets it builds", "[ft][ivf][pr]") {
+    // 300 zero vectors and 100 at 100 in every dimension, in two buckets of 200: one
+    // holds 200 zeros, the other the remaining 100 zeros and the far vectors, so those
+    // zeros sit 50 below their centroid in every dimension. Residual codes trained on
+    // nearest-bucket residuals cover only [0, 50] and turned those zeros into 50s.
+    constexpr int64_t dim = 8;
+    constexpr int64_t zeros = 300;
+    constexpr int64_t far = 100;
+    std::vector<float> vectors((zeros + far) * dim, 0.0F);
+    std::fill(vectors.begin() + zeros * dim, vectors.end(), 100.0F);
+    std::vector<int64_t> ids(zeros + far);
+    for (int64_t i = 0; i < zeros + far; ++i) {
+        ids[i] = i;
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(zeros + far)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    const auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "sq8", 2, "balanced_kmeans", true);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+    auto stats = nlohmann::json::parse(index->GetStats());
+    REQUIRE(stats["bucket_num"]["min"].get<float>() == 200);
+
+    std::vector<float> origin(dim, 0.0F);
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(origin.data())->Owner(false);
+    auto result = index->KnnSearch(query, zeros, fmt::format(fixtures::search_param_tmp, 2));
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == zeros);
+    for (int64_t i = 0; i < zeros; ++i) {
+        REQUIRE(result.value()->GetIds()[i] < zeros);
+        REQUIRE(result.value()->GetDistances()[i] < 1.0F);
+    }
+}
+
+TEST_CASE("IVF balanced_kmeans residual codes cover a later Add", "[ft][ivf][pr]") {
+    // 200 zero vectors, 100 at x = 10 and 100 at x = 10, y = 200, in two buckets of 200:
+    // the zeros in one, centroid 0, the others in the other, centroid (10, 100). Every
+    // balanced residual has x = 0, but Add routes a copy of (10, 0) to the zeros' bucket,
+    // where its residual has x = 10; codes trained on balanced residuals alone cannot
+    // hold that and decoded it as 0.
+    constexpr int64_t dim = 8;
+    constexpr int64_t zeros = 200;
+    constexpr int64_t each = 100;
+    constexpr int64_t count = zeros + 2 * each;
+    std::vector<float> vectors(count * dim, 0.0F);
+    std::vector<int64_t> ids(count);
+    for (int64_t i = 0; i < count; ++i) {
+        ids[i] = i;
+        vectors[i * dim] = i < zeros ? 0.0F : 10.0F;
+        vectors[i * dim + 1] = i < zeros + each ? 0.0F : 200.0F;
+    }
+    auto base = vsag::Dataset::Make();
+    base->NumElements(count)
+        ->Dim(dim)
+        ->Ids(ids.data())
+        ->Float32Vectors(vectors.data())
+        ->Owner(false);
+    const auto param = fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", dim, "sq8", 2, "balanced_kmeans", true);
+    auto index = fixtures::TestIndex::TestFactory(fixtures::IVFTestIndex::name, param, true);
+    REQUIRE(index->Build(base).has_value());
+
+    // The partition this test is about: one bucket holds exactly the zeros.
+    std::vector<float> origin(dim, 0.0F);
+    auto zero_query = vsag::Dataset::Make();
+    zero_query->NumElements(1)->Dim(dim)->Float32Vectors(origin.data())->Owner(false);
+    auto zero_result =
+        index->KnnSearch(zero_query, zeros, fmt::format(fixtures::search_param_tmp, 1));
+    REQUIRE(zero_result.has_value());
+    REQUIRE(zero_result.value()->GetDim() == zeros);
+    for (int64_t i = 0; i < zeros; ++i) {
+        REQUIRE(zero_result.value()->GetIds()[i] < zeros);
+    }
+
+    int64_t later_id = count;
+    std::vector<float> later(vectors.begin() + zeros * dim, vectors.begin() + (zeros + 1) * dim);
+    auto added = vsag::Dataset::Make();
+    added->NumElements(1)->Dim(dim)->Ids(&later_id)->Float32Vectors(later.data())->Owner(false);
+    REQUIRE(index->Add(added).has_value());
+
+    auto query = vsag::Dataset::Make();
+    query->NumElements(1)->Dim(dim)->Float32Vectors(later.data())->Owner(false);
+    auto result = index->KnnSearch(query, count + 1, fmt::format(fixtures::search_param_tmp, 2));
+    REQUIRE(result.has_value());
+    bool found = false;
+    for (int64_t i = 0; i < result.value()->GetDim(); ++i) {
+        if (result.value()->GetIds()[i] == later_id) {
+            found = true;
+            REQUIRE(std::abs(result.value()->GetDistances()[i]) < 1.0F);
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("IVF rejects unknown trainers", "[ft][ivf][pr]") {
+    auto params = nlohmann::json::parse(fixtures::IVFTestIndex::GenerateIVFBuildParametersString(
+        "l2", 16, "fp32", 8, "balanced_kmeans", false, 1, false, 1, 512));
+    params["index_param"]["ivf_train_type"] = "balanced";
+    auto result = vsag::Factory::CreateIndex(fixtures::IVFTestIndex::name, params.dump());
+    REQUIRE_FALSE(result.has_value());
+    REQUIRE(result.error().type == vsag::ErrorType::INVALID_ARGUMENT);
+    REQUIRE(result.error().message.find("balanced_kmeans") != std::string::npos);
+}

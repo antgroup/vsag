@@ -395,6 +395,8 @@ TEST_CASE("IVF Parameters CheckCompatibility", "[ut][IVFParameter][CheckCompatib
         "ivf partition_strategy_type", partition_strategy_type, "ivf", "gno_imi", false);
     TEST_COMPATIBILITY_CASE("ivf ivf_train_type", ivf_train_type, "kmeans", "random", true);
     TEST_COMPATIBILITY_CASE(
+        "ivf balanced ivf_train_type", ivf_train_type, "kmeans", "balanced_kmeans", true);
+    TEST_COMPATIBILITY_CASE(
         "ivf precise_codes_layout", precise_codes_layout, "flat", "bucket", false);
     TEST_COMPATIBILITY_CASE("ivf buckets_per_data", buckets_per_data, 3, 2, false);
     TEST_COMPATIBILITY_CASE("ivf use_attribute_filter", use_attribute_filter, true, false, false);
@@ -902,4 +904,44 @@ TEST_CASE("IVF maps SAQ parameters", "[ut][IVFParameter][SAQ]") {
     REQUIRE(quantization["saq_avg_bits"].GetFloat() == 5.0F);
     REQUIRE(quantization["saq_segment_count"].GetUint64() == 2);
     REQUIRE_FALSE(quantization["saq_random_rotation"].GetBool());
+}
+
+TEST_CASE("IVF maps the balanced_kmeans trainer", "[ut][IVFParameter]") {
+    vsag::IndexCommonParam common_param;
+    common_param.dim_ = 64;
+    common_param.data_type_ = vsag::DataTypes::DATA_TYPE_FLOAT;
+
+    // The external key reaches the partition strategy and survives a round trip.
+    auto external_param = vsag::JsonType::Parse(R"({
+        "partition_strategy_type": "ivf",
+        "ivf_train_type": "balanced_kmeans",
+        "kmeans_iter_count": 7
+    })");
+    auto param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+        vsag::IVF::CheckAndMappingExternalParam(external_param, common_param));
+    REQUIRE(param != nullptr);
+    const auto& strategy = param->ivf_partition_strategy_parameter;
+    REQUIRE(strategy->partition_train_type ==
+            vsag::IVFNearestPartitionTrainerType::BalancedKMeansTrainer);
+    REQUIRE(strategy->GetKMeansIterCount() == 7);
+    REQUIRE(param->ToJson()[vsag::IVF_PARTITION_STRATEGY_PARAMS_KEY][vsag::IVF_TRAIN_TYPE_KEY]
+                .GetString() == "balanced_kmeans");
+    vsag::ParameterTest::TestToJson(param);
+
+    // Without the key the trainer stays kmeans.
+    auto default_param = std::dynamic_pointer_cast<vsag::IVFParameter>(
+        vsag::IVF::CheckAndMappingExternalParam(vsag::JsonType::Parse("{}"), common_param));
+    REQUIRE(default_param->ivf_partition_strategy_parameter->partition_train_type ==
+            vsag::IVFNearestPartitionTrainerType::KMeansTrainer);
+
+    // Unknown trainers and a balanced GNO-IMI are refused.
+    REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(
+        vsag::JsonType::Parse(R"({"ivf_train_type": "balanced"})"), common_param));
+    REQUIRE_THROWS(vsag::IVF::CheckAndMappingExternalParam(vsag::JsonType::Parse(R"({
+            "partition_strategy_type": "gno_imi",
+            "ivf_train_type": "balanced_kmeans",
+            "first_order_buckets_count": 10,
+            "second_order_buckets_count": 10
+        })"),
+                                                           common_param));
 }
