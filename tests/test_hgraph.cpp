@@ -61,6 +61,7 @@ public:
     bool sample{true};
     uint64_t query_count{100};
     uint64_t disk_graph_io_start{0};
+    int64_t disk_case_index{-1};
     fixtures::budget::CaseIdentity identity;
     std::vector<std::pair<std::string, std::string>> tune_cases;
     std::shared_ptr<const budget::CasePlan> budget_plan;
@@ -232,8 +233,14 @@ ForEachHGraphDiskIOCase(const HGraphResourcePtr& resource, Callback callback) {
     auto select_idx = resource->disk_graph_io_start;
     for (const auto& metric : resource->metric_types) {
         for (const auto dim : resource->dims) {
-            for (const auto& [memory_io, disk_io] : HGraphDiskIOCases(dim)) {
-                callback(metric, dim, memory_io, disk_io, hgraph_graph_io_types.at(select_idx));
+            const auto cases = HGraphDiskIOCases(dim);
+            for (uint64_t i = 0; i < cases.size(); ++i) {
+                const auto& [memory_io, disk_io] = cases[i];
+                if (resource->disk_case_index < 0 ||
+                    i == static_cast<uint64_t>(resource->disk_case_index)) {
+                    callback(metric, dim, memory_io, disk_io, hgraph_graph_io_types.at(select_idx));
+                }
+                // Advance even across unselected entries, retaining the original backend mapping.
                 select_idx = (select_idx + 1) % hgraph_graph_io_types.size();
             }
         }
@@ -260,8 +267,8 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
                 disk_graph_io_start = (disk_graph_io_start + HGraphDiskIOCases(dim).size()) %
                                       hgraph_graph_io_types.size();
             }
-            // These helpers consume test_cases directly. Keep fixed-matrix and disk
-            // helpers intact so their backend sequence and special contracts remain unchanged.
+            // These helpers consume test_cases directly. Fixed matrices retain their
+            // special contracts; disk tuples use the original backend cursor above.
             const auto title = HGraphCaseTitle(resource->identity);
             const bool split_quantizers =
                 title == "HGraph Build Test" || title == "HGraph Clone" ||
@@ -271,8 +278,18 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
                 title == "HGraph Export Model" || title == "HGraph Mark Remove" ||
                 title == "HGraph Search Over Time" || title == "HGraph Merge" ||
                 title == "HGraph Hops Limit" || title == "HGraph Duplicate Build" ||
-                title == "HGraph Estimate Memory And Get Memory Usage";
-            if (title == "HGraph Tune") {
+                title == "HGraph Estimate Memory And Get Memory Usage" ||
+                title == "HGraph Reverse Edges" || title == "HGraph ODescent Build" ||
+                title == "HGraph Serialize File" || title == "HGraph Multi-Query Range Search" ||
+                title == "HGraph Concurrent Add Search Remove" ||
+                title == "HGraph With Extra Info" || title == "HGraph Compressed Graph Build";
+            if (disk_io) {
+                for (uint64_t i = 0; i < HGraphDiskIOCases(dim).size(); ++i) {
+                    auto part = group;
+                    part["disk_case_index"] = i;
+                    groups.push_back(std::move(part));
+                }
+            } else if (title == "HGraph Tune") {
                 for (uint64_t i = 0; i < resource->tune_cases.size(); ++i) {
                     auto part = group;
                     part["tune_index"] = i;
@@ -302,6 +319,7 @@ SelectHGraphDailyGroup(const HGraphResourcePtr& resource, const nlohmann::json& 
     }
     if (HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index") {
         resource->disk_graph_io_start = selected.at("disk_graph_io_start").get<uint64_t>();
+        resource->disk_case_index = selected.at("disk_case_index").get<int64_t>();
     }
     if (selected.contains("quantizer_index")) {
         resource->test_cases = {
@@ -595,6 +613,68 @@ ApplyHGraphBudget(const HGraphResourcePtr& resource) {
     }
 }
 
+// Coverage instruments hot distance/pruning paths with atomic counters. Keep these
+// functional contracts at a small dataset size; ASan and TSan retain their workloads.
+void
+BoundDailyCoverage(const HGraphResourcePtr& resource, bool coverage) {
+    const auto title = HGraphCaseTitle(resource->identity);
+    if (!coverage || !resource->sample || resource->identity.name != "(PR) " + title ||
+        (title != "HGraph Duplicate Build" && title != "HGraph Export Model" &&
+         title != "HGraph Search Over Time")) {
+        return;
+    }
+    // 256 also preserves the PQ training floor. Do not change dimensions, metrics,
+    // quantizers, query counts, construction threads, or any correctness assertion.
+    resource->base_count = std::min(resource->base_count, uint64_t{256});
+}
+
+TEST_CASE("Daily coverage bounds only expensive HGraph functional workloads",
+          "[ft][hgraph][daily_plan][test_budget]") {
+    const auto title = GENERATE("HGraph Duplicate Build",
+                                "HGraph Export Model",
+                                "HGraph Search Over Time",
+                                "HGraph Concurrent Add",
+                                "HGraph Build Test");
+    const bool enabled = GENERATE(false, true);
+    const bool sample = GENERATE(false, true);
+    auto resource = std::make_shared<HGraphTestResource>();
+    resource->sample = sample;
+    resource->identity.name = std::string(sample ? "(PR) " : "(Daily) ") + title;
+    resource->base_count = 600;
+    resource->dims = {64, 1536};
+    resource->metric_types = {"l2", "cosine"};
+    resource->test_cases = HGraphTestIndex::all_test_cases;
+    resource->query_count = 100;
+    const bool bounded = enabled && sample &&
+                         (std::string(title) == "HGraph Duplicate Build" ||
+                          std::string(title) == "HGraph Export Model" ||
+                          std::string(title) == "HGraph Search Over Time");
+    BoundDailyCoverage(resource, enabled);
+    REQUIRE(resource->base_count == (bounded ? 256 : 600));
+    REQUIRE(resource->dims == std::vector<int>{64, 1536});
+    REQUIRE(resource->metric_types == std::vector<std::string>{"l2", "cosine"});
+    REQUIRE(resource->test_cases == HGraphTestIndex::all_test_cases);
+    REQUIRE(resource->query_count == 100);
+}
+
+// Daily concurrency protects interleavings, not a large-dimensional throughput target.
+// Full-size stress remains available without the Daily planner (including release runs).
+void
+BoundDailyConcurrency(const HGraphResourcePtr& resource, bool planned_daily) {
+    const auto title = HGraphCaseTitle(resource->identity);
+    if (!planned_daily || resource->sample || resource->identity.name.rfind("(Daily) ", 0) != 0 ||
+        (title != "HGraph Concurrent Add" && title != "HGraph Concurrent Add Search Remove")) {
+        return;
+    }
+    resource->base_count = std::min(resource->base_count, uint64_t{512});
+    for (auto& dim : resource->dims) {
+        dim = std::min(dim, 256);
+    }
+    std::sort(resource->dims.begin(), resource->dims.end());
+    resource->dims.erase(std::unique(resource->dims.begin(), resource->dims.end()),
+                         resource->dims.end());
+}
+
 }  // namespace
 
 HGraphResourcePtr
@@ -634,9 +714,15 @@ HGraphTestIndex::GetResource(bool sample,
     if (title == "HGraph Search Empty Index") {
         resource->dims = SelectHGraphValues(fixtures::get_common_used_dims(), 1, seed + 3);
     }
+    BoundDailyConcurrency(resource,
+                          std::getenv("VSAG_DAILY_ENUMERATE") != nullptr ||
+                              std::getenv("VSAG_DAILY_HGRAPH") != nullptr);
+    BoundDailyCoverage(resource,
+                       std::getenv("VSAG_DAILY_COVERAGE") != nullptr &&
+                           std::string(std::getenv("VSAG_DAILY_COVERAGE")) == "1");
     ApplyHGraphBudget(resource);
-    // Keep the original whole-case workload size and assertions. Rotation splits
-    // metric/dimension/quantizer groups; the inventory retains every legal tuple.
+    // Rotation retains every tuple in the effective workload. Only opt-in Daily
+    // concurrency uses bounded shapes; ordinary full/release invocation is unchanged.
     if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
         const auto groups = HGraphDailyGroups(resource);
         if (const auto* path = std::getenv("VSAG_DAILY_ENUMERATE")) {
@@ -1502,7 +1588,15 @@ TEST_CASE("HGraph Daily quantizer splitting preserves the complete tuple invento
           "[ft][hgraph][test_budget][daily_plan][pr]") {
     using namespace fixtures;
     auto whole = std::make_shared<HGraphTestResource>();
-    whole->identity = {"(Daily) HGraph Build Test", "", __FILE__, 0};
+    const auto title = GENERATE("HGraph Build Test",
+                                "HGraph Reverse Edges",
+                                "HGraph ODescent Build",
+                                "HGraph Serialize File",
+                                "HGraph Multi-Query Range Search",
+                                "HGraph Concurrent Add Search Remove",
+                                "HGraph With Extra Info",
+                                "HGraph Compressed Graph Build");
+    whole->identity = {std::string("(Daily) ") + title, "", __FILE__, 0};
     whole->base_count = 1000;
     whole->query_count = 100;
     whole->metric_types = {"l2", "ip"};
@@ -1573,12 +1667,14 @@ TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequenc
     }
     ForEachHGraphDiskIOCase(whole, [&](const auto&... args) { unsplit.emplace_back(args...); });
     const auto groups = HGraphDailyGroups(whole);
-    REQUIRE(groups.size() == 8);
+    REQUIRE(groups.size() == expected.size());
     for (const auto& group : groups) {
         auto selected = std::make_shared<HGraphTestResource>(*whole);
         SelectHGraphDailyGroup(selected, group);
+        const auto before = split.size();
         ForEachHGraphDiskIOCase(selected,
                                 [&](const auto&... args) { split.emplace_back(args...); });
+        REQUIRE(split.size() == before + 1);
     }
     REQUIRE(unsplit == expected);
     REQUIRE(split == expected);
@@ -1586,7 +1682,7 @@ TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequenc
         return std::get<2>(value) == "sq8_uniform,bf16" && std::get<4>(value) == "mmap_io";
     }));
     auto invalid = groups.at(1);
-    invalid["disk_graph_io_start"] = 0;
+    invalid["disk_graph_io_start"] = 999;
     REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
     invalid.erase("disk_graph_io_start");
     REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
@@ -1653,6 +1749,50 @@ TEST_CASE("HGraph Tune budget keeps representative PR transitions and full daily
                           });
         REQUIRE(disabled == 1);
     }
+}
+
+TEST_CASE("HGraph planned Daily concurrency bounds preserve operations and release scope",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    for (const auto* title : {"HGraph Concurrent Add", "HGraph Concurrent Add Search Remove"}) {
+        auto resource = std::make_shared<HGraphTestResource>();
+        resource->identity = {std::string("(Daily) ") + title, "", __FILE__, 0};
+        resource->sample = false;
+        resource->report_budget = false;
+        resource->base_count = 3000;
+        resource->query_count = 100;
+        resource->dims = {32, 768, 1536};
+        resource->metric_types = {"l2", "ip"};
+        resource->test_cases = {{"fp32", 0.99F}, {"pq,fp32", 0.95F}};
+        BoundDailyConcurrency(resource, false);
+        REQUIRE(resource->base_count == 3000);
+        REQUIRE(resource->dims == std::vector<int>{32, 768, 1536});
+        BoundDailyConcurrency(resource, true);
+        REQUIRE(resource->base_count == 512);
+        REQUIRE(resource->dims == std::vector<int>{32, 256});
+        REQUIRE(resource->query_count == 100);
+        REQUIRE(resource->metric_types == std::vector<std::string>{"l2", "ip"});
+        REQUIRE(resource->test_cases.size() == 2);
+        ApplyHGraphBudget(resource);
+        REQUIRE(resource->base_count >= 320);  // 80% initial PQ training still has >=256 rows.
+        REQUIRE(resource->base_count <= 512);
+        REQUIRE(HGraphDailyGroups(resource).size() == 8);
+        resource->sample = true;
+        resource->identity.name = std::string("(PR) ") + title;
+        resource->base_count = 1000;
+        resource->dims = {768};
+        BoundDailyConcurrency(resource, true);
+        REQUIRE(resource->base_count == 1000);
+        REQUIRE(resource->dims == std::vector<int>{768});
+    }
+    auto other = std::make_shared<HGraphTestResource>();
+    other->sample = false;
+    other->identity = {"(Daily) HGraph With Extra Info", "", __FILE__, 0};
+    other->base_count = 1000;
+    other->dims = {1536};
+    BoundDailyConcurrency(other, true);
+    REQUIRE(other->base_count == 1000);
+    REQUIRE(other->dims == std::vector<int>{1536});
 }
 
 TEST_CASE("HGraph budget respects partial PQ training and independent memory builds",
@@ -3279,6 +3419,11 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
     for (auto metric_type : resource->metric_types) {
         for (auto dim : resource->dims) {
             for (auto& [base_quantization_str1, base_quantization_str2] : test_cases) {
+                fixtures::daily::Phase configuration_phase("Tune transition",
+                                                           {{"metric", metric_type},
+                                                            {"dim", dim},
+                                                            {"from", base_quantization_str1},
+                                                            {"to", base_quantization_str2}});
                 INFO(
                     fmt::format("metric_type: {}, dim: {}, base_quantization_str1: {}, "
                                 "base_quantization_str2: {}",
@@ -3327,7 +3472,18 @@ TestHGraphTune(const fixtures::HGraphTestIndexPtr& test_index,
 
                 if (not is_tested_disable_future_tuning) {
                     auto index3 = TestIndex::TestFactory(test_index->name, param1, true);
-                    TestIndex::TestBuildIndex(index3, dataset, true);
+                    if (resource->sample) {
+                        TestIndex::TestBuildIndex(index3, dataset, true);
+                    } else {
+                        // Daily already built these exact vectors. Restore an independent copy
+                        // for the tuning flag contract instead of repeating the expensive build.
+                        fixtures::daily::Phase phase("Tune snapshot restore");
+                        auto snapshot = index1->Serialize();
+                        REQUIRE(snapshot.has_value());
+                        REQUIRE(index3->Deserialize(snapshot.value()).has_value());
+                        REQUIRE(index3->GetNumElements() == index1->GetNumElements());
+                        TestIndex::TestKnnSearch(index3, dataset, search_param, 0.7, true);
+                    }
                     // set disable_future_tuning
                     auto set_result = index3->Tune(param2, true);
                     REQUIRE(set_result.has_value());
@@ -3560,6 +3716,9 @@ TestHGraphODescentBuild(const fixtures::HGraphTestIndexPtr& test_index,
         for (auto raw_dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
                 auto dim = raw_dim;
+                fixtures::daily::Phase configuration_phase(
+                    "Quantizer",
+                    {{"metric", metric_type}, {"dim", dim}, {"quantizer", base_quantization_str}});
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
                                  metric_type,
                                  dim,
@@ -4010,6 +4169,9 @@ TestHGraphConcurrentAddSearchRemove(const fixtures::HGraphTestIndexPtr& test_ind
         for (auto raw_dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
                 auto dim = raw_dim;
+                fixtures::daily::Phase configuration_phase(
+                    "Quantizer",
+                    {{"metric", metric_type}, {"dim", dim}, {"quantizer", base_quantization_str}});
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
                                  metric_type,
                                  dim,
@@ -4054,6 +4216,9 @@ TestHGraphSerialize(const fixtures::HGraphTestIndexPtr& test_index,
         for (auto raw_dim : resource->dims) {
             for (auto& [base_quantization_str, recall] : resource->test_cases) {
                 auto dim = raw_dim;
+                fixtures::daily::Phase configuration_phase(
+                    "Quantizer",
+                    {{"metric", metric_type}, {"dim", dim}, {"quantizer", base_quantization_str}});
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}, recall: {}",
                                  metric_type,
                                  dim,
@@ -4869,6 +5034,12 @@ TestHGraphDiskIOType(const fixtures::HGraphTestIndexPtr& test_index,
             const auto& memory_io_str,
             const auto& disk_io_str,
             const auto& graph_io_type) {
+            fixtures::daily::Phase configuration_phase("Disk tuple",
+                                                       {{"metric", metric_type},
+                                                        {"dim", dim},
+                                                        {"memory", memory_io_str},
+                                                        {"disk", disk_io_str},
+                                                        {"graph_io", graph_io_type}});
             INFO(fmt::format(
                 "metric_type: {}, dim: {}, memory_io_str: {}, disk_io_str: {}, graph_io_type: {}",
                 metric_type,
@@ -5116,6 +5287,9 @@ TestHGraphReverseEdges(const fixtures::HGraphTestIndexPtr& test_index,
                 auto dim = raw_dim;
                 const auto& base_quantization_str = test_case.first;
                 const auto& recall = test_case.second;
+                fixtures::daily::Phase configuration_phase(
+                    "Quantizer",
+                    {{"metric", metric_type}, {"dim", dim}, {"quantizer", base_quantization_str}});
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
                                  metric_type,
                                  dim,
@@ -6434,6 +6608,9 @@ test_hgraph_multi_query_range_search(const fixtures::HGraphTestIndexPtr& test_in
             for (const auto& test_case : resource->test_cases) {
                 auto dim = raw_dim;
                 const auto& base_quantization_str = test_case.first;
+                fixtures::daily::Phase configuration_phase(
+                    "Quantizer",
+                    {{"metric", metric_type}, {"dim", dim}, {"quantizer", base_quantization_str}});
                 INFO(fmt::format("metric_type: {}, dim: {}, base_quantization_str: {}",
                                  metric_type,
                                  dim,

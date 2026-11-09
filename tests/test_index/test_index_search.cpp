@@ -62,6 +62,7 @@ TestIndex::TestKnnSearch(const IndexPtr& index,
                          const std::string& search_param,
                          float expected_recall,
                          bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestKnnSearch");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return 0.0F;
     }
@@ -105,6 +106,7 @@ TestIndex::TestRangeSearch(const IndexPtr& index,
                            float expected_recall,
                            int64_t limited_size,
                            bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestRangeSearch");
     if (not index->CheckFeature(vsag::SUPPORT_RANGE_SEARCH)) {
         return 0.0F;
     }
@@ -193,6 +195,7 @@ TestIndex::TestKnnSearchIter(const IndexPtr& index,
                              float expected_recall,
                              bool expected_success,
                              bool use_ex_filter) {
+    fixtures::daily::Phase daily_phase("TestKnnSearchIter");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_ITERATOR_FILTER_SEARCH)) {
         return 0.0F;
     }
@@ -266,6 +269,7 @@ TestIndex::TestFilterSearch(const TestIndex::IndexPtr& index,
                             float expected_recall,
                             bool expected_success,
                             bool support_filter_obj) {
+    fixtures::daily::Phase daily_phase("TestFilterSearch");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH_WITH_ID_FILTER)) {
         return;
     }
@@ -350,6 +354,7 @@ TestIndex::TestSearchAllocator(const TestIndex::IndexPtr& index,
                                const std::string& search_param,
                                float expected_recall,
                                bool expected_success) {
+    fixtures::daily::Phase daily_phase("TestSearchAllocator");
     if (not index->CheckFeature(vsag::SUPPORT_KNN_SEARCH)) {
         return;
     }

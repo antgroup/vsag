@@ -33,6 +33,73 @@ class DailyPlanTests(unittest.TestCase):
         return dp.sealed({"schema_version": 1, "kind": "daily-result", "lane": "linux",
                           "plan": plan, "records": [{"key": "core", "status": "passed", "seconds": 20}]})
 
+    def test_exact_timing_beats_slow_sibling_and_timeout_stays_a_lower_bound(self):
+        original = dp.load
+        history = {"samples": [
+            {"key": "fast", "case": "same", "environment": "env", "status": "passed", "seconds": 10},
+            {"key": "slow", "case": "same", "environment": "env", "status": "timeout", "seconds": 1800}]}
+        def load(path):
+            return history if Path(path).name == "daily_timing_history.json" else original(path)
+        units = [{**self.unit(key), "tests": [{"name": "same"}]} for key in ("fast", "slow", "unknown")]
+        with patch.object(dp, "load", side_effect=load):
+            plan = dp.build_plan(self.context(), "env", units, [])
+        fast, slow, unknown = plan["core"]
+        self.assertEqual(fast["order_seconds"], 12)
+        self.assertEqual(slow["order_seconds"], 1800)
+        self.assertIsNone(slow["estimate_seconds"])
+        self.assertEqual(unknown["order_seconds"], 1800)
+        self.assertIsNone(unknown["estimate_seconds"])
+
+    def test_quarantine_is_exact_rotation_only_and_visible_not_passed(self):
+        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        bad = {**self.unit(rule["key"]), "mode": "rotation", "configuration": {"metric": "l2", "dim": 1536},
+               "tests": [{"name": rule["case"]}]}
+        other = {**bad, "key": "other"}
+        plan = dp.build_plan(self.context(), "env", [self.unit()], [bad, other])
+        self.assertEqual([u["key"] for day in plan["rotation"] for u in day], ["other"])
+        self.assertEqual(plan["quarantines"][0]["status"], "not_validated")
+        self.assertEqual(plan["quarantines"][0]["configuration"], bad["configuration"])
+        result = dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan, "lane": "test",
+                            "records": [{"key": u["key"], "status": "passed", "seconds": 1}
+                                        for u in plan["selected"]]})
+        summary = report.summarize([result])
+        text = report.markdown(summary)
+        self.assertIn("Quarantined configurations", text)
+        self.assertIn(rule["key"], text)
+        self.assertIn("not validated", text)
+        # Quarantine is not an execution result, does not hide unexpected failures,
+        # and never disables PR core or the exhaustive coverage profile.
+        self.assertEqual(summary["status"], "passed")
+        result["records"][0]["status"] = "failed"
+        result = dp.sealed({k: v for k, v in result.items() if k != "digest"})
+        self.assertEqual(report.summarize([result])["status"], "failed")
+        core_plan = dp.build_plan(self.context(), "env", [{**bad, "mode": "core"}], [])
+        self.assertEqual(len(core_plan["selected"]), 1)
+        full = dp.build_plan(self.context(), "env", [self.unit()], [bad], full_coverage=True)
+        self.assertFalse(full["quarantines"])
+        self.assertEqual(sum(map(len, full["rotation"])), 1)
+        with self.assertRaisesRegex(dp.PlanError, "identity mismatch"):
+            dp.quarantine_extensions([{**bad, "tests": [{"name": "unrelated"}]}], [rule])
+        for invalid in ({**rule, "key": "*"}, {**rule, "case": "(PR) HGraph Duplicate"},
+                        {**rule, "tracking": ""}, {**rule, "reason": ""}):
+            with self.assertRaises(dp.PlanError):
+                dp.quarantine_extensions([bad], [invalid])
+        with self.assertRaises(dp.PlanError):
+            dp.quarantine_extensions([bad], [rule, rule])
+
+    def test_quarantine_is_not_duplicated_in_four_shard_summary(self):
+        rule = dp.load(dp.HERE / "daily_matrix.json")["quarantine"][0]
+        bad = {**self.unit(rule["key"]), "mode": "rotation", "tests": [{"name": rule["case"]}]}
+        parent = dp.build_plan(self.context(), "env", [self.unit(str(i)) for i in range(4)], [bad])
+        results = []
+        for i in range(4):
+            plan = dp.shard_plan(parent, i, 4)
+            results.append(dp.sealed({"schema_version": 1, "kind": "daily-result", "plan": plan,
+                                     "lane": f"test-shard{i}", "records": [
+                                         {"key": u["key"], "status": "passed", "seconds": 1}
+                                         for u in plan["selected"]]}))
+        self.assertEqual(len(report.summarize(results)["quarantines"]), 1)
+
     def test_multiline_macro_aliases_keep_one_canonical_axis(self):
         source = 'TEST_CASE("x", "[pyramid]") {\n auto x = DAILY_GENERATE(1,\n 2,\n 3);\n}'
         axes, choices = parameters.configurations(source, 1)
@@ -445,16 +512,43 @@ class DailyPlanTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             binary = root / "mock.py"
-            binary.write_text("#!" + sys.executable + "\n" + MOCK)
+            interrupted = MOCK.replace(
+                "root = ET.Element('Catch2TestRun')",
+                "Path(os.environ['VSAG_DAILY_PHASE_FILE']).write_text("
+                "json.dumps({'phase': 'Build', 'event': 'start', 'details': {'quantizer': 'fp32'}}) + '\\n')\n"
+                "report.write_text('<Catch2TestRun>')\n"
+                "root = ET.Element('Catch2TestRun')")
+            binary.write_text("#!" + sys.executable + "\n" + interrupted)
             binary.chmod(0o755)
             test = {"name": "case", "tags": "[hgraph]", "source_file": "test.cpp",
                     "source_line": 1, "binary": "mock.py", "id": "test", "sleep": 5}
             binary.with_suffix(".json").write_text(json.dumps({"cases": [test]}))
             unit = {**self.unit(), "binary": str(binary), "tests": [test], "seed": 42,
                     "env": {"VSAG_DAILY_HGRAPH": "{}"}}
-            result = run.run_unit(unit, 0, root, 0.1, threading.Event())
+            result = run.run_unit(unit, 0, root, 0.5, threading.Event())
             self.assertEqual(result["status"], "timeout", result)
-            self.assertGreaterEqual(result["seconds"], 0.1)
+            self.assertGreaterEqual(result["seconds"], 0.5)
+            self.assertEqual(result["phase_events"], 1)
+            self.assertEqual(result["active_phases"], [{"phase": "Build", "event": "start",
+                                                      "details": {"quantizer": "fp32"}}])
+            self.assertTrue((root / result["directory"] / result["phase_trace"]).is_file())
+
+    def test_phase_trace_preserves_nested_progress_with_truncated_tail(self):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "phases.jsonl"
+            self.assertEqual(run.phase_diagnostics(trace), {})
+            events = [{"phase": "Quantizer", "event": "start"},
+                      {"phase": "Build", "event": "start"},
+                      {"phase": "Build", "event": "end", "seconds": 12},
+                      {"phase": "TestGeneral", "event": "start"}]
+            trace.write_text("".join(json.dumps(event) + "\n" for event in events) + '{"phase":')
+            result = run.phase_diagnostics(trace)
+            self.assertEqual(result["phase_events"], 4)
+            self.assertEqual(result["active_phases"], [events[0], events[3]])
+            self.assertEqual(result["last_phase_event"], events[3])
+            self.assertIn("phase_trace_error", result)
+            with patch.object(Path, "read_text", side_effect=PermissionError("unreadable")):
+                self.assertIn("Cannot read phase trace", run.phase_diagnostics(trace)["phase_trace_error"])
 
     def test_lint_result_controls_summary_without_charging_test_budget(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -477,7 +571,7 @@ class DailyPlanTests(unittest.TestCase):
                     if status != "success":
                         self.assertIn("Workflow dependency full-lint-clang-tidy-check: " + status,
                                       actual["failures"])
-                        self.assertIn("Correctness/completeness: **failed**", (root / "summary.md").read_text())
+                        self.assertIn("Selected-check correctness/completeness: **failed**", (root / "summary.md").read_text())
 
     def test_missing_lane_writes_failure_summary(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -558,6 +652,144 @@ class DailyPlanTests(unittest.TestCase):
             text = (ROOT / "scripts/testing" / name).read_text()
             self.assertIn('if [ -n "${VSAG_DAILY_CONTEXT:-}" ]; then', text)
             self.assertIn("--allow-running-no-tests", text)  # Old non-Daily path stays intact.
+
+
+
+class DailyNamedCountTests(unittest.TestCase):
+    context = DailyPlanTests.context
+    unit = DailyPlanTests.unit
+    result = DailyPlanTests.result
+
+    def named_result(self, lane="x86", status="passed"):
+        tests = [{"name": "case", "source_file": "/checkout/tests/test_x.cpp"}]
+        core = [{**self.unit(), "tests": tests}]
+        extension = [{**self.unit("rotation"), "tests": tests, "mode": "rotation"}]
+        plan = dp.build_plan(self.context(), lane, core, extension,
+                             inventory={"named_cases": tests + [{"name": "other", "source_file": "tests/test_x.cpp"}]})
+        return dp.sealed({"schema_version": 1, "kind": "daily-result", "lane": lane,
+                          "plan": plan, "records": [{"key": u["key"], "status": status, "seconds": 1}
+                                                     for u in plan["selected"]]})
+
+    def test_counts_deduplicate_platforms_and_configurations(self):
+        a = self.named_result()
+        b = self.named_result("mac", "timeout")
+        counts = report.summarize([a, b])["case_counts"]
+        self.assertEqual((counts["passed"], counts["failed"], counts["selected"], counts["global"]), (0, 1, 1, 2))
+        self.assertFalse(counts["legacy_inventory"])
+
+    def test_missing_execution_is_pending_not_passed(self):
+        r = self.named_result()
+        r["records"] = []
+        r = dp.sealed({k: v for k, v in r.items() if k != "digest"})
+        summary = report.summarize([r], allow_incomplete=True)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["case_counts"]["pending"], 1)
+        self.assertEqual(summary["case_counts"]["passed"], 0)
+
+    def test_shard_order_and_missing_sibling_do_not_inflate_passes(self):
+        r = self.named_result()
+        # Put two configurations of the same named case in the core.
+        core = [{**self.unit(key), "tests": r["plan"]["core"][0]["tests"]} for key in ("a", "b")]
+        parent = dp.build_plan(self.context(), "env", core, [], inventory=r["plan"]["inventory"])
+        shards = []
+        for i in range(2):
+            plan = dp.shard_plan(parent, i, 2)
+            shards.append(dp.sealed({"schema_version": 1, "kind": "daily-result", "lane": f"test-shard{i}",
+                                    "plan": plan, "records": [{"key": u["key"], "status": "passed", "seconds": 1} for u in plan["selected"]]}))
+        self.assertEqual(report.summarize(shards)["case_counts"], report.summarize(shards[::-1])["case_counts"])
+        self.assertEqual(report.summarize(shards)["case_counts"]["passed"], 1)
+        partial = report.summarize(shards[:1], allow_incomplete=True)
+        self.assertEqual(partial["case_counts"]["pending"], 1)
+        self.assertEqual(partial["status"], "failed")
+
+    def test_non_catch_command_is_not_a_named_case(self):
+        r = self.result()
+        counts = report.summarize([r])["case_counts"]
+        self.assertEqual(counts["selected"], 0)
+        self.assertEqual(counts["command_groups"], {"linux": "passed"})
+
+    def test_missing_lane_preserves_counts_and_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dp.write(root / "result.json", self.named_result())
+            proc = subprocess.run([sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                                   str(root / "result.json"), "--expected-lanes", "x86", "missing",
+                                   "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")],
+                                  capture_output=True)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            summary = dp.load(root / "summary.json")
+            self.assertTrue(summary["incomplete"])
+            self.assertEqual(summary["case_counts"]["selected"], 1)
+            self.assertIn("Passed cases", (root / "summary.md").read_text())
+            self.assertIn("Incomplete evidence", (root / "summary.md").read_text())
+
+    def test_missing_manifest_or_metrics_keeps_verified_counts_but_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            dp.write(root / "result.json", self.named_result())
+            proc = subprocess.run([sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                                   str(root / "result.json"), "--expected-file", str(root / "missing.json"),
+                                   "--metrics", str(root / "missing-metrics.json"),
+                                   "--summary", str(root / "summary.md"), "--json", str(root / "summary.json")],
+                                  capture_output=True)
+            self.assertEqual(proc.returncode, 1, proc.stderr)
+            summary = dp.load(root / "summary.json")
+            self.assertTrue(summary["incomplete"])
+            self.assertEqual(summary["case_counts"]["selected"], 1)
+            self.assertEqual(len(summary["coverage_gaps"]), 2)
+
+    def test_macos_examples_have_independent_failure_safe_step(self):
+        action = (ROOT / ".github/actions/asan-build-and-test-test-asan-macos-arm64/action.yml").read_text()
+        test, examples = action.split("    - name: Run full examples independently\n")
+        examples = examples.split("    - name: Upload Log")[0]
+        self.assertNotIn("daily_measure.py", test)
+        self.assertIn("!cancelled()", examples)
+        self.assertIn("steps.download-tests.outcome == 'success'", examples)
+        self.assertIn("inputs.matrix-test-type == 'unittests'", examples)
+        self.assertIn("daily_measure.py --name examples", examples)
+
+    def test_counts_expose_skips_and_budget_exhaustion_as_not_executed(self):
+        for status in ("skipped", "budget_exhausted", "cancelled", "launch_error"):
+            counts = report.summarize([self.named_result(status=status)])["case_counts"]
+            self.assertEqual((counts["passed"], counts["failed"], counts["pending"]), (0, 0, 1))
+
+    def test_corrupt_input_has_unknown_counts_and_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            value = self.named_result()
+            value["records"][0]["status"] = "failed"  # Do not reseal: reject corruption.
+            dp.write(root / "result.json", value)
+            proc = subprocess.run([sys.executable, str(ROOT / "scripts/testing/daily_report.py"),
+                                   str(root / "result.json"), "--summary", str(root / "summary.md"),
+                                   "--json", str(root / "summary.json")], capture_output=True)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("| — | — | — | — |", (root / "summary.md").read_text())
+
+    def test_absolute_build_paths_do_not_duplicate_global_cases(self):
+        import daily_counts
+        self.assertEqual(daily_counts.case_identity({"source_file": "/runner/build/src/a_test.cpp", "name": "a"}),
+                         daily_counts.case_identity({"source_file": "src/a_test.cpp", "name": "a"}))
+        self.assertNotEqual(daily_counts.case_identity({"source_file": "src/a_test.cpp", "name": "a"}),
+                            daily_counts.case_identity({"source_file": "tests/a_test.cpp", "name": "a"}))
+
+    def test_second_quarantine_keeps_other_duplicate_configurations(self):
+        rules = dp.load(dp.HERE / "daily_matrix.json")["quarantine"]
+        cosine = next(r for r in rules if r["key"] == "df2ccbce1f3092b1dc00a580b4e6e2176e55e694eca7ed7c222ae100d1618bb5")
+        unit = {**self.unit(cosine["key"]), "mode": "rotation", "tests": [{"name": cosine["case"]}]}
+        kept, excluded = dp.quarantine_extensions([unit, {**unit, "key": "different-configuration"}], rules)
+        self.assertEqual([u["key"] for u in kept], ["different-configuration"])
+        self.assertEqual([u["key"] for u in excluded], [cosine["key"]])
+
+    def test_group_failure_uses_individual_case_results(self):
+        import daily_counts
+        tests = [{"name": name, "source_file": "tests/x.cpp"} for name in ("SIMD", "simd")]
+        unit = {"tests": tests}
+        record = {"tests": [{**tests[0], "success": True, "skips": 0},
+                             {**tests[1], "success": False, "skips": 0}]}
+        self.assertEqual(daily_counts.named_status(unit, record, tests[0], "failed"), "passed")
+        self.assertEqual(daily_counts.named_status(unit, record, tests[1], "failed"), "failed")
+        self.assertEqual(daily_counts.named_status(unit, {}, tests[0], "timeout"), "not_run")
+        self.assertEqual(daily_counts.named_status(unit, {**record, "error": "invalid plan"}, tests[0], "failed"), "not_run")
 
 
 if __name__ == "__main__":

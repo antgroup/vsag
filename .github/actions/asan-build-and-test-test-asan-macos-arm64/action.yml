@@ -18,6 +18,7 @@ runs:
       shell: bash -e {0}
       run: rm -rf ./build
     - name: Download Test
+      id: download-tests
       uses: actions/download-artifact@v5
       with:
         name: test_macos_arm64-${{ github.run_id }}
@@ -35,10 +36,13 @@ runs:
           fi
         else
           ./scripts/testing/test_parallel_by_name.sh ${{ inputs.matrix-test-type }}
-          if [ "$FULL_EXAMPLES" = "true" ] && [ "${{ inputs.matrix-test-type }}" = "unittests" ]; then
-            python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
-          fi
         fi
+    - name: Run full examples independently
+      if: ${{ !cancelled() && steps.download-tests.outcome == 'success' && env.FULL_EXAMPLES == 'true' && env.SMOKE != 'true' && inputs.matrix-test-type == 'unittests' }}
+      env:
+        ASAN_OPTIONS: detect_container_overflow=0
+      shell: bash -e {0}
+      run: python3 scripts/testing/daily_measure.py --name examples --owner bindings-examples-compatibility -- python3 scripts/ci/platform_smoke.py all-examples
     - name: Upload Log
       if: always()
       uses: actions/upload-artifact@v5

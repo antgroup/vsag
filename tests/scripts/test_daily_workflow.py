@@ -14,6 +14,22 @@ WORKFLOW = ROOT / ".github/workflows/daily_test.yml"
 
 
 class DailyWorkflowTests(unittest.TestCase):
+    def test_source_preflight_gates_heavy_regression_jobs(self):
+        plan = job_text(WORKFLOW, "daily-plan")
+        self.assertIn("run: python3 scripts/testing/daily_parameters.py", plan)
+        self.assertLess(plan.index("Preflight Daily parameter inventory"),
+                        plan.index("Freeze source, date and matrix"))
+        self.assertNotIn("continue-on-error", plan)
+        for name in ("daily_build_asan_x86", "daily_build_asan_aarch64", "daily_build_simd",
+                     "daily_build_tsan", "full-platform-build-asan-x86",
+                     "full-platform-build-asan-macos-arm64", "full-python-build-python-wheel-x86",
+                     "full-python-build-python-wheel-aarch64", "full-lint-clang-tidy-check",
+                     "full-coverage-coverage", "full-compatibility-compatibility"):
+            body = job_text(WORKFLOW, name)
+            needs = re.search(r"(?m)^    needs:([^\n]*(?:\n      - [^\n]+)*)", body)
+            self.assertIsNotNone(needs, name)
+            self.assertIn("daily-plan", needs[1], name)
+
     def test_shared_arm_artifact_and_x86_shard_artifact_names(self):
         workflow = WORKFLOW.read_text()
         self.assertNotIn("  full-platform-build-asan-aarch64:", workflow)

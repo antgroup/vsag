@@ -85,7 +85,9 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
     for test in tests:
         test["binary"] = binary.name
         test["id"] = shards.stable_id(binary.name, test)
+    named_inventory = [dict(test) for test in tests]
     tests, inventory = capability_inventory(binary, tests)
+    inventory["named_cases"] = named_inventory
     core, extension = [], []
     for group in shards.case_groups(tests):
         inventory_timeout(deadline)
@@ -101,9 +103,12 @@ def inventory_units(binary, root, profile, output, seed, cancelled, deadline=Non
             if any("[daily]" in t["tags"].lower() for t in group):
                 continue
             core.append({**base, "key": key, "mode": "core"})
-        elif len(group) == 1 and test_source(root, group[0]).name in ("test_pyramid.cpp", "test_sindi.cpp"):
+        elif len(group) == 1 and test_source(root, group[0]).relative_to(root).as_posix() in params.PARAMETER_SOURCES:
             test = group[0]
-            axes, choices = params.configurations(test_source(root, test).read_text(), test["source_line"])
+            source = test_source(root, test)
+            axes, choices = params.configurations(
+                source.read_text(), test["source_line"],
+                source_file=str(source.relative_to(root)), case_name=test["name"])
             for i, choice in enumerate(choices):
                 unit = {**base, "key": dp.digest([key, axes, choice]), "axes": axes,
                         "configuration": choice, "mode": "core" if i == 0 else "rotation",
@@ -146,6 +151,35 @@ def execution_events(logfile, report):
     return events
 
 
+def phase_diagnostics(path):
+    """Keep completed events and the active phase even after an interrupted XML report."""
+    if not path.is_file():
+        return {}
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError as exc:
+        return {"phase_trace": path.name, "phase_trace_error": "Cannot read phase trace: " + str(exc)}
+    events, active, error = [], [], None
+    for line in lines:
+        try:
+            event = json.loads(line)
+            if not isinstance(event, dict) or event.get("event") not in ("start", "end") or not isinstance(event.get("phase"), str):
+                raise ValueError("invalid phase event")
+            events.append(event)
+            if event["event"] == "start":
+                active.append(event)
+            elif active and active[-1]["phase"] == event["phase"]:
+                active.pop()
+        except (ValueError, TypeError) as exc:
+            error = "Incomplete or malformed phase trace: " + str(exc)
+            break
+    result = {"phase_trace": path.name, "phase_events": len(events),
+              "active_phases": active, "last_phase_event": events[-1] if events else None}
+    if error:
+        result["phase_trace_error"] = error
+    return result
+
+
 def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     directory = output / ("case-%05d" % number)
     directory.mkdir()
@@ -174,7 +208,8 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
                 raise dp.PlanError("Execution window exhausted during test listing")
             timeout = min(timeout, max(1, math.floor(remaining)))
         report = directory / "report.xml"
-        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"])]
+        command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"]),
+                   "VSAG_DAILY_PHASE_FILE=" + str(directory / "phases.jsonl")]
         command += [k + "=" + v for k, v in sorted(unit["env"].items())]
         command += [str(binary), shards.exact_filter([t["name"] for t in unit["tests"]]),
                     "--reporter", "xml", "--out", str(report), "--durations", "yes",
@@ -210,6 +245,7 @@ def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     except (dp.PlanError, shards.ShardError, OSError, ValueError, ET.ParseError) as error:
         record["error"] = str(error)
         record["status"] = "failed"
+    record.update(phase_diagnostics(directory / "phases.jsonl"))
     dp.write(directory / "result.json", record)
     print(json.dumps({"case": unit["tests"][0]["name"], "key": unit["key"],
                       "status": record["status"], "seconds": record["seconds"]}), flush=True)
