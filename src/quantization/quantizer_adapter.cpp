@@ -22,17 +22,20 @@
 #include "quantization/computer.h"
 #include "quantization/fp32_quantizer.h"
 #include "quantization/quantizer.h"
+#include "quantization/quantizer_headers.h"
 #include "quantization/scalar_quantization/half_precision_quantizer.h"
+#include "quantization/scalar_quantization/local_scalar_quantizer.h"
 #include "quantization/scalar_quantization/scalar_quantizer.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "utils/half_input.h"
 
 namespace vsag {
 
 using generic::BF16ToFloat;
 using generic::FloatToBF16;
 using generic::FloatToFP16;
-using generic::FP16ToFloat;
+using half_input::FP16ToFloat;
 
 namespace {
 template <typename QuantT>
@@ -53,10 +56,13 @@ QuantizerAdapter<QuantT, DataT>::QuantizerAdapter(const QuantizerParamPtr& param
                                                   const IndexCommonParam& common_param)
     : Quantizer<QuantizerAdapter<QuantT, DataT>>(common_param.dim_, common_param.allocator_.get()),
       data_type_(common_param.data_type_) {
-    this->inner_quantizer_ = std::make_shared<QuantT>(param, common_param);
+    auto inner_common_param = common_param;
+    inner_common_param.data_type_ = DataTypes::DATA_TYPE_FLOAT;
+    this->inner_quantizer_ = std::make_shared<QuantT>(param, inner_common_param);
     this->code_size_ = this->inner_quantizer_->GetCodeSize();
     this->query_code_size_ = this->inner_quantizer_->GetQueryCodeSize();
     this->metric_ = common_param.metric_;
+    this->hold_molds_ = this->inner_quantizer_->HoldMolds();
 }
 
 template <typename QuantT, typename DataT>
@@ -68,7 +74,8 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const float* data, uint64_t count) {
         for (int64_t i = 0; i < this->dim_ * count; ++i) {
             vec[i] = static_cast<float>(data_int8[i]);
         }
-        return this->inner_quantizer_->TrainImpl(vec.data(), count);
+        this->is_trained_ = this->inner_quantizer_->ReTrain(vec.data(), count);
+        return this->is_trained_;
     } else if constexpr (std::is_same_v<DataT, uint16_t>) {
         const auto* data_fp16 = reinterpret_cast<const uint16_t*>(data);
         Vector<float> vec(this->dim_ * count, this->allocator_);
@@ -79,7 +86,8 @@ QuantizerAdapter<QuantT, DataT>::TrainImpl(const float* data, uint64_t count) {
                 vec[i] = BF16ToFloat(data_fp16[i]);
             }
         }
-        return this->inner_quantizer_->TrainImpl(vec.data(), count);
+        this->is_trained_ = this->inner_quantizer_->ReTrain(vec.data(), count);
+        return this->is_trained_;
     } else {
         static_assert(std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
                       "QuantizerAdapter::TrainImpl only supports int8_t and uint16_t data types");
@@ -229,6 +237,9 @@ QuantizerAdapter<QuantT, DataT>::SerializeImpl(StreamWriter& writer) {
 template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::DeserializeImpl(StreamReader& reader) {
+    // The adapter serializes the shared quantizer header only once. Restore
+    // its training state before the inner payload validates trained models.
+    this->inner_quantizer_->is_trained_ = this->is_trained_;
     this->inner_quantizer_->DeserializeImpl(reader);
 }
 
@@ -239,7 +250,7 @@ QuantizerAdapter<QuantT, DataT>::ProcessQueryImpl(
     static_assert(
         std::is_same_v<DataT, int8_t> || std::is_same_v<DataT, uint16_t>,
         "QuantizerAdapter::ProcessQueryImpl only supports int8_t and uint16_t data types");
-    auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    auto& inner_computer = get_inner_computer(computer);
     if constexpr (std::is_same_v<DataT, int8_t>) {
         const auto* query_int8 = reinterpret_cast<const int8_t*>(query);
         Vector<float> vec(this->dim_, this->allocator_);
@@ -271,8 +282,35 @@ template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::ComputeDistImpl(
     Computer<QuantizerAdapter<QuantT, DataT>>& computer, const uint8_t* codes, float* dists) const {
-    auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
+    auto& inner_computer = get_inner_computer(computer);
     this->inner_quantizer_->ComputeDistImpl(inner_computer, codes, dists);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::ComputeDistsBatch4Impl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+    const uint8_t* codes1,
+    const uint8_t* codes2,
+    const uint8_t* codes3,
+    const uint8_t* codes4,
+    float& dists1,
+    float& dists2,
+    float& dists3,
+    float& dists4) const {
+    auto& inner_computer = get_inner_computer(computer);
+    this->inner_quantizer_->ComputeDistsBatch4(
+        inner_computer, codes1, codes2, codes3, codes4, dists1, dists2, dists3, dists4);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::ScanRowBatchDistImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+    uint64_t count,
+    const uint8_t* codes,
+    float* dists) const {
+    this->inner_quantizer_->ScanRowBatchDists(get_inner_computer(computer), count, codes, dists);
 }
 
 template <typename QuantT, typename DataT>
@@ -282,18 +320,67 @@ QuantizerAdapter<QuantT, DataT>::ScanBatchDistImpl(
     uint64_t count,
     const uint8_t* codes,
     float* dists) const {
-    auto& inner_computer = reinterpret_cast<Computer<QuantT>&>(computer);
-    for (uint64_t i = 0; i < count; ++i) {
-        this->inner_quantizer_->ComputeDistImpl(
-            inner_computer, codes + i * this->code_size_, dists + i);
-    }
+    auto& inner_computer = get_inner_computer(computer);
+    this->inner_quantizer_->ScanBatchDists(inner_computer, count, codes, dists);
 }
 
 template <typename QuantT, typename DataT>
 void
 QuantizerAdapter<QuantT, DataT>::ReleaseComputerImpl(
     Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
-    this->allocator_->Deallocate(computer.buf_);
+    computer.inner_computer_.reset();
+    computer.allocator_->Deallocate(computer.buf_);
+    computer.buf_ = nullptr;
+}
+
+template <typename QuantT, typename DataT>
+Computer<QuantT>&
+QuantizerAdapter<QuantT, DataT>::get_inner_computer(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer) const {
+    if (computer.inner_computer_ == nullptr) {
+        // Deliberately heap-own this cached, small control object: its typed
+        // destructor releases native state. Query buffers still use the index
+        // allocator; the control object is not included in its memory accounting.
+        computer.inner_computer_ =
+            std::make_unique<Computer<QuantT>>(this->inner_quantizer_.get(), computer.allocator_);
+    }
+    return *static_cast<Computer<QuantT>*>(computer.inner_computer_.get());
+}
+
+template <typename QuantT, typename DataT>
+bool
+QuantizerAdapter<QuantT, DataT>::ComputeDistWithThresholdImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+    const uint8_t* codes,
+    float threshold,
+    float* dists) const {
+    return this->inner_quantizer_->ComputeDistWithThreshold(
+        get_inner_computer(computer), codes, threshold, dists);
+}
+
+template <typename QuantT, typename DataT>
+bool
+QuantizerAdapter<QuantT, DataT>::ComputeDistWithLowerBoundImpl(
+    Computer<QuantizerAdapter<QuantT, DataT>>& computer,
+    const uint8_t* codes,
+    float* dists,
+    float* lower_bound) const {
+    return this->inner_quantizer_->ComputeDistWithLowerBound(
+        get_inner_computer(computer), codes, dists, lower_bound);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::Package32(const uint8_t* codes,
+                                           uint8_t* packaged_codes,
+                                           int64_t valid_size) const {
+    this->inner_quantizer_->Package32(codes, packaged_codes, valid_size);
+}
+
+template <typename QuantT, typename DataT>
+void
+QuantizerAdapter<QuantT, DataT>::Unpack32(const uint8_t* packaged_codes, uint8_t* codes) const {
+    this->inner_quantizer_->Unpack32(packaged_codes, codes);
 }
 
 TEMPLATE_QUANTIZER_ADAPTER(ProductQuantizer, int8_t);
@@ -302,4 +389,119 @@ TEMPLATE_QUANTIZER_ADAPTER(FP16Quantizer, uint16_t);
 TEMPLATE_QUANTIZER_ADAPTER(BF16Quantizer, uint16_t);
 TEMPLATE_QUANTIZER_ADAPTER(SQ8Quantizer, uint16_t);
 TEMPLATE_QUANTIZER_ADAPTER(FP32Quantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(SQ4Quantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(SQ4UniformQuantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(SQ8UniformQuantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(PQFastScanQuantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(RaBitQuantizer, uint16_t);
+TEMPLATE_QUANTIZER_ADAPTER(SAQQuantizer, uint16_t);
+template class QuantizerAdapter<SQ8LocalQuantizer, uint16_t>;
+template class QuantizerAdapter<SQ4LocalQuantizer, uint16_t>;
+
+// Only the same-metric combinations selected by the factory are instantiated.
+template class QuantizerAdapter<
+    TransformQuantizer<SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ8Quantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<SQ8Quantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<FP32Quantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<FP32Quantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<FP32Quantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ4Quantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<SQ4Quantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ4UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                       MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ4UniformQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ4UniformQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                       MetricType::METRIC_TYPE_COSINE>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ8UniformQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                       MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ8UniformQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SQ8UniformQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                       MetricType::METRIC_TYPE_COSINE>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<BF16Quantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<BF16Quantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<BF16Quantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<FP16Quantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<FP16Quantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<FP16Quantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<ProductQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                                   MetricType::METRIC_TYPE_L2SQR>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<ProductQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<ProductQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<PQFastScanQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                       MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<PQFastScanQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<PQFastScanQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                       MetricType::METRIC_TYPE_COSINE>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<RaBitQuantizer<MetricType::METRIC_TYPE_L2SQR>,
+                                                   MetricType::METRIC_TYPE_L2SQR>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<RaBitQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<RaBitQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SAQQuantizer<MetricType::METRIC_TYPE_L2SQR>, MetricType::METRIC_TYPE_L2SQR>,
+    uint16_t>;
+template class QuantizerAdapter<
+    TransformQuantizer<SAQQuantizer<MetricType::METRIC_TYPE_IP>, MetricType::METRIC_TYPE_IP>,
+    uint16_t>;
+template class QuantizerAdapter<TransformQuantizer<SAQQuantizer<MetricType::METRIC_TYPE_COSINE>,
+                                                   MetricType::METRIC_TYPE_COSINE>,
+                                uint16_t>;
 }  // namespace vsag

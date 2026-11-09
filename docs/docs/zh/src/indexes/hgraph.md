@@ -115,7 +115,7 @@ auto result = index->KnnSearch(
 | `use_conjugate_graph` | bool | `false` | 启用 `Feedback`/`Pretrain` 图增强；详见[图索引增强](../advanced/enhance_graph.md) |
 | `resize_increase_count_bit` | int | `10` | 扩容批次 slot 数的 `log2`，取值范围为 `1` 到 `31`。`1` 表示每次按 2 个 slot 对齐，`10` 表示按 1024 个 slot 对齐。较小取值减少预分配，但可能增加重分配次数。 |
 
-`sq8_local` 和 `sq4_local` 支持 float32 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
+`sq8_local` 和 `sq4_local` 支持 float32/float16/bfloat16 输入下 L2/IP/cosine 的基础与精排存储（包括 RaBitQ + local SQ4/SQ8 精排）。布局、数值限制和 Tune 兼容性见[local SQ4/SQ8](../quantization/sq.md)。
 
 `use_reverse_edges` 面向需要快速检查入邻居、图分析或图维护算法的负载。维护反向邻接表会让边
 存储约翻倍，因此默认关闭。
@@ -126,8 +126,13 @@ auto result = index->KnnSearch(
 ### PiPNN 构建边界
 
 设置 `graph_type: "pipnn"` 可让初次全量 `Build` 使用
-[PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、
-`metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入，从原始构建向量生成底层图，并复用
+[PiPNN](https://arxiv.org/abs/2602.21247)。PiPNN 构建器接收 `dtype: "float32"`、`"float16"` 或
+`"bfloat16"`，以及 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的稠密向量输入；不支持稀疏向量或 `int8` 输入。
+对于 FP16/BF16 输入，它以原生半精度格式借用完整输入行，不生成完整输入的 FP32 副本；
+仅将有界的局部分区/叶子操作数转换为 FP32 供 BLAS 矩阵运算使用，并以 FP32 累加。
+这不是原生半精度矩阵后端。最终向量存储量化与输入 dtype 独立配置，仍须遵守索引与量化器的支持限制。
+量化器训练与 PiPNN 构图是独立阶段：训练仍可能将完整的选定训练样本物化为 FP32 缓冲区（选中全部行时可能覆盖整个数据集）。因此，借用半精度输入不保证整个 Build 都没有完整训练样本的 FP32 缓冲区。这些半精度输入路径仍在验证中，不作性能或无回归声明。
+它从原始构建向量生成底层图，并复用
 HGraph 现有的路由层、向量存储、搜索、过滤、精排、增量 `Add`、删除和序列化路径。持久化底层
 存储可以使用 `sq8` 等受支持的量化器，包括 RaBitQ 配合 SQ8 精排。缓存辅助构建暂不支持 PiPNN。
 上表的 `pipnn_*` 参数用于调节该构建器，`ef_construction` 不生效；
@@ -264,6 +269,8 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 > **注意。** `321_index_fp16_hgraph.cpp` 文件头注释提到 `BFloat16Vectors()`，但该 setter 并不
 > 存在 —— FP16 与 BF16 都通过 `Float16Vectors` 传入。无论 `dtype` 是 `"float16"` 还是
 > `"bfloat16"`，都使用同一个 setter。
+
+FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，而非单独的受限列表：`fp32`、`fp16`、`bf16`、普通 `sq4`/`sq8`、`sq4_uniform`/`sq8_uniform`、`sq4_local`/`sq8_local`、`pq`、`pqfs`、`rabitq` 以及符合条件的 `tq` 链。此说明适用于基础存储和启用后的精排存储，并不意味着任意 base/precise 组合都合法；原有的 metric、维度、训练、图和 IO 限制仍然适用。TQ 链内仍禁止 local SQ4/SQ8。split RaBitQ 支持 3+5 bits（包括 MRLE），split TQ 链仅允许 `"mrle, rabitq"`。HGraph fused RaBitQ 仍仅支持 L2/IP，要求 flat 内存图并遵守原有 IO 限制，不支持 TQ。半精度输入不会放宽这些限制。
 
 ### 输入类型选择建议
 

@@ -52,6 +52,19 @@ namespace vsag {
 
 namespace {
 
+void
+check_ivf_data_type(DataTypes data_type) {
+    if (data_type == DataTypes::DATA_TYPE_INT8) {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
+    }
+    if (data_type != DataTypes::DATA_TYPE_FLOAT) {
+        throw VsagException(
+            ErrorType::INVALID_ARGUMENT,
+            fmt::format("IVF only supports float32 datatype, got {}", ToString(data_type)));
+    }
+}
+
 BucketDataCellParamPtr
 make_precise_bucket_param(const IVFParameterPtr& param) {
     auto precise_bucket_param = std::make_shared<BucketDataCellParameter>();
@@ -219,10 +232,7 @@ build_default_ivf_param(const JsonType& external_param) {
 ParamPtr
 IVF::CheckAndMappingExternalParam(const JsonType& external_param,
                                   const IndexCommonParam& common_param) {
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("IVF not support {} datatype", DATATYPE_INT8));
-    }
+    check_ivf_data_type(common_param.data_type_);
 
     auto inner_json = build_default_ivf_param(external_param);
     for (const auto& [key, ignored] : external_param.GetInnerJson()->items()) {
@@ -418,6 +428,7 @@ IVF::IVF(const IVFParameterPtr& param, const IndexCommonParam& common_param)
       location_map_(common_param.allocator_.get()),
       bucket_graphs_(common_param.allocator_.get()),
       common_param_(common_param) {
+    check_ivf_data_type(common_param.data_type_);
     this->bucket_ = BucketInterface::MakeInstance(param->bucket_param, common_param);
     if (this->bucket_ == nullptr) {
         throw VsagException(ErrorType::INTERNAL_ERROR, "bucket init error");

@@ -469,7 +469,7 @@ FlattenDataCell<QuantTmpl, LayoutTmpl>::query(float* result_dists,
                                                  std::memory_order_relaxed);
             }
 
-            computer->ScanBatchDists(id_count, codes.data, result_dists);
+            this->quantizer_->ScanRowBatchDists(*computer, id_count, codes.data, result_dists);
             if (ctx != nullptr and ctx->stats != nullptr and ctx->track_distance_evaluations)
                 ctx->stats->AddDistance(ctx->distance_phase, backend_, id_count);
             return;

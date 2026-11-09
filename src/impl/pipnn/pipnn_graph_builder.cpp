@@ -31,10 +31,12 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 #include "common.h"
 #include "datacell/graph_interface.h"
+#include "half_vector.h"
 #include "hash_types.h"
 #include "impl/blas/blas_function.h"
 #include "impl/thread_pool/safe_thread_pool.h"
@@ -143,15 +145,16 @@ id_gap(InnerIdType first, InnerIdType second) {
     return left >= right ? left - right : right - left;
 }
 
+template <typename Element>
 void
 group_duplicate_rows(const Vector<InnerIdType>& ids,
-                     const Vector<const float*>& rows,
+                     const Vector<const Element*>& rows,
                      uint64_t dimensions,
                      Allocator* allocator,
                      Vector<InnerIdType>& representative_ids,
-                     Vector<const float*>& representative_rows,
+                     Vector<const Element*>& representative_rows,
                      Vector<std::pair<InnerIdType, InnerIdType>>& duplicates) {
-    const uint64_t row_bytes = checked_product(dimensions, sizeof(float), "row");
+    const uint64_t row_bytes = checked_product(dimensions, sizeof(Element), "row");
     require_argument(row_bytes <= std::numeric_limits<std::size_t>::max(),
                      "PiPNN row size exceeds the platform limit");
     UnorderedMap<std::string_view, InnerIdType> representatives(allocator);
@@ -261,7 +264,30 @@ public:
           thread_count_(thread_count),
           dimensions_(dimensions),
           metric_(metric),
-          rows_(rows),
+          rows_(&rows),
+          ids_(allocator),
+          reservoirs_(allocator),
+          reservoir_states_(allocator) {
+    }
+
+    PiPNNPipeline(const PiPNNGraphBuilderParameter& parameter,
+                  uint64_t dimensions,
+                  MetricType metric,
+                  Allocator* allocator,
+                  SafeThreadPool* thread_pool,
+                  uint64_t thread_count,
+                  GraphInterfacePtr graph,
+                  const Vector<const uint16_t*>& rows,
+                  DataTypes data_type)
+        : parameter_(parameter),
+          allocator_(allocator),
+          graph_(std::move(graph)),
+          thread_pool_(thread_pool),
+          thread_count_(thread_count),
+          dimensions_(dimensions),
+          metric_(metric),
+          half_rows_(&rows),
+          data_type_(data_type),
           ids_(allocator),
           reservoirs_(allocator),
           reservoir_states_(allocator) {
@@ -319,7 +345,7 @@ private:
 
     template <MetricType metric>
     void
-    build_small_leaf(const Leaf& leaf, float* matrix, uint64_t neighbor_count);
+    build_small_leaf(const Leaf& leaf, UninitializedFloatBuffer& matrix, uint64_t neighbor_count);
 
     void
     insert_candidate(uint32_t source, uint32_t target, float distance);
@@ -350,9 +376,39 @@ private:
                  uint64_t block_size,
                  const std::function<void(uint64_t, uint64_t)>& task) const;
 
+    [[nodiscard]] bool
+    native_half() const {
+        return data_type_ != DataTypes::DATA_TYPE_FLOAT;
+    }
+
+    [[nodiscard]] pipnn_half::Format
+    half_format() const {
+        return data_type_ == DataTypes::DATA_TYPE_FP16 ? pipnn_half::Format::FP16
+                                                       : pipnn_half::Format::BF16;
+    }
+
+    [[nodiscard]] const uint16_t*
+    half_row(uint32_t local_id) const {
+        return (*half_rows_)[local_id];
+    }
+
+    void
+    gather_row(uint32_t local_id, UninitializedFloatBuffer& buffer, uint64_t row) const {
+        if (native_half()) {
+            const auto* source = half_row(local_id);
+            auto* destination = buffer.Data() + row * dimensions_;
+            pipnn_half::DecodeRow(source, destination, dimensions_, half_format());
+        } else {
+            const auto* source = vector_by_local_id(local_id);
+            std::copy(source,
+                      source + static_cast<int64_t>(dimensions_),
+                      buffer.Data() + static_cast<int64_t>(row * dimensions_));
+        }
+    }
+
     [[nodiscard]] const float*
     vector_by_local_id(uint32_t local_id) const {
-        return rows_[local_id];
+        return (*rows_)[local_id];
     }
 
 private:
@@ -365,7 +421,9 @@ private:
     uint64_t dimensions_;
     MetricType metric_;
     // Build() is synchronous, so the pipeline borrows rows only for its own lifetime.
-    const Vector<const float*>& rows_;
+    const Vector<const float*>* rows_{nullptr};
+    const Vector<const uint16_t*>* half_rows_{nullptr};
+    DataTypes data_type_{DataTypes::DATA_TYPE_FLOAT};
     uint64_t reservoir_size_{0};
     Vector<InnerIdType> ids_;
     float* norms_{nullptr};
@@ -396,7 +454,8 @@ PiPNNPipeline::Build(const Vector<InnerIdType>& ids_sequence) {
 void
 PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
     ids_.assign(ids_sequence.begin(), ids_sequence.end());
-    require_argument(ids_.size() == rows_.size(), "PiPNN IDs and rows must have equal sizes");
+    require_argument(ids_.size() == (native_half() ? half_rows_->size() : rows_->size()),
+                     "PiPNN IDs and rows must have equal sizes");
     require_argument(ids_.size() <= std::numeric_limits<uint32_t>::max(),
                      "PiPNN point count exceeds the local ID limit");
     if (ids_.empty()) {
@@ -415,14 +474,20 @@ PiPNNPipeline::prepare(const Vector<InnerIdType>& ids_sequence) {
             const auto id = ids_[local_id];
             require_argument(id < graph_capacity, "PiPNN input ID is outside the graph capacity");
             require_argument(seen_ids.emplace(id).second, "PiPNN input IDs must be unique");
-            require_argument(rows_[local_id] != nullptr, "PiPNN input rows must not be null");
+            require_argument(native_half()
+                                 ? half_row(static_cast<uint32_t>(local_id)) != nullptr
+                                 : vector_by_local_id(static_cast<uint32_t>(local_id)) != nullptr,
+                             "PiPNN input rows must not be null");
         }
     } else {
         parallel_for(ids_.size(), 256, [&](uint64_t begin, uint64_t end) {
             for (uint64_t local_id = begin; local_id < end; ++local_id) {
                 require_argument(ids_[local_id] < graph_capacity,
                                  "PiPNN input ID is outside the graph capacity");
-                require_argument(rows_[local_id] != nullptr, "PiPNN input rows must not be null");
+                require_argument(
+                    native_half() ? half_row(static_cast<uint32_t>(local_id)) != nullptr
+                                  : vector_by_local_id(static_cast<uint32_t>(local_id)) != nullptr,
+                    "PiPNN input rows must not be null");
             }
         });
     }
@@ -470,6 +535,30 @@ PiPNNPipeline::prepare_sketches() {
 
     parallel_for(ids_.size(), 64, [&](uint64_t begin, uint64_t end) {
         for (uint64_t local_id = begin; local_id < end; ++local_id) {
+            if (native_half()) {
+                const auto* vector = half_row(static_cast<uint32_t>(local_id));
+                if (metric_ != MetricType::METRIC_TYPE_IP) {
+                    const float norm =
+                        pipnn_half::Preparation(vector, nullptr, dimensions_, half_format());
+                    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                        const float length = std::sqrt(std::max(0.0F, norm));
+                        norms_[local_id] =
+                            length > 0.0F and std::isfinite(length) ? 1.0F / length : 0.0F;
+                    } else {
+                        norms_[local_id] = norm;
+                    }
+                }
+                for (uint64_t plane = 0; plane < parameter_.hash_plane_count; ++plane) {
+                    const auto* hyperplane = hyperplanes.data() + plane * dimensions_;
+                    float dot =
+                        pipnn_half::Preparation(vector, hyperplane, dimensions_, half_format());
+                    if (metric_ == MetricType::METRIC_TYPE_COSINE) {
+                        dot *= norms_[local_id];
+                    }
+                    sketches_[local_id * parameter_.hash_plane_count + plane] = dot;
+                }
+                continue;
+            }
             const auto* vector = vector_by_local_id(static_cast<uint32_t>(local_id));
             if (metric_ != MetricType::METRIC_TYPE_IP) {
                 float norm = 0.0F;
@@ -761,10 +850,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         checked_product(leaders.size(), dimensions_, "leader matrix");
     UninitializedFloatBuffer leader_values(leader_value_count, allocator_, "leader matrix");
     for (uint64_t leader = 0; leader < leaders.size(); ++leader) {
-        const auto* source = vector_by_local_id(leaders[leader]);
-        std::copy(source,
-                  source + static_cast<int64_t>(dimensions_),
-                  leader_values.Data() + static_cast<int64_t>(leader * dimensions_));
+        gather_row(leaders[leader], leader_values, leader);
     }
 
     if (allow_parallelism and thread_pool_ != nullptr and thread_count_ > 1 and
@@ -815,10 +901,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
                     const uint64_t stripe_size =
                         std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size() - begin);
                     for (uint64_t point = 0; point < stripe_size; ++point) {
-                        const auto* source = vector_by_local_id(item.points[begin + point]);
-                        std::copy(source,
-                                  source + static_cast<int64_t>(dimensions_),
-                                  point_values.Data() + static_cast<int64_t>(point * dimensions_));
+                        gather_row(item.points[begin + point], point_values, point);
                     }
 
                     BlasFunction::Sgemm(BlasFunction::RowMajor,
@@ -899,10 +982,7 @@ PiPNNPipeline::assign_to_leaders(const WorkItem& item,
         const uint64_t stripe_size =
             std::min<uint64_t>(PARTITION_STRIPE_SIZE, item.points.size() - begin);
         for (uint64_t point = 0; point < stripe_size; ++point) {
-            const auto* source = vector_by_local_id(item.points[begin + point]);
-            std::copy(source,
-                      source + static_cast<int64_t>(dimensions_),
-                      point_values.Data() + static_cast<int64_t>(point * dimensions_));
+            gather_row(item.points[begin + point], point_values, point);
         }
 
         BlasFunction::Sgemm(BlasFunction::RowMajor,
@@ -1003,19 +1083,16 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
     const uint64_t neighbor_count = std::min<uint64_t>(requested_neighbor_count, point_count - 1);
     if (neighbor_count <= SMALL_TOP_K_LIMIT) {
         if (metric_ == MetricType::METRIC_TYPE_L2SQR) {
-            build_small_leaf<MetricType::METRIC_TYPE_L2SQR>(leaf, matrix.Data(), neighbor_count);
+            build_small_leaf<MetricType::METRIC_TYPE_L2SQR>(leaf, matrix, neighbor_count);
             return;
         }
         if (metric_ == MetricType::METRIC_TYPE_IP) {
-            build_small_leaf<MetricType::METRIC_TYPE_IP>(leaf, matrix.Data(), neighbor_count);
+            build_small_leaf<MetricType::METRIC_TYPE_IP>(leaf, matrix, neighbor_count);
             return;
         }
     }
     for (uint64_t point = 0; point < point_count; ++point) {
-        const auto* source = vector_by_local_id(leaf[point]);
-        std::copy(source,
-                  source + static_cast<int64_t>(dimensions_),
-                  matrix.Data() + static_cast<int64_t>(point * dimensions_));
+        gather_row(leaf[point], matrix, point);
     }
     const uint64_t distance_values = checked_product(point_count, point_count, "leaf distances");
     UninitializedFloatBuffer distances(distance_values, allocator_, "leaf distances");
@@ -1134,7 +1211,10 @@ PiPNNPipeline::build_leaf(const Leaf& leaf) {
 
 template <MetricType metric>
 void
-PiPNNPipeline::build_small_leaf(const Leaf& leaf, float* matrix, uint64_t neighbor_count) {
+PiPNNPipeline::build_small_leaf(const Leaf& leaf,
+                                UninitializedFloatBuffer& matrix_buffer,
+                                uint64_t neighbor_count) {
+    auto* matrix = matrix_buffer.Data();
     static_assert(metric == MetricType::METRIC_TYPE_L2SQR || metric == MetricType::METRIC_TYPE_IP);
     const uint64_t count = leaf.size();
     Vector<std::pair<float, uint32_t>> nearest(
@@ -1157,6 +1237,9 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf, float* matrix, uint64_t neighb
         return left_gap != right_gap ? left_gap < right_gap : ids[lhs.second] < ids[rhs.second];
     };
     auto from_dot = [&](uint64_t source, uint64_t target, float dot) {
+        if (native_half()) {
+            return distance_from_dot(leaf[source], leaf[target], dot);
+        }
         if constexpr (metric == MetricType::METRIC_TYPE_L2SQR) {
             return std::max(0.0F, sanitize_distance(norms[source] + norms[target] - dot - dot));
         } else {
@@ -1191,8 +1274,12 @@ PiPNNPipeline::build_small_leaf(const Leaf& leaf, float* matrix, uint64_t neighb
     for (uint64_t row_begin = 0; row_begin < count; row_begin += strip_rows) {
         const auto row_end = std::min(count, row_begin + strip_rows);
         for (uint64_t point = row_begin; point < row_end; ++point) {
-            const auto* source = vector_by_local_id(leaf[point]);
-            std::copy(source, source + dimensions_, matrix + point * dimensions_);
+            if (native_half()) {
+                gather_row(leaf[point], matrix_buffer, point);
+            } else {
+                const auto* source = vector_by_local_id(leaf[point]);
+                std::copy(source, source + dimensions_, matrix + point * dimensions_);
+            }
         }
         const auto* dots = dot_buffer.Data();
         if (row_begin == 0) {
@@ -1386,6 +1473,10 @@ PiPNNPipeline::update_farthest(uint32_t source) {
 
 float
 PiPNNPipeline::pair_distance(uint32_t lhs, uint32_t rhs) const {
+    if (native_half()) {
+        return distance_from_dot(
+            lhs, rhs, pipnn_half::Dot(half_row(lhs), half_row(rhs), dimensions_, half_format()));
+    }
     const auto* left = vector_by_local_id(lhs);
     const auto* right = vector_by_local_id(rhs);
     const float dot = FP32ComputeIP(left, right, dimensions_);
@@ -1455,10 +1546,18 @@ PiPNNPipeline::robust_prune(uint32_t source,
     for (uint64_t candidate_index = 0; candidate_index < ordered.size(); ++candidate_index) {
         constexpr uint64_t prefetch_distance = 4;
         if (candidate_index + prefetch_distance < ordered.size()) {
-            const auto* future =
-                vector_by_local_id(ordered[candidate_index + prefetch_distance].second);
-            for (uint64_t dim = 0; dim < dimensions_; dim += 16) {
-                Prefetch(future + dim);
+            const auto local_id = ordered[candidate_index + prefetch_distance].second;
+            if (native_half()) {
+                const auto* future = reinterpret_cast<const char*>(half_row(local_id));
+                const uint64_t bytes = dimensions_ * sizeof(uint16_t);
+                for (uint64_t offset = 0; offset < bytes; offset += 64) {
+                    Prefetch(future + offset);
+                }
+            } else {
+                const auto* future = vector_by_local_id(local_id);
+                for (uint64_t dim = 0; dim < dimensions_; dim += 16) {
+                    Prefetch(future + dim);
+                }
             }
         }
         const auto& [source_distance, candidate] = ordered[candidate_index];
@@ -1680,12 +1779,55 @@ void
 PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
                          const Vector<InnerIdType>& ids_sequence,
                          const Vector<const float*>& rows) const {
+    build_typed(graph, ids_sequence, rows, DataTypes::DATA_TYPE_FLOAT);
+}
+
+void
+PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
+                         const Vector<InnerIdType>& ids_sequence,
+                         const Vector<const uint16_t*>& rows,
+                         DataTypes data_type) const {
+    require_argument(
+        data_type == DataTypes::DATA_TYPE_FP16 or data_type == DataTypes::DATA_TYPE_BF16,
+        "PiPNN native half rows require FP16 or BF16");
+    build_typed(graph, ids_sequence, rows, data_type);
+}
+
+template <typename ElementType>
+void
+PiPNNGraphBuilder::build_typed(const GraphInterfacePtr& graph,
+                               const Vector<InnerIdType>& ids_sequence,
+                               const Vector<const ElementType*>& rows,
+                               DataTypes data_type) const {
     require_argument(graph != nullptr, "PiPNN graph must not be null");
     parameter_.Validate(graph->MaximumDegree());
+    const auto build_pipeline = [&](const Vector<InnerIdType>& ids,
+                                    const Vector<const ElementType*>& input_rows) {
+        if constexpr (std::is_same_v<ElementType, float>) {
+            PiPNNPipeline(parameter_,
+                          dimensions_,
+                          metric_,
+                          allocator_,
+                          thread_pool_,
+                          thread_count_,
+                          graph,
+                          input_rows)
+                .Build(ids);
+        } else {
+            PiPNNPipeline(parameter_,
+                          dimensions_,
+                          metric_,
+                          allocator_,
+                          thread_pool_,
+                          thread_count_,
+                          graph,
+                          input_rows,
+                          data_type)
+                .Build(ids);
+        }
+    };
     if (graph->GetDuplicateTracker() == nullptr) {
-        PiPNNPipeline(
-            parameter_, dimensions_, metric_, allocator_, thread_pool_, thread_count_, graph, rows)
-            .Build(ids_sequence);
+        build_pipeline(ids_sequence, rows);
         return;
     }
 
@@ -1703,7 +1845,7 @@ PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
         require_argument(rows[local_id] != nullptr, "PiPNN input rows must not be null");
     }
     Vector<InnerIdType> representative_ids(allocator_);
-    Vector<const float*> representative_rows(allocator_);
+    Vector<const ElementType*> representative_rows(allocator_);
     Vector<std::pair<InnerIdType, InnerIdType>> duplicates(allocator_);
     group_duplicate_rows(ids_sequence,
                          rows,
@@ -1712,15 +1854,7 @@ PiPNNGraphBuilder::Build(const GraphInterfacePtr& graph,
                          representative_ids,
                          representative_rows,
                          duplicates);
-    PiPNNPipeline(parameter_,
-                  dimensions_,
-                  metric_,
-                  allocator_,
-                  thread_pool_,
-                  thread_count_,
-                  graph,
-                  representative_rows)
-        .Build(representative_ids);
+    build_pipeline(representative_ids, representative_rows);
     for (const auto& [representative, duplicate] : duplicates) {
         graph->SetDuplicateId(representative, duplicate);
     }
