@@ -20,12 +20,13 @@
 namespace vsag {
 namespace {
 uint32_t
-VisibleCpuSlots() {
+visible_cpu_slots() {
     uint32_t count = std::max(1U, std::thread::hardware_concurrency());
 #ifdef __linux__
     cpu_set_t affinity;
-    if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0)
+    if (sched_getaffinity(0, sizeof(affinity), &affinity) == 0) {
         count = static_cast<uint32_t>(std::max(1, CPU_COUNT(&affinity)));
+    }
     const auto read = [](const std::string& path) {
         std::ifstream file(path);
         std::ostringstream value;
@@ -38,12 +39,14 @@ VisibleCpuSlots() {
 }
 }  // namespace
 SearchExecutionContext::SearchExecutionContext(std::optional<uint32_t> maximum)
-    : slots(VisibleCpuSlots()), limit(std::min(slots - 1, maximum.value_or(512))) {
-    CHECK_ARGUMENT(!maximum || *maximum <= 512, "max_background_workers must be in [0,512]");
+    : slots(visible_cpu_slots()), limit(std::min(slots - 1, maximum.value_or(512))) {
+    const bool valid_maximum = not maximum.has_value() or *maximum <= 512;
+    CHECK_ARGUMENT(valid_maximum, "max_background_workers must be in [0,512]");
     if (limit != 0) {
         auto result = Engine::CreateThreadPool(limit);
-        if (!result.has_value())
+        if (not result.has_value()) {
             throw VsagException(result.error());
+        }
         pool = std::make_shared<SafeThreadPool>(result.value());
     }
 }

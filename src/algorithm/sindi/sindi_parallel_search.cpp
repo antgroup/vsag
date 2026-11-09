@@ -31,7 +31,8 @@ resource_limit(const char* name, uint64_t fallback) {
     uint64_t parsed = 0;
     const auto* end = value + std::strlen(value);
     const auto result = std::from_chars(value, end, parsed);
-    CHECK_ARGUMENT(result.ec == std::errc{} and result.ptr == end,
+    const bool valid_limit = result.ec == std::errc{} and result.ptr == end;
+    CHECK_ARGUMENT(valid_limit,
                    std::string("invalid ") + name + ": expected unsigned decimal digits");
     return parsed;
 }
@@ -113,22 +114,24 @@ struct Slot {
 }  // namespace
 
 std::string
-SindiExecutionStatistics(JsonType json,
+SindiExecutionStatistics(JsonType&& json,
                          const SindiParallelState* parallel,
                          const SindiCpuTime& caller_cpu,
                          bool profile_cpu,
                          uint32_t requested_slots) {
-    if (not parallel and not profile_cpu and requested_slots <= 1) {
+    if (parallel == nullptr and not profile_cpu and requested_slots <= 1) {
         return json.Dump();
     }
-    if (parallel) {
+    if (parallel != nullptr) {
         json["sindi_strategy"].SetString("accel_v1");
         json["sindi_requested_slots"].SetUint64(parallel->requested);
         json["sindi_resources_ready"].SetBool(parallel->resources != nullptr);
         json["sindi_granted_slots"].SetUint64(parallel->granted);
         json["sindi_filter_slots"].SetUint64(parallel->filter_slots);
-        json["sindi_cpu_slots"].SetUint64(parallel->resources ? parallel->resources->slots : 0);
-        json["sindi_worker_limit"].SetUint64(parallel->resources ? parallel->resources->limit : 0);
+        json["sindi_cpu_slots"].SetUint64(
+            parallel->resources != nullptr ? parallel->resources->slots : 0);
+        json["sindi_worker_limit"].SetUint64(
+            parallel->resources != nullptr ? parallel->resources->limit : 0);
         json["sindi_partitions"].SetUint64(parallel->plan.quotas.size());
         json["sindi_candidate_capacity"].SetUint64(parallel->plan.capacity);
         json["sindi_n_candidate"].SetUint64(parallel->plan.candidates);
@@ -158,12 +161,12 @@ SindiExecutionStatistics(JsonType json,
             json["sindi_worker_limit"].SetUint64(0);
         }
     }
-    const bool cpu_complete =
-        profile_cpu and caller_cpu.available and (not parallel or parallel->worker_cpu_available);
+    const bool cpu_complete = profile_cpu and caller_cpu.available and
+                              (parallel == nullptr or parallel->worker_cpu_available);
     json["sindi_cpu_time_enabled"].SetBool(profile_cpu);
     json["sindi_cpu_time_complete"].SetBool(cpu_complete);
     if (cpu_complete) {
-        const auto worker_ns = parallel ? parallel->worker_cpu_ns : 0;
+        const auto worker_ns = parallel != nullptr ? parallel->worker_cpu_ns : 0;
         json["sindi_search_cpu_us"].SetDouble(double(caller_cpu.nanoseconds + worker_ns) / 1000);
         json["sindi_worker_cpu_us"].SetDouble(double(worker_ns) / 1000);
     }
@@ -174,14 +177,16 @@ SindiParallelPlan
 SindiParallelPlan::Make(uint64_t windows, uint64_t candidates, double ratio, uint64_t topk) {
     uint64_t ratio_bits = 0;
     std::memcpy(&ratio_bits, &ratio, sizeof(ratio_bits));
-    CHECK_ARGUMENT(topk > 0 and candidates >= topk and ratio >= 1.0 and
-                       (ratio_bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL,
-                   "invalid parallel candidate capacity");
+    const bool valid_candidate_budget =
+        topk > 0 and candidates >= topk and ratio >= 1.0 and
+        (ratio_bits & 0x7ff0000000000000ULL) != 0x7ff0000000000000ULL;
+    CHECK_ARGUMENT(valid_candidate_budget, "invalid parallel candidate capacity");
     const auto maximum = resource_limit("VSAG_SINDI_MAX_CANDIDATES", 1048576);
-    CHECK_ARGUMENT(maximum > 0 and maximum <= std::numeric_limits<uint32_t>::max(),
-                   "VSAG_SINDI_MAX_CANDIDATES must fit a positive uint32");
-    CHECK_ARGUMENT(candidates <= maximum and ratio <= double(maximum) / double(candidates),
-                   "parallel candidate capacity exceeds deployment limit");
+    const bool valid_maximum = maximum > 0 and maximum <= std::numeric_limits<uint32_t>::max();
+    CHECK_ARGUMENT(valid_maximum, "VSAG_SINDI_MAX_CANDIDATES must fit a positive uint32");
+    const bool capacity_within_limit =
+        candidates <= maximum and ratio <= double(maximum) / double(candidates);
+    CHECK_ARGUMENT(capacity_within_limit, "parallel candidate capacity exceeds deployment limit");
     SindiParallelPlan plan;
     plan.candidates = candidates;
     plan.capacity = static_cast<uint64_t>(std::ceil(ratio * double(candidates)));
@@ -193,7 +198,8 @@ SindiParallelPlan::Make(uint64_t windows, uint64_t candidates, double ratio, uin
     for (uint64_t i = 0; i < groups; ++i) {
         plan.boundaries.push_back(windows / groups * (i + 1) +
                                   (windows % groups) * (i + 1) / groups);
-        plan.quotas.push_back(plan.capacity / groups + (i < plan.capacity % groups));
+        plan.quotas.push_back(plan.capacity / groups +
+                              static_cast<uint64_t>(i < plan.capacity % groups));
     }
     return plan;
 }
@@ -249,22 +255,24 @@ SearchSindiPartitions(const SindiPartitionSearchRequest& request,
     const auto* provider =
         state.user_filter ? dynamic_cast<const ConcurrentFilterProvider*>(state.user_filter.get())
                           : nullptr;
-    CHECK_ARGUMENT(not state.user_filter or provider != nullptr,
-                   "SINDI parallel search requires independent filters");
+    const bool independent_filters = not state.user_filter or provider != nullptr;
+    CHECK_ARGUMENT(independent_filters, "SINDI parallel search requires independent filters");
     for (;;) {
         if (state.user_filter) {
             lease = provider->TryLease(maximum);
-            CHECK_ARGUMENT(lease != nullptr and not lease->evaluators.empty() and
-                               lease->evaluators.size() <= maximum,
-                           "SINDI parallel filter resources unavailable");
+            const bool valid_filter_lease = lease != nullptr and not lease->evaluators.empty() and
+                                            lease->evaluators.size() <= maximum;
+            CHECK_ARGUMENT(valid_filter_lease, "SINDI parallel filter resources unavailable");
             maximum = static_cast<uint32_t>(lease->evaluators.size());
-            if (state.filter_slots == 0)
+            if (state.filter_slots == 0) {
                 state.filter_slots = maximum;
+            }
         }
         reservation.extra = shared.TryReserve(maximum - 1);
         state.granted = reservation.extra + 1;
-        if (state.granted == maximum || not lease)
+        if (state.granted == maximum or not lease) {
             break;
+        }
         maximum = state.granted;
         {
             std::lock_guard<std::mutex> guard(shared.mutex);

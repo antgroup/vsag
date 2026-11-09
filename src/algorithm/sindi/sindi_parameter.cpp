@@ -331,13 +331,15 @@ SINDISearchParameter::FromJson(const JsonType& json) {
     if (search_json.Contains("parallel_n_candidate_ratio")) {
         parallel_n_candidate_ratio =
             search_json["parallel_n_candidate_ratio"].GetInnerJson()->get<double>();
-        CHECK_ARGUMENT(
-            std::isfinite(parallel_n_candidate_ratio) and parallel_n_candidate_ratio >= 1.0,
-            "parallel_n_candidate_ratio must be finite and >= 1");
+        const bool valid_ratio =
+            std::isfinite(parallel_n_candidate_ratio) and parallel_n_candidate_ratio >= 1.0;
+        CHECK_ARGUMENT(valid_ratio, "parallel_n_candidate_ratio must be finite and >= 1");
     }
-    CHECK_ARGUMENT(not search_json.Contains("worker_n_candidate") and
-                       not search_json.Contains("filter_callback_limit_weight") and
-                       not search_json.Contains("window_scheduler"),
+    const bool supported_execution_parameters =
+        not search_json.Contains("worker_n_candidate") and
+        not search_json.Contains("filter_callback_limit_weight") and
+        not search_json.Contains("window_scheduler");
+    CHECK_ARGUMENT(supported_execution_parameters,
                    "unsupported SINDI execution parameter; use window_parallelism and "
                    "parallel_n_candidate_ratio");
 

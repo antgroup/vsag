@@ -793,10 +793,10 @@ SINDI::knn_search_impl(const DatasetPtr& query,
         search_param.window_parallelism = 1;
         if (const auto* provider = dynamic_cast<const ConcurrentFilterProvider*>(filter.get())) {
             serial_filter_lease = provider->TryLease(1);
-            CHECK_ARGUMENT(serial_filter_lease != nullptr and
-                               serial_filter_lease->evaluators.size() == 1 and
-                               serial_filter_lease->evaluators.front() != nullptr,
-                           "SINDI serial filter resources unavailable");
+            const bool valid_serial_filter_lease =
+                serial_filter_lease != nullptr and serial_filter_lease->evaluators.size() == 1 and
+                serial_filter_lease->evaluators.front() != nullptr;
+            CHECK_ARGUMENT(valid_serial_filter_lease, "SINDI serial filter resources unavailable");
             effective_filter = serial_filter_lease->evaluators.front();
         }
     }
@@ -1231,7 +1231,9 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     const auto search_json = JsonType::Parse(request.params_str_);
     search_param.FromJson(search_json);
     if (search_param.window_parallelism > 1) {
-        CHECK_ARGUMENT(request.mode_ == SearchMode::KNN_SEARCH and request.expected_labels_.empty(),
+        const bool supported_parallel_request =
+            request.mode_ == SearchMode::KNN_SEARCH and request.expected_labels_.empty();
+        CHECK_ARGUMENT(supported_parallel_request,
                        "SINDI parallel search does not support Range or reasoning");
         rlock.unlock();
         return knn_search_impl(request.query_,
