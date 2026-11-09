@@ -252,6 +252,22 @@ SINDI_V2 supports all SINDI features with both in-memory and disk-based I/O.
 See the [SINDI_V2 page](../indexes/sindi_v2.md) for build parameters and search parameters such as
 `n_candidate` and `filter_callback_limit`.
 
+## SIMQ (multi-vector retrieval)
+
+SIMQ requires top-level `dim > 0`, `dtype: "float32"`, and `metric_type: "ip"`;
+`repr: "multi_vector"` can describe the layout explicitly. Its 15 public build fields live under
+`index_param`: `base_io_type`, `base_file_path`, `base_enable_read_cache`, `base_cache_total_size`,
+`quantization_type`, `build_thread_count`, `init_cluster_ratio`, `max_cluster_size`,
+`split_start_idx`, `random_seed`, `coarse_k`, `rerank_k`, `split_delay_seconds`,
+`support_duplicate`, and `deduplicate_storage`.
+
+Both KNN and range search accept `simq.coarse_k`, `simq.rerank_k` (omitted/non-positive values
+use build defaults), and soft `simq.timeout_ms`. Root-level finite `threshold` limits KNN final
+distances only; range search uses `radius`. Shared `parallelism`, `factor`, and `enable_reorder`
+are parsed inside `simq` but ignored; MaxSim reranking cannot be disabled. See the
+[SIMQ parameter tables](../indexes/simq.md) for defaults, constraints, storage/quantization caveats,
+and the distinction between input dtype and storage format.
+
 ## Runtime Parameters
 
 Beyond build-time parameters, `Index::Tune` and `SearchParam` tweak runtime settings such as
