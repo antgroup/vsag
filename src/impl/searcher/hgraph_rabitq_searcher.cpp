@@ -529,27 +529,20 @@ private:
     std::array<float, K_FUSED_CLUSTER_COUNT> scaled_cluster_g_error_{};
 };
 
-class SearchBuffer {
+template <bool filtered>
+class SearchBuffer;
+
+// The unfiltered specialization keeps the original sorted candidate array.
+template <>
+class SearchBuffer<false> {
 public:
-    SearchBuffer(uint64_t capacity, Allocator* allocator, bool filtered)
-        : data_(filtered ? 0 : capacity + 1, allocator),
-          capacity_(capacity),
-          filtered_(filtered),
-          frontier_(allocator, -1),
-          accepted_(allocator, static_cast<int64_t>(capacity)) {
+    SearchBuffer(uint64_t capacity, Allocator* allocator)
+        : data_(capacity + 1, allocator), capacity_(capacity) {
     }
 
     void
-    Insert(InnerIdType id, float distance, bool allowed) {
+    Insert(InnerIdType id, float distance, bool /*allowed*/) {
         if (IsFull(distance)) {
-            return;
-        }
-        if (filtered_) {
-            // Rejected nodes remain bridges without tightening the search boundary.
-            frontier_.Push(distance, id);
-            if (allowed) {
-                accepted_.Push(distance, id);
-            }
             return;
         }
         const auto pos = binary_search(distance);
@@ -562,19 +555,11 @@ public:
 
     [[nodiscard]] bool
     HasNext() const {
-        if (filtered_) {
-            return not frontier_.Empty() and not IsFull(frontier_.Top().first);
-        }
         return current_ < size_;
     }
 
     InnerIdType
     Pop() {
-        if (filtered_) {
-            const auto id = frontier_.Top().second;
-            frontier_.Pop();
-            return id;
-        }
         const auto id = data_[current_].id;
         data_[current_].checked = true;
         ++current_;
@@ -586,17 +571,11 @@ public:
 
     [[nodiscard]] InnerIdType
     NextId() const {
-        if (filtered_) {
-            return frontier_.Top().second;
-        }
         return data_[current_].id;
     }
 
     [[nodiscard]] bool
     IsFull(float distance) const {
-        if (filtered_) {
-            return accepted_.Size() == capacity_ and distance > accepted_.Top().first;
-        }
         return size_ == capacity_ and distance > data_[size_ - 1].distance;
     }
 
@@ -605,8 +584,7 @@ private:
     binary_search(float distance) const {
         uint64_t lo = 0;
         uint64_t length = size_;
-        // Advance by a conditionally selected half to keep this hot search
-        // branchless.
+        // Advance by a conditionally selected half to keep this hot search branchless.
         while (length > 1) {
             const auto half = length >> 1U;
             length -= half;
@@ -615,17 +593,140 @@ private:
         return lo < size_ and data_[lo].distance < distance ? lo + 1 : lo;
     }
 
-private:
     Vector<SearchBufferRecord> data_;
     uint64_t size_{0};
     uint64_t current_{0};
     uint64_t capacity_{0};
-    bool filtered_{false};
+};
+
+// Only filtered traversal owns the frontier and accepted-candidate heaps.
+template <>
+class SearchBuffer<true> {
+public:
+    SearchBuffer(uint64_t capacity, Allocator* allocator)
+        : capacity_(capacity),
+          frontier_(allocator, -1),
+          accepted_(allocator, static_cast<int64_t>(capacity)) {
+    }
+
+    void
+    Insert(InnerIdType id, float distance, bool allowed) {
+        if (IsFull(distance)) {
+            return;
+        }
+        frontier_.Push(distance, id);
+        if (allowed) {
+            accepted_.Push(distance, id);
+        }
+    }
+
+    [[nodiscard]] bool
+    HasNext() const {
+        return not frontier_.Empty() and not IsFull(frontier_.Top().first);
+    }
+
+    InnerIdType
+    Pop() {
+        const auto id = frontier_.Top().second;
+        frontier_.Pop();
+        return id;
+    }
+
+    [[nodiscard]] InnerIdType
+    NextId() const {
+        return frontier_.Top().second;
+    }
+
+    [[nodiscard]] bool
+    IsFull(float distance) const {
+        return accepted_.Size() == capacity_ and distance > accepted_.Top().first;
+    }
+
+private:
+    uint64_t capacity_;
     StandardHeap<false, false> frontier_;
     StandardHeap<true, true> accepted_;
 };
 
-template <typename Scorer>
+template <bool filtered>
+class FusedSearchFilter;
+
+template <>
+class FusedSearchFilter<false> {
+public:
+    FusedSearchFilter(const InnerSearchParam& /*param*/, Allocator* /*allocator*/) {
+    }
+
+    [[nodiscard]] static bool
+    IsAllowed(InnerIdType /*id*/) {
+        return true;
+    }
+
+    [[nodiscard]] static bool
+    HasDeferred() {
+        return false;
+    }
+};
+
+template <>
+class FusedSearchFilter<true> {
+public:
+    FusedSearchFilter(const InnerSearchParam& param, Allocator* allocator)
+        : filter_(param.is_inner_id_allowed.get()), deferred_bridges_(allocator) {
+        if (not param.executors.empty() and param.executors[0] != nullptr) {
+            param.executors[0]->Clear();
+            attribute_filter_ = param.executors[0]->Run();
+        }
+        if (filter_ != nullptr) {
+            bitmap_ = filter_->GetValidBitmap(&bitmap_size_);
+        }
+        if (param.search_mode != RANGE_SEARCH and
+            (filter_ != nullptr or attribute_filter_ != nullptr)) {
+            const float ratio = filter_ == nullptr ? 1.0F : filter_->ValidRatio();
+            skip_strategy_ = create_filter_search_skip_strategy(
+                param.skip_strategy_type, ratio, param.skip_ratio);
+        }
+    }
+
+    [[nodiscard]] bool
+    IsAllowed(InnerIdType id) const {
+        const bool allowed = bitmap_ != nullptr and id < bitmap_size_
+                                 ? bitmap_[id] != 0
+                                 : filter_ == nullptr or filter_->CheckValid(id);
+        return allowed and (attribute_filter_ == nullptr or attribute_filter_->CheckValid(id));
+    }
+
+    [[nodiscard]] bool
+    ShouldSkip() const {
+        return skip_strategy_ != nullptr and not skip_strategy_->ShouldVisit();
+    }
+
+    void
+    Defer(InnerIdType id) {
+        deferred_bridges_.push_back(id);
+    }
+
+    [[nodiscard]] bool
+    HasDeferred() const {
+        return deferred_cursor_ < deferred_bridges_.size();
+    }
+
+    InnerIdType
+    PopDeferred() {
+        return deferred_bridges_[deferred_cursor_++];
+    }
+
+private:
+    Filter* filter_;
+    Filter* attribute_filter_{nullptr};
+    const uint8_t* bitmap_{nullptr};
+    uint64_t bitmap_size_{0};
+    FilterSearchSkipStrategyPtr skip_strategy_;
+    Vector<InnerIdType> deferred_bridges_;
+    uint64_t deferred_cursor_{0};
+};
+
+template <bool filtered, typename Scorer>
 DistHeapPtr
 search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     const VisitedListPtr& visited_list,
@@ -659,10 +760,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         not range_search and HGraphRaBitQSearcher::ShouldDeferRerank(search_param);
     const uint64_t deferred_rerank_count = std::max<uint64_t>(search_param.ef, 2 * rerank_topk);
     BoundedResults results(deferred_rerank ? deferred_rerank_count : result_limit, allocator);
-    SearchBuffer candidate_set(
-        search_param.ef,
-        allocator,
-        search_param.is_inner_id_allowed != nullptr or not search_param.executors.empty());
+    SearchBuffer<filtered> candidate_set(search_param.ef, allocator);
 
     uint32_t rabitq_filter_count = 0;
     uint32_t rabitq_full_count = 0;
@@ -670,33 +768,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
     uint32_t rabitq_hint_full_count = 0;
     uint32_t rabitq_reorder_fallback_full_count = 0;
     uint32_t deferred_finalize_full_count = 0;
-    Filter* attribute_filter = nullptr;
-    if (not search_param.executors.empty() and search_param.executors[0] != nullptr) {
-        search_param.executors[0]->Clear();
-        attribute_filter = search_param.executors[0]->Run();
-    }
-    uint64_t bitmap_size = 0;
-    const auto* bitmap = search_param.is_inner_id_allowed == nullptr
-                             ? nullptr
-                             : search_param.is_inner_id_allowed->GetValidBitmap(&bitmap_size);
-    const auto is_allowed = [&search_param, attribute_filter, bitmap, bitmap_size](InnerIdType id) {
-        const bool allowed = bitmap != nullptr and id < bitmap_size
-                                 ? bitmap[id] != 0
-                                 : search_param.is_inner_id_allowed == nullptr or
-                                       search_param.is_inner_id_allowed->CheckValid(id);
-        return allowed and (attribute_filter == nullptr or attribute_filter->CheckValid(id));
-    };
-    FilterSearchSkipStrategyPtr skip_strategy;
-    if (not range_search and
-        (search_param.is_inner_id_allowed != nullptr or attribute_filter != nullptr)) {
-        const float ratio = search_param.is_inner_id_allowed == nullptr
-                                ? 1.0F
-                                : search_param.is_inner_id_allowed->ValidRatio();
-        skip_strategy = create_filter_search_skip_strategy(
-            search_param.skip_strategy_type, ratio, search_param.skip_ratio);
-    }
-    Vector<InnerIdType> deferred_bridges(allocator);
-    uint64_t deferred_cursor = 0;
+    FusedSearchFilter<filtered> filter(search_param, allocator);
 
     const auto score_node = [&](const HGraphRaBitQFusedDataCell::CodeView& node,
                                 float* distance,
@@ -775,7 +847,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
             if (duplicate == id) {
                 continue;
             }
-            if (not is_allowed(duplicate)) {
+            if (not filter.IsAllowed(duplicate)) {
                 continue;
             }
             float duplicate_distance = 0.0F;
@@ -809,7 +881,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                        &entry_full_distance_available)) {
         return std::make_shared<StandardHeap<true, false>>(allocator, -1);
     }
-    const bool entry_allowed = is_allowed(search_param.ep);
+    const bool entry_allowed = filter.IsAllowed(search_param.ep);
     if (should_rerank and entry_allowed and not entry_full_distance_available) {
         if (not refine_node(entry_node, entry_filter_ip, &entry_distance)) {
             return std::make_shared<StandardHeap<true, false>>(allocator, -1);
@@ -857,7 +929,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                          float filter_inner_product,
                                          bool supplement_prefetched,
                                          bool full_distance_available,
-                                         bool allowed) {
+                                         bool filter_allowed) {
+        const bool allowed = not filtered or filter_allowed;
         ++distance_computations;
         if (reasoning != nullptr) {
             reasoning->RecordVisit(neighbor, distance, hops);  // [reasoning]
@@ -930,8 +1003,8 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
         prefetch_next_candidate();
     };
 
-    while (candidate_set.HasNext() or deferred_cursor < deferred_bridges.size()) {
-        const bool recovering = not candidate_set.HasNext();
+    while (candidate_set.HasNext() or filter.HasDeferred()) {
+        const bool recovering = filtered and not candidate_set.HasNext();
         if (not recovering) {
             ++hops;
         }
@@ -956,8 +1029,14 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
 
         // A skipped bridge is eventually scored against the accepted-candidate boundary.
         // It is not permanently lost merely because it was marked visited while gathering edges.
-        const auto current_id =
-            recovering ? deferred_bridges[deferred_cursor++] : candidate_set.Pop();
+        const auto current_id = [&]() {
+            if constexpr (filtered) {
+                if (recovering) {
+                    return filter.PopDeferred();
+                }
+            }
+            return candidate_set.Pop();
+        }();
         MaybeSharedLock node_lock(neighbors_mutex, current_id);
         const auto current_node = graph->GetNodeView(current_id);
         const auto neighbor_count = recovering ? 1U : current_node.neighbor_count;
@@ -977,15 +1056,17 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                     (not recovering and visited_list->TestAndSet(neighbor))) {
                     continue;
                 }
-                const bool allowed = not recovering and is_allowed(neighbor);
-                if (not recovering and selected_neighbors > 0 and skip_strategy != nullptr and
-                    not skip_strategy->ShouldVisit() and not allowed) {
-                    deferred_bridges.push_back(neighbor);
-                    continue;
+                if constexpr (filtered) {
+                    const bool allowed = not recovering and filter.IsAllowed(neighbor);
+                    if (not recovering and selected_neighbors > 0 and filter.ShouldSkip() and
+                        not allowed) {
+                        filter.Defer(neighbor);
+                        continue;
+                    }
+                    batch_allowed[batch_count] = allowed;
+                    ++selected_neighbors;
                 }
                 batch_ids[batch_count] = neighbor;
-                batch_allowed[batch_count] = allowed;
-                ++selected_neighbors;
                 graph->PrefetchFusedFilter(neighbor);
                 ++batch_count;
             }
@@ -1057,7 +1138,7 @@ search_direct_fused(const HGraphRaBitQFusedDataCellPtr& graph,
                                         filter_inner_products[lane],
                                         supplement_prefetched[lane],
                                         full_distance_available[lane],
-                                        batch_allowed[lane]);
+                                        filtered ? batch_allowed[lane] : true);
                 }
             }
         }
@@ -1322,19 +1403,23 @@ HGraphRaBitQSearcher::Route(const GraphInterfacePtr& route_graph,
     return entry_point;
 }
 
+namespace {
+template <bool filtered>
 DistHeapPtr
-HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
-                             const FlattenInterfacePtr& flatten,
-                             const VisitedListPtr& visited_list,
-                             const void* query,
-                             const InnerSearchParam& search_param,
-                             QueryContext* ctx,
-                             RaBitQCandidateVector* lower_bound_candidates,
-                             bool* search_finalized) const {
+search_fused(const HGraphRaBitQFusedDataCellPtr& graph,
+             const FlattenInterfacePtr& flatten,
+             const VisitedListPtr& visited_list,
+             const void* query,
+             const InnerSearchParam& search_param,
+             QueryContext* ctx,
+             RaBitQCandidateVector* lower_bound_candidates,
+             bool* search_finalized,
+             Allocator* default_allocator,
+             const MutexArrayPtr& neighbors_mutex) {
     if (search_finalized != nullptr) {
         *search_finalized = false;
     }
-    auto* allocator = select_query_allocator(ctx, allocator_);
+    auto* allocator = select_query_allocator(ctx, default_allocator);
     auto* split_codes = dynamic_cast<RaBitQSplitDataCellInterface*>(flatten.get());
     if (graph == nullptr or split_codes == nullptr or search_param.find_duplicate) {
         return nullptr;
@@ -1383,14 +1468,14 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         ctx == nullptr ? std::numeric_limits<float>::quiet_NaN() : ctx->rabitq_error_rate;
     if (has_direct_traversal_query) {
         const auto run_direct_search = [&](const auto& scorer) {
-            auto result = search_direct_fused(graph,
-                                              visited_list,
-                                              search_param,
-                                              ctx,
-                                              lower_bound_candidates,
-                                              allocator,
-                                              neighbors_mutex_,
-                                              scorer);
+            auto result = search_direct_fused<filtered>(graph,
+                                                        visited_list,
+                                                        search_param,
+                                                        ctx,
+                                                        lower_bound_candidates,
+                                                        allocator,
+                                                        neighbors_mutex,
+                                                        scorer);
             if (search_finalized != nullptr) {
                 *search_finalized = not deferred_rerank or lower_bound_candidates != nullptr;
             }
@@ -1422,10 +1507,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         }
     }
     auto result = std::make_shared<StandardHeap<true, false>>(allocator, -1);
-    SearchBuffer candidate_set(
-        search_param.ef,
-        allocator,
-        search_param.is_inner_id_allowed != nullptr or not search_param.executors.empty());
+    SearchBuffer<filtered> candidate_set(search_param.ef, allocator);
     uint32_t rabitq_filter_count = 0;
     uint32_t rabitq_full_count = 0;
     uint32_t rabitq_filter_fallback_full_count = 0;
@@ -1437,34 +1519,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         rate_context.rabitq_error_rate = ctx->rabitq_error_rate;
         rate_context_ptr = &rate_context;
     }
-    Filter* attribute_filter = nullptr;
-    if (not search_param.executors.empty() and search_param.executors[0] != nullptr) {
-        search_param.executors[0]->Clear();
-        attribute_filter = search_param.executors[0]->Run();
-    }
-    uint64_t bitmap_size = 0;
-    const auto* bitmap = search_param.is_inner_id_allowed == nullptr
-                             ? nullptr
-                             : search_param.is_inner_id_allowed->GetValidBitmap(&bitmap_size);
-    const auto is_allowed = [&search_param, attribute_filter, bitmap, bitmap_size](InnerIdType id) {
-        const bool allowed = bitmap != nullptr and id < bitmap_size
-                                 ? bitmap[id] != 0
-                                 : search_param.is_inner_id_allowed == nullptr or
-                                       search_param.is_inner_id_allowed->CheckValid(id);
-        return allowed and (attribute_filter == nullptr or attribute_filter->CheckValid(id));
-    };
-
-    FilterSearchSkipStrategyPtr skip_strategy;
-    if (not range_search and
-        (search_param.is_inner_id_allowed != nullptr or attribute_filter != nullptr)) {
-        const float ratio = search_param.is_inner_id_allowed == nullptr
-                                ? 1.0F
-                                : search_param.is_inner_id_allowed->ValidRatio();
-        skip_strategy = create_filter_search_skip_strategy(
-            search_param.skip_strategy_type, ratio, search_param.skip_ratio);
-    }
-    Vector<InnerIdType> deferred_bridges(allocator);
-    uint64_t deferred_cursor = 0;
+    FusedSearchFilter<filtered> filter(search_param, allocator);
 
     auto score_node = [&](InnerIdType id,
                           float* distance,
@@ -1580,7 +1635,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
         auto duplicate_ids = graph->GetDuplicateIds(group_id);
         duplicate_ids.push_back(group_id);
         for (const auto duplicate : duplicate_ids) {
-            if (duplicate == id or not is_allowed(duplicate)) {
+            if (duplicate == id or not filter.IsAllowed(duplicate)) {
                 continue;
             }
             const auto node = graph->GetCodeView(duplicate);
@@ -1604,7 +1659,7 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     if (not score_node(search_param.ep, &entry_distance, &entry_lower_bound, &entry_filter_ip)) {
         return result;
     }
-    const bool entry_allowed = is_allowed(search_param.ep);
+    const bool entry_allowed = filter.IsAllowed(search_param.ep);
     if (should_rerank and entry_allowed and not deferred_rerank) {
         const bool refined =
             exact_filter_ip_hint
@@ -1641,8 +1696,8 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
     const auto prefetch_codes_l1 = [&graph](InnerIdType id) { graph->PrefetchFusedFilter(id); };
     const auto prefetch_graph_l2 = [&graph](InnerIdType id) { graph->PrefetchNodeHeader(id); };
 
-    while (candidate_set.HasNext() or deferred_cursor < deferred_bridges.size()) {
-        const bool recovering = not candidate_set.HasNext();
+    while (candidate_set.HasNext() or filter.HasDeferred()) {
+        const bool recovering = filtered and not candidate_set.HasNext();
         if (not recovering) {
             ++hops;
         }
@@ -1665,9 +1720,15 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             reasoning->AddSearchHop();  // [reasoning]
         }
 
-        const auto current_id =
-            recovering ? deferred_bridges[deferred_cursor++] : candidate_set.Pop();
-        MaybeSharedLock node_lock(neighbors_mutex_, current_id);
+        const auto current_id = [&]() {
+            if constexpr (filtered) {
+                if (recovering) {
+                    return filter.PopDeferred();
+                }
+            }
+            return candidate_set.Pop();
+        }();
+        MaybeSharedLock node_lock(neighbors_mutex, current_id);
         const auto node = graph->GetNodeView(current_id);
         const auto neighbor_count = recovering ? 1U : node.neighbor_count;
         CHECK_ARGUMENT(neighbor_count <= graph->MaximumDegree(),
@@ -1696,13 +1757,15 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
             if (not recovering and visited_list->TestAndSet(neighbor)) {
                 continue;
             }
-            const bool allowed = not recovering and is_allowed(neighbor);
-            if (not recovering and selected_neighbors > 0 and skip_strategy != nullptr and
-                not skip_strategy->ShouldVisit() and not allowed) {
-                deferred_bridges.push_back(neighbor);
-                continue;
+            const bool allowed = not recovering and filter.IsAllowed(neighbor);
+            if constexpr (filtered) {
+                if (not recovering and selected_neighbors > 0 and filter.ShouldSkip() and
+                    not allowed) {
+                    filter.Defer(neighbor);
+                    continue;
+                }
+                ++selected_neighbors;
             }
-            ++selected_neighbors;
 
             float distance = 0.0F;
             float lower_bound = 0.0F;
@@ -1816,6 +1879,41 @@ HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
                                                                  std::memory_order_relaxed);
     }
     return result;
+}
+
+}  // namespace
+
+DistHeapPtr
+HGraphRaBitQSearcher::Search(const HGraphRaBitQFusedDataCellPtr& graph,
+                             const FlattenInterfacePtr& flatten,
+                             const VisitedListPtr& visited_list,
+                             const void* query,
+                             const InnerSearchParam& search_param,
+                             QueryContext* ctx,
+                             RaBitQCandidateVector* lower_bound_candidates,
+                             bool* search_finalized) const {
+    if (search_param.is_inner_id_allowed != nullptr or not search_param.executors.empty()) {
+        return search_fused<true>(graph,
+                                  flatten,
+                                  visited_list,
+                                  query,
+                                  search_param,
+                                  ctx,
+                                  lower_bound_candidates,
+                                  search_finalized,
+                                  allocator_,
+                                  neighbors_mutex_);
+    }
+    return search_fused<false>(graph,
+                               flatten,
+                               visited_list,
+                               query,
+                               search_param,
+                               ctx,
+                               lower_bound_candidates,
+                               search_finalized,
+                               allocator_,
+                               neighbors_mutex_);
 }
 
 }  // namespace vsag

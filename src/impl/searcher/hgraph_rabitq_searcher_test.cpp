@@ -245,6 +245,69 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     run_search(make_search_graph(true), 5);
     run_search(make_search_graph(false), 0);
 
+    SECTION("unfiltered specialization matches an all-pass filter") {
+        struct AllPassFilter final : Filter {
+            bool
+            CheckValid(int64_t) const override {
+                ++checks;
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            mutable uint64_t checks{0};
+        };
+        auto search_graph = make_search_graph(false);
+        for (const bool one_bit : {false, true}) {
+            for (const bool reorder : {false, true}) {
+                for (const uint64_t ef : {5U, 41U}) {
+                    CAPTURE(one_bit, reorder, ef);
+                    std::vector<std::pair<float, InnerIdType>> expected;
+                    for (const bool filtered : {false, true}) {
+                        auto all_pass = std::make_shared<AllPassFilter>();
+                        InnerSearchParam search_param;
+                        search_param.ep = 0;
+                        search_param.ef = ef;
+                        search_param.topk = 5;
+                        search_param.rerank_topk = 5;
+                        search_param.skip_ratio = 1.0F;
+                        search_param.enable_rabitq_one_bit_search = one_bit;
+                        search_param.enable_reorder = reorder;
+                        search_param.rabitq_fused_computer = computer;
+                        if (filtered) {
+                            search_param.is_inner_id_allowed = all_pass;
+                        }
+                        auto visited = std::make_shared<VisitedList>(5, allocator.get());
+                        SearchStatistics stats;
+                        QueryContext ctx;
+                        ctx.stats = &stats;
+                        auto found = searcher.Search(search_graph,
+                                                     flatten,
+                                                     visited,
+                                                     vectors.data(),
+                                                     search_param,
+                                                     &ctx,
+                                                     nullptr);
+                        REQUIRE(found != nullptr);
+                        REQUIRE(found->Size() == 5);
+                        CHECK(stats.dist_cmp.load() == 5);
+                        std::vector<std::pair<float, InnerIdType>> actual(
+                            found->GetData(), found->GetData() + found->Size());
+                        std::sort(actual.begin(), actual.end());
+                        if (filtered) {
+                            CHECK(actual == expected);
+                            CHECK(all_pass->checks >= 5);
+                        } else {
+                            expected = std::move(actual);
+                            CHECK(all_pass->checks == 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     SECTION("filtered traversal crosses rejected bridges beyond ef") {
         const auto skip_strategy =
             GENERATE(FilterSearchSkipStrategyType::RANDOM,
@@ -618,21 +681,28 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
         auto untrained_split =
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(untrained_flatten);
         REQUIRE(untrained_split != nullptr);
-        auto generic_fallback_visited = std::make_shared<VisitedList>(5, allocator.get());
-        RaBitQCandidateVector generic_fallback_candidates(allocator.get());
-        bool generic_fallback_finalized = true;
-        auto generic_fallback_result = searcher.Search(full_hint_graph,
-                                                       untrained_flatten,
-                                                       generic_fallback_visited,
-                                                       vectors.data(),
-                                                       deferred_param,
-                                                       nullptr,
-                                                       &generic_fallback_candidates,
-                                                       &generic_fallback_finalized);
-        REQUIRE(generic_fallback_result != nullptr);
-        REQUIRE(generic_fallback_result->Empty());
-        REQUIRE(generic_fallback_candidates.empty());
-        REQUIRE_FALSE(generic_fallback_finalized);
+        for (const bool filtered : {false, true}) {
+            auto generic_param = deferred_param;
+            if (filtered) {
+                generic_param.is_inner_id_allowed =
+                    std::make_shared<WhiteListFilter>([](int64_t) { return true; });
+            }
+            auto generic_fallback_visited = std::make_shared<VisitedList>(5, allocator.get());
+            RaBitQCandidateVector generic_fallback_candidates(allocator.get());
+            bool generic_fallback_finalized = true;
+            auto generic_fallback_result = searcher.Search(full_hint_graph,
+                                                           untrained_flatten,
+                                                           generic_fallback_visited,
+                                                           vectors.data(),
+                                                           generic_param,
+                                                           nullptr,
+                                                           &generic_fallback_candidates,
+                                                           &generic_fallback_finalized);
+            REQUIRE(generic_fallback_result != nullptr);
+            REQUIRE(generic_fallback_result->Empty());
+            REQUIRE(generic_fallback_candidates.empty());
+            REQUIRE_FALSE(generic_fallback_finalized);
+        }
     }
 
     for (InnerIdType id = 0; id < 5; ++id) {
