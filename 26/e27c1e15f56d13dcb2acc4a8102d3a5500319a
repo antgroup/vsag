@@ -1,0 +1,53 @@
+tests/test_hgraph.cpp
+  s_3248531dc89b3e::t_b5a8035131467e 270-271
+  s_3248531dc89b3e::t_38f2d98dd41bd2 64,236-243,281-291,321,1522-1528,1599,1603,1606,1614,3307-3311,3360-3371,3604-3606,4057-4059,4104-4106,4922-4927,5175-5177,6495-6497
+src/impl/searcher/parallel_searcher_test.cpp
+  s_3248531dc89b3e::t_058175ce98bf28 53-55
+  s_3248531dc89b3e::t_af0fd660cd05f7 26-27,83-84,86-101,103
+.github/workflows/daily_test.yml
+  s_3248531dc89b3e::t_e8bea12b46dd96 65-66
+docs/agents/daily-regression.md
+  s_3248531dc89b3e::t_975c322afe2c85 95-118,166-173
+scripts/testing/daily_parameters.py
+  s_3248531dc89b3e::t_cdce7b5f4e1c28 7,9,11,16-17,49-51,81-94,112-186
+scripts/testing/daily_run.py
+  s_3248531dc89b3e::t_c3fd626db57b2c 104,106-109,152-176,205-206,242
+src/impl/searcher/parallel_searcher.cpp
+  s_3248531dc89b3e::t_a75380c91214c1 313-315
+tests/fixtures/framework/daily_test_plan.h
+  s_3248531dc89b3e::t_724cf67e630301 9,11,46-63,66,68,72,75,79-85,91
+tests/scripts/test_daily_parameters.py
+  s_3248531dc89b3e::t_ab65b7930d8edc 1-94
+tests/scripts/test_daily_plan.py
+  s_3248531dc89b3e::t_d148e8fa894685 448-454,461,463-482
+tests/scripts/test_daily_workflow.py
+  s_3248531dc89b3e::t_417de01382e758 17-32
+tests/test_index/test_index_common.h
+  s_3248531dc89b3e::t_6be392315abc0f 20
+tests/test_index/test_index_concurrent.cpp
+  s_3248531dc89b3e::t_6deb073a1656a7 143,203
+tests/test_index/test_index_search.cpp
+  s_3248531dc89b3e::t_1c95fae700c014 65,109,198,272,357
+tests/test_index/test_index_serialize.cpp
+  s_3248531dc89b3e::t_3236c493f30999 25,70,109,152
+tests/test_index/test_index_update.cpp
+  s_3248531dc89b3e::t_6c5d764ac45d35 24
+tests/test_pyramid.cpp
+  s_3248531dc89b3e::t_9b56c089db358e 4231-4233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "26e27c1e15f56d13dcb2acc4a8102d3a5500319a",
+  "prompts": {},
+  "sessions": {
+    "s_3248531dc89b3e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a161c8-51a2-7a01-af0f-657cb33884e9",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Xiangyu Wang <wxy407827@antgroup.com>"
+    }
+  }
+}
