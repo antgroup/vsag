@@ -15,6 +15,7 @@
 
 #include "scalar_quantizer.h"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <vector>
@@ -204,5 +205,54 @@ TEST_CASE("SQ8 Serialize and Deserialize", "[ut][SQ8Quantizer]") {
             TestSerializeAndDeserializeMetricSQ8<metrics[1]>(dim, count, error);
             TestSerializeAndDeserializeMetricSQ8<metrics[2]>(dim, count, error);
         }
+    }
+}
+
+template <typename QuantT>
+void
+TestScalarQuantizerBatch4MatchesSingle(uint64_t dim) {
+    constexpr uint64_t count = 100;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    QuantT quantizer(static_cast<int>(dim), allocator.get());
+    auto data = fixtures::generate_vectors(count, dim, false);
+    auto query = fixtures::generate_vectors(1, dim, false, 165);
+    REQUIRE(quantizer.Train(data.data(), count));
+
+    // Four different codes, so a swapped code pointer or query buffer changes the result.
+    const uint64_t code_size = quantizer.GetCodeSize();
+    std::vector<uint8_t> codes(4 * code_size);
+    for (uint64_t i = 0; i < 4; ++i) {
+        REQUIRE(quantizer.EncodeOne(data.data() + i * dim, codes.data() + i * code_size));
+    }
+
+    auto computer = quantizer.FactoryComputer();
+    computer->SetQuery(query.data());
+    float batch[4]{};
+    quantizer.ComputeDistsBatch4(*computer,
+                                 codes.data(),
+                                 codes.data() + code_size,
+                                 codes.data() + 2 * code_size,
+                                 codes.data() + 3 * code_size,
+                                 batch[0],
+                                 batch[1],
+                                 batch[2],
+                                 batch[3]);
+    for (uint64_t i = 0; i < 4; ++i) {
+        CAPTURE(dim, i);
+        const float expected = quantizer.ComputeDist(*computer, codes.data() + i * code_size);
+        REQUIRE(std::isfinite(batch[i]));
+        REQUIRE(std::abs(batch[i] - expected) <= 1e-4F * std::max(1.0F, std::abs(expected)));
+    }
+}
+
+TEST_CASE("SQ ComputeDistsBatch4 matches four ComputeDist calls", "[ut][SQ8Quantizer]") {
+    // 960 runs the vector kernel; 1, 17 and 33 run its scalar tail.
+    for (const uint64_t dim : {1ULL, 17ULL, 33ULL, 64ULL, 960ULL}) {
+        // The batched L2 kernel.
+        TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_L2SQR>>(dim);
+        // Configurations that fall back to four single distances.
+        TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_IP>>(dim);
+        TestScalarQuantizerBatch4MatchesSingle<SQ8Quantizer<MetricType::METRIC_TYPE_COSINE>>(dim);
+        TestScalarQuantizerBatch4MatchesSingle<SQ4Quantizer<MetricType::METRIC_TYPE_L2SQR>>(dim);
     }
 }
