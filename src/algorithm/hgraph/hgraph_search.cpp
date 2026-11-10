@@ -700,6 +700,44 @@ HGraph::search_range_with_request(const SearchRequest& request,
 [[nodiscard]] DatasetPtr
 HGraph::SearchWithRequest(const SearchRequest& request) const {
     ValidateSearchThreshold(request.threshold_);
+
+    // Iterator search: delegate to the iterator-aware KnnSearch overload.
+    if (request.enable_iterator_search_) {
+        CHECK_ARGUMENT(request.query_ != nullptr, "iterator search requires a query");
+        CHECK_ARGUMENT(request.query_->GetNumElements() == 1,
+                       "iterator-based search only supports single query (NumElements=1)");
+        CHECK_ARGUMENT(request.p_iter_ctx_ != nullptr,
+                       "p_iter_ctx_ must be non-null when enable_iterator_search_ is true");
+        CHECK_ARGUMENT(request.mode_ != SearchMode::RANGE_SEARCH,
+                       "iterator search only supports KNN, not range search");
+        CHECK_ARGUMENT(request.distance_batch_func_ == nullptr,
+                       "iterator search does not support custom query scoring");
+        CHECK_ARGUMENT(not request.enable_attribute_filter_,
+                       "iterator search does not support attribute filters");
+
+        // Preserve the request-level distance threshold: the delegated overload
+        // obtains its threshold from ParseSearchThreshold, so if threshold_ is set
+        // but params_str_ does not contain one already, inject it.
+        std::string iterator_params = request.params_str_;
+        if (request.threshold_.has_value() and
+            iterator_params.find("\"threshold\"") == std::string::npos) {
+            auto pos = iterator_params.rfind("}");
+            if (pos != std::string::npos) {
+                std::string thr_kv = ", \"threshold\": " +
+                                     std::to_string(request.threshold_.value()) + "}";
+                iterator_params = iterator_params.substr(0, pos) + thr_kv;
+            }
+        }
+
+        return this->KnnSearch(request.query_,
+                               request.topk_,
+                               iterator_params,
+                               request.filter_,
+                               request.search_allocator_,
+                               *request.p_iter_ctx_,
+                               request.is_last_search_);
+    }
+
     SearchStatistics stats;
     QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
     if (request.search_allocator_ != nullptr) {
