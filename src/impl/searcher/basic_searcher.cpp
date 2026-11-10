@@ -63,6 +63,8 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
     }
 
     if (not filter) {
+        // Every neighbour is prefetched before the first test, so prefetch_stride_visit_ does not
+        // apply here; it only tunes the filtered loop below.
         for (const auto id : neighbors) {
             vl->Prefetch(id);
         }
