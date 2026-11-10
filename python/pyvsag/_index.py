@@ -26,6 +26,9 @@ _DENSE_DTYPES = {
     "bfloat16": ("uint16", "numpy.uint16 (raw bfloat16 bits)"),
 }
 
+_FLOAT32 = np.dtype(np.float32)
+_MAX_ENCODED_PARAMETERS = 64
+
 _CREATE_ERRORS = {
     lib.VSAG_UNSUPPORTED_INDEX: "error type: UNSUPPORTED_INDEX",
     lib.VSAG_INVALID_ARGUMENT: "error type: invalid_parameter",
@@ -78,7 +81,9 @@ def _ptr(array, ctype="void*"):
 
 
 def _is_contiguous_1d(array):
-    return array.strides[0] == array.itemsize
+    # numpy's own flag, so the validating path and the single-query fast path agree on one-element
+    # views, whose stride is irrelevant.
+    return array.flags.c_contiguous
 
 
 def _int64_ids(ids, expected_size=None):
@@ -193,6 +198,7 @@ class Index:
             raise RuntimeError(_CREATE_ERRORS.get(code, "error type: unexpectedError"))
         self._handle = ffi.gc(out[0], lib.vsag_index_destroy)
         self._dtype = _parse_dtype(parameters)
+        self._encoded_parameters = {}
 
     def _dense_kind(self, operation):
         kind = _DENSE_DTYPES.get(self._dtype)
@@ -335,24 +341,39 @@ class Index:
         dists[:count] = found_dists[:count]
         return ids, dists, result, err
 
+    def _encode(self, parameters):
+        """UTF-8 encode a parameters string; callers pass the same few strings repeatedly."""
+        encoded = self._encoded_parameters.get(parameters)
+        if encoded is None:
+            encoded = parameters.encode()
+            if len(self._encoded_parameters) < _MAX_ENCODED_PARAMETERS:
+                self._encoded_parameters[parameters] = encoded
+        return encoded
+
     def _flat_knn(self, vector, k, parameters):
         """Single float32 query through the allocation-free C entry point."""
-        k = int(k)
-        ids = np.full(k, -1, dtype=np.int64)
-        dists = np.full(k, -1.0, dtype=np.float32)
+        ids = np.empty(k, dtype=np.int64)
+        dists = np.empty(k, dtype=np.float32)
+        found = ffi.new("int64_t[1]")
         err = lib.vsag_index_knn_search_float32(
             self._handle,
-            _ptr(vector, "float*"),
+            ffi.from_buffer("float[]", vector),
             1,
             vector.shape[0],
             k,
-            parameters.encode(),
+            self._encode(parameters),
             ffi.NULL,
-            _ptr(ids, "int64_t*"),
-            _ptr(dists, "float*"),
-            ffi.NULL,
+            ffi.from_buffer("int64_t[]", ids, require_writable=True),
+            ffi.from_buffer("float[]", dists, require_writable=True),
+            found,
         )
-        return ids, dists, err
+        # Slots the search did not fill, or all of them after a failure, read as "no result".
+        count = 0 if err != ffi.NULL else int(found[0])
+        _take_error(err)
+        if count < k:
+            ids[count:] = -1
+            dists[count:] = -1.0
+        return ids, dists
 
     def knn_search(self, *args, **kwargs):
         """k-nearest-neighbor search.
@@ -360,15 +381,26 @@ class Index:
         Dense:  knn_search(vector, k, parameters) -> (ids, distances), each of shape (k,)
         Sparse: knn_search(index_pointers, indices, values, k, parameters)
         """
+        if len(args) == 3 and not kwargs and self._dtype == "float32":
+            # The common call, kept free of argument binding and re-validation.
+            vector, k, parameters = args
+            if (
+                type(vector) is np.ndarray
+                and vector.dtype == _FLOAT32
+                and vector.ndim == 1
+                and vector.flags.c_contiguous
+                and type(k) is int
+                and k > 0
+                and type(parameters) is str
+            ):
+                return self._flat_knn(vector, k, parameters)
         is_sparse, values = self._bind(args, kwargs, self._DENSE_KNN, self._SPARSE_KNN)
         if is_sparse:
             return self._sparse_knn(*values, statistics=False)
         vector, k, parameters = values
         if self._dtype == "float32" and int(k) > 0:
             array = self._dense_array(vector, "knn_search", "vector")
-            ids, dists, err = self._flat_knn(array, k, parameters)
-            _take_error(err)
-            return ids, dists
+            return self._flat_knn(array, int(k), parameters)
         ids, dists, _, err = self._dense_knn(vector, k, parameters, "knn_search")
         _take_error(err)
         return ids, dists
