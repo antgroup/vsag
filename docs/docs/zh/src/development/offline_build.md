@@ -87,7 +87,6 @@ VSAG 不提供项目控制的压缩包镜像。如需使用本地或内网镜像
 | `VSAG_THIRDPARTY_YAML_CPP_0_9_0` | yaml-cpp 0.9.0 | `github.com/jbeder/yaml-cpp/.../yaml-cpp-0.9.0.tar.gz` | `ENABLE_TOOLS=ON`（且 C++11 ABI） |
 | `VSAG_THIRDPARTY_TABULATE_COMMIT_3A58301067BB` | p-ranav/tabulate | `github.com/p-ranav/tabulate/archive/3a583010...tar.gz` | `ENABLE_TOOLS=ON`（且 C++11 ABI） |
 | `VSAG_THIRDPARTY_HTTPLIB_0_35_0` | cpp-httplib 0.35.0 | `github.com/yhirose/cpp-httplib/.../v0.35.0.tar.gz` | `ENABLE_TOOLS=ON`（且 C++11 ABI） |
-| `VSAG_THIRDPARTY_PYBIND11_2_11_1` | pybind11 2.11.1 | `github.com/pybind/pybind11/.../v2.11.1.tar.gz` | Python 绑定（`pyvsag` / `ENABLE_PYBINDS=ON`） |
 
 > 每个依赖确切的上游 URL **以及**期望的 `URL_HASH`，其唯一权威来源是对应的
 > [`extern/<lib>/<lib>.cmake`](https://github.com/antgroup/vsag/tree/main/extern)
@@ -107,7 +106,6 @@ VSAG 不提供项目控制的压缩包镜像。如需使用本地或内网镜像
 - **+ 工具**（`ENABLE_TOOLS=ON` **且** `ENABLE_CXX11_ABI=ON`）：另加 `HDF5`、
   `ARGPARSE`、`YAML_CPP`、`TABULATE`、`HTTPLIB`——仅当两个选项同时开启时才会下载
   （见 [`cmake/VSAGThirdParty.cmake`](https://github.com/antgroup/vsag/blob/main/cmake/VSAGThirdParty.cmake)）。
-- **+ Python wheel**（`make pyvsag`）：另加 `PYBIND11`。
 
 ## 示例
 

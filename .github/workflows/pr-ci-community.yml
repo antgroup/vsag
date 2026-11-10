@@ -77,7 +77,7 @@ jobs:
               - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
-              - 'python_bindings/**'
+              - 'cmake/vsag_c.map'
               - 'tests/python/**'
               - '.github/workflows/**'
               - 'scripts/**'

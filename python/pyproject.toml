@@ -1,34 +1,21 @@
 [build-system]
 requires = [
-    "setuptools<60; python_version == '3.6'",
-    "setuptools>=61,<68; python_version == '3.7'",
-    "setuptools>=68; python_version >= '3.8'",
+    "setuptools>=70.1",
     "setuptools_scm",
     "wheel",
-    "pep440",
 ]
 build-backend = "setuptools.build_meta"
 
-
-
+# One py3-none wheel per architecture: libvsag_c is loaded through cffi, so a single build
+# serves every supported CPython (3.10+).
 [tool.cibuildwheel]
+build = "cp310-*"
 skip = ["*-musllinux*", "*i686*", "pp*"]
-before-build = '''
-                bash scripts/deps/install_deps_centos.sh 
-              '''
-before-all = '''
-    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
-    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
-    if [[ "$(uname -m)" == "aarch64" ]]; then
-      rm -f /etc/yum.repos.d/CentOS-SCLo-*.repo
-    fi
-    yum clean all
-    yum install -y gcc gcc-c++ gcc-gfortran python3-devel
-    yum install -y libaio-devel libcurl-devel ca-certificates
-    yum install -y libgomp
-'''
+before-build = "bash scripts/deps/install_deps_centos.sh"
+before-all = "yum install -y gcc gcc-c++ ca-certificates"
 
 [tool.cibuildwheel.linux]
-repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
-manylinux-x86_64-image = "manylinux2014"
-manylinux-aarch64-image = "manylinux2014"
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+# libgomp comes from gcc-toolset; auditwheel must find it to bundle it into the wheel.
+repair-wheel-command = "LD_LIBRARY_PATH=$(dirname $(gcc -print-file-name=libgomp.so.1)):$LD_LIBRARY_PATH auditwheel repair -w {dest_dir} {wheel}"

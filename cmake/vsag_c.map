@@ -1,0 +1,6 @@
+{
+    global:
+        vsag_*;
+    local:
+        *;
+};

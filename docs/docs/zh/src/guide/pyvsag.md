@@ -1,6 +1,6 @@
 # pyvsag
 
-`pyvsag` 是 VSAG 的 Python 绑定包，接口封装基于 [pybind11](https://github.com/pybind/pybind11) 实现，源代码位于仓库 [`python_bindings/`](https://github.com/antgroup/vsag/tree/main/python_bindings) 目录，打包脚本位于 [`python/`](https://github.com/antgroup/vsag/tree/main/python)。
+`pyvsag` 是 VSAG 的 Python 绑定包，是一个纯 Python 层，通过 [cffi](https://cffi.readthedocs.io/) 调用 [C API](c_api.md)（`libvsag_c`）。每个 CPU 架构只需一个 `py3-none-manylinux_2_28` wheel，即可适用于所有 CPython 3.10+ 版本。数据仅以指针、形状和 dtype 的形式跨越边界，因此不依赖 NumPy 的 ABI。源代码与打包脚本位于 [`python/`](https://github.com/antgroup/vsag/tree/main/python)。
 
 ## 安装
 
@@ -10,15 +10,17 @@
 pip install pyvsag
 ```
 
-需要在 Linux 环境下使用（`manylinux2014` wheel）。如果希望构建本地 wheel，可以运行：
+需要在 Linux 环境下使用（`manylinux_2_28` wheel）。如果希望构建本地 wheel，可以运行：
 
 ```bash
-# 构建特定 Python 版本的 wheel
-make pyvsag PY_VERSION=3.11
-
-# 或一次构建所有受支持版本
-make pyvsag-all
+make pyvsag
 ```
+
+注意事项：
+
+- C++ 库在搜索期间会释放 GIL，内部 OpenMP 线程不受 GIL 影响，线程数可通过 `OMP_NUM_THREADS` 控制。
+- 使用 `multiprocessing` 时请选择 `spawn` 启动方式，不要在 `fork` 之间共享索引。
+- 在源码目录中运行时，可通过 `PYVSAG_LIBRARY` 指定要加载的 `libvsag_c`。
 
 ## 快速开始
 
@@ -122,6 +124,6 @@ Node.js 对应的 `calcDistancesById(query, ids)` 和旧别名 `calDistanceById(
 
 - 大多数 C++ 参数在 Python 中以相同的 JSON 字段传递；
 - C++ 版本新增的索引类型、量化方式、距离度量会随 `pyvsag` 的下一个 release 一同发布；
-- 构建 wheel 时所使用的依赖项与发布版 C++ 库相同（OpenBLAS、libaio 等）。
+- 构建 wheel 时所使用的依赖项与发布版 C++ 库相同（OpenBLAS 等），但关闭了 libaio（`ENABLE_LIBAIO=OFF`）。此时 `async_io` 仍可选用，但会退化为带缓冲的兼容后端（单次 `buffer_io` 读取，且写入后不做 fsync），并只打印一次警告；需要真正的 libaio 路径时，请在本地用 `VSAG_ENABLE_LIBAIO=ON pip install python/` 自行构建。详见[磁盘索引](../resources/disk_index.md)。
 
 关于可用参数和索引类型，请参考 [创建索引](create_index.md) 和 [索引参数](../resources/index_parameters.md)。

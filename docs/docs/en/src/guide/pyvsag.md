@@ -1,7 +1,10 @@
 # pyvsag
 
-`pyvsag` is the official Python binding for VSAG, implemented with pybind11. Sources live under
-`python_bindings/` and `python/`.
+`pyvsag` is the official Python binding for VSAG. It is a pure-Python layer that calls the
+[C API](c_api.md) (`libvsag_c`) through [cffi](https://cffi.readthedocs.io/), so one
+`py3-none-manylinux_2_28` wheel per architecture serves every CPython 3.10+ release. Data crosses
+the boundary only as pointer, shape and dtype, hence it does not depend on the NumPy ABI. Sources
+live under `python/`.
 
 ## Installation
 
@@ -12,10 +15,15 @@ pip install pyvsag
 To build from source:
 
 ```bash
-make pyvsag PY_VERSION=3.10
-# Build wheels for multiple Python versions:
-make pyvsag-all
+make pyvsag
 ```
+
+Notes:
+
+- The C++ library releases the GIL while searching, and internal OpenMP threads are unaffected by
+  it. Control their count with `OMP_NUM_THREADS`.
+- With `multiprocessing`, use the `spawn` start method; do not share an index across `fork`.
+- Set `PYVSAG_LIBRARY` to load a specific `libvsag_c` when running from a source tree.
 
 ## Quick Start
 
@@ -118,6 +126,12 @@ The Node.js equivalents `calcDistancesById(query, ids)` and legacy `calDistanceB
 
 `pyvsag` wraps the same `vsag::Index` API as C++ and shares the underlying index binaries. You can
 build an index in Python and load it in C++ (and vice versa) as long as parameters match.
+
+The released wheel is built with `ENABLE_LIBAIO=OFF`, so it has no libaio dependency. The
+`async_io` I/O type can still be selected, but it falls back to a buffered compatibility backend
+(single `buffer_io`-style reads and no fsync after writes) and logs a one-time warning. To get the
+real libaio path, build locally with `VSAG_ENABLE_LIBAIO=ON pip install python/`. See
+[Disk Index](../resources/disk_index.md).
 
 ## More Examples
 

@@ -198,8 +198,5 @@ evaluation；其他已测量阶段仍会返回，但发生 approximate evaluatio
 `reorder_distance_count` 保持兼容且含义不变。Python 保留 `(ids, distances)` 解包方式；可通过
 `knn_search_with_statistics` 显式获取统计信息：稠密重载返回一个统计 JSON 字符串，稀疏 CSR
 重载为每个查询返回一个字符串。`range_search_with_statistics` 返回范围搜索数组及一个统计
-JSON 字符串。C 保留
-`SearchResult_t` 布局，统计信息通过新增的显式访问方式提供：C 调用
-`vsag_search_result_enable_statistics()` 后获取统计信息，并用
-`vsag_search_result_destroy_statistics()` 释放；未选择统计的旧调用保留 `other_result` 所有权，
-不会产生统计分配。旧版 HNSW 和 DiskANN 不在此合约内。
+JSON 字符串。C 通过
+`vsag_search_result_statistics()` 返回 `vsag_search_result_t` 的统计 JSON 字符串。旧版 HNSW 和 DiskANN 不在此合约内。

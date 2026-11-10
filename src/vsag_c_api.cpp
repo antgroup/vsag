@@ -1,4 +1,3 @@
-
 // Copyright 2024-present the vsag project
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,813 +13,912 @@
 // limitations under the License.
 
 #include <vsag/factory.h>
+#include <vsag/filter.h>
 #include <vsag/index.h>
+#include <vsag/logger.h>
+#include <vsag/options.h>
 #include <vsag/vsag_c_api.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstring>
 #include <fstream>
 #include <memory>
 #include <mutex>
+#include <new>
 #include <stdexcept>
-#include <streambuf>
 #include <string>
-#include <type_traits>
-#include <unordered_map>
-#include <unordered_set>
+#include <utility>
+#include <vector>
 
-Error_t success = {VSAG_SUCCESS, "success"};
-
-class VsagIndex {
-public:
-    VsagIndex(std::shared_ptr<vsag::Index> index) : index_(std::move(index)) {
-    }
-
-    std::shared_ptr<vsag::Index> index_;
+struct vsag_error {
+    int32_t code;
+    std::string message;
 };
 
-static Error_t
-make_error(const vsag::Error& error) {
-    Error_t err;
-    err.code = -static_cast<int>(error.type);
-    const auto& msg = error.message;
-    snprintf(err.message, sizeof(err.message), "%s", msg.c_str());
-    return err;
-}
+struct vsag_dataset {
+    int64_t num_elements{0};
+    int64_t dim{0};
+    const int64_t* ids{nullptr};
+    const float* float32_vectors{nullptr};
+    const uint16_t* float16_vectors{nullptr};
+    const int8_t* int8_vectors{nullptr};
+    const uint32_t* index_pointers{nullptr};
+    const uint32_t* indices{nullptr};
+    const float* values{nullptr};
+};
 
-static Error_t
-make_error(const std::exception& e) {
-    Error_t err;
-    err.code = VSAG_INTERNAL_ERROR;
-    const auto* msg = e.what();
-    // Use snprintf for safe string copying
-    snprintf(err.message, sizeof(err.message), "%s", msg);
-    return err;
-}
+struct vsag_filter {
+    vsag::FilterPtr filter;
+};
 
-static Error_t
-make_error(const std::string& msg) {
-    Error_t err;
-    err.code = VSAG_INTERNAL_ERROR;
-    snprintf(err.message, sizeof(err.message), "%s", msg.c_str());
-    return err;
-}
+struct vsag_index {
+    std::shared_ptr<vsag::Index> index;
+};
+
+struct vsag_search_result {
+    vsag::DatasetPtr dataset;
+    int64_t count{0};
+    // Rendered on first request: most callers never read the statistics.
+    std::once_flag statistics_once;
+    std::string statistics;
+};
 
 namespace {
-std::mutex statistics_mutex;
-std::unordered_set<const SearchResult_t*> statistics_requests;
-std::unordered_map<const SearchResult_t*, std::unique_ptr<std::string>> statistics_results;
 
-void
-cancel_statistics_request(SearchResult_t* search_result) noexcept {
-    if (search_result == nullptr) {
-        return;
-    }
+// Returned when allocating an error object fails; vsag_error_destroy() never frees it.
+vsag_error*
+out_of_memory_error() {
+    static vsag_error error{VSAG_NO_ENOUGH_MEMORY, "out of memory"};
+    return &error;
+}
+
+vsag_error_t*
+make_error(int32_t code, const std::string& message) noexcept {
     try {
-        std::lock_guard lock(statistics_mutex);
-        if (statistics_requests.erase(search_result) != 0) {
-            search_result->other_result = nullptr;
-        }
-    } catch (...) {  // NOLINT(bugprone-empty-catch)
-        // Cleanup must preserve the primary result or exception.
+        return new vsag_error{code, message};
+    } catch (...) {
+        return out_of_memory_error();
     }
 }
-}  // namespace
 
-Error_t
-vsag_search_result_enable_statistics(SearchResult_t* search_result) {
+vsag_error_t*
+make_error(const vsag::Error& error) noexcept {
+    return make_error(-static_cast<int32_t>(error.type), error.message);
+}
+
+vsag_error_t*
+invalid_argument(const std::string& message) noexcept {
+    return make_error(VSAG_INVALID_ARGUMENT, message);
+}
+
+template <typename Fn>
+vsag_error_t*
+guarded(Fn&& fn) noexcept {
     try {
-        if (search_result == nullptr) {
-            return make_error("search result is NULL");
-        }
-        std::lock_guard lock(statistics_mutex);
-        if (statistics_requests.count(search_result) != 0 ||
-            statistics_results.count(search_result) != 0) {
-            return make_error("search result statistics are already enabled");
-        }
-        statistics_requests.insert(search_result);
-        search_result->other_result = nullptr;
-        return success;
+        return fn();
+    } catch (const std::bad_alloc&) {
+        return out_of_memory_error();
+    } catch (const std::invalid_argument& e) {
+        return invalid_argument(e.what());
     } catch (const std::exception& e) {
-        return make_error(e);
+        return make_error(VSAG_INTERNAL_ERROR, e.what());
     } catch (...) {
-        return make_error("unknown error while enabling search statistics");
+        return make_error(VSAG_UNKNOWN_ERROR, "unknown error");
     }
 }
 
-const char*
-vsag_search_result_get_statistics(const SearchResult_t* search_result) {
-    try {
-        if (search_result == nullptr) {
-            return nullptr;
-        }
-        std::lock_guard lock(statistics_mutex);
-        auto it = statistics_results.find(search_result);
-        if (it == statistics_results.end()) {
-            return nullptr;
-        }
-        return it->second->c_str();
-    } catch (...) {
-        return nullptr;
-    }
+template <typename T>
+vsag_error_t*
+to_error(const tl::expected<T, vsag::Error>& result) noexcept {
+    return result.has_value() ? nullptr : make_error(result.error());
 }
 
-void
-vsag_search_result_destroy_statistics(SearchResult_t* search_result) {
-    try {
-        if (search_result != nullptr) {
-            std::lock_guard lock(statistics_mutex);
-            const bool registered = statistics_requests.erase(search_result) != 0 ||
-                                    statistics_results.erase(search_result) != 0;
-            if (registered) {
-                search_result->other_result = nullptr;
-            }
-        }
-    } catch (...) {  // NOLINT(bugprone-empty-catch)
-        // Cleanup must preserve the primary result or exception.
-    }
+vsag_error_t*
+require(bool condition, const char* message) noexcept {
+    return condition ? nullptr : invalid_argument(message);
 }
 
-static void
-attach_statistics(SearchResult_t* search_result, const vsag::DatasetPtr& dataset) {
-    if (dataset == nullptr) {
-        throw std::invalid_argument("search result dataset is NULL");
-    }
-    std::lock_guard lock(statistics_mutex);
-    auto request = statistics_requests.find(search_result);
-    if (request == statistics_requests.end()) {
-        return;
-    }
-    auto statistics = std::make_unique<std::string>(dataset->GetStatistics());
-    auto [it, inserted] = statistics_results.emplace(search_result, std::move(statistics));
-    if (not inserted) {
-        throw std::runtime_error("search result statistics already exist");
-    }
-    search_result->other_result = it->second.get();
-    statistics_requests.erase(request);
-}
-
-class StatisticsRequestGuard {
-public:
-    explicit StatisticsRequestGuard(SearchResult_t* search_result) : search_result_(search_result) {
-    }
-
-    ~StatisticsRequestGuard() {
-        if (not consumed_) {
-            cancel_statistics_request(search_result_);
-        }
-    }
-
-    void
-    Attach(const vsag::DatasetPtr& dataset) {
-        attach_statistics(search_result_, dataset);
-        consumed_ = true;
-    }
-
-private:
-    SearchResult_t* search_result_{nullptr};
-    bool consumed_{false};
-};
-
-#define VSAG_CHECK_RESULT(expr)                    \
-    do {                                           \
-        const auto& _vsag_result = (expr);         \
-        if ((_vsag_result).has_value()) {          \
-            return success;                        \
-        }                                          \
-        return make_error((_vsag_result).error()); \
+#define VSAG_REQUIRE(condition, message)                               \
+    do {                                                               \
+        if (vsag_error_t* _vsag_error = require(condition, message)) { \
+            return _vsag_error;                                        \
+        }                                                              \
     } while (0)
 
-extern "C" {
-vsag_index_t
-vsag_index_factory(const char* index_name, const char* index_param) {
-    try {
-        auto index = vsag::Factory::CreateIndex(index_name, index_param);
-        if (index.has_value()) {
-            return new VsagIndex(index.value());
-        }
-        return nullptr;
+// A vsag::Dataset built from a handle, plus the sparse rows it points at.
+struct DatasetView {
+    vsag::DatasetPtr dataset;
+    std::vector<vsag::SparseVector> sparse_vectors;
+};
 
-    } catch (const std::exception& e) {
-        return nullptr;
+DatasetView
+make_view(const vsag_dataset_t* handle, bool single_query) {
+    if (handle == nullptr) {
+        throw std::invalid_argument("dataset is NULL");
     }
-}
-
-Error_t
-vsag_index_destroy(vsag_index_t index) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        delete vsag_index;
-        return success;
-    } catch (const std::exception& e) {
-        return make_error(e);
+    if (handle->num_elements <= 0) {
+        throw std::invalid_argument("dataset num_elements must be positive");
     }
-}
-
-Error_t
-vsag_index_build(
-    vsag_index_t index, const float* data, const int64_t* ids, uint64_t dim, uint64_t count) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(count))
-                ->Ids(ids)
-                ->Float32Vectors(data);
-            auto build_result = vsag_index->index_->Build(dataset);
-            VSAG_CHECK_RESULT(build_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
+    if (single_query and handle->num_elements != 1) {
+        throw std::invalid_argument("dataset must hold exactly one vector");
     }
-}
-
-Error_t
-vsag_index_add(vsag_index_t index,
-               const float* data,
-               const int64_t* ids,
-               const uint64_t dim,
-               const uint64_t count) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(count))
-                ->Ids(ids)
-                ->Float32Vectors(data);
-            auto add_result = vsag_index->index_->Add(dataset);
-            VSAG_CHECK_RESULT(add_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
+    const bool is_sparse = handle->index_pointers != nullptr;
+    const bool is_dense = handle->float32_vectors != nullptr or
+                          handle->float16_vectors != nullptr or handle->int8_vectors != nullptr;
+    if (not is_sparse and not is_dense) {
+        throw std::invalid_argument("dataset has no vectors");
     }
-}
-
-Error_t
-vsag_index_train(vsag_index_t index,
-                 const float* data,
-                 const int64_t* ids,
-                 const uint64_t dim,
-                 const uint64_t count) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(count))
-                ->Ids(ids)
-                ->Float32Vectors(data);
-            auto train_result = vsag_index->index_->Train(dataset);
-            VSAG_CHECK_RESULT(train_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
+    if (is_dense and handle->dim <= 0) {
+        throw std::invalid_argument("dataset dim must be positive");
     }
-}
 
-Error_t
-vsag_index_knn_search(vsag_index_t index,
-                      const float* query,
-                      uint64_t dim,
-                      int64_t k,
-                      const char* parameters,
-                      SearchResult_t* search_result) {
-    try {
-        if (search_result == nullptr) {
-            return make_error("search result is NULL");
+    DatasetView view;
+    view.dataset = vsag::Dataset::Make();
+    view.dataset->Owner(false)->NumElements(handle->num_elements);
+    if (handle->dim > 0) {
+        view.dataset->Dim(handle->dim);
+    }
+    if (handle->ids != nullptr) {
+        view.dataset->Ids(handle->ids);
+    }
+    if (handle->float32_vectors != nullptr) {
+        view.dataset->Float32Vectors(handle->float32_vectors);
+    }
+    if (handle->float16_vectors != nullptr) {
+        view.dataset->Float16Vectors(handle->float16_vectors);
+    }
+    if (handle->int8_vectors != nullptr) {
+        view.dataset->Int8Vectors(handle->int8_vectors);
+    }
+    if (is_sparse) {
+        const auto* pointers = handle->index_pointers;
+        if (pointers[0] != 0) {
+            throw std::invalid_argument("index_pointers[0] must be 0");
         }
-        StatisticsRequestGuard statistics_guard(search_result);
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            if (k <= 0) {
-                Error_t err;
-                err.code = VSAG_INVALID_ARGUMENT;
-                snprintf(err.message, sizeof(err.message), "%s", "knn_search requires k >= 1");
-                return err;
+        view.sparse_vectors.resize(handle->num_elements);
+        for (int64_t i = 0; i < handle->num_elements; ++i) {
+            const uint32_t begin = pointers[i];
+            const uint32_t end = pointers[i + 1];
+            if (end < begin) {
+                throw std::invalid_argument("index_pointers must be non-decreasing");
             }
-            auto query_dataset = vsag::Dataset::Make();
-            query_dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Float32Vectors(query);
-            auto result = vsag_index->index_->KnnSearch(query_dataset, k, parameters);
-            if (result.has_value()) {
-                const auto* ids_view = result.value()->GetIds();
-                const auto* dists_view = result.value()->GetDistances();
-                auto real_k = result.value()->GetDim();
-                int64_t to_write = std::min<int64_t>(real_k, k);
-                for (int64_t i = 0; i < to_write; ++i) {
-                    search_result->ids[i] = ids_view[i];
-                    search_result->dists[i] = dists_view[i];
-                }
-                search_result->count = to_write;
-                statistics_guard.Attach(result.value());
-            } else {
-                return make_error(result.error());
+            if (end > begin and (handle->indices == nullptr or handle->values == nullptr)) {
+                throw std::invalid_argument("sparse indices and values must not be NULL");
             }
-            return success;
+            auto& row = view.sparse_vectors[i];
+            row.len_ = end - begin;
+            row.ids_ = const_cast<uint32_t*>(handle->indices) + begin;
+            row.vals_ = const_cast<float*>(handle->values) + begin;
         }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
+        view.dataset->SparseVectors(view.sparse_vectors.data());
     }
+    return view;
 }
 
-class VsagFilterWrapper : public vsag::Filter {
+class IdListFilter : public vsag::Filter {
 public:
-    VsagFilterWrapper(FilterFunc_t filter) : filter_(filter) {
+    IdListFilter(const int64_t* ids, uint64_t count, bool allow)
+        : ids_(ids, ids + count), allow_(allow) {
+        std::sort(ids_.begin(), ids_.end());
+        ids_.erase(std::unique(ids_.begin(), ids_.end()), ids_.end());
     }
 
     [[nodiscard]] bool
     CheckValid(int64_t id) const override {
-        return filter_(id);
+        return std::binary_search(ids_.begin(), ids_.end(), id) == allow_;
     }
 
 private:
-    FilterFunc_t filter_;
+    std::vector<int64_t> ids_;
+    bool allow_;
 };
 
-Error_t
-vsag_index_knn_search_with_filter(vsag_index_t index,
-                                  const float* query,
-                                  uint64_t dim,
-                                  int64_t k,
-                                  const char* parameters,
-                                  FilterFunc_t filter,
-                                  SearchResult_t* search_result) {
-    try {
-        if (search_result == nullptr) {
-            return make_error("search result is NULL");
-        }
-        StatisticsRequestGuard statistics_guard(search_result);
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            if (k <= 0) {
-                Error_t err;
-                err.code = VSAG_INVALID_ARGUMENT;
-                snprintf(err.message, sizeof(err.message), "%s", "knn_search requires k >= 1");
-                return err;
-            }
-            auto query_dataset = vsag::Dataset::Make();
-            query_dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Float32Vectors(query);
-            auto vsag_filter = std::make_shared<VsagFilterWrapper>(filter);
-            auto result = vsag_index->index_->KnnSearch(query_dataset, k, parameters, vsag_filter);
-            if (result.has_value()) {
-                const auto* ids_view = result.value()->GetIds();
-                const auto* dists_view = result.value()->GetDistances();
-                auto real_k = result.value()->GetDim();
-                int64_t to_write = std::min<int64_t>(real_k, k);
-                for (int64_t i = 0; i < to_write; ++i) {
-                    search_result->ids[i] = ids_view[i];
-                    search_result->dists[i] = dists_view[i];
-                }
-                search_result->count = to_write;
-                statistics_guard.Attach(result.value());
-            } else {
-                return make_error(result.error());
-            }
-            return success;
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_range_search(vsag_index_t index,
-                        const float* query,
-                        uint64_t dim,
-                        float radius,
-                        int64_t k,
-                        const char* parameters,
-                        SearchResult_t* search_result) {
-    try {
-        if (search_result == nullptr) {
-            return make_error("search result is NULL");
-        }
-        StatisticsRequestGuard statistics_guard(search_result);
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            if (k <= 0) {
-                Error_t err;
-                err.code = VSAG_INVALID_ARGUMENT;
-                snprintf(err.message,
-                         sizeof(err.message),
-                         "%s",
-                         "range_search requires k >= 1 as result cap");
-                return err;
-            }
-            auto query_dataset = vsag::Dataset::Make();
-            query_dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Float32Vectors(query);
-            auto result = vsag_index->index_->RangeSearch(query_dataset, radius, parameters, k);
-            if (result.has_value()) {
-                const auto* ids_view = result.value()->GetIds();
-                const auto* dists_view = result.value()->GetDistances();
-                auto real_k = result.value()->GetDim();
-                int64_t to_write = std::min<int64_t>(real_k, k);
-                for (int64_t i = 0; i < to_write; ++i) {
-                    search_result->ids[i] = ids_view[i];
-                    search_result->dists[i] = dists_view[i];
-                }
-                search_result->count = to_write;
-                statistics_guard.Attach(result.value());
-            } else {
-                return make_error(result.error());
-            }
-        }
-        return success;
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_range_search_with_filter(vsag_index_t index,
-                                    const float* query,
-                                    uint64_t dim,
-                                    float radius,
-                                    int64_t k,
-                                    const char* parameters,
-                                    FilterFunc_t filter,
-                                    SearchResult_t* search_result) {
-    try {
-        if (search_result == nullptr) {
-            return make_error("search result is NULL");
-        }
-        StatisticsRequestGuard statistics_guard(search_result);
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            if (k <= 0) {
-                Error_t err;
-                err.code = VSAG_INVALID_ARGUMENT;
-                snprintf(err.message,
-                         sizeof(err.message),
-                         "%s",
-                         "range_search requires k >= 1 as result cap");
-                return err;
-            }
-            auto query_dataset = vsag::Dataset::Make();
-            query_dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Float32Vectors(query);
-            auto vsag_filter = std::make_shared<VsagFilterWrapper>(filter);
-            auto result =
-                vsag_index->index_->RangeSearch(query_dataset, radius, parameters, vsag_filter, k);
-            if (result.has_value()) {
-                const auto* ids_view = result.value()->GetIds();
-                const auto* dists_view = result.value()->GetDistances();
-                auto real_k = result.value()->GetDim();
-                int64_t to_write = std::min<int64_t>(real_k, k);
-                for (int64_t i = 0; i < to_write; ++i) {
-                    search_result->ids[i] = ids_view[i];
-                    search_result->dists[i] = dists_view[i];
-                }
-                search_result->count = to_write;
-                statistics_guard.Attach(result.value());
-            } else {
-                return make_error(result.error());
-            }
-        }
-        return success;
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_clone(const vsag_index_t index, vsag_index_t* clone_index) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto clone_index2 = vsag_index->index_->Clone();
-            if (clone_index2.has_value()) {
-                *clone_index = new VsagIndex(clone_index2.value());
-                return success;
-            }
-            return make_error(clone_index2.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_export_model(const vsag_index_t index, vsag_index_t* model_index) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto model_index2 = vsag_index->index_->ExportModel();
-            if (model_index2.has_value()) {
-                *model_index = new VsagIndex(model_index2.value());
-                return success;
-            }
-            return make_error(model_index2.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_calculate_distance_by_ids(const vsag_index_t index,
-                                     const float* query,
-                                     const uint64_t dim,
-                                     const int64_t* ids,
-                                     const uint64_t count,
-                                     float* dists) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dists2 =
-                vsag_index->index_->CalcDistancesById(query, ids, static_cast<int64_t>(count));
-            if (dists2.has_value()) {
-                memcpy(dists, dists2.value()->GetDistances(), count * sizeof(float));
-                return success;
-            }
-            return make_error(dists2.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_update_ids(vsag_index_t index,
-                      const int64_t* old_ids,
-                      const int64_t* new_ids,
-                      const uint64_t dim,
-                      const uint64_t count) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            for (uint64_t i = 0; i < count; ++i) {
-                auto update_result = vsag_index->index_->UpdateId(old_ids[i], new_ids[i]);
-                if (not update_result.has_value()) {
-                    return make_error(update_result.error());
-                }
-            }
-            return success;
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_update_vector(vsag_index_t index,
-                         const int64_t id,
-                         const float* new_data,
-                         const uint64_t dim) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Ids(&id)
-                ->Float32Vectors(new_data);
-            auto update_result = vsag_index->index_->UpdateVector(id, dataset, false);
-            if (update_result.has_value()) {
-                if (update_result.value()) {
-                    return success;
-                }
-                return make_error("Failed to update vector");
-            }
-            return make_error(update_result.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_update_vector_force(vsag_index_t index,
-                               const int64_t id,
-                               const float* new_data,
-                               const uint64_t dim) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset = vsag::Dataset::Make();
-            dataset->Owner(false)
-                ->Dim(static_cast<int64_t>(dim))
-                ->NumElements(static_cast<int64_t>(1))
-                ->Ids(&id)
-                ->Float32Vectors(new_data);
-            auto update_result = vsag_index->index_->UpdateVector(id, dataset, true);
-            if (update_result.has_value()) {
-                if (update_result.value()) {
-                    return success;
-                }
-                return make_error("Failed to update vector");
-            }
-            return make_error(update_result.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_index_get_vector_by_ids(vsag_index_t index,
-                             const int64_t* ids,
-                             const uint64_t count,
-                             float* vectors) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto dataset_result =
-                vsag_index->index_->GetRawVectorByIds(ids, static_cast<int64_t>(count));
-            if (dataset_result.has_value()) {
-                const auto* vectors_view = dataset_result.value()->GetFloat32Vectors();
-                if (vectors_view != nullptr) {
-                    uint64_t dim = dataset_result.value()->GetDim();
-                    memcpy(vectors, vectors_view, count * dim * sizeof(float));
-                    return success;
-                }
-                return make_error("Failed to get vector data");
-            }
-            return make_error(dataset_result.error());
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_serialize_file(vsag_index_t index, const char* file_path) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            std::ofstream file(file_path, std::ios::binary);
-            if (!file.is_open()) {
-                return make_error("failed to open file for writing: " + std::string(file_path));
-            }
-            auto serialize_result = vsag_index->index_->Serialize(file);
-            file.close();
-            VSAG_CHECK_RESULT(serialize_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_deserialize_file(vsag_index_t index, const char* file_path) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            std::ifstream file(file_path, std::ios::binary);
-            if (!file.is_open()) {
-                Error_t err;
-                err.code = VSAG_MISSING_FILE;
-                snprintf(err.message,
-                         sizeof(err.message),
-                         "failed to open file for reading: %s",
-                         file_path);
-                return err;
-            }
-            auto deserialize_result = vsag_index->index_->Deserialize(file);
-            file.close();
-            VSAG_CHECK_RESULT(deserialize_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-Error_t
-vsag_serialize_write_func(vsag_index_t index,
-                          void (*write_func)(OffsetType offset, SizeType size, const void* data)) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            auto serialize_result = vsag_index->index_->Serialize(write_func);
-            VSAG_CHECK_RESULT(serialize_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
-    }
-}
-
-class RandomAccessStreamBuf : public std::streambuf {
+class BitmapFilter : public vsag::Filter {
 public:
-    using ReadFunc = void (*)(OffsetType offset, SizeType size, void* data);
-    using SizeCallback = std::function<OffsetType()>;
-
-    explicit RandomAccessStreamBuf(ReadFunc read_func, SizeCallback size_cb = nullptr)
-        : read_func_(read_func), size_cb_(std::move(size_cb)) {
+    BitmapFilter(const uint8_t* bitmap, uint64_t num_ids) : bitmap_(bitmap), num_ids_(num_ids) {
     }
 
-protected:
-    std::streamsize
-    xsgetn(char* s, std::streamsize count) override {
-        if (read_func_ == nullptr or count <= 0) {
-            return 0;
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        if (id < 0 or static_cast<uint64_t>(id) >= num_ids_) {
+            return false;
         }
-
-        auto n = static_cast<SizeType>(count);
-
-        read_func_(current_pos_, n, s);
-
-        current_pos_ += n;
-        return count;
+        return ((bitmap_[id >> 3] >> (id & 7)) & 1) != 0;
     }
 
-    pos_type
-    seekoff(off_type off,
-            std::ios_base::seekdir way,
-            std::ios_base::openmode which = std::ios_base::in) override {
-        if (which != std::ios_base::in) {
-            return {-1};
-        }
+private:
+    const uint8_t* bitmap_;
+    uint64_t num_ids_;
+};
 
-        OffsetType new_pos;
-        switch (way) {
-            case std::ios_base::beg:
-                if (off < 0) {
-                    return {-1};
-                }
-                new_pos = static_cast<OffsetType>(off);
+class IdRangeFilter : public vsag::Filter {
+public:
+    IdRangeFilter(int64_t min_id, int64_t max_id) : min_id_(min_id), max_id_(max_id) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return id >= min_id_ and id <= max_id_;
+    }
+
+private:
+    int64_t min_id_;
+    int64_t max_id_;
+};
+
+vsag_error_t*
+wrap_filter(vsag::FilterPtr filter, vsag_filter_t** out_filter) {
+    auto* handle = new vsag_filter{std::move(filter)};
+    *out_filter = handle;
+    return nullptr;
+}
+
+struct LogSink {
+    vsag_log_fn log_fn;
+    void* user_data;
+};
+
+// Forwards records to the host callback, or to the logger that was active before it was
+// installed when no callback is set. It is installed once and never removed, so replacing the
+// callback only swaps `sink_` under a mutex and never touches Options while other threads log.
+class CallbackLogger : public vsag::Logger {
+public:
+    explicit CallbackLogger(vsag::Logger* fallback) : fallback_(fallback) {
+    }
+
+    void
+    SetSink(vsag_log_fn log_fn, void* user_data) {
+        auto sink = std::make_shared<const LogSink>(LogSink{log_fn, user_data});
+        std::lock_guard lock(sink_mutex_);
+        sink_ = std::move(sink);
+    }
+
+    void
+    SetLevel(Level log_level) override {
+        level_.store(log_level);
+        fallback_->SetLevel(log_level);
+    }
+
+    void
+    Trace(const std::string& msg) override {
+        emit(kTRACE, msg);
+    }
+
+    void
+    Debug(const std::string& msg) override {
+        emit(kDEBUG, msg);
+    }
+
+    void
+    Info(const std::string& msg) override {
+        emit(kINFO, msg);
+    }
+
+    void
+    Warn(const std::string& msg) override {
+        emit(kWARN, msg);
+    }
+
+    void
+    Error(const std::string& msg) override {
+        emit(kERR, msg);
+    }
+
+    void
+    Critical(const std::string& msg) override {
+        emit(kCRITICAL, msg);
+    }
+
+private:
+    void
+    emit(int level, const std::string& msg) {
+        std::shared_ptr<const LogSink> sink;
+        {
+            std::lock_guard lock(sink_mutex_);
+            sink = sink_;
+        }
+        if (sink == nullptr or sink->log_fn == nullptr) {
+            forward_to_fallback(level, msg);
+        } else if (level >= level_.load()) {
+            sink->log_fn(sink->user_data, level, msg.c_str());
+        }
+    }
+
+    void
+    forward_to_fallback(int level, const std::string& msg) {
+        switch (level) {
+            case kTRACE:
+                fallback_->Trace(msg);
                 break;
-            case std::ios_base::cur:
-                if (off >= 0) {
-                    new_pos = current_pos_ + static_cast<OffsetType>(off);
-                } else {
-                    auto abs_off = static_cast<OffsetType>(-off);
-                    if (abs_off > current_pos_) {
-                        return {-1};
-                    }
-                    new_pos = current_pos_ - abs_off;
-                }
+            case kDEBUG:
+                fallback_->Debug(msg);
                 break;
-            case std::ios_base::end:
-                if (!size_cb_) {
-                    return {-1};
-                }
-                new_pos = size_cb_() + static_cast<OffsetType>(off);
+            case kINFO:
+                fallback_->Info(msg);
+                break;
+            case kWARN:
+                fallback_->Warn(msg);
+                break;
+            case kERR:
+                fallback_->Error(msg);
                 break;
             default:
-                return {-1};
+                fallback_->Critical(msg);
+                break;
         }
-
-        current_pos_ = new_pos;
-        return {static_cast<off_type>(new_pos)};
     }
 
-    pos_type
-    seekpos(pos_type sp, std::ios_base::openmode which = std::ios_base::in) override {
-        return seekoff(off_type(sp), std::ios_base::beg, which);
-    }
-
-private:
-    ReadFunc read_func_;
-    SizeCallback size_cb_;
-    OffsetType current_pos_{0};
+    vsag::Logger* fallback_;
+    std::mutex sink_mutex_;
+    std::shared_ptr<const LogSink> sink_;
+    std::atomic<int> level_{kINFO};
 };
 
-Error_t
-vsag_deserialize_read_func(vsag_index_t index,
-                           void (*read_func)(OffsetType offset, SizeType size, void* data),
-                           SizeType (*size_func)()) {
-    try {
-        auto* vsag_index = static_cast<VsagIndex*>(index);
-        if (vsag_index != nullptr) {
-            RandomAccessStreamBuf stream_buf(read_func, size_func);
-            std::istream stream(&stream_buf);
-            auto deserialize_result = vsag_index->index_->Deserialize(stream);
-            VSAG_CHECK_RESULT(deserialize_result);
-        }
-        return make_error("index is NULL");
-    } catch (const std::exception& e) {
-        return make_error(e);
+std::mutex logger_mutex;
+int32_t log_level = -1;                     // -1: never set through this API
+CallbackLogger* callback_logger = nullptr;  // intentionally leaked; see CallbackLogger
+
+vsag_error_t*
+make_result(const tl::expected<vsag::DatasetPtr, vsag::Error>& searched,
+            vsag_search_result_t** out_result) {
+    if (not searched.has_value()) {
+        return make_error(searched.error());
+    }
+    auto result = std::make_unique<vsag_search_result>();
+    result->dataset = searched.value();
+    result->count = result->dataset->GetDim();
+    *out_result = result.release();
+    return nullptr;
+}
+
+}  // namespace
+
+extern "C" {
+
+uint32_t
+vsag_c_api_version(void) {
+    return VSAG_C_API_VERSION;
+}
+
+int32_t
+vsag_error_code(const vsag_error_t* error) {
+    return error == nullptr ? VSAG_SUCCESS : error->code;
+}
+
+const char*
+vsag_error_message(const vsag_error_t* error) {
+    return error == nullptr ? "" : error->message.c_str();
+}
+
+void
+vsag_error_destroy(vsag_error_t* error) {
+    if (error != out_of_memory_error()) {
+        delete error;
     }
 }
+
+vsag_error_t*
+vsag_set_log_level(int32_t level) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(static_cast<uint32_t>(level) <= VSAG_LOG_OFF, "unsupported log level");
+        std::lock_guard lock(logger_mutex);
+        log_level = level;
+        vsag::Options::Instance().logger()->SetLevel(static_cast<vsag::Logger::Level>(level));
+        return nullptr;
+    });
 }
+
+vsag_error_t*
+vsag_set_logger(vsag_log_fn log_fn, void* user_data) {
+    return guarded([&]() -> vsag_error_t* {
+        std::lock_guard lock(logger_mutex);
+        if (callback_logger == nullptr) {
+            if (log_fn == nullptr) {
+                return nullptr;  // still using the built-in logger
+            }
+            auto& options = vsag::Options::Instance();
+            callback_logger = new CallbackLogger(options.logger());
+            if (log_level >= 0) {
+                callback_logger->SetLevel(static_cast<vsag::Logger::Level>(log_level));
+            }
+            callback_logger->SetSink(log_fn, user_data);
+            options.set_logger(callback_logger);
+            return nullptr;
+        }
+        callback_logger->SetSink(log_fn, user_data);
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_dataset_create(vsag_dataset_t** out_dataset) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_dataset != nullptr, "out_dataset is NULL");
+        *out_dataset = new vsag_dataset();
+        return nullptr;
+    });
+}
+
+void
+vsag_dataset_destroy(vsag_dataset_t* dataset) {
+    delete dataset;
+}
+
+vsag_error_t*
+vsag_dataset_set_num_elements(vsag_dataset_t* dataset, int64_t num_elements) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->num_elements = num_elements;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_dim(vsag_dataset_t* dataset, int64_t dim) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->dim = dim;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_ids(vsag_dataset_t* dataset, const int64_t* ids) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->ids = ids;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_float32_vectors(vsag_dataset_t* dataset, const float* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->float32_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_float16_vectors(vsag_dataset_t* dataset, const uint16_t* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->float16_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_int8_vectors(vsag_dataset_t* dataset, const int8_t* vectors) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->int8_vectors = vectors;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_dataset_set_sparse_vectors(vsag_dataset_t* dataset,
+                                const uint32_t* index_pointers,
+                                const uint32_t* indices,
+                                const float* values) {
+    VSAG_REQUIRE(dataset != nullptr, "dataset is NULL");
+    dataset->index_pointers = index_pointers;
+    dataset->indices = indices;
+    dataset->values = values;
+    return nullptr;
+}
+
+vsag_error_t*
+vsag_filter_create_id_list(const int64_t* ids,
+                           uint64_t count,
+                           int32_t mode,
+                           vsag_filter_t** out_filter) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_filter != nullptr, "out_filter is NULL");
+        VSAG_REQUIRE(ids != nullptr or count == 0, "ids is NULL");
+        VSAG_REQUIRE(static_cast<uint32_t>(mode) <= VSAG_FILTER_DENY, "unsupported filter mode");
+        return wrap_filter(std::make_shared<IdListFilter>(ids, count, mode == VSAG_FILTER_ALLOW),
+                           out_filter);
+    });
+}
+
+vsag_error_t*
+vsag_filter_create_bitmap(const uint8_t* bitmap, uint64_t num_ids, vsag_filter_t** out_filter) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_filter != nullptr, "out_filter is NULL");
+        VSAG_REQUIRE(bitmap != nullptr or num_ids == 0, "bitmap is NULL");
+        return wrap_filter(std::make_shared<BitmapFilter>(bitmap, num_ids), out_filter);
+    });
+}
+
+vsag_error_t*
+vsag_filter_create_id_range(int64_t min_id, int64_t max_id, vsag_filter_t** out_filter) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_filter != nullptr, "out_filter is NULL");
+        return wrap_filter(std::make_shared<IdRangeFilter>(min_id, max_id), out_filter);
+    });
+}
+
+void
+vsag_filter_destroy(vsag_filter_t* filter) {
+    delete filter;
+}
+
+int64_t
+vsag_search_result_count(const vsag_search_result_t* result) {
+    return result == nullptr ? 0 : result->count;
+}
+
+const int64_t*
+vsag_search_result_ids(const vsag_search_result_t* result) {
+    return result == nullptr ? nullptr : result->dataset->GetIds();
+}
+
+const float*
+vsag_search_result_distances(const vsag_search_result_t* result) {
+    return result == nullptr ? nullptr : result->dataset->GetDistances();
+}
+
+const char*
+vsag_search_result_statistics(const vsag_search_result_t* result) {
+    if (result == nullptr) {
+        return "";
+    }
+    try {
+        auto* mutable_result = const_cast<vsag_search_result_t*>(result);
+        std::call_once(mutable_result->statistics_once, [&]() {
+            mutable_result->statistics = mutable_result->dataset->GetStatistics();
+        });
+    } catch (...) {  // NOLINT(bugprone-empty-catch)
+        // Statistics are optional; report none rather than throw across the C boundary.
+    }
+    return result->statistics.c_str();
+}
+
+void
+vsag_search_result_destroy(vsag_search_result_t* result) {
+    delete result;
+}
+
+vsag_error_t*
+vsag_index_create(const char* index_name, const char* index_param, vsag_index_t** out_index) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_index != nullptr, "out_index is NULL");
+        *out_index = nullptr;
+        VSAG_REQUIRE(index_name != nullptr and index_param != nullptr,
+                     "index name and parameters must not be NULL");
+        auto created = vsag::Factory::CreateIndex(index_name, index_param);
+        if (not created.has_value()) {
+            return make_error(created.error());
+        }
+        *out_index = new vsag_index{created.value()};
+        return nullptr;
+    });
+}
+
+void
+vsag_index_destroy(vsag_index_t* index) {
+    delete index;
+}
+
+vsag_error_t*
+vsag_index_build(vsag_index_t* index, const vsag_dataset_t* base) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(base, false);
+        return to_error(index->index->Build(view.dataset));
+    });
+}
+
+vsag_error_t*
+vsag_index_train(vsag_index_t* index, const vsag_dataset_t* data) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(data, false);
+        return to_error(index->index->Train(view.dataset));
+    });
+}
+
+vsag_error_t*
+vsag_index_add(vsag_index_t* index, const vsag_dataset_t* base, uint64_t* out_failed_count) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(base, false);
+        auto added = index->index->Add(view.dataset);
+        if (not added.has_value()) {
+            return make_error(added.error());
+        }
+        if (out_failed_count != nullptr) {
+            *out_failed_count = added.value().size();
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_remove(vsag_index_t* index,
+                  const int64_t* ids,
+                  uint64_t count,
+                  uint64_t* out_removed_count) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(ids != nullptr or count == 0, "ids is NULL");
+        auto removed = index->index->Remove(std::vector<int64_t>(ids, ids + count));
+        if (not removed.has_value()) {
+            return make_error(removed.error());
+        }
+        if (out_removed_count != nullptr) {
+            *out_removed_count = removed.value();
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_update_ids(vsag_index_t* index,
+                      const int64_t* old_ids,
+                      const int64_t* new_ids,
+                      uint64_t count) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE((old_ids != nullptr and new_ids != nullptr) or count == 0, "ids is NULL");
+        for (uint64_t i = 0; i < count; ++i) {
+            auto updated = index->index->UpdateId(old_ids[i], new_ids[i]);
+            if (not updated.has_value()) {
+                return make_error(updated.error());
+            }
+            if (not updated.value()) {
+                return make_error(VSAG_INTERNAL_ERROR, "failed to update id");
+            }
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_update_vector(vsag_index_t* index,
+                         int64_t id,
+                         const vsag_dataset_t* vector,
+                         int32_t force_update) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto view = make_view(vector, true);
+        auto updated = index->index->UpdateVector(id, view.dataset, force_update != 0);
+        if (not updated.has_value()) {
+            return make_error(updated.error());
+        }
+        if (not updated.value()) {
+            return make_error(VSAG_INTERNAL_ERROR, "failed to update vector");
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_knn_search(const vsag_index_t* index,
+                      const vsag_dataset_t* query,
+                      int64_t k,
+                      const char* parameters,
+                      const vsag_filter_t* filter,
+                      vsag_search_result_t** out_result) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_result != nullptr, "out_result is NULL");
+        *out_result = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(parameters != nullptr, "parameters is NULL");
+        VSAG_REQUIRE(k > 0, "knn_search requires k >= 1");
+        auto view = make_view(query, true);
+        const auto& searched =
+            filter == nullptr
+                ? index->index->KnnSearch(view.dataset, k, parameters)
+                : index->index->KnnSearch(view.dataset, k, parameters, filter->filter);
+        return make_result(searched, out_result);
+    });
+}
+
+vsag_error_t*
+vsag_index_range_search(const vsag_index_t* index,
+                        const vsag_dataset_t* query,
+                        float radius,
+                        int64_t limit,
+                        const char* parameters,
+                        const vsag_filter_t* filter,
+                        vsag_search_result_t** out_result) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_result != nullptr, "out_result is NULL");
+        *out_result = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(parameters != nullptr, "parameters is NULL");
+        VSAG_REQUIRE(limit == -1 or limit > 0, "range_search limit must be -1 or positive");
+        auto view = make_view(query, true);
+        const auto& searched =
+            filter == nullptr ? index->index->RangeSearch(view.dataset, radius, parameters, limit)
+                              : index->index->RangeSearch(
+                                    view.dataset, radius, parameters, filter->filter, limit);
+        return make_result(searched, out_result);
+    });
+}
+
+vsag_error_t*
+vsag_index_knn_search_float32(const vsag_index_t* index,
+                              const float* queries,
+                              uint64_t num_queries,
+                              uint64_t dim,
+                              int64_t k,
+                              const char* parameters,
+                              const vsag_filter_t* filter,
+                              int64_t* out_ids,
+                              float* out_distances,
+                              int64_t* out_counts) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(queries != nullptr and parameters != nullptr, "query or parameters is NULL");
+        VSAG_REQUIRE(out_ids != nullptr and out_distances != nullptr, "output buffer is NULL");
+        VSAG_REQUIRE(k > 0, "knn_search requires k >= 1");
+        VSAG_REQUIRE(dim > 0, "dim must be positive");
+        const std::string search_parameters(parameters);
+        for (uint64_t i = 0; i < num_queries; ++i) {
+            auto query = vsag::Dataset::Make();
+            query->Owner(false)
+                ->NumElements(1)
+                ->Dim(static_cast<int64_t>(dim))
+                ->Float32Vectors(queries + i * dim);
+            const auto& searched =
+                filter == nullptr
+                    ? index->index->KnnSearch(query, k, search_parameters)
+                    : index->index->KnnSearch(query, k, search_parameters, filter->filter);
+            if (not searched.has_value()) {
+                return make_error(searched.error());
+            }
+            const auto count = std::min<int64_t>(searched.value()->GetDim(), k);
+            std::memcpy(out_ids + i * k, searched.value()->GetIds(), count * sizeof(int64_t));
+            std::memcpy(
+                out_distances + i * k, searched.value()->GetDistances(), count * sizeof(float));
+            if (out_counts != nullptr) {
+                out_counts[i] = count;
+            }
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_calc_distances_by_ids(const vsag_index_t* index,
+                                 const vsag_dataset_t* query,
+                                 const int64_t* ids,
+                                 uint64_t count,
+                                 float* out_distances) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE((ids != nullptr and out_distances != nullptr) or count == 0,
+                     "ids or out_distances is NULL");
+        auto view = make_view(query, true);
+        auto calculated =
+            index->index->CalcDistancesById(view.dataset, ids, static_cast<int64_t>(count));
+        if (not calculated.has_value()) {
+            return make_error(calculated.error());
+        }
+        if (count > 0) {
+            std::memcpy(out_distances, calculated.value()->GetDistances(), count * sizeof(float));
+        }
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_vectors_by_ids(const vsag_index_t* index,
+                              const int64_t* ids,
+                              uint64_t count,
+                              float* out_vectors) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(ids != nullptr and out_vectors != nullptr and count > 0,
+                     "ids or out_vectors is NULL, or count is 0");
+        auto fetched = index->index->GetRawVectorByIds(ids, static_cast<int64_t>(count));
+        if (not fetched.has_value()) {
+            return make_error(fetched.error());
+        }
+        const auto* vectors = fetched.value()->GetFloat32Vectors();
+        if (vectors == nullptr) {
+            return make_error(VSAG_INTERNAL_ERROR, "index returned no float32 vectors");
+        }
+        std::memcpy(out_vectors, vectors, count * fetched.value()->GetDim() * sizeof(float));
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_clone(const vsag_index_t* index, vsag_index_t** out_index) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_index != nullptr, "out_index is NULL");
+        *out_index = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto cloned = index->index->Clone();
+        if (not cloned.has_value()) {
+            return make_error(cloned.error());
+        }
+        *out_index = new vsag_index{cloned.value()};
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_export_model(const vsag_index_t* index, vsag_index_t** out_index) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_index != nullptr, "out_index is NULL");
+        *out_index = nullptr;
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        auto exported = index->index->ExportModel();
+        if (not exported.has_value()) {
+            return make_error(exported.error());
+        }
+        *out_index = new vsag_index{exported.value()};
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_serialize_file(const vsag_index_t* index, const char* file_path) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(file_path != nullptr, "file_path is NULL");
+        std::ofstream file(file_path, std::ios::binary);
+        if (not file.is_open()) {
+            return make_error(VSAG_INTERNAL_ERROR,
+                              std::string("failed to open file for writing: ") + file_path);
+        }
+        return to_error(index->index->Serialize(file));
+    });
+}
+
+vsag_error_t*
+vsag_index_deserialize_file(vsag_index_t* index, const char* file_path) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(file_path != nullptr, "file_path is NULL");
+        std::ifstream file(file_path, std::ios::binary);
+        if (not file.is_open()) {
+            return make_error(VSAG_MISSING_FILE,
+                              std::string("failed to open file for reading: ") + file_path);
+        }
+        return to_error(index->index->Deserialize(file));
+    });
+}
+
+vsag_error_t*
+vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_num_elements != nullptr, "out_num_elements is NULL");
+        *out_num_elements = index->index->GetNumElements();
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_memory_usage(const vsag_index_t* index, int64_t* out_memory_usage) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_memory_usage != nullptr, "out_memory_usage is NULL");
+        *out_memory_usage = static_cast<int64_t>(index->index->GetMemoryUsage());
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_check_id_exist(const vsag_index_t* index, int64_t id, int32_t* out_exist) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_exist != nullptr, "out_exist is NULL");
+        *out_exist = index->index->CheckIdExist(id) ? 1 : 0;
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_index_get_min_max_id(const vsag_index_t* index, int64_t* out_min_id, int64_t* out_max_id) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(out_min_id != nullptr and out_max_id != nullptr, "out id is NULL");
+        auto range = index->index->GetMinAndMaxId();
+        if (not range.has_value()) {
+            return make_error(range.error());
+        }
+        *out_min_id = range.value().first;
+        *out_max_id = range.value().second;
+        return nullptr;
+    });
+}
+
+}  // extern "C"

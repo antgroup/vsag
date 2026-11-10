@@ -52,8 +52,7 @@ release:                 ## Build vsag with release options.
 dist-pre-cxx11-abi:      ## Build vsag with distribution options.
 dist-cxx11-abi:          ## Build vsag with distribution options.
 dist-libcxx:             ## Build vsag using libc++.
-pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
-pyvsag-all:              ## Build wheels for all supported versions. Usage: make pyvsag-all
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture).
 clean-release:           ## Clear build-release/ directory.
 install:                 ## Build and install the release version of vsag.
 ```
@@ -183,16 +182,10 @@ make release
 
 pyvsag 是 VSAG 的 Python 版本。通过 `pip install pyvsag` 下载安装的 wheel 包就是通过 `make pyvsag` 命令构建出来的。
 
-默认会使用 `PY_VERSION=3.10`，你可以显式指定目标 Python 版本：
+wheel 为 `py3-none` 平台包，不区分 Python 版本，每个架构只需构建一次：
 
 ```bash
-make pyvsag PY_VERSION=3.11
-```
-
-或者一次构建所有受支持版本的 wheel：
-
-```bash
-make pyvsag-all
+make pyvsag
 ```
 
 ## 环境变量

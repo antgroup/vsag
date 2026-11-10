@@ -113,7 +113,7 @@ python3 scripts/coverage/compare_simd_coverage.py --root . \
 `tests/python/` 包含 `pyvsag` 的 pytest 用例。构建好 `pyvsag` 后：
 
 ```bash
-make pyvsag PY_VERSION=3.10
+make pyvsag
 cd tests/python && pytest -q
 ```
 

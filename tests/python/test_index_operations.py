@@ -14,6 +14,8 @@
 
 """Tests for extended Python index operations"""
 
+import json
+
 import numpy as np
 import pyvsag
 import pytest
@@ -553,3 +555,60 @@ class TestCalDistanceById:
         assert len(calc_dists) == 3
         valid_count = sum(1 for d in calc_dists if d >= 0)
         assert valid_count > 0
+
+
+def _small_index():
+    return pyvsag.Index(
+        "brute_force",
+        json.dumps(
+            {
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 4,
+                "index_param": {
+                    "base_quantization_type": "fp32",
+                    "precise_quantization_type": "fp32",
+                },
+            }
+        ),
+    )
+
+
+def test_set_logger_helpers():
+    """The logging helpers report success without raising."""
+    pyvsag.set_logger_debug()
+    pyvsag.set_logger_info()
+    pyvsag.set_logger_off()
+
+
+def test_copy_does_not_double_free():
+    """Shallow copies share one native owner, so destroying either copy is safe."""
+    import copy
+    import gc
+
+    index = _small_index()
+    clone = copy.copy(index)
+    del index
+    gc.collect()
+    assert clone.get_num_elements() == 0
+
+
+def test_rejects_non_native_byte_order():
+    index = _small_index()
+    ids = np.arange(2, dtype=np.int64)
+    swapped = np.ones((2, 4), dtype=">f4")
+    with pytest.raises(ValueError, match="numpy.float32"):
+        index.build(swapped, ids, 2, 4)
+    with pytest.raises(ValueError, match="numpy.float32"):
+        index.knn_search(np.ones(4, dtype=">f4"), 1, "{}")
+
+
+def test_rejects_lossy_integer_input():
+    index = _small_index()
+    vectors = np.ones((2, 4), dtype=np.float32)
+    with pytest.raises(ValueError, match="integer"):
+        index.build(vectors, np.array([0.5, 1.5]), 2, 4)
+    with pytest.raises(ValueError, match="range"):
+        index.build(vectors, np.array([0, 2**63], dtype=np.uint64), 2, 4)
+    with pytest.raises(ValueError, match="range"):
+        index.remove(np.array([2**63], dtype=np.uint64))
