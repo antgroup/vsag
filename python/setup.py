@@ -21,8 +21,6 @@ class CMakeBuild(build_ext):
 
         cmake_args = [
             f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
-            "-DCMAKE_BUILD_WITH_INSTALL_RPATH=ON",
-            f"-DCMAKE_INSTALL_RPATH={'@loader_path' if sys.platform == 'darwin' else '$ORIGIN'}",
             f"-DPYTHON_EXECUTABLE={sys.executable}",
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
@@ -32,13 +30,6 @@ class CMakeBuild(build_ext):
             f"-DMKL_STATIC_LINK={mkl_static_link}",
             "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
         ]
-
-        if sys.platform.startswith("linux"):
-            # NumPy may load another C++ runtime first; keep bundled static symbols private.
-            cmake_args += [
-                "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,--exclude-libs,ALL",
-                "-DCMAKE_MODULE_LINKER_FLAGS=-Wl,--exclude-libs,ALL",
-            ]
 
         build_args = []
         if self.compiler.compiler_type != "msvc":
