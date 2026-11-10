@@ -101,7 +101,6 @@ The suffix is derived from the exact pinned identifier:
 | `VSAG_THIRDPARTY_YAML_CPP_0_9_0` | yaml-cpp 0.9.0 | `github.com/jbeder/yaml-cpp/.../yaml-cpp-0.9.0.tar.gz` | `ENABLE_TOOLS=ON` (+ C++11 ABI) |
 | `VSAG_THIRDPARTY_TABULATE_COMMIT_3A58301067BB` | p-ranav/tabulate | `github.com/p-ranav/tabulate/archive/3a583010...tar.gz` | `ENABLE_TOOLS=ON` (+ C++11 ABI) |
 | `VSAG_THIRDPARTY_HTTPLIB_0_35_0` | cpp-httplib 0.35.0 | `github.com/yhirose/cpp-httplib/.../v0.35.0.tar.gz` | `ENABLE_TOOLS=ON` (+ C++11 ABI) |
-| `VSAG_THIRDPARTY_PYBIND11_2_11_1` | pybind11 2.11.1 | `github.com/pybind/pybind11/.../v2.11.1.tar.gz` | Python bindings (`pyvsag` / `ENABLE_PYBINDS=ON`) |
 
 > The exact upstream URL **and** the expected `URL_HASH` for each dependency are
 > the single source of truth in the corresponding
@@ -125,7 +124,6 @@ You only have to mirror what your specific build actually downloads:
   `ARGPARSE`, `YAML_CPP`, `TABULATE`, `HTTPLIB` — downloaded only when *both*
   options are enabled (see
   [`cmake/VSAGThirdParty.cmake`](https://github.com/antgroup/vsag/blob/main/cmake/VSAGThirdParty.cmake)).
-- **+ Python wheel** (`make pyvsag`): also `PYBIND11`.
 
 ## Examples
 

@@ -5,6 +5,7 @@ import subprocess
 import sys
 from setuptools import setup, Extension
 from setuptools.command.build_ext import build_ext
+from setuptools.command.bdist_wheel import bdist_wheel
 from setuptools.dist import Distribution
 
 class CMakeExtension(Extension):
@@ -12,50 +13,67 @@ class CMakeExtension(Extension):
         Extension.__init__(self, name, sources=[])
         self.sourcedir = os.path.abspath(sourcedir)
 
+
 class CMakeBuild(build_ext):
+    """Builds libvsag_c, which pyvsag loads through cffi; there is no Python extension module."""
+
+    def get_ext_filename(self, ext_name):
+        return os.path.join("pyvsag", "libvsag_c.so")
+
     def build_extension(self, ext):
-        extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.name)))
+        extdir = os.path.abspath(os.path.join(self.build_lib, "pyvsag"))
+        os.makedirs(extdir, exist_ok=True)
         cfg = "Debug" if self.debug else "Release"
         mkl_static_link = os.environ.get("MKL_STATIC_LINK", "ON")
+        # The released wheel has no libaio dependency; a local build can opt back in.
+        libaio = os.environ.get("VSAG_ENABLE_LIBAIO", "OFF").strip().upper() or "OFF"
         use_system_deps = os.environ.get("VSAG_USE_SYSTEM_DEPS", "OFF").strip().upper() or "OFF"
 
         cmake_args = [
-            f"-DCMAKE_LIBRARY_OUTPUT_DIRECTORY={extdir}",
-            f"-DPYTHON_EXECUTABLE={sys.executable}",
-            f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DCMAKE_BUILD_TYPE={cfg}",
             f"-DVSAG_USE_SYSTEM_DEPS:STRING={use_system_deps}",
             "-DENABLE_PYBINDS=ON",
             "-DENABLE_TESTS=OFF",
+            f"-DENABLE_LIBAIO={libaio}",
             f"-DMKL_STATIC_LINK={mkl_static_link}",
             "-DCMAKE_CXX_FLAGS_RELEASE=-O3 -DNDEBUG -s",
         ]
 
-        build_args = []
-        if self.compiler.compiler_type != "msvc":
-            jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
-            build_args += ["--", f"-j{jobs}"]
-
+        jobs = os.environ.get("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 4))
         env = os.environ.copy()
         build_temp = self.build_temp
         os.makedirs(build_temp, exist_ok=True)
         src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
+        subprocess.check_call(["cmake", src_dir] + cmake_args, cwd=build_temp, env=env)
         subprocess.check_call(
-            ["cmake", src_dir] + cmake_args, cwd=build_temp, env=env
-        )
-        subprocess.check_call(
-            ["cmake", "--build", "."] + build_args, cwd=build_temp, env=env
+            ["cmake", "--build", ".", "--target", "vsag_c", "--", f"-j{jobs}"],
+            cwd=build_temp,
+            env=env,
         )
 
-        lib_patterns = ["libvsag.so*", "libvsag.dylib", "*vsag*.dll"]
-        for pattern in lib_patterns:
-            for lib_path in glob.glob(os.path.join(build_temp, "**", pattern), recursive=True):
-                shutil.copy(lib_path, extdir)
+        libs = glob.glob(os.path.join(build_temp, "**", "libvsag_c.*"), recursive=True)
+        if len(libs) != 1:
+            raise RuntimeError("expected exactly one libvsag_c in the build tree, found: %s" % libs)
+        shutil.copy(libs[0], extdir)
+        shutil.copy(
+            os.path.join(src_dir, "include", "vsag", "vsag_c_api.h"),
+            os.path.join(extdir, "_vsag_c_api.h"),
+        )
+
 
 class BinaryDistribution(Distribution):
     def has_ext_modules(self):
         return True
+
+
+class PlatformWheel(bdist_wheel):
+    """The library is loaded through cffi, so the wheel does not depend on the Python ABI."""
+
+    def get_tag(self):
+        _, _, plat = bdist_wheel.get_tag(self)
+        return "py3", "none", plat
+
 
 def _read_version():
     here = os.path.dirname(os.path.abspath(__file__))
@@ -97,6 +115,6 @@ setup(
     long_description_content_type='text/markdown',
     distclass=BinaryDistribution,
     ext_modules=[CMakeExtension("pyvsag._pyvsag")],
-    cmdclass={"build_ext": CMakeBuild},
+    cmdclass={"build_ext": CMakeBuild, "bdist_wheel": PlatformWheel},
     zip_safe=False,
 )

@@ -116,7 +116,7 @@ higher, as measured by the `make cov` flow and the CI coverage job.
 ## Python Tests
 
 ```bash
-make pyvsag PY_VERSION=3.10
+make pyvsag
 cd tests/python && pytest -q
 ```
 

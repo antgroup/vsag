@@ -55,8 +55,7 @@ tsan        Build with ThreadSanitizer
 fmt         Run clang-format
 lint        Run clang-tidy
 fix-lint    Apply clang-tidy fix-its in-place (destructive)
-pyvsag      Build pyvsag for a specific Python version (PY_VERSION=...)
-pyvsag-all  Build pyvsag wheels for all supported Python versions
+pyvsag      Build the pyvsag py3-none wheel
 dist-pre-cxx11-abi  Build redistributable tarball (pre-C++11 ABI)
 dist-cxx11-abi      Build redistributable tarball (C++11 ABI)
 dist-libcxx         Build redistributable tarball (libc++)
@@ -170,9 +169,7 @@ and worked examples.
 ## Python Wheel (pyvsag)
 
 ```bash
-make pyvsag PY_VERSION=3.10
-# Or build all supported versions in parallel:
-make pyvsag-all
+make pyvsag
 ```
 
 Wheels are emitted under `python/dist/`.

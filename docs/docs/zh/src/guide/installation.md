@@ -58,7 +58,7 @@ arm64。macOS 当前验证范围是核心 C++ 库的 `make debug`、`make releas
   - **clang-format 20**（精确版本，用于代码格式化）
   - **clang-tidy 20**（精确版本，用于静态检查）
 - 其他依赖项：
-  - Linux：gfortran、OpenMP、libaio、Python 3.6+、curl
+  - Linux：gfortran、OpenMP、libaio、Python 3.10+、curl
   - macOS：Xcode Command Line Tools、Homebrew
 
 依赖项可以通过以下脚本安装：

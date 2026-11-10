@@ -93,7 +93,7 @@ pull_request_rules:
     conditions:
       - or:
           - files~=^python/.*$
-          - files~=^python_bindings/.*$
+          - files~=^cmake/vsag_c.map$
     actions:
       label:
         add:

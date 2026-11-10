@@ -214,7 +214,5 @@ Legacy `dist_cmp` and `reorder_distance_count` remain available unchanged for co
 Python preserves `(ids, distances)` tuple unpacking. Opt in with
 `knn_search_with_statistics`: the dense overload returns one statistics JSON string, while the
 sparse CSR overload returns one string per query. `range_search_with_statistics` returns the range
-arrays plus one statistics JSON string. C preserves `SearchResult_t`; call
-`vsag_search_result_enable_statistics()` before a search and release returned statistics with
-`vsag_search_result_destroy_statistics()`. Legacy callers retain `other_result` ownership and
-incur no statistics allocation. Legacy HNSW and DiskANN are explicit non-goals.
+arrays plus one statistics JSON string. C returns the statistics JSON string of a `vsag_search_result_t` through
+`vsag_search_result_statistics()`. Legacy HNSW and DiskANN are explicit non-goals.

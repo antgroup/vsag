@@ -13,7 +13,7 @@ VSAG 项目代码处于快速迭代中，目录组织并不完美，这里仅对
 - `extern/`：第三方库，以 CMake 的方式从 GitHub 下载和集成；
 - `include/`：公开头文件，对外稳定 API 都位于此目录；
 - `python/`：pyvsag 打包和安装工具；
-- `python_bindings/`：基于 pybind11 的 Python 绑定实现；
+- `python/`：基于 cffi 的 Python 绑定与打包脚本；
 - `typescript/`：Node.js / TypeScript 绑定及对应 npm 包源代码；
 - `scripts/`：一些有用的工具脚本，例如安装依赖、计算代码覆盖率等；
 - `src/`：核心源代码和单元测试（`*_test.cpp`）；

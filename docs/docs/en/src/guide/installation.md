@@ -43,7 +43,7 @@ Other common Makefile targets:
 - `make test` — build with tests enabled and run the unit + functional suites.
 - `make cov` — build with coverage instrumentation; run tests afterwards to generate the report.
 - `make asan` / `make tsan` — sanitizer-enabled builds.
-- `make pyvsag PY_VERSION=3.10` — build the Python wheel.
+- `make pyvsag` — build the Python wheel.
 - `make dist-pre-cxx11-abi` / `dist-cxx11-abi` / `dist-libcxx` — build redistributable tarballs.
 
 See [Building](../development/building.md) for details.
