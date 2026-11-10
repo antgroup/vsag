@@ -87,9 +87,8 @@ Filters are plain data, so no call crosses the language boundary per candidate:
 - `vsag_filter_create_bitmap`: keep id `i` when bit `i` of a caller-owned bitmap is set.
 - `vsag_filter_create_id_range`: keep ids in an inclusive range.
 
-Pass a filter, or `NULL`, to the search functions. Callable filters are intentionally not part of
-the C API: a callback per candidate costs a GIL acquisition in Python and an upcall in Java and
-Go, and cannot run off the main thread in Node.js.
+Pass a filter, or `NULL`, to the search functions. A per-candidate callback is available separately for hosts (see Callback filters), but `pyvsag`
+does not expose it: it would cost a GIL acquisition per candidate.
 
 ## Logging
 
@@ -111,13 +110,56 @@ callback and are safe while other threads log.
   `vsag_index_get_num_elements`, `vsag_index_get_memory_usage`, `vsag_index_check_id_exist` and
   `vsag_index_get_min_max_id`.
 - **Copy and reuse:** `vsag_index_clone`, `vsag_index_export_model`.
-- **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`.
+- **Persistence:** `vsag_index_serialize_file`, `vsag_index_deserialize_file`, and, for hosts that
+  keep index bytes in their own storage, `vsag_index_serialize_writer` and
+  `vsag_index_deserialize_reader`.
 
 Support still depends on the selected index. An unsupported operation returns
 `VSAG_UNSUPPORTED_INDEX_OPERATION`. Check the returned error code for `VSAG_READ_ERROR`,
 `VSAG_MISSING_FILE`, or another non-success value instead of assuming a file operation completed.
 
-Reader, writer, allocator and thread-pool extension points for embedding hosts are not exposed yet.
+## Host storage callbacks
+
+`vsag_index_serialize_writer(index, write_fn, user_data)` passes the serialized bytes to
+`write_fn(user_data, offset, size, data)`. `vsag_index_deserialize_reader(index, read_fn, size_fn,
+user_data)` reads them back through `read_fn(user_data, offset, size, dest)` and
+`size_fn(user_data)`; both callbacks are required because deserialization seeks to the end of the input. The
+callbacks return `0` on success and any other value on failure, which makes the call return an
+error. They run synchronously on the calling thread, must not throw or unwind into the library,
+and must not keep the pointers they receive. `user_data` only has to stay valid for the call.
+
+## Host allocator and thread pool
+
+An engine creates indexes that use memory and threads supplied by the host:
+
+```c
+vsag_engine_options_t* options = NULL;
+vsag_engine_options_create(&options);
+vsag_engine_options_set_allocator(options, "host", allocate, deallocate, reallocate, host);
+vsag_engine_options_set_thread_pool(options, submit, host);
+
+vsag_engine_t* engine = NULL;
+vsag_engine_create(options, &engine);   /* options may be NULL for the defaults */
+vsag_engine_options_destroy(options);   /* the engine copies what it needs */
+
+vsag_index_t* index = NULL;
+vsag_engine_create_index(engine, "hgraph", params, &index);
+vsag_engine_destroy(engine);            /* indexes keep the resources alive */
+```
+
+The allocator callbacks mirror `malloc`, `free` and `realloc`. `submit(user_data, task,
+task_data)` must run `task(task_data)` exactly once on any thread and return `0`, or return a
+non-zero value to decline, in which case the library runs the task on the calling thread. The pool
+is owned by the host, so the library never resizes it. All of these callbacks may run concurrently
+from any thread, must not throw or unwind into the library, and `user_data` has to stay valid until
+the engine and every index created from it are destroyed.
+
+## Callback filters
+
+`vsag_filter_create_callback(filter_fn, user_data, &filter)` is the host-side alternative to the
+data filters: `filter_fn(user_data, id)` returns non-zero to keep an id. It is called for every
+candidate a search considers, possibly concurrently, so it must be thread-safe and cheap and must
+not call back into VSAG. Prefer a data filter whenever the valid ids are known up front.
 
 ## Reference
 

@@ -72,6 +72,8 @@ extern "C" {
 
 typedef struct vsag_error vsag_error_t;
 typedef struct vsag_dataset vsag_dataset_t;
+typedef struct vsag_engine vsag_engine_t;
+typedef struct vsag_engine_options vsag_engine_options_t;
 typedef struct vsag_filter vsag_filter_t;
 typedef struct vsag_index vsag_index_t;
 typedef struct vsag_search_result vsag_search_result_t;
@@ -188,6 +190,82 @@ vsag_filter_create_id_range(int64_t min_id, int64_t max_id, vsag_filter_t** out_
 
 void
 vsag_filter_destroy(vsag_filter_t* filter);
+
+/**
+ * Host extension point: decides per candidate. Returns non-zero to keep `id` and 0 to drop it.
+ * It is called for every candidate the search considers, possibly concurrently from any thread
+ * the library uses, so it must be thread-safe, cheap, must not throw or unwind into the library,
+ * and must not call back into VSAG. `user_data` must stay valid while the filter is in use.
+ * Prefer the data filters above when the set of valid ids is known up front.
+ */
+typedef int32_t (*vsag_filter_fn)(void* user_data, int64_t id);
+
+vsag_error_t*
+vsag_filter_create_callback(vsag_filter_fn filter_fn, void* user_data, vsag_filter_t** out_filter);
+
+/* ---------------------------------------------------------------------------------------------
+ * Engine: indexes that use host-provided memory and threads (host extension point)
+ *
+ * An engine bundles an allocator and a thread pool supplied by the host and creates indexes that
+ * use them. Every callback below may be called concurrently from any thread, must not throw or
+ * unwind into the library, and receives the `user_data` it was registered with. `user_data` and
+ * whatever it refers to must stay valid until the engine and every index created from it have
+ * been destroyed; the library keeps the resources alive until then.
+ * ------------------------------------------------------------------------------------------ */
+
+/** Returns `size` bytes, or NULL on failure. */
+typedef void* (*vsag_allocate_fn)(void* user_data, uint64_t size);
+
+/** Releases a block returned by allocate or reallocate. */
+typedef void (*vsag_deallocate_fn)(void* user_data, void* ptr);
+
+/** Resizes a block, preserving its contents, and returns the new block or NULL on failure. */
+typedef void* (*vsag_reallocate_fn)(void* user_data, void* ptr, uint64_t size);
+
+/** A unit of work the library hands to the host pool; run it exactly once on any thread. */
+typedef void (*vsag_task_fn)(void* task_data);
+
+/**
+ * Schedules `task(task_data)` on a host thread and returns 0, or returns non-zero when the task
+ * cannot be accepted, in which case the library runs it on the calling thread. The pool is
+ * owned by the host, so the library does not resize it.
+ */
+typedef int32_t (*vsag_submit_fn)(void* user_data, vsag_task_fn task, void* task_data);
+
+vsag_error_t*
+vsag_engine_options_create(vsag_engine_options_t** out_options);
+
+void
+vsag_engine_options_destroy(vsag_engine_options_t* options);
+
+/** Uses the host allocator; `name` is only used in diagnostics and is copied. */
+vsag_error_t*
+vsag_engine_options_set_allocator(vsag_engine_options_t* options,
+                                  const char* name,
+                                  vsag_allocate_fn allocate_fn,
+                                  vsag_deallocate_fn deallocate_fn,
+                                  vsag_reallocate_fn reallocate_fn,
+                                  void* user_data);
+
+/** Runs parallel work on the host pool. */
+vsag_error_t*
+vsag_engine_options_set_thread_pool(vsag_engine_options_t* options,
+                                    vsag_submit_fn submit_fn,
+                                    void* user_data);
+
+/** `options` may be NULL for the built-in allocator and pool; it is copied. */
+vsag_error_t*
+vsag_engine_create(const vsag_engine_options_t* options, vsag_engine_t** out_engine);
+
+/** Releasing the handle does not invalidate indexes created from the engine. */
+void
+vsag_engine_destroy(vsag_engine_t* engine);
+
+vsag_error_t*
+vsag_engine_create_index(vsag_engine_t* engine,
+                         const char* index_name,
+                         const char* index_param,
+                         vsag_index_t** out_index);
 
 /* ---------------------------------------------------------------------------------------------
  * Search results
@@ -321,6 +399,36 @@ vsag_index_serialize_file(const vsag_index_t* index, const char* file_path);
 
 vsag_error_t*
 vsag_index_deserialize_file(vsag_index_t* index, const char* file_path);
+
+/* ---------------------------------------------------------------------------------------------
+ * Serialization through host storage (host extension point)
+ *
+ * The callbacks return 0 on success and any other value on failure; a failure makes the call
+ * return an error. They are invoked synchronously on the calling thread, must not throw or
+ * unwind into the library, and must not keep the pointers they receive after returning.
+ * `user_data` is passed through unchanged and only has to stay valid for the duration of the
+ * call.
+ * ------------------------------------------------------------------------------------------ */
+
+/** Stores `size` bytes of `data` at `offset` of the output. */
+typedef int32_t (*vsag_write_fn)(void* user_data, uint64_t offset, uint64_t size, const void* data);
+
+/** Fills `dest` with `size` bytes that start at `offset` of the input. */
+typedef int32_t (*vsag_read_fn)(void* user_data, uint64_t offset, uint64_t size, void* dest);
+
+/** The total size of the input in bytes. */
+typedef uint64_t (*vsag_size_fn)(void* user_data);
+
+/** Serializes the index by passing its bytes to `write_fn`. */
+vsag_error_t*
+vsag_index_serialize_writer(const vsag_index_t* index, vsag_write_fn write_fn, void* user_data);
+
+/** Deserializes the index by reading its bytes through `read_fn`; `size_fn` is required. */
+vsag_error_t*
+vsag_index_deserialize_reader(vsag_index_t* index,
+                              vsag_read_fn read_fn,
+                              vsag_size_fn size_fn,
+                              void* user_data);
 
 vsag_error_t*
 vsag_index_get_num_elements(const vsag_index_t* index, int64_t* out_num_elements);

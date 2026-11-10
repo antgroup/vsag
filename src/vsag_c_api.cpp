@@ -12,21 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <vsag/engine.h>
 #include <vsag/factory.h>
 #include <vsag/filter.h>
 #include <vsag/index.h>
 #include <vsag/logger.h>
 #include <vsag/options.h>
+#include <vsag/resource.h>
+#include <vsag/thread_pool.h>
 #include <vsag/vsag_c_api.h>
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstring>
 #include <fstream>
+#include <functional>
+#include <future>
+#include <istream>
 #include <memory>
 #include <mutex>
 #include <new>
 #include <stdexcept>
+#include <streambuf>
 #include <string>
 #include <utility>
 #include <vector>
@@ -52,8 +60,24 @@ struct vsag_filter {
     vsag::FilterPtr filter;
 };
 
+struct vsag_engine_options {
+    std::string allocator_name;
+    vsag_allocate_fn allocate_fn{nullptr};
+    vsag_deallocate_fn deallocate_fn{nullptr};
+    vsag_reallocate_fn reallocate_fn{nullptr};
+    void* allocator_user_data{nullptr};
+    vsag_submit_fn submit_fn{nullptr};
+    void* pool_user_data{nullptr};
+};
+
+struct vsag_engine {
+    std::shared_ptr<void> state;  // EngineState
+};
+
 struct vsag_index {
     std::shared_ptr<vsag::Index> index;
+    // Keeps the engine's host resources alive for as long as the index exists.
+    std::shared_ptr<void> owner;
 };
 
 struct vsag_search_result {
@@ -254,6 +278,141 @@ wrap_filter(vsag::FilterPtr filter, vsag_filter_t** out_filter) {
     return nullptr;
 }
 
+class CallbackFilter : public vsag::Filter {
+public:
+    CallbackFilter(vsag_filter_fn filter_fn, void* user_data)
+        : filter_fn_(filter_fn), user_data_(user_data) {
+    }
+
+    [[nodiscard]] bool
+    CheckValid(int64_t id) const override {
+        return filter_fn_(user_data_, id) != 0;
+    }
+
+private:
+    vsag_filter_fn filter_fn_;
+    void* user_data_;
+};
+
+class CallbackAllocator : public vsag::Allocator {
+public:
+    CallbackAllocator(std::string name,
+                      vsag_allocate_fn allocate_fn,
+                      vsag_deallocate_fn deallocate_fn,
+                      vsag_reallocate_fn reallocate_fn,
+                      void* user_data)
+        : name_(std::move(name)),
+          allocate_fn_(allocate_fn),
+          deallocate_fn_(deallocate_fn),
+          reallocate_fn_(reallocate_fn),
+          user_data_(user_data) {
+    }
+
+    std::string
+    Name() override {
+        return name_;
+    }
+
+    void*
+    Allocate(uint64_t size) override {
+        return allocate_fn_(user_data_, size);
+    }
+
+    void
+    Deallocate(void* p) override {
+        deallocate_fn_(user_data_, p);
+    }
+
+    void*
+    Reallocate(void* p, uint64_t size) override {
+        return reallocate_fn_(user_data_, p, size);
+    }
+
+private:
+    std::string name_;
+    vsag_allocate_fn allocate_fn_;
+    vsag_deallocate_fn deallocate_fn_;
+    vsag_reallocate_fn reallocate_fn_;
+    void* user_data_;
+};
+
+// Hands tasks to the host pool. The host owns pool sizing, so the size and queue limits are
+// ignored; pending tasks are counted so WaitUntilEmpty() and destruction can wait for them.
+class CallbackThreadPool : public vsag::ThreadPool {
+public:
+    CallbackThreadPool(vsag_submit_fn submit_fn, void* user_data)
+        : submit_fn_(submit_fn), user_data_(user_data) {
+    }
+
+    ~CallbackThreadPool() override {
+        wait_idle();
+    }
+
+    void
+    WaitUntilEmpty() override {
+        wait_idle();
+    }
+
+    void
+    SetQueueSizeLimit(std::uint64_t /*limit*/) override {
+    }
+
+    void
+    SetPoolSize(std::uint64_t /*limit*/) override {
+    }
+
+    std::future<void>
+    Enqueue(std::function<void(void)> task) override {
+        auto* job = new Job{this, std::packaged_task<void()>(std::move(task))};
+        auto future = job->task.get_future();
+        {
+            std::lock_guard lock(mutex_);
+            ++pending_;
+        }
+        if (submit_fn_(user_data_, &CallbackThreadPool::run, job) != 0) {
+            run(job);
+        }
+        return future;
+    }
+
+private:
+    void
+    wait_idle() {
+        std::unique_lock lock(mutex_);
+        idle_.wait(lock, [this]() { return pending_ == 0; });
+    }
+
+    struct Job {
+        CallbackThreadPool* pool;
+        std::packaged_task<void()> task;
+    };
+
+    static void
+    run(void* task_data) {
+        std::unique_ptr<Job> job(static_cast<Job*>(task_data));
+        job->task();
+        auto* pool = job->pool;
+        std::lock_guard lock(pool->mutex_);
+        if (--pool->pending_ == 0) {
+            pool->idle_.notify_all();
+        }
+    }
+
+    vsag_submit_fn submit_fn_;
+    void* user_data_;
+    std::mutex mutex_;
+    std::condition_variable idle_;
+    uint64_t pending_{0};
+};
+
+// Host resources and the engine built on them; shared with every index the engine creates.
+struct EngineState {
+    std::shared_ptr<vsag::Allocator> allocator;
+    std::shared_ptr<vsag::ThreadPool> thread_pool;
+    std::unique_ptr<vsag::Resource> resource;
+    std::unique_ptr<vsag::Engine> engine;
+};
+
 struct LogSink {
     vsag_log_fn log_fn;
     void* user_data;
@@ -358,6 +517,62 @@ private:
 std::mutex logger_mutex;
 int32_t log_level = -1;                     // -1: never set through this API
 CallbackLogger* callback_logger = nullptr;  // intentionally leaked; see CallbackLogger
+
+// Presents a host reader as a seekable std::istream. A failing callback ends the stream, which
+// the index reports as a read error.
+class ReaderStreamBuf : public std::streambuf {
+public:
+    ReaderStreamBuf(vsag_read_fn read_fn, vsag_size_fn size_fn, void* user_data)
+        : read_fn_(read_fn), size_fn_(size_fn), user_data_(user_data) {
+    }
+
+protected:
+    std::streamsize
+    xsgetn(char* dest, std::streamsize count) override {
+        if (count <= 0) {
+            return 0;
+        }
+        const auto size = static_cast<uint64_t>(count);
+        if (read_fn_(user_data_, position_, size, dest) != 0) {
+            return 0;
+        }
+        position_ += size;
+        return count;
+    }
+
+    pos_type
+    seekoff(off_type off, std::ios_base::seekdir way, std::ios_base::openmode which) override {
+        if (which != std::ios_base::in) {
+            return {-1};
+        }
+        int64_t base = 0;
+        if (way == std::ios_base::cur) {
+            base = static_cast<int64_t>(position_);
+        } else if (way == std::ios_base::end) {
+            if (size_fn_ == nullptr) {
+                return {-1};
+            }
+            base = static_cast<int64_t>(size_fn_(user_data_));
+        }
+        const int64_t target = base + off;
+        if (target < 0) {
+            return {-1};
+        }
+        position_ = static_cast<uint64_t>(target);
+        return {static_cast<off_type>(target)};
+    }
+
+    pos_type
+    seekpos(pos_type pos, std::ios_base::openmode which) override {
+        return seekoff(off_type(pos), std::ios_base::beg, which);
+    }
+
+private:
+    vsag_read_fn read_fn_;
+    vsag_size_fn size_fn_;
+    void* user_data_;
+    uint64_t position_{0};
+};
 
 vsag_error_t*
 make_result(const tl::expected<vsag::DatasetPtr, vsag::Error>& searched,
@@ -530,6 +745,15 @@ vsag_filter_create_id_range(int64_t min_id, int64_t max_id, vsag_filter_t** out_
     });
 }
 
+vsag_error_t*
+vsag_filter_create_callback(vsag_filter_fn filter_fn, void* user_data, vsag_filter_t** out_filter) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_filter != nullptr, "out_filter is NULL");
+        VSAG_REQUIRE(filter_fn != nullptr, "filter_fn is NULL");
+        return wrap_filter(std::make_shared<CallbackFilter>(filter_fn, user_data), out_filter);
+    });
+}
+
 void
 vsag_filter_destroy(vsag_filter_t* filter) {
     delete filter;
@@ -583,6 +807,113 @@ vsag_index_create(const char* index_name, const char* index_param, vsag_index_t*
             return make_error(created.error());
         }
         *out_index = new vsag_index{created.value()};
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_engine_options_create(vsag_engine_options_t** out_options) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_options != nullptr, "out_options is NULL");
+        *out_options = new vsag_engine_options();
+        return nullptr;
+    });
+}
+
+void
+vsag_engine_options_destroy(vsag_engine_options_t* options) {
+    delete options;
+}
+
+vsag_error_t*
+vsag_engine_options_set_allocator(vsag_engine_options_t* options,
+                                  const char* name,
+                                  vsag_allocate_fn allocate_fn,
+                                  vsag_deallocate_fn deallocate_fn,
+                                  vsag_reallocate_fn reallocate_fn,
+                                  void* user_data) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(options != nullptr, "options is NULL");
+        VSAG_REQUIRE(
+            allocate_fn != nullptr and deallocate_fn != nullptr and reallocate_fn != nullptr,
+            "allocator callbacks must not be NULL");
+        options->allocator_name = name == nullptr ? "host_allocator" : name;
+        options->allocate_fn = allocate_fn;
+        options->deallocate_fn = deallocate_fn;
+        options->reallocate_fn = reallocate_fn;
+        options->allocator_user_data = user_data;
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_engine_options_set_thread_pool(vsag_engine_options_t* options,
+                                    vsag_submit_fn submit_fn,
+                                    void* user_data) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(options != nullptr, "options is NULL");
+        VSAG_REQUIRE(submit_fn != nullptr, "submit_fn is NULL");
+        options->submit_fn = submit_fn;
+        options->pool_user_data = user_data;
+        return nullptr;
+    });
+}
+
+vsag_error_t*
+vsag_engine_create(const vsag_engine_options_t* options, vsag_engine_t** out_engine) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_engine != nullptr, "out_engine is NULL");
+        *out_engine = nullptr;
+        auto state = std::make_shared<EngineState>();
+        if (options != nullptr and options->allocate_fn != nullptr) {
+            state->allocator = std::make_shared<CallbackAllocator>(options->allocator_name,
+                                                                   options->allocate_fn,
+                                                                   options->deallocate_fn,
+                                                                   options->reallocate_fn,
+                                                                   options->allocator_user_data);
+        } else {
+            state->allocator = vsag::Engine::CreateDefaultAllocator();
+        }
+        if (options != nullptr and options->submit_fn != nullptr) {
+            state->thread_pool =
+                std::make_shared<CallbackThreadPool>(options->submit_fn, options->pool_user_data);
+        } else {
+            auto pool = vsag::Engine::CreateThreadPool(
+                static_cast<uint32_t>(vsag::Options::Instance().num_threads_building()));
+            if (not pool.has_value()) {
+                return make_error(pool.error());
+            }
+            state->thread_pool = pool.value();
+        }
+        state->resource = std::make_unique<vsag::Resource>(state->allocator, state->thread_pool);
+        state->engine = std::make_unique<vsag::Engine>(state->resource.get());
+        *out_engine = new vsag_engine{std::move(state)};
+        return nullptr;
+    });
+}
+
+void
+vsag_engine_destroy(vsag_engine_t* engine) {
+    delete engine;
+}
+
+vsag_error_t*
+vsag_engine_create_index(vsag_engine_t* engine,
+                         const char* index_name,
+                         const char* index_param,
+                         vsag_index_t** out_index) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(out_index != nullptr, "out_index is NULL");
+        *out_index = nullptr;
+        VSAG_REQUIRE(engine != nullptr, "engine is NULL");
+        VSAG_REQUIRE(index_name != nullptr and index_param != nullptr,
+                     "index name and parameters must not be NULL");
+        auto* state = static_cast<EngineState*>(engine->state.get());
+        auto created = state->engine->CreateIndex(index_name, index_param);
+        if (not created.has_value()) {
+            return make_error(created.error());
+        }
+        *out_index = new vsag_index{created.value(), engine->state};
         return nullptr;
     });
 }
@@ -828,7 +1159,7 @@ vsag_index_clone(const vsag_index_t* index, vsag_index_t** out_index) {
         if (not cloned.has_value()) {
             return make_error(cloned.error());
         }
-        *out_index = new vsag_index{cloned.value()};
+        *out_index = new vsag_index{cloned.value(), index->owner};
         return nullptr;
     });
 }
@@ -843,7 +1174,7 @@ vsag_index_export_model(const vsag_index_t* index, vsag_index_t** out_index) {
         if (not exported.has_value()) {
             return make_error(exported.error());
         }
-        *out_index = new vsag_index{exported.value()};
+        *out_index = new vsag_index{exported.value(), index->owner};
         return nullptr;
     });
 }
@@ -873,6 +1204,43 @@ vsag_index_deserialize_file(vsag_index_t* index, const char* file_path) {
                               std::string("failed to open file for reading: ") + file_path);
         }
         return to_error(index->index->Deserialize(file));
+    });
+}
+
+vsag_error_t*
+vsag_index_serialize_writer(const vsag_index_t* index, vsag_write_fn write_fn, void* user_data) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(write_fn != nullptr, "write_fn is NULL");
+        auto failed = std::make_shared<bool>(false);
+        auto serialized =
+            index->index->Serialize([=](uint64_t offset, uint64_t size, const void* data) {
+                if (*failed) {
+                    return;
+                }
+                if (write_fn(user_data, offset, size, data) != 0) {
+                    *failed = true;
+                    throw std::runtime_error("write callback failed");
+                }
+            });
+        if (*failed) {
+            return make_error(VSAG_INTERNAL_ERROR, "write callback failed");
+        }
+        return to_error(serialized);
+    });
+}
+
+vsag_error_t*
+vsag_index_deserialize_reader(vsag_index_t* index,
+                              vsag_read_fn read_fn,
+                              vsag_size_fn size_fn,
+                              void* user_data) {
+    return guarded([&]() -> vsag_error_t* {
+        VSAG_REQUIRE(index != nullptr, "index is NULL");
+        VSAG_REQUIRE(read_fn != nullptr and size_fn != nullptr, "read_fn or size_fn is NULL");
+        ReaderStreamBuf buffer(read_fn, size_fn, user_data);
+        std::istream stream(&buffer);
+        return to_error(index->index->Deserialize(stream));
     });
 }
 

@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <random>
 #include <string>
@@ -69,6 +71,18 @@ struct IndexDeleter {
         vsag_index_destroy(index);
     }
 };
+struct EngineDeleter {
+    void
+    operator()(vsag_engine_t* engine) const {
+        vsag_engine_destroy(engine);
+    }
+};
+struct OptionsDeleter {
+    void
+    operator()(vsag_engine_options_t* options) const {
+        vsag_engine_options_destroy(options);
+    }
+};
 struct FilterDeleter {
     void
     operator()(vsag_filter_t* filter) const {
@@ -83,6 +97,8 @@ struct ResultDeleter {
 };
 using DatasetPtr = std::unique_ptr<vsag_dataset_t, DatasetDeleter>;
 using IndexPtr = std::unique_ptr<vsag_index_t, IndexDeleter>;
+using EnginePtr = std::unique_ptr<vsag_engine_t, EngineDeleter>;
+using OptionsPtr = std::unique_ptr<vsag_engine_options_t, OptionsDeleter>;
 using FilterPtr = std::unique_ptr<vsag_filter_t, FilterDeleter>;
 using ResultPtr = std::unique_ptr<vsag_search_result_t, ResultDeleter>;
 
@@ -209,6 +225,84 @@ TEST_CASE("vsag_c_api build, search and serialize", "[vsag_c_api][ut]") {
             VSAG_SUCCESS);
     REQUIRE(code_of(vsag_index_deserialize_file(loaded.get(), "/nonexistent_dir/index.bin")) !=
             VSAG_SUCCESS);
+}
+
+namespace {
+struct MemoryStorage {
+    std::vector<char> bytes;
+    int writes_before_failure{-1};  // -1: never fail
+    int reads_before_failure{-1};
+};
+
+int32_t
+write_to_memory(void* user_data, uint64_t offset, uint64_t size, const void* data) {
+    auto* storage = static_cast<MemoryStorage*>(user_data);
+    if (storage->writes_before_failure == 0) {
+        return -1;
+    }
+    if (storage->writes_before_failure > 0) {
+        --storage->writes_before_failure;
+    }
+    if (storage->bytes.size() < offset + size) {
+        storage->bytes.resize(offset + size);
+    }
+    std::memcpy(storage->bytes.data() + offset, data, size);
+    return 0;
+}
+
+int32_t
+read_from_memory(void* user_data, uint64_t offset, uint64_t size, void* dest) {
+    auto* storage = static_cast<MemoryStorage*>(user_data);
+    if (storage->reads_before_failure == 0 or offset + size > storage->bytes.size()) {
+        return -1;
+    }
+    if (storage->reads_before_failure > 0) {
+        --storage->reads_before_failure;
+    }
+    std::memcpy(dest, storage->bytes.data() + offset, size);
+    return 0;
+}
+
+uint64_t
+size_of_memory(void* user_data) {
+    return static_cast<MemoryStorage*>(user_data)->bytes.size();
+}
+}  // namespace
+
+TEST_CASE("vsag_c_api serialize through host storage", "[vsag_c_api][ut]") {
+    TestData data;
+    auto index = data.BuildIndex();
+
+    MemoryStorage storage;
+    REQUIRE_OK(vsag_index_serialize_writer(index.get(), write_to_memory, &storage));
+    REQUIRE_FALSE(storage.bytes.empty());
+
+    auto loaded = make_index();
+    REQUIRE_OK(
+        vsag_index_deserialize_reader(loaded.get(), read_from_memory, size_of_memory, &storage));
+    data.CheckIndex(loaded.get());
+
+    // A failing write or read callback surfaces as an error instead of a partial success.
+    MemoryStorage failing_writer;
+    failing_writer.writes_before_failure = 0;
+    REQUIRE(code_of(vsag_index_serialize_writer(index.get(), write_to_memory, &failing_writer)) !=
+            VSAG_SUCCESS);
+    MemoryStorage failing_reader{storage.bytes};
+    failing_reader.reads_before_failure = 1;
+    auto target = make_index();
+    REQUIRE(code_of(vsag_index_deserialize_reader(
+                target.get(), read_from_memory, size_of_memory, &failing_reader)) != VSAG_SUCCESS);
+
+    REQUIRE(code_of(vsag_index_serialize_writer(nullptr, write_to_memory, &storage)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_serialize_writer(index.get(), nullptr, &storage)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_deserialize_reader(
+                nullptr, read_from_memory, size_of_memory, &storage)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_deserialize_reader(
+                target.get(), read_from_memory, nullptr, &storage)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_index_deserialize_reader(target.get(), nullptr, nullptr, &storage)) ==
+            VSAG_INVALID_ARGUMENT);
 }
 
 TEST_CASE("vsag_c_api add, train, remove and update", "[vsag_c_api][ut]") {
@@ -578,6 +672,187 @@ TEST_CASE("vsag_c_api invalid arguments", "[vsag_c_api][ut]") {
     REQUIRE(code_of(vsag_dataset_set_int8_vectors(nullptr, nullptr)) == VSAG_INVALID_ARGUMENT);
     REQUIRE(code_of(vsag_dataset_set_sparse_vectors(nullptr, nullptr, nullptr, nullptr)) ==
             VSAG_INVALID_ARGUMENT);
+}
+
+TEST_CASE("vsag_c_api callback filter", "[vsag_c_api][ut]") {
+    TestData data;
+    auto index = data.BuildIndex();
+    auto query = make_dense(data.Row(10), 1);
+
+    std::atomic<int> calls{0};
+    auto keep_even = [](void* user_data, int64_t id) -> int32_t {
+        static_cast<std::atomic<int>*>(user_data)->fetch_add(1);
+        return id % 2 == 0 ? 1 : 0;
+    };
+    vsag_filter_t* raw = nullptr;
+    REQUIRE_OK(vsag_filter_create_callback(keep_even, &calls, &raw));
+    FilterPtr filter(raw);
+
+    vsag_search_result_t* result = nullptr;
+    REQUIRE_OK(vsag_index_knn_search(
+        index.get(), query.get(), 10, search_parameters, filter.get(), &result));
+    ResultPtr guard(result);
+    REQUIRE(vsag_search_result_count(result) > 0);
+    for (int64_t i = 0; i < vsag_search_result_count(result); ++i) {
+        REQUIRE(vsag_search_result_ids(result)[i] % 2 == 0);
+    }
+    REQUIRE(calls.load() > 0);
+
+    REQUIRE(code_of(vsag_filter_create_callback(nullptr, nullptr, &raw)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_filter_create_callback(keep_even, nullptr, nullptr)) ==
+            VSAG_INVALID_ARGUMENT);
+}
+
+namespace {
+struct CountingAllocator {
+    std::atomic<int64_t> allocations{0};
+    std::atomic<int64_t> live{0};
+};
+
+void*
+counting_allocate(void* user_data, uint64_t size) {
+    auto* counters = static_cast<CountingAllocator*>(user_data);
+    counters->allocations++;
+    counters->live++;
+    return std::malloc(size);
+}
+
+void
+counting_deallocate(void* user_data, void* ptr) {
+    if (ptr != nullptr) {
+        static_cast<CountingAllocator*>(user_data)->live--;
+    }
+    std::free(ptr);
+}
+
+void*
+counting_reallocate(void* user_data, void* ptr, uint64_t size) {
+    auto* counters = static_cast<CountingAllocator*>(user_data);
+    if (ptr == nullptr) {
+        counters->allocations++;
+        counters->live++;
+    }
+    return std::realloc(ptr, size);
+}
+
+// Runs every task on a fresh thread; the destructor joins them all.
+struct ThreadPerTaskPool {
+    std::mutex mutex;
+    std::vector<std::thread> threads;
+    std::atomic<int> submitted{0};
+    std::atomic<int> rejected{0};
+    std::atomic<bool> reject{false};
+
+    ~ThreadPerTaskPool() {
+        for (auto& thread : threads) {
+            thread.join();
+        }
+    }
+};
+
+int32_t
+submit_to_thread(void* user_data, vsag_task_fn task, void* task_data) {
+    auto* pool = static_cast<ThreadPerTaskPool*>(user_data);
+    if (pool->reject.load()) {
+        pool->rejected++;
+        return -1;
+    }
+    pool->submitted++;
+    std::lock_guard lock(pool->mutex);
+    pool->threads.emplace_back([task, task_data]() { task(task_data); });
+    return 0;
+}
+
+constexpr const char* parallel_index_param = R"(
+    {
+        "dtype": "float32",
+        "metric_type": "l2",
+        "dim": 128,
+        "index_param": {
+            "base_quantization_type": "fp32",
+            "max_degree": 32,
+            "ef_construction": 100,
+            "build_thread_count": 4
+        }
+    }
+)";
+}  // namespace
+
+TEST_CASE("vsag_c_api engine with host allocator and thread pool", "[vsag_c_api][ut]") {
+    TestData data;
+    CountingAllocator counters;
+    ThreadPerTaskPool pool;
+
+    vsag_engine_options_t* raw_options = nullptr;
+    REQUIRE_OK(vsag_engine_options_create(&raw_options));
+    OptionsPtr options(raw_options);
+    REQUIRE_OK(vsag_engine_options_set_allocator(raw_options,
+                                                 "counting",
+                                                 counting_allocate,
+                                                 counting_deallocate,
+                                                 counting_reallocate,
+                                                 &counters));
+    REQUIRE_OK(vsag_engine_options_set_thread_pool(raw_options, submit_to_thread, &pool));
+
+    vsag_engine_t* raw_engine = nullptr;
+    REQUIRE_OK(vsag_engine_create(raw_options, &raw_engine));
+    EnginePtr engine(raw_engine);
+    options.reset();
+
+    vsag_index_t* raw_index = nullptr;
+    REQUIRE_OK(vsag_engine_create_index(raw_engine, index_name, parallel_index_param, &raw_index));
+    IndexPtr index(raw_index);
+    // The index keeps the host resources alive after the engine handle is gone.
+    engine.reset();
+
+    auto base = make_dense(data.datas.data(), num_vectors, data.ids.data());
+    REQUIRE_OK(vsag_index_build(index.get(), base.get()));
+    data.CheckIndex(index.get());
+    REQUIRE(counters.allocations.load() > 0);
+    REQUIRE(pool.submitted.load() > 0);
+
+    // A pool that refuses work makes the library run it on the calling thread.
+    pool.reject = true;
+    vsag_engine_options_t* reject_options = nullptr;
+    REQUIRE_OK(vsag_engine_options_create(&reject_options));
+    OptionsPtr reject_options_owner(reject_options);
+    REQUIRE_OK(vsag_engine_options_set_thread_pool(reject_options, submit_to_thread, &pool));
+    vsag_engine_t* rejecting_engine = nullptr;
+    REQUIRE_OK(vsag_engine_create(reject_options, &rejecting_engine));
+    EnginePtr rejecting(rejecting_engine);
+    vsag_index_t* fallback_index = nullptr;
+    REQUIRE_OK(vsag_engine_create_index(
+        rejecting_engine, index_name, parallel_index_param, &fallback_index));
+    IndexPtr fallback_owner(fallback_index);
+    const int submitted_before = pool.submitted.load();
+    REQUIRE_OK(vsag_index_build(fallback_index, base.get()));
+    REQUIRE(pool.rejected.load() > 0);
+    REQUIRE(pool.submitted.load() == submitted_before);
+    data.CheckIndex(fallback_index);
+
+    index.reset();
+    REQUIRE(counters.live.load() == 0);
+
+    REQUIRE(code_of(vsag_engine_create_index(nullptr, index_name, index_param, &raw_index)) ==
+            VSAG_INVALID_ARGUMENT);
+    vsag_engine_options_t* invalid_options = nullptr;
+    REQUIRE_OK(vsag_engine_options_create(&invalid_options));
+    OptionsPtr invalid(invalid_options);
+    REQUIRE(code_of(vsag_engine_options_set_allocator(invalid_options,
+                                                      nullptr,
+                                                      nullptr,
+                                                      counting_deallocate,
+                                                      counting_reallocate,
+                                                      nullptr)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_engine_options_set_thread_pool(invalid_options, nullptr, nullptr)) ==
+            VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_engine_options_set_allocator(nullptr,
+                                                      nullptr,
+                                                      counting_allocate,
+                                                      counting_deallocate,
+                                                      counting_reallocate,
+                                                      nullptr)) == VSAG_INVALID_ARGUMENT);
+    REQUIRE(code_of(vsag_engine_options_create(nullptr)) == VSAG_INVALID_ARGUMENT);
 }
 
 namespace {

@@ -84,9 +84,8 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 - `vsag_filter_create_bitmap`：当调用方持有的 bitmap 第 `i` 位为 1 时保留 id `i`。
 - `vsag_filter_create_id_range`：保留闭区间内的 id。
 
-将过滤器（或 `NULL`）传给搜索函数。C API 有意不提供可调用的过滤器：每个候选点一次回调，在
-Python 中意味着一次 GIL 获取，在 Java 和 Go 中意味着一次 upcall，在 Node.js 中则无法在非主线程
-执行。
+将过滤器（或 `NULL`）传给搜索函数。面向宿主的逐候选点回调另有提供（见“回调过滤器”），但 `pyvsag` 不暴露它：
+每个候选点都会产生一次 GIL 获取。
 
 ## 日志
 
@@ -106,12 +105,50 @@ Python 中意味着一次 GIL 获取，在 Java 和 Go 中意味着一次 upcall
   `vsag_index_get_num_elements`、`vsag_index_get_memory_usage`、`vsag_index_check_id_exist` 和
   `vsag_index_get_min_max_id`。
 - **复制与复用：** `vsag_index_clone`、`vsag_index_export_model`。
-- **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`。
+- **持久化：** `vsag_index_serialize_file`、`vsag_index_deserialize_file`；对于把索引字节放在自有
+  存储中的宿主，还有 `vsag_index_serialize_writer` 和 `vsag_index_deserialize_reader`。
 
 是否支持仍取决于所选索引，不支持的操作返回 `VSAG_UNSUPPORTED_INDEX_OPERATION`。请检查返回的
 错误码是否为 `VSAG_READ_ERROR`、`VSAG_MISSING_FILE` 等非成功值，不要假定文件操作一定完成。
 
-面向嵌入式宿主的 reader、writer、allocator 和线程池扩展点暂未提供。
+## 宿主存储回调
+
+`vsag_index_serialize_writer(index, write_fn, user_data)` 把序列化后的字节交给
+`write_fn(user_data, offset, size, data)`。`vsag_index_deserialize_reader(index, read_fn,
+size_fn, user_data)` 通过 `read_fn(user_data, offset, size, dest)` 和 `size_fn(user_data)` 读回；
+两个回调都必须提供，因为反序列化会定位到输入的末尾。回调成功返回 `0`，其他值表示失败，此时调用
+会返回错误。回调在调用线程上同步执行，不得抛出异常或展开到库内，也不得保留收到的指针。
+`user_data` 只需在该调用期间保持有效。
+
+## 宿主 allocator 与线程池
+
+engine 创建的索引会使用宿主提供的内存和线程：
+
+```c
+vsag_engine_options_t* options = NULL;
+vsag_engine_options_create(&options);
+vsag_engine_options_set_allocator(options, "host", allocate, deallocate, reallocate, host);
+vsag_engine_options_set_thread_pool(options, submit, host);
+
+vsag_engine_t* engine = NULL;
+vsag_engine_create(options, &engine);   /* options 可为 NULL，使用默认实现 */
+vsag_engine_options_destroy(options);   /* engine 已复制所需内容 */
+
+vsag_index_t* index = NULL;
+vsag_engine_create_index(engine, "hgraph", params, &index);
+vsag_engine_destroy(engine);            /* 索引会让这些资源继续存活 */
+```
+
+allocator 回调对应 `malloc`、`free` 和 `realloc`。`submit(user_data, task, task_data)` 必须在
+任意线程上恰好执行一次 `task(task_data)` 并返回 `0`；返回非零表示拒绝，此时库会在调用线程上
+执行该任务。线程池由宿主持有，库不会调整其大小。这些回调都可能在任意线程并发调用，不得抛出
+异常或展开到库内，且 `user_data` 需在 engine 及其创建的所有索引销毁之前保持有效。
+
+## 回调过滤器
+
+`vsag_filter_create_callback(filter_fn, user_data, &filter)` 是数据型过滤器之外、面向宿主的选择：
+`filter_fn(user_data, id)` 返回非零表示保留该 id。搜索考察的每个候选点都会调用它，且可能并发，
+因此必须线程安全、足够轻量，并且不得回调 VSAG。只要事先知道有效 id，就优先使用数据型过滤器。
 
 ## 参考
 
