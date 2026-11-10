@@ -95,6 +95,22 @@ public:
         graph.PublishNode(id + 1);
     }
 
+    static std::vector<InnerIdType>
+    ReserveAddRows(HGraph& graph, const DatasetPtr& data) {
+        auto batch = graph.prepare_add_batch(data);
+        std::vector<InnerIdType> ids;
+        for (const auto& row : batch.rows) {
+            ids.push_back(row.inner_id);
+        }
+        return ids;
+    }
+
+    static void
+    CompleteFusedRow(HGraph& graph, InnerIdType id, const float* data) {
+        graph.insert_persistent_codes(data, id);
+        graph.PublishNode(id);
+    }
+
     static void
     SetPrecise(HGraph& graph, const FlattenInterfacePtr& codes) {
         graph.high_precise_codes_ = codes;
@@ -2688,4 +2704,137 @@ TEST_CASE("HGraph fused preparation reads reserved labels through the label tabl
     CHECK(filter->saw_reserved_label);
     CHECK(result.value()->GetIds()[0] >= 1000000);
     CHECK(result.value()->GetIds()[0] < 1000512);
+}
+
+TEST_CASE("HGraph fused scans exclude holes from out-of-order Add workers",
+          "[ut][hgraph][fused][fused_filter_add][fused_scan_readiness]") {
+    BlockSizeLimitGuard block_size_limit_guard(256UL * 1024);
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 512;
+    auto params = MakeFp32HGraphJson(false);
+    params["support_duplicate"].SetBool(false);
+    params["base_quantization_type"].SetString("rabitq");
+    params["precise_quantization_type"].SetString("rabitq");
+    params["use_reorder"].SetBool(true);
+    params["rabitq_bits_per_dim_base"].SetInt(3);
+    params["rabitq_bits_per_dim_precise"].SetInt(5);
+    params["rabitq_bits_per_dim_query"].SetInt(32);
+    params["rabitq_use_fht"].SetBool(true);
+    params["rabitq_fused_datacell"].SetBool(true);
+    params["resize_increase_count_bit"].SetUint64(10);
+    auto index = MakeHGraphIndex(params, MakeCommonParam(dim));
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, count)).has_value());
+    auto graph = std::static_pointer_cast<vsag::HGraph>(index->GetInnerIndex());
+    std::vector<int64_t> added_labels{2000000, 2000001};
+    auto added = MakeFloatDataset(vectors, added_labels, dim, 2);
+    const auto slots = vsag::HGraphCodeWriteTestAccess::ReserveAddRows(*graph, added);
+    REQUIRE(slots.size() == 2);
+    CHECK(vsag::HGraphCodeWriteTestAccess::PendingCount(*graph) == 2);
+    // Schedule the higher worker first: both watermarks cover the still-unwritten lower row.
+    vsag::HGraphCodeWriteTestAccess::CompleteFusedRow(*graph, slots[1], vectors.data() + dim);
+    CHECK(vsag::HGraphCodeWriteTestAccess::Pending(*graph, slots[0]) != 0);
+    CHECK(vsag::HGraphCodeWriteTestAccess::Pending(*graph, slots[1]) == 0);
+    REQUIRE(index->GetNumElements() == count + 2);
+    struct LabelFilter final : vsag::Filter {
+        explicit LabelFilter(int64_t value) : wanted(value) {
+        }
+        bool
+        CheckValid(int64_t label) const override {
+            return label == wanted;
+        }
+        float
+        ValidRatio() const override {
+            return 0.0F;
+        }
+        int64_t wanted;
+    };
+    auto query = MakeFloatQuery(vectors, dim);
+    auto unfinished = index->KnnSearch(
+        query, 1, R"({"hgraph":{"ef_search":30}})", std::make_shared<LabelFilter>(added_labels[0]));
+    REQUIRE(unfinished.has_value());
+    CHECK(unfinished.value()->GetDim() == 0);
+    CHECK(vsag::JsonType::Parse(unfinished.value()->GetStatistics())["distance_evaluations"]
+              .GetUint64() == 0);
+    auto completed = index->KnnSearch(
+        query, 1, R"({"hgraph":{"ef_search":30}})", std::make_shared<LabelFilter>(added_labels[1]));
+    REQUIRE(completed.has_value());
+    REQUIRE(completed.value()->GetDim() == 1);
+    CHECK(completed.value()->GetIds()[0] == added_labels[1]);
+}
+
+TEST_CASE("HGraph fused predicate preparation preserves the query deadline",
+          "[ut][hgraph][fused][fused_filter_add][fused_preparation_timeout]") {
+    constexpr int64_t dim = 64;
+    constexpr int64_t count = 512;
+    auto params = MakeFp32HGraphJson(false);
+    params["support_duplicate"].SetBool(false);
+    params["base_quantization_type"].SetString("rabitq");
+    params["precise_quantization_type"].SetString("rabitq");
+    params["use_reorder"].SetBool(true);
+    params["rabitq_bits_per_dim_base"].SetInt(3);
+    params["rabitq_bits_per_dim_precise"].SetInt(5);
+    params["rabitq_bits_per_dim_query"].SetInt(32);
+    params["rabitq_use_fht"].SetBool(true);
+    params["rabitq_fused_datacell"].SetBool(true);
+    auto index = MakeHGraphIndex(params, MakeCommonParam(dim));
+    auto vectors = fixtures::generate_vectors(count, dim, false, 73);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    REQUIRE(index->Build(MakeFloatDataset(vectors, ids, dim, count)).has_value());
+    struct RejectFilter final : vsag::Filter {
+        explicit RejectFilter(uint64_t sleep_at = 0) : sleep_at_(sleep_at) {
+        }
+        bool
+        CheckValid(int64_t) const override {
+            const auto checked = ++calls;
+            if (checked == sleep_at_) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+            }
+            return false;
+        }
+        float
+        ValidRatio() const override {
+            return 0.0F;
+        }
+        uint64_t sleep_at_;
+        mutable std::atomic<uint64_t> calls{0};
+    };
+    for (const int64_t query_count : {1, 2}) {
+        auto filter = std::make_shared<RejectFilter>();
+        auto query = vsag::Dataset::Make()
+                         ->NumElements(query_count)
+                         ->Dim(dim)
+                         ->Owner(false)
+                         ->Float32Vectors(vectors.data());
+        auto result =
+            index->KnnSearch(query, 1, R"({"hgraph":{"ef_search":30,"timeout_ms":0}})", filter);
+        REQUIRE(result.has_value());
+        CHECK(filter->calls.load() == 0);
+        CHECK(result.value()->GetStatistics({"is_timeout"})[0] == "true");
+        CHECK(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("timeout")");
+        if (query_count == 1) {
+            CHECK(result.value()->GetDim() == 0);
+        } else {
+            CHECK(result.value()->GetNumElements() == query_count);
+            REQUIRE(result.value()->GetDim() == 1);
+            CHECK(result.value()->GetIds()[0] == -1);
+            CHECK(result.value()->GetIds()[1] == -1);
+            CHECK(vsag::JsonType::Parse(result.value()->GetStatistics())["batch_routes"]["timeout"]
+                      .GetUint64() == 2);
+        }
+    }
+    // Let all 256 samples finish, then expire inside enumeration rather than in its hint.
+    auto slow = std::make_shared<RejectFilter>(266);
+    auto result = index->KnnSearch(
+        MakeFloatQuery(vectors, dim), 1, R"({"hgraph":{"ef_search":30,"timeout_ms":1000}})", slow);
+    REQUIRE(result.has_value());
+    CHECK(slow->calls.load() >= 266);
+    CHECK(slow->calls.load() <= 320);
+    CHECK(result.value()->GetDim() == 0);
+    CHECK(result.value()->GetStatistics({"is_timeout"})[0] == "true");
+    CHECK(vsag::JsonType::Parse(result.value()->GetStatistics())["distance_evaluations"]
+              .GetUint64() == 0);
 }

@@ -103,18 +103,30 @@ public:
                          float scan_threshold,
                          Allocator* allocator,
                          Vector<InnerIdType>* attribute_ids = nullptr,
-                         const FilterPtr& remaining_filter = nullptr)
+                         const FilterPtr& remaining_filter = nullptr,
+                         Timer* time_cost = nullptr)
         : source_(std::move(source)), ids_(allocator) {
+        const auto expired = [time_cost]() {
+            return time_cost != nullptr and time_cost->CheckOvertime();
+        };
+        if (expired()) {
+            return;
+        }
         if (attribute_ids != nullptr) {
             ids_ = std::move(*attribute_ids);
-            ids_.erase(std::remove_if(ids_.begin(),
-                                      ids_.end(),
-                                      [&](InnerIdType id) {
-                                          return id >= count or
-                                                 (remaining_filter != nullptr and
-                                                  not remaining_filter->CheckValid(id));
-                                      }),
-                       ids_.end());
+            uint64_t kept = 0;
+            for (uint64_t i = 0; i < ids_.size(); ++i) {
+                if (i % 64 == 0 and expired()) {
+                    ids_.clear();
+                    return;
+                }
+                const auto id = ids_[i];
+                if (id < count and
+                    (remaining_filter == nullptr or remaining_filter->CheckValid(id))) {
+                    ids_[kept++] = id;
+                }
+            }
+            ids_.resize(kept);
             complete_ = true;
             ratio_ =
                 count == 0 ? 0.0F : static_cast<float>(ids_.size()) / static_cast<float>(count);
@@ -127,6 +139,9 @@ public:
         uint64_t accepted = 0;
         uint64_t random = 73;
         for (uint64_t i = 0; i < samples; ++i) {
+            if (i % 64 == 0 and expired()) {
+                return;
+            }
             const uint64_t begin = i * count / samples;
             const uint64_t end = (i + 1) * count / samples;
             random = random * 6364136223846793005ULL + 1442695040888963407ULL;
@@ -140,6 +155,10 @@ public:
              (hinted_ratio <= scan_threshold or ratio_ <= std::min(1.0F, 2.0F * scan_threshold)));
         if (enumerate) {
             for (InnerIdType id = 0; id < count; ++id) {
+                if (id % 64 == 0 and expired()) {
+                    ids_.clear();
+                    return;
+                }
                 if (source_->CheckValid(id)) {
                     ids_.push_back(id);
                     // Stop as soon as the matching set is too dense for a scan. No N-byte
@@ -692,6 +711,9 @@ HGraph::brute_force_search(const void* query,
 
     uint64_t cursor = 0;
     const uint64_t scan_count = valid_ids == nullptr ? total : valid_ids->size();
+    // The publication watermark can cover holes left by slower Add workers. The codes lock
+    // pins this readiness map until all distance batches finish; never score an unfinished slot.
+    const bool has_pending_writes = not this->pending_code_writes_.empty();
     while (cursor < scan_count) {
         if (time_cost != nullptr and time_cost->CheckOvertime()) {
             if (ctx != nullptr and ctx->stats != nullptr) {
@@ -704,6 +726,8 @@ HGraph::brute_force_search(const void* query,
             const auto id =
                 valid_ids == nullptr ? static_cast<InnerIdType>(cursor) : (*valid_ids)[cursor];
             if (id < total and
+                (not has_pending_writes or
+                 this->pending_code_writes_.find(id) == this->pending_code_writes_.end()) and
                 (valid_ids != nullptr or filter == nullptr or filter->CheckValid(id))) {
                 batch_ids[batch_count++] = id;
             }
@@ -1206,7 +1230,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
                                                    scan_threshold,
                                                    ctx.alloc,
                                                    have_attribute_ids ? &attribute_ids : nullptr,
-                                                   remaining_filter);
+                                                   remaining_filter,
+                                                   base_search_param.time_cost.get());
         ft = prepared_filter;
         base_search_param.is_inner_id_allowed = ft;
     }
@@ -1292,6 +1317,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     ep_search_param.distance_batch_size = request.distance_batch_size_;
 
     uint64_t batch_hgraph_queries = 0;
+    uint64_t batch_timeout_queries = 0;
     uint64_t batch_mci_queries = 0;
     uint64_t batch_brute_force_queries = 0;
     uint64_t batch_hybrid_queries = 0;
@@ -1340,7 +1366,28 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         search_param.rabitq_fused_computer = nullptr;
         ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
         if (search_param.time_cost != nullptr) {
-            search_param.time_cost->Reset();
+            // Shared preparation is charged to the first query. Subsequent batch rows each
+            // start a new budget; routing must not erase time already spent preparing filters.
+            if (q_idx > 0 or prepared_filter == nullptr) {
+                search_param.time_cost->Reset();
+            }
+            if (prepared_filter != nullptr and search_param.time_cost->CheckOvertime()) {
+                stats.is_timeout.store(true, std::memory_order_relaxed);
+                if (query_count == 1) {
+                    auto timed_stats = batch_mci_result.MakeStatistics(stats);
+                    timed_stats["mci_hybrid_route"].SetString("timeout");
+                    auto empty = DatasetImpl::MakeEmptyDataset();
+                    empty->Statistics(timed_stats.Dump());
+                    if (reasoning_ctx) {
+                        reasoning_ctx->SetTermination(ReasoningTermination::kTimeout);
+                        reasoning_ctx->DiagnoseExpectedTargets();
+                        empty->Reasoning(reasoning_ctx->GenerateReport());
+                    }
+                    return empty;
+                }
+                ++batch_timeout_queries;
+                continue;
+            }
         }
         // MCI collects its own filter-derived seeds and never reads the HGraph entry point.
         // Try it first with either lock policy; an unavailable route still uses HGraph navigation.
@@ -1391,7 +1438,7 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
             }
             search_param.ep = ep_search_param.ep;
             ctx.distance_phase = DistanceEvaluationPhase::APPROXIMATE;
-            if (search_param.time_cost != nullptr) {
+            if (search_param.time_cost != nullptr and prepared_filter == nullptr) {
                 search_param.time_cost->Reset();
             }
         }
@@ -1698,7 +1745,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     if (query_count > 1) {
         auto batch_stats = batch_mci_result.MakeStatistics(stats);
         batch_stats["mci_hybrid_route"].SetString(
-            batch_mci_queries == static_cast<uint64_t>(query_count)           ? "mci"
+            batch_timeout_queries == static_cast<uint64_t>(query_count)       ? "timeout"
+            : batch_mci_queries == static_cast<uint64_t>(query_count)         ? "mci"
             : batch_brute_force_queries == static_cast<uint64_t>(query_count) ? "brute_force"
             : batch_hybrid_queries == static_cast<uint64_t>(query_count)      ? "hybrid"
             : batch_hgraph_queries == static_cast<uint64_t>(query_count)      ? "hgraph"
@@ -1709,6 +1757,9 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
         batch_stats["batch_routes"]["mci"].SetUint64(batch_mci_queries);
         batch_stats["batch_routes"]["brute_force"].SetUint64(batch_brute_force_queries);
         batch_stats["batch_routes"]["hybrid"].SetUint64(batch_hybrid_queries);
+        if (batch_timeout_queries > 0) {
+            batch_stats["batch_routes"]["timeout"].SetUint64(batch_timeout_queries);
+        }
         dataset_results->Statistics(batch_stats.Dump());
     }
 

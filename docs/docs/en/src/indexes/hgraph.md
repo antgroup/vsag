@@ -380,7 +380,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `enable_reorder` | bool | `true` | Whether to re-rank coarse candidates against the precise codes. Set to `false` to skip reordering and return the approximate results directly. Use `use_reorder: true` in `index_param` to store the precise codes needed for reordering. |
 | `factor` | float | `0.0` | Reorder-candidate amplification factor. When `> 1.0`, the reorder-candidate pool is capped at `k * factor` (but never below `max(ef_search, k)`); the default `0.0` preserves the existing behaviour with `ef_search` candidates. |
 | `parallelism` | int | `1` | Number of parallel workers for a single HGraph search. Values `<= 0` are reset to `1` during parsing; parallel execution requires a configured executor, otherwise the search falls back to sequential execution. |
-| `timeout_ms` | int | unlimited | Per-query wall-clock timeout in milliseconds. The timer starts after routing; once exceeded, the search returns the current frontier. Best-effort only — it does not preempt a distance-computation batch. |
+| `timeout_ms` | int | unlimited | Per-query wall-clock timeout in milliseconds. Ordinary graph queries start the timer after routing; prepared-filter queries also charge preparation and routing (see below). Once exceeded, the search returns completed results. Best-effort only — it does not preempt a distance-computation batch. |
 | `use_extra_info_filter` | bool | `false` | Create the query filter from extra-info rather than plain label membership. Requires matching extra-info columns at build time. |
 | `use_conjugate_graph_search` | bool | `true` | Search enhancement pass. When `use_conjugate_graph: true` was set at build time, the search expands results through the conjugate graph for potentially higher recall; set to `false` to skip it. Only takes effect when a conjugate graph was built. |
 
@@ -420,7 +420,12 @@ predicate. Callback enumeration stops as soon as the set exceeds the scan thresh
 an N-byte bitmap and moves the sparse ID list instead of copying it. Scans visit matching IDs without graph routing
 or a subsequent reorder pass. Attribute expressions and SearchRequest bitset predicates use the HGraph/scan path; MCI fast paths remain limited to the original ID predicate. Distances use the final codes or raw vectors and retain the
 quantization error of the selected codes. Scans honor `timeout_ms` between distance batches and return
-completed results with `is_timeout=true` when the budget expires; an active distance batch is not interrupted.
+completed results with `is_timeout=true` when the budget expires; an active distance batch is not interrupted. Preparation checks deadlines periodically while sampling and enumerating predicates.
+The first query's budget includes shared filter preparation and routing; later batch queries start their
+own budgets. If preparation expires before search begins, the query evaluates no distances and reports
+`mci_hybrid_route="timeout"`. Batch rows keep their `-1`/infinity padding, and `batch_routes.timeout`
+counts rows that expired before a search route ran. Scans exclude unfinished Add code slots even when
+out-of-order publication advances the index watermark past them.
 
 How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 

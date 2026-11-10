@@ -1835,7 +1835,7 @@ TEST_CASE("HGraph fused automatic scans honor query timeout",
     REQUIRE(timed.has_value());
     CHECK(timed.value()->GetDim() == 0);
     CHECK(timed.value()->GetStatistics({"is_timeout"})[0] == "true");
-    CHECK(timed.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+    CHECK(timed.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("timeout")");
     CHECK(
         vsag::JsonType::Parse(timed.value()->GetStatistics())["distance_evaluations"].GetUint64() ==
         0);
