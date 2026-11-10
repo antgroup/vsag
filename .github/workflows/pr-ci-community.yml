@@ -476,6 +476,12 @@ jobs:
           set -euo pipefail
           cd ./tests/python/
           python3 -m pytest . -v --tb=short 2>&1 | tee test-output.log
+      - name: Smoke-Test Wheel in Clean Environments
+        env:
+          VSAG_SMOKE_REQUIRE_DOCKER: "1"
+        run: |
+          sudo apt-get install -y python3-venv
+          bash ./scripts/python/wheel_smoke_test.sh ./wheelhouse python3
       - name: Upload Test Logs
         if: always()
         uses: actions/upload-artifact@v5

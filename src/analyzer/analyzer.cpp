@@ -25,6 +25,33 @@
 
 namespace vsag {
 
+namespace {
+
+// A non-owning view of one row of a query dataset.
+DatasetPtr
+query_row(const DatasetPtr& queries, int64_t row) {
+    auto query = Dataset::Make();
+    query->NumElements(1)->Dim(queries->GetDim())->Owner(false);
+    const auto offset = static_cast<uint64_t>(row) * static_cast<uint64_t>(queries->GetDim());
+    if (const auto* vectors = queries->GetFloat32Vectors()) {
+        query->Float32Vectors(vectors + offset);
+    } else if (const auto* vectors = queries->GetInt8Vectors()) {
+        query->Int8Vectors(vectors + offset);
+    } else if (const auto* vectors = queries->GetFloat16Vectors()) {
+        query->Float16Vectors(vectors + offset);
+    } else if (const auto* vectors = queries->GetSparseVectors()) {
+        query->SparseVectors(vectors + row);
+    } else if (const auto* vectors = queries->GetMultiVectors()) {
+        query->MultiVectors(vectors + row)->MultiVectorDim(queries->GetMultiVectorDim());
+    } else {
+        throw VsagException(ErrorType::INVALID_ARGUMENT,
+                            "analysis query must contain dense, sparse or multi-vector data");
+    }
+    return query;
+}
+
+}  // namespace
+
 AnalyzerBasePtr
 CreateAnalyzer(const InnerIndexInterface* index, const AnalyzerParam& param) {
     if (index == nullptr) {
@@ -120,22 +147,31 @@ BasicIndexAnalyzer::AnalyzeIndexBySearch(const SearchRequest& request) {
             stats, index_->GetName(), "search", "not_applicable", query_count, request.topk_);
         return stats;
     }
+    // Baseline indexes search one query per call, so a batch is analyzed query by query.
     const auto begin = std::chrono::steady_clock::now();
-    DatasetPtr result;
-    try {
-        result = index_->SearchWithRequest(request);
-    } catch (const VsagException& exception) {
-        if (exception.error_.type != ErrorType::UNSUPPORTED_INDEX_OPERATION) {
-            throw;
+    int64_t result_count = 0;
+    for (int64_t row = 0; row < query_count; ++row) {
+        auto single_request = request;
+        single_request.query_ = query_count == 1 ? request.query_ : query_row(request.query_, row);
+        DatasetPtr result;
+        try {
+            result = index_->SearchWithRequest(single_request);
+        } catch (const VsagException& exception) {
+            if (exception.error_.type != ErrorType::UNSUPPORTED_INDEX_OPERATION) {
+                throw;
+            }
+            result = index_->KnnSearch(single_request.query_,
+                                       single_request.topk_,
+                                       single_request.params_str_,
+                                       single_request.filter_);
         }
-        result =
-            index_->KnnSearch(request.query_, request.topk_, request.params_str_, request.filter_);
+        result_count += result == nullptr ? 0 : result->GetDim();
     }
     const auto elapsed =
         std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - begin).count();
     stats["time_cost_query"].SetFloat(
         static_cast<float>(elapsed / static_cast<double>(query_count)));
-    stats["result_count"].SetInt64(result == nullptr ? 0 : result->GetDim());
+    stats["result_count"].SetInt64(result_count);
     stats["_analysis"]["skipped"]["recall_query"].SetString("ground truth was not requested");
     AddAnalysisMetadata(stats, index_->GetName(), "search", "partial", query_count, request.topk_);
     return stats;

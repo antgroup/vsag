@@ -68,6 +68,24 @@ The current `save` and `load` wrappers do not propagate errors returned by the u
 serialization and deserialization operations. Verify that the output file was created and
 round-trip important indexes before relying on persisted data.
 
+## Analyzing Index Files
+
+`pyvsag.analyze_index()` inspects a saved index, usually without its original build parameters, and the
+wheel installs the same analysis as the `pyvsag-analyze-index` command:
+
+```python
+report = pyvsag.analyze_index("index.bin")
+print(report["metadata"]["index_type"], report["static_analysis"]["_analysis"]["status"])
+```
+
+```bash
+pyvsag-analyze-index --index_path index.bin --query_path queries.bin --topk 10
+```
+
+The report is a JSON-serializable `dict` with the index metadata, its statistics and, when a
+query file is given, search analysis. See [Index Analysis](../resources/analyze_index.md#analyzing-index-files)
+for the options, the report format and the supported index files.
+
 ## Index Operations
 
 The Python binding exposes the following index-management methods in addition to build, search,

@@ -23,3 +23,6 @@ bind_index(py::module_& module);
 
 void
 bind_logging(py::module_& module);
+
+void
+bind_analysis(py::module_& module);
