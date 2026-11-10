@@ -36,6 +36,12 @@ endif ()
 
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_config vsag_src_common)
+if (CMAKE_GENERATOR MATCHES "Ninja" AND ENABLE_ASAN)
+    # Sanitized metric factories instantiate every quantizer/I/O combination.
+    # Bound their overlap with other datacell sources on memory-limited CI hosts.
+    set_property (GLOBAL APPEND PROPERTY JOB_POOLS datacell_compile_pool=1)
+    set_property (TARGET datacell PROPERTY JOB_POOL_COMPILE datacell_compile_pool)
+endif ()
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE DATACELL_TESTS "*_test.cpp")
