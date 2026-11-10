@@ -17,6 +17,7 @@
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <cfenv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -894,6 +895,111 @@ TEST_CASE("PiPNN bulk half decode respects unaligned row bounds and every SIMD t
         }
     }
     vsag::pipnn_half::DecodeRow(nullptr, nullptr, 0, format);
+}
+
+TEST_CASE("PiPNN half decode preserves sNaN bits without raising invalid",
+          "[ut][pipnn][half][decode_row]") {
+    using vsag::pipnn_half::Format;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    const uint64_t dim = GENERATE(1, 7, 8, 9, 15, 16, 17);
+    const uint16_t snan = format == Format::FP16 ? 0x7c01 : 0x7f81;
+    const uint16_t negative_snan = format == Format::FP16 ? 0xfc01 : 0xff81;
+    for (uint64_t position = 0; position < dim; ++position) {
+        CAPTURE(dim, position, static_cast<int>(format));
+        std::vector<uint16_t> input(dim + 1, 0);
+        std::vector<float> scalar(dim + 2, -123.0F);
+        std::vector<float> dispatched(dim + 2, -123.0F);
+        input[position + 1] = position % 2 == 0 ? snan : negative_snan;
+        std::fenv_t saved;
+        const int held = std::feholdexcept(&saved);
+        REQUIRE(held == 0);
+        if (format == Format::FP16) {
+            vsag::pipnn_half::detail::DecodeRowScalar<Format::FP16>(
+                input.data() + 1, scalar.data() + 1, dim);
+        } else {
+            vsag::pipnn_half::detail::DecodeRowScalar<Format::BF16>(
+                input.data() + 1, scalar.data() + 1, dim);
+        }
+        const int scalar_invalid = std::fetestexcept(FE_INVALID);
+        std::feclearexcept(FE_ALL_EXCEPT);
+        vsag::pipnn_half::DecodeRow(input.data() + 1, dispatched.data() + 1, dim, format);
+        const int dispatch_invalid = std::fetestexcept(FE_INVALID);
+        const int restored = std::fesetenv(&saved);
+        REQUIRE(restored == 0);
+        REQUIRE(scalar_invalid == 0);
+        REQUIRE(dispatch_invalid == 0);
+        for (uint64_t k = 0; k < dim; ++k) {
+            REQUIRE(FloatBits(dispatched[k + 1]) == FloatBits(scalar[k + 1]));
+        }
+        REQUIRE(FloatBits(dispatched[position + 1]) ==
+                (format == Format::FP16
+                     ? (static_cast<uint32_t>(input[position + 1] & 0x8000U) << 16) | 0x7f802000U
+                     : static_cast<uint32_t>(input[position + 1]) << 16));
+        REQUIRE(dispatched.front() == -123.0F);
+        REQUIRE(dispatched.back() == -123.0F);
+    }
+}
+
+TEST_CASE("PiPNN half preparation scalar and dispatch agree at vector boundaries",
+          "[ut][pipnn][half]") {
+    using vsag::pipnn_half::Format;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    const uint64_t dim = GENERATE(0, 1, 3, 4, 5, 7, 8, 9, 15, 16, 17, 31, 32, 33);
+    CAPTURE(dim, static_cast<int>(format));
+    std::vector<uint16_t> input(dim + 1);
+    std::vector<float> plane(dim + 1);
+    for (uint64_t k = 0; k < dim; ++k) {
+        input[k + 1] = EncodeHalf(static_cast<float>(static_cast<int>(k % 9) - 4) / 4.0F, format);
+        plane[k + 1] = static_cast<float>(static_cast<int>(k % 7) - 3) / 8.0F;
+    }
+    for (const bool square : {false, true}) {
+        CAPTURE(square);
+        const float* b = square ? nullptr : plane.data() + 1;
+        const float scalar =
+            vsag::pipnn_half::detail::PreparationScalar(input.data() + 1, b, dim, format);
+        const float dispatched = vsag::pipnn_half::Preparation(input.data() + 1, b, dim, format);
+        REQUIRE(FloatBits(dispatched) == FloatBits(scalar));
+    }
+}
+
+TEST_CASE("PiPNN preparation matches reference for varied finite inputs",
+          "[ut][pipnn][half][preparation]") {
+    using vsag::pipnn_half::Format;
+    const auto format = GENERATE(Format::FP16, Format::BF16);
+    std::mt19937 rng(0x19ac723u);
+    // Non-power-of-two FP32 planes and mixed signs exercise rounding and cancellation.
+    std::uniform_real_distribution<float> half_values(-32.0F, 32.0F);
+    std::uniform_real_distribution<float> plane_values(-8.0F, 8.0F);
+    for (uint64_t dim = 0; dim <= 127; ++dim) {
+        std::vector<uint16_t> input(dim + 1);
+        std::vector<float> plane(dim + 1);
+        for (uint64_t i = 0; i < dim; ++i) {
+            input[i + 1] = EncodeHalf(half_values(rng), format);
+            plane[i + 1] = plane_values(rng);
+        }
+        for (const bool square : {false, true}) {
+            CAPTURE(dim, square, static_cast<int>(format));
+            const float* b = square ? nullptr : plane.data() + 1;
+            double reference = 0.0;
+            double magnitude = 0.0;
+            for (uint64_t i = 0; i < dim; ++i) {
+                const double value = ReferenceHalf(input[i + 1], format);
+                const double product = value * (square ? value : static_cast<double>(b[i]));
+                reference += product;
+                magnitude += std::abs(product);
+            }
+            // Absolute products give a useful bound even when projections cancel.
+            // Allow for rounded products and up to dim additions in either reduction.
+            const double tolerance = (dim + 2) * std::numeric_limits<float>::epsilon() * magnitude;
+            const float scalar =
+                vsag::pipnn_half::detail::PreparationScalar(input.data() + 1, b, dim, format);
+            const float dispatched =
+                vsag::pipnn_half::Preparation(input.data() + 1, b, dim, format);
+            CAPTURE(reference, magnitude, tolerance, scalar, dispatched);
+            REQUIRE(std::abs(static_cast<double>(scalar) - reference) <= tolerance);
+            REQUIRE(std::abs(static_cast<double>(dispatched) - reference) <= tolerance);
+        }
+    }
 }
 
 TEST_CASE("PiPNN half vector arithmetic handles unaligned rows and SIMD tails",

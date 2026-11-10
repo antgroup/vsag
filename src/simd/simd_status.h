@@ -51,17 +51,20 @@ public:
 
     static bool is_inited;
 
-    static inline void
+    static inline bool
     Init() {
-        if (is_inited) {
-            return;
-        }
-        is_inited = cpuinfo_initialize();
+        static const bool initialized = []() {
+            is_inited = cpuinfo_initialize();
+            return is_inited;
+        }();
+        return initialized;
     }
 
     static inline bool
     SupportAVX512() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_AVX512)
         ret = true;
@@ -73,7 +76,9 @@ public:
 
     static inline bool
     SupportAVX512VPOPCNTDQ() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
 #if defined(ENABLE_AVX512VPOPCNTDQ)
         return cpuinfo_has_x86_avx512vpopcntdq();
 #else
@@ -103,7 +108,9 @@ public:
 
     static inline bool
     SupportAVX2() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_AVX2)
         ret = true;
@@ -113,8 +120,20 @@ public:
     }
 
     static inline bool
+    SupportAVXAndAVX2() {
+        return SupportAVX2() && cpuinfo_has_x86_avx();
+    }
+
+    static inline bool
+    SupportAVX2F16C() {
+        return SupportAVXAndAVX2() && cpuinfo_has_x86_f16c();
+    }
+
+    static inline bool
     SupportAVX() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_AVX)
         ret = true;
@@ -125,7 +144,9 @@ public:
 
     static inline bool
     SupportSSE() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_SSE)
         ret = true;
@@ -136,6 +157,9 @@ public:
 
     static inline bool
     SupportNEON() {
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_NEON)
         ret = true;
@@ -146,7 +170,9 @@ public:
 
     static inline bool
     SupportSVE() {
-        Init();
+        if (!Init()) {
+            return false;
+        }
         bool ret = false;
 #if defined(ENABLE_SVE)
         ret = true;

@@ -27,6 +27,7 @@ set (SIMD_SRCS
         sve.cpp
         simd.cpp
         simd_status.cpp
+        pipnn_half_simd.cpp
         basic_func.cpp
         bit_simd.cpp
         fp32_simd.cpp
@@ -53,7 +54,15 @@ if (DIST_CONTAINS_AVX)
     set_source_files_properties (avx.cpp PROPERTIES COMPILE_FLAGS "-mavx -mf16c")
 endif ()
 if (DIST_CONTAINS_AVX2)
+    list (APPEND SIMD_SRCS pipnn_half_avx2.cpp)
+    check_cxx_compiler_flag ("-mf16c" PIPNN_COMPILER_F16C_SUPPORTED)
+    if (PIPNN_COMPILER_F16C_SUPPORTED)
+        list (APPEND SIMD_SRCS pipnn_half_f16c.cpp)
+    endif ()
     set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
+    set_source_files_properties (pipnn_half_avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2")
+    set_source_files_properties (pipnn_half_f16c.cpp PROPERTIES COMPILE_FLAGS
+            "-mavx2 -mf16c -mno-fma -ffp-contract=off")
 endif ()
 
 set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
@@ -113,6 +122,9 @@ endfunction ()
 simd_add_definitions (DIST_CONTAINS_SSE -DENABLE_SSE=1)
 simd_add_definitions (DIST_CONTAINS_AVX -DENABLE_AVX=1)
 simd_add_definitions (DIST_CONTAINS_AVX2 -DENABLE_AVX2=1)
+if (DIST_CONTAINS_AVX2 AND PIPNN_COMPILER_F16C_SUPPORTED)
+    target_compile_definitions (simd PRIVATE ENABLE_PIPNN_F16C=1)
+endif ()
 simd_add_definitions (DIST_CONTAINS_AVX512 -DENABLE_AVX512=1)
 simd_add_definitions (DIST_CONTAINS_AVX512VPOPCNTDQ -DENABLE_AVX512VPOPCNTDQ=1)
 simd_add_definitions (DIST_CONTAINS_AMX -DENABLE_AMX=1)
@@ -139,6 +151,9 @@ if (ENABLE_TESTS)
     endif ()
     if (DIST_CONTAINS_AVX2)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX2=1)
+    endif ()
+    if (DIST_CONTAINS_AVX2 AND PIPNN_COMPILER_F16C_SUPPORTED)
+        target_compile_definitions (simd_test PRIVATE ENABLE_PIPNN_F16C=1)
     endif ()
     if (DIST_CONTAINS_AVX512)
         target_compile_definitions (simd_test PRIVATE ENABLE_AVX512=1)
