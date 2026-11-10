@@ -456,3 +456,23 @@ After #3295's packaging upgrade passes wheel build/install/pytest validation,
 remove the main-push exception in `select_for_event`, update the pause regressions
 and these docs, and verify an actual main Branch CI Python run before considering
 automatic Python coverage restored.
+
+## Branch ARM build diagnostics
+
+The Branch CI Aarch64 ASan build keeps its existing three-way compilation and
+examples. `scripts/ci/monitor_build.py` wraps that build without changing its
+exit code and streams `[build-resource]` JSON samples every 15 seconds. Samples
+include available host memory, accessible cgroup memory limits/OOM counters,
+CPU accounting, and build-process RSS and compiler source operands. This is
+useful because Ninja prints completed commands: the last printed source is not
+necessarily the source still compiling. Arbitrary command lines and environment
+variables are not captured.
+
+The best-effort `arm-build-diagnostics-<job>-<run>-<attempt>` artifact retains
+`samples.jsonl` and `summary.json` for seven days. Diagnostic upload failure does
+not change the build result. Cancellation is forwarded to the build process
+group, and a stuck group is killed after a ten-second grace period. If the runner
+is abruptly terminated, the upload/final sample cannot be guaranteed; consult
+the already streamed samples and GitHub's runner annotations. Exit 137 or a
+shutdown signal alone does not establish OOM. Compare counter deltas and memory
+pressure; unavailable cgroup evidence is unknown, not proof of no OOM.

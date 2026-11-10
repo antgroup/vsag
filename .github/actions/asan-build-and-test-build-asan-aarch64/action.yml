@@ -11,7 +11,19 @@ runs:
         key: build-aarch-${{ hashFiles('./CMakeLists.txt') }}-${{ hashFiles('./.circleci/fresh_ci_cache.commit') }}
     - name: Make Asan
       shell: sh
-      run: export CMAKE_GENERATOR="Ninja"; make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+      run: |
+        export CMAKE_GENERATOR="Ninja"
+        python3 scripts/ci/monitor_build.py --output-dir "$RUNNER_TEMP/arm-build-diagnostics" -- \
+          make asan COMPILE_JOBS=3 VSAG_ENABLE_EXAMPLES=ON
+    - name: Upload ARM build diagnostics
+      if: always()
+      continue-on-error: true
+      uses: actions/upload-artifact@v5
+      with:
+        path: ${{ runner.temp }}/arm-build-diagnostics/
+        name: arm-build-diagnostics-${{ github.job }}-${{ github.run_id }}-${{ github.run_attempt }}
+        if-no-files-found: warn
+        retention-days: 7
     - name: Clean
       shell: sh
       run: find ./build -type f -name "*.o" -exec rm -f {} +

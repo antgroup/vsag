@@ -3,6 +3,7 @@
 import ast
 import json
 import os
+import platform
 import re
 import shutil
 from pathlib import Path
@@ -253,6 +254,65 @@ add_subdirectory("${VSAG_SOURCE_DIR}/src/simd" simd)
                           ('c++20', 'c++17', 'c++20')]:
             with self.subTest(standards=standards):
                 self.assertNotEqual(self.audit(*standards).returncode, 0)
+
+
+@unittest.skipUnless(platform.machine().lower() in ('x86_64', 'amd64'), 'x86 F16C source')
+class PipnnReleaseFlagsTest(unittest.TestCase):
+    def test_release_database_compiles_and_lints_f16c_without_disabling_diagnostics(self):
+        compiler = shutil.which('g++-13')
+        clang = shutil.which('clang++-20')
+        tidy = shutil.which('clang-tidy-20')
+        if not all((compiler, clang, tidy, shutil.which('cmake'), shutil.which('ninja'))):
+            self.skipTest('requires GCC 13, Clang/tidy 20, CMake and Ninja')
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory)
+            (source / 'CMakeLists.txt').write_text('''
+cmake_minimum_required(VERSION 3.18)
+project(pipnn_release_flags LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+set(ENABLE_TESTS OFF)
+set(DIST_CONTAINS_AVX2 ON)
+add_compile_options(-O3 -ffast-math -fno-finite-math-only -Werror)
+include_directories("${VSAG_SOURCE_DIR}/src" "${VSAG_SOURCE_DIR}/include")
+add_library(cpuinfo INTERFACE)
+add_library(coverage_config INTERFACE)
+add_subdirectory("${VSAG_SOURCE_DIR}/src/simd" simd)
+''')
+            build = source / 'build'
+            result = subprocess.run(['cmake', '-S', str(source), '-B', str(build), '-G', 'Ninja',
+                                     '-DCMAKE_BUILD_TYPE=Release', '-DCMAKE_CXX_COMPILER=' + compiler,
+                                     '-DVSAG_SOURCE_DIR=' + str(ROOT)], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            entries = json.loads((build / 'compile_commands.json').read_text())
+            target = next(e for e in entries if Path(e['file']).name == 'pipnn_half_f16c.cpp')
+            flags = shlex.split(target['command'])
+            self.assertLess(flags.index('-ffast-math'), flags.index('-fno-fast-math'))
+            self.assertLess(flags.index('-fno-fast-math'), flags.index('-ffp-contract=off'))
+            self.assertIn('-mno-fma', flags)
+            self.assertFalse(any(f.startswith('-Wno-') for f in flags))
+            neighbor = next(e for e in entries if Path(e['file']).name == 'pipnn_half_avx2.cpp')
+            self.assertNotIn('-fno-fast-math', shlex.split(neighbor['command']))
+            out_index = flags.index('-o')
+            del flags[out_index:out_index + 2]
+            flags.remove('-c')
+            for driver in (compiler, clang):
+                cmd = [driver, *flags[1:], '-fsyntax-only']
+                # GCC and clang-tidy consume the same generated Release database.
+                result = subprocess.run(cmd, cwd=build, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            result = subprocess.run([tidy, '-p=' + str(build), target['file'],
+                                     '--warnings-as-errors=*'],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotIn('overriding-option', result.stdout + result.stderr)
+            # Negative control: the previous Release command must reproduce #3310,
+            # so this test cannot pass merely because diagnostics are disabled.
+            old_flags = [f for f in flags[1:] if f != '-fno-fast-math']
+            result = subprocess.run([clang, *old_flags, '-fsyntax-only'], cwd=build,
+                                    capture_output=True, text=True)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('overriding-option', result.stdout + result.stderr)
 
 
 if __name__ == '__main__':
