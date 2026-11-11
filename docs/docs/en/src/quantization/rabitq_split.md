@@ -112,8 +112,8 @@ storage:
 - `1 <= x <= 4`, `y >= 1`, and `x + y <= 8`.
 - The metric must be L2 or inner product.
 - The graph, filter codes, and supplement codes must all use memory IO.
-- MCI, `deduplicate_storage`, removal metadata, reverse edges, and force remove
-  must be disabled.
+- `deduplicate_storage`, removal metadata, reverse edges, and force remove must be disabled.
+- MCI companions are supported with `use_mci: true`; see [fused MCI routing](../indexes/hgraph.md#fused-rabitq-with-mci-selectivity-routing).
 - PCA is not supported; omit `rabitq_pca_dim` or set it to `0`.
 - The legacy v0.14 serialization format is not supported.
 - The fused slab wire format is versioned independently. The current format

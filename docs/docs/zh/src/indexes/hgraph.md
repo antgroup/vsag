@@ -284,7 +284,7 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 | `hops_limit` | int | 不限 | beam search 在返回当前前沿前允许的最大跳数。 |
 | `skip_ratio` | float | `0.2` | 过滤场景下的性能调优参数。控制跳过无效点的比例，取值范围 `[0.0, 1.0]`。`skip_ratio=0.2` 表示跳过 20% 的无效点，只检查 80% 的无效点。值越大性能越好但召回率可能越低。仅在带 filter 的搜索中生效。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
 | `skip_strategy` | string | `"deterministic_accumulative"` | 过滤跳过的策略。可选值：`"random"`（随机跳过）或 `"deterministic_accumulative"`（确定性累积跳过）。详见下文[过滤跳过策略](#过滤跳过策略skip_ratio-与-skip_strategy)。 |
-| `brute_force_threshold` | float | 普通 HGraph：`0.0`；fused KNN：`0.02` | 选择率感知的暴搜回退开关。当过滤通过率小于等于阈值时，跳过图遍历，直接扫描合格 ID。准备过过滤集合的路径使用实际通过率，其余路径使用 `ValidRatio()` 提示（详见下一节）。取值范围 `[0.0, 1.0]`；显式设置 `0.0` 可关闭自动扫描。 |
+| `brute_force_threshold` | float | 普通 HGraph：`0.0`；无 MCI 路由的 fused KNN：`0.02` | 选择率感知的暴搜回退开关。当过滤通过率小于等于阈值时，跳过图遍历，直接扫描合格 ID。准备过过滤集合的路径使用实际通过率，其余路径使用 `ValidRatio()` 提示（详见下一节）。取值范围 `[0.0, 1.0]`；显式设置 `0.0` 可关闭自动扫描。 |
 | `rabitq_one_bit_search` | bool | `false` | 启用 RaBitQ filter/lower-bound 路径；对 x+y split 索引会使用全部 x 个 filter bits，详见 [RaBitQ x+y Split](../quantization/rabitq_split.md)。 |
 | `rabitq_error_rate` | float | 索引默认值 | 本次搜索使用的正数 lower-bound 误差倍率；调整它不需要重建 split 索引。 |
 | `enable_reorder` | bool | `true` | 是否用精排编码对粗排候选做重打分。设为 `false` 跳过精排，直接返回近似结果。需在 `index_param` 中设置 `use_reorder: true` 以存储精排所需的精确编码。 |
@@ -298,6 +298,16 @@ base->NumElements(num_vectors)->Dim(dim)->Ids(ids)
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
+
+### fused RaBitQ 与 MCI 按通过率路由
+
+构建 fused 索引时设置 `use_mci: true`，生成 MCI 伴随索引。对于能提供合格 ID 列表或支持的位图种子来源的 ID 过滤，非迭代 KNN 沿用现有路由规则：`p < hgraph_valid_ratio_threshold` 走 MCI，`p >=` 阈值走专用 fused HGraph 遍历。`p` 为过滤器的 `ValidRatio()`，阈值默认 `0.05`。这条路径不再抽样过滤器，也不套用 fused 默认的 2% 自动扫描阈值。MCI 使用当前最佳精度编码搜索伴随索引，不调用专用 fused 遍历循环。
+
+```json
+{"hgraph":{"ef_search":100,"use_mci":true,"hgraph_valid_ratio_threshold":0.05,"rabitq_one_bit_search":true}}
+```
+
+显式设置正数 `brute_force_threshold` 时，扫描仍优先；显式设为零时，关闭扫描并保留 MCI/HGraph 分流。MCI 伴随索引或种子来源不可用，以及带属性或 SearchRequest 位图条件的查询，继续使用原有 fused HGraph/扫描路由。`use_hybrid_traversal` 是独立的联合遍历模式，本次不改变其行为。通过统计字段 `mci_hybrid_route`（`mci`、`hgraph`、`brute_force`）确认实际路径。
 
 ### 高选择性过滤下的暴搜回退（`brute_force_threshold`）
 
@@ -314,7 +324,7 @@ auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})"
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
-fused RaBitQ 的非迭代 KNN 查询默认启用 `0.02` 阈值；显式设置
+fused RaBitQ 的非迭代 KNN 查询在上述 MCI 路由不可用时默认启用 `0.02` 阈值；显式设置
 `brute_force_threshold: 0` 可关闭。ID 过滤、属性表达式、位图以及删除标记按 AND
 共同判定。属性过滤要求构建时设置 `use_attribute_filter: true`。
 
@@ -343,7 +353,7 @@ fused 对普通回调先抽样估计通过率，再对可能适合扫描的谓�
 
 取值建议：
 
-- 普通 HGraph 保持默认 `0.0`；fused KNN 保持默认 `0.02` 即可自动选择。
+- 普通 HGraph 保持默认 `0.0`；fused KNN 在上述 MCI 路由不可用时默认使用 `0.02`。
 - 高选择性过滤（如 `ValidRatio` ≤ 0.05）下，`0.01–0.05` 是合理起点。再往上调
   实际上等于「只要带 filter 就走暴搜」。
 - 回调过滤先抽样最多 256 条记录，必要时再遍历 N 条索引记录；属性结果只在扫描预算内枚举 ID，高通过率图搜索保留紧凑过滤器。扫描阶段只计算通过全部条件的 M 条向量的距离；批量查询复用准备结果。

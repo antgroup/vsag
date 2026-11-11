@@ -1099,6 +1099,11 @@ private:
         uint64_t hybrid_seed_budget{0};
     };
 
+    [[nodiscard]] bool
+    can_use_mci(const SearchRequest& request,
+                const HGraphSearchParameters& params,
+                const InnerSearchParam& search_param) const;
+
     [[nodiscard]] MCIHybridSearchResult
     try_mci_search(const SearchRequest& request,
                    const HGraphSearchParameters& params,

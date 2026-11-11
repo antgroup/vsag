@@ -1181,10 +1181,15 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
     // hops_limit only takes effect when it's greater than ef_search
     apply_hops_limit(base_search_param, params);
 
-    // An explicit zero disables automatic scan preparation for fused queries.
-    const float scan_threshold = params.has_brute_force_threshold    ? params.brute_force_threshold
-                                 : rabitq_fused_datacell_ != nullptr ? 0.02F
-                                                                     : 0.0F;
+    // Preserve MCI's selectivity routing when a usable companion and seed source exist.
+    // Explicit scan thresholds still win; unsupported predicates keep fused's scan fallback.
+    const bool fused_mci_routing = rabitq_fused_datacell_ != nullptr and ft != nullptr and
+                                   not use_custom_distance and not params.use_hybrid_traversal and
+                                   this->can_use_mci(request, params, base_search_param);
+    const float scan_threshold = params.has_brute_force_threshold ? params.brute_force_threshold
+                                 : rabitq_fused_datacell_ != nullptr and not fused_mci_routing
+                                     ? 0.02F
+                                     : 0.0F;
     Vector<InnerIdType> attribute_ids(ctx.alloc);
     FilterPtr remaining_filter = ft;
     bool have_attribute_ids = false;
@@ -1223,7 +1228,8 @@ HGraph::SearchWithRequest(const SearchRequest& request) const {
 
     std::shared_ptr<PreparedSearchFilter> prepared_filter;
     if (ft != nullptr and not use_custom_distance and
-        (rabitq_fused_datacell_ != nullptr or scan_threshold > 0.0F)) {
+        (rabitq_fused_datacell_ != nullptr or scan_threshold > 0.0F) and
+        (not fused_mci_routing or scan_threshold > 0.0F)) {
         prepared_filter =
             std::make_shared<PreparedSearchFilter>(ft,
                                                    this->PublishedCount(),

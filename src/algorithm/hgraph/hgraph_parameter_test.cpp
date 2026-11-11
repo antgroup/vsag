@@ -1052,10 +1052,14 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
 
-    SECTION("reject MCI") {
+    SECTION("accept MCI companion") {
         auto param = make_param();
         param["use_mci"].SetBool(true);
-        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        auto with_mci = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+            vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        REQUIRE(with_mci != nullptr);
+        CHECK(with_mci->rabitq_fused_datacell);
+        CHECK(with_mci->mci_parameters.enabled);
     }
 
     SECTION("reject non-memory supplement") {

@@ -312,8 +312,6 @@ HGraphParameter::FromJson(const JsonType& json) {
         hierarchical_graph_param->use_reverse_edges_ = true;
     }
     if (this->rabitq_fused_datacell) {
-        CHECK_ARGUMENT(not this->mci_parameters.enabled,
-                       "rabitq_fused_datacell does not support MCI");
         CHECK_ARGUMENT(not this->deduplicate_storage,
                        "rabitq_fused_datacell does not support deduplicate_storage");
         CHECK_ARGUMENT(not this->support_force_remove,

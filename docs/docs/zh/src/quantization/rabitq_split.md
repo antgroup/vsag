@@ -103,7 +103,8 @@ label、filter code 和 supplement，record stride 仍向上对齐到 64-byte。
 - `1 <= x <= 4`、`y >= 1` 且 `x + y <= 8`。
 - metric 必须是 L2 或内积。
 - graph、filter code 和 supplement code 必须全部使用内存 IO。
-- 必须关闭 MCI、`deduplicate_storage`、remove metadata、reverse edges 和 force remove。
+- 必须关闭 `deduplicate_storage`、remove metadata、reverse edges 和 force remove。
+- 设置 `use_mci: true` 可启用 MCI 伴随索引，路由规则见 [fused 与 MCI 按通过率路由](../indexes/hgraph.md#fused-rabitq-与-mci-按通过率路由)。
 - fused 不支持 PCA；请省略 `rabitq_pca_dim` 或将其设为 `0`。
 - 不支持旧版 v0.14 序列化格式。
 - fused slab 使用独立 wire version；当前格式会明确拒绝曾包含 node version 和

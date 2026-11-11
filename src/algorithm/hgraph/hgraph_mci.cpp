@@ -626,6 +626,18 @@ HGraph::MCIHybridSearchResult::MakeStatistics(const SearchStatistics& stats) con
     return json;
 }
 
+bool
+HGraph::can_use_mci(const SearchRequest& request,
+                    const HGraphSearchParameters& params,
+                    const InnerSearchParam& search_param) const {
+    return params.use_mci and this->mci_parameters_.enabled and
+           not request.enable_attribute_filter_ and not request.enable_bitset_filter_ and
+           search_param.executors.empty() and
+           (has_valid_id_source(request.filter_) or has_bitset_source(request.filter_)) and
+           this->mci_cliques_ != nullptr and
+           this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
+}
+
 HGraph::MCIHybridSearchResult
 HGraph::try_mci_search(const SearchRequest& request,
                        const HGraphSearchParameters& params,
@@ -637,14 +649,7 @@ HGraph::try_mci_search(const SearchRequest& request,
     const bool bitset_seed_source = has_bitset_source(request.filter_);
     // MCI's seeds and packed/bitmap fast paths describe request.filter_, not additional
     // attribute or request-bitset predicates. Keep those queries on the composed HGraph path.
-    const bool can_use_mci = params.use_mci and this->mci_parameters_.enabled and
-                             not request.enable_attribute_filter_ and
-                             not request.enable_bitset_filter_ and
-                             search_param.executors.empty() and
-                             (has_valid_id_source(request.filter_) or bitset_seed_source) and
-                             this->mci_cliques_ != nullptr and
-                             this->mci_cliques_->HasCliqueIndex(this->total_count_.load());
-    if (not can_use_mci) {
+    if (not this->can_use_mci(request, params, search_param)) {
         return result;
     }
 

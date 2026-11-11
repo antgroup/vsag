@@ -3915,3 +3915,144 @@ TEST_CASE("HGraph prepared attribute and bitset predicates bypass ID-only MCI fa
         CHECK(result->GetIds()[i] < (request.enable_bitset_filter_ ? 11 : 12));
     }
 }
+
+TEST_CASE("Fused HGraph preserves MCI selectivity routing before implicit scans",
+          "[ut][hgraph][mci][fused_mci_routing]") {
+    constexpr int64_t dim = 128;
+    constexpr int64_t count = 400;
+    constexpr int64_t k = 5;
+    auto config = vsag::JsonType::Parse(generate_hgraph_mci_params(dim));
+    auto params = config["index_param"];
+    params["graph_type"].SetString("pipnn");
+    params["graph_io_type"].SetString("memory_io");
+    params["graph_storage_type"].SetString("flat");
+    params["base_io_type"].SetString("memory_io");
+    params["base_quantization_type"].SetString("rabitq");
+    params["precise_quantization_type"].SetString("rabitq");
+    params["rabitq_bits_per_dim_base"].SetInt(3);
+    params["rabitq_bits_per_dim_precise"].SetInt(5);
+    params["rabitq_bits_per_dim_query"].SetInt(32);
+    params["rabitq_fused_datacell"].SetBool(true);
+    params["rabitq_use_fht"].SetBool(true);
+    params["use_reorder"].SetBool(true);
+    params["reorder_source"].SetString("base");
+    params["store_raw_vector"].SetBool(false);
+    params["use_mci"].SetBool(true);
+    params["use_attribute_filter"].SetBool(true);
+    params["build_thread_count"].SetInt(4);
+    std::vector<int64_t> ids(count);
+    std::iota(ids.begin(), ids.end(), 0);
+    std::vector<float> vectors(count * dim);
+    std::vector<vsag::AttributeSet> attrs(count);
+    std::vector<vsag::AttributeValue<int32_t>> values(count);
+    for (int64_t i = 0; i < count; ++i) {
+        for (int64_t d = 0; d < dim; ++d) {
+            vectors[i * dim + d] = std::sin(static_cast<float>((i + 1) * (d + 7)) * 0.013F);
+        }
+        values[i].name_ = "allowed";
+        values[i].GetValue().push_back(i < 8 ? 1 : 0);
+        attrs[i].attrs_.push_back(&values[i]);
+    }
+    auto made = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(made.has_value());
+    auto index = made.value();
+    auto data = make_dataset(ids, vectors, 0, count, dim);
+    data->AttributeSets(attrs.data());
+    REQUIRE(index->Build(data).has_value());
+    REQUIRE(vsag::JsonType::Parse(index->GetStats())["mci_total_nodes"].GetInt() == count);
+    auto query = make_dataset(ids, vectors, 0, 1, dim);
+    const auto check = [&](int64_t valid,
+                           float threshold,
+                           const std::string& route,
+                           const std::string& extra = "") {
+        CAPTURE(valid, threshold, route, extra);
+        std::vector<int64_t> valid_ids(static_cast<uint64_t>(valid));
+        std::iota(valid_ids.begin(), valid_ids.end(), 0);
+        auto filter = std::make_shared<RangeBitmapFilter>(0, count, valid, valid_ids, true);
+        const std::string search =
+            R"({"hgraph":{"ef_search":400,"rabitq_one_bit_search":true,"hgraph_valid_ratio_threshold":)" +
+            std::to_string(threshold) + extra + "}}";
+        auto result = index->KnnSearch(query, k, search, filter);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value()->GetDim() == std::min(k, valid));
+        CHECK(result.value()->GetStatistics({"mci_hybrid_route"})[0] == '"' + route + '"');
+        auto control = index->KnnSearch(
+            query, k, R"({"hgraph":{"ef_search":400,"brute_force_threshold":1}})", filter);
+        REQUIRE(control.has_value());
+        REQUIRE(control.value()->GetDim() == std::min(k, valid));
+        for (int64_t i = 0; i < std::min(k, valid); ++i) {
+            CHECK(filter->CheckValid(result.value()->GetIds()[i]));
+            CHECK(result.value()->GetIds()[i] == control.value()->GetIds()[i]);
+        }
+    };
+    // A matching set below the old implicit 2% scan threshold must now reach MCI.
+    check(4, 0.05F, "mci");
+    check(8, 0.05F, "mci");
+    check(10, 0.05F, "mci");
+    // The threshold boundary belongs to HGraph, including below the old scan threshold.
+    check(20, 0.05F, "hgraph");
+    check(40, 0.05F, "hgraph");
+    check(8, 0.01F, "hgraph");
+    check(8, 0.0F, "hgraph");
+    check(8, 0.05F, "brute_force", R"(,"brute_force_threshold":0.02)");
+    check(8, 0.05F, "mci", R"(,"brute_force_threshold":0)");
+    check(8, 0.05F, "brute_force", R"(,"use_mci":false)");
+
+    check(8, 0.05F, "hybrid", R"(,"use_hybrid_traversal":true,"brute_force_threshold":0)");
+    auto excluded = vsag::Bitset::Make();
+    for (int64_t i = 8; i < count; ++i) {
+        excluded->Set(i);
+    }
+    auto bitmap_result = index->KnnSearch(
+        query,
+        k,
+        R"({"hgraph":{"ef_search":400,"use_mci":true,"hgraph_valid_ratio_threshold":1,"mci_seed_ratio":10}})",
+        excluded);
+    REQUIRE(bitmap_result.has_value());
+    REQUIRE(bitmap_result.value()->GetDim() == k);
+    CHECK(bitmap_result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("mci")");
+    for (int64_t i = 0; i < k; ++i) {
+        CHECK(bitmap_result.value()->GetIds()[i] >= 0);
+        CHECK(bitmap_result.value()->GetIds()[i] < 8);
+    }
+
+    // The fused records and MCI companion must both survive ordinary serialization.
+    std::stringstream bytes;
+    REQUIRE(index->Serialize(bytes).has_value());
+    auto loaded = vsag::Factory::CreateIndex("hgraph", config.Dump());
+    REQUIRE(loaded.has_value());
+    REQUIRE(loaded.value()->Deserialize(bytes).has_value());
+    index = loaded.value();
+    check(8, 0.05F, "mci");
+    check(20, 0.05F, "hgraph");
+
+    std::vector<int64_t> added_ids{count, count + 1};
+    std::vector<float> added_vectors(2 * dim);
+    std::copy_n(vectors.begin(), 2 * dim, added_vectors.begin());
+    auto added = index->Add(make_dataset(added_ids, added_vectors, 0, 2, dim));
+    REQUIRE(added.has_value());
+    REQUIRE(added.value().empty());
+    check(8, 0.05F, "mci");
+    REQUIRE(index->Remove(0).has_value());
+    check(8, 0.05F, "mci");
+
+    // Unsupported composed predicates retain their complete HGraph/scan predicate.
+    vsag::SearchRequest request;
+    request.query_ = query;
+    request.topk_ = k;
+    std::vector<int64_t> valid_ids(80);
+    std::iota(valid_ids.begin(), valid_ids.end(), 0);
+    request.filter_ = std::make_shared<RangeBitmapFilter>(0, count, 80, valid_ids, true);
+    request.enable_filter_ = true;
+    request.enable_attribute_filter_ = true;
+    request.attribute_filter_str_ = "allowed = 1";
+    request.params_str_ = R"({"hgraph":{"ef_search":400,"rabitq_one_bit_search":true}})";
+    auto result = index->SearchWithRequest(request);
+    REQUIRE(result.has_value());
+    REQUIRE(result.value()->GetDim() == k);
+    CHECK(result.value()->GetStatistics({"mci_hybrid_route"})[0] == R"("brute_force")");
+    for (int64_t i = 0; i < k; ++i) {
+        CHECK(result.value()->GetIds()[i] >= 0);
+        CHECK(result.value()->GetIds()[i] < 8);
+    }
+}

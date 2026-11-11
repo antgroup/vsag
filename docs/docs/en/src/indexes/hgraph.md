@@ -374,7 +374,7 @@ Search-time parameters live under the `hgraph` sub-object:
 | `hops_limit` | int | unlimited | Hard cap on the number of hops the beam search performs before returning the current frontier. |
 | `skip_ratio` | float | `0.2` | Performance tuning parameter for filtered search. Controls the ratio of invalid points to skip, in range `[0.0, 1.0]`. `skip_ratio=0.2` means skip 20% of invalid points and only check 80%. Higher values improve performance but may reduce recall. Only applies to searches with filters. See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
 | `skip_strategy` | string | `"deterministic_accumulative"` | Strategy for filter skipping. Options: `"random"` (random skipping) or `"deterministic_accumulative"` (deterministic cumulative skipping). See [Filter Skip Strategy](#filter-skip-strategy-skip_ratio-and-skip_strategy) below. |
-| `brute_force_threshold` | float | Ordinary HGraph: `0.0`; fused KNN: `0.02` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; an explicit `0.0` disables automatic scanning. |
+| `brute_force_threshold` | float | Ordinary HGraph: `0.0`; fused KNN without MCI routing: `0.02` | Selectivity-aware brute-force fallback. When `> 0` and the supplied filter's `ValidRatio()` is `≤ brute_force_threshold`, the search **bypasses the graph traversal entirely** and runs an exact scan over the valid ids using the best available flatten codes (see the section below). Must lie in `[0.0, 1.0]`; an explicit `0.0` disables automatic scanning. |
 | `rabitq_one_bit_search` | bool | `false` | Enables the RaBitQ filter/lower-bound path. On an x+y split index it uses all x filter bits; see [RaBitQ x+y Split](../quantization/rabitq_split.md). |
 | `rabitq_error_rate` | float | index default | Positive lower-bound error multiplier for this search. It can be tuned without rebuilding the split index. |
 | `enable_reorder` | bool | `true` | Whether to re-rank coarse candidates against the precise codes. Set to `false` to skip reordering and return the approximate results directly. Use `use_reorder: true` in `index_param` to store the precise codes needed for reordering. |
@@ -388,6 +388,26 @@ Search-time parameters live under the `hgraph` sub-object:
 auto result = index->KnnSearch(
     query, topk, R"({"hgraph": {"ef_search": 200}})").value();
 ```
+
+### Fused RaBitQ with MCI selectivity routing
+
+Build the fused index with `use_mci: true` to create its MCI companion. For an ID predicate
+that provides valid IDs or a supported bitset seed source, non-iterator KNN preserves the
+existing MCI/HGraph routing rule: `p < hgraph_valid_ratio_threshold` uses MCI; `p >=` the
+threshold uses the specialized fused HGraph traversal. Here `p` is the filter's `ValidRatio()`;
+the threshold defaults to `0.05`. This route does not sample the predicate or apply the implicit
+2% fused scan threshold. MCI searches the companion using the best available distance codes;
+it does not use the specialized fused traversal loop.
+
+```json
+{"hgraph":{"ef_search":100,"use_mci":true,"hgraph_valid_ratio_threshold":0.05,"rabitq_one_bit_search":true}}
+```
+
+An explicit positive `brute_force_threshold` retains scan priority. An explicit zero disables
+scanning and keeps the MCI/HGraph split. Without a usable MCI companion/seed source, or with
+attribute or SearchRequest bitset predicates, the existing fused HGraph/scan routing remains
+in effect. `use_hybrid_traversal` is a separate joint-traversal mode and is unchanged. Inspect
+`mci_hybrid_route` (`mci`, `hgraph`, or `brute_force`) to verify the selected route.
 
 ### Brute-force fallback under highly selective filters (`brute_force_threshold`)
 
@@ -406,7 +426,7 @@ auto params = R"({"hgraph": {"ef_search": 200, "brute_force_threshold": 0.01}})"
 auto result = index->KnnSearch(query, topk, params, my_filter).value();
 ```
 
-Non-iterator fused RaBitQ KNN queries enable a `0.02` threshold by default. Set
+Non-iterator fused RaBitQ KNN queries enable a `0.02` threshold by default unless the MCI routing above is available. Set
 `brute_force_threshold: 0` explicitly to disable it. ID predicates, attribute expressions,
 bitsets and deletion marks are combined with AND. Attribute filtering requires
 `use_attribute_filter: true` at build time.
@@ -449,7 +469,7 @@ How it works (`src/algorithm/hgraph/hgraph_search.cpp`):
 
 Picking a value:
 
-- Ordinary HGraph keeps its `0.0` default; fused KNN uses `0.02` for automatic routing.
+- Ordinary HGraph keeps its `0.0` default; fused KNN uses `0.02` unless the MCI routing above is available.
 - For highly selective filters, `0.01–0.05` is a reasonable starting point.
   Setting it higher than that effectively turns the index into a brute-force
   scanner whenever a filter is present.
