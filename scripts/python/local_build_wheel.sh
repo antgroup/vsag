@@ -27,9 +27,18 @@ echo "✅ Prerequisites met."
 echo "🔎 Setting up Python virtual environment..."
 if [ -z "$VIRTUAL_ENV" ] && [ -z "$CONDA_PREFIX" ]; then
   # Not in any virtual environment, create and activate .venv
-  if [ ! -d "$VENV_DIR" ]; then
-    echo "   - Virtual environment not found, creating at './${VENV_DIR}'..."
-    python3 -m venv "$VENV_DIR"
+  if [ ! -f "${VENV_DIR}/bin/activate" ]; then
+    if [ -e "$VENV_DIR" ] && [ ! -f "${VENV_DIR}/pyvenv.cfg" ] && [ -n "$(ls -A "$VENV_DIR" 2>/dev/null)" ]; then
+      echo "❌ './${VENV_DIR}' exists but is not a Python virtual environment."
+      echo "   Remove it, or activate your own virtual environment and run the build again."
+      exit 1
+    fi
+    echo "   - Virtual environment not found or incomplete, creating at './${VENV_DIR}'..."
+    python3 -m venv --clear "$VENV_DIR" || {
+      echo "❌ Could not create a virtual environment. Install the venv module (for example"
+      echo "   'apt install python3-venv') or activate your own virtual environment first."
+      exit 1
+    }
   fi
   source "${VENV_DIR}/bin/activate"
   echo "✅ Virtual environment activated."
