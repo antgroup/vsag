@@ -23,7 +23,6 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/searcher/searcher_utils.h"
-#include "utils/filter_search_skip_strategy.h"
 #include "vsag/allocator.h"
 
 namespace vsag {
@@ -36,8 +35,6 @@ uint32_t
 BasicSearcher::visit(const GraphInterfacePtr& graph,
                      const VisitedListPtr& vl,
                      const std::pair<float, uint64_t>& current_node_pair,
-                     const FilterPtr& filter,
-                     FilterSearchSkipStrategy* skip_strategy,
                      Vector<InnerIdType>& to_be_visited_rid,
                      Vector<InnerIdType>& to_be_visited_id,
                      Vector<InnerIdType>& neighbors) const {
@@ -55,12 +52,10 @@ BasicSearcher::visit(const GraphInterfacePtr& graph,
             vl->Prefetch(neighbors[i + prefetch_stride_visit_]);
         }
         if (not vl->Get(neighbors[i])) {
-            if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
-                filter->CheckValid(neighbors[i])) {
-                to_be_visited_rid[count_no_visited] = i;
-                to_be_visited_id[count_no_visited] = neighbors[i];
-                count_no_visited++;
-            }
+            // Result eligibility must not disconnect the navigation graph.
+            to_be_visited_rid[count_no_visited] = i;
+            to_be_visited_id[count_no_visited] = neighbors[i];
+            count_no_visited++;
             vl->Set(neighbors[i]);
         }
     }
@@ -133,12 +128,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
 
     auto add_pending_duplicates = [&](float duplicate_dist, InnerIdType group_head_id) {
         if constexpr (mode != InnerSearchMode::KNN_SEARCH) {
@@ -261,14 +250,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             graph->Prefetch(candidate_set->Top().second, 0);
         }
 
-        count_no_visited = visit(graph,
-                                 vl,
-                                 current_node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 skip_strategy.get(),
-                                 to_be_visited_rid,
-                                 to_be_visited_id,
-                                 neighbors);
+        count_no_visited =
+            visit(graph, vl, current_node_pair, to_be_visited_rid, to_be_visited_id, neighbors);
 
         dist_cmp += count_no_visited;
 
@@ -344,12 +327,6 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
     Vector<InnerIdType> to_be_visited_id(graph->MaximumDegree(), alloc);
     Vector<InnerIdType> neighbors(graph->MaximumDegree(), alloc);
     Vector<float> line_dists(graph->MaximumDegree(), alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
 
     Filter* attr_ft = nullptr;
     if (not inner_search_param.executors.empty() and inner_search_param.executors[0] != nullptr) {
@@ -441,14 +418,8 @@ BasicSearcher::search_impl(const GraphInterfacePtr& graph,
             graph->Prefetch(candidate_set->Top().second, 0);
         }
 
-        count_no_visited = visit(graph,
-                                 vl,
-                                 current_node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 skip_strategy.get(),
-                                 to_be_visited_rid,
-                                 to_be_visited_id,
-                                 neighbors);
+        count_no_visited =
+            visit(graph, vl, current_node_pair, to_be_visited_rid, to_be_visited_id, neighbors);
 
         flatten->Query(line_dists.data(), computer, to_be_visited_id.data(), count_no_visited, ctx);
         dist_cmp += count_no_visited;

@@ -528,8 +528,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                                    const void* data_point,
                                    size_t ef,
                                    const vsag::FilterPtr is_id_allowed,
-                                   const float skip_ratio,
-                                   vsag::FilterSearchSkipStrategyType skip_strategy_type,
+                                   const float /*skip_ratio*/,
+                                   vsag::FilterSearchSkipStrategyType /*skip_strategy_type*/,
                                    vsag::Allocator* allocator,
                                    vsag::IteratorFilterContext* iter_ctx,
                                    float min_distance) const {
@@ -540,10 +540,6 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
 
     MaxHeap top_candidates(search_allocator);
     MaxHeap candidate_set(search_allocator);
-
-    float valid_ratio = is_id_allowed ? is_id_allowed->ValidRatio() : 1.0F;
-    auto skip_strategy =
-        vsag::create_filter_search_skip_strategy(skip_strategy_type, valid_ratio, skip_ratio);
 
     float lower_bound;
     if (iter_ctx != nullptr && !iter_ctx->IsFirstUsed()) {
@@ -614,16 +610,8 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
             }
             if (visited_array[candidate_id] != visited_array_tag) {
                 visited_array[candidate_id] = visited_array_tag;
-                bool candidate_valid = true;
-                bool candidate_valid_checked = false;
-                if (is_id_allowed && not candidate_set.empty() &&
-                    not skip_strategy->ShouldSkipFilterCheck()) {
-                    candidate_valid = is_id_allowed->CheckValid(getExternalLabel(candidate_id));
-                    candidate_valid_checked = true;
-                    if (not candidate_valid) {
-                        continue;
-                    }
-                }
+                // Nonmatching nodes can be the only bridge to eligible results.
+                // Apply eligibility only when inserting into top_candidates.
                 float dist = 0;
                 char* currObj1 = getDataByInternalId(candidate_id);
                 dist = fstdistfunc_(data_point, currObj1, dist_func_param_);
@@ -634,7 +622,7 @@ HierarchicalNSW::searchBaseLayerST(InnerIdType ep_id,
                     vsag::PrefetchLines(vector_data_ptr, 64);
 
                     if ((!has_deletions || !isMarkedDeleted(candidate_id)) &&
-                        ((!is_id_allowed) || candidate_valid_checked ||
+                        ((!is_id_allowed) ||
                          is_id_allowed->CheckValid(getExternalLabel(candidate_id)))) {
                         if (iter_ctx != nullptr && !iter_ctx->CheckPoint(candidate_id)) {
                             continue;

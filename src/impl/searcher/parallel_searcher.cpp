@@ -22,7 +22,6 @@
 #include "datacell/flatten_interface.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/searcher/searcher_utils.h"
-#include "utils/filter_search_skip_strategy.h"
 #include "utils/spsc_queue.h"
 
 namespace vsag {
@@ -39,8 +38,6 @@ uint32_t
 ParallelSearcher::visit(const GraphInterfacePtr& graph,
                         const VisitedListPtr& vl,
                         const Vector<std::pair<float, uint64_t>>& node_pair,
-                        const FilterPtr& filter,
-                        FilterSearchSkipStrategy* skip_strategy,
                         Vector<InnerIdType>& to_be_visited_rid,
                         Vector<InnerIdType>& to_be_visited_id,
                         std::vector<Vector<InnerIdType>>& neighbors,
@@ -64,12 +61,10 @@ ParallelSearcher::visit(const GraphInterfacePtr& graph,
                 vl->Prefetch(neighbors[i][j + prefetch_stride_visit_]);
             }
             if (not vl->Get(neighbors[i][j])) {
-                if (not filter || count_no_visited == 0 || skip_strategy->ShouldSkipFilterCheck() ||
-                    filter->CheckValid(neighbors[i][j])) {
-                    to_be_visited_rid[count_no_visited] = j;
-                    to_be_visited_id[count_no_visited] = neighbors[i][j];
-                    count_no_visited++;
-                }
+                // Result eligibility must not disconnect the navigation graph.
+                to_be_visited_rid[count_no_visited] = j;
+                to_be_visited_id[count_no_visited] = neighbors[i][j];
+                count_no_visited++;
                 vl->Set(neighbors[i][j]);
             }
         }
@@ -133,12 +128,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
                                                Vector<InnerIdType>(graph->MaximumDegree(), alloc));
     Vector<float> line_dists(vector_size, alloc);
     Vector<std::pair<float, uint64_t>> node_pair(beam, alloc);
-    auto skip_strategy = create_filter_search_skip_strategy(
-        inner_search_param.skip_strategy_type,
-        inner_search_param.is_inner_id_allowed != nullptr
-            ? inner_search_param.is_inner_id_allowed->ValidRatio()
-            : 1.0F,
-        inner_search_param.skip_ratio);
 
     auto add_knn_duplicate_results = [&](float duplicate_dist, InnerIdType group_head_id) {
         if (not inner_search_param.consider_duplicate or label_table == nullptr or
@@ -251,8 +240,6 @@ ParallelSearcher::search_impl(const GraphInterfacePtr& graph,
         count_no_visited = visit(graph,
                                  vl,
                                  node_pair,
-                                 inner_search_param.is_inner_id_allowed,
-                                 skip_strategy.get(),
                                  to_be_visited_rid,
                                  to_be_visited_id,
                                  neighbors,
