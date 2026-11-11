@@ -187,7 +187,7 @@ The image upgrade can land on main ahead of the C++20 migration. Copy the follow
 
 These changes build independently of the CMake, source, formatter configuration and release-package changes in the toolchain PR. The existing x86 MKL/OpenBLAS and aarch64 OpenBLAS Dockerfiles inherit the upgraded bases without edits. The manylinux `Dockerfile.dist_*` changes belong to the toolchain/release migration and are not required for this image-only PR.
 
-The image workflow watches both the Dockerfiles and the shared installer. PR events build the complete image chains without pushing; merging the image PR triggers the existing push workflow to publish the tags. After publication, obtain the digest for `ghcr.io/antgroup/vsag:ci-x86-openblas`, verify GCC/G++ 13 and clang-format/clang-tidy 20 in that image, and commit that exact digest to `.github/ci-routing.json` on canonical main. Preserve the existing routing switch unless intentionally changing routing policy. The toolchain PR then needs a new run or **Re-run all jobs** to read the new main configuration and use the new image; rerunning only failed jobs can retain the old image selection.
+The image workflow watches both the Dockerfiles and the shared installer. PR events build the complete image chains without pushing; merging the image PR triggers the existing push workflow to publish the tags. After publication, obtain the `linux/amd64` manifest digest from the `ghcr.io/antgroup/vsag:ci-main-openblas` index, verify GCC/G++ 13 and clang-format/clang-tidy 20 in that image, and commit that exact digest to `.github/ci-routing.json` on canonical main. Preserve the existing routing switch unless intentionally changing routing policy. The toolchain PR then needs a new run or **Re-run all jobs** to read the new main configuration and use the new image; rerunning only failed jobs can retain the old image selection.
 
 ## Main-target PR check scope
 
@@ -196,10 +196,10 @@ lint, formatting, routing checks and `PR CI Gate`. Team and Community remain alt
 Linux execution paths, not different correctness requirements.
 
 - Python wheel build/test is temporarily disabled for all main-target PRs, including
-  Python changes, while the Python rework is in progress. The existing main-push
-  and manual Python checks remain available. Restore PR validation in both
+  Python changes, while the Python rework is in progress. Automatic main-push Python checks are also temporarily paused pending #3295;
+  explicit manual Python checks remain available. Restore PR validation in both
   `build-python-x86` and `test-python-x86` after the rework is ready; until then,
-  Python integration regressions may first be detected after merge.
+  Python integration regressions require explicit manual or Daily testing to be detected.
 - macOS ASan builds and TSan no longer run for main-target PRs. Their main-push and
   manual workflows remain unchanged. Platform-specific and race regressions can thus
   be discovered after merge rather than before it.
@@ -232,7 +232,7 @@ failed diff operations conservatively select heavy checks and full lint.
 
 | Layer | Checks |
 | --- | --- |
-| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 wheel plus all Python tests; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
+| Each main push | ARM64/macOS ASan builds plus fixed platform smoke inventory; Python X86 temporarily paused pending #3295; existing TSan concurrent tests; changed implementation lint, expanded to full lint for headers/build/dependencies/unknown changes |
 | Daily, manual until separately activated | Existing daily/SIMD/bundled-OpenBLAS/concurrent tests plus full X86/ARM64/macOS ASan suites, all numbered examples (including macOS), both Python architectures, full lint, Coverage and historical compatibility |
 | Version branches and standalone manual workflows | Existing full scope; reusable workflow inputs default to full behavior |
 
@@ -392,7 +392,7 @@ job runners, dependencies, selection and permissions. No workflow generator is n
 - PR CI retains the required `PR CI Gate` name. PR Metadata alone handles body/label
   edits. Retargeting a PR still requires pushing a new commit before code validation.
 - Branch CI retains a separate run for each main commit. Main uses platform smoke,
-  Python x86, TSan and selected lint; version branches retain their full standalone
+  TSan and selected lint (automatic Python x86 is temporarily paused pending #3295); version branches retain their full standalone
   scopes, including Coverage and compatibility. SIMD path checks are also here.
 - Manual Checks offers full PR/branch profiles and individual ASan, TSan, Python,
   lint, Coverage, compatibility, SIMD, toolchain and performance checks. The actual
@@ -436,3 +436,23 @@ Runs can execute concurrently if GitHub-hosted capacity permits. This does not
 change the Team pool or enable full daily regression scheduling.
 
 See [Daily regression budgets and seven-day rotation](daily-regression.md) for the opt-in Daily profile, reproduction, and acceptance boundaries.
+
+### Temporary main-push Python pause (#3295)
+
+Automatic main pushes currently skip Python wheel construction and pytest while
+the pyvsag/manylinux upgrade in [#3295](https://github.com/antgroup/vsag/issues/3295)
+is developed. The current manylinux GCC 10.2.1 build rejects the new
+`__builtin_cpu_supports("f16c")` calls. This pause accepts that post-merge Python
+regressions will not be detected automatically during the transition.
+
+`main_ci_policy.py` emits an explicit `python=false` only for main pushes (or
+when heavy checks are unnecessary). `main_ci_summary.py` requires that the
+Python result is skipped and explains the suspension; it still rejects failures,
+missing selection outputs, and failures in other selected checks. Daily, manual
+Python/full-branch checks, version branches and local contributor validation
+requirements retain their existing scope. No repository-wide workflow is disabled.
+
+After #3295's packaging upgrade passes wheel build/install/pytest validation,
+remove the main-push exception in `select_for_event`, update the pause regressions
+and these docs, and verify an actual main Branch CI Python run before considering
+automatic Python coverage restored.

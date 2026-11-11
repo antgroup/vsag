@@ -57,7 +57,26 @@ def policy():
     if (p.get("schema_version") != 1 or set(p["minutes"]) != BUCKETS
             or any(type(v) is not int or v <= 0 for v in p["minutes"].values())
             or sum(p["minutes"].values()) != 360):
-        raise PlanError("Daily budget must have exactly 360 minutes")
+        raise PlanError("Invalid legacy diagnostic allocation")
+    w = p["window"]
+    if (w["wall_minutes"] != 600 or w["execution_minutes"] + w["cleanup_minutes"] != 600
+            or w["execution_minutes"] <= 0 or w["cleanup_minutes"] < 1
+            or type(w["job_execution_minutes"]) is not int
+            or not 0 < w["job_execution_minutes"] < 300):
+        raise PlanError("Invalid ten-hour execution/cleanup window")
+    if type(p["x86_shards"]) is not int or not 1 <= p["x86_shards"] <= 32:
+        raise PlanError("Invalid x86 shard count")
+    if p["timezone"] != "Asia/Shanghai" or w["timezone"] != p["timezone"]:
+        raise PlanError("Daily business timezone must be Asia/Shanghai")
+    if any(not isinstance(w.get(k), str) or not re.fullmatch(r"[0-9]{2}:[0-9]{2}", w[k])
+           for k in ("start", "end")):
+        raise PlanError("Window clock must use HH:MM")
+    try:
+        start, end = (dt.time.fromisoformat(w[k]) for k in ("start", "end"))
+    except ValueError as error:
+        raise PlanError("Invalid window clock") from error
+    if ((end.hour * 60 + end.minute - start.hour * 60 - start.minute) % 1440) != w["wall_minutes"]:
+        raise PlanError("Window clocks disagree with elapsed duration")
     for name in p["core_minutes"]:
         if sum(p[k][name] for k in ("core_minutes", "rotation_minutes", "reserve_minutes")) != p["minutes"][name]:
             raise PlanError("Invalid sub-budget: " + name)
@@ -134,15 +153,15 @@ def partition(units):
         raise PlanError("Duplicate configuration group")
     slots = [[] for _ in range(7)]
     loads = [{b: 0.0 for b in BUCKETS} for _ in range(7)]
-    for u in sorted(units, key=lambda u: (-(u["estimate_seconds"] or 60.0), u["key"])):
+    for u in sorted(units, key=lambda u: (-(u.get("order_seconds") or u["estimate_seconds"] or 60.0), u["key"])):
         b = u["owner"]
         slot = min(range(7), key=lambda i: (loads[i][b], i))
         slots[slot].append(u)
-        loads[slot][b] += u["estimate_seconds"] or 60.0
+        loads[slot][b] += u.get("order_seconds") or u["estimate_seconds"] or 60.0
     return slots
 
 
-def build_plan(ctx, environment, core, extension, inventory=None):
+def build_plan(ctx, environment, core, extension, inventory=None, core_only=False, full_coverage=False):
     validate_context(ctx)
     if not environment or not core:
         raise PlanError("Environment and daily core cannot be empty")
@@ -154,9 +173,51 @@ def build_plan(ctx, environment, core, extension, inventory=None):
         if u["owner"] not in BUCKETS - {"reserve"}:
             raise PlanError("Invalid owner")
         u["estimate_seconds"] = estimate(u, environment, history)
-    week = partition(extension)
+        names = {t["name"] for t in u.get("tests", [])}
+        observations = [s["seconds"] for s in history["samples"]
+                        if s.get("case") in names and s["environment"] == environment
+                        and s["status"] in ("passed", "timeout")]
+        if any(type(v) not in (int, float) or not math.isfinite(v) or v <= 0
+               for v in observations):
+            raise PlanError("Invalid scheduling observation")
+        # Parent-group/timeout observations order work, never certify a new tuple's estimate.
+        u["order_seconds"] = max([u["estimate_seconds"] or 60.0] + observations)
+    architecture_scope = None
+    if not full_coverage and environment.lower().endswith(("/linux/aarch64", "/linux/arm64")):
+        # Keep one stable core smoke per source file/owner. Other existing core
+        # cases join the extension inventory rather than disappearing silently.
+        smoke, rest, seen = [], [], set()
+        for unit in sorted(core, key=lambda u: (
+                not any("[build]" in t.get("tags", "").lower() for t in u["tests"]), u["key"])):
+            family = (unit["owner"], tuple(sorted({t["source_file"] for t in unit["tests"]})))
+            protected = any("[regression]" in t.get("tags", "").lower() or
+                            t["name"].startswith("gh#") for t in unit["tests"])
+            if family in seen and not protected:
+                rest.append({**unit, "mode": "rotation"})
+            else:
+                seen.add(family)
+                smoke.append(unit)
+        core = smoke
+        extension = rest + extension
+        # A fixed weekly bucket gives approximately one tenth of the extension
+        # inventory to ARM. Full matrices remain a release validation obligation.
+        date = dt.date.fromisoformat(ctx["logical_date"])
+        monday = date - dt.timedelta(days=date.weekday())
+        strata = load(HERE / "daily_matrix.json")["architecture_policy"]["arm_extension_strata"]
+        if type(strata) is not int or not 1 <= strata <= 70:
+            raise PlanError("Invalid ARM extension strata")
+        bucket = (monday.toordinal() // 7) % strata
+        eligible = ([] if core_only else [u for u in extension
+                    if int(digest(u["key"])[:8], 16) % strata == bucket])
+        architecture_scope = {"architecture": "arm", "extension_fraction": f"1/{strata}",
+                              "extension_inventory": len(extension),
+                              "weekly_extension": len(eligible),
+                              "release_only_this_week": len(extension) - len(eligible)}
+        extension = eligible
+    week = partition([] if core_only else extension)
     return sealed({"schema_version": 1, "kind": "daily-plan", "context": ctx,
-                   "environment": environment, "core": core, "rotation": week,
+                   "environment": environment, "architecture_scope": architecture_scope,
+                   "core": core, "rotation": week,
                    "inventory": inventory or {"exclusions": []},
                    "selected": core + week[ctx["slot"]],
                    "unknown_timings": sum(u["estimate_seconds"] is None for u in units)})
@@ -174,3 +235,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def shard_plan(plan, index, count):
+    verify(plan)
+    if type(index) is not int or type(count) is not int or not 1 <= count <= 32 or not 0 <= index < count:
+        raise PlanError("Invalid shard index/count")
+    bins = [[] for _ in range(count)]
+    loads = [0.0] * count
+    for unit in sorted(plan["selected"], key=lambda u: (-u.get("order_seconds", 60.0), u["key"])):
+        target = min(range(count), key=lambda i: (loads[i], i))
+        bins[target].append(unit)
+        loads[target] += unit.get("order_seconds", 60.0)
+    return sealed({**{k: v for k, v in plan.items() if k != "digest"},
+                   "selected": bins[index],
+                   "sharding": {"index": index, "count": count, "parent_digest": plan["digest"],
+                                "full_selected": plan["selected"]}})
+
+
+def execution_deadline(ctx, window=None):
+    now = dt.datetime.now(dt.timezone.utc)
+    if window is not None:
+        verify(window)
+        if window.get("kind") != "daily-window" or window.get("source_sha") != ctx["source_sha"]:
+            raise PlanError("Execution window/source mismatch")
+        import os
+        if os.environ.get("GITHUB_RUN_ATTEMPT") and window.get("attempt") != int(os.environ["GITHUB_RUN_ATTEMPT"]):
+            raise PlanError("Stale execution window from an earlier attempt")
+        if not isinstance(window.get("started_at"), str) or not isinstance(window.get("job_started_at"), str):
+            raise PlanError("Missing attempt/job start clock")
+        started = dt.datetime.fromisoformat(window["started_at"].replace("Z", "+00:00"))
+        job_start = dt.datetime.fromisoformat(window["job_started_at"].replace("Z", "+00:00"))
+        if started.tzinfo is None or job_start.tzinfo is None or job_start < started:
+            raise PlanError("Invalid attempt/job start clock")
+    else:
+        started = job_start = now
+    limits = policy()["window"]
+    return min(started + dt.timedelta(minutes=limits["execution_minutes"]),
+               job_start + dt.timedelta(minutes=limits["job_execution_minutes"]))

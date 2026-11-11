@@ -77,7 +77,7 @@ jobs:
               - 'tests/scripts/simd_coverage_test.py'
             python:
               - 'python/**'
-              - 'python_bindings/**'
+              - 'cmake/vsag_c.map'
               - 'tests/python/**'
               - '.github/workflows/**'
               - 'scripts/**'
@@ -287,7 +287,7 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -329,7 +329,7 @@ jobs:
     env:
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -367,7 +367,7 @@ jobs:
     if: ${{ !inputs.team-linux && needs.changes.outputs.cpp == 'true' }}
     runs-on: ubuntu-24.04
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -404,7 +404,7 @@ jobs:
       COMPATIBILITY_INDEX_DIR: ${{ github.workspace }}/.ci-compatibility-inputs
       LD_LIBRARY_PATH: ${{ github.workspace }}/build/src
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -500,7 +500,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
         with:
@@ -620,7 +620,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
       volumes:
         - /opt:/useless
     steps:
@@ -665,7 +665,7 @@ jobs:
       group: test_tsan_x86-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     container:
-      image: vsaglib/vsag:ci-x86-openblas
+      image: vsaglib/vsag:ci-main-openblas
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/tsan-build-and-test-test-tsan

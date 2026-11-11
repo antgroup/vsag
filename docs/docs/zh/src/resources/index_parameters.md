@@ -46,7 +46,7 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `max_degree` | 16~48 | 每节点最大出边数 |
 | `ef_construction` | 200~500 | 构建阶段候选集大小，越大召回越高、构建越慢 |
 | `alpha` | `1.0` | 最终 robust pruning 的系数；PiPNN 要求有限且不小于 `1.0` |
-| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` | 主存储的量化策略 —— 支持的全部取值见[量化章节](../quantization/) |
+| `base_quantization_type` | `fp32` / `fp16` / `bf16` / `sq8` / `sq8_local` / `sq4_local` / `sq4` / `pq` / `rabitq` / `saq` / `tq` | 主存储的量化策略；具体行为及各索引限制见[量化章节](../quantization/) |
 | `use_reverse_edges` | `false` | 跟踪入边，实现 O(1) 反向邻居查找；边存储约翻倍，且压缩图存储不支持 |
 | `label_remap_type` | `pg` | label map 实现：默认 `pg`，或 `robin` |
 | `reorder_source` | `precise` | 从 `precise` 存储或直接从 `base` 重排；RaBitQ x+y split（包括 `tq_chain="mrle, rabitq"`）会自动选择 `base` |
@@ -57,6 +57,19 @@ HGraph 的构建参数使用通用的 `index_param` 键（参见 `examples/cpp/1
 | `fast_encode_rabitq_rounds` | `6` | 快速编码器微调轮数，范围 `[1, 32]` |
 
 HGraph float32 L2/IP/cosine 的 `base_quantization_type` 和 `precise_quantization_type` 均可选择 `sq8_local` 或 `sq4_local`（后者需要 `use_reorder: true`）。内存、持久化及限制见[local SQ4/SQ8](../quantization/sq.md)。
+
+### SAQ 基础量化参数
+
+当 `base_quantization_type` 为 `saq` 时，HGraph、IVF 和 Pyramid 接受下列参数。它们属于
+构建期模型状态，因此加载或合并兼容索引状态时必须保持一致。
+
+| 字段 | 类型 | 默认值 | 有效取值 | 说明 |
+|------|------|--------|----------|------|
+| `saq_avg_bits` | float | `4.0` | `[1, 8]` | 每个输入维度的平均 payload 目标。完整记录预留与等长 multi-bit RaBitQ 相同的 12 字节额度；SAQ 的每段 8 字节元数据和字节对齐位平面均在该固定记录预算内计费。 |
+| `saq_segment_count` | 无符号整数 | `0` | `0` 或可行的正整数 | `0` 表示联合学习段数、64 维对齐边界和位宽；正数表示固定均匀分配的对齐边界并学习各段位宽。维度或记录预算无法容纳请求时训练失败。 |
+| `saq_random_rotation` | 布尔值 | `true` | `true` / `false` | 在每段内应用确定性、可持久化的正交旋转。 |
+
+记录布局、度量语义、持久化方式和完整 HGraph 示例见 [SAQ 指南](../quantization/saq.md)。
 
 ### PiPNN 构建参数
 
@@ -225,6 +238,21 @@ SINDI_V2 兼容 SINDI 的全部功能，并支持内存与磁盘 I/O。
 
 构建参数及 `n_candidate`、`filter_callback_limit` 等检索参数详见
 [SINDI_V2 页面](../indexes/sindi_v2.md)。
+
+## SIMQ（多向量检索）
+
+SIMQ 要求顶层 `dim > 0`、`dtype: "float32"`、`metric_type: "ip"`；
+可用 `repr: "multi_vector"` 显式描述布局。全部 15 个公开构建字段位于 `index_param`：
+`base_io_type`、`base_file_path`、`base_enable_read_cache`、`base_cache_total_size`、
+`quantization_type`、`build_thread_count`、`init_cluster_ratio`、`max_cluster_size`、
+`split_start_idx`、`random_seed`、`coarse_k`、`rerank_k`、`split_delay_seconds`、
+`support_duplicate`、`deduplicate_storage`。
+
+KNN 和范围搜索均接受 `simq.coarse_k`、`simq.rerank_k`（省略或非正值回退构建默认值）
+以及软预算 `simq.timeout_ms`。根级有限 `threshold` 仅限制 KNN 最终距离；范围搜索使用
+`radius`。共享的 `parallelism`、`factor`、`enable_reorder` 可在 `simq` 内解析但不生效，
+不能关闭 MaxSim 精排。默认值、约束、存储/量化限制及输入 dtype 与存储格式的区别，
+详见 [SIMQ 参数表](../indexes/simq.md)。
 
 ## 运行期参数
 

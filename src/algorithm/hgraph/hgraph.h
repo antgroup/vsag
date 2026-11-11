@@ -103,6 +103,7 @@ public:
     friend class HGraphFGIM;
     friend class HGraphFGIMTestAccessor;
     friend class HGraphCodeWriteTestAccess;
+    friend class HGraphFusedInputTestAccess;
     friend struct HGraphMCITestAccess;
     friend class HGraphOptimizedBuildSession;
     friend class MciIncrementalAddExecutor;
@@ -112,7 +113,7 @@ public:
     HGraph(const HGraphParameterPtr& param, const IndexCommonParam& common_param);
 
     HGraph(const ParamPtr& param, const IndexCommonParam& common_param)
-        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param){};
+        : HGraph(std::dynamic_pointer_cast<HGraphParameter>(param), common_param) {};
 
     ~HGraph() override = default;
 
@@ -681,11 +682,14 @@ private:
     void
     validate_add_data(const DatasetPtr& data) const;
 
-    void
-    validate_fused_vector_data(const float* data, uint64_t count) const;
+    const float*
+    fused_float_input(const void* data, uint64_t count, Vector<float>& scratch) const;
 
     std::unique_ptr<FusedBatchCodes>
     prepare_fused_codes(const DatasetPtr& data) const;
+
+    void
+    validate_fused_vector_data(const void* input, uint64_t count) const;
 
     AddContext
     prepare_add_context(const DatasetPtr& data);

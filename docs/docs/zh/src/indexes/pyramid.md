@@ -85,7 +85,9 @@ Pyramid 的 `Build`、`Add` 和检索支持 `dtype: "float16"`、`dtype: "bfloat
 
 两种半精度输入都通过 `Dataset::Float16Vectors` 提供连续的 `uint16_t` 缓冲区。缓冲区应包含**已经编码的 FP16 或 BF16 位模式**，而不是将浮点数直接数值转换为整数的结果；`dtype` 决定这些位模式的解释方式。Build/Add 缓冲区包含 `NumElements() * Dim()` 个元素，查询缓冲区也必须使用与索引一致的输入格式。ID 和路径的设置与上面的示例相同，将 `Float32Vectors(data)` 和 `Float32Vectors(q)` 分别替换为 `Float16Vectors(half_data)` 和 `Float16Vectors(half_query)` 即可。使用 `Owner(false)` 时，调用期间须保持借用的缓冲区（包括 ID 和路径）有效。
 
-对于半精度输入，`base_quantization_type` 以及启用 `use_reorder: true` 时的 `precise_quantization_type` 支持 `fp16`、`bf16`、`pq`、`sq8` 和 `fp32`。各量化器自身的要求仍然适用，例如 PQ 的训练和维度设置。以下是输入与存储格式匹配的最小配置：
+FP16/BF16 输入支持原来对 FP32 合法的同一组存储量化器配置，而非单独的受限列表：`fp32`、`fp16`、`bf16`、普通 `sq4`/`sq8`、`sq4_uniform`/`sq8_uniform`、`sq4_local`/`sq8_local`、`pq`、`pqfs`、`rabitq` 以及符合条件的 `tq` 链。此说明适用于基础存储和启用后的精排存储，并不意味着任意 base/precise 组合都合法；原有的 metric、维度、训练、图和 IO 限制仍然适用。TQ 链内仍禁止 local SQ4/SQ8。split RaBitQ 支持 3+5 bits（包括 MRLE），split TQ 链仅允许 `"mrle, rabitq"`。HGraph fused RaBitQ 仍仅支持 L2/IP，要求 flat 内存图并遵守原有 IO 限制，不支持 TQ。半精度输入不会放宽这些限制。
+
+以下是输入与存储格式匹配的最小配置：
 
 ```json
 {
@@ -102,13 +104,13 @@ Pyramid 的 `Build`、`Add` 和检索支持 `dtype: "float16"`、`dtype: "bfloat
 
 若使用 BF16 输入和 BF16 存储，将 `dtype` 改为 `"bfloat16"`，`base_quantization_type` 改为 `"bf16"`。也支持跨格式存储转换，例如 FP16 输入配 BF16 存储、BF16 输入配 FP32 存储；这不会改变后续查询所需的输入格式。`metric_type: "cosine"` 会在编码前归一化向量，因此即使输入和存储格式匹配，cosine 也不保证逐字节保留输入。
 
-对于 L2/IP，FP16 输入配 FP16 存储、BF16 输入配 BF16 存储会逐位保留输入编码。跨格式存储以及 `pq`/`sq8`/`fp32` 存储会先将输入转换为 float32，不提供相同的半精度位模式保留保证。
+对于 L2/IP，FP16 输入配 FP16 存储、BF16 输入配 BF16 存储会逐位保留输入编码。跨格式存储及其他量化器按需经过 FP32 转换，不提供相同的半精度位模式保留保证。
 
 在半精度输入索引上调用 `CalcDistanceById` 和 `CalcDistancesById` 时，请使用 `DatasetPtr` 重载，并提供与索引 dtype 一致的原生半精度查询缓冲区。原始 `const float*` 重载仅接受 float32 索引，对半精度输入索引会明确报错。
 
 FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 字节。这指的是**向量编码大小，而非整个索引内存**：图、ID、路径、分配开销以及可选的精排/原始向量副本还会占用空间。仅使用半精度输入并不会自动选择半精度存储，也不代表总内存减半。
 
-半精度输入可使用 `graph_type: "nsw"` 或 `"odescent"`；**PiPNN 仍仅支持 float32 输入**。以上说明仅针对 Pyramid，不代表 VSAG 的所有索引都支持这些输入类型。
+半精度输入可使用 `graph_type: "nsw"`、`"odescent"` 和 `"pipnn"`。以上说明仅针对 Pyramid，不代表 VSAG 的所有索引都支持这些输入类型。
 
 ## 构建参数
 
@@ -116,7 +118,7 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
+| `base_quantization_type` | string | — | 底层量化类型（`fp32`、`fp16`、`bf16`、`sq8`、`sq4`、`sq8_local`、`sq4_local`、`sq8_uniform`、`sq4_uniform`、`pq`、`pqfs`、`rabitq`、`saq`、`tq`）。各量化器细节见[量化章节](../quantization/)。 |
 | `tq_chain` | string | — | `base_quantization_type` 为 `tq` 时使用的变换链，例如 `"mrle, rabitq"`。 |
 | `mrle_dim` | int | `0` | MRLE 保留的前缀维度；`0` 表示保持输入维度。 |
 | `max_degree` | int | `64` | 子图内节点的最大出度 |
@@ -143,6 +145,9 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `rabitq_bits_per_dim_precise` | int | 未设置 | RaBitQ split 的 `y` bits。和 `base_quantization_type: "rabitq"`、`precise_quantization_type: "rabitq"` 一起设置时，Pyramid 使用 split storage；`rabitq_bits_per_dim_base` 仍表示 `x`，且 `x + y <= 8`。 |
 | `fast_encode_rabitq` | bool | `true` | 对 RaBitQ 底层或精排存储使用多 bit 快速编码器；设为 `false` 使用精确编码器 |
 | `fast_encode_rabitq_rounds` | int | `6` | RaBitQ 快速编码的微调轮数，范围 `[1, 32]` |
+| `saq_avg_bits` | float | `4.0` | SAQ 每维平均记录位预算，范围 `[1, 8]` |
+| `saq_segment_count` | int | `0` | SAQ 分段数；`0` 表示动态选择边界 |
+| `saq_random_rotation` | bool | `true` | 在每个 SAQ 分段内使用独立正交旋转 |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | 底层与精排存储后端；以 liburing 构建时可用 `uring_io` |
 | `base_file_path` / `precise_file_path` | string | — | `buffer_io`、`async_io`、`uring_io`、`mmap_io` 等磁盘存储必须设置 |
 | `store_raw_vector` | bool | `false` | 保留 FP32 原始向量，用于 `GetRawVectorByIds` 和精确的按 ID 距离计算 |
@@ -153,8 +158,13 @@ FP16 或 BF16 的单向量存储码占 `2 * dim` 字节，FP32 则占 `4 * dim` 
 | `build_thread_count` | int | `1` | 构建阶段并发线程数 |
 | `hierarchies` | array | `[]` | 命名层级定义。每个元素可以是字符串（继承全部顶层参数）或对象（含 `name` 及可选覆盖参数：`max_degree`、`ef_construction`、`alpha`、`no_build_levels`、`index_min_size`、`root_graph_type`）。设置后激活多层级模式，每个层级维护独立的路径树。 |
 
-PiPNN 支持 `dtype: "float32"`，并支持 `metric_type: "l2"`、`"ip"` 或 `"cosine"` 的 Pyramid
-构建。它批量构建每棵 hierarchy 中所有实际构建的图；设置
+PiPNN 支持 `dtype: "float32"`、`"float16"` 或 `"bfloat16"`，以及
+`metric_type: "l2"`、`"ip"` 或 `"cosine"` 的 Pyramid 稠密向量构建；不支持稀疏向量或 `int8` 输入。
+对于 FP16/BF16 输入，PiPNN 以原生半精度格式借用完整输入行，不生成完整输入的 FP32 副本；
+仅将有界的局部分区/叶子操作数转换为 FP32 供 BLAS 矩阵运算使用，并以 FP32 累加。
+这不是原生半精度矩阵后端。最终向量存储量化与输入 dtype 独立配置，仍须遵守上文列出的量化器支持范围。
+量化器训练与 PiPNN 构图是独立阶段：训练仍可能将完整的选定训练样本物化为 FP32 缓冲区（选中全部行时可能覆盖整个数据集）。因此，借用半精度输入不保证整个 Build 都没有完整训练样本的 FP32 缓冲区。这些半精度输入路径仍在验证中，不作性能或无回归声明。
+它批量构建每棵 hierarchy 中所有实际构建的图；设置
 `root_graph_type: "multi_layer"` 时，也包括所有 root routing 层。搜索、增量 `Add`、删除、
 重复处理、精排和序列化保持标准 Pyramid 行为；`no_build_levels` 中列出的层级仍会跳过构图。
 `pipnn_*` 参数在整个 Pyramid 索引中共享；hierarchy 对象仍可分别覆盖

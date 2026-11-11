@@ -62,7 +62,9 @@ def axes_for(source, source_line):
         if re.search(r"\b(from_range|range|random|take|filter|map|values)\s*\(", expression):
             raise dp.PlanError("Generator adapter needs an explicit inventory")
         line = source.count("\n", 0, ts[i][1]) + 1
-        axes.append({"line": str(line), "choices": count, "expression": expression.strip()})
+        end_line = source.count("\n", 0, ts[close][1]) + 1
+        axes.append({"line": str(line), "end_line": str(end_line),
+                     "choices": count, "expression": expression.strip()})
         i = close + 1
     if len({a["line"] for a in axes}) != len(axes):
         raise dp.PlanError("Multiple generators on one line are unsupported")
@@ -80,3 +82,20 @@ def configurations(source, source_line):
         {a["line"]: index for a, index in zip(axes, indices)}
         for indices in itertools.product(*(range(a["choices"]) for a in axes))
     ]
+
+
+def runtime_choices(axes, choice):
+    """Accept opening/closing macro locations used by GCC and Clang respectively."""
+    result = dict(choice)
+    owners = {}
+    for axis in axes:
+        for location in {axis["line"], axis.get("end_line", axis["line"])}:
+            if location in owners and owners[location] != axis["line"]:
+                raise dp.PlanError("Generator line aliases overlap")
+            owners[location] = axis["line"]
+        alias = axis.get("end_line", axis["line"])
+        value = choice[axis["line"]]
+        if alias in result and result[alias] != value:
+            raise dp.PlanError("Generator line aliases overlap")
+        result[alias] = value
+    return result

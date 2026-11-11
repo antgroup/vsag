@@ -1,5 +1,6 @@
 """Daily wiring and default-scope regressions without depending on PyYAML."""
 import ast
+import json
 from pathlib import Path
 import re
 import subprocess
@@ -13,6 +14,34 @@ WORKFLOW = ROOT / ".github/workflows/daily_test.yml"
 
 
 class DailyWorkflowTests(unittest.TestCase):
+    def test_shared_arm_artifact_and_x86_shard_artifact_names(self):
+        workflow = WORKFLOW.read_text()
+        self.assertNotIn("  full-platform-build-asan-aarch64:", workflow)
+        self.assertNotIn("  full-platform-test-asan-aarch64:", workflow)
+        self.assertNotIn("  asan_test_clean_up:", workflow)
+        example = job_text(WORKFLOW, "full-platform-test-example-aarch64")
+        self.assertIn("daily_build_asan_aarch64", example)
+        self.assertIn("artifact-name: daily_test_aarch64-${{ github.run_id }}", workflow)
+        x86 = job_text(WORKFLOW, "daily_test_asan_x86")
+        self.assertIn("shard: ${{ fromJSON(needs.daily-plan.outputs.x86_shards) }}", x86)
+        self.assertIn("timeout-minutes: 300", x86)
+        self.assertIn("VSAG_DAILY_SHARD_COUNT: ${{ needs.daily-plan.outputs.x86_shard_count }}", x86)
+        self.assertIn("-shard${{ matrix.shard }}-${{ github.run_id }}", x86)
+        self.assertIn("VSAG_ENABLE_INTEL_MKL=ON", (ROOT / ".github/actions/asan-build-and-test-build-asan-x86/action.yml").read_text())
+        self.assertIn("-DVSAG_USE_SYSTEM_OPENBLAS=OFF", job_text(WORKFLOW, "daily_build_asan_x86"))
+
+    def test_long_build_and_lint_stages_use_remaining_window(self):
+        text = WORKFLOW.read_text()
+        for name in ("daily_build_asan_x86", "daily_build_asan_aarch64", "daily_build_simd",
+                     "daily_build_tsan", "full-platform-build-asan-x86", "full-platform-build-asan-macos-arm64",
+                     "full-python-build-python-wheel-x86", "full-python-build-python-wheel-aarch64",
+                     "full-lint-clang-tidy-check"):
+            body = re.search(r"(?ms)^  " + name + r":\n.*?(?=^  [a-zA-Z0-9_-]+:|^permissions:)", text).group()
+            self.assertIn("id: window", body, name)
+            self.assertIn("timeout-minutes: ${{ fromJSON(steps.window.outputs.remaining_minutes) }}", body, name)
+        build = job_text(WORKFLOW, "daily_build_asan_x86")
+        self.assertLess(build.index("Load Cache"), build.index("Check build/lint execution window"))
+
     def test_regression_schedule_stays_off(self):
         text = WORKFLOW.read_text()
         self.assertEqual(re.findall(r'(?m)^    - cron: ["\x27]([^"\x27]+)', text),
@@ -45,6 +74,8 @@ class DailyWorkflowTests(unittest.TestCase):
     def test_all_test_lanes_have_frozen_context_and_failure_evidence(self):
         text = job_text(WORKFLOW, "daily-plan")
         expected = ast.literal_eval(re.search(r"expected-lanes.json', (\[.*\])\)", text).group(1))
+        expected += [f'daily_test_asan_x86-{binary}-shard{i}'
+                     for binary in ('unittests', 'functests') for i in range(json.loads((ROOT/'scripts/testing/daily_budget_policy.json').read_text())['x86_shards'])]
         self.assertEqual(len(expected), len(set(expected)))
         workflow = WORKFLOW.read_text()
         names = re.findall(r"(?m)^  ([a-z0-9_-]+):$", workflow.split("jobs:\n", 1)[1])
@@ -52,6 +83,7 @@ class DailyWorkflowTests(unittest.TestCase):
             job = job_text(WORKFLOW, name)
             if "VSAG_DAILY_CONTEXT:" in job:
                 self.assertIn("Download frozen Daily plan", job, name)
+                self.assertIn("uses: ./.github/actions/daily-execution-window", job, name)
                 self.assertIn("Upload Daily evidence", job, name)
                 self.assertRegex(job, r"Upload Daily evidence\n\s+if: always\(\)")
                 self.assertTrue(any(lane.startswith(name + "-") for lane in expected), name)

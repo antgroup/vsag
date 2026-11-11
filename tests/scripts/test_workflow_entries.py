@@ -60,6 +60,14 @@ class EntryTests(unittest.TestCase):
             for name in re.findall(r'uses: \./(\.github/actions/[^\s]+)', p.read_text()):
                 self.assertTrue((ROOT / name / 'action.yml').is_file(), name)
 
+    def test_consumers_do_not_pull_shared_architecture_tags(self):
+        legacy_tag = r'(?:vsaglib/vsag|ghcr\.io/antgroup/vsag):ci-(?:x86|aarch64)-'
+        for workflow in (ROOT / '.github/workflows').glob('*.y*ml'):
+            if workflow.name == 'update-ci-image.yml':
+                continue  # Local aliases in the publisher connect consecutive Dockerfile builds.
+            with self.subTest(workflow=workflow.name):
+                self.assertNotRegex(workflow.read_text(), legacy_tag)
+
     def test_branch_scope_original_version_docs_and_simd(self):
         event = {'ref': 'refs/heads/0.18'}
         self.assertEqual(select('push', event, 'full-branch', ['docs/a.md']),
@@ -79,16 +87,33 @@ class EntryTests(unittest.TestCase):
                 'needs.entry-scope.outputs.simd': 'false',
                 'needs.changes.result': 'skipped' if version else 'success',
                 'needs.changes.outputs.heavy': '' if version else str(heavy).lower(),
+                'needs.changes.outputs.python': '' if version else 'false',
                 'needs.changes.outputs.lint': '' if version else ('full' if heavy else 'none')}
 
-    def test_main_keeps_smoke_and_omits_full_x86_and_arm_python(self):
+    def test_main_keeps_smoke_and_omits_full_x86_and_python(self):
         values = self.context()
         for name in ('platforms-build-asan-aarch64', 'platforms-build-asan-macos-arm64',
-                     'python-build-python-wheel-x86', 'lint-clang-tidy-check'):
+                     'lint-clang-tidy-check'):
             self.assertTrue(condition('main-ci.yml', name, values), name)
-        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-aarch64',
+        for name in ('platforms-build-asan-x86', 'python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
                      'coverage-changes', 'compatibility-compatibility', 'simd-build-asan-simd'):
             self.assertFalse(condition('main-ci.yml', name, values), name)
+
+    def test_python_pause_covers_all_jobs_but_preserves_manual_and_version(self):
+        names = ('python-build-python-wheel-x86', 'python-build-python-wheel-aarch64',
+                 'python-test-python-x86', 'python-test-python-aarch64', 'python-clean-up', 'python')
+        for scope in ('main', 'version', 'manual', 'manual-full'):
+            values = self.context(version=scope == 'version', profile='python' if scope == 'manual' else 'full-branch')
+            if scope.startswith('manual'):
+                values.update({'github.event_name': 'workflow_dispatch',
+                               'needs.changes.outputs.python': 'true'})
+            for name in names:
+                values['needs.' + name + '.result'] = 'success'
+            for name in names:
+                expected = scope in ('version', 'manual') or (scope == 'manual-full' and name in
+                    ('python-build-python-wheel-x86', 'python-test-python-x86', 'python-clean-up', 'python'))
+                self.assertEqual(condition('main-ci.yml', name, values), expected, (scope, name))
+        self.assertIn('python: ${{ steps.policy.outputs.python }}', job('main-ci.yml', 'changes'))
 
     def test_main_docs_skips_heavy_and_version_keeps_full(self):
         for version, heavy in [(False, False), (True, True)]:
@@ -102,7 +127,7 @@ class EntryTests(unittest.TestCase):
         for profile in ('asan', 'python', 'tsan', 'lint', 'coverage', 'compatibility', 'simd'):
             values = self.context(profile=profile)
             values.update({'github.event_name': 'workflow_dispatch', 'needs.changes.result': 'skipped',
-                           'needs.changes.outputs.heavy': '', 'needs.changes.outputs.lint': ''})
+                           'needs.changes.outputs.heavy': '', 'needs.changes.outputs.python': '', 'needs.changes.outputs.lint': ''})
             for selected, name in [('asan', 'platforms-build-asan-x86'), ('python', 'python-build-python-wheel-aarch64'),
                                    ('tsan', 'tsan-changes'), ('lint', 'lint-clang-tidy-check'),
                                    ('coverage', 'coverage-changes'), ('compatibility', 'compatibility-compatibility'),

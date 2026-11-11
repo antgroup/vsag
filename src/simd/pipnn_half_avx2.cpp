@@ -12,14 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+#include <immintrin.h>
 
-#include <pybind11/pybind11.h>
+#include "pipnn_half_scalar.h"
 
-namespace py = pybind11;
-
-void
-bind_index(py::module_& module);
+namespace vsag::pipnn_half::detail {
 
 void
-bind_logging(py::module_& module);
+DecodeRowBF16(const uint16_t* source, float* destination, uint64_t dim) {
+    uint64_t k = 0;
+    for (; dim - k >= 8; k += 8) {
+        const __m128i raw = _mm_loadu_si128(reinterpret_cast<const __m128i*>(source + k));
+        const __m256i bits = _mm256_slli_epi32(_mm256_cvtepu16_epi32(raw), 16);
+        _mm256_storeu_ps(destination + k, _mm256_castsi256_ps(bits));
+    }
+    DecodeRowScalar<Format::BF16>(source + k, destination + k, dim - k);
+}
+
+}  // namespace vsag::pipnn_half::detail

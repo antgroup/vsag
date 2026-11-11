@@ -21,6 +21,7 @@ add_subdirectory (heap)
 add_subdirectory (transform)
 add_subdirectory (bitset)
 add_subdirectory (cluster)
+add_subdirectory (partition)
 add_subdirectory (logger)
 add_subdirectory (searcher)
 add_subdirectory (odescent)
@@ -35,10 +36,10 @@ list (FILTER IMPL_SRCS EXCLUDE REGEX "_test.cpp")
 
 add_library (impl OBJECT ${IMPL_SRCS})
 target_link_libraries (impl PRIVATE transform thread_pool allocator heap vsag_blas
-    bitset logger filter cluster searcher odescent pipnn reorder reasoning label_table coverage_config vsag_src_common)
+    bitset logger filter cluster partition searcher odescent pipnn reorder reasoning label_table coverage_config vsag_src_common)
 
 set (IMPL_LIBS transform thread_pool allocator heap bitset vsag_blas
-    logger filter impl cluster searcher odescent pipnn reorder reasoning label_table PARENT_SCOPE)
+    logger filter impl cluster partition searcher odescent pipnn reorder reasoning label_table PARENT_SCOPE)
 
 if (ENABLE_TESTS)
     file (GLOB_RECURSE IMPL_TESTS "*_test.cpp")

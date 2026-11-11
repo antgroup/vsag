@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Behavioral regression checks for installed-package and standard audits."""
+import ast
 import json
 import os
 import re
@@ -7,6 +8,7 @@ import shutil
 from pathlib import Path
 import subprocess
 import shlex
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -40,6 +42,14 @@ class ToolchainCompatibilityTest(unittest.TestCase):
                              str(library))
 
     def test_standard_audit_without_python39_path_api(self):
+        audit = ROOT / 'scripts/ci/check-cxx-standards.py'
+        # Check the script, not pathlib internals: relative_to() uses
+        # is_relative_to() on newer Python versions.
+        for node in ast.walk(ast.parse(audit.read_text())):
+            if isinstance(node, ast.Attribute):
+                self.assertNotEqual(node.attr, 'is_relative_to')
+
+    def test_standard_audit_excludes_neighboring_paths(self):
         with tempfile.TemporaryDirectory() as directory:
             entries = [{'file': str(ROOT / 'src/probe.cpp'), 'directory': str(ROOT),
                         'arguments': ['c++', '-std=c++20', '-c', 'probe.cpp']},
@@ -48,18 +58,8 @@ class ToolchainCompatibilityTest(unittest.TestCase):
                        {'file': str(ROOT / 'src-neighbor/probe.cpp'),
                         'directory': str(ROOT), 'arguments': ['c++', '-std=c++11']}]
             (Path(directory) / 'compile_commands.json').write_text(json.dumps(entries))
-            script = '''
-import runpy
-import sys
-from pathlib import Path
-def unavailable(*args):
-    raise AttributeError('is_relative_to is unavailable before Python 3.9')
-Path.is_relative_to = unavailable
-sys.argv = sys.argv[1:]
-runpy.run_path(sys.argv[0], run_name='__main__')
-'''
             result = subprocess.run(
-                ['python3', '-c', script, str(ROOT / 'scripts/ci/check-cxx-standards.py'),
+                [sys.executable, str(ROOT / 'scripts/ci/check-cxx-standards.py'),
                  directory], capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("'cpu': 1", result.stdout)
@@ -221,7 +221,7 @@ add_subdirectory("${VSAG_SOURCE_DIR}/src/simd" simd)
                 entry.update(fields)
                 (Path(directory) / 'compile_commands.json').write_text(json.dumps([entry]))
                 result = subprocess.run(
-                    ['python3', str(ROOT / 'scripts/ci/check-cxx-standards.py'), directory],
+                    [sys.executable, str(ROOT / 'scripts/ci/check-cxx-standards.py'), directory],
                     capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn('expected C++20', result.stderr)
@@ -237,7 +237,7 @@ add_subdirectory("${VSAG_SOURCE_DIR}/src/simd" simd)
                                 'arguments': ['c++', '-std=' + standard, '-c', source]})
             (Path(directory) / 'compile_commands.json').write_text(json.dumps(entries))
             return subprocess.run(
-                ['python3', str(ROOT / 'scripts/ci/check-cxx-standards.py'), directory],
+                [sys.executable, str(ROOT / 'scripts/ci/check-cxx-standards.py'), directory],
                 capture_output=True, text=True)
 
     def test_historical_standard_aliases_are_accepted(self):

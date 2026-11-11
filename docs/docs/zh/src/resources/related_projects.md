@@ -15,13 +15,13 @@
 ## 生态工具
 
 - **[ann-benchmarks](https://github.com/erikbern/ann-benchmarks)**：行业通用的 ANN 基准测试工具，VSAG 自带 [性能评估工具](eval.md) 与其数据集格式兼容。
-- **[pybind11](https://github.com/pybind/pybind11)**：`pyvsag` Python 绑定基于此实现。
+- **[cffi](https://cffi.readthedocs.io/)**：`pyvsag` Python 绑定基于此实现。
 - **[napi-rs](https://napi.rs/)**：`typescript/` 下的 Node.js 绑定基于此实现。
 
 ## 绑定与语言支持
 
 - **C++**（原生）
-- **Python**：`pyvsag`，源码位于 `python_bindings/` 与 `python/`。
+- **Python**：`pyvsag`，源码位于 `python/`。
 - **Node.js / TypeScript**：源码位于 `typescript/`，npm 包名 `vsag`。
 
 欢迎提交 PR 完善本列表。

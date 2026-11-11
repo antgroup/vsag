@@ -35,6 +35,7 @@
 - [Product Quantization (PQ)](quantization/pq.md)
 - [PQ FastScan](quantization/pqfs.md)
 - [RaBitQ](quantization/rabitq.md)
+- [SAQ](quantization/saq.md)
 - [RaBitQ x+y Split](quantization/rabitq_split.md)
 - [Transform Quantizer (TQ)](advanced/quantization_transform.md)
 
@@ -73,6 +74,7 @@
 - [Extra Info](advanced/extra_info.md)
 - [Index Lifecycle Management](advanced/index_lifecycle.md)
 - [HGraph MCI Companion](advanced/hgraph_mci_companion.md)
+- [Random Projection Tree Partitioning](advanced/rpt_partition.md)
 
 # API Reference
 

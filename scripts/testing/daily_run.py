@@ -2,6 +2,8 @@
 """Execute a frozen Daily plan, with exact Catch2 result reconciliation."""
 from __future__ import annotations
 import argparse
+import datetime as dt
+import math
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
@@ -69,14 +71,24 @@ def capability_inventory(binary, tests):
     return selected, {"build_capabilities": evidence, "exclusions": excluded}
 
 
-def inventory_units(binary, root, profile, output, seed, cancelled):
-    tests = shards.listing(binary, "~[.]", seed, output / "inventory", 120, cancelled)
+def inventory_timeout(deadline, maximum=120):
+    if deadline is None:
+        return maximum
+    remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+    if remaining <= 0:
+        raise dp.PlanError("Job/attempt execution window exhausted during inventory")
+    return min(maximum, remaining)
+
+
+def inventory_units(binary, root, profile, output, seed, cancelled, deadline=None):
+    tests = shards.listing(binary, "~[.]", seed, output / "inventory", inventory_timeout(deadline), cancelled)
     for test in tests:
         test["binary"] = binary.name
         test["id"] = shards.stable_id(binary.name, test)
     tests, inventory = capability_inventory(binary, tests)
     core, extension = [], []
     for group in shards.case_groups(tests):
+        inventory_timeout(deadline)
         owners = {dp.owner(t, profile) for t in group}
         if len(owners) != 1:
             raise dp.PlanError("A case-insensitive Catch2 group crosses budget owners")
@@ -95,7 +107,7 @@ def inventory_units(binary, root, profile, output, seed, cancelled):
             for i, choice in enumerate(choices):
                 unit = {**base, "key": dp.digest([key, axes, choice]), "axes": axes,
                         "configuration": choice, "mode": "core" if i == 0 else "rotation",
-                        "env": {"VSAG_DAILY_CHOICES": json.dumps(choice)}}
+                        "env": {"VSAG_DAILY_CHOICES": json.dumps(params.runtime_choices(axes, choice))}}
                 (core if i == 0 else extension).append(unit)
         elif len(group) == 1 and group[0]["name"].startswith("(Daily) HGraph "):
             directory = output / ("enumerate-" + key[:16])
@@ -105,7 +117,7 @@ def inventory_units(binary, root, profile, output, seed, cancelled):
             command = ["env", "VSAG_DAILY_ENUMERATE=" + str(manifest), str(binary),
                        shards.exact_filter([group[0]["name"]]), "--rng-seed", str(seed)]
             state = shards.execute(command, directory, directory / "tmp",
-                                   directory / "enumeration.log", 120, cancelled)
+                                   directory / "enumeration.log", inventory_timeout(deadline), cancelled)
             if state["exit_code"] != 4 or not manifest.is_file():
                 raise dp.PlanError("HGraph inventory failed: " + group[0]["name"])
             configurations = dp.load(manifest)
@@ -134,7 +146,7 @@ def execution_events(logfile, report):
     return events
 
 
-def run_unit(unit, number, output, timeout, cancelled):
+def run_unit(unit, number, output, timeout, cancelled, deadline=None):
     directory = output / ("case-%05d" % number)
     directory.mkdir()
     cwd, temporary = directory / "cwd", directory / "tmp"
@@ -143,10 +155,24 @@ def run_unit(unit, number, output, timeout, cancelled):
     binary = Path(unit["binary"])
     record = {"key": unit["key"], "status": "failed", "seconds": 0, "directory": directory.name}
     try:
+        listing_timeout = 120
+        if deadline is not None:
+            remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+            if remaining <= 0:
+                record.update(status="budget_exhausted", error="Execution window exhausted")
+                dp.write(directory / "result.json", record)
+                return record
+            listing_timeout = min(120, max(1, math.floor(remaining)))
+            timeout = min(timeout, max(1, math.floor(remaining)))
         selected = shards.listing(binary, shards.exact_filter([t["name"] for t in unit["tests"]]),
-                                  unit["seed"], directory / "selection", 120, cancelled)
+                                  unit["seed"], directory / "selection", listing_timeout, cancelled)
         if Counter(map(shards.case_identity, selected)) != Counter(map(shards.case_identity, unit["tests"])):
             raise dp.PlanError("Exact filter did not select the expected tests")
+        if deadline is not None:
+            remaining = (deadline - dt.datetime.now(dt.timezone.utc)).total_seconds()
+            if remaining <= 0:
+                raise dp.PlanError("Execution window exhausted during test listing")
+            timeout = min(timeout, max(1, math.floor(remaining)))
         report = directory / "report.xml"
         command = ["env", "VSAG_DAILY_EVENTS=1", "VSAG_TEST_SEED=" + str(unit["seed"])]
         command += [k + "=" + v for k, v in sorted(unit["env"].items())]
@@ -202,6 +228,8 @@ def main():
     p.add_argument("--workers", type=int, default=2)
     p.add_argument("--timeout", type=int, default=dp.policy()["case_timeout_seconds"])
     p.add_argument("--plan-only", action="store_true")
+    p.add_argument("--shard-index", type=int, default=0)
+    p.add_argument("--shard-count", type=int, default=1)
     p.add_argument("--core-only", action="store_true")
     args = p.parse_args()
     if args.workers < 1 or args.timeout < 1:
@@ -220,17 +248,26 @@ def main():
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: cancel.set())
     seed = int(dp.digest([ctx["week"], "daily-seed-v1"])[:8], 16) or 1
-    core, extension, inventory = inventory_units(binary, root, args.profile, output, seed, cancel)
+    window_path = Path(args.context).with_name("window.json")
+    deadline = dp.execution_deadline(ctx, dp.load(window_path) if window_path.exists() else None)
+    try:
+        core, extension, inventory = inventory_units(binary, root, args.profile, output, seed, cancel, deadline)
+    except (dp.PlanError, shards.ShardError) as error:
+        dp.write(output / "inventory-error.json", {"status": "failed", "error": str(error)})
+        raise
     if args.profile == "concurrent":
         core = [u for u in core if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
         extension = [u for u in extension if any("[concurrent]" in t["tags"].lower() for t in u["tests"])]
-    plan = dp.build_plan(ctx, args.environment, core, [] if args.core_only else extension, inventory=inventory)
+    plan = dp.build_plan(ctx, args.environment, core, extension, inventory=inventory, core_only=args.core_only,
+                         full_coverage=args.profile == "unit-coverage")
+    if args.shard_count != 1 or args.shard_index != 0:
+        plan = dp.shard_plan(plan, args.shard_index, args.shard_count)
     dp.write(output / "plan.json", plan)
     if args.plan_only:
         return 0
     records = []
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        pending = [pool.submit(run_unit, u, i, output, args.timeout, cancel)
+        pending = [pool.submit(run_unit, u, i, output, args.timeout, cancel, deadline)
                    for i, u in enumerate(plan["selected"])]
         for future in as_completed(pending):
             records.append(future.result())

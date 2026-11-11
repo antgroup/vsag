@@ -38,16 +38,30 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                         fmt::format("Unknown flatten interface name: {}", param->name));
 }
 
+// Adapt only the external input boundary. In particular, transforms and their
+// bottom quantizer must continue to receive FP32 vectors.
+template <typename QuantizerT, typename IOTmpl>
+FlattenInterfacePtr
+MakeFlattenDataCellInstanceForInput(const FlattenInterfaceParamPtr& param,
+                                    const IndexCommonParam& common_param) {
+    if (common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+        common_param.data_type_ == DataTypes::DATA_TYPE_BF16) {
+        return MakeFlattenDataCellInstance<QuantizerAdapter<QuantizerT, uint16_t>, IOTmpl>(
+            param, common_param);
+    }
+    return MakeFlattenDataCellInstance<QuantizerT, IOTmpl>(param, common_param);
+}
+
 template <typename QuantizerT, typename IOTmpl, MetricType metric>
 FlattenInterfacePtr
 MakeFlattenDataCellInstanceWithTQ(const FlattenInterfaceParamPtr& param,
                                   const IndexCommonParam& common_param,
                                   bool is_transform_quantizer) {
     if (is_transform_quantizer) {
-        return MakeFlattenDataCellInstance<TransformQuantizer<QuantizerT, metric>, IOTmpl>(
+        return MakeFlattenDataCellInstanceForInput<TransformQuantizer<QuantizerT, metric>, IOTmpl>(
             param, common_param);
     }
-    return MakeFlattenDataCellInstance<QuantizerT, IOTmpl>(param, common_param);
+    return MakeFlattenDataCellInstanceForInput<QuantizerT, IOTmpl>(param, common_param);
 }
 
 template <MetricType metric, typename IOTmpl>
@@ -69,33 +83,6 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
             fmt::format("INT8 data type does not support {} quantization", quantization_string));
     }
 
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
-        common_param.data_type_ == DataTypes::DATA_TYPE_BF16) {
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP16) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<FP16Quantizer<metric>, uint16_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_BF16) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<BF16Quantizer<metric>, uint16_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<ProductQuantizer<metric>, uint16_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_SQ8) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<SQ8Quantizer<metric>, uint16_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_FP32) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<FP32Quantizer<metric>, uint16_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        throw VsagException(ErrorType::INVALID_ARGUMENT,
-                            fmt::format("FP16/BF16 data type does not support {} quantization",
-                                        quantization_string));
-    }
-
     auto actual_quantization = quantization_string;
     const bool is_transform_quantizer = quantization_string == QUANTIZATION_TYPE_VALUE_TQ;
     if (is_transform_quantizer) {
@@ -111,12 +98,12 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
     if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ8_LOCAL) {
         const bool supported = !is_transform_quantizer;
         CHECK_ARGUMENT(supported, "sq8_local does not support transforms");
-        return MakeFlattenDataCellInstance<SQ8LocalQuantizer, IOTmpl>(param, common_param);
+        return MakeFlattenDataCellInstanceForInput<SQ8LocalQuantizer, IOTmpl>(param, common_param);
     }
     if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ4_LOCAL) {
         const bool supported = !is_transform_quantizer;
         CHECK_ARGUMENT(supported, "sq4_local does not support transforms");
-        return MakeFlattenDataCellInstance<SQ4LocalQuantizer, IOTmpl>(param, common_param);
+        return MakeFlattenDataCellInstanceForInput<SQ4LocalQuantizer, IOTmpl>(param, common_param);
     }
     if (actual_quantization == QUANTIZATION_TYPE_VALUE_SQ8) {
         return MakeFlattenDataCellInstanceWithTQ<SQ8Quantizer<metric>, IOTmpl, metric>(
@@ -159,6 +146,10 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
             return MakeRaBitQSplitDataCell(param, common_param, is_transform_quantizer);
         }
         return MakeFlattenDataCellInstanceWithTQ<RaBitQuantizer<metric>, IOTmpl, metric>(
+            param, common_param, is_transform_quantizer);
+    }
+    if (actual_quantization == QUANTIZATION_TYPE_VALUE_SAQ) {
+        return MakeFlattenDataCellInstanceWithTQ<SAQQuantizer<metric>, IOTmpl, metric>(
             param, common_param, is_transform_quantizer);
     }
 

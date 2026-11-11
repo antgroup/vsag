@@ -47,6 +47,7 @@
 #include "pyramid_fast_build.h"
 #include "quantization/transform_quantization/transform_quantizer_parameter.h"
 #include "query_context.h"
+#include "simd/bf16_simd.h"
 #include "storage/empty_index_binary_set.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
@@ -76,9 +77,10 @@ namespace {
 bool
 supports_parallel_encode(const FlattenInterfacePtr& codes) {
     const auto name = codes->GetQuantizerName();
-    return codes->InMemory() &&
-           (name == QUANTIZATION_TYPE_VALUE_FP32 || name == QUANTIZATION_TYPE_VALUE_RABITQ ||
-            name == QUANTIZATION_TYPE_VALUE_SQ8);
+    const auto terminal_name = GetBaseQuantizerName(name);
+    return codes->InMemory() && (terminal_name == QUANTIZATION_TYPE_VALUE_FP32 ||
+                                 terminal_name == QUANTIZATION_TYPE_VALUE_RABITQ ||
+                                 terminal_name == QUANTIZATION_TYPE_VALUE_SQ8);
 }
 
 void
@@ -750,13 +752,27 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
     const auto* build_vectors = optimized_build_codes_ == nullptr ? data_vectors : nullptr;
 
     if (graph_type_ == GRAPH_TYPE_VALUE_PIPNN) {
-        // PiPNN is restricted to float32 dense input by the constructor, so the
-        // representation-free rows can be handed back as float pointers unchanged.
+        // Borrow input rows in their original dtype; no full FP32 expansion.
+        const bool half_input = common_param_.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                                common_param_.data_type_ == DataTypes::DATA_TYPE_BF16;
         Vector<const float*> rows(allocator_);
-        rows.reserve(static_cast<uint64_t>(data_num));
+        Vector<const uint16_t*> half_rows(allocator_);
+        if (half_input) {
+            half_rows.reserve(static_cast<uint64_t>(data_num));
+        } else {
+            rows.reserve(static_cast<uint64_t>(data_num));
+        }
         for (const auto input_index : input_indices) {
-            rows.emplace_back(static_cast<const float*>(
-                element_ptr(build_vectors == nullptr ? data_vectors : build_vectors, input_index)));
+            if (input_index < 0 or input_index >= input_count) {
+                throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                    "PiPNN input index is outside the source dataset");
+            }
+            const auto* row = element_ptr(data_vectors, input_index);
+            if (half_input) {
+                half_rows.emplace_back(static_cast<const uint16_t*>(row));
+            } else {
+                rows.emplace_back(static_cast<const float*>(row));
+            }
         }
         for (const auto& [hname, hierarchy] : hierarchies_) {
             auto pipnn_parameter = pipnn_param_;
@@ -775,13 +791,22 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                     // the whole [0, data_num) range: the public path API currently requires at
                     // least one path per element, but that caller-side invariant is not something
                     // this builder should depend on.
-                    Vector<const float*> node_rows(allocator_);
-                    node_rows.reserve(ids.size());
-                    for (const auto id : ids) {
-                        node_rows.emplace_back(rows[id]);
-                    }
                     graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(graph, ids, node_rows);
+                    if (half_input) {
+                        Vector<const uint16_t*> node_rows(allocator_);
+                        node_rows.reserve(ids.size());
+                        for (const auto id : ids) {
+                            node_rows.emplace_back(half_rows[id]);
+                        }
+                        pipnn_builder.Build(graph, ids, node_rows, common_param_.data_type_);
+                    } else {
+                        Vector<const float*> node_rows(allocator_);
+                        node_rows.reserve(ids.size());
+                        for (const auto id : ids) {
+                            node_rows.emplace_back(rows[id]);
+                        }
+                        pipnn_builder.Build(graph, ids, node_rows);
+                    }
                 };
             hierarchy->root->Build(build_graph);
 
@@ -807,15 +832,25 @@ Pyramid::build_by_batch_graph(const DatasetPtr& base) {
                 for (int level = 0; level <= max_route_level; ++level) {
                     Vector<InnerIdType> route_ids(allocator_);
                     Vector<const float*> route_rows(allocator_);
+                    Vector<const uint16_t*> half_route_rows(allocator_);
                     for (InnerIdType id = 0; id < data_num; ++id) {
                         if (route_levels[id] >= level) {
                             route_ids.emplace_back(id);
-                            route_rows.emplace_back(rows[id]);
+                            if (half_input) {
+                                half_route_rows.emplace_back(half_rows[id]);
+                            } else {
+                                route_rows.emplace_back(rows[id]);
+                            }
                         }
                     }
                     auto route_graph = root.make_route_graph();
                     route_graph->SetMaxCapacity(static_cast<InnerIdType>(data_num));
-                    pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    if (half_input) {
+                        pipnn_builder.Build(
+                            route_graph, route_ids, half_route_rows, common_param_.data_type_);
+                    } else {
+                        pipnn_builder.Build(route_graph, route_ids, route_rows);
+                    }
                     root.routing_->graphs.emplace_back(std::move(route_graph));
                 }
             }
@@ -2266,6 +2301,14 @@ Pyramid::CheckAndMappingExternalParam(const JsonType& external_param,
                 .SetJson(value);
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][FAST_ENCODE_RABITQ_ROUNDS_KEY]
                 .SetJson(value);
+        } else if (key == SAQ_AVG_BITS) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_AVG_BITS_KEY].SetJson(value);
+        } else if (key == SAQ_SEGMENT_COUNT) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_SEGMENT_COUNT_KEY].SetJson(
+                value);
+        } else if (key == SAQ_RANDOM_ROTATION) {
+            inner_json[BASE_CODES_KEY][QUANTIZATION_PARAMS_KEY][SAQ_RANDOM_ROTATION_KEY].SetJson(
+                value);
         } else if (key == PYRAMID_PRECISE_QUANTIZATION_TYPE) {
             inner_json[PRECISE_CODES_KEY][QUANTIZATION_PARAMS_KEY][TYPE_KEY].SetJson(value);
         } else if (key == PYRAMID_GRAPH_MAX_DEGREE) {

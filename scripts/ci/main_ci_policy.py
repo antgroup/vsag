@@ -34,8 +34,20 @@ def select(base, head):
         return {"heavy": "true", "lint": "full", "pattern": ""}
 
 
+def select_for_event(base, head, event_name, ref):
+    result = select(base, head)
+    # Temporary main-push suspension until the pyvsag/manylinux upgrade in #3295.
+    # Explicit manual checks retain their normal scope.
+    paused = event_name == "push" and ref == "refs/heads/main"
+    result["python"] = "false" if paused else result["heavy"]
+    return result
+
+
 def main():
-    result = select(os.environ.get("BEFORE_SHA"), os.environ.get("AFTER_SHA"))
+    result = select_for_event(
+        os.environ.get("BEFORE_SHA"), os.environ.get("AFTER_SHA"),
+        os.environ.get("GITHUB_EVENT_NAME"), os.environ.get("GITHUB_REF"),
+    )
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
         for key, value in result.items():
             output.write(f"{key}={value}\n")

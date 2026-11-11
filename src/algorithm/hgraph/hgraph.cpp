@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <deque>
 #include <functional>
 #include <future>
@@ -155,9 +156,11 @@ HGraph::HGraph(const HGraphParameterPtr& hgraph_param, const vsag::IndexCommonPa
                                            common_param.metric_ == MetricType::METRIC_TYPE_L2SQR;
         CHECK_ARGUMENT(valid_adaptive_metric, "PiPNN adaptive pruning only supports L2");
         if (common_param.repr_ != RecordRepr::DENSE or
-            common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT) {
+            (common_param.data_type_ != DataTypes::DATA_TYPE_FLOAT and
+             common_param.data_type_ != DataTypes::DATA_TYPE_FP16 and
+             common_param.data_type_ != DataTypes::DATA_TYPE_BF16)) {
             throw VsagException(ErrorType::INVALID_ARGUMENT,
-                                "HGraph PiPNN only supports dense float32 indexes");
+                                "HGraph PiPNN only supports dense floating-point indexes");
         }
     }
     if (this->deduplicate_storage_ && this->graph_type_ != GRAPH_TYPE_VALUE_NSW &&
@@ -368,10 +371,29 @@ HGraph::Tune(const std::string& parameters, bool disable_future_tuning) {
     };
 
     auto train_count = std::min(this->train_sample_count_, this->GetNumElements());
-    Vector<float> train_data(train_count * dim_, 0, allocator_);
+    const auto element_size =
+        (data_type_ == DataTypes::DATA_TYPE_FP16 or data_type_ == DataTypes::DATA_TYPE_BF16)
+            ? sizeof(uint16_t)
+            : sizeof(float);
+    CHECK_ARGUMENT(dim_ > 0, "Tune training dimension must be positive");
+    CHECK_ARGUMENT(static_cast<uint64_t>(dim_) <= std::numeric_limits<size_t>::max() / element_size,
+                   "Tune training row size overflows");
+    const auto row_bytes = static_cast<size_t>(dim_) * element_size;
+    CHECK_ARGUMENT(static_cast<uint64_t>(train_count) <=
+                       (std::numeric_limits<size_t>::max() - (sizeof(float) - 1)) / row_bytes,
+                   "Tune training buffer size overflows");
+    const auto train_bytes = static_cast<size_t>(train_count) * row_bytes;
+    // Train consumes tightly packed native input, including FP16/BF16. Keep the
+    // allocation float-aligned, and decode through aligned scratch: odd half
+    // dimensions need not leave each packed row aligned for Decode's float* API.
+    Vector<float> train_data((train_bytes + sizeof(float) - 1) / sizeof(float), 0, allocator_);
     if (is_tune_base_code or is_tune_precise_code or is_tune_raw_code) {
+        Vector<float> decoded_row(dim_, 0, allocator_);
+        auto* packed_data = reinterpret_cast<uint8_t*>(train_data.data());
         for (InnerIdType i = 0; i < train_count; i++) {
-            decode_tune_source(i, train_data.data() + i * dim_);
+            decode_tune_source(i, decoded_row.data());
+            std::memcpy(
+                packed_data + static_cast<size_t>(i) * row_bytes, decoded_row.data(), row_bytes);
         }
     }
 
@@ -596,11 +618,11 @@ constexpr bool K_BUILD_ESTIMATE_STDLIB_MODELED = true;
 constexpr bool K_BUILD_ESTIMATE_STDLIB_MODELED = false;
 #endif
 
-// Five helpers below (estimate_shared_request, estimate_function_target_request,
+// Six helpers below (estimate_shared_request, estimate_function_target_request,
 // estimate_packaged_task_request, estimate_scheduler_task_request and
-// estimate_sampled_dataset_request) static_assert their fallback #else, so a new modeled
-// profile cannot silently return 0. estimate_deque_request has no separate fallback: its
-// #else is the libstdc++ model. A new modeled profile must add branches to all six.
+// estimate_sampled_dataset_owner_request/estimate_sampled_dataset_request) reject unmodeled
+// fallback profiles at compile time. estimate_deque_request has no separate fallback: its
+// #else is the libstdc++ model. A new modeled profile must extend all seven helpers.
 
 // The level replay keeps per-level counts in this fixed array, so replay storage does not
 // depend on N. With the 1/ln 4 replay multiplier, finite draws stayed below about 15.8 in
@@ -835,6 +857,37 @@ using BuildEstimateDatasetValue = std::variant<int64_t,
                                                const MultiVector*,
                                                std::vector<std::vector<std::string>>>;
 
+// sample_train_data retains its allocator in a custom deleter. This source-layout proxy
+// is used only to size the separate shared_ptr control block; no instance is executed.
+struct BuildEstimateDatasetDeleter {
+    std::shared_ptr<Allocator> owned_allocator;
+
+    void
+    operator()(DatasetImpl*) const {
+    }
+};
+
+constexpr uint64_t
+estimate_sampled_dataset_owner_request() {
+#if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP)
+    using Control = std::__shared_ptr_pointer<DatasetImpl*,
+                                              BuildEstimateDatasetDeleter,
+                                              std::allocator<DatasetImpl>>;
+#elif defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBSTDCXX)
+    using Control = std::_Sp_counted_deleter<DatasetImpl*,
+                                             BuildEstimateDatasetDeleter,
+                                             std::allocator<void>,
+                                             __gnu_cxx::__default_lock_policy>;
+#else
+    static_assert(!K_BUILD_ESTIMATE_STDLIB_MODELED,
+                  "estimate_sampled_dataset_owner_request: add the new stdlib profile");
+    return 0;
+#endif
+#if defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBCPP) || defined(VSAG_HGRAPH_BUILD_ESTIMATE_LIBSTDCXX)
+    return sizeof(DatasetImpl) + sizeof(Control);
+#endif
+}
+
 uint64_t
 estimate_sampled_dataset_request() {
     using Value = std::pair<const std::string, BuildEstimateDatasetValue>;
@@ -852,7 +905,7 @@ estimate_sampled_dataset_request() {
                   "estimate_sampled_dataset_request: add the new stdlib profile");
     constexpr uint64_t node = 0;
 #endif
-    return estimate_shared_request<DatasetImpl>() + K_BUILD_ESTIMATE_DATASET_KEYS * node +
+    return estimate_sampled_dataset_owner_request() + K_BUILD_ESTIMATE_DATASET_KEYS * node +
            2 * K_BUILD_ESTIMATE_DATASET_BUCKETS * sizeof(void*);
 }
 
@@ -2009,13 +2062,13 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
             Vector<int8_t> base_data(data_size, allocator_);
             GetVectorByInnerId(inner_id, reinterpret_cast<float*>(base_data.data()));
             const float old_self_dist =
-                this->CalcDistanceById(reinterpret_cast<float*>(base_data.data()), id);
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+                this->calc_native_distance_by_id(base_data.data(), id, true);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
             if (std::abs(old_self_dist - self_dist) < 1e-3) {
                 return true;
             }
         } else {
-            self_dist = this->CalcDistanceById(static_cast<float*>(new_base_vec), id);
+            self_dist = this->calc_native_distance_by_id(new_base_vec, id, true);
         }
 
         // 2. check whether the neighborhood relationship is same
@@ -2029,9 +2082,8 @@ HGraph::UpdateVector(int64_t id, const DatasetPtr& new_base, bool force_update) 
 
             float neighbor_dist = 0;
             try {
-                neighbor_dist =
-                    this->CalcDistanceById(static_cast<float*>(new_base_vec),
-                                           this->label_table_->GetLabelById(neighbor_inner_id));
+                neighbor_dist = this->calc_native_distance_by_id(
+                    new_base_vec, this->label_table_->GetLabelById(neighbor_inner_id), true);
             } catch (const std::runtime_error& e) {
                 // incase that neighbor has been deleted
                 continue;

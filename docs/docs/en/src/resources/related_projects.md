@@ -21,13 +21,13 @@ easier to assemble complete stacks.
 
 - **[ann-benchmarks](https://github.com/erikbern/ann-benchmarks)** — the de-facto ANN benchmark
   harness; VSAG's [performance evaluation tool](eval.md) is compatible with its dataset format.
-- **[pybind11](https://github.com/pybind/pybind11)** — powers the `pyvsag` Python binding.
+- **[cffi](https://cffi.readthedocs.io/)** — powers the `pyvsag` Python binding.
 - **[napi-rs](https://napi.rs/)** — powers the Node.js binding under `typescript/`.
 
 ## Bindings / Language Support
 
 - **C++** (native)
-- **Python** — `pyvsag`, source under `python_bindings/` and `python/`.
+- **Python** — `pyvsag`, source under `python/`.
 - **Node.js / TypeScript** — source under `typescript/`, npm package name `vsag`.
 
 Pull requests to extend this list are welcome.

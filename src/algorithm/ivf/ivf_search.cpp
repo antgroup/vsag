@@ -586,8 +586,16 @@ IVF::search_with_custom_distance(const DatasetPtr& query,
 
 DatasetPtr
 IVF::SearchWithRequest(const SearchRequest& request) const {
-    ValidateSearchThreshold(request.threshold_);
     SearchStatistics stats;
+    auto result = this->search_with_request(request, stats);
+    // Only the public boundary serializes statistics, including all early-return paths.
+    result->Statistics(stats.Dump());
+    return result;
+}
+
+DatasetPtr
+IVF::search_with_request(const SearchRequest& request, SearchStatistics& stats) const {
+    ValidateSearchThreshold(request.threshold_);
     QueryContext ctx{.alloc = request.search_allocator_, .stats = &stats};
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
@@ -664,7 +672,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         CHECK_ARGUMENT(not request.threshold_.has_value(),
                        "threshold filtering is not supported with disable_bucket_scan");
         auto result = this->route_buckets_only(query, param, ctx);
-        result->Statistics(stats.Dump());
         return result;
     }
 
@@ -710,7 +717,59 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                 json["ivf"]["parallelism"].SetInt64(1);
             }
             one_request.params_str_ = json.Dump();
-            auto one_result = this->SearchWithRequest(one_request);
+            // Keep each child isolated until its workers finish, then reduce without JSON.
+            SearchStatistics one_stats;
+            auto one_result = this->search_with_request(one_request, one_stats);
+            // Relaxed reads are safe after child workers finish; atomic destination updates
+            // allow sibling reductions to overlap. Preserve legacy wrapping and 64-bit saturation.
+            auto add_legacy_counter = [&](const std::atomic<uint32_t>& child_counter,
+                                          std::atomic<uint32_t>& counter) {
+                counter.fetch_add(child_counter.load(std::memory_order_relaxed),
+                                  std::memory_order_relaxed);
+            };
+            add_legacy_counter(one_stats.dist_cmp, stats.dist_cmp);
+            add_legacy_counter(one_stats.hops, stats.hops);
+            add_legacy_counter(one_stats.io_cnt, stats.io_cnt);
+            add_legacy_counter(one_stats.io_time_ms, stats.io_time_ms);
+            add_legacy_counter(one_stats.reorder_distance_count, stats.reorder_distance_count);
+            add_legacy_counter(one_stats.reorder_candidate_count, stats.reorder_candidate_count);
+            add_legacy_counter(one_stats.reorder_lower_bound_probe_count,
+                               stats.reorder_lower_bound_probe_count);
+            add_legacy_counter(one_stats.rabitq_filter_count, stats.rabitq_filter_count);
+            add_legacy_counter(one_stats.rabitq_full_count, stats.rabitq_full_count);
+            add_legacy_counter(one_stats.rabitq_filter_fallback_full_count,
+                               stats.rabitq_filter_fallback_full_count);
+            add_legacy_counter(one_stats.rabitq_reorder_hint_full_count,
+                               stats.rabitq_reorder_hint_full_count);
+            add_legacy_counter(one_stats.rabitq_reorder_fallback_full_count,
+                               stats.rabitq_reorder_fallback_full_count);
+            add_legacy_counter(one_stats.query_computer_count, stats.query_computer_count);
+            add_legacy_counter(one_stats.parallel_search_fallback_count,
+                               stats.parallel_search_fallback_count);
+
+            auto add_distance_counter = [&](std::atomic<uint64_t>& counter, uint64_t count) {
+                if (SearchStatistics::SaturatingAdd(counter, count)) {
+                    stats.complete.store(false, std::memory_order_relaxed);
+                }
+            };
+            add_distance_counter(stats.distance_evaluations,
+                                 one_stats.distance_evaluations.load(std::memory_order_relaxed));
+            for (uint64_t i = 0; i < stats.distance_evaluations_by_phase.size(); ++i) {
+                add_distance_counter(
+                    stats.distance_evaluations_by_phase[i],
+                    one_stats.distance_evaluations_by_phase[i].load(std::memory_order_relaxed));
+            }
+            for (uint64_t i = 0; i < stats.distance_evaluations_by_backend.size(); ++i) {
+                add_distance_counter(
+                    stats.distance_evaluations_by_backend[i],
+                    one_stats.distance_evaluations_by_backend[i].load(std::memory_order_relaxed));
+            }
+            if (one_stats.is_timeout.load(std::memory_order_relaxed)) {
+                stats.is_timeout.store(true, std::memory_order_relaxed);
+            }
+            if (not one_stats.complete.load(std::memory_order_relaxed)) {
+                stats.complete.store(false, std::memory_order_relaxed);
+            }
             const auto count = std::min(request.topk_, one_result->GetDim());
             if (count > 0) {
                 std::copy_n(one_result->GetIds(), count, ids + query_idx * request.topk_);
@@ -739,7 +798,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                           ->Ids(ids)
                           ->Distances(distances)
                           ->Owner(true, alloc);
-        result->Statistics(stats.Dump());
         return result;
     }
 
@@ -813,12 +871,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
         if (search_result == nullptr || search_result->Empty()) {
             auto dataset_results = DatasetImpl::MakeEmptyDataset();
             this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-            dataset_results->Statistics(stats.Dump());
             return dataset_results;
         }
         auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-        dataset_results->Statistics(stats.Dump());
         return dataset_results;
     }
 
@@ -847,12 +903,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                                   reasoning_ctx.get(),
                                   std::nullopt,
                                   bucket_computer);
-            result->Statistics(stats.Dump());
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
         }
         auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
-        dataset_results->Statistics(stats.Dump());
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
         return dataset_results;
     }
@@ -887,7 +941,6 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
                               bucket_computer);
         result = FilterDatasetByThreshold(result, request.threshold_, ctx.alloc, request.topk_);
         AttachReasoningReport(result, reasoning_ctx.get());
-        result->Statistics(stats.Dump());
         return result;
     }
     filter_search_result_by_threshold(
@@ -895,12 +948,10 @@ IVF::SearchWithRequest(const SearchRequest& request) const {
     if (search_result == nullptr || search_result->Empty()) {
         auto dataset_results = DatasetImpl::MakeEmptyDataset();
         this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
-        dataset_results->Statistics(stats.Dump());
         return dataset_results;
     }
 
     auto dataset_results = this->pack_knn_result(search_result, ctx.alloc);
-    dataset_results->Statistics(stats.Dump());
 
     this->AttachReasoningReport(dataset_results, reasoning_ctx.get());
 

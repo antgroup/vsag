@@ -89,33 +89,49 @@ for (int64_t i = 0; i < result_count; ++i) {
 
 ## 构建参数
 
-SIMQ 专属构建参数放在 `index_param` 下。`dim`、`dtype`、`metric_type`
-是顶层字段。`dtype` **必须** 为 `"float32"`，`metric_type` **必须** 为 `"ip"`。
+SIMQ 专属构建参数放在 `index_param` 下；通用字段保留在顶层。
+无论内部采用哪种存储量化，输入仍为 FP32 `MultiVector` 数据。
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `dim` | int | —（必填） | 每个 token 向量的维度 |
-| `base_io_type` | string | `"async_io"` | 精排阶段使用的原始多向量数据存储后端 |
-| `base_file_path` | string | `"./default_file_path"` | 磁盘 IO 类型使用的文件路径 |
-| `init_cluster_ratio` | float | `0.2` | 初始聚类中心的 token 向量采样比例 |
-| `max_cluster_size` | int | `64` | 单个簇允许的最大 token 向量数 |
-| `split_start_idx` | int | `32` | 簇切分时新簇的起始位置 |
-| `random_seed` | int | `42` | 聚类打乱的随机种子 |
-| `coarse_k` | int | `8` | 构建时每个查询 token 搜索的最近簇数量 |
-| `rerank_k` | int | `100` | 构建时进入精排的候选文档数量上限 |
+### 顶层通用字段
 
-- **`dim`** — 所有文档和查询中的所有 token 共享同一维度
-- **`base_io_type`** — 可选值：`async_io`、`uring_io`、`memory_io`、
-  `block_memory_io`、`buffer_io`、`mmap_io`、`reader_io`。原生 `uring_io`
-  需要以 liburing 构建，否则回退到 `buffer_io`
-- **`base_file_path`** — 默认值为占位符，使用磁盘类型（`async_io`、
-  `uring_io`、`buffer_io`、`mmap_io`）时需提供真实路径
-- **`init_cluster_ratio`** — 取值范围 `(0, 1]`。值越小簇越少越大，
-  值越大簇越多越细
-- **`max_cluster_size`** — 必须 > 1
-- **`split_start_idx`** — 通常设为 `max_cluster_size` 的一半，
-  取值范围 `(1, max_cluster_size)`
-- **`coarse_k`**、**`rerank_k`** — 必须 > 0
+| 参数 | 类型 | 默认值 | 约束与作用 |
+|------|------|--------|------------|
+| `dim` | int | 必填 | 正整数；所有文档和查询 token 的维度。 |
+| `dtype` | string | 必填 | 必须为 `"float32"`；描述输入标量类型，而非存储量化器。 |
+| `metric_type` | string | 必填 | 必须为 `"ip"`。 |
+| `repr` | string | `"dense"`（通用解析器默认值） | 可选通用布局字段；可显式用 `"multi_vector"` 描述数据。SIMQ 的 Build/Add/检索接口仍要求 `MultiVectors`，不能传入单个稠密向量。 |
+| `extra_info_size` | int | `0` | 共享解析器接受整数，无非负检查；正值会初始化继承的 extra-info 存储，但 SIMQ Build/Add 与检索不填充或返回它。本工作流请保持 `0`。 |
+| `use_old_serial_format` | bool | `false` | 通用兼容标志；SIMQ 不消费此字段来选择序列化格式。 |
+
+### `index_param` 下的字段
+
+下表列出全部 15 个 SIMQ 公开构建字段；`index_param` 下的其他键会被拒绝。
+
+| 参数 | 类型 | 默认值 | 约束与作用 |
+|------|------|--------|------------|
+| `base_io_type` | string | `"async_io"` | 文档 token 编码后端：`async_io`、`uring_io`、`buffer_io`、`mmap_io`、`memory_io`、`block_memory_io` 或 `reader_io`；注意下方 IO 限制。 |
+| `base_file_path` | string | `"./default_file_path"` | 磁盘存储（`async_io`、`uring_io`、`buffer_io`、`mmap_io`）需提供可用文件路径；默认值仅为占位符。 |
+| `base_enable_read_cache` | bool | `false` | 为 `async_io`、`uring_io`、`buffer_io`、`reader_io` 启用可选 LRU 页缓存。`memory_io`、`block_memory_io`、`mmap_io` 使用 `NoCache`，忽略此开关。 |
+| `base_cache_total_size` | unsigned int | `268435456`（256 MiB） | 缓存字节预算，必须为非负整数；容量按 128 KiB 页向下取整，小于一页（含 `0`）时即使开启也不缓存。作用于文档编码 IO 实例，不是代表图缓存。 |
+| `quantization_type` | string | `"fp32"` | 工厂支持的文档/图存储类型：`fp32`、`fp16`、`bf16`、`sq8_uniform`、`int8`；注意下方 `int8` 限制，不改变 FP32 输入要求。 |
+| `build_thread_count` | unsigned int | `1` | 共享解析器接受非负整数，SIMQ 无额外正数检查；建议使用 `>= 1`。控制构建图、代表图与聚类工作，不是每次查询的并行度开关；聚类至少使用一个 worker。 |
+| `init_cluster_ratio` | float | `0.2` | 范围 `(0, 1]`；初始种子 token 的采样比例。较小值通常产生更少、更大的分区。 |
+| `max_cluster_size` | int | `64` | 必须 `> 1`；触发分区切分的 token 数阈值，不是文档数上限。 |
+| `split_start_idx` | int | `32` | 范围 `(1, max_cluster_size)`；溢出分区按距离排序后，新分区的起始位置。 |
+| `random_seed` | int | `42` | 初始 token 打乱及文档模型有界训练采样的随机种子；SIMQ 无额外范围检查。 |
+| `coarse_k` | int | `8` | 必须 `> 0`；默认每个查询 token 搜索的最近代表簇数，检索时不超过可用簇数。 |
+| `rerank_k` | int | `100` | 必须 `> 0`；默认进入 MaxSim 精排的候选文档数上限，检索时不超过文档总数。 |
+| `split_delay_seconds` | float | `0.0` | 必须 `>= 0`；增量 `Add` 首次溢出后，等待该时长才允许切分；`0` 表示立即切分。待切分项在 `Add` 中检查，不存在后台定时器，也不推迟初次 Build 聚类切分。 |
+| `support_duplicate` | bool | `false` | 相同代表向量可共享代表 HGraph 节点；不对文档 ID 去重，也不在构建内部 HGraph 中抑制重复 token。 |
+| `deduplicate_storage` | bool | `false` | 要求 `support_duplicate: true`；共享代表 HGraph 中的重复向量编码槽位，不是文档 token 存储去重。 |
+
+**IO 限制。** 原生 `uring_io` 需要 liburing；缺少时使用 buffered 后端回退。
+工厂识别 `reader_io`，但它是只读的外部 Reader 后端，需要绑定非空 Reader；
+仅在 JSON 中选择此类型不提供可写的 Build/Add 存储，不能把所有可识别的 IO 类型当作可互换的构建后端。
+
+**量化限制。** 工厂支持 `int8`，但当前编码器直接复制输入原始字节，并不执行数值上的
+FP32 到 int8 转换。因此不能将其宣传为 FP32 token 值的常规标量压缩。
+FP32 工作流优先选择 `fp32`、`fp16`、`bf16`、`sq8_uniform`，并以实际数据验证存储精度。
 
 > **聚类参数的选择。** `init_cluster_ratio` 与 `max_cluster_size` 共同控制
 > 簇的数量与大小。较小的 `init_cluster_ratio` 搭配较大的 `max_cluster_size`
@@ -124,23 +140,42 @@ SIMQ 专属构建参数放在 `index_param` 下。`dim`、`dtype`、`metric_type
 
 ## 检索参数
 
-检索参数放在 `simq` 子对象下：
+`simq` 子对象中的以下字段同时作用于 `KnnSearch` 与 `RangeSearch`：
 
-| 参数 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `coarse_k` | int | *（构建时默认值）* | 每个查询 token 搜索的最近簇数量 |
-| `rerank_k` | int | *（构建时默认值）* | 进入精排的候选文档数量上限 |
+| 参数 | 类型 | 默认值 | 约束与作用 |
+|------|------|--------|------------|
+| `coarse_k` | int | `-1` → 构建值 | 正数覆盖构建值；省略或 `<= 0` 时回退到构建值。每个查询 token 探测更多簇会扩大候选范围，通常也增加延迟。 |
+| `rerank_k` | int | `-1` → 构建值 | 正数覆盖构建值；省略或 `<= 0` 时回退到构建值。更多候选会增加 MaxSim IO/计算，与请求的 `topk`/范围输出数独立。 |
+| `timeout_ms` | int | 省略（无截止时间） | 毫秒计的软耗时预算。字段存在即启用计时；解析器无正数检查，因此 `<= 0` 表示预算立即耗尽，不是“关闭超时”。可能返回部分或空结果。 |
 
-- **`coarse_k`** — 覆盖构建时的值。值越大候选范围越广，
-  召回越高但延迟也越大
-- **`rerank_k`** — 覆盖构建时的值。值越大召回越高，
-  但磁盘读取和计算开销也越大
-- 不设置时使用构建时的默认值。显式设置时两个值都必须 > 0
+计时在粗排前开始，但不会中断代表图搜索或正在进行的 IO/MaxSim 工作。
+粗排后、精排工作单元之间（KNN 每批最多 32 篇文档，范围搜索每次一篇）以及返回前检查预算。
+粗排阶段超时会清空粗排候选。这不是严格的墙钟延迟上界；请检查返回统计中的 `is_timeout` 标志。
+
+共享解析器还接受 `simq` 内的以下字段，但 SIMQ 的两条检索路径均不消费它们：
+
+| 参数 | 类型 | 解析默认值 | SIMQ 作用 |
+|------|------|------------|-----------|
+| `parallelism` | int | `1` | 忽略；共享解析器会把非正值归一为 `1`。 |
+| `factor` | float | `0.0` | 忽略；SIMQ 无范围检查。请改用 `rerank_k` 调节候选数。 |
+| `enable_reorder` | bool | `true` | 忽略，包括 `false`；SIMQ 始终对保留候选执行 MaxSim 精排。 |
+
+| 根级参数 | 类型 | 默认值 | 约束与作用 |
+|----------|------|--------|------------|
+| `threshold` | float | 省略 | 仅 KNN：最终距离的有限、包含边界的上限；详见下文。 |
+
+**仅 KNN** 支持可选的根级 `threshold`（float，默认省略），必须是有限 JSON 数字。
+它是**最终返回距离**的包含边界的上限，不是粗排截断阈值或相似度下限；仅有限且
+`<= threshold` 的距离通过。允许负阈值，返回数量可能少于 `topk`。
+SIMQ 距离是对每个查询 token 在存储文档 token 上求最小 `1 - inner_product` 后求和，
+并非单向量 IP 距离。参见 [KNN 阈值过滤](../guide/knn_search.md)。
+`RangeSearch` 使用 `radius` 参数，不消费根级 `threshold`；`limited_size` 限制范围输出数量，
+不控制由 `rerank_k` 限定的候选池。
 
 ```cpp
 auto result = index->KnnSearch(
     query, topk,
-    R"({"simq": {"coarse_k": 600, "rerank_k": 5000}})").value();
+    R"({"threshold": 4.0, "simq": {"coarse_k": 600, "rerank_k": 5000, "timeout_ms": 100}})").value();
 ```
 
 ## 搜索统计
@@ -181,8 +216,8 @@ SIMQ 仅接受 `float32` 多向量数据，仅支持内积相似度。
 ## 实践建议
 
 - **调整 `coarse_k` 与 `rerank_k`。** 增大 `coarse_k` 扩大簇级候选范围；
-  增大 `rerank_k` 让更多文档进入精确打分。实践中 `rerank_k` 对召回的影响
-  更大，但每个额外候选都需要一次磁盘读取和完整的 MaxSim 计算，延迟也会增加。
+  增大 `rerank_k` 让更多文档进入基于存储表示的 MaxSim 打分。实践中 `rerank_k` 对召回的影响
+  更大，但每个额外候选都需要访问存储和完整的 MaxSim 计算，延迟也会增加。
 - **IO 类型选择。** 语料规模超出内存时使用 `async_io`；多向量数据可以放入
   内存时，使用 `memory_io` 或 `block_memory_io` 获得最低的精排延迟。
 - **簇大小配置。** 将 `max_cluster_size` 设为 `split_start_idx` 的约两倍。切分位置
@@ -205,7 +240,7 @@ SIMQ 仅接受 `float32` 多向量数据，仅支持内积相似度。
 
 即使 `quantization_type` 为 `fp16`、`bf16` 或 `sq8_uniform`，Dataset 输入仍然必须是 FP32 `MultiVector`。SIMQ 在分区构建前编码 token，通过量化器原生 code-to-code 距离维护分区；构建图与代表图均使用量化 base 存储，不配置 FP32 精排副本。图插入/查询接口和均值累加仍使用有界 FP32 临时解码，不是完全免解码构建。
 
-构建不再创建全量 FP32 token 打平副本，而使用临时编码池、token 地址元数据及每个最多 4096 个 token 的训练/暂存缓冲。编码池在 Build 返回前与文档编码存储重复存在；用户持有的 FP32 输入及 O(tokens) 元数据仍占内存。需要训练的量化器采用最多 4096 个 token 的确定性样本（数据更多时有放回抽样），后续 Add 复用已训练文档模型。两个 HGraph 各自拥有量化模型，不混用不同模型的编码字节。
+构建不再创建全量 FP32 token 打平副本，而使用临时编码池、token 地址元数据及每个最多 4096 个 token 的训练/暂存缓冲。编码池在 Build 返回前与文档编码存储重复存在；用户持有的 FP32 输入及 O(tokens) 元数据仍占内存。Build 将最多 4096 个 token 的确定性样本传给文档量化器的 Train 方法（数据更多时有放回抽样）；是否学习数据相关状态取决于量化器。后续 Add 复用文档模型，不重新训练。两个 HGraph 各自拥有量化模型，不混用不同模型的编码字节。
 
 可以使用 `Build(首批)` 后分批 `Add(后续批次)`，首批应覆盖后续数据分布。量化和增量构建不保证与全量 FP32 构建产生相同分区或召回，请使用真实负载评估。SIMQ 输入仍仅支持 FP32，metric 仍仅支持内积；输入类型与内部存储类型是不同概念。
 

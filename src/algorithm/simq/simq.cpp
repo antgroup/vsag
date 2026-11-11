@@ -404,7 +404,9 @@ HGraphDynamicClustering::Fit(const uint8_t* codes, int64_t num_vecs, int64_t dim
 
     cluster_centers_ = init_centers;
     for (int cid : init_centers) {
-        clusters_[cid] = {{static_cast<InnerIdType>(cid), 0.0F}};
+        auto& cluster = clusters_[cid];
+        cluster.clear();
+        cluster.push_back({static_cast<InnerIdType>(cid), 0.0F});
         vec_to_cluster_[cid] = cid;
     }
 
@@ -2059,6 +2061,11 @@ SIMQ::CheckAndMappingExternalParam(const JsonType& external_param,
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][TYPE_KEY].SetJson(value);
         } else if (key == BRUTE_FORCE_BASE_FILE_PATH) {
             inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][IO_FILE_PATH_KEY].SetJson(value);
+        } else if (key == "base_enable_read_cache") {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_ENABLED_KEY].SetJson(value);
+        } else if (key == "base_cache_total_size") {
+            inner_json[BASE_CODES_KEY][IO_PARAMS_KEY][READ_CACHE_TOTAL_CACHE_SIZE_KEY].SetJson(
+                value);
         } else if (key == "init_cluster_ratio" || key == "max_cluster_size" ||
                    key == "split_start_idx" || key == "random_seed" || key == "coarse_k" ||
                    key == "rerank_k" || key == "quantization_type" ||

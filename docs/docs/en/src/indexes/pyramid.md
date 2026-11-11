@@ -93,7 +93,9 @@ Pyramid accepts `dtype: "float16"` and `dtype: "bfloat16"` input for `Build`, `A
 
 For either half input type, supply `Dataset::Float16Vectors` with a contiguous `uint16_t` buffer containing the **encoded FP16 or BF16 bit patterns**, not integers obtained by numerically casting floats. `dtype` determines how these bits are interpreted. Build/Add buffers contain `NumElements() * Dim()` entries; query buffers must use the same input format as the index. Supply IDs and paths as in the example above, replacing `Float32Vectors(data)` and `Float32Vectors(q)` with `Float16Vectors(half_data)` and `Float16Vectors(half_query)`. With `Owner(false)`, keep the borrowed buffers (including IDs and paths) alive for the operation.
 
-For half input, supported `base_quantization_type` and, when `use_reorder` is `true`, `precise_quantization_type` values are `fp16`, `bf16`, `pq`, `sq8`, and `fp32`. Quantizer-specific requirements still apply (for example, PQ training and dimension settings). A minimal matching-format configuration is:
+FP16/BF16 input supports the same originally legal FP32 storage-quantizer configurations, not a separate limited quantizer list: `fp32`, `fp16`, `bf16`, ordinary `sq4`/`sq8`, `sq4_uniform`/`sq8_uniform`, `sq4_local`/`sq8_local`, `pq`, `pqfs`, `rabitq`, and eligible `tq` chains. This applies to base storage and, when enabled, precise storage; it does not make every base/precise combination legal. Existing metric, dimension, training, graph, and IO restrictions still apply. Local SQ4/SQ8 remain prohibited inside TQ chains. Split RaBitQ supports 3+5 bits, including MRLE; a split TQ chain is restricted to `"mrle, rabitq"`. HGraph fused RaBitQ remains L2/IP-only, requires flat in-memory graph storage and its existing IO constraints, and does not support TQ. Half input does not relax any of these restrictions.
+
+A minimal matching-format configuration is:
 
 ```json
 {
@@ -110,13 +112,13 @@ For half input, supported `base_quantization_type` and, when `use_reorder` is `t
 
 For BF16 input with BF16 storage, change `dtype` to `"bfloat16"` and `base_quantization_type` to `"bf16"`. Cross-format storage conversion is also supported, such as FP16 input with BF16 storage or BF16 input with FP32 storage; this does not change the required input format of subsequent queries. `metric_type: "cosine"` normalizes vectors before encoding, so matching-format input does not imply byte-for-byte preservation for cosine.
 
-For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and `pq`/`sq8`/`fp32` storage convert the input through float32; they do not provide the same half-bit preservation guarantee.
+For L2/IP, matching FP16-to-FP16 and BF16-to-BF16 storage preserves the input bit patterns verbatim. Cross-format storage and other quantizers use FP32 conversion as required; they do not provide the same half-bit preservation guarantee.
 
 For `CalcDistanceById` and `CalcDistancesById` on half-input indexes, use the `DatasetPtr` overload with a native half query buffer matching the index dtype. The raw `const float*` overloads accept only float32 indexes and reject half-input indexes.
 
 An FP16 or BF16 stored vector code occupies `2 * dim` bytes, compared with `4 * dim` for FP32. This is **vector-code size, not total index memory**: graphs, IDs, paths, allocation overhead, and any reorder/raw-vector copies also consume space. Half input alone does not select half storage or halve total memory.
 
-Use `graph_type: "nsw"` or `"odescent"` with half input. **PiPNN remains float32-only.** These guarantees describe Pyramid, not every VSAG index.
+Half input supports `graph_type: "nsw"`, `"odescent"`, and `"pipnn"`. These guarantees describe Pyramid, not every VSAG index.
 
 ## Build parameters
 
@@ -124,7 +126,7 @@ Build-time parameters live under `index_param`.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
+| `base_quantization_type` | string | — | Coarse storage quantizer (`fp32`, `fp16`, `bf16`, `sq8`, `sq4`, `sq8_local`, `sq4_local`, `sq8_uniform`, `sq4_uniform`, `pq`, `pqfs`, `rabitq`, `saq`, `tq`). See the [Quantization chapter](../quantization/) for per-quantizer details. |
 | `tq_chain` | string | — | Transform chain used when `base_quantization_type` is `tq`, for example `"mrle, rabitq"`. |
 | `mrle_dim` | int | `0` | Prefix dimension retained by MRLE; `0` keeps the input dimension. |
 | `max_degree` | int | `64` | Maximum out-degree per node within a sub-graph. |
@@ -151,6 +153,9 @@ Build-time parameters live under `index_param`.
 | `rabitq_bits_per_dim_precise` | int | unset | RaBitQ split `y` bits. When set with `base_quantization_type: "rabitq"` and `precise_quantization_type: "rabitq"`, Pyramid uses split storage; `rabitq_bits_per_dim_base` remains `x`, and `x + y <= 8`. |
 | `fast_encode_rabitq` | bool | `true` | Use the fast multi-bit RaBitQ encoder for RaBitQ base or precise storage; set to `false` for the exact encoder. |
 | `fast_encode_rabitq_rounds` | int | `6` | Fast RaBitQ refinement rounds in `[1, 32]`. |
+| `saq_avg_bits` | float | `4.0` | SAQ average record bits per dimension, in `[1, 8]`. |
+| `saq_segment_count` | int | `0` | SAQ segment count; `0` selects boundaries dynamically. |
+| `saq_random_rotation` | bool | `true` | Apply an independent orthogonal rotation inside each SAQ segment. |
 | `base_io_type` / `precise_io_type` | string | `"block_memory_io"` | Base and reorder storage backends; `uring_io` is available in builds with liburing. |
 | `base_file_path` / `precise_file_path` | string | — | Required for disk-backed storage such as `buffer_io`, `async_io`, `uring_io`, or `mmap_io`. |
 | `store_raw_vector` | bool | `false` | Preserve an FP32 copy for `GetRawVectorByIds` and precise distance-by-id calculations. |
@@ -161,8 +166,15 @@ Build-time parameters live under `index_param`.
 | `build_thread_count` | int | `1` | Threads used for parallel build. |
 | `hierarchies` | array | `[]` | Named hierarchy definitions. Each element is either a string (inherits all top-level params) or an object with `name` and optional overrides (`max_degree`, `ef_construction`, `alpha`, `no_build_levels`, `index_min_size`, `root_graph_type`). When present, multi-hierarchy mode is activated and each hierarchy maintains its own independent path tree. |
 
-PiPNN supports Pyramid builds with `dtype: "float32"` and `metric_type` set to `"l2"`, `"ip"`, or
-`"cosine"`. It batch-builds every constructed graph in each hierarchy; with
+PiPNN supports dense Pyramid builds with `dtype: "float32"`, `"float16"`, or `"bfloat16"` and
+`metric_type` set to `"l2"`, `"ip"`, or `"cosine"`; sparse and `int8` inputs are not supported.
+For FP16/BF16 input, PiPNN borrows the full input rows in their original half format rather than
+materializing a full FP32 input copy. It converts bounded, local partition/leaf operands to FP32
+for BLAS matrix operations and accumulates in FP32; this is not a native half-precision matrix
+backend. Final vector-storage quantization is configured independently of the input dtype,
+subject to the supported quantizers listed above.
+Quantizer training is separate from PiPNN graph construction: training may still materialize the full selected training sample in an FP32 buffer (potentially the full dataset when all rows are selected). Borrowing half input therefore does not guarantee that the complete build avoids a full-sample FP32 buffer. Validation of these half-input paths is in progress; no performance or non-regression claim is made.
+It batch-builds every constructed graph in each hierarchy; with
 `root_graph_type: "multi_layer"`, this also includes every root routing layer. Search, incremental
 `Add`, removal, duplicate handling, reorder, and serialization retain the standard Pyramid
 behavior. Levels in `no_build_levels` are still skipped.

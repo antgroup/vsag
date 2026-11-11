@@ -260,7 +260,35 @@ HGraphDailyGroups(const HGraphResourcePtr& resource) {
                 disk_graph_io_start = (disk_graph_io_start + HGraphDiskIOCases(dim).size()) %
                                       hgraph_graph_io_types.size();
             }
-            groups.push_back(std::move(group));
+            // These helpers consume test_cases directly. Keep fixed-matrix and disk
+            // helpers intact so their backend sequence and special contracts remain unchanged.
+            const auto title = HGraphCaseTitle(resource->identity);
+            const bool split_quantizers =
+                title == "HGraph Build Test" || title == "HGraph Clone" ||
+                title == "HGraph Build & ContinueAdd Test" ||
+                title == "HGraph Build & ContinueAdd Test With Random Allocator" ||
+                title == "HGraph Concurrent Add" || title == "HGraph Train & Add Test" ||
+                title == "HGraph Export Model" || title == "HGraph Mark Remove" ||
+                title == "HGraph Search Over Time" || title == "HGraph Merge" ||
+                title == "HGraph Hops Limit" || title == "HGraph Duplicate Build" ||
+                title == "HGraph Estimate Memory And Get Memory Usage";
+            if (title == "HGraph Tune") {
+                for (uint64_t i = 0; i < resource->tune_cases.size(); ++i) {
+                    auto part = group;
+                    part["tune_index"] = i;
+                    part["tune_pairs"] = nlohmann::json::array({resource->tune_cases[i]});
+                    groups.push_back(std::move(part));
+                }
+            } else if (split_quantizers) {
+                for (uint64_t i = 0; i < resource->test_cases.size(); ++i) {
+                    auto part = group;
+                    part["quantizer_index"] = i;
+                    part["quantizers"] = nlohmann::json::array({resource->test_cases[i]});
+                    groups.push_back(std::move(part));
+                }
+            } else {
+                groups.push_back(std::move(group));
+            }
         }
     }
     return groups;
@@ -274,6 +302,13 @@ SelectHGraphDailyGroup(const HGraphResourcePtr& resource, const nlohmann::json& 
     }
     if (HGraphCaseTitle(resource->identity) == "HGraph Disk IO Type Index") {
         resource->disk_graph_io_start = selected.at("disk_graph_io_start").get<uint64_t>();
+    }
+    if (selected.contains("quantizer_index")) {
+        resource->test_cases = {
+            resource->test_cases.at(selected.at("quantizer_index").get<uint64_t>())};
+    }
+    if (selected.contains("tune_index")) {
+        resource->tune_cases = {resource->tune_cases.at(selected.at("tune_index").get<uint64_t>())};
     }
     resource->metric_types = {selected.at("metric").get<std::string>()};
     resource->dims = {selected.at("dim").get<int>()};
@@ -601,7 +636,7 @@ HGraphTestIndex::GetResource(bool sample,
     }
     ApplyHGraphBudget(resource);
     // Keep the original whole-case workload size and assertions. Rotation splits
-    // metric/dimension groups; each group retains every legal quantizer/tune pair.
+    // metric/dimension/quantizer groups; the inventory retains every legal tuple.
     if (!sample && identity.name.rfind("(Daily) ", 0) == 0) {
         const auto groups = HGraphDailyGroups(resource);
         if (const auto* path = std::getenv("VSAG_DAILY_ENUMERATE")) {
@@ -1462,6 +1497,49 @@ MakeHGraphQueryComputerCountParam(const std::string& quantization,
     }
 
 }  // namespace
+
+TEST_CASE("HGraph Daily quantizer splitting preserves the complete tuple inventory",
+          "[ft][hgraph][test_budget][daily_plan][pr]") {
+    using namespace fixtures;
+    auto whole = std::make_shared<HGraphTestResource>();
+    whole->identity = {"(Daily) HGraph Build Test", "", __FILE__, 0};
+    whole->base_count = 1000;
+    whole->query_count = 100;
+    whole->metric_types = {"l2", "ip"};
+    whole->dims = {32, 128};
+    whole->test_cases = {{"fp32", 0.99F}, {"sq8,fp32", 0.95F}, {"pq,fp32", 0.9F}};
+    const auto groups = HGraphDailyGroups(whole);
+    REQUIRE(groups.size() == 12);
+    uint64_t index = 0;
+    for (const auto& metric : whole->metric_types) {
+        for (const auto dim : whole->dims) {
+            for (const auto& quantizer : whole->test_cases) {
+                auto selected = std::make_shared<HGraphTestResource>(*whole);
+                SelectHGraphDailyGroup(selected, groups.at(index++));
+                REQUIRE(selected->metric_types == std::vector<std::string>{metric});
+                REQUIRE(selected->dims == std::vector<int>{dim});
+                REQUIRE(selected->test_cases.size() == 1);
+                REQUIRE(selected->test_cases.front() == quantizer);
+                REQUIRE(selected->base_count == whole->base_count);
+                REQUIRE(selected->query_count == whole->query_count);
+            }
+        }
+    }
+    whole->identity.name = "(Daily) HGraph Tune";
+    whole->tune_cases = {{"sq8,fp32", "sq8"}, {"sq4,fp32", "sq4"}};
+    const auto tunes = HGraphDailyGroups(whole);
+    REQUIRE(tunes.size() == 8);
+    for (uint64_t i = 0; i < tunes.size(); ++i) {
+        auto selected = std::make_shared<HGraphTestResource>(*whole);
+        SelectHGraphDailyGroup(selected, tunes.at(i));
+        REQUIRE(selected->tune_cases.size() == 1);
+        REQUIRE(selected->tune_cases.front() == whole->tune_cases.at(i % 2));
+    }
+    whole->identity.name = "(Daily) HGraph Build Test";
+    auto invalid = groups.front();
+    invalid["quantizer_index"] = 99;
+    REQUIRE_THROWS_AS(SelectHGraphDailyGroup(whole, invalid), std::invalid_argument);
+}
 
 TEST_CASE("HGraph Daily disk IO splitting preserves the original backend sequence",
           "[ft][hgraph][test_budget][daily_plan][pr]") {

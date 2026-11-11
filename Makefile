@@ -239,16 +239,9 @@ dist-libcxx:             ## Build vsag using libc++.
 	cmake ${VSAG_CMAKE_ARGS} -B${RELEASE_BUILD_DIR} -DCMAKE_BUILD_TYPE=Release -DENABLE_CCACHE=${VSAG_ENABLE_CCACHE} -DENABLE_LIBCXX=on
 	cmake --build ${RELEASE_BUILD_DIR} --parallel ${COMPILE_JOBS}
 
-PY_VERSION ?= 3.10
+.PHONY: pyvsag
 
-.PHONY: pyvsag pyvsag-all
-
-pyvsag:                  ## Build a specific Python version wheel. Usage: make pyvsag PY_VERSION=3.10
-	@echo "Building wheel for Python $(PY_VERSION)..."
-	bash ./scripts/python/local_build_wheel.sh $(PY_VERSION)
-
-pyvsag-all:              ## Build wheels for all supported versions. Usage: make pyvsag-all
-	@echo "Building wheels for all supported versions..."
+pyvsag:                  ## Build the pyvsag wheel (one py3-none wheel per architecture).
 	bash ./scripts/python/local_build_wheel.sh
 
 .PHONY: clean-release
