@@ -34,34 +34,6 @@ if (CMAKE_GENERATOR MATCHES "Ninja")
       PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
 endif ()
 
-# Each (metric, IO) flatten factory instantiation is its own translation unit, compiled
-# serially, so that peak compiler memory stays bounded (notably for ASan on AArch64).
-set (FLATTEN_SHARD_IOS MemoryBlockIO MemoryIO BufferIO AsyncIO UringIO MMapIO ReaderIO
-                       UserDefinedIO)
-set (FLATTEN_SHARD_METRICS METRIC_TYPE_L2SQR METRIC_TYPE_IP METRIC_TYPE_COSINE)
-set (FLATTEN_SHARD_SRCS "")
-foreach (SHARD_METRIC IN LISTS FLATTEN_SHARD_METRICS)
-  foreach (SHARD_IO IN LISTS FLATTEN_SHARD_IOS)
-    set (shard_src
-         "${CMAKE_CURRENT_BINARY_DIR}/flatten_shards/flatten_datacell_factory_${SHARD_METRIC}_${SHARD_IO}.cpp"
-    )
-    configure_file ("${CMAKE_CURRENT_SOURCE_DIR}/flatten_datacell_factory_shard.cpp.in"
-                    "${shard_src}" @ONLY)
-    list (APPEND FLATTEN_SHARD_SRCS "${shard_src}")
-  endforeach ()
-endforeach ()
-add_library (flatten_datacell_factory_shards OBJECT ${FLATTEN_SHARD_SRCS})
-target_include_directories (flatten_datacell_factory_shards
-                            PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries (
-  flatten_datacell_factory_shards
-  PRIVATE transform quantizer io attr coverage_config vsag_src_common)
-if (CMAKE_GENERATOR MATCHES "Ninja")
-    set_property (
-      TARGET flatten_datacell_factory_shards
-      PROPERTY JOB_POOL_COMPILE rabitq_split_factory_pool)
-endif ()
-
 add_library (datacell OBJECT ${DATACELL_SRCS})
 target_link_libraries (datacell PRIVATE transform quantizer io attr coverage_config vsag_src_common)
 

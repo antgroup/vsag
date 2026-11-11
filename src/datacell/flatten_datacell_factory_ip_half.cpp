@@ -16,8 +16,11 @@
 
 namespace vsag {
 
-template FlattenInterfacePtr
-MakeFlattenDataCellShard<MetricType::@SHARD_METRIC@, @SHARD_IO@>(
-    const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
+FlattenInterfacePtr
+make_flatten_data_cell_ip_half(const FlattenInterfaceParamPtr& param,
+                               const IndexCommonParam& common_param) {
+    return FlattenFactoryImpl<FlattenInputKind::Half>::MakeForMetric<MetricType::METRIC_TYPE_IP>(
+        param, common_param);
+}
 
 }  // namespace vsag
