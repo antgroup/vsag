@@ -22,7 +22,6 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <shared_mutex>
-#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -34,14 +33,13 @@
 #include "impl/filter/filter_callback_limiter.h"
 #include "impl/heap/standard_heap.h"
 #include "impl/reasoning/reasoning_context.h"
-#include "impl/searcher/sindi_searcher.h"
-#include "impl/thread_pool/default_thread_pool.h"
-#include "impl/thread_pool/safe_thread_pool.h"
 #include "index_feature_list.h"
 #include "io/memory_block_io/memory_block_io_parameter.h"
 #include "quantization/sparse_quantization/sparse_quantizer_parameter.h"
 #include "simd/bf16_simd.h"
 #include "simd/fp16_simd.h"
+#include "sindi_cpu_timer.h"
+#include "sindi_parallel_search.h"
 #include "storage/serialization.h"
 #include "storage/serialization_tags.h"
 #include "storage/tlv_section.h"
@@ -62,26 +60,6 @@ constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DATACELL = 2;
 constexpr int64_t SINDI_RERANK_FLAT_FORMAT_DMQ = 3;
 constexpr const char* SINDI_POSTING_LIST_FORMAT_VERSION_KEY = "sindi_posting_list_format_version";
 constexpr int64_t SINDI_SORTED_POSTING_LIST_FORMAT_VERSION = 1;
-constexpr uint64_t SINDI_SEARCH_THREAD_POOL_SIZE = 16;
-
-uint64_t
-resolve_worker_candidates(const SINDISearchParameter& param, uint64_t final_candidates) {
-    const auto worker_candidates = param.worker_n_candidate == 0
-                                       ? final_candidates
-                                       : static_cast<uint64_t>(param.worker_n_candidate);
-    const auto minimum_worker_candidates =
-        final_candidates / param.window_parallelism +
-        static_cast<uint64_t>(final_candidates % param.window_parallelism != 0);
-    CHECK_ARGUMENT(worker_candidates >= minimum_worker_candidates,
-                   fmt::format("worker_n_candidate ({}) is below the minimum per-worker capacity "
-                               "({}) for window_parallelism ({}) and final candidate count ({})",
-                               worker_candidates,
-                               minimum_worker_candidates,
-                               param.window_parallelism,
-                               final_candidates));
-    return worker_candidates;
-}
-
 bool
 has_sorted_posting_lists(const JsonType& basic_info) {
     return basic_info.Contains(SINDI_POSTING_LIST_FORMAT_VERSION_KEY) and
@@ -781,8 +759,17 @@ SINDI::KnnSearch(const DatasetPtr& query,
                  const std::string& parameters,
                  const FilterPtr& filter,
                  vsag::Allocator* allocator) const {
-    SindiQueryProfileScope query_scope;
-    auto& stages = SindiLastQueryProfile();
+    return knn_search_impl(
+        query, k, parameters, filter, allocator, SindiParallelState::Clock::now());
+}
+
+DatasetPtr
+SINDI::knn_search_impl(const DatasetPtr& query,
+                       int64_t k,
+                       const std::string& parameters,
+                       const FilterPtr& filter,
+                       Allocator* allocator,
+                       std::chrono::steady_clock::time_point entered) const {
     std::shared_lock rlock(this->global_mutex_);
 
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -796,9 +783,50 @@ SINDI::KnnSearch(const DatasetPtr& query,
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(parameters);
     search_param.FromJson(search_json);
-    const auto& window_options = search_param.execution_options;
-    SindiWindowSearchProfile window_profile;
-    stages.enabled = window_options.stage_profile;
+    const auto requested_slots = search_param.window_parallelism;
+    const bool serial_fallback = requested_slots > 1 and search_resources_ == nullptr;
+    std::unique_ptr<ConcurrentFilterLease> serial_filter_lease;
+    FilterPtr effective_filter = filter;
+    if (serial_fallback) {
+        // Reuse the original serial path, including its global candidate heap,
+        // timer and callback budget. Do not enter the partition executor.
+        search_param.window_parallelism = 1;
+        if (const auto* provider = dynamic_cast<const ConcurrentFilterProvider*>(filter.get())) {
+            serial_filter_lease = provider->TryLease(1);
+            const bool valid_serial_filter_lease =
+                serial_filter_lease != nullptr and serial_filter_lease->evaluators.size() == 1 and
+                serial_filter_lease->evaluators.front() != nullptr;
+            CHECK_ARGUMENT(valid_serial_filter_lease, "SINDI serial filter resources unavailable");
+            effective_filter = serial_filter_lease->evaluators.front();
+        }
+    }
+    SindiCpuTime caller_cpu;
+    SindiCpuTimer cpu_timer(search_param.profile_cpu, caller_cpu);
+    std::unique_ptr<SindiParallelState> parallel;
+    if (search_param.window_parallelism > 1) {
+        CHECK_ARGUMENT(immutable_term_datacell_ != nullptr,
+                       "SINDI parallel search requires an immutable in-memory datacell");
+        parallel = std::make_unique<SindiParallelState>();
+        parallel->resources = search_resources_;
+        parallel->user_filter = filter;
+        parallel->ratio = search_param.parallel_n_candidate_ratio;
+        parallel->requested = search_param.window_parallelism;
+        parallel->callback_limit = search_param.filter_callback_limit;
+        parallel->profile_cpu = search_param.profile_cpu;
+        if (search_param.enable_time_record) {
+            const auto available = std::chrono::duration<double, std::milli>(
+                                       SindiParallelState::Clock::time_point::max() - entered)
+                                       .count();
+            if (search_param.timeout_ms <= 0) {
+                parallel->deadline = entered;
+            } else if (search_param.timeout_ms < available) {
+                parallel->deadline =
+                    entered +
+                    std::chrono::duration_cast<SindiParallelState::Clock::duration>(
+                        std::chrono::duration<double, std::milli>(search_param.timeout_ms));
+            }
+        }
+    }
     const auto threshold = ParseSearchThreshold(parameters);
     CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * k,
                    fmt::format("n_candidate ({}) should be less than {} * k ({})",
@@ -807,8 +835,6 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                k));
     InnerSearchParam inner_param;
     inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), k);
-    inner_param.parallel_search_thread_count = search_param.window_parallelism;
-    const auto worker_candidates = resolve_worker_candidates(search_param, inner_param.ef);
     inner_param.topk = threshold.has_value() ? static_cast<int64_t>(inner_param.ef) : k;
     inner_param.distance_threshold = threshold;
     inner_param.enable_reorder = use_reorder_;
@@ -818,25 +844,46 @@ SINDI::KnnSearch(const DatasetPtr& query,
     }
 
     auto filter_callback_remaining =
-        filter != nullptr and search_param.filter_callback_limit > 0
+        parallel == nullptr and effective_filter != nullptr and
+                search_param.filter_callback_limit > 0
             ? std::make_shared<uint64_t>(search_param.filter_callback_limit)
             : nullptr;
     const uint64_t* filter_callback_remaining_ptr = filter_callback_remaining.get();
     inner_param.is_inner_id_allowed = this->create_search_filter(
-        create_filter_callback_limiter(filter, filter_callback_remaining));
+        create_filter_callback_limiter(effective_filter, filter_callback_remaining));
 
     SearchStatistics statistics;
-    auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
+    auto* statistics_ptr = &statistics;
+    const auto annotate = [&](const DatasetPtr& result) {
+        if (parallel and SindiParallelState::Clock::now() >= parallel->deadline) {
+            throw VsagException(ErrorType::INTERNAL_ERROR,
+                                "SINDI deadline exceeded before result publication");
+        }
+        cpu_timer.Stop();
+        result->Statistics(SindiExecutionStatistics(statistics.ToJson(),
+                                                    parallel.get(),
+                                                    caller_cpu,
+                                                    search_param.profile_cpu,
+                                                    requested_slots));
+    };
     const auto metadata_route = metadata_filter_.Classify(query, window_size_);
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
-        if (statistics_ptr != nullptr) {
-            SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-            result->Statistics(statistics.Dump());
+        if (parallel) {
+            parallel->plan =
+                SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio, inner_param.topk);
         }
+        annotate(result);
         return result;
     }
     metadata_filter_.ApplyFilter(metadata_route, inner_param.is_inner_id_allowed);
+    if (parallel) {
+        parallel->map_filter = [this, &metadata_route](const FilterPtr& evaluator) {
+            auto mapped = this->create_search_filter(evaluator);
+            metadata_filter_.ApplyFilter(metadata_route, mapped);
+            return mapped;
+        };
+    }
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator);
     Vector<float> tmp_vals(allocator);
@@ -844,10 +891,11 @@ SINDI::KnnSearch(const DatasetPtr& query,
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
-            if (statistics_ptr != nullptr) {
-                SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-                result->Statistics(statistics.Dump());
+            if (parallel) {
+                parallel->plan =
+                    SindiParallelPlan::Make(0, inner_param.ef, parallel->ratio, inner_param.topk);
             }
+            annotate(result);
             return result;
         }
     }
@@ -855,7 +903,6 @@ SINDI::KnnSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(
         effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    query_scope.FinishPreparation();
     auto result = search_impl<KNN_SEARCH>(computer,
                                           inner_param,
                                           allocator,
@@ -865,15 +912,8 @@ SINDI::KnnSearch(const DatasetPtr& query,
                                           statistics_ptr,
                                           filter_callback_remaining_ptr,
                                           metadata_route,
-                                          worker_candidates,
-                                          window_options,
-                                          &window_profile);
-    if (statistics_ptr != nullptr) {
-        SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-        result->Statistics(
-            SindiSearcher::DumpStatistics(statistics, window_options, window_profile));
-    }
-    SindiStageTimer result_timer(stages.enabled, stages.result_us);
+                                          parallel.get());
+    annotate(result);
     return FilterDatasetByThreshold(result, threshold, allocator, k);
 }
 
@@ -888,11 +928,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                    SearchStatistics* statistics,
                    const uint64_t* filter_callback_remaining,
                    const SindiMetadataSearchRoute& metadata_route,
-                   uint64_t worker_n_candidate,
-                   const SindiSearchOptions& window_options,
-                   SindiWindowSearchProfile* window_profile) const {
-    auto& stages = SindiLastQueryProfile();
-    SindiStageTimer preparation_timer(window_options.stage_profile, stages.prepare_us);
+                   SindiParallelState* parallel) const {
     auto* search_allocator = allocator != nullptr ? allocator : allocator_;
     // computer and heap
     MaxHeap heap(search_allocator);
@@ -910,27 +946,7 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
     auto selected_buckets = reasoning_ctx != nullptr
                                 ? std::make_unique<Vector<BucketIdType>>(search_allocator)
                                 : nullptr;
-    const bool can_parallel_windows =
-        mode == KNN_SEARCH and inner_param.parallel_search_thread_count > 1 and
-        filter == nullptr and reasoning_ctx == nullptr and filter_callback_remaining == nullptr;
-    // A caller-supplied pool may contain an Add/Remove task waiting for the read
-    // lock held by this query. Query workers must never queue behind that writer.
-    SafeThreadPoolPtr search_thread_pool;
-    const bool batch_rerank =
-        use_reorder_ and mode == KNN_SEARCH and reasoning_ctx == nullptr and
-        rerank_type_ != SPARSE_RERANK_TYPE_DMQ8 and
-        (window_options.rerank_batch or window_options.rerank_parallelism > 1);
-    if (can_parallel_windows or (batch_rerank and window_options.rerank_parallelism > 1)) {
-        std::call_once(search_thread_pool_once_, [this]() {
-            const auto workers = std::min<uint64_t>(
-                SINDI_SEARCH_THREAD_POOL_SIZE, std::max(1U, std::thread::hardware_concurrency()));
-            search_thread_pool_ =
-                std::make_shared<SafeThreadPool>(std::make_shared<DefaultThreadPool>(workers));
-        });
-        search_thread_pool = search_thread_pool_;
-    }
-    const bool parallel_windows = can_parallel_windows and search_thread_pool != nullptr;
-    if (parallel_windows) {
+    if (parallel != nullptr) {
         std::vector<uint32_t> windows;
         for (auto cur = min_window_id; cur <= max_window_id; ++cur) {
             cur = metadata_filter_.NextMatchingWindow(
@@ -940,38 +956,19 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
             }
             windows.push_back(static_cast<uint32_t>(cur));
         }
-        SindiWindowSearchProfile unused_profile;
-        const SindiWindowSearchRequest request{windows,
-                                               term_datacell_,
-                                               computer,
-                                               inner_param,
-                                               metadata_filter_,
-                                               metadata_route,
-                                               search_thread_pool,
-                                               search_allocator,
-                                               window_size_,
-                                               static_cast<uint64_t>(cur_element_count_.load()),
-                                               worker_n_candidate,
-                                               use_term_lists_heap_insert,
-                                               statistics};
-        preparation_timer.Stop();
-        SindiStageTimer windows_timer(window_options.stage_profile, stages.windows_us);
-        auto scan_options = window_options;
-        scan_options.profile = scan_options.profile or scan_options.stage_profile;
-        SindiSearcher::SearchWindows(request,
-                                     scan_options,
-                                     window_profile != nullptr ? *window_profile : unused_profile,
-                                     heap);
-        windows_timer.Stop();
-        if (window_options.stage_profile) {
-            const auto merge_us =
-                window_profile != nullptr ? window_profile->merge_us : unused_profile.merge_us;
-            stages.merge_us += merge_us;
-            stages.windows_us -= merge_us;
-        }
+        const SindiPartitionSearchRequest request{windows,
+                                                  term_datacell_,
+                                                  computer,
+                                                  inner_param,
+                                                  metadata_filter_,
+                                                  metadata_route,
+                                                  search_allocator,
+                                                  window_size_,
+                                                  static_cast<uint64_t>(cur_element_count_.load()),
+                                                  use_term_lists_heap_insert,
+                                                  statistics};
+        SearchSindiPartitions(request, *parallel, heap);
     } else {
-        preparation_timer.Stop();
-        SindiStageTimer windows_timer(window_options.stage_profile, stages.windows_us);
         Vector<float> dists(window_size_, 0.0F, search_allocator);
         SindiQueryContext query_context(search_allocator);
         for (auto cur = min_window_id; cur <= max_window_id; ++cur) {
@@ -1054,60 +1051,62 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
 
     // rerank
     if (use_reorder_) {
-        SindiStageTimer rerank_timer(window_options.stage_profile, stages.rerank_us);
         // high precision
         float cur_heap_top = std::numeric_limits<float>::max();
         auto candidate_size = heap.size();
         auto high_precise_heap = std::make_shared<StandardHeap<true, false>>(search_allocator, -1);
         const auto& rerank_query = original_query ? *original_query : computer->raw_query_;
         auto* rerank_datacell = rerank_flat_.get();
-        auto rerank_computer =
-            batch_rerank ? nullptr : rerank_datacell->FactoryComputer(&rerank_query);
+        auto rerank_computer = rerank_datacell->FactoryComputer(&rerank_query);
+        constexpr uint64_t deadline_batch_size = 64;
+        const auto check_deadline = [parallel] {
+            if (parallel != nullptr and SindiParallelState::Clock::now() >= parallel->deadline) {
+                throw VsagException(ErrorType::INTERNAL_ERROR,
+                                    "SINDI deadline exceeded during rerank");
+            }
+        };
         Vector<InnerIdType> rerank_ids(search_allocator);
-        Vector<float> batch_distances(search_allocator);
-        if (batch_rerank) {
-            rerank_ids.reserve(candidate_size);
-            while (not heap.empty()) {
-                rerank_ids.push_back(heap.top().second);
-                heap.pop();
-            }
-            stages.parallel_rerank = window_options.stage_profile and
-                                     window_options.rerank_parallelism > 1 and candidate_size > 1;
-            batch_distances = SindiSearcher::RerankDistances(*rerank_datacell,
-                                                             rerank_query,
-                                                             rerank_ids,
-                                                             window_options.rerank_parallelism,
-                                                             search_thread_pool,
-                                                             search_allocator,
-                                                             statistics,
-                                                             window_options.stage_profile,
-                                                             window_options.rerank_scheduler);
+        Vector<float> approximate_distances(search_allocator);
+        Vector<float> rerank_distances(search_allocator);
+        rerank_ids.reserve(candidate_size);
+        rerank_distances.resize(candidate_size);
+        if (reasoning_ctx != nullptr) {
+            approximate_distances.reserve(candidate_size);
         }
-        const bool time_statistics = window_options.stage_profile and statistics != nullptr and
-                                     rerank_type_ != SPARSE_RERANK_TYPE_DMQ8;
-        for (auto i = 0; i < candidate_size; i++) {
-            auto inner_id = batch_rerank ? rerank_ids[i] : heap.top().second;
-            float high_precise_distance = 0.0F;
-            QueryContext query_context{.stats = time_statistics ? nullptr : statistics,
+        while (not heap.empty()) {
+            if (parallel != nullptr and rerank_ids.size() % deadline_batch_size == 0) {
+                check_deadline();
+            }
+            rerank_ids.push_back(heap.top().second);
+            if (reasoning_ctx != nullptr) {
+                approximate_distances.push_back(heap.top().first);
+            }
+            heap.pop();
+        }
+        // Ordinary serial searches retain one batched Query. Parallel searches poll their
+        // deadline between bounded batches instead of taking the datacell lock per candidate.
+        const uint64_t rerank_batch_size =
+            parallel == nullptr ? std::max<uint64_t>(1, candidate_size) : deadline_batch_size;
+        for (uint64_t start = 0; start < candidate_size; start += rerank_batch_size) {
+            check_deadline();
+            QueryContext query_context{.stats = statistics,
                                        .distance_phase = DistanceEvaluationPhase::RERANK};
-            if (batch_rerank) {
-                high_precise_distance = batch_distances[i];
-            } else {
-                rerank_datacell->Query(
-                    &high_precise_distance, rerank_computer, &inner_id, 1, &query_context);
+            rerank_datacell->Query(rerank_distances.data() + start,
+                                   rerank_computer,
+                                   rerank_ids.data() + start,
+                                   std::min<uint64_t>(rerank_batch_size, candidate_size - start),
+                                   &query_context);
+        }
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            if (parallel != nullptr and i % deadline_batch_size == 0) {
+                check_deadline();
             }
-            if (time_statistics and not batch_rerank) {
-                SindiStageTimer timer(true, stages.statistics_counter_us);
-                statistics->AddDistance(DistanceEvaluationPhase::RERANK,
-                                        rerank_type_ == SPARSE_RERANK_TYPE_FP16
-                                            ? DistanceEvaluationBackend::SPARSE_FP16
-                                            : DistanceEvaluationBackend::SPARSE_FP32,
-                                        1);
-            }
+            const auto inner_id = rerank_ids[i];
+            const auto high_precise_distance = rerank_distances[i];
             auto label = label_table_->GetLabelById(inner_id);
             if (reasoning_ctx != nullptr) {
                 reasoning_ctx->RecordReorder(
-                    inner_id, 1.0F + heap.top().first, high_precise_distance);
+                    inner_id, 1.0F + approximate_distances[i], high_precise_distance);
             }
             if constexpr (mode == KNN_SEARCH) {
                 const bool eligible =
@@ -1143,18 +1142,12 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     high_precise_heap->Pop();
                 }
             }
-            if (not batch_rerank) {
-                heap.pop();
-            }
         }
 
-        rerank_timer.Stop();
-        SindiStageTimer result_timer(window_options.stage_profile, stages.result_us);
         return collect_heap_results(high_precise_heap, search_allocator);
     }
 
     // low precision
-    SindiStageTimer result_timer(window_options.stage_profile, stages.result_us);
     if constexpr (mode == RANGE_SEARCH) {
         k = static_cast<int64_t>(heap.size());
         if (inner_param.range_search_limit_size != -1) {
@@ -1188,8 +1181,6 @@ SINDI::RangeSearch(const DatasetPtr& query,
                    const std::string& parameters,
                    const FilterPtr& filter,
                    int64_t limited_size) const {
-    SindiQueryProfileScope query_scope;
-    auto& stages = SindiLastQueryProfile();
     std::shared_lock rlock(this->global_mutex_);
 
     const auto* sparse_vectors = query->GetSparseVectors();
@@ -1203,8 +1194,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(parameters);
     search_param.FromJson(search_json);
-    const auto& window_options = search_param.execution_options;
-    stages.enabled = window_options.stage_profile;
+    CHECK_ARGUMENT(search_param.window_parallelism == 1,
+                   "SINDI RangeSearch does not support window parallelism");
     InnerSearchParam inner_param;
 
     inner_param.range_search_limit_size = static_cast<int>(limited_size);
@@ -1215,7 +1206,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
     }
 
     SearchStatistics statistics;
-    auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
+    auto* statistics_ptr = &statistics;
     SparseVector effective_query = sparse_query;
     Vector<uint32_t> tmp_ids(allocator_);
     Vector<float> tmp_vals(allocator_);
@@ -1224,7 +1215,6 @@ SINDI::RangeSearch(const DatasetPtr& query,
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
             if (statistics_ptr != nullptr) {
-                SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
                 result->Statistics(statistics.Dump());
             }
             return result;
@@ -1243,7 +1233,6 @@ SINDI::RangeSearch(const DatasetPtr& query,
     auto computer = std::make_shared<SparseTermComputer>(
         effective_query, search_param, allocator_, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
-    query_scope.FinishPreparation();
     auto result = search_impl<RANGE_SEARCH>(computer,
                                             inner_param,
                                             allocator_,
@@ -1251,12 +1240,8 @@ SINDI::RangeSearch(const DatasetPtr& query,
                                             rerank_query,
                                             nullptr,
                                             statistics_ptr,
-                                            filter_callback_remaining_ptr,
-                                            {},
-                                            0,
-                                            window_options);
+                                            filter_callback_remaining_ptr);
     if (statistics_ptr != nullptr) {
-        SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
         result->Statistics(statistics.Dump());
     }
     return result;
@@ -1264,8 +1249,7 @@ SINDI::RangeSearch(const DatasetPtr& query,
 
 DatasetPtr
 SINDI::SearchWithRequest(const SearchRequest& request) const {
-    SindiQueryProfileScope query_scope;
-    auto& stages = SindiLastQueryProfile();
+    const auto entered = SindiParallelState::Clock::now();
     std::shared_lock rlock(this->global_mutex_);
 
     CHECK_ARGUMENT(request.query_ != nullptr, "query should not be null");
@@ -1279,15 +1263,33 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
     SINDISearchParameter search_param;
     const auto search_json = JsonType::Parse(request.params_str_);
     search_param.FromJson(search_json);
-    const auto& window_options = search_param.execution_options;
-    SindiWindowSearchProfile window_profile;
-    stages.enabled = window_options.stage_profile;
+    if (search_param.window_parallelism > 1) {
+        const bool supported_parallel_request =
+            request.mode_ == SearchMode::KNN_SEARCH and request.expected_labels_.empty();
+        CHECK_ARGUMENT(supported_parallel_request,
+                       "SINDI parallel search does not support Range or reasoning");
+        rlock.unlock();
+        return knn_search_impl(request.query_,
+                               request.topk_,
+                               request.params_str_,
+                               request.enable_filter_ ? request.filter_ : nullptr,
+                               select_query_allocator(request.search_allocator_, this->allocator_),
+                               entered);
+    }
 
     Allocator* allocator = select_query_allocator(request.search_allocator_, this->allocator_);
 
     bool is_range = (request.mode_ == SearchMode::RANGE_SEARCH);
     SearchStatistics statistics;
-    auto* statistics_ptr = window_options.collect_statistics ? &statistics : nullptr;
+    auto* statistics_ptr = &statistics;
+    SindiCpuTime caller_cpu;
+    const bool profile_cpu = search_param.profile_cpu and not is_range;
+    SindiCpuTimer cpu_timer(profile_cpu, caller_cpu);
+    const auto annotate = [&](const DatasetPtr& result) {
+        cpu_timer.Stop();
+        result->Statistics(
+            SindiExecutionStatistics(statistics.ToJson(), nullptr, caller_cpu, profile_cpu));
+    };
 
     InnerSearchParam inner_param;
     const bool filter_enabled = request.enable_filter_ and request.filter_ != nullptr;
@@ -1339,10 +1341,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                          : metadata_filter_.Classify(request.query_, window_size_);
     if (metadata_route.kind == SindiHostRouteKind::EMPTY) {
         auto result = make_empty_result();
-        if (statistics_ptr != nullptr) {
-            SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-            result->Statistics(statistics.Dump());
-        }
+        annotate(result);
         this->AttachReasoningReport(result, reasoning_ctx.get());
         return result;
     }
@@ -1355,10 +1354,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         effective_query = remap_sparse_vector_for_query(sparse_query, tmp_ids, tmp_vals);
         if (effective_query.len_ == 0) {
             auto result = make_empty_result();
-            if (statistics_ptr != nullptr) {
-                SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-                result->Statistics(statistics.Dump());
-            }
+            annotate(result);
             this->AttachReasoningReport(result, reasoning_ctx.get());
             return result;
         }
@@ -1368,7 +1364,6 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
         effective_query, search_param, allocator, term_datacell_->GetWindowCount());
     const SparseVector* rerank_query = (remap_term_ids_ && use_reorder_) ? &sparse_query : nullptr;
 
-    query_scope.FinishPreparation();
     DatasetPtr result;
     if (is_range) {
         inner_param.range_search_limit_size = static_cast<int>(request.limited_size_);
@@ -1380,10 +1375,7 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                            rerank_query,
                                            reasoning_ctx.get(),
                                            statistics_ptr,
-                                           filter_callback_remaining_ptr,
-                                           {},
-                                           0,
-                                           window_options);
+                                           filter_callback_remaining_ptr);
     } else {
         CHECK_ARGUMENT(search_param.n_candidate <= SPARSE_AMPLIFICATION_FACTOR * request.topk_,
                        fmt::format("n_candidate ({}) should be less than {} * k ({})",
@@ -1391,8 +1383,6 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                    SPARSE_AMPLIFICATION_FACTOR,
                                    request.topk_));
         inner_param.ef = std::max(static_cast<int64_t>(search_param.n_candidate), request.topk_);
-        inner_param.parallel_search_thread_count = search_param.window_parallelism;
-        const auto worker_candidates = resolve_worker_candidates(search_param, inner_param.ef);
         inner_param.topk = request.topk_;
         result = search_impl<KNN_SEARCH>(computer,
                                          inner_param,
@@ -1402,18 +1392,10 @@ SINDI::SearchWithRequest(const SearchRequest& request) const {
                                          reasoning_ctx.get(),
                                          statistics_ptr,
                                          filter_callback_remaining_ptr,
-                                         metadata_route,
-                                         worker_candidates,
-                                         window_options,
-                                         &window_profile);
+                                         metadata_route);
     }
 
-    if (statistics_ptr != nullptr) {
-        SindiStageTimer timer(stages.enabled, stages.statistics_json_us);
-        result->Statistics(
-            SindiSearcher::DumpStatistics(statistics, window_options, window_profile));
-    }
-    SindiStageTimer result_timer(stages.enabled, stages.result_us);
+    annotate(result);
     this->AttachReasoningReport(result, reasoning_ctx.get());
     return result;
 }

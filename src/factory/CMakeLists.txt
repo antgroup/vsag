@@ -20,6 +20,7 @@ set (FACTORY_SRC
         index_creators.cpp
         index_registry.cpp
         resource.cpp
+        search_resource.cpp
         resource_owner_wrapper.h
 )
 

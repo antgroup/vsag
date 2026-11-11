@@ -107,7 +107,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
             "query_prune_ratio": 0.2,
             "n_candidate": 20,
             "window_parallelism": 4,
-            "worker_n_candidate": 5,
+            "parallel_n_candidate_ratio": 2.0,
             "term_prune_ratio": 0.1,
             "term_retain_threshold": 100,
             "filter_callback_limit": 1000
@@ -120,30 +120,20 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE(search_param->term_retain_threshold == 100);
     REQUIRE(search_param->filter_callback_limit == 1000);
     REQUIRE(search_param->window_parallelism == 4);
-    REQUIRE(search_param->worker_n_candidate == 5);
+    REQUIRE(search_param->parallel_n_candidate_ratio == 2.0);
+    REQUIRE_FALSE(search_param->profile_cpu);
     vsag::ParameterTest::TestToJson(search_param);
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune_ratio"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("term_retain_threshold"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("filter_callback_limit"));
     REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("window_parallelism"));
-    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("worker_n_candidate"));
+    REQUIRE(search_param->ToJson()[INDEX_SINDI].Contains("parallel_n_candidate_ratio"));
     REQUIRE_THROWS_AS(
         search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"window_parallelism":17}})")),
         vsag::VsagException);
     REQUIRE_THROWS_AS(
         search_param->FromJson(vsag::JsonType::Parse(R"({"sindi":{"worker_n_candidate":0}})")),
         vsag::VsagException);
-    for (const auto value : {"4294967296", "4294967297", "9223372036854775807"}) {
-        REQUIRE_THROWS_AS(search_param->FromJson(JsonType::Parse(
-                              std::string(R"({"sindi":{"worker_n_candidate":)") + value + "}}")),
-                          VsagException);
-    }
-    SINDISearchParameter maximum_worker_candidates;
-    maximum_worker_candidates.FromJson(
-        JsonType::Parse(R"({"sindi":{"worker_n_candidate":4294967295}})"));
-    REQUIRE(maximum_worker_candidates.worker_n_candidate == std::numeric_limits<uint32_t>::max());
-    vsag::ParameterTest::TestToJson(
-        std::make_shared<SINDISearchParameter>(maximum_worker_candidates));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("term_prune"));
     REQUIRE_FALSE(search_param->ToJson()[INDEX_SINDI].Contains("use_term_lists_heap_insert"));
 
@@ -153,7 +143,7 @@ TEST_CASE("SINDI Index Parameters Test", "[ut][SINDIParameter]") {
     REQUIRE_FALSE(default_json[INDEX_SINDI].Contains("worker_n_candidate"));
     SINDISearchParameter restored_default;
     REQUIRE_NOTHROW(restored_default.FromJson(default_json));
-    REQUIRE(restored_default.worker_n_candidate == 0);
+    REQUIRE(restored_default.parallel_n_candidate_ratio == 2.0);
 
     auto legacy_search_param_str = R"({
         "sindi": {
@@ -497,7 +487,7 @@ TEST_CASE("SINDI build term prune parameters", "[ut][SINDIParameter]") {
 }
 
 TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIParameter]") {
-    for (const auto* key : {"window_parallelism", "worker_n_candidate"}) {
+    for (const auto* key : {"window_parallelism"}) {
         for (const auto* value : {"1.5",
                                   "1.0",
                                   "1e100",
@@ -526,7 +516,64 @@ TEST_CASE("SINDI worker parameters require bounded JSON integers", "[ut][SINDIPa
     }
     SINDISearchParameter maximum;
     REQUIRE_NOTHROW(maximum.FromJson(
-        JsonType::Parse(R"({"sindi":{"window_parallelism":16,"worker_n_candidate":4294967295}})")));
+        JsonType::Parse(R"({"sindi":{"window_parallelism":16,"parallel_n_candidate_ratio":1}})")));
     REQUIRE(maximum.window_parallelism == 16);
-    REQUIRE(maximum.worker_n_candidate == std::numeric_limits<uint32_t>::max());
+    REQUIRE(maximum.parallel_n_candidate_ratio == 1);
+    REQUIRE_NOTHROW(maximum.FromJson(JsonType::Parse(R"({"sindi":{"profile_cpu":true}})")));
+    REQUIRE(maximum.profile_cpu);
+    REQUIRE(maximum.ToJson()[INDEX_SINDI]["profile_cpu"].GetBool());
+    REQUIRE_THROWS(maximum.FromJson(JsonType::Parse(R"({"sindi":{"profile_cpu":"true"}})")));
+    REQUIRE_THROWS(maximum.FromJson(JsonType::Parse(
+        R"({"sindi":{"window_parallelism":2,"parallel_n_candidate_ratio":1,"worker_n_candidate":100}})")));
+}
+
+TEST_CASE("SINDI defaults candidate capacity to twice the final budget", "[ut][SINDIParameter]") {
+    SINDISearchParameter parameter;
+    REQUIRE(parameter.parallel_n_candidate_ratio == 2.0);
+    parameter.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+    // Library default is zero: the search uses max(n_candidate, topk).
+    // Embedding applications may explicitly configure a larger candidate pool.
+    REQUIRE(parameter.n_candidate == 0);
+    SINDISearchParameter library_default;
+    library_default.FromJson(parameter.ToJson());
+    REQUIRE(library_default.n_candidate == 0);
+    for (auto slots : {1, 4}) {
+        auto json = JsonType::Parse(R"({"sindi":{"n_candidate":100}})");
+        json[INDEX_SINDI]["window_parallelism"].SetInt(slots);
+        parameter.FromJson(json);
+        REQUIRE(parameter.window_parallelism == slots);
+        REQUIRE(parameter.parallel_n_candidate_ratio == 2.0);
+        REQUIRE(parameter.n_candidate == 100);
+        SINDISearchParameter restored;
+        restored.FromJson(parameter.ToJson());
+        REQUIRE(restored.parallel_n_candidate_ratio == 2.0);
+        REQUIRE(restored.window_parallelism == slots);
+        for (double ratio : {1.0, 1.5, 4.0}) {
+            json[INDEX_SINDI]["parallel_n_candidate_ratio"].SetDouble(ratio);
+            parameter.FromJson(json);
+            REQUIRE(parameter.parallel_n_candidate_ratio == ratio);
+            restored.FromJson(parameter.ToJson());
+            REQUIRE(restored.parallel_n_candidate_ratio == ratio);
+        }
+        parameter.FromJson(JsonType::Parse(R"({"sindi":{}})"));
+        REQUIRE(parameter.parallel_n_candidate_ratio == 2.0);
+        REQUIRE(parameter.window_parallelism == 1);
+    }
+    for (const auto* invalid : {"0", "0.99", "-1", "1e309", "null", "true", "\"2\""}) {
+        REQUIRE_THROWS(parameter.FromJson(JsonType::Parse(
+            std::string(R"({"sindi":{"parallel_n_candidate_ratio":)") + invalid + "}}")));
+    }
+}
+
+TEST_CASE("SINDI rejects removed execution controls for every slot count", "[ut][SINDIParameter]") {
+    for (auto slots : {1, 4}) {
+        for (const auto* key :
+             {"worker_n_candidate", "window_scheduler", "filter_callback_limit_weight"}) {
+            auto json = JsonType::Parse(R"({"sindi":{}})");
+            json[INDEX_SINDI]["window_parallelism"].SetInt(slots);
+            json[INDEX_SINDI][key].SetInt(1);
+            SINDISearchParameter parameter;
+            REQUIRE_THROWS_AS(parameter.FromJson(json), VsagException);
+        }
+    }
 }
