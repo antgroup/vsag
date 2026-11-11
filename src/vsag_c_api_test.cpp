@@ -778,6 +778,52 @@ constexpr const char* parallel_index_param = R"(
 )";
 }  // namespace
 
+namespace {
+std::atomic<bool> allocator_exhausted{false};
+
+void*
+exhaustible_allocate(void* /*user_data*/, uint64_t size) {
+    return allocator_exhausted.load() ? nullptr : std::malloc(size);
+}
+
+void
+exhaustible_deallocate(void* /*user_data*/, void* ptr) {
+    std::free(ptr);
+}
+
+void*
+exhaustible_reallocate(void* /*user_data*/, void* ptr, uint64_t size) {
+    return allocator_exhausted.load() ? nullptr : std::realloc(ptr, size);
+}
+}  // namespace
+
+TEST_CASE("vsag_c_api host allocator failure is an error, not a crash", "[vsag_c_api][ut]") {
+    TestData data;
+    vsag_engine_options_t* raw_options = nullptr;
+    REQUIRE_OK(vsag_engine_options_create(&raw_options));
+    OptionsPtr options(raw_options);
+    REQUIRE_OK(vsag_engine_options_set_allocator(raw_options,
+                                                 "exhaustible",
+                                                 exhaustible_allocate,
+                                                 exhaustible_deallocate,
+                                                 exhaustible_reallocate,
+                                                 nullptr));
+    vsag_engine_t* raw_engine = nullptr;
+    REQUIRE_OK(vsag_engine_create(raw_options, &raw_engine));
+    EnginePtr engine(raw_engine);
+    vsag_index_t* raw_index = nullptr;
+    REQUIRE_OK(vsag_engine_create_index(raw_engine, index_name, index_param, &raw_index));
+    IndexPtr index(raw_index);
+
+    allocator_exhausted = true;
+    auto base = make_dense(data.datas.data(), num_vectors, data.ids.data());
+    auto* error = vsag_index_build(index.get(), base.get());
+    allocator_exhausted = false;
+    REQUIRE(error != nullptr);
+    REQUIRE(vsag_error_code(error) == VSAG_NO_ENOUGH_MEMORY);
+    vsag_error_destroy(error);
+}
+
 TEST_CASE("vsag_c_api engine with host allocator and thread pool", "[vsag_c_api][ut]") {
     TestData data;
     CountingAllocator counters;

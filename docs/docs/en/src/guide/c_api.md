@@ -125,7 +125,8 @@ Support still depends on the selected index. An unsupported operation returns
 user_data)` reads them back through `read_fn(user_data, offset, size, dest)` and
 `size_fn(user_data)`; both callbacks are required because deserialization seeks to the end of the input. The
 callbacks return `0` on success and any other value on failure, which makes the call return an
-error. They run synchronously on the calling thread, must not throw or unwind into the library,
+error: `VSAG_INTERNAL_ERROR` for a failing write callback (there is no dedicated write code) and
+`VSAG_READ_ERROR` for a failing read callback. They run synchronously on the calling thread, must not throw or unwind into the library,
 and must not keep the pointers they receive. `user_data` only has to stay valid for the call.
 
 ## Host allocator and thread pool
@@ -147,7 +148,8 @@ vsag_engine_create_index(engine, "hgraph", params, &index);
 vsag_engine_destroy(engine);            /* indexes keep the resources alive */
 ```
 
-The allocator callbacks mirror `malloc`, `free` and `realloc`. `submit(user_data, task,
+The allocator callbacks mirror `malloc`, `free` and `realloc`; returning `NULL` for a non-zero size is
+reported to the caller as `VSAG_NO_ENOUGH_MEMORY`. `submit(user_data, task,
 task_data)` must run `task(task_data)` exactly once on any thread and return `0`, or return a
 non-zero value to decline, in which case the library runs the task on the calling thread. The pool
 is owned by the host, so the library never resizes it. All of these callbacks may run concurrently
