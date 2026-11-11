@@ -2099,13 +2099,17 @@ TEST_CASE("Fused query transform preserves in-place and PCA inputs",
         Vector<float> expected(pca_dim, 0.0F, allocator.get());
         Vector<float> aliased(original_dim, 0.0F, allocator.get());
         std::copy_n(vectors.data(), original_dim, aliased.data());
-        float expected_norm = 0.0F, actual_norm = 0.0F;
-        typename RaBitQuantizer<metric>::norm_type expected_mrq = 0.0F, actual_mrq = 0.0F;
+        float expected_norm = 0.0F;
+        float actual_norm = 0.0F;
+        typename RaBitQuantizer<metric>::norm_type expected_mrq = 0.0F;
+        typename RaBitQuantizer<metric>::norm_type actual_mrq = 0.0F;
         quantizer.TransformFusedQuery(vectors.data(), expected, expected_norm, expected_mrq);
         quantizer.TransformFusedQuery(aliased.data(), aliased, actual_norm, actual_mrq);
         CHECK(expected_norm == actual_norm);
         CHECK(expected_mrq == actual_mrq);
-        for (uint64_t d = 0; d < pca_dim; ++d) CHECK(aliased[d] == expected[d]);
+        for (uint64_t d = 0; d < pca_dim; ++d) {
+            CHECK(aliased[d] == expected[d]);
+        }
     };
     check.template operator()<MetricType::METRIC_TYPE_L2SQR>();
     check.template operator()<MetricType::METRIC_TYPE_IP>();

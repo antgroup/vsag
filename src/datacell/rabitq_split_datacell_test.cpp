@@ -272,7 +272,7 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
     const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
     const uint64_t dim = GENERATE(65, 128, 960);
     CAPTURE(metric, dim);
-    constexpr InnerIdType count = 32;
+    constexpr InnerIdType count = 96;
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
     auto json = JsonType::Parse(R"({"codes_type":"rabitq_split",
         "io_params":{"type":"memory_io"},"quantization_params":{"type":"rabitq",
@@ -282,7 +282,7 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
     param->FromJson(json);
     IndexCommonParam common;
     common.allocator_ = allocator;
-    common.dim_ = dim;
+    common.dim_ = static_cast<int64_t>(dim);
     common.metric_ = metric;
     auto vectors = fixtures::generate_vectors(count, dim, false, 91);
     auto flatten = FlattenInterface::MakeInstance(param, common);
@@ -324,7 +324,7 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
                                         nullptr));
     }
     const auto check = [&](const ComputerInterfacePtr& computer) {
-        for (const InnerIdType n : {0, 1, 2, 3, 4, 5, 7, 16, 32}) {
+        for (const InnerIdType n : {0, 1, 2, 3, 4, 5, 7, 16, 32, 63, 64, 65, 96}) {
             std::array<float, count> actual{};
             SearchStatistics stats;
             QueryContext ctx;
@@ -339,7 +339,8 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
     };
     const auto computer = flatten->FactoryComputer(vectors.data());
     check(computer);
-    RaBitQFusedTraversalQuery traversal, reference;
+    RaBitQFusedTraversalQuery traversal;
+    RaBitQFusedTraversalQuery reference;
     REQUIRE(split->GetFusedTraversalQuery(computer, &traversal));
     REQUIRE(split->GetFusedTraversalQuery(reference_computer, &reference));
     CHECK(traversal.query_sum == reference.query_sum);
@@ -351,11 +352,23 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
     }
     check(computer);
 
+    const auto partial = flatten->FactoryComputer(vectors.data());
+    float first_distance = 0.0F;
+    flatten->Query(&first_distance, partial, ids.data(), 1, nullptr);
+    RaBitQFusedTraversalQuery late;
+    REQUIRE(split->GetFusedTraversalQuery(partial, &late));
+    for (uint32_t i = 0; i < late.cluster_count; ++i) {
+        CHECK(std::abs(late.cluster_g_add[i] - reference.cluster_g_add[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_add[i])));
+    }
+    check(partial);
+
     // BasicSearcher workers may share a computer. Full scoring must not race with the
     // one-time creation of traversal-only fields on that same computer.
     const auto shared = flatten->FactoryComputer(vectors.data());
     std::array<bool, 4> ok{};
     std::vector<std::thread> workers;
+    workers.reserve(4);
     for (uint32_t i = 0; i < 4; ++i) {
         workers.emplace_back([&, i]() {
             bool valid = true;
@@ -377,8 +390,12 @@ TEST_CASE("Fused full batches and deferred traversal preparation match scalar sc
             ok[i] = valid;
         });
     }
-    for (auto& worker : workers) worker.join();
-    for (const bool valid : ok) CHECK(valid);
+    for (auto& worker : workers) {
+        worker.join();
+    }
+    for (const bool valid : ok) {
+        CHECK(valid);
+    }
 }
 
 }  // namespace vsag

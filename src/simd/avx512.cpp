@@ -1304,7 +1304,7 @@ fused_three_plus_five_batch(const float* query,
                 const auto* plane = bit < 3 ? filter_codes[i] + bit * plane_bytes
                                             : supplement_codes[i] + (bit - 3) * plane_bytes;
                 std::memcpy(&mask, plane + (d >> 3U), sizeof(mask));
-                code = _mm512_or_si512(code, _mm512_maskz_mov_epi8(mask, weights[bit]));
+                code = _mm512_mask_add_epi8(code, mask, code, weights[bit]);
             }
             const auto code0 =
                 _mm512_cvtepi32_ps(_mm512_cvtepi8_epi32(_mm512_castsi512_si128(code)));
@@ -1360,17 +1360,21 @@ RaBitQFloatThreePlusFiveBitIPBatch4(const float* query,
         case 0:
             return;
         case 1:
-            return fused_three_plus_five_batch<1>(
+            fused_three_plus_five_batch<1>(
                 query, filter_codes, supplement_codes, dim, query_sum, results);
+            return;
         case 2:
-            return fused_three_plus_five_batch<2>(
+            fused_three_plus_five_batch<2>(
                 query, filter_codes, supplement_codes, dim, query_sum, results);
+            return;
         case 3:
-            return fused_three_plus_five_batch<3>(
+            fused_three_plus_five_batch<3>(
                 query, filter_codes, supplement_codes, dim, query_sum, results);
+            return;
         case 4:
-            return fused_three_plus_five_batch<4>(
+            fused_three_plus_five_batch<4>(
                 query, filter_codes, supplement_codes, dim, query_sum, results);
+            return;
         default:
             break;
     }
@@ -1992,7 +1996,7 @@ void
 fht_register_block(float* data) {
     __m512 values[16];
 #pragma GCC unroll 16
-    for (uint32_t i = 0; i < 16; ++i) {
+    for (uint64_t i = 0; i < 16; ++i) {
         values[i] = fht_local16(_mm512_loadu_ps(data + 16 * i));
     }
     fht_register_stage<1>(values);
@@ -2000,7 +2004,7 @@ fht_register_block(float* data) {
     fht_register_stage<4>(values);
     fht_register_stage<8>(values);
 #pragma GCC unroll 16
-    for (uint32_t i = 0; i < 16; ++i) {
+    for (uint64_t i = 0; i < 16; ++i) {
         _mm512_storeu_ps(data + 16 * i, values[i]);
     }
 }

@@ -1918,8 +1918,12 @@ TEST_CASE("Fused 3+5 full IP batches preserve all code bits and tails",
             for (uint32_t i = 0; i < 4; ++i) {
                 filters[i].resize(3 * plane_bytes + offset);
                 supplements[i].resize(5 * plane_bytes + offset);
-                for (auto& byte : filters[i]) byte = static_cast<uint8_t>(random());
-                for (auto& byte : supplements[i]) byte = static_cast<uint8_t>(random());
+                for (auto& byte : filters[i]) {
+                    byte = static_cast<uint8_t>(random());
+                }
+                for (auto& byte : supplements[i]) {
+                    byte = static_cast<uint8_t>(random());
+                }
                 filter_codes[i] = filters[i].data() + offset;
                 supplement_codes[i] = supplements[i].data() + offset;
                 for (uint64_t d = 0; d < dim; ++d) {
@@ -1952,12 +1956,15 @@ TEST_CASE("Fused 3+5 full IP batches preserve all code bits and tails",
                     for (uint32_t i = 0; i < count; ++i) {
                         CHECK(std::abs(actual[i] - expected[i]) <= 1e-5 + 3e-6 * absolute_sum[i]);
                     }
-                    for (uint32_t i = count; i < 5; ++i) CHECK(actual[i] == -777);
+                    for (uint32_t i = count; i < 5; ++i) {
+                        CHECK(actual[i] == -777);
+                    }
                 };
                 check(generic::RaBitQFloatThreePlusFiveBitIPBatch4);
                 check(RaBitQFloatThreePlusFiveBitIPBatch4);
-                if (SimdStatus::SupportAVX512())
+                if (SimdStatus::SupportAVX512()) {
                     check(avx512::RaBitQFloatThreePlusFiveBitIPBatch4);
+                }
             }
         }
     }
@@ -1974,16 +1981,21 @@ TEST_CASE("FHT register blocks preserve butterfly results", "[ut][simd][fused_fh
             auto actual = expected;
             generic::FHTRotate(expected.data() + offset, dim);
             FHTRotate(actual.data() + offset, dim);
-            for (uint64_t i = 0; i < dim; ++i) CHECK(actual[i + offset] == expected[i + offset]);
+            for (uint64_t i = 0; i < dim; ++i) {
+                CHECK(actual[i + offset] == expected[i + offset]);
+            }
         }
     }
 }
 
 TEST_CASE("FlipSign handles its final full AVX-512 block", "[ut][simd][fused_fht_register]") {
     for (const uint64_t dim : {63, 64, 65, 128, 960}) {
-        std::vector<float> expected(dim), actual(dim);
+        std::vector<float> expected(dim);
+        std::vector<float> actual(dim);
         std::vector<uint8_t> signs((dim + 7) / 8, 0xA5);
-        for (uint64_t d = 0; d < dim; ++d) expected[d] = static_cast<float>(d) - 31.0F;
+        for (uint64_t d = 0; d < dim; ++d) {
+            expected[d] = static_cast<float>(d) - 31.0F;
+        }
         actual = expected;
         generic::FlipSign(signs.data(), expected.data(), dim);
         FlipSign(signs.data(), actual.data(), dim);
