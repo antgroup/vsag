@@ -483,17 +483,17 @@ VSAG draws on the following works for graph construction, vector quantization, f
                 </a>
             </td>
             <td align="center">
-                <a href="https://github.com/misaka0714">
-                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
-                    <br />
-                    <sub><b>baoyuan</b></sub>
-                </a>
-            </td>
-            <td align="center">
                 <a href="https://github.com/dasurax">
                     <img src="https://avatars.githubusercontent.com/u/9841872?v=4" width="100" alt="dasurax"/>
                     <br />
                     <sub><b>dasurax</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/misaka0714">
+                    <img src="https://avatars.githubusercontent.com/u/129934985?v=4" width="100" alt="misaka0714"/>
+                    <br />
+                    <sub><b>baoyuan</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -601,6 +601,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
         </tr>
         <tr>
             <td align="center">
+                <a href="https://github.com/159753a52">
+                    <img src="https://avatars.githubusercontent.com/u/137481623?v=4" width="100" alt="159753a52"/>
+                    <br />
+                    <sub><b>Zelong Fang</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/CharlesXu-HQ">
                     <img src="https://avatars.githubusercontent.com/u/109326548?v=4" width="100" alt="CharlesXu-HQ"/>
                     <br />
@@ -612,6 +619,13 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <img src="https://avatars.githubusercontent.com/u/51120671?v=4" width="100" alt="cubicc"/>
                     <br />
                     <sub><b>cubicc</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/Fightingzzy">
+                    <img src="https://avatars.githubusercontent.com/u/94771814?v=4" width="100" alt="Fightingzzy"/>
+                    <br />
+                    <sub><b>Fighting</b></sub>
                 </a>
             </td>
             <td align="center">
@@ -628,6 +642,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Zihao Wang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/jiaweizone">
                     <img src="https://avatars.githubusercontent.com/u/251354?v=4" width="100" alt="jiaweizone"/>
@@ -642,8 +658,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>liric24</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/Lss-lmj">
                     <img src="https://avatars.githubusercontent.com/u/102685785?v=4" width="100" alt="Lss-lmj"/>
@@ -672,6 +686,8 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>Nannan Wang</b></sub>
                 </a>
             </td>
+        </tr>
+        <tr>
             <td align="center">
                 <a href="https://github.com/shenguoquan">
                     <img src="https://avatars.githubusercontent.com/u/6701903?v=4" width="100" alt="shenguoquan"/>
@@ -686,8 +702,6 @@ VSAG draws on the following works for graph construction, vector quantization, f
                     <sub><b>lhd</b></sub>
                 </a>
             </td>
-        </tr>
-        <tr>
             <td align="center">
                 <a href="https://github.com/stuBirdFly">
                     <img src="https://avatars.githubusercontent.com/u/84010733?v=4" width="100" alt="stuBirdFly"/>
