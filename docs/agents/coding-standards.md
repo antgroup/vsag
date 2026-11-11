@@ -47,6 +47,15 @@ Follow the Google C++ Style Guide with the project-specific rules below.
 - Prefer `uint64_t` over `size_t` in code changes to avoid potential macOS
   compile issues.
 
+## Public C API opaque tags
+
+C++ struct definitions use CamelCase. The existing opaque C API tags
+`vsag_error`, `vsag_dataset`, `vsag_engine`, `vsag_engine_options`, `vsag_filter`,
+`vsag_index`, and `vsag_search_result` retain their public spelling. The struct-name checker permits
+these exact tags only in `include/vsag/vsag_c_api.h` and `src/vsag_c_api.cpp`;
+clang-tidy recognizes the same finite tag set. Other `vsag_*` struct names and
+ordinary C++ implementation structures remain subject to the naming rule.
+
 ## Things to avoid
 
 - Avoid changing files under `extern/` unless the task explicitly requires

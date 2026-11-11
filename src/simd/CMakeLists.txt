@@ -61,8 +61,11 @@ if (DIST_CONTAINS_AVX2)
     endif ()
     set_source_files_properties (avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2 -mfma -mf16c")
     set_source_files_properties (pipnn_half_avx2.cpp PROPERTIES COMPILE_FLAGS "-mavx2")
+    # This kernel promises ordered, non-contracted FP32 accumulation. Cancel
+    # Release fast-math for this TU before setting contraction explicitly; Clang
+    # 20 (including clang-tidy on a GCC database) rejects the conflicting pair.
     set_source_files_properties (pipnn_half_f16c.cpp PROPERTIES COMPILE_FLAGS
-            "-mavx2 -mf16c -mno-fma -ffp-contract=off")
+            "-mavx2 -mf16c -mno-fma -fno-fast-math -ffp-contract=off")
 endif ()
 
 set(AVX512_FLAGS "-mavx512f -mavx512cd -mavx512vl -mavx512bw -mavx512dq -mavx512ifma -mavx512vbmi")
