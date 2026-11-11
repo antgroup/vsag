@@ -213,7 +213,7 @@ vsag_filter_create_callback(vsag_filter_fn filter_fn, void* user_data, vsag_filt
  * been destroyed; the library keeps the resources alive until then.
  * ------------------------------------------------------------------------------------------ */
 
-/** Returns `size` bytes, or NULL on failure. */
+/** Returns `size` bytes, or NULL on failure; the library then reports VSAG_NO_ENOUGH_MEMORY. */
 typedef void* (*vsag_allocate_fn)(void* user_data, uint64_t size);
 
 /** Releases a block returned by allocate or reallocate. */
@@ -419,7 +419,11 @@ typedef int32_t (*vsag_read_fn)(void* user_data, uint64_t offset, uint64_t size,
 /** The total size of the input in bytes. */
 typedef uint64_t (*vsag_size_fn)(void* user_data);
 
-/** Serializes the index by passing its bytes to `write_fn`. */
+/**
+ * Serializes the index by passing its bytes to `write_fn`. A failing `write_fn` is reported as
+ * VSAG_INTERNAL_ERROR, because there is no dedicated write error code; a failing read callback
+ * during deserialization is reported as VSAG_READ_ERROR.
+ */
 vsag_error_t*
 vsag_index_serialize_writer(const vsag_index_t* index, vsag_write_fn write_fn, void* user_data);
 

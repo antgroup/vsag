@@ -313,9 +313,15 @@ public:
         return name_;
     }
 
+    // The library writes through whatever the allocator returns, so a host failure has to become
+    // std::bad_alloc here, where the C API reports it as VSAG_NO_ENOUGH_MEMORY.
     void*
     Allocate(uint64_t size) override {
-        return allocate_fn_(user_data_, size);
+        void* block = allocate_fn_(user_data_, size);
+        if (block == nullptr and size > 0) {
+            throw std::bad_alloc();
+        }
+        return block;
     }
 
     void
@@ -325,7 +331,11 @@ public:
 
     void*
     Reallocate(void* p, uint64_t size) override {
-        return reallocate_fn_(user_data_, p, size);
+        void* block = reallocate_fn_(user_data_, p, size);
+        if (block == nullptr and size > 0) {
+            throw std::bad_alloc();
+        }
+        return block;
     }
 
 private:

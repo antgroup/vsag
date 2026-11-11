@@ -117,7 +117,8 @@ dataset 是对调用方内存的视图，既可描述底库数据，也可描述
 `write_fn(user_data, offset, size, data)`。`vsag_index_deserialize_reader(index, read_fn,
 size_fn, user_data)` 通过 `read_fn(user_data, offset, size, dest)` 和 `size_fn(user_data)` 读回；
 两个回调都必须提供，因为反序列化会定位到输入的末尾。回调成功返回 `0`，其他值表示失败，此时调用
-会返回错误。回调在调用线程上同步执行，不得抛出异常或展开到库内，也不得保留收到的指针。
+会返回错误：写回调失败返回 `VSAG_INTERNAL_ERROR`（目前没有专门的写错误码），读回调失败返回
+`VSAG_READ_ERROR`。回调在调用线程上同步执行，不得抛出异常或展开到库内，也不得保留收到的指针。
 `user_data` 只需在该调用期间保持有效。
 
 ## 宿主 allocator 与线程池
@@ -139,7 +140,8 @@ vsag_engine_create_index(engine, "hgraph", params, &index);
 vsag_engine_destroy(engine);            /* 索引会让这些资源继续存活 */
 ```
 
-allocator 回调对应 `malloc`、`free` 和 `realloc`。`submit(user_data, task, task_data)` 必须在
+allocator 回调对应 `malloc`、`free` 和 `realloc`；对非零大小返回 `NULL` 时，调用方会收到
+`VSAG_NO_ENOUGH_MEMORY`。`submit(user_data, task, task_data)` 必须在
 任意线程上恰好执行一次 `task(task_data)` 并返回 `0`；返回非零表示拒绝，此时库会在调用线程上
 执行该任务。线程池由宿主持有，库不会调整其大小。这些回调都可能在任意线程并发调用，不得抛出
 异常或展开到库内，且 `user_data` 需在 engine 及其创建的所有索引销毁之前保持有效。
