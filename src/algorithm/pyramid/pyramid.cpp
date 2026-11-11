@@ -573,6 +573,7 @@ Pyramid::resolve_entry_point(const IndexNode& node,
     }
 
     InnerSearchParam route_param = search_param;
+    route_param.tail_search = nullptr;
     route_param.ef = 1;
     route_param.topk = 1;
     route_param.search_mode = KNN_SEARCH;
@@ -910,6 +911,22 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     auto search_param = this->create_knn_search_param(parsed_param, k, filter, threshold);
+    if (parsed_param.tail_search.Enabled()) {
+        CHECK_ARGUMENT(
+            query->GetNumElements() == 1 and query->GetPaths() == nullptr and
+                immutable_.load(std::memory_order_acquire) and
+                metric_ == MetricType::METRIC_TYPE_L2SQR and
+                data_type_ == DataTypes::DATA_TYPE_FLOAT and
+                base_codes_->SupportSplitCodeStorage() and use_reorder_ and
+                not support_duplicate_ and delete_count_.load() == 0 and filter == nullptr and
+                not threshold.has_value() and parsed_param.parallel_search_thread_count == 1 and
+                not parsed_param.enable_time_record and parsed_param.hierarchies.empty() and
+                search_param.enable_rabitq_one_bit_search and
+                hierarchies_.at("")->root->status_ == IndexNode::Status::GRAPH,
+            "tail search requires immutable unfiltered root split L2 KNN with reorder");
+        search_param.tail_search = &parsed_param.tail_search;
+        search_param.tail_topk = static_cast<uint64_t>(k);
+    }
     const auto reorder_candidate_limit =
         get_reorder_candidate_limit(use_reorder_, parsed_param.topk_factor, k, search_param.ef);
     const bool collect_rabitq_lower_bounds = search_param.enable_rabitq_one_bit_search and
@@ -963,6 +980,7 @@ Pyramid::RangeSearch(const DatasetPtr& query,
     QueryContext ctx{.alloc = this->allocator_, .stats = &stats};
 
     auto parsed_param = PyramidSearchParameters::FromJson(parameters);
+    CHECK_ARGUMENT(not parsed_param.tail_search.Enabled(), "tail search is only supported by KNN");
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     CHECK_ARGUMENT(parsed_param.hierarchy_op == PyramidSearchParameters::HierarchyOp::SINGLE,
                    "multi-hierarchy search (union/intersection) is not yet implemented");
@@ -1053,6 +1071,8 @@ Pyramid::SearchWithRequest(const SearchRequest& request) const {
                    "Pyramid SearchWithRequest does not support attribute filters");
 
     auto parsed_param = PyramidSearchParameters::FromJson(request.params_str_);
+    CHECK_ARGUMENT(not parsed_param.tail_search.Enabled(),
+                   "tail search is supported by KnnSearch, not SearchWithRequest");
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     const auto request_filter = create_request_filter(request);
     InnerSearchParam search_param;

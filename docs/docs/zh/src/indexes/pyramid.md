@@ -250,6 +250,9 @@ Pyramid 使用 split code 的 code-code 距离完成增量 FLAT→GRAPH 晋升�
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
 | `ef_search` | int | `100` | 叶子层子图检索的候选集大小 |
+| `tail_start_after` | int | `20` | 正常逐点展开多少个节点后开始批量展开和距离间隔检查，非负 uint32。 |
+| `tail_batch_size` | int | `1` | 尾阶段每轮最多展开的候选节点数，正 uint32；设为 `16` 开启 B16。 |
+| `tail_relative_gap` | float | 未设置 | 距离间隔早停阈值，必须为有限非负数；省略时关闭早停。 |
 | `factor` | float | 未设置 | KNN 重排候选倍率。值 `<= 1` 时不增加限制；值大于 `1` 时，Pyramid 保持各子图原有搜索行为，先合并子图结果，再将至多 `min(max(ef_search, topk), floor(topk * factor))` 个主图候选送入重排。与 HGraph 一致，RaBitQ lower-bound 安全候选可在该限制后额外并入，`reorder_candidate_count` 记录实际合并数量。参数必须为有限正数；范围检索或关闭重排时不生效。 |
 | `hops_limit` | int | 不限 | 根节点底图及每个非根 GRAPH 的逐图 KNN 跳数上限；不大于 `ef_search` 时忽略。根节点的稀疏路由层不受限制，FLAT 扫描与范围检索不受影响。 |
 | `subindex_ef_search` | int | `50` | 沿路径向下遍历中间子图时的候选集大小 |
@@ -263,6 +266,29 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
 ```
+
+### 批量展开与距离间隔早停
+
+三个 `tail_*` 参数与 `ef_search` 并列放在 `pyramid` 搜索对象中。默认配置走原生搜索；
+设置 `tail_batch_size=16` 开启 B16，再设置 `tail_relative_gap` 开启早停：
+
+```cpp
+index->SetImmutable().value();
+auto result = index->KnnSearch(query, 10,
+    R"({"pyramid":{"ef_search":128,"tail_start_after":20,
+                   "tail_batch_size":16,"tail_relative_gap":0.1}})").value();
+```
+
+前 `tail_start_after` 个节点逐点展开。之后每轮按本轮开始时的结果门槛选出候选节点，集中收集邻居，
+通过 visited 去重，批量计算距离并更新堆。早停检查最近未展开候选的估计平方 L2 距离是否大于
+当前用户请求的第 k 个结果距离乘以 `(1 + tail_relative_gap)`。这两个距离都使用内存中的过滤编码，
+完整 split 编码重排及其 lower-bound 候选收集仍沿用原有实现。早停会改变召回率，需要与 `ef_search`
+一起按目标 Recall 调参。
+
+当前支持不可变、float32、无过滤的 L2 KNN，搜索默认层级根图，使用 split RaBitQ 编码并开启重排。
+先调用 `SetImmutable()`；查询不带路径，`parallelism=1`，无删除、重复点支持、距离阈值或超时限制。
+根图路由层仍走原生搜索。对不支持的请求启用尾阶段参数会返回参数错误；RangeSearch 和 SearchWithRequest
+不接受已启用的尾阶段选项。以上搜索参数不改变索引序列化格式。
 
 ### `parallelism` 的线程池前提
 

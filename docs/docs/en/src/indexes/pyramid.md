@@ -264,6 +264,9 @@ Search-time parameters live under the `pyramid` sub-object:
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `ef_search` | int | `100` | Candidate list size for the leaf-level graph search. |
+| `tail_start_after` | int | `20` | Number of individually expanded nodes before tail batching and gap checks. Nonnegative uint32. |
+| `tail_batch_size` | int | `1` | Maximum candidate nodes expanded per tail round. Positive uint32; `16` enables B16. |
+| `tail_relative_gap` | float | unset | Optional finite, nonnegative relative squared-distance gap for early stopping. Omitting it disables gap stopping. |
 | `factor` | float | unset | KNN reorder candidate multiplier. Values `<= 1` add no limit. When greater than `1`, Pyramid first completes the unchanged subgraph searches and merges their results, then sends at most `min(max(ef_search, topk), floor(topk * factor))` main-graph candidates to reorder. RaBitQ lower-bound safety candidates may be merged after this limit, matching HGraph; `reorder_candidate_count` reports the actual merged count. The value must be finite and positive. It has no effect on range search or when reorder is disabled. |
 | `hops_limit` | int | unlimited | Per-graph KNN hop cap for the root bottom graph and every non-root graph; ignored when it is not greater than `ef_search`. Sparse root routing layers are never hop-limited. FLAT scans and range search are unaffected. |
 | `subindex_ef_search` | int | `50` | Candidate list size used when traversing intermediate sub-graphs on the path. |
@@ -277,6 +280,34 @@ auto result = index->KnnSearch(
     query, topk,
     R"({"pyramid": {"ef_search": 200, "subindex_ef_search": 80}})").value();
 ```
+
+### Batched tail expansion and gap stopping
+
+The three `tail_*` parameters are peers of `ef_search` in the `pyramid` search object.
+With the defaults, ordinary `KnnSearch` uses the native traversal. Set `tail_batch_size`
+to `16` for B16; additionally set `tail_relative_gap` to enable early stopping:
+
+```cpp
+index->SetImmutable().value();
+auto result = index->KnnSearch(query, 10,
+    R"({"pyramid":{"ef_search":128,"tail_start_after":20,
+                   "tail_batch_size":16,"tail_relative_gap":0.1}})").value();
+```
+
+Each tail round selects candidates using the result threshold at the start of that round,
+collects their neighbors, removes visited IDs, scores the fresh vectors together, and updates
+the heaps. Gap stopping checks whether the nearest unexpanded candidate's estimated squared
+L2 distance exceeds `(1 + tail_relative_gap)` times the current user-requested k-th distance.
+Both distances use the in-memory filter codes. The full split-code reorder and its lower-bound
+candidate collection remain unchanged. Gap stopping is an accuracy/speed tradeoff; tune it
+jointly with `ef_search` at the desired Recall.
+
+This path supports immutable, float32, unfiltered L2 KNN on the default root graph with split
+RaBitQ storage and reorder enabled. Call `SetImmutable()` first. Queries must have no paths,
+with `parallelism=1`, no deletes, duplicate support, threshold, or time limit. Root routing
+layers keep native traversal. An enabled tail option on an unsupported request returns an
+argument error; RangeSearch and SearchWithRequest do not accept enabled tail options. These
+search parameters do not change the index serialization format.
 
 ### Thread pool requirement for `parallelism`
 

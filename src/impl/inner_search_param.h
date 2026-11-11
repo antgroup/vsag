@@ -31,6 +31,7 @@ namespace vsag {
 DEFINE_POINTER(Filter);
 DEFINE_POINTER(Executor);
 struct QueryContext;
+struct GraphTailSearchParameters;
 class ReasoningContext;
 
 enum InnerSearchMode { KNN_SEARCH = 1, RANGE_SEARCH = 2 };
@@ -83,6 +84,10 @@ public:
 
     // time record
     std::shared_ptr<Timer> time_cost{nullptr};
+
+    // Appended to preserve the offsets of existing native-search fields.
+    const GraphTailSearchParameters* tail_search{nullptr};
+    uint64_t tail_topk{0};
 
     InnerSearchParam&
     operator=(const InnerSearchParam& other) = default;
