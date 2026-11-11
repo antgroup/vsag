@@ -612,3 +612,65 @@ def test_rejects_lossy_integer_input():
         index.build(vectors, np.array([0, 2**63], dtype=np.uint64), 2, 4)
     with pytest.raises(ValueError, match="range"):
         index.remove(np.array([2**63], dtype=np.uint64))
+
+
+def test_knn_search_fast_path_and_fallbacks_agree(monkeypatch):
+    """The allocation-free float32 path and the validating path return the same results."""
+    index = _small_index()
+    vectors = np.arange(12, dtype=np.float32).reshape(3, 4)
+    index.build(vectors, np.arange(3, dtype=np.int64), 3, 4)
+
+    # The fast path never goes through argument binding, the validating path always does.
+    binds = []
+    original_bind = pyvsag.Index._bind
+    monkeypatch.setattr(
+        pyvsag.Index,
+        "_bind",
+        staticmethod(lambda *a, **k: binds.append(1) or original_bind(*a, **k)),
+    )
+
+    ids, dists = index.knn_search(vectors[1], 5, "{}")
+    assert binds == []
+    assert ids.tolist() == [1, 0, 2, -1, -1]
+    assert dists[3:].tolist() == [-1.0, -1.0]
+
+    strided = np.arange(8, dtype=np.float32)[::2]  # a view with stride 2, not contiguous
+    with pytest.raises(ValueError, match="contiguous"):
+        index.knn_search(strided, 5, "{}")
+    for variant in (np.int64(5), 5.0):
+        binds.clear()
+        slow_ids, slow_dists = index.knn_search(vectors[1], variant, "{}")
+        assert binds == [1]
+        assert slow_ids.tolist() == ids.tolist()
+        np.testing.assert_array_equal(slow_dists, dists)
+    binds.clear()
+    kw_ids, _ = index.knn_search(vector=vectors[1], k=5, parameters="{}")
+    assert binds == [1]
+    assert kw_ids.tolist() == ids.tolist()
+
+    # A one-element view is contiguous whatever its stride, on both paths.
+    single = np.arange(8, dtype=np.float32)[::2][:1]
+    assert single.strides == (8,) and single.flags.c_contiguous
+    one_dim = pyvsag.Index(
+        "brute_force",
+        json.dumps(
+            {
+                "dtype": "float32",
+                "metric_type": "l2",
+                "dim": 1,
+                "index_param": {
+                    "base_quantization_type": "fp32",
+                    "precise_quantization_type": "fp32",
+                },
+            }
+        ),
+    )
+    one_dim.build(np.zeros((2, 1), dtype=np.float32), np.arange(2, dtype=np.int64), 2, 1)
+    fast = one_dim.knn_search(single, 1, "{}")
+    slow = one_dim.knn_search(single, np.int64(1), "{}")
+    assert fast[0].tolist() == slow[0].tolist()
+
+    # A failing search keeps the "-1 filled" contract instead of raising.
+    bad_ids, bad_dists = index.knn_search(np.ones(7, dtype=np.float32), 3, "{}")
+    assert bad_ids.tolist() == [-1, -1, -1]
+    assert bad_dists.tolist() == [-1.0, -1.0, -1.0]
