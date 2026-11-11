@@ -19,7 +19,8 @@ namespace vsag {
 FlattenInterfacePtr
 make_flatten_data_cell_ip(const FlattenInterfaceParamPtr& param,
                           const IndexCommonParam& common_param) {
-    return MakeFlattenDataCellForMetric<MetricType::METRIC_TYPE_IP>(param, common_param);
+    return FlattenFactoryImpl<FlattenInputKind::Native>::MakeForMetric<MetricType::METRIC_TYPE_IP>(
+        param, common_param);
 }
 
 }  // namespace vsag

@@ -29,16 +29,34 @@ FlattenInterfacePtr
 make_flatten_data_cell_cosine(const FlattenInterfaceParamPtr& param,
                               const IndexCommonParam& common_param);
 
+// FP16/BF16 input adapters are instantiated in separate translation units.
+FlattenInterfacePtr
+make_flatten_data_cell_l2_half(const FlattenInterfaceParamPtr& param,
+                               const IndexCommonParam& common_param);
+
+FlattenInterfacePtr
+make_flatten_data_cell_ip_half(const FlattenInterfaceParamPtr& param,
+                               const IndexCommonParam& common_param);
+
+FlattenInterfacePtr
+make_flatten_data_cell_cosine_half(const FlattenInterfaceParamPtr& param,
+                                   const IndexCommonParam& common_param);
+
 FlattenInterfacePtr
 MakeFlattenDataCell(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param) {
+    const bool half = common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
+                      common_param.data_type_ == DataTypes::DATA_TYPE_BF16;
     if (common_param.metric_ == MetricType::METRIC_TYPE_L2SQR) {
-        return make_flatten_data_cell_l2(param, common_param);
+        return half ? make_flatten_data_cell_l2_half(param, common_param)
+                    : make_flatten_data_cell_l2(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_IP) {
-        return make_flatten_data_cell_ip(param, common_param);
+        return half ? make_flatten_data_cell_ip_half(param, common_param)
+                    : make_flatten_data_cell_ip(param, common_param);
     }
     if (common_param.metric_ == MetricType::METRIC_TYPE_COSINE) {
-        return make_flatten_data_cell_cosine(param, common_param);
+        return half ? make_flatten_data_cell_cosine_half(param, common_param)
+                    : make_flatten_data_cell_cosine(param, common_param);
     }
     return nullptr;
 }

@@ -38,49 +38,70 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                         fmt::format("Unknown flatten interface name: {}", param->name));
 }
 
-// Adapt only the external input boundary. In particular, transforms and their
-// bottom quantizer must continue to receive FP32 vectors.
-template <typename QuantizerT, typename IOTmpl>
-FlattenInterfacePtr
-MakeFlattenDataCellInstanceForInput(const FlattenInterfaceParamPtr& param,
-                                    const IndexCommonParam& common_param) {
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_FP16 ||
-        common_param.data_type_ == DataTypes::DATA_TYPE_BF16) {
-        return MakeFlattenDataCellInstance<QuantizerAdapter<QuantizerT, uint16_t>, IOTmpl>(
-            param, common_param);
-    }
-    return MakeFlattenDataCellInstance<QuantizerT, IOTmpl>(param, common_param);
-}
+// Native: the quantizer consumes vectors as-is. Half: FP16/BF16 input is adapted at the boundary.
+// The two kinds are instantiated in separate translation units (flatten_datacell_factory_*.cpp
+// and flatten_datacell_factory_*_half.cpp) to bound peak compiler memory.
+enum class FlattenInputKind { Native, Half };
 
-template <typename QuantizerT, typename IOTmpl, MetricType metric>
-FlattenInterfacePtr
-MakeFlattenDataCellInstanceWithTQ(const FlattenInterfaceParamPtr& param,
-                                  const IndexCommonParam& common_param,
-                                  bool is_transform_quantizer) {
-    if (is_transform_quantizer) {
-        return MakeFlattenDataCellInstanceForInput<TransformQuantizer<QuantizerT, metric>, IOTmpl>(
-            param, common_param);
+template <FlattenInputKind kind>
+struct FlattenFactoryImpl {
+    // Adapt only the external input boundary. In particular, transforms and their
+    // bottom quantizer must continue to receive FP32 vectors.
+    template <typename QuantizerT, typename IOTmpl>
+    static FlattenInterfacePtr
+    MakeFlattenDataCellInstanceForInput(const FlattenInterfaceParamPtr& param,
+                                        const IndexCommonParam& common_param) {
+        if constexpr (kind == FlattenInputKind::Half) {
+            return MakeFlattenDataCellInstance<QuantizerAdapter<QuantizerT, uint16_t>, IOTmpl>(
+                param, common_param);
+        } else {
+            return MakeFlattenDataCellInstance<QuantizerT, IOTmpl>(param, common_param);
+        }
     }
-    return MakeFlattenDataCellInstanceForInput<QuantizerT, IOTmpl>(param, common_param);
-}
 
+    template <typename QuantizerT, typename IOTmpl, MetricType metric>
+    static FlattenInterfacePtr
+    MakeFlattenDataCellInstanceWithTQ(const FlattenInterfaceParamPtr& param,
+                                      const IndexCommonParam& common_param,
+                                      bool is_transform_quantizer) {
+        if (is_transform_quantizer) {
+            return MakeFlattenDataCellInstanceForInput<TransformQuantizer<QuantizerT, metric>,
+                                                       IOTmpl>(param, common_param);
+        }
+        return MakeFlattenDataCellInstanceForInput<QuantizerT, IOTmpl>(param, common_param);
+    }
+
+    template <MetricType metric, typename IOTmpl>
+    static FlattenInterfacePtr
+    MakeByMetricAndIO(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
+
+    template <MetricType metric>
+    static FlattenInterfacePtr
+    MakeForMetric(const FlattenInterfaceParamPtr& param, const IndexCommonParam& common_param);
+};
+
+template <FlattenInputKind kind>
 template <MetricType metric, typename IOTmpl>
 FlattenInterfacePtr
-MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
-                            const IndexCommonParam& common_param) {
+FlattenFactoryImpl<kind>::MakeByMetricAndIO(const FlattenInterfaceParamPtr& param,
+                                            const IndexCommonParam& common_param) {
     const std::string quantization_string = param->quantizer_parameter->GetTypeName();
 
-    if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
-            return MakeFlattenDataCellInstance<INT8Quantizer<metric>, IOTmpl>(param, common_param);
+    if constexpr (kind == FlattenInputKind::Native) {
+        if (common_param.data_type_ == DataTypes::DATA_TYPE_INT8) {
+            if (quantization_string == QUANTIZATION_TYPE_VALUE_INT8) {
+                return MakeFlattenDataCellInstance<INT8Quantizer<metric>, IOTmpl>(param,
+                                                                                  common_param);
+            }
+            if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
+                return MakeFlattenDataCellInstance<
+                    QuantizerAdapter<ProductQuantizer<metric>, int8_t>,
+                    IOTmpl>(param, common_param);
+            }
+            throw VsagException(ErrorType::INVALID_ARGUMENT,
+                                fmt::format("INT8 data type does not support {} quantization",
+                                            quantization_string));
         }
-        if (quantization_string == QUANTIZATION_TYPE_VALUE_PQ) {
-            return MakeFlattenDataCellInstance<QuantizerAdapter<ProductQuantizer<metric>, int8_t>,
-                                               IOTmpl>(param, common_param);
-        }
-        throw VsagException(
-            ErrorType::INVALID_ARGUMENT,
-            fmt::format("INT8 data type does not support {} quantization", quantization_string));
     }
 
     auto actual_quantization = quantization_string;
@@ -157,34 +178,35 @@ MakeFlattenDataCellInstance(const FlattenInterfaceParamPtr& param,
                         fmt::format("Unsupported quantization type: {}", actual_quantization));
 }
 
+template <FlattenInputKind kind>
 template <MetricType metric>
 FlattenInterfacePtr
-MakeFlattenDataCellForMetric(const FlattenInterfaceParamPtr& param,
-                             const IndexCommonParam& common_param) {
+FlattenFactoryImpl<kind>::MakeForMetric(const FlattenInterfaceParamPtr& param,
+                                        const IndexCommonParam& common_param) {
     const auto& io_type = param->io_parameter->GetTypeName();
     if (io_type == IO_TYPE_VALUE_BLOCK_MEMORY_IO) {
-        return MakeFlattenDataCellInstance<metric, MemoryBlockIO>(param, common_param);
+        return MakeByMetricAndIO<metric, MemoryBlockIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_MEMORY_IO) {
-        return MakeFlattenDataCellInstance<metric, MemoryIO>(param, common_param);
+        return MakeByMetricAndIO<metric, MemoryIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_BUFFER_IO) {
-        return MakeFlattenDataCellInstance<metric, BufferIO>(param, common_param);
+        return MakeByMetricAndIO<metric, BufferIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_ASYNC_IO) {
-        return MakeFlattenDataCellInstance<metric, AsyncIO>(param, common_param);
+        return MakeByMetricAndIO<metric, AsyncIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_URING_IO) {
-        return MakeFlattenDataCellInstance<metric, UringIO>(param, common_param);
+        return MakeByMetricAndIO<metric, UringIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_MMAP_IO) {
-        return MakeFlattenDataCellInstance<metric, MMapIO>(param, common_param);
+        return MakeByMetricAndIO<metric, MMapIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_READER_IO) {
-        return MakeFlattenDataCellInstance<metric, ReaderIO>(param, common_param);
+        return MakeByMetricAndIO<metric, ReaderIO>(param, common_param);
     }
     if (io_type == IO_TYPE_VALUE_USER_DEFINED_IO) {
-        return MakeFlattenDataCellInstance<metric, UserDefinedIO>(param, common_param);
+        return MakeByMetricAndIO<metric, UserDefinedIO>(param, common_param);
     }
     return nullptr;
 }
