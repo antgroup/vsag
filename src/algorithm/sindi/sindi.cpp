@@ -1058,21 +1058,55 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
         const auto& rerank_query = original_query ? *original_query : computer->raw_query_;
         auto* rerank_datacell = rerank_flat_.get();
         auto rerank_computer = rerank_datacell->FactoryComputer(&rerank_query);
-        for (auto i = 0; i < candidate_size; i++) {
+        constexpr uint64_t deadline_batch_size = 64;
+        const auto check_deadline = [parallel] {
             if (parallel != nullptr and SindiParallelState::Clock::now() >= parallel->deadline) {
                 throw VsagException(ErrorType::INTERNAL_ERROR,
                                     "SINDI deadline exceeded during rerank");
             }
-            auto inner_id = heap.top().second;
-            float high_precise_distance = 0.0F;
+        };
+        Vector<InnerIdType> rerank_ids(search_allocator);
+        Vector<float> approximate_distances(search_allocator);
+        Vector<float> rerank_distances(search_allocator);
+        rerank_ids.reserve(candidate_size);
+        rerank_distances.resize(candidate_size);
+        if (reasoning_ctx != nullptr) {
+            approximate_distances.reserve(candidate_size);
+        }
+        while (not heap.empty()) {
+            if (parallel != nullptr and rerank_ids.size() % deadline_batch_size == 0) {
+                check_deadline();
+            }
+            rerank_ids.push_back(heap.top().second);
+            if (reasoning_ctx != nullptr) {
+                approximate_distances.push_back(heap.top().first);
+            }
+            heap.pop();
+        }
+        // Ordinary serial searches retain one batched Query. Parallel searches poll their
+        // deadline between bounded batches instead of taking the datacell lock per candidate.
+        const uint64_t rerank_batch_size =
+            parallel == nullptr ? std::max<uint64_t>(1, candidate_size) : deadline_batch_size;
+        for (uint64_t start = 0; start < candidate_size; start += rerank_batch_size) {
+            check_deadline();
             QueryContext query_context{.stats = statistics,
                                        .distance_phase = DistanceEvaluationPhase::RERANK};
-            rerank_datacell->Query(
-                &high_precise_distance, rerank_computer, &inner_id, 1, &query_context);
+            rerank_datacell->Query(rerank_distances.data() + start,
+                                   rerank_computer,
+                                   rerank_ids.data() + start,
+                                   std::min<uint64_t>(rerank_batch_size, candidate_size - start),
+                                   &query_context);
+        }
+        for (uint64_t i = 0; i < candidate_size; ++i) {
+            if (parallel != nullptr and i % deadline_batch_size == 0) {
+                check_deadline();
+            }
+            const auto inner_id = rerank_ids[i];
+            const auto high_precise_distance = rerank_distances[i];
             auto label = label_table_->GetLabelById(inner_id);
             if (reasoning_ctx != nullptr) {
                 reasoning_ctx->RecordReorder(
-                    inner_id, 1.0F + heap.top().first, high_precise_distance);
+                    inner_id, 1.0F + approximate_distances[i], high_precise_distance);
             }
             if constexpr (mode == KNN_SEARCH) {
                 const bool eligible =
@@ -1108,7 +1142,6 @@ SINDI::search_impl(const SparseTermComputerPtr& computer,
                     high_precise_heap->Pop();
                 }
             }
-            heap.pop();
         }
 
         return collect_heap_results(high_precise_heap, search_allocator);

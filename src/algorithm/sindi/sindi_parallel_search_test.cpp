@@ -295,6 +295,59 @@ TEST_CASE("SINDI pruned proxy ties remain stable and expose candidate tuning lim
     }
 }
 
+TEST_CASE("SINDI rerank preserves candidate pairing across batch boundaries",
+          "[ut][SINDIParallel]") {
+    const auto rerank_type = GENERATE(SPARSE_RERANK_TYPE_FP32, SPARSE_RERANK_TYPE_FP16);
+    constexpr uint64_t count = 129;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.metric_ = MetricType::METRIC_TYPE_IP;
+    common.search_resources_ = std::make_shared<SearchExecutionContext>(3);
+    auto params = std::make_shared<SINDIParameter>();
+    params->immutable = true;
+    params->term_id_limit = 4;
+    params->window_size = 4;
+    params->doc_prune_ratio = 0;
+    params->term_prune_ratio = 0;
+    params->sparse_value_quant_type = SparseValueQuantizationType::FP32;
+    params->use_reorder = true;
+    params->rerank_type = rerank_type;
+    SINDI index(params, common);
+    uint32_t term = 1;
+    std::vector<float> values(count);
+    std::vector<int64_t> labels(count);
+    std::vector<SparseVector> vectors(count);
+    for (uint64_t i = 0; i < count; ++i) {
+        values[i] = static_cast<float>(i + 1);
+        labels[i] = static_cast<int64_t>(1000 + i);
+        vectors[i] = SparseVector{1, &term, &values[i]};
+    }
+    auto data = Dataset::Make()
+                    ->NumElements(count)
+                    ->SparseVectors(vectors.data())
+                    ->Ids(labels.data())
+                    ->Owner(false);
+    REQUIRE(index.Build(data).empty());
+    float query_value = 1;
+    SparseVector query_vector{1, &term, &query_value};
+    auto query = Dataset::Make()->NumElements(1)->SparseVectors(&query_vector)->Owner(false);
+    for (uint32_t parallelism : {1U, 4U}) {
+        const auto search = nlohmann::json{{"sindi",
+                                            {{"window_parallelism", parallelism},
+                                             {"n_candidate", 256},
+                                             {"parallel_n_candidate_ratio", 1},
+                                             {"query_prune_ratio", 0}}}};
+        const auto result = index.KnnSearch(query, count, search.dump(), nullptr);
+        REQUIRE(result->GetDim() == static_cast<int64_t>(count));
+        for (uint64_t i = 0; i < count; ++i) {
+            const auto expected = count - i - 1;
+            REQUIRE(result->GetIds()[i] == labels[expected]);
+            REQUIRE(result->GetDistances()[i] == 1.0F - values[expected]);
+        }
+    }
+}
+
 TEST_CASE("SINDI parallel search preserves filtering and deterministic ties",
           "[ut][SINDIParallel]") {
     auto allocator = SafeAllocator::FactoryDefaultAllocator();
