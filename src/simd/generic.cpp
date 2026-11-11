@@ -1511,4 +1511,19 @@ SQ4LocalComputeCodesIP(const uint8_t* a, const uint8_t* b, uint64_t dim) {
     return simd::LocalSQCompute<simd::SQ8Traits<simd::GenericSQ8Tag>, false, 4, true>(
         nullptr, a, b, dim);
 }
+void
+RaBitQFloatThreePlusFiveBitIPBatch4(const float* query,
+                                    const uint8_t* const* filter_codes,
+                                    const uint8_t* const* supplement_codes,
+                                    uint64_t dim,
+                                    uint32_t count,
+                                    float query_sum,
+                                    float* results) {
+    for (uint32_t i = 0; i < count; ++i) {
+        const float filter_ip = RaBitQFloatThreeBitCenteredIP(query, filter_codes[i], dim);
+        const float supplement_ip = RaBitQFloatSupplementCodeIP(query, supplement_codes[i], dim, 5);
+        results[i] = 32.0F * filter_ip + supplement_ip - 15.5F * query_sum;
+    }
+}
+
 }  // namespace vsag::generic

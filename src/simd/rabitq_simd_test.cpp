@@ -15,8 +15,10 @@
 #include "rabitq_simd.h"
 
 #include <algorithm>
+#include <array>
 #include <catch2/benchmark/catch_benchmark.hpp>
 #include <cstring>
+#include <random>
 
 #include "fp32_simd.h"
 #include "kernels/rabitq_compute.h"
@@ -1890,5 +1892,101 @@ TEST_CASE("RaBitQ scalar code to split planes SIMD", "[ut][simd][rabitq]") {
                 }
             }
         }
+    }
+}
+
+TEST_CASE("Fused 3+5 full IP batches preserve all code bits and tails",
+          "[ut][simd][rabitq_fused_full_batch]") {
+    std::mt19937 random(45261);
+    std::uniform_real_distribution<float> values(-0.05F, 0.05F);
+    for (const uint64_t dim :
+         {1, 7, 8, 15, 16, 31, 32, 63, 64, 65, 127, 128, 129, 959, 960, 961, 1024}) {
+        for (const uint64_t offset : {0, 1, 5}) {
+            const uint64_t plane_bytes = (dim + 7) / 8;
+            std::vector<float> query(dim + offset);
+            double query_sum = 0.0;
+            for (uint64_t d = 0; d < dim; ++d) {
+                query[d + offset] = values(random);
+                query_sum += query[d + offset];
+            }
+            std::array<std::vector<uint8_t>, 4> filters;
+            std::array<std::vector<uint8_t>, 4> supplements;
+            const uint8_t* filter_codes[4]{};
+            const uint8_t* supplement_codes[4]{};
+            double expected[4]{};
+            double absolute_sum[4]{};
+            for (uint32_t i = 0; i < 4; ++i) {
+                filters[i].resize(3 * plane_bytes + offset);
+                supplements[i].resize(5 * plane_bytes + offset);
+                for (auto& byte : filters[i]) byte = static_cast<uint8_t>(random());
+                for (auto& byte : supplements[i]) byte = static_cast<uint8_t>(random());
+                filter_codes[i] = filters[i].data() + offset;
+                supplement_codes[i] = supplements[i].data() + offset;
+                for (uint64_t d = 0; d < dim; ++d) {
+                    uint32_t code = 0;
+                    for (uint32_t bit = 0; bit < 3; ++bit) {
+                        code |= ((filter_codes[i][bit * plane_bytes + d / 8] >> (d % 8)) & 1U)
+                                << (7 - bit);
+                    }
+                    for (uint32_t bit = 0; bit < 5; ++bit) {
+                        code |= ((supplement_codes[i][bit * plane_bytes + d / 8] >> (d % 8)) & 1U)
+                                << bit;
+                    }
+                    const double product = static_cast<double>(query[d + offset]) *
+                                           (static_cast<double>(code) - 127.5);
+                    expected[i] += product;
+                    absolute_sum[i] += std::abs(product);
+                }
+            }
+            for (uint32_t count = 0; count <= 4; ++count) {
+                CAPTURE(dim, offset, count);
+                const auto check = [&](RaBitQFloatThreePlusFiveBitBatch4Type kernel) {
+                    float actual[5] = {-777, -777, -777, -777, -777};
+                    kernel(query.data() + offset,
+                           filter_codes,
+                           supplement_codes,
+                           dim,
+                           count,
+                           static_cast<float>(query_sum),
+                           actual);
+                    for (uint32_t i = 0; i < count; ++i) {
+                        CHECK(std::abs(actual[i] - expected[i]) <= 1e-5 + 3e-6 * absolute_sum[i]);
+                    }
+                    for (uint32_t i = count; i < 5; ++i) CHECK(actual[i] == -777);
+                };
+                check(generic::RaBitQFloatThreePlusFiveBitIPBatch4);
+                check(RaBitQFloatThreePlusFiveBitIPBatch4);
+                if (SimdStatus::SupportAVX512())
+                    check(avx512::RaBitQFloatThreePlusFiveBitIPBatch4);
+            }
+        }
+    }
+}
+
+TEST_CASE("FHT register blocks preserve butterfly results", "[ut][simd][fused_fht_register]") {
+    for (const uint64_t dim : {16, 32, 64, 128, 256, 512, 1024, 2048, 4096}) {
+        for (const uint64_t offset : {0, 1, 3}) {
+            CAPTURE(dim, offset);
+            std::vector<float> expected(dim + offset);
+            for (uint64_t i = 0; i < dim; ++i) {
+                expected[i + offset] = std::sin(static_cast<float>(i) * 0.019F);
+            }
+            auto actual = expected;
+            generic::FHTRotate(expected.data() + offset, dim);
+            FHTRotate(actual.data() + offset, dim);
+            for (uint64_t i = 0; i < dim; ++i) CHECK(actual[i + offset] == expected[i + offset]);
+        }
+    }
+}
+
+TEST_CASE("FlipSign handles its final full AVX-512 block", "[ut][simd][fused_fht_register]") {
+    for (const uint64_t dim : {63, 64, 65, 128, 960}) {
+        std::vector<float> expected(dim), actual(dim);
+        std::vector<uint8_t> signs((dim + 7) / 8, 0xA5);
+        for (uint64_t d = 0; d < dim; ++d) expected[d] = static_cast<float>(d) - 31.0F;
+        actual = expected;
+        generic::FlipSign(signs.data(), expected.data(), dim);
+        FlipSign(signs.data(), actual.data(), dim);
+        CHECK(std::memcmp(actual.data(), expected.data(), dim * sizeof(float)) == 0);
     }
 }

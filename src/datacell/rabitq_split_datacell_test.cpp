@@ -19,6 +19,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <thread>
 
 #include "flatten_datacell_parameter.h"
 #include "flatten_interface.h"
@@ -264,6 +265,120 @@ TEST_CASE("RaBitQ fused pair distances match reconstructed vectors",
     // Retraining must refresh the same cache too.
     split->TrainFusedCodec(other_vectors.data(), count, cluster_count);
     check_pairs(flatten, other_vectors.data());
+}
+
+TEST_CASE("Fused full batches and deferred traversal preparation match scalar scoring",
+          "[ut][RaBitQSplitDataCell][fused_full_batch]") {
+    const auto metric = GENERATE(MetricType::METRIC_TYPE_L2SQR, MetricType::METRIC_TYPE_IP);
+    const uint64_t dim = GENERATE(65, 128, 960);
+    CAPTURE(metric, dim);
+    constexpr InnerIdType count = 32;
+    auto allocator = SafeAllocator::FactoryDefaultAllocator();
+    auto json = JsonType::Parse(R"({"codes_type":"rabitq_split",
+        "io_params":{"type":"memory_io"},"quantization_params":{"type":"rabitq",
+        "rabitq_version":"split","rabitq_bits_per_dim_query":32,
+        "rabitq_bits_per_dim_base":8,"rabitq_bits_per_dim_filter":3,"use_fht":true}})");
+    auto param = std::make_shared<FlattenDataCellParameter>();
+    param->FromJson(json);
+    IndexCommonParam common;
+    common.allocator_ = allocator;
+    common.dim_ = dim;
+    common.metric_ = metric;
+    auto vectors = fixtures::generate_vectors(count, dim, false, 91);
+    auto flatten = FlattenInterface::MakeInstance(param, common);
+    flatten->Train(vectors.data(), count);
+    auto split = std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(flatten);
+    REQUIRE(split != nullptr);
+    split->TrainFusedCodec(vectors.data(), count, 16);
+    auto graph_param = std::make_shared<GraphDataCellParameter>();
+    graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+    graph_param->max_degree_ = 8;
+    graph_param->init_max_capacity_ = count;
+    auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+        graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common);
+    split->AttachFusedCodeStorage(graph.get());
+    flatten->Resize(count);
+    Vector<uint8_t> filter(split->OneBitCodeSize(), allocator.get());
+    Vector<uint8_t> supplement(split->SupplementCodeSize(), allocator.get());
+    std::array<RaBitQFusedCodeView, count> views;
+    std::array<InnerIdType, count> ids;
+    for (InnerIdType id = 0; id < count; ++id) {
+        flatten->InsertVector(vectors.data() + static_cast<uint64_t>(id) * dim, id);
+        uint32_t cluster = 0;
+        REQUIRE(split->EncodeFused(vectors.data() + static_cast<uint64_t>(id) * dim,
+                                   filter.data(),
+                                   supplement.data(),
+                                   &cluster));
+        graph->SetNodeCodes(id, id, cluster, filter.data(), supplement.data());
+        REQUIRE(graph->GetFusedCodeView(id, views[id]));
+        ids[id] = id;
+    }
+    const auto reference_computer = split->FactoryFusedComputer(vectors.data());
+    std::array<float, count> expected;
+    for (InnerIdType id = 0; id < count; ++id) {
+        REQUIRE(split->ComputeFusedFull(reference_computer,
+                                        views[id].cluster_id,
+                                        views[id].one_bit_code,
+                                        views[id].supplement_code,
+                                        expected.data() + id,
+                                        nullptr));
+    }
+    const auto check = [&](const ComputerInterfacePtr& computer) {
+        for (const InnerIdType n : {0, 1, 2, 3, 4, 5, 7, 16, 32}) {
+            std::array<float, count> actual{};
+            SearchStatistics stats;
+            QueryContext ctx;
+            ctx.stats = &stats;
+            flatten->Query(actual.data(), computer, ids.data(), n, &ctx);
+            CHECK(stats.rabitq_full_count.load() == n);
+            for (InnerIdType id = 0; id < n; ++id) {
+                CHECK(std::abs(actual[id] - expected[id]) <=
+                      2e-4F * std::max(1.0F, std::abs(expected[id])));
+            }
+        }
+    };
+    const auto computer = flatten->FactoryComputer(vectors.data());
+    check(computer);
+    RaBitQFusedTraversalQuery traversal, reference;
+    REQUIRE(split->GetFusedTraversalQuery(computer, &traversal));
+    REQUIRE(split->GetFusedTraversalQuery(reference_computer, &reference));
+    CHECK(traversal.query_sum == reference.query_sum);
+    for (uint32_t i = 0; i < traversal.cluster_count; ++i) {
+        CHECK(std::abs(traversal.cluster_g_add[i] - reference.cluster_g_add[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_add[i])));
+        CHECK(std::abs(traversal.cluster_g_error[i] - reference.cluster_g_error[i]) <=
+              2e-4F * std::max(1.0F, std::abs(reference.cluster_g_error[i])));
+    }
+    check(computer);
+
+    // BasicSearcher workers may share a computer. Full scoring must not race with the
+    // one-time creation of traversal-only fields on that same computer.
+    const auto shared = flatten->FactoryComputer(vectors.data());
+    std::array<bool, 4> ok{};
+    std::vector<std::thread> workers;
+    for (uint32_t i = 0; i < 4; ++i) {
+        workers.emplace_back([&, i]() {
+            bool valid = true;
+            for (uint32_t repeat = 0; repeat < 16; ++repeat) {
+                if (i % 2 == 0) {
+                    std::array<float, count> actual{};
+                    flatten->Query(actual.data(), shared, ids.data(), count, nullptr);
+                    for (InnerIdType id = 0; id < count; ++id) {
+                        valid = valid and std::isfinite(actual[id]) and
+                                std::abs(actual[id] - expected[id]) <=
+                                    2e-4F * std::max(1.0F, std::abs(expected[id]));
+                    }
+                } else {
+                    RaBitQFusedTraversalQuery prepared;
+                    valid = valid and split->GetFusedTraversalQuery(shared, &prepared) and
+                            prepared.query_sum == reference.query_sum;
+                }
+            }
+            ok[i] = valid;
+        });
+    }
+    for (auto& worker : workers) worker.join();
+    for (const bool valid : ok) CHECK(valid);
 }
 
 }  // namespace vsag

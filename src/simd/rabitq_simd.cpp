@@ -395,4 +395,16 @@ GetFlipSign() {
 }
 FlipSignType FlipSign = GetFlipSign();
 
+static RaBitQFloatThreePlusFiveBitBatch4Type
+GetRaBitQFloatThreePlusFiveBitIPBatch4() {
+    if (SimdStatus::SupportAVX512()) {
+#if defined(ENABLE_AVX512)
+        return avx512::RaBitQFloatThreePlusFiveBitIPBatch4;
+#endif
+    }
+    return generic::RaBitQFloatThreePlusFiveBitIPBatch4;
+}
+RaBitQFloatThreePlusFiveBitBatch4Type RaBitQFloatThreePlusFiveBitIPBatch4 =
+    GetRaBitQFloatThreePlusFiveBitIPBatch4();
+
 }  // namespace vsag

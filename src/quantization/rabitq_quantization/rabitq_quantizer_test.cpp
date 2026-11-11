@@ -2077,3 +2077,37 @@ TEST_CASE("RaBitQ Query SQ Transform With All Same Element", "[ut][RaBitQuantize
         REQUIRE(is_approx_zero(original_data[i] - decode_data[i]));
     }
 }
+
+TEST_CASE("Fused query transform preserves in-place and PCA inputs",
+          "[ut][RaBitQuantizer][fused_query_transform]") {
+    constexpr uint64_t original_dim = 64;
+    const uint64_t pca_dim = GENERATE(32, 64);
+    const auto check = [&]<MetricType metric>() {
+        auto allocator = SafeAllocator::FactoryDefaultAllocator();
+        auto vectors = fixtures::generate_vectors(128, original_dim, false, 73);
+        RaBitQuantizer<metric> quantizer(original_dim,
+                                         pca_dim,
+                                         32,
+                                         8,
+                                         true,
+                                         pca_dim != original_dim,
+                                         allocator.get(),
+                                         RaBitQuantizerParameter::RABITQ_VERSION_SPLIT,
+                                         RaBitQuantizerParameter::DEFAULT_RABITQ_ERROR_RATE,
+                                         3);
+        REQUIRE(quantizer.TrainImpl(vectors.data(), 128));
+        Vector<float> expected(pca_dim, 0.0F, allocator.get());
+        Vector<float> aliased(original_dim, 0.0F, allocator.get());
+        std::copy_n(vectors.data(), original_dim, aliased.data());
+        float expected_norm = 0.0F, actual_norm = 0.0F;
+        typename RaBitQuantizer<metric>::norm_type expected_mrq = 0.0F, actual_mrq = 0.0F;
+        quantizer.TransformFusedQuery(vectors.data(), expected, expected_norm, expected_mrq);
+        quantizer.TransformFusedQuery(aliased.data(), aliased, actual_norm, actual_mrq);
+        CHECK(expected_norm == actual_norm);
+        CHECK(expected_mrq == actual_mrq);
+        for (uint64_t d = 0; d < pca_dim; ++d) CHECK(aliased[d] == expected[d]);
+    };
+    check.template operator()<MetricType::METRIC_TYPE_L2SQR>();
+    check.template operator()<MetricType::METRIC_TYPE_IP>();
+    check.template operator()<MetricType::METRIC_TYPE_COSINE>();
+}

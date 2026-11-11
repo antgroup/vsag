@@ -3450,7 +3450,6 @@ RaBitQuantizer<metric>::TransformFusedQuery(const float* query,
                                             Vector<float>& transformed_query,
                                             float& query_raw_norm,
                                             norm_type& mrq_norm_sqr) const {
-    Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
     query_raw_norm = 0.0F;
     mrq_norm_sqr = 0.0F;
     if constexpr (metric == MetricType::METRIC_TYPE_IP or
@@ -3460,6 +3459,11 @@ RaBitQuantizer<metric>::TransformFusedQuery(const float* query,
         }
         query_raw_norm = std::sqrt(query_raw_norm);
     }
+    if (pca_dim_ == this->original_dim_ and query != transformed_query.data()) {
+        rom_->Transform(query, transformed_query.data());
+        return;
+    }
+    Vector<float> pca_data(this->original_dim_, 0, this->allocator_);
     if (pca_dim_ != this->original_dim_) {
         pca_->Transform(query, pca_data.data());
         if (use_mrq_) {

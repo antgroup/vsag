@@ -1008,6 +1008,31 @@ extern RaBitQSQ4UBinaryWithBaseSumBatch4Type RaBitQSQ4UBinaryIPWithBaseSumBatch4
 extern RaBitQCodeCodeType RaBitQCodeCodeIP;
 extern RaBitQPackScalarToSplitPlanesType RaBitQPackScalarToSplitPlanes;
 extern RaBitQPackScalarToSplitCodeType RaBitQPackScalarToSplitCode;
+// Exact centered inner products for up to four fused 3+5-bit records.
+using RaBitQFloatThreePlusFiveBitBatch4Type = void (*)(
+    const float*, const uint8_t* const*, const uint8_t* const*, uint64_t, uint32_t, float, float*);
+namespace generic {
+void
+RaBitQFloatThreePlusFiveBitIPBatch4(const float* query,
+                                    const uint8_t* const* filter_codes,
+                                    const uint8_t* const* supplement_codes,
+                                    uint64_t dim,
+                                    uint32_t count,
+                                    float query_sum,
+                                    float* results);
+}
+namespace avx512 {
+void
+RaBitQFloatThreePlusFiveBitIPBatch4(const float* query,
+                                    const uint8_t* const* filter_codes,
+                                    const uint8_t* const* supplement_codes,
+                                    uint64_t dim,
+                                    uint32_t count,
+                                    float query_sum,
+                                    float* results);
+}
+extern RaBitQFloatThreePlusFiveBitBatch4Type RaBitQFloatThreePlusFiveBitIPBatch4;
+
 extern FHTRotateType FHTRotate;
 extern KacsWalkType KacsWalk;
 extern VecRescaleType VecRescale;
