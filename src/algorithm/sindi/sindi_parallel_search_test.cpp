@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <future>
@@ -715,6 +716,15 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
         }
         return count;
     };
+    const auto wait_for_thread_count = [&](uint64_t expected) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (thread_count() != expected) {
+            if (std::chrono::steady_clock::now() >= deadline)
+                return false;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+        return true;
+    };
     const auto before = thread_count();
     const auto require_same_result = [](const DatasetPtr& actual, const DatasetPtr& expected) {
         REQUIRE(actual->GetDim() == expected->GetDim());
@@ -808,11 +818,11 @@ TEST_CASE("SINDI cold resource contract child", "[.][SindiResourceCold]") {
     }
     for (auto& future : queries) REQUIRE(future.get()->GetDim() == 8);
     queries.clear();
-    REQUIRE(thread_count() == prepared_threads);
+    REQUIRE(wait_for_thread_count(prepared_threads));
     // An unrelated index without the capability keeps serial behavior even now.
     require_same_result(old_index->KnnSearch(query, 8, parameters, nullptr), baseline);
     index.reset();
-    REQUIRE(thread_count() == prepared_threads);
+    REQUIRE(wait_for_thread_count(prepared_threads));
 }
 
 TEST_CASE("SINDI resource contract is checked in fresh processes", "[ut][SINDIParallel]") {
