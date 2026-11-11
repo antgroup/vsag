@@ -170,9 +170,23 @@ and worked examples.
 
 ```bash
 make pyvsag
+pip install wheelhouse/pyvsag-*.whl
 ```
 
-Wheels are emitted under `python/dist/`.
+The wheel is a `py3-none` package, so one build per architecture serves every supported CPython
+(3.10+). `make pyvsag` runs `scripts/python/local_build_wheel.sh` from the repository root and
+writes the wheel to `wheelhouse/`. With Docker it builds inside the `manylinux_2_28` image (via
+cibuildwheel) and runs part of `tests/python` there, leaving the host environment untouched. Without
+Docker it falls back to a plain `python -m build`, installs the wheel into the active virtual
+environment and runs `tests/python` against it; that wheel carries a `linux_<arch>` tag instead of
+`manylinux_2_28`. Outside an active virtual environment the script creates `.venv/` in the
+repository.
+
+The wheel contains `libvsag_c`, built with `ENABLE_PYBINDS=ON` and `ENABLE_LIBAIO=OFF`. In a build
+without Docker, `VSAG_ENABLE_LIBAIO=ON` overrides this (for example
+`VSAG_ENABLE_LIBAIO=ON python -m build --wheel python`); the variable is not forwarded into the
+Docker build. See [pyvsag](../guide/pyvsag.md) for installing the wheel, running against an in-tree
+build, and the runtime behavior.
 
 ## Distribution Tarballs
 

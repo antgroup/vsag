@@ -23,8 +23,7 @@ locate the right document below first.
 - `src/`: core implementation and unit tests
 - `tests/`: functional tests
 - `examples/cpp/`, `examples/python/`, `examples/typescript/`: example programs
-- `python/`: `pyvsag` packaging and Python-side code
-- `python/`: pyvsag cffi layer and packaging
+- `python/`: `pyvsag`, the pure-Python cffi layer and wheel packaging
 - `docs/`: design and user-facing documentation (see below)
 - `tools/`: utility and analysis tools
 

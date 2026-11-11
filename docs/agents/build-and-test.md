@@ -29,6 +29,9 @@ make pyvsag
 
 Prefer these targets over invoking `cmake` directly so behavior matches CI.
 
+`make pyvsag` writes the wheel to `wheelhouse/`; install it into a clean virtual environment before
+running `tests/python`. See the [pyvsag guide](../docs/en/src/guide/pyvsag.md).
+
 `make test-module MODULE=<name>` is the local acceleration path for one unit-test subsystem. The maintained module names are `gpu`, `simd`, `common`, `algorithm`, `factory`, `attr`, `datacell`, `layout`, `quantization`, `storage`, `io`, `utils`, and `impl`. It accepts the same `CASE` and `SHARD` runtime arguments as `make test`; use the aggregate `make test` path before submitting changes.
 
 ## Development environment

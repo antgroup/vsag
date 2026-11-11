@@ -59,8 +59,9 @@ failures and obtain confirmation for any exception; do not mask failures or
 substitute future main/daily checks for the required pre-submission validation.
 
 The main-target Python PR suspension is temporary; these contributor-side
-requirements apply during it. Restore automated Python PR checks after the
-Python rework is ready. See [CI routing](ci-routing.md#main-target-pr-check-scope)
+requirements apply during it. Automated Python PR checks will be restored once
+the new pyvsag packaging (#3295) has been validated in the development
+environment. See [CI routing](ci-routing.md#main-target-pr-check-scope)
 and [build/test guidance](build-and-test.md).
 
 ## Commit messages

@@ -244,7 +244,8 @@ data = load_sparse_hdf5("sparse.hdf5")
 # data["distances"] -> numpy.ndarray  shape (Q, K) float32
 ```
 
-如果已经拿到原始字节流，可以直接调用 `pyvsag.sparse.decode_sparse_bytes(buffer)`。
+`load_sparse_hdf5` 需要 `h5py`，而 `pyvsag` 不会自动安装它。如果已经拿到原始字节流，可以直接调用
+`pyvsag.sparse.decode_sparse_bytes(buffer)`，它没有额外依赖。
 
 ### 参考实现
 
