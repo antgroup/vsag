@@ -20,6 +20,8 @@
 #include <limits>
 #include <vector>
 
+#include "attr/argparse.h"
+#include "attr/executor/executor.h"
 #include "datacell/flatten_datacell.h"
 #include "datacell/flatten_datacell_parameter.h"
 #include "datacell/hgraph_rabitq_fused_datacell.h"
@@ -243,6 +245,227 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
     run_search(make_search_graph(true), 5);
     run_search(make_search_graph(false), 0);
 
+    SECTION("unfiltered specialization matches an all-pass filter") {
+        struct AllPassFilter final : Filter {
+            bool
+            CheckValid(int64_t) const override {
+                ++checks;
+                return true;
+            }
+            float
+            ValidRatio() const override {
+                return 1.0F;
+            }
+            mutable uint64_t checks{0};
+        };
+        auto search_graph = make_search_graph(false);
+        for (const bool one_bit : {false, true}) {
+            for (const bool reorder : {false, true}) {
+                for (const uint64_t ef : {5U, 41U}) {
+                    CAPTURE(one_bit, reorder, ef);
+                    std::vector<std::pair<float, InnerIdType>> expected;
+                    for (const bool filtered : {false, true}) {
+                        auto all_pass = std::make_shared<AllPassFilter>();
+                        InnerSearchParam search_param;
+                        search_param.ep = 0;
+                        search_param.ef = ef;
+                        search_param.topk = 5;
+                        search_param.rerank_topk = 5;
+                        search_param.skip_ratio = 1.0F;
+                        search_param.enable_rabitq_one_bit_search = one_bit;
+                        search_param.enable_reorder = reorder;
+                        search_param.rabitq_fused_computer = computer;
+                        if (filtered) {
+                            search_param.is_inner_id_allowed = all_pass;
+                        }
+                        auto visited = std::make_shared<VisitedList>(5, allocator.get());
+                        SearchStatistics stats;
+                        QueryContext ctx;
+                        ctx.stats = &stats;
+                        auto found = searcher.Search(search_graph,
+                                                     flatten,
+                                                     visited,
+                                                     vectors.data(),
+                                                     search_param,
+                                                     &ctx,
+                                                     nullptr);
+                        REQUIRE(found != nullptr);
+                        REQUIRE(found->Size() == 5);
+                        CHECK(stats.dist_cmp.load() == 5);
+                        std::vector<std::pair<float, InnerIdType>> actual(
+                            found->GetData(), found->GetData() + found->Size());
+                        std::sort(actual.begin(), actual.end());
+                        if (filtered) {
+                            CHECK(actual == expected);
+                            CHECK(all_pass->checks >= 5);
+                        } else {
+                            expected = std::move(actual);
+                            CHECK(all_pass->checks == 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    SECTION("filtered traversal crosses rejected bridges beyond ef") {
+        const auto skip_strategy =
+            GENERATE(FilterSearchSkipStrategyType::RANDOM,
+                     FilterSearchSkipStrategyType::DETERMINISTIC_ACCUMULATIVE);
+        auto graph_param = std::make_shared<GraphDataCellParameter>();
+        graph_param->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        graph_param->max_degree_ = 2;
+        graph_param->init_max_capacity_ = count;
+        auto graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+            graph_param, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        auto ordered = encoded;
+        std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.full_distance < rhs.full_distance;
+        });
+        for (InnerIdType id = 0; id < count; ++id) {
+            auto node = id == 1 ? ordered.back() : id == count - 1 ? ordered[1] : ordered[id];
+            set_coarse_score(node, node.full_distance);
+            graph->SetNodeCodes(
+                id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+            Vector<InnerIdType> neighbors(allocator.get());
+            if (id == 0) {
+                neighbors.push_back(1);
+                neighbors.push_back(2);
+            } else if (id > 1 and id + 1 < count) {
+                neighbors.push_back(id + 1);
+            }
+            graph->InsertNeighborsById(id, neighbors);
+        }
+        // The first accepted neighbor fills the result budget but is farther than the accepted
+        // node behind the second, rejected bridge. Even maximal skip must recover that bridge.
+        class BridgeFilter final : public Filter {
+        public:
+            bool
+            CheckValid(int64_t id) const override {
+                return id == 1 or id == count - 1;
+            }
+            float
+            ValidRatio() const override {
+                return 0.0F;
+            }
+        };
+        auto filter = std::make_shared<BridgeFilter>();
+        auto attr_index = AttributeInvertedInterface::MakeInstance(allocator.get());
+        for (InnerIdType id = 0; id < count; ++id) {
+            AttributeValue<int32_t> value;
+            value.name_ = "allowed";
+            value.GetValue().push_back(id == count - 1 ? 1 : 0);
+            AttributeSet attrs;
+            attrs.attrs_.push_back(&value);
+            attr_index->Insert(attrs, id);
+        }
+        auto expression = AstParse("allowed = 1", &attr_index->field_type_map_);
+        auto executor = Executor::MakeInstance(allocator.get(), expression, attr_index);
+        executor->Init();
+        const auto check_filtered_search = [&](const InnerSearchParam& search_param) {
+            auto visited = std::make_shared<VisitedList>(count, allocator.get());
+            RaBitQCandidateVector candidates(allocator.get());
+            auto result = searcher.Search(
+                graph, flatten, visited, vectors.data(), search_param, nullptr, &candidates);
+            REQUIRE(result != nullptr);
+            REQUIRE(result->Size() == 1);
+            CHECK(result->Top().second == count - 1);
+        };
+        for (const auto ef : {1U, 2U, 41U}) {
+            for (const bool one_bit : {false, true}) {
+                for (const bool reorder : {false, true}) {
+                    CAPTURE(ef, one_bit, reorder);
+                    InnerSearchParam search_param;
+                    search_param.ep = 0;
+                    search_param.ef = ef;
+                    search_param.topk = 1;
+                    search_param.rerank_topk = 1;
+                    search_param.enable_rabitq_one_bit_search = one_bit;
+                    search_param.enable_reorder = reorder;
+                    search_param.skip_ratio = 1.0F;
+                    search_param.skip_strategy_type = skip_strategy;
+                    search_param.is_inner_id_allowed = filter;
+                    check_filtered_search(search_param);
+                    // Attribute-only requests have no ID filter to activate filtered traversal.
+                    search_param.is_inner_id_allowed.reset();
+                    search_param.executors.push_back(executor);
+                    check_filtered_search(search_param);
+                }
+            }
+        }
+    }
+
+    SECTION("rejected bridge lower bound survives a full accepted frontier") {
+        constexpr InnerIdType bridge_id = 42;
+        constexpr InnerIdType target_id = 43;
+        auto params = std::make_shared<GraphDataCellParameter>();
+        params->io_parameter_ = std::make_shared<MemoryIOParameter>();
+        params->max_degree_ = 64;
+        params->init_max_capacity_ = 44;
+        auto bridge_graph = std::make_shared<HGraphRaBitQFusedDataCell>(
+            params, split->OneBitCodeSize(), split->SupplementCodeSize(), common_param);
+        auto bridge = *best;
+        REQUIRE(traversal_query.cluster_g_error[bridge.cluster_id] > 0.0F);
+        set_coarse_score(bridge, worst->full_distance + 1000.0F);
+        const float error =
+            (worst->full_distance + 2000.0F) / traversal_query.cluster_g_error[bridge.cluster_id];
+        std::memcpy(
+            bridge.filter.data() + traversal_query.one_bit_metadata_offset + 2U * sizeof(float),
+            &error,
+            sizeof(error));
+        for (InnerIdType id = 0; id <= target_id; ++id) {
+            auto node = id == bridge_id ? bridge : id == target_id ? *best : *worst;
+            if (id != bridge_id) {
+                set_coarse_score(node, node.full_distance);
+            }
+            bridge_graph->SetNodeCodes(
+                id, id, node.cluster_id, node.filter.data(), node.supplement.data());
+            Vector<InnerIdType> neighbors(allocator.get());
+            if (id == 0) {
+                for (InnerIdType neighbor = 1; neighbor <= bridge_id; ++neighbor) {
+                    neighbors.push_back(neighbor);
+                }
+            } else if (id == bridge_id) {
+                neighbors.push_back(target_id);
+            }
+            bridge_graph->InsertNeighborsById(id, neighbors);
+        }
+        class RejectBridge final : public Filter {
+        public:
+            bool
+            CheckValid(int64_t id) const override {
+                return id != bridge_id;
+            }
+            float
+            ValidRatio() const override {
+                return 0.0F;
+            }
+        };
+        for (const auto ef : {40U, 41U, 42U}) {
+            for (const float skip : {0.0F, 1.0F}) {
+                CAPTURE(filter_bits, ef, skip);
+                InnerSearchParam params;
+                params.ep = 0;
+                params.ef = ef;
+                params.topk = 1;
+                params.rerank_topk = 1;
+                params.enable_rabitq_one_bit_search = true;
+                params.enable_reorder = true;
+                params.skip_ratio = skip;
+                params.is_inner_id_allowed = std::make_shared<RejectBridge>();
+                auto visited = std::make_shared<VisitedList>(44, allocator.get());
+                QueryContext context;
+                context.rabitq_error_rate = 1.0F;
+                context.alloc = allocator.get();
+                auto found = searcher.Search(
+                    bridge_graph, flatten, visited, vectors.data(), params, &context, nullptr);
+                REQUIRE(found != nullptr);
+                REQUIRE(found->Size() == 1);
+                CHECK(found->Top().second == target_id);
+            }
+        }
+    }
+
     auto full_hint_graph = make_search_graph(false);
     InnerSearchParam full_hint_param;
     full_hint_param.ep = 0;
@@ -458,21 +681,28 @@ TEST_CASE("HGraph RaBitQ route honors one-bit search switch", "[ut][HGraphRaBitQ
         auto untrained_split =
             std::dynamic_pointer_cast<RaBitQSplitDataCellInterface>(untrained_flatten);
         REQUIRE(untrained_split != nullptr);
-        auto generic_fallback_visited = std::make_shared<VisitedList>(5, allocator.get());
-        RaBitQCandidateVector generic_fallback_candidates(allocator.get());
-        bool generic_fallback_finalized = true;
-        auto generic_fallback_result = searcher.Search(full_hint_graph,
-                                                       untrained_flatten,
-                                                       generic_fallback_visited,
-                                                       vectors.data(),
-                                                       deferred_param,
-                                                       nullptr,
-                                                       &generic_fallback_candidates,
-                                                       &generic_fallback_finalized);
-        REQUIRE(generic_fallback_result != nullptr);
-        REQUIRE(generic_fallback_result->Empty());
-        REQUIRE(generic_fallback_candidates.empty());
-        REQUIRE_FALSE(generic_fallback_finalized);
+        for (const bool filtered : {false, true}) {
+            auto generic_param = deferred_param;
+            if (filtered) {
+                generic_param.is_inner_id_allowed =
+                    std::make_shared<WhiteListFilter>([](int64_t) { return true; });
+            }
+            auto generic_fallback_visited = std::make_shared<VisitedList>(5, allocator.get());
+            RaBitQCandidateVector generic_fallback_candidates(allocator.get());
+            bool generic_fallback_finalized = true;
+            auto generic_fallback_result = searcher.Search(full_hint_graph,
+                                                           untrained_flatten,
+                                                           generic_fallback_visited,
+                                                           vectors.data(),
+                                                           generic_param,
+                                                           nullptr,
+                                                           &generic_fallback_candidates,
+                                                           &generic_fallback_finalized);
+            REQUIRE(generic_fallback_result != nullptr);
+            REQUIRE(generic_fallback_result->Empty());
+            REQUIRE(generic_fallback_candidates.empty());
+            REQUIRE_FALSE(generic_fallback_finalized);
+        }
     }
 
     for (InnerIdType id = 0; id < 5; ++id) {

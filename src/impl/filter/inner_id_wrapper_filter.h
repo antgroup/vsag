@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <algorithm>
+
 #include "impl/label_table/label_table.h"
 #include "vsag/filter.h"
 
@@ -49,13 +51,21 @@ public:
     GetValidBitmap(uint64_t* size) const override {
         // The wrapped filter observes labels, so the bitmap it can offer is indexed by label. It is
         // usable as an inner-id bitmap only when labels and inner ids are the same ids.
+        // Capture the domain before checking identity and asking the caller for its bitmap.
+        // A later Add must use CheckValid even if that bitmap includes spare capacity.
+        const auto identity_limit = static_cast<uint64_t>(label_table_.GetTotalCount());
         if (not label_table_.IsIdentityMapping()) {
             if (size != nullptr) {
                 *size = 0;
             }
             return nullptr;
         }
-        return filter_impl_->GetValidBitmap(size);
+        uint64_t source_size = 0;
+        const auto* bitmap = filter_impl_->GetValidBitmap(&source_size);
+        if (size != nullptr) {
+            *size = std::min(source_size, identity_limit);
+        }
+        return bitmap;
     }
 
 private:

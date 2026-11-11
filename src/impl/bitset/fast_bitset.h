@@ -44,6 +44,14 @@ public:
     uint64_t
     Count() override;
 
+    // Enumerate a request-owned result bitset, clamping implicit fill bits to the index domain.
+    void
+    GetSetBits(uint64_t limit, Vector<InnerIdType>& ids) const;
+
+    // Return false without retaining a partial list when the result exceeds max_ids.
+    bool
+    TryGetSetBits(uint64_t limit, uint64_t max_ids, Vector<InnerIdType>& ids) const;
+
     void
     Or(const ComputableBitset& another) override;
 

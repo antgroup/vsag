@@ -15,6 +15,7 @@
 
 #include "timer.h"
 
+#include <cstdint>
 #include <thread>
 
 #include "unittest.h"
@@ -36,6 +37,15 @@ TEST_CASE("Timer Basic", "[ut][Timer]") {
         timer.SetThreshold(5.0);
         std::this_thread::sleep_for(sleep_duration);
         REQUIRE(timer.CheckOvertime());
+    }
+
+    SECTION("zero budget is expired immediately after reset") {
+        Timer timer;
+        timer.SetThreshold(0.0);
+        for (uint64_t i = 0; i < 64; ++i) {
+            timer.Reset();
+            REQUIRE(timer.CheckOvertime());
+        }
     }
 
     SECTION("write back to reference in destructor") {

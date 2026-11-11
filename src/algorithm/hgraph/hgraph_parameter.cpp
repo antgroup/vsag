@@ -312,8 +312,6 @@ HGraphParameter::FromJson(const JsonType& json) {
         hierarchical_graph_param->use_reverse_edges_ = true;
     }
     if (this->rabitq_fused_datacell) {
-        CHECK_ARGUMENT(not this->mci_parameters.enabled,
-                       "rabitq_fused_datacell does not support MCI");
         CHECK_ARGUMENT(not this->deduplicate_storage,
                        "rabitq_fused_datacell does not support deduplicate_storage");
         CHECK_ARGUMENT(not this->support_force_remove,
@@ -595,6 +593,7 @@ HGraphSearchParameters::FromParsedJson(const JsonType& params) {
             "hgraph mci hgraph_valid_ratio_threshold must be in range [0, 1]");
     }
     if (params[INDEX_TYPE_HGRAPH].Contains(HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD)) {
+        obj.has_brute_force_threshold = true;
         obj.brute_force_threshold =
             params[INDEX_TYPE_HGRAPH][HGRAPH_PARAMETER_BRUTE_FORCE_THRESHOLD].GetFloat();
         CHECK_ARGUMENT(  // NOLINT

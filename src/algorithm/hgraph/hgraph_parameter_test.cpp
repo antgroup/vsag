@@ -832,12 +832,14 @@ TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
     SECTION("default is 0") {
         auto params = vsag::HGraphSearchParameters::FromJson(R"({"hgraph": {"ef_search": 32}})");
         REQUIRE(params.brute_force_threshold == 0.0F);
+        REQUIRE_FALSE(params.has_brute_force_threshold);
     }
 
     SECTION("accepts values in [0, 1]") {
         auto params = vsag::HGraphSearchParameters::FromJson(
             R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.25}})");
         REQUIRE(params.brute_force_threshold == 0.25F);
+        REQUIRE(params.has_brute_force_threshold);
 
         params = vsag::HGraphSearchParameters::FromJson(
             R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 1.0}})");
@@ -846,6 +848,7 @@ TEST_CASE("HGraphSearchParameters parses brute_force_threshold",
         params = vsag::HGraphSearchParameters::FromJson(
             R"({"hgraph": {"ef_search": 32, "brute_force_threshold": 0.0}})");
         REQUIRE(params.brute_force_threshold == 0.0F);
+        REQUIRE(params.has_brute_force_threshold);
     }
 
     SECTION("rejects out-of-range values") {
@@ -1049,10 +1052,14 @@ TEST_CASE("HGraph maps and validates fused RaBitQ split datacell", "[ut][HGraphP
         REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
     }
 
-    SECTION("reject MCI") {
+    SECTION("accept MCI companion") {
         auto param = make_param();
         param["use_mci"].SetBool(true);
-        REQUIRE_THROWS(vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        auto with_mci = std::dynamic_pointer_cast<vsag::HGraphParameter>(
+            vsag::HGraph::CheckAndMappingExternalParam(param, common_param));
+        REQUIRE(with_mci != nullptr);
+        CHECK(with_mci->rabitq_fused_datacell);
+        CHECK(with_mci->mci_parameters.enabled);
     }
 
     SECTION("reject non-memory supplement") {

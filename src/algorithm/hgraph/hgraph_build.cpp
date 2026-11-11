@@ -826,8 +826,10 @@ HGraph::prepare_add_batch(const DatasetPtr& data) {
             if (inner_id >= total_count_) {
                 this->resize(total_count_.load() + 1);
             }
-            // Fused storage rejects Tune and its optimized writer bypasses normal insertion.
-            if (not this->using_dedup_storage() and this->rabitq_fused_datacell_ == nullptr) {
+            // Normal Add may finish out of order. Track every unfinished code slot, including
+            // fused records. The exclusive optimized bulk build uses a separate writer.
+            if (not this->using_dedup_storage() and (this->rabitq_fused_datacell_ == nullptr or
+                                                     this->optimized_build_codes_ == nullptr)) {
                 std::unique_lock codes_lock(this->persistent_codes_mutex_);
                 this->pending_code_writes_[inner_id] = BASE_CODE |
                                                        (has_precise_reorder() ? PRECISE_CODE : 0) |
@@ -995,8 +997,6 @@ HGraph::insert_persistent_codes_unlocked(const void* data,
                                          InnerIdType inner_id,
                                          const RaBitQFusedCodeView* preencoded) {
     this->basic_flatten_codes_->InsertVector(data, inner_id);
-    this->finish_code_write(inner_id,
-                            BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (preencoded != nullptr) {
         // InsertVector above advances the flatten count; fused storage owns the actual bytes.
         this->rabitq_fused_datacell_->SetNodeCodes(inner_id,
@@ -1007,6 +1007,8 @@ HGraph::insert_persistent_codes_unlocked(const void* data,
     } else {
         this->sync_fused_node_codes(inner_id, data);
     }
+    this->finish_code_write(inner_id,
+                            BASE_CODE | (raw_vector_ == basic_flatten_codes_ ? RAW_CODE : 0));
     if (has_precise_reorder()) {
         this->high_precise_codes_->InsertVector(data, inner_id);
         this->finish_code_write(inner_id,

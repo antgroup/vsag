@@ -903,7 +903,9 @@ private:
                        int64_t topk,
                        float radius,
                        QueryContext* ctx,
-                       const std::optional<float>& threshold = std::nullopt) const;
+                       const std::optional<float>& threshold = std::nullopt,
+                       const Vector<InnerIdType>* valid_ids = nullptr,
+                       Timer* time_cost = nullptr) const;
 
     DatasetPtr
     search_range_with_request(const SearchRequest& request,
@@ -1101,6 +1103,11 @@ private:
         // Seed budget the traversal resolved for the current filter, before sampling.
         uint64_t hybrid_seed_budget{0};
     };
+
+    [[nodiscard]] bool
+    can_use_mci(const SearchRequest& request,
+                const HGraphSearchParameters& params,
+                const InnerSearchParam& search_param) const;
 
     [[nodiscard]] MCIHybridSearchResult
     try_mci_search(const SearchRequest& request,
