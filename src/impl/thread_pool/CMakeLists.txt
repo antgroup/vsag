@@ -18,6 +18,8 @@ set (THREAD_POOL_SRC
     default_thread_pool.cpp
     default_thread_pool.h
     safe_thread_pool.h
+    ring_buffer_thread_pool.cpp
+    ring_buffer_thread_pool.h
 )
 
 add_library (thread_pool OBJECT ${THREAD_POOL_SRC})
