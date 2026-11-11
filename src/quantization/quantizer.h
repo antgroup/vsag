@@ -34,8 +34,8 @@ namespace vsag {
 template <typename QuantT>
 class Quantizer {
 public:
-    explicit Quantizer<QuantT>(int dim, Allocator* allocator)
-        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator){};
+    explicit Quantizer(int dim, Allocator* allocator)
+        : dim_(dim), code_size_(dim * sizeof(float)), allocator_(allocator) {};
 
     virtual ~Quantizer() = default;
 
