@@ -912,18 +912,19 @@ Pyramid::KnnSearch(const DatasetPtr& query,
     ctx.rabitq_error_rate = parsed_param.rabitq_error_rate;
     auto search_param = this->create_knn_search_param(parsed_param, k, filter, threshold);
     if (parsed_param.tail_search.Enabled()) {
-        CHECK_ARGUMENT(
+        const bool supported =
             query->GetNumElements() == 1 and query->GetPaths() == nullptr and
-                immutable_.load(std::memory_order_acquire) and
-                metric_ == MetricType::METRIC_TYPE_L2SQR and
-                data_type_ == DataTypes::DATA_TYPE_FLOAT and
-                base_codes_->SupportSplitCodeStorage() and use_reorder_ and
-                not support_duplicate_ and delete_count_.load() == 0 and filter == nullptr and
-                not threshold.has_value() and parsed_param.parallel_search_thread_count == 1 and
-                not parsed_param.enable_time_record and parsed_param.hierarchies.empty() and
-                search_param.enable_rabitq_one_bit_search and
-                hierarchies_.at("")->root->status_ == IndexNode::Status::GRAPH,
-            "tail search requires immutable unfiltered root split L2 KNN with reorder");
+            immutable_.load(std::memory_order_acquire) and
+            metric_ == MetricType::METRIC_TYPE_L2SQR and
+            data_type_ == DataTypes::DATA_TYPE_FLOAT and base_codes_->SupportSplitCodeStorage() and
+            use_reorder_ and not support_duplicate_ and delete_count_.load() == 0 and
+            filter == nullptr and not threshold.has_value() and
+            parsed_param.parallel_search_thread_count == 1 and
+            not parsed_param.enable_time_record and parsed_param.hierarchies.empty() and
+            search_param.enable_rabitq_one_bit_search and
+            hierarchies_.at("")->root->status_ == IndexNode::Status::GRAPH;
+        CHECK_ARGUMENT(supported,
+                       "tail search requires immutable unfiltered root split L2 KNN with reorder");
         search_param.tail_search = &parsed_param.tail_search;
         search_param.tail_topk = static_cast<uint64_t>(k);
     }

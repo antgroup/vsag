@@ -11,7 +11,7 @@
 
 namespace vsag {
 namespace {
-template <bool EnableGap>
+template <bool enable_gap>
 DistHeapPtr
 search_batched_graph(const GraphInterfacePtr& graph,
                      const FlattenInterfacePtr& flatten,
@@ -31,11 +31,11 @@ search_batched_graph(const GraphInterfacePtr& graph,
     }
     // Gap tracking uses the final user k, not the enclosing graph's ef-sized heap.
     Vector<float> nearest(allocator);
-    if constexpr (EnableGap) {
+    if constexpr (enable_gap) {
         nearest.reserve(requested_topk);
     }
     const auto observe = [&](float distance) {
-        if constexpr (EnableGap) {
+        if constexpr (enable_gap) {
             if (nearest.size() < requested_topk) {
                 nearest.push_back(distance);
                 std::push_heap(nearest.begin(), nearest.end());
@@ -46,6 +46,7 @@ search_batched_graph(const GraphInterfacePtr& graph,
             }
         }
     };
+    const auto relative_gap = tail.relative_gap.value_or(0.0F);
     const auto entry = p.ep;
     float distance;
     flatten->QueryWithDistanceLowerBound(&distance, nullptr, computer, &entry, 1, context);
@@ -54,16 +55,20 @@ search_batched_graph(const GraphInterfacePtr& graph,
     frontier->Push(-distance, entry);
     visited->Set(entry);
     observe(distance);
-    uint64_t expanded = 0, comparisons = 1;
-    Vector<InnerIdType> selected(allocator), adjacent(allocator), fresh(allocator);
-    Vector<float> distances(allocator), lower_bounds(allocator);
+    uint64_t expanded = 0;
+    uint64_t comparisons = 1;
+    Vector<InnerIdType> selected(allocator);
+    Vector<InnerIdType> adjacent(allocator);
+    Vector<InnerIdType> fresh(allocator);
+    Vector<float> distances(allocator);
+    Vector<float> lower_bounds(allocator);
     while (not frontier->Empty()) {
         if (results->Size() >= p.ef and -frontier->Top().first > results->Top().first) {
             break;
         }
-        if constexpr (EnableGap) {
+        if constexpr (enable_gap) {
             if (expanded >= tail.start_after and nearest.size() == requested_topk and
-                -frontier->Top().first > nearest.front() * (1.0F + *tail.relative_gap)) {
+                -frontier->Top().first > nearest.front() * (1.0F + relative_gap)) {
                 break;
             }
         }
@@ -153,15 +158,15 @@ SearchBatchedGraph(const GraphInterfacePtr& graph,
                    DistanceRecordVector* lower_bound_candidates,
                    const GraphTailSearchParameters& tail,
                    uint64_t requested_topk) {
-    CHECK_ARGUMENT(
+    const bool supported =
         parameters.search_mode == KNN_SEARCH and parameters.enable_rabitq_one_bit_search and
-            parameters.enable_reorder and flatten->SupportSplitCodeStorage() and
-            parameters.is_inner_id_allowed == nullptr and parameters.executors.empty() and
-            not parameters.consider_duplicate and not parameters.find_duplicate and
-            parameters.distance_batch_func == nullptr and parameters.time_cost == nullptr and
-            not parameters.distance_threshold.has_value() and requested_topk > 0 and
-            tail.batch_size > 0,
-        "batched graph search requires unfiltered split KNN");
+        parameters.enable_reorder and flatten->SupportSplitCodeStorage() and
+        parameters.is_inner_id_allowed == nullptr and parameters.executors.empty() and
+        not parameters.consider_duplicate and not parameters.find_duplicate and
+        parameters.distance_batch_func == nullptr and parameters.time_cost == nullptr and
+        not parameters.distance_threshold.has_value() and requested_topk > 0 and
+        tail.batch_size > 0;
+    CHECK_ARGUMENT(supported, "batched graph search requires unfiltered split KNN");
     if (tail.relative_gap.has_value()) {
         return search_batched_graph<true>(graph,
                                           flatten,
