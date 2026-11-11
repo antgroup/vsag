@@ -10,6 +10,7 @@
 namespace vsag {
 
 // Resolve the current process's visible CPU hierarchy, including ancestor quotas.
+// An unresolved cgroup namespace root conservatively limits execution to one slot.
 uint32_t
 CgroupCpuSlots(const std::string& membership,
                const std::string& mountinfo,

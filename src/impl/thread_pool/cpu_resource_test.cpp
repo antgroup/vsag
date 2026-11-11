@@ -8,7 +8,7 @@
 #include "unittest.h"
 using namespace vsag;
 
-TEST_CASE("CPU budget resolves nested and namespaced quotas", "[ut][CPUResource]") {
+TEST_CASE("CPU budget resolves quotas and limits unresolved namespaces", "[ut][CPUResource]") {
     std::unordered_map<std::string, std::string> files;
     const auto read = [&](const std::string& path) {
         const auto found = files.find(path);
@@ -31,9 +31,22 @@ TEST_CASE("CPU budget resolves nested and namespaced quotas", "[ut][CPUResource]
 
     const std::string namespaced = "29 23 0:26 /pod /bound rw - cgroup2 cgroup rw\n";
     files["/bound/cpu.max"] = "300000 100000";
-    REQUIRE(CgroupCpuSlots("0::/\n", namespaced, read, 16) == 3);
+    // A namespace-relative root cannot be matched to this mount root without more information.
+    REQUIRE(CgroupCpuSlots("0::/\n", namespaced, read, 16) == 1);
     REQUIRE(CgroupCpuSlots("0::/pod\n", namespaced, read, 16) == 3);
     REQUIRE(CgroupCpuSlots("0::/../../pod\n", namespaced, read, 16) == 1);
+
+    const std::string inherited = "29 23 0:26 /.. /inherited rw - cgroup2 cgroup rw\n";
+    files["/inherited/cpu.max"] = "max 100000";
+    files["/inherited/pod/cpu.max"] = "100000 100000";
+    REQUIRE(CgroupCpuSlots("0::/\n", inherited, read, 16) == 1);
+    const std::string inherited_v1 =
+        "30 23 0:27 /.. /inherited-v1 rw - cgroup cgroup rw,cpu,cpuacct\n";
+    files["/inherited-v1/cpu.cfs_quota_us"] = "-1";
+    files["/inherited-v1/cpu.cfs_period_us"] = "100000";
+    files["/inherited-v1/pod/cpu.cfs_quota_us"] = "100000";
+    files["/inherited-v1/pod/cpu.cfs_period_us"] = "100000";
+    REQUIRE(CgroupCpuSlots("3:cpu,cpuacct:/\n", inherited_v1, read, 16) == 1);
 
     const std::string sibling_mount =
         "29 23 0:26 / /cg rw - cgroup2 cgroup rw\n"

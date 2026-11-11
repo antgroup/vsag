@@ -81,17 +81,17 @@ CgroupCpuSlots(const std::string& membership,
             auto relative = group.generic_string();
             if (relative == root) {
                 relative.clear();
-            } else if (root == "/") {
-                // The mount exposes the full hierarchy, so membership is already relative to it.
-            } else if (root != "/" and relative.compare(0, root.size() + 1, root + "/") == 0) {
-                relative.erase(0, root.size());
-            } else if (relative != "/") {
-                // A mount outside the process membership may be a sibling cgroup bind mount.
-                // Only a process at the cgroup namespace root can use a mismatched mount root.
-                continue;
-            } else {
-                // The membership is namespace-relative and identifies the mount root itself.
-                relative.clear();
+            } else if (root != "/") {
+                if (relative.compare(0, root.size() + 1, root + "/") == 0) {
+                    relative.erase(0, root.size());
+                } else if (relative == "/") {
+                    // An inherited mount can expose an ancestor of the cgroup namespace root.
+                    // Its relationship to the process cannot be inferred from these inputs.
+                    return 1;
+                } else {
+                    // A mount outside the membership may be a sibling cgroup bind mount.
+                    continue;
+                }
             }
             auto current =
                 (point / std::filesystem::path(relative).relative_path()).lexically_normal();
